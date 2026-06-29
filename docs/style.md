@@ -1,0 +1,321 @@
+# gpu.c3l Style and Project Conventions
+
+## 1. Language target
+
+Target C3 0.8.0. C3 is pre-1.0, so code examples and implementation work must be verified against the target compiler rather than memory of earlier syntax.
+
+## 2. Module names
+
+Public module:
+
+```c3
+module gpu;
+```
+
+Vulkan backend module:
+
+```c3
+module gpu::vk;
+```
+
+Sample modules may use sample-specific namespaces. Do not put samples in `module gpu;` unless they are shipped helpers.
+
+## 3. Naming
+
+| Kind | Case | Examples |
+|---|---|---|
+| Variables, fields, parameters | `snake_case` | `frame_index`, `debug_name`, `memory_kind` |
+| Functions | `snake_case` | `create_buffer`, `cmd_dispatch`, `alloc_frame_span` |
+| Structs, enums, typedefs, aliases | `PascalCase` | `DeviceDesc`, `GpuSpan`, `TextureUsage` |
+| Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_BUFFERS`, `TRANSFER_DST`, `DEVICE_LOST` |
+| Modules | lowercase, dotted | `gpu`, `gpu::vk` |
+| Files | `snake_case.c3` | `descriptor_heap.c3`, `pipeline_graphics.c3` |
+
+## 4. Definition order
+
+Within each source file:
+
+```text
+1. Typedefs
+2. Aliases
+3. Constants
+4. Enums / constdefs / bitstructs
+5. Structs
+6. Struct methods
+7. Free functions
+```
+
+Keep type definitions before values and operations that use them.
+
+## 5. Construction and destruction
+
+Project-owned lifecycle uses free functions:
+
+```text
+create_device
+destroy_device
+create_buffer
+destroy_buffer
+create_texture
+destroy_texture
+```
+
+Avoid:
+
+```text
+Device.create
+Buffer.destroy
+Texture.create
+```
+
+Methods are appropriate when an operation naturally mutates or reads an existing receiver and is not a lifecycle constructor. External bindings may use method syntax when it maps C API structure; backend code may call `vma` wrapper methods because those are part of the binding.
+
+## 6. Error handling
+
+Use C3 optionals/faults for fallible operations.
+
+Good:
+
+```text
+create_buffer(...) -> BufferHandle?
+cmd_dispatch(...) -> void?
+return INVALID_HANDLE~
+```
+
+Avoid:
+
+```text
+bool success out-params
+null sentinel returns
+-1 resource IDs
+global errno-style state
+```
+
+Faults should be specific:
+
+```text
+INVALID_HANDLE
+UNSUPPORTED_FEATURE
+ARENA_FULL
+DESCRIPTOR_HEAP_FULL
+PIPELINE_CREATE_FAILED
+```
+
+Avoid broad catch-all faults such as `FAILED` unless no better category exists.
+
+## 7. Handles
+
+Use typed handles. Do not pass raw `uint`, `int`, or `ulong` where a domain handle exists.
+
+Good:
+
+```text
+BufferHandle buffer
+TextureHandle texture
+PipelineHandle pipeline
+```
+
+Bad:
+
+```text
+ulong buffer
+uint texture
+int pipeline
+```
+
+## 8. Call formatting
+
+Calls with four or more arguments, or calls that would exceed 120 characters, should use named arguments, one per line, with a trailing comma.
+
+Preferred:
+
+```c3
+create_buffer(
+    device: &device,
+    desc:   &buffer_desc,
+    flags:  debug_flags,
+    name:   "input_buffer",
+);
+```
+
+Short calls with three or fewer arguments may stay positional if readable.
+
+## 9. Braces
+
+Use K&R brace style:
+
+```c3
+fn void? destroy_buffer(Device* device, BufferHandle handle) {
+    if (handle.value == 0) {
+        return INVALID_HANDLE~;
+    }
+}
+```
+
+Do not use Allman braces.
+
+## 10. Comments and docstrings
+
+Prefer doc comments for public API contracts:
+
+```c3
+<* Create a GPU buffer.
+   Ownership: caller must destroy the returned handle with destroy_buffer.
+   If ADDRESSABLE is set, the backend creates a shader-device-address buffer. *>
+fn BufferHandle? create_buffer(Device* device, BufferDesc* desc);
+```
+
+Avoid inline comments that restate the code. Comments should explain why, not what.
+
+API preconditions, side effects, and ownership rules belong in doc comments. If a field needs a comment to be understood, consider renaming it or restructuring the type.
+
+## 11. Milestone terminology
+
+Milestone names are allowed in:
+
+```text
+docs/milestones.md
+planning documents
+commit messages
+issue titles
+```
+
+Milestone names are not allowed in:
+
+```text
+code identifiers
+file names
+test names
+source comments
+shader symbols
+```
+
+Use behavior names, not schedule names.
+
+Good:
+
+```text
+test_root_pointer_compute
+create_frame_upload_arena
+```
+
+Bad:
+
+```text
+test_m9_root_pointer_compute
+create_m6_arena
+```
+
+## 12. Public API dependency hygiene
+
+Public `gpu` signatures must not expose:
+
+```text
+vk:: types
+vma:: types
+sdl:: types
+platform window structs
+raw native OS handles unless wrapped in neutral descriptors
+```
+
+Backend files may import `vk` and `vma`. Samples may import `sdl`.
+
+## 13. File organization
+
+Public files should be grouped by API area:
+
+```text
+device.c3
+memory.c3
+buffer.c3
+texture.c3
+pipeline.c3
+command.c3
+sync.c3
+swapchain.c3
+```
+
+Backend implementation should mirror public areas:
+
+```text
+vk/device.c3
+vk/memory.c3
+vk/buffer.c3
+vk/texture.c3
+vk/pipeline_compute.c3
+vk/pipeline_graphics.c3
+vk/command.c3
+vk/sync.c3
+```
+
+Translation helpers belong in `vk/helpers.c3` and should not be duplicated.
+
+## 14. Shader style
+
+Shader source should use explicit layouts:
+
+```text
+explicit set/binding
+explicit location
+std430 for root/table data
+stable generated constants
+```
+
+Shared structs must be generated or manually mirrored with size checks. Avoid `vec3` in shared ABI structs.
+
+## 15. Resource naming
+
+All resources should accept a `debug_name` where practical.
+
+Debug name conventions:
+
+```text
+input_buffer
+output_buffer
+frame_upload_0
+persistent_materials
+albedo_texture
+swapchain_color_0
+pipeline_root_pointer_compute
+```
+
+Avoid names that encode milestones or temporary implementation plans.
+
+## 16. Testing style
+
+Tests:
+
+```text
+use @test
+use snake_case names
+assert specific faults
+keep pure CPU tests exhaustive
+keep Vulkan tests validation-clean
+```
+
+Test names describe behavior:
+
+```text
+test_invalid_buffer_handle_rejected
+test_frame_arena_overflow_faults
+test_root_pointer_compute_writes_output
+```
+
+## 17. Formatting tool policy
+
+Do not run whole-tree auto-formatters unless the project explicitly adopts them. Hand-format to this guide. Large whitespace-only rewrites should be avoided.
+
+## 18. Acceptance criteria for style compliance
+
+A change is style-compliant when:
+
+```text
+names follow the table above
+public lifecycle uses free functions
+faults are specific
+public signatures do not leak backend bindings
+calls with 4+ args use named multiline style
+comments document why, ownership, or invariants
+no milestone names appear in code/test identifiers
+pure CPU tests and relevant backend tests pass
+```

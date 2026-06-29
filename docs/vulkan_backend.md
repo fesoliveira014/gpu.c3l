@@ -1,0 +1,493 @@
+# gpu.c3l Vulkan Backend
+
+## 1. Purpose
+
+The Vulkan backend implements the `gpu` public API on Vulkan 1.3. It lives under:
+
+```c3
+module gpu::vk;
+```
+
+It imports:
+
+```c3
+import gpu;
+import vk;
+import vma;
+```
+
+No `vk::` or `vma::` type should appear in public `gpu` API signatures.
+
+## 2. Backend files
+
+```text
+vk/instance.c3             instance creation, validation layers, debug messenger
+vk/device.c3               physical device selection, logical device, feature chain
+vk/queue.c3                queue family selection, queue handles, submit
+vk/allocator.c3            vma::Allocator creation/destruction, stats
+vk/memory.c3               memory kind policy, arenas, virtual allocator
+vk/buffer.c3               VkBuffer + VMA allocation path
+vk/texture.c3              VkImage + VMA allocation, views, layout tracking
+vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
+vk/shader.c3               SPIR-V modules and reflection validation
+vk/pipeline_compute.c3     compute pipeline creation
+vk/pipeline_graphics.c3    graphics pipeline creation
+vk/command.c3              command buffers and command recording
+vk/sync.c3                 barriers, timeline semaphores
+vk/render_pass.c3          dynamic rendering
+vk/swapchain.c3            WSI and swapchain
+vk/debug.c3                debug names, leak reports
+vk/helpers.c3              enum and flag translation helpers
+```
+
+## 3. Required Vulkan features
+
+The backend should require:
+
+```text
+Vulkan 1.3
+buffer device address
+synchronization2
+dynamic rendering
+timeline semaphores
+```
+
+Descriptor path:
+
+```text
+preferred: descriptor buffer
+fallback: descriptor indexing
+```
+
+Device creation should fail with `UNSUPPORTED_FEATURE` if required features are missing.
+
+## 4. Instance creation
+
+Instance creation responsibilities:
+
+```text
+select Vulkan API version
+collect required instance extensions
+collect validation layer names when enabled
+create vk::Instance
+load extension entry points
+install debug utils messenger when enabled
+```
+
+The backend should support a headless path with no surface extensions and a windowed path with platform-specific surface extensions.
+
+## 5. Physical device selection
+
+Selection criteria:
+
+```text
+must support Vulkan 1.3
+must support buffer device address
+must support synchronization2
+must support dynamic rendering
+must support timeline semaphores
+must support at least one graphics or compute queue according to requested use
+must support descriptor buffer or descriptor indexing fallback
+```
+
+Scoring criteria:
+
+```text
+discrete GPU preferred
+larger device-local memory preferred
+descriptor buffer support preferred
+separate transfer queue optional bonus
+```
+
+Device selection result:
+
+```text
+PhysicalDeviceChoice
+    vk::PhysicalDevice physical_device
+    uint graphics_family
+    uint compute_family
+    uint transfer_family
+    DeviceCaps caps
+```
+
+## 6. Logical device creation
+
+Logical device creation builds a Vulkan feature chain.
+
+Required features:
+
+```text
+bufferDeviceAddress
+synchronization2
+dynamicRendering
+timelineSemaphore
+```
+
+Optional features:
+
+```text
+descriptorBuffer
+runtimeDescriptorArray
+descriptorBindingPartiallyBound
+descriptorBindingUpdateAfterBind
+shaderSampledImageArrayNonUniformIndexing
+shaderStorageImageArrayNonUniformIndexing
+```
+
+The exact feature structs depend on the Vulkan headers exposed by `vk.c3l`.
+
+## 7. VMA allocator integration
+
+After logical device creation:
+
+```text
+create vma::Allocator
+store in VkDeviceState
+```
+
+Allocator create info should include:
+
+```text
+physical_device
+device
+instance
+vulkan_api_version
+buffer-device-address allocator flag
+memory-budget allocator flag when supported
+```
+
+All Vulkan buffer/image memory must be allocated through VMA.
+
+Backend code should use idiomatic VMA wrappers where possible:
+
+```text
+vma::try_create_allocator
+allocator.try_create_buffer
+allocator.try_create_image
+allocator.try_map
+allocator.try_flush
+allocator.try_invalidate
+allocator.heap_budgets
+allocator.stats_string
+```
+
+## 8. Buffer implementation
+
+Creation flow:
+
+```text
+public BufferDesc
+    -> validate
+    -> translate BufferUsage to vk::BufferUsageFlags
+    -> translate MemoryKind to vma::AllocationCreateInfo
+    -> allocator.try_create_buffer
+    -> query mapped pointer from allocation info
+    -> query buffer device address if addressable
+    -> store BufferSlot
+    -> return BufferHandle
+```
+
+Addressable buffers must include:
+
+```text
+VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+```
+
+If address query returns zero, creation should fail.
+
+## 9. Texture implementation
+
+Creation flow:
+
+```text
+public TextureDesc
+    -> validate dimensions and format
+    -> translate usage to vk::ImageUsageFlags
+    -> allocator.try_create_image
+    -> create default image view
+    -> set initial layout
+    -> store TextureSlot
+    -> return TextureHandle
+```
+
+The backend tracks image layout per texture. For complex subresource layout tracking, begin with whole-image layout tracking and add subresource tracking only when required.
+
+## 10. Descriptor heap implementation
+
+### Descriptor buffer path
+
+Preferred when supported.
+
+Backend owns descriptor buffers for:
+
+```text
+sampled images
+storage images
+samplers
+```
+
+Public indices map to descriptor entries.
+
+### Descriptor indexing fallback
+
+Fallback uses:
+
+```text
+large descriptor arrays
+runtime descriptor array support
+partially bound descriptors
+update-after-bind where needed
+```
+
+Public API and shader material records remain unchanged.
+
+### Descriptor slot policy
+
+```text
+DescriptorSlot
+    uint index
+    ushort generation
+    DescriptorKind kind
+    bool used
+    TextureHandle owner_texture
+```
+
+Initial policy should validate descriptor use in debug builds and report leaked descriptors at device destruction.
+
+## 11. Shader and pipeline implementation
+
+### Shader modules
+
+The backend consumes SPIR-V bytes.
+
+Responsibilities:
+
+```text
+create vk::ShaderModule
+store stage and entry point
+run reflection validation
+set debug names
+```
+
+Reflection validation checks:
+
+```text
+entry point exists
+expected push constant range exists
+unexpected descriptor sets are rejected
+descriptor heap bindings match convention
+```
+
+### Compute pipeline
+
+Compute pipeline creation:
+
+```text
+shader module
+pipeline layout with root pointer push constant
+global descriptor heap layout or descriptor buffer binding convention
+vk::Pipeline
+```
+
+### Graphics pipeline
+
+Graphics pipeline creation:
+
+```text
+vertex shader
+fragment shader
+pipeline layout with vertex/fragment root push constants
+color/depth formats for dynamic rendering
+raster/depth/blend state
+viewport/scissor dynamic state
+pipeline cache lookup
+vk::Pipeline
+```
+
+## 12. Command buffers
+
+Command pool policy:
+
+```text
+one command pool per frame per queue family
+reset pools when frame retires
+```
+
+Command list slot:
+
+```text
+CommandListState
+    vk::CommandBuffer command_buffer
+    QueueKind queue
+    CommandState state
+    bool in_render_pass
+    uint frame_index
+```
+
+Begin/end/submit validate state transitions.
+
+## 13. Synchronization
+
+Use synchronization2 for barriers.
+
+Translation helpers:
+
+```text
+stage_to_vk
+hazard_to_access
+texture_layout_to_vk
+barrier_to_vk_dependency_info
+```
+
+Barrier commands:
+
+```text
+cmd_buffer_barrier -> vk::BufferMemoryBarrier2
+cmd_texture_barrier -> vk::ImageMemoryBarrier2
+cmd_global_barrier -> vk::MemoryBarrier2
+```
+
+The backend must not insert hidden barriers for user-visible resource transitions except for unavoidable swapchain acquire/present transitions inside WSI helpers.
+
+## 14. Timeline semaphores
+
+Use timeline semaphores for:
+
+```text
+frame retirement
+queue submission order
+arena reset safety
+deferred destruction safety
+```
+
+Public submit descriptor should support waits and signals:
+
+```text
+SubmitDesc
+    CommandList[] command_lists
+    SemaphoreWait[] waits
+    SemaphoreSignal[] signals
+```
+
+## 15. Render pass implementation
+
+Use dynamic rendering.
+
+Render pass begin:
+
+```text
+validate color/depth targets
+transition only if caller explicitly requested via barrier before begin
+build rendering attachment infos
+vkCmdBeginRendering
+```
+
+Render pass end:
+
+```text
+vkCmdEndRendering
+```
+
+Do not transition attachments to shader-read automatically.
+
+## 16. Swapchain implementation
+
+Swapchain module owns:
+
+```text
+vk::SurfaceKHR
+vk::SwapchainKHR
+vk::Image[]
+vk::ImageView[]
+Format format
+uint width
+uint height
+present mode
+```
+
+Surface creation is platform-specific. SDL3 samples should create windows and provide native handles or use a sample helper that calls backend WSI functions.
+
+Swapchain operations:
+
+```text
+create
+acquire
+present
+recreate on out-of-date/suboptimal
+```
+
+## 17. Debug implementation
+
+Debug features:
+
+```text
+Vulkan object names
+VMA allocation names
+live slot reports
+leaked descriptor reports
+allocation stats
+validation message routing
+optional command labels
+```
+
+Object naming should happen immediately after successful backend object creation.
+
+## 18. Deferred destruction
+
+Resources may be destroyed publicly before the GPU has finished using them.
+
+Backend policy:
+
+```text
+remove public handle immediately
+push backend object to deferred destruction list with retire timeline
+free backend object after timeline completed
+```
+
+For VMA-backed resources:
+
+```text
+buffer: allocator.destroy_buffer(buffer, allocation)
+image: allocator.destroy_image(image, allocation)
+```
+
+## 19. Translation helpers
+
+All enum/flag conversion should live in `vk/helpers.c3`.
+
+Helpers:
+
+```text
+format_to_vk
+buffer_usage_to_vk
+texture_usage_to_vk
+memory_kind_to_vma
+stage_to_vk
+hazard_to_vk_access
+layout_to_vk
+filter_to_vk
+address_mode_to_vk
+compare_op_to_vk
+blend_factor_to_vk
+blend_op_to_vk
+topology_to_vk
+```
+
+Do not duplicate translation switches in command or resource files.
+
+## 20. Backend acceptance criteria
+
+The Vulkan backend is acceptable when:
+
+```text
+device creation is validation-clean
+all buffers/images are VMA-backed
+addressable buffers produce valid GPU addresses
+root-pointer compute works
+texture heap works through TextureIndex
+barriers use synchronization2
+offscreen dynamic rendering works
+SDL3 swapchain sample presents and resizes
+live resource leaks are reported
+no vk:: or vma:: type appears in public API signatures
+```

@@ -1,0 +1,19 @@
+# C3 / c3c build output
+/build/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+
+# ...but keep vendored native libs under the manifest's linklib-dir
+!linked-libs/**
+
+# Personal Claude Code instructions (not shared)
+CLAUDE.local.md
+
+# Editor / OS
+.DS_Store
+*.swp

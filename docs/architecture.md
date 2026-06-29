@@ -1,0 +1,455 @@
+# gpu.c3l Architecture
+
+## 1. Purpose
+
+`gpu.c3l` is a C3 library that exposes a direct GPU programming model suitable for modern explicit rendering and compute workloads. It is not a renderer, render graph, material system, asset system, or platform abstraction layer.
+
+The API centers on four ideas:
+
+```text
+GpuAddress      -> shader-visible buffer pointers
+GpuSpan         -> CPU/GPU range metadata
+TextureIndex    -> shader-visible texture heap index
+SamplerIndex    -> shader-visible sampler heap index
+```
+
+Draw and dispatch commands pass root GPU addresses. Shaders follow pointers to structured data and use texture/sampler indices for image access. Barriers are explicit. Resource lifetimes are explicit.
+
+## 2. Layer model
+
+```text
+application / engine / sample
+        |
+        v
+gpu public API, module gpu
+        |
+        v
+backend dispatch layer
+        |
+        v
+gpu::vk Vulkan backend
+        |
+        +--> vk.c3l    -> Vulkan API calls
+        +--> vma.c3l   -> Vulkan memory allocation
+        +--> sdl3.c3l  -> samples/tests only, not backend public API
+```
+
+The public API does not expose backend handles. A Vulkan backend can be replaced or supplemented later without changing shader data structures or most user code.
+
+## 3. Package structure
+
+`gpu.c3l` uses a C3 library package layout. Library source files live at package root and in submodule directories.
+
+```text
+gpu.c3l/
+├── manifest.json
+├── gpu.c3i
+├── gpu.c3
+├── types.c3
+├── faults.c3
+├── caps.c3
+├── device.c3
+├── queue.c3
+├── memory.c3
+├── buffer.c3
+├── texture.c3
+├── descriptor_heap.c3
+├── shader_abi.c3
+├── pipeline.c3
+├── command.c3
+├── sync.c3
+├── render_pass.c3
+├── swapchain.c3
+├── vk/
+│   └── *.c3
+├── resources/
+│   └── shaders/
+├── test/
+├── samples/
+├── tools/
+└── docs/
+```
+
+### Library files
+
+Files at package root declare:
+
+```c3
+module gpu;
+```
+
+Backend files under `vk/` declare:
+
+```c3
+module gpu::vk;
+```
+
+Samples are standalone consumers and may declare their own sample modules.
+
+## 4. Public object model
+
+### Device
+
+`Device` owns all backend resources.
+
+Responsibilities:
+
+```text
+backend lifetime
+queue ownership
+resource slot tables
+VMA allocator through backend state
+descriptor heaps
+frame upload arenas
+persistent arenas
+readback/staging arenas
+pipeline cache
+debug and stats state
+```
+
+Public shape:
+
+```text
+Device
+    BackendKind backend
+    DeviceCaps caps
+    void* backend_state
+```
+
+The pointer is opaque. Public code should not inspect it.
+
+### Queues
+
+The API exposes queue kinds rather than raw queue handles:
+
+```text
+QueueKind.GRAPHICS
+QueueKind.COMPUTE
+QueueKind.TRANSFER
+```
+
+The backend maps those kinds to Vulkan queue families and queue handles.
+
+### Command lists
+
+A command list is a transient recorder.
+
+State transitions:
+
+```text
+EMPTY -> RECORDING -> CLOSED -> SUBMITTED -> RETIRED
+```
+
+Invalid transitions return faults. Commands that require a render pass must fault if recorded outside one. Commands that cannot be recorded inside a render pass must fault if a render pass is active.
+
+### Buffers
+
+Buffers are backend-owned resources with optional CPU mapping and optional shader-visible GPU address.
+
+Public uses:
+
+```text
+copy source/destination
+shader-readable/writable storage
+indirect command buffers
+index buffers
+fixed vertex buffers when needed
+arena backing buffers
+readback buffers
+```
+
+Backend slot:
+
+```text
+BufferSlot
+    vk::Buffer buffer
+    vma::Allocation allocation
+    vma::AllocationInfo allocation_info
+    vk::DeviceAddress gpu_base
+    void* cpu_base
+    usz size
+    BufferUsage usage
+    MemoryKind memory_kind
+    ushort generation
+    bool used
+```
+
+### Textures
+
+Textures represent Vulkan images and their default views.
+
+Public uses:
+
+```text
+sampled textures
+storage textures
+color attachments
+depth/stencil attachments
+transfer sources/destinations
+```
+
+Backend slot:
+
+```text
+TextureSlot
+    vk::Image image
+    vma::Allocation allocation
+    vma::AllocationInfo allocation_info
+    vk::ImageView default_view
+    vk::ImageLayout layout
+    Format format
+    TextureUsage usage
+    uint width, height, depth
+    uint mip_levels
+    ushort generation
+    bool used
+```
+
+### Texture and sampler descriptors
+
+`TextureHandle` owns the image. `TextureIndex` is the shader-visible descriptor heap index.
+
+This separation matters:
+
+```text
+TextureHandle -> lifetime and commands
+TextureIndex  -> shader-visible sampled/storage reference
+```
+
+Destroying a texture must invalidate or reject descriptors pointing at it according to the final debug policy. The safer initial policy is to require descriptor destruction before texture destruction in debug builds and report a fault otherwise.
+
+### Pipelines
+
+Pipelines are immutable shader execution objects.
+
+Kinds:
+
+```text
+PipelineKind.COMPUTE
+PipelineKind.GRAPHICS
+```
+
+Graphics pipelines include the minimum Vulkan-required immutable state. Dynamic viewport/scissor should be used. Blend/depth/raster state should be deduplicated through the pipeline cache.
+
+### Semaphores
+
+Timeline semaphores are the default synchronization primitive.
+
+Public:
+
+```text
+SemaphoreHandle
+SemaphoreValue
+```
+
+Binary semaphores are backend-internal swapchain details unless a public need appears.
+
+### Swapchains
+
+Swapchains are optional. Headless compute and offscreen graphics must work without a swapchain.
+
+A swapchain depends on platform surface creation. Samples use SDL3 to create windows and provide platform handles, but the `gpu` public API should not require `sdl::Window` in signatures.
+
+## 5. Backend dispatch
+
+Preferred backend connection:
+
+```text
+Device
+    BackendVTable* vtable
+    void* backend_state
+```
+
+The vtable groups operations by resource type:
+
+```text
+create/destroy device
+create/destroy buffer
+create/destroy texture
+create/destroy descriptors
+create/destroy pipeline
+begin/end/submit commands
+record commands
+create/destroy swapchain
+query stats
+```
+
+The public functions perform handle validation and call the backend implementation.
+
+## 6. Resource lifetime
+
+### Creation
+
+Creation functions return fallible values:
+
+```text
+Device?
+BufferHandle?
+TextureHandle?
+PipelineHandle?
+GpuSpan?
+```
+
+Failures return specific faults.
+
+### Destruction
+
+Destruction functions should be explicit and should validate handles.
+
+Initial policy:
+
+```text
+invalid handle              -> INVALID_HANDLE
+resource still referenced   -> RESOURCE_IN_USE or INVALID_RESOURCE_STATE
+valid destruction           -> retire slot and increment generation
+```
+
+### Deferred destruction
+
+Vulkan resources cannot be destroyed while in use by the GPU. The backend should maintain per-frame deferred destruction queues:
+
+```text
+retire_frame(frame_index)
+    destroy resources whose retire_timeline <= completed_timeline
+```
+
+Calling `destroy_buffer` removes the public handle immediately, but backend destruction may be deferred.
+
+## 7. Frame model
+
+Each frame-in-flight has:
+
+```text
+frame upload arena
+command pool(s)
+deferred destruction list
+last submit timeline value
+```
+
+Frame flow:
+
+```text
+begin_frame(device)
+    wait if frame slot is still in flight
+    reset command pools
+    reset frame upload arena
+    set VMA current frame index
+
+record work
+submit work
+
+end_frame(device)
+    record frame timeline value
+```
+
+Headless tests may skip swapchain-specific acquire/present steps.
+
+## 8. Command model
+
+### Compute
+
+```text
+cmd_dispatch(command_list, pipeline, root_gpu, groups)
+```
+
+The command binds the compute pipeline, pushes the root pointer, and dispatches.
+
+### Graphics
+
+```text
+cmd_begin_render_pass(command_list, render_pass_desc)
+cmd_draw(command_list, pipeline, vertex_root, fragment_root, vertex_count, instance_count)
+cmd_draw_indexed(command_list, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count)
+cmd_end_render_pass(command_list)
+```
+
+Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex input is allowed for simple paths and compatibility, but it is not the preferred data model.
+
+### Transfer
+
+```text
+cmd_copy_buffer
+cmd_copy_buffer_to_texture
+cmd_copy_texture_to_buffer
+cmd_fill_buffer
+```
+
+Transfer helpers do not imply next-use barriers.
+
+### Barriers
+
+Barriers are explicit:
+
+```text
+cmd_buffer_barrier(command_list, BufferBarrier)
+cmd_texture_barrier(command_list, TextureBarrier)
+cmd_global_barrier(command_list, GlobalBarrier)
+```
+
+Render pass boundaries do not imply shader-read or transfer-read readiness.
+
+## 9. Descriptor heap model
+
+The public API exposes descriptor allocation and updates:
+
+```text
+create_texture_descriptor(device, texture, view_desc) -> TextureIndex?
+destroy_texture_descriptor(device, index) -> void?
+create_sampler(device, desc) -> SamplerIndex?
+destroy_sampler(device, index) -> void?
+```
+
+Backend implementations:
+
+```text
+preferred: VK_EXT_descriptor_buffer
+fallback: descriptor indexing + large descriptor arrays
+```
+
+The fallback does not change shader material records.
+
+## 10. Swapchain model
+
+Swapchain operations:
+
+```text
+create_swapchain(device, SurfaceDesc, SwapchainDesc) -> SwapchainHandle?
+acquire_next_image(device, swapchain) -> AcquiredImage?
+present(device, PresentDesc) -> void?
+resize/recreate on SWAPCHAIN_OUT_OF_DATE
+```
+
+Surface creation is platform-specific. The sample harness may provide helper functions that take `sdl::Window*`, but those helpers should live outside the core public API.
+
+## 11. Debug model
+
+Debug builds should track:
+
+```text
+resource names
+live resource counts
+allocation names
+allocation user data
+slot generation errors
+resource state errors
+outstanding frame allocations
+leaked descriptors
+leaked backend objects
+```
+
+`destroy_device` should report live resources before destroying the backend.
+
+## 12. Release architecture gate
+
+The architecture is complete enough for a first release when the library supports:
+
+```text
+headless root-pointer compute
+bindless texture compute
+offscreen graphics readback
+SDL3 windowed triangle sample
+GPU-driven indirect draw sample
+VMA memory budget reporting
+debug resource leak reporting
+shader ABI docs and generated layout checks
+```
