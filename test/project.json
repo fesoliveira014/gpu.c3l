@@ -25,7 +25,7 @@
     "vk_bootstrap": {
       "type": "test",
       "target": "linux-x64",
-      "sources": [ "src/test_vk_features.c3", "src/test_vk_bootstrap.c3", "src/test_vk_vma_allocator.c3", "src/test_vk_buffer.c3" ]
+      "sources": [ "src/test_vk_features.c3", "src/test_vk_bootstrap.c3", "src/test_vk_vma_allocator.c3", "src/test_vk_buffer.c3", "src/test_vk_frame_arena.c3" ]
     }
   }
 }

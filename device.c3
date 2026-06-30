@@ -11,6 +11,9 @@ alias CreateBufferFn        = fn BufferHandle? (Device*, BufferDesc*);
 alias DestroyBufferFn       = fn void? (Device*, BufferHandle);
 alias GetBufferAddressFn    = fn GpuAddress? (Device*, BufferHandle);
 alias GetBufferSpanFn       = fn GpuSpan? (Device*, BufferHandle);
+alias BeginFrameFn          = fn void? (Device*);
+alias AllocFrameSpanFn      = fn GpuSpan? (Device*, usz size, usz align);
+alias EndFrameFn            = fn void? (Device*);
 
 struct BackendVTable {
     DestroyDeviceFn     destroy_device;
@@ -20,6 +23,9 @@ struct BackendVTable {
     DestroyBufferFn     destroy_buffer;
     GetBufferAddressFn  get_buffer_address;
     GetBufferSpanFn     get_buffer_span;
+    BeginFrameFn        begin_frame;
+    AllocFrameSpanFn    alloc_frame_span;
+    EndFrameFn          end_frame;
 }
 
 // A GPU device. `vtable` points at one static table shared by all devices of a
