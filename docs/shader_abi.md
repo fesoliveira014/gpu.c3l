@@ -200,10 +200,10 @@ The exact shader spelling depends on descriptor buffer vs descriptor indexing im
 
 ## 9. Descriptor heap shader contract
 
-All shaders that use textures/samplers must include a common heap declaration.
+Shaders that use textures/samplers include a heap-access helper. The library *publishes* this helper as a shader-side ABI include; it is not an application shader, and consuming projects add it to their shader include path:
 
 ```text
-resources/shaders/common/descriptor_heap.glsl
+include/shaders/descriptor_heap.glsl
 ```
 
 That file should define:
@@ -289,12 +289,12 @@ abi/material.abi
 abi/draw.abi
 ```
 
-Outputs:
+Outputs (the C3 struct ships as library source; the GLSL files are published shader-side ABI includes the consumer's own shaders `#include`):
 
 ```text
-generated/shader_abi.c3
-resources/shaders/generated/shader_abi.glsl
-resources/shaders/generated/shader_abi_offsets.glsl
+shader_abi.c3                              (library source)
+include/shaders/generated/shader_abi.glsl
+include/shaders/generated/shader_abi_offsets.glsl
 ```
 
 Generated C3 should include:

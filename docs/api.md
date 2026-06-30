@@ -139,10 +139,10 @@ GpuSpan.buffer identifies the backing buffer for barriers/copies/debug.
 
 ## 4. Faults
 
-Public operations use C3 optionals/faults. Suggested fault groups:
+Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix:
 
-```text
-faultdef GpuFault {
+```c3
+faultdef
     UNSUPPORTED_BACKEND,
     UNSUPPORTED_FEATURE,
     INVALID_ARGUMENT,
@@ -158,8 +158,7 @@ faultdef GpuFault {
     SHADER_INVALID,
     SURFACE_LOST,
     SWAPCHAIN_OUT_OF_DATE,
-    COMMAND_RECORDING_ERROR,
-}
+    COMMAND_RECORDING_ERROR;
 ```
 
 Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled.
@@ -617,7 +616,7 @@ fn void? run_compute() {
     gpu::BufferHandle input = gpu::create_buffer(&device, &input_desc)!;
     defer gpu::destroy_buffer(&device, input)!!;
 
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, RootArgs.sizeof, RootArgs.alignof)!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, RootArgs::size, RootArgs::alignment)!;
     RootArgs* root = (RootArgs*)root_span.cpu;
     root.input = gpu::get_buffer_address(&device, input)!;
     root.count = 1024;

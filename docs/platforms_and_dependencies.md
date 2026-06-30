@@ -207,6 +207,8 @@ custom C3 wrapper around shaderc.c3l if adopted later
 
 Keep shader compilation outside the core runtime unless runtime compilation becomes an explicit feature.
 
+Shader ownership: the shipped library contains no application shaders. Shader programs belong to the consuming project (and, in this repository, to each sample/test). The library publishes only shader-side ABI includes under `include/shaders/` for consumers to `#include`. Compiling application shaders to SPIR-V is therefore the consumer's build step, not part of the library manifest.
+
 ## 11. Environment variables
 
 Do not require environment variables for normal library use. Tests may document optional environment variables for selecting a Vulkan ICD.

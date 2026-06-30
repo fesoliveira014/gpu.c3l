@@ -4,6 +4,8 @@
 
 `gpu.c3l` is a C3 library that exposes a direct GPU programming model suitable for modern explicit rendering and compute workloads. It is not a renderer, render graph, material system, asset system, or platform abstraction layer.
 
+It is a concrete take on Sebastian Aaltonen's "No Graphics API" proposal (<https://www.sebastianaaltonen.com/blog/no-graphics-api>): expose the modern GPU directly — root pointers, bindless heap indices, explicit barriers — instead of the descriptor/binding abstractions designed for ~2012 hardware.
+
 The API centers on four ideas:
 
 ```text
@@ -62,8 +64,8 @@ gpu.c3l/
 ├── swapchain.c3
 ├── vk/
 │   └── *.c3
-├── resources/
-│   └── shaders/
+├── include/
+│   └── shaders/        published shader-side ABI includes only (no application shaders)
 ├── test/
 ├── samples/
 ├── tools/
@@ -85,6 +87,10 @@ module gpu::vk;
 ```
 
 Samples are standalone consumers and may declare their own sample modules.
+
+### Shader ownership
+
+The library ships **no application shaders**. Shader entry points are written and owned by the consuming project. The only shader-side artifacts the library publishes are ABI includes under `include/shaders/` (descriptor-heap helpers and generated ABI structs/offsets) that a consumer's shaders `#include`. Samples and tests own their shaders inside their own trees, because they are consumers like any other.
 
 ## 4. Public object model
 

@@ -354,7 +354,7 @@ Prove the core shader ABI.
 ```text
 vk/shader.c3
 vk/pipeline_compute.c3
-resources/shaders/compute/root_pointer.comp.glsl
+samples/root_pointer_compute/shaders/root_pointer.comp.glsl
 test/test_vk_root_pointer_compute.c3
 samples/root_pointer_compute/
 ```
@@ -390,7 +390,7 @@ Expose TextureIndex and SamplerIndex to shaders.
 ```text
 descriptor_heap.c3
 vk/descriptor_heap.c3
-resources/shaders/common/descriptor_heap.glsl
+include/shaders/descriptor_heap.glsl
 test/test_vk_texture_heap.c3
 samples/bindless_texture_compute/
 ```
@@ -463,7 +463,7 @@ Render without a window or swapchain.
 render_pass.c3
 vk/render_pass.c3
 vk/pipeline_graphics.c3
-resources/shaders/graphics/*.glsl
+samples/offscreen_triangle/shaders/*.glsl
 test/test_vk_offscreen_triangle.c3
 samples/offscreen_triangle/
 ```
@@ -604,7 +604,7 @@ Support compute-generated draws and dispatches.
 ```text
 command.c3 updates
 vk/command.c3 updates
-resources/shaders/compute/build_draws.comp.glsl
+samples/gpu_driven_draw_sdl/shaders/build_draws.comp.glsl
 samples/gpu_driven_draw_sdl/
 test/test_vk_indirect_draw.c3
 ```
@@ -674,8 +674,8 @@ Remove manual CPU/shader layout drift.
 
 ```text
 tools/gen_shader_abi/
-generated/shader_abi.c3
-resources/shaders/generated/shader_abi.glsl
+shader_abi.c3
+include/shaders/generated/shader_abi.glsl
 test/test_shader_abi_layout.c3
 ```
 

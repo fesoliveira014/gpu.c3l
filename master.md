@@ -15,6 +15,8 @@
 
 `gpu.c3l` is a C3 library that exposes a compact, explicit, modern GPU programming model. It is designed for engines, renderers, research projects, tools, and sample applications that want direct GPU control without carrying a traditional graphics API abstraction into application code.
 
+The design follows the "No Graphics API" direction argued by Sebastian Aaltonen (<https://www.sebastianaaltonen.com/blog/no-graphics-api>): modern bindless GPUs with 64-bit addressing and coherent caches no longer need the descriptor-set, root-signature, and resource-binding machinery that DX12/Vulkan/Metal carry. `gpu.c3l` applies that direction concretely — a single root GPU pointer per draw/dispatch, buffers by GPU address, textures/samplers by heap index, transient command lists, and explicit stage-based synchronization — on top of a Vulkan 1.3 backend.
+
 The public API is intentionally small. User code writes root data into GPU-visible memory, passes a single GPU address to draw or dispatch commands, accesses buffer data by GPU address, accesses textures and samplers by compact heap indices, and records explicit synchronization. Descriptor sets, descriptor pools, descriptor set layouts, Vulkan image memory requirements, Vulkan pipeline layouts, VMA allocations, and platform window details stay behind backend or sample boundaries.
 
 The first backend is Vulkan. The Vulkan backend lives under `module gpu::vk` and uses:
@@ -176,6 +178,10 @@ A material record contains texture/sampler indices, not bound resources. The Vul
 
 Vulkan still has image layouts, descriptor machinery, queue ownership, swapchains, memory requirements, and pipeline layouts. Those are not reasons to expose Vulkan-shaped concepts publicly. The backend adapts the public model to Vulkan.
 
+### 3.8 Shaders are consumer-owned
+
+`gpu.c3l` ships no application shaders. Shader programs — the actual compute and graphics entry points — are written and owned by the project that calls the library. The library publishes only the *shader-side ABI contract*: generated ABI structs/offsets and the descriptor-heap access helpers, as include files a consumer's shaders `#include` (see `docs/shader_abi.md`). The repository's own samples and tests are consumers too, so their shaders live inside each sample/test, not in a library-owned shader tree.
+
 ---
 
 ## 4. C3 library structure
@@ -223,23 +229,22 @@ gpu.c3l/
 │   ├── swapchain.c3
 │   ├── debug.c3
 │   └── helpers.c3
-├── resources/
-│   └── shaders/
-│       ├── common/
-│       ├── compute/
-│       ├── graphics/
-│       └── generated/
+├── include/
+│   └── shaders/              published shader-side ABI includes (consumer #includes these)
+│       ├── descriptor_heap.glsl
+│       └── generated/        generated ABI structs/offsets
 ├── tools/
 │   ├── gen_shader_abi/
 │   └── shader_build/
 ├── test/
 │   ├── project.json
 │   ├── README.md
+│   ├── shaders/              test-owned shaders (tests are consumers)
 │   └── *.c3
 ├── samples/
 │   ├── project.json
 │   ├── shared/
-│   ├── hello_compute/
+│   ├── hello_compute/        each sample owns its shaders/ subdirectory
 │   ├── root_pointer_compute/
 │   ├── bindless_texture_compute/
 │   ├── offscreen_triangle/
@@ -740,7 +745,7 @@ The first complete proof should be `samples/root_pointer_compute` and its matchi
 create_device
 create_buffer(input, addressable)
 create_buffer(output, addressable + readback path)
-alloc_frame_span(sizeof(RootArgs), alignof(RootArgs))
+alloc_frame_span(RootArgs::size, RootArgs::alignment)
 write RootArgs { input_gpu, output_gpu, count }
 begin command list
 cmd_barrier host write -> compute shader read

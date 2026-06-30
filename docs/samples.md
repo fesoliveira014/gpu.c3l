@@ -6,6 +6,8 @@ Samples prove real usage and provide regression coverage. They are also the pref
 
 Samples are standalone consumers of `gpu.c3l`. Windowed samples use SDL3 through `sdl3.c3l`.
 
+Because samples are consumers, each sample owns its shaders in its own `shaders/` subdirectory (`samples/<name>/shaders/`). The library ships no application shaders; sample shaders `#include` the published shader-side ABI includes from `include/shaders/` (see `docs/shader_abi.md`).
+
 ## 2. Sample project structure
 
 ```text
