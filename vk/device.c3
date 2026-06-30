@@ -1,6 +1,7 @@
 module gpu::vk;
 
 import gpu;
+import gpu::slots;
 import vk;
 import vma;
 import std::core::mem;
@@ -21,6 +22,7 @@ struct VkDeviceState {
     gpu::DeviceCaps            caps;
     bool                       validation;
     bool                       memory_budget_enabled;
+    BufferTable                buffers;
 }
 
 // One static vtable shared by every Vulkan device.
@@ -28,6 +30,10 @@ const gpu::BackendVTable VK_VTABLE = {
     .destroy_device      = &vk_destroy_device,
     .get_memory_stats    = &vk_get_memory_stats,
     .build_memory_report = &vk_build_memory_report,
+    .create_buffer       = &vk_create_buffer,
+    .destroy_buffer      = &vk_destroy_buffer,
+    .get_buffer_address  = &vk_get_buffer_address,
+    .get_buffer_span     = &vk_get_buffer_span,
 };
 
 <* Build a Vulkan device end to end. On failure the partial state is torn down
@@ -59,6 +65,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     vk::get_device_queue(state.device, state.transfer_family, 0, &state.transfer_queue);
 
     create_vk_allocator(state)!;
+    state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
     state.caps = build_caps(&features12, &features13, state.physical_device);
 
     return (gpu::Device){
@@ -79,6 +86,16 @@ fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
     if (state.device != null) {
         vk::device_wait_idle(state.device);
+        // Destroy any buffers the caller did not, so no VMA allocation leaks.
+        if (state.allocator != null && state.buffers.slots.ptr != null) {
+            foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {
+                if (cell.used) state.allocator.destroy_buffer(cell.value.buffer, cell.value.allocation);
+            }
+        }
+        if (state.buffers.slots.ptr != null) {
+            mem::free(state.buffers.slots.ptr);
+            state.buffers.slots = {};
+        }
         if (state.allocator != null) {
             state.allocator.destroy();
             state.allocator = (vma::Allocator)null;

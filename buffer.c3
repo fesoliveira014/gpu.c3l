@@ -1,5 +1,7 @@
 module gpu;
 
+const usz MAX_BUFFERS = 4096;
+
 // Buffer usage flags. A bitstruct of bools, composed by field-set:
 //   BufferUsage u = { .storage, .addressable, .transfer_dst };
 bitstruct BufferUsage : uint {
@@ -18,4 +20,27 @@ struct BufferDesc {
     BufferUsage usage;
     MemoryKind  memory_kind;
     ZString     debug_name;
+}
+
+<* Create a buffer. Ownership: the caller destroys it with destroy_buffer. *>
+fn BufferHandle? create_buffer(Device* device, BufferDesc* desc) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.create_buffer(device, desc);
+}
+
+fn void? destroy_buffer(Device* device, BufferHandle buffer) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.destroy_buffer(device, buffer);
+}
+
+<* Shader-visible GPU address of an addressable buffer; faults if the buffer was
+   not created with the addressable usage flag. *>
+fn GpuAddress? get_buffer_address(Device* device, BufferHandle buffer) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.get_buffer_address(device, buffer);
+}
+
+fn GpuSpan? get_buffer_span(Device* device, BufferHandle buffer) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.get_buffer_span(device, buffer);
 }

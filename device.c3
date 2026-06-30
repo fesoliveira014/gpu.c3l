@@ -7,11 +7,19 @@ import gpu::vk;
 alias DestroyDeviceFn       = fn void (Device*);
 alias GetMemoryStatsFn      = fn MemoryStats? (Device*);
 alias BuildMemoryReportFn   = fn String? (Device*, bool detailed);
+alias CreateBufferFn        = fn BufferHandle? (Device*, BufferDesc*);
+alias DestroyBufferFn       = fn void? (Device*, BufferHandle);
+alias GetBufferAddressFn    = fn GpuAddress? (Device*, BufferHandle);
+alias GetBufferSpanFn       = fn GpuSpan? (Device*, BufferHandle);
 
 struct BackendVTable {
     DestroyDeviceFn     destroy_device;
     GetMemoryStatsFn    get_memory_stats;
     BuildMemoryReportFn build_memory_report;
+    CreateBufferFn      create_buffer;
+    DestroyBufferFn     destroy_buffer;
+    GetBufferAddressFn  get_buffer_address;
+    GetBufferSpanFn     get_buffer_span;
 }
 
 // A GPU device. `vtable` points at one static table shared by all devices of a
