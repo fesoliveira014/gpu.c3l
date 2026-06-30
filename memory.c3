@@ -25,6 +25,7 @@ struct GpuSpan {
 
 const usz MAX_MEMORY_HEAPS = 16;
 const usz ARENA_SIZE = 1 << 20;
+const usz PERSISTENT_ARENA_SIZE = 64 << 20;
 
 // Per-heap memory usage snapshot.
 struct MemoryHeapBudget {
@@ -65,6 +66,37 @@ fn GpuSpan? alloc_frame_span(Device* device, usz size, usz align) {
 fn void? end_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.end_frame(device);
+}
+
+struct PersistentAllocDesc {
+    usz         size;
+    usz         align;
+    BufferUsage usage;
+    MemoryKind  memory_kind;
+    ZString     debug_name;
+}
+
+struct PersistentArenaStats {
+    ulong capacity_bytes;
+    ulong used_bytes;
+    ulong allocation_count;
+}
+
+<* Allocate a long-lived span from the persistent arena. Its GPU address is
+   stable until freed. Ownership: free with free_persistent_span. *>
+fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.alloc_persistent_span(device, desc);
+}
+
+fn void? free_persistent_span(Device* device, GpuSpan span) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.free_persistent_span(device, span);
+}
+
+fn PersistentArenaStats? get_persistent_stats(Device* device) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.get_persistent_stats(device);
 }
 
 <* Derive a sub-range starting `offset` bytes into this span. The GPU address

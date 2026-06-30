@@ -14,18 +14,24 @@ alias GetBufferSpanFn       = fn GpuSpan? (Device*, BufferHandle);
 alias BeginFrameFn          = fn void? (Device*);
 alias AllocFrameSpanFn      = fn GpuSpan? (Device*, usz size, usz align);
 alias EndFrameFn            = fn void? (Device*);
+alias AllocPersistentSpanFn = fn GpuSpan? (Device*, PersistentAllocDesc*);
+alias FreePersistentSpanFn  = fn void? (Device*, GpuSpan);
+alias GetPersistentStatsFn  = fn PersistentArenaStats? (Device*);
 
 struct BackendVTable {
-    DestroyDeviceFn     destroy_device;
-    GetMemoryStatsFn    get_memory_stats;
-    BuildMemoryReportFn build_memory_report;
-    CreateBufferFn      create_buffer;
-    DestroyBufferFn     destroy_buffer;
-    GetBufferAddressFn  get_buffer_address;
-    GetBufferSpanFn     get_buffer_span;
-    BeginFrameFn        begin_frame;
-    AllocFrameSpanFn    alloc_frame_span;
-    EndFrameFn          end_frame;
+    DestroyDeviceFn         destroy_device;
+    GetMemoryStatsFn        get_memory_stats;
+    BuildMemoryReportFn     build_memory_report;
+    CreateBufferFn          create_buffer;
+    DestroyBufferFn         destroy_buffer;
+    GetBufferAddressFn      get_buffer_address;
+    GetBufferSpanFn         get_buffer_span;
+    BeginFrameFn            begin_frame;
+    AllocFrameSpanFn        alloc_frame_span;
+    EndFrameFn              end_frame;
+    AllocPersistentSpanFn   alloc_persistent_span;
+    FreePersistentSpanFn    free_persistent_span;
+    GetPersistentStatsFn    get_persistent_stats;
 }
 
 // A GPU device. `vtable` points at one static table shared by all devices of a

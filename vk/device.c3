@@ -28,6 +28,7 @@ struct VkDeviceState {
     uint                       frames_in_flight;
     uint                       frame_index;
     FrameArenaState[]          frame_arenas;
+    PersistentArenaState       persistent_arena;
 }
 
 // One static vtable shared by every Vulkan device.
@@ -42,6 +43,9 @@ const gpu::BackendVTable VK_VTABLE = {
     .begin_frame         = &vk_begin_frame,
     .alloc_frame_span    = &vk_alloc_frame_span,
     .end_frame           = &vk_end_frame,
+    .alloc_persistent_span = &vk_alloc_persistent_span,
+    .free_persistent_span  = &vk_free_persistent_span,
+    .get_persistent_stats  = &vk_get_persistent_stats,
 };
 
 <* Build a Vulkan device end to end. On failure the partial state is torn down
@@ -75,6 +79,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     create_vk_allocator(state)!;
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
     create_frame_resources(state, desc)!;
+    create_persistent_arena(state)!;
     state.caps = build_caps(&features12, &features13, state.physical_device);
 
     return (gpu::Device){
@@ -106,6 +111,7 @@ fn void destroy_state(VkDeviceState* state) @private {
             state.buffers.slots = {};
         }
         destroy_frame_resources(state);
+        destroy_persistent_arena(state);
         if (state.allocator != null) {
             state.allocator.destroy();
             state.allocator = (vma::Allocator)null;

@@ -2,7 +2,23 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import vma;
 import std::core::mem;
+import std::collections::map;
+
+alias PersistentAllocMap = HashMap{usz, vma::VirtualAllocation};
+
+// One persistent arena per device: a large addressable buffer suballocated by a
+// VMA virtual block. `live` maps each allocation's offset to its virtual
+// allocation handle so a span can be freed by offset.
+struct PersistentArenaState {
+    gpu::BufferHandle  backing_buffer;
+    vma::VirtualBlock  virtual_block;
+    gpu::GpuAddress    gpu_base;
+    void*              cpu_base;
+    usz                size;
+    PersistentAllocMap live;
+}
 
 // Per-frame upload arena: a mapped, addressable buffer bump-allocated within a
 // frame, reset once its timeline value retires.
@@ -122,4 +138,85 @@ fn void? vk_end_frame(gpu::Device* device) @private {
         .set_semaphore(state.frame_timeline)
         .set_value(state.timeline_counter);
     check(vk::signal_semaphore(state.device, &signal_info))!;
+}
+
+<* Create the persistent arena: a large addressable buffer plus a VMA virtual
+   block that suballocates it. *>
+fn void? create_persistent_arena(VkDeviceState* state) {
+    gpu::Device handle = { .backend = gpu::BackendKind.VULKAN, .vtable = &VK_VTABLE, .backend_state = (void*)state };
+    gpu::BufferDesc desc = {
+        .size        = gpu::PERSISTENT_ARENA_SIZE,
+        .usage       = { .storage, .addressable },
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .debug_name  = "persistent_arena",
+    };
+    gpu::BufferHandle buffer = vk_create_buffer(&handle, &desc)!;
+    gpu::GpuSpan span = vk_get_buffer_span(&handle, buffer)!;
+
+    vma::VirtualBlockCreateInfo block_info = { .size = (vk::DeviceSize)gpu::PERSISTENT_ARENA_SIZE };
+    vma::VirtualBlock block;
+    check(vma::create_virtual_block(&block_info, &block))!;
+
+    state.persistent_arena.backing_buffer = buffer;
+    state.persistent_arena.virtual_block  = block;
+    state.persistent_arena.gpu_base       = span.gpu;
+    state.persistent_arena.cpu_base       = span.cpu;
+    state.persistent_arena.size           = span.size;
+    state.persistent_arena.live.init(mem);
+}
+
+fn void destroy_persistent_arena(VkDeviceState* state) @private {
+    if (state.persistent_arena.virtual_block == null) return;
+    state.persistent_arena.virtual_block.destroy();
+    state.persistent_arena.virtual_block = (vma::VirtualBlock)null;
+    state.persistent_arena.live.free();
+}
+
+fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAllocDesc* desc) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (desc.memory_kind != gpu::MemoryKind.PERSISTENT_UPLOAD) return gpu::INVALID_ARGUMENT~;
+    PersistentArenaState* arena = &state.persistent_arena;
+
+    vma::VirtualAllocationCreateInfo create_info = {
+        .size      = (vk::DeviceSize)desc.size,
+        .alignment = (vk::DeviceSize)desc.align,
+    };
+    vma::VirtualAllocation allocation;
+    vk::DeviceSize offset;
+    check(arena.virtual_block.allocate(&create_info, &allocation, &offset))!;
+
+    arena.live.set((usz)offset, allocation);
+    return (gpu::GpuSpan){
+        .gpu    = (gpu::GpuAddress)((ulong)arena.gpu_base + offset),
+        .cpu    = arena.cpu_base == null ? null : (char*)arena.cpu_base + offset,
+        .size   = desc.size,
+        .buffer = arena.backing_buffer,
+        .offset = (usz)offset,
+        .kind   = gpu::MemoryKind.PERSISTENT_UPLOAD,
+    };
+}
+
+fn void? vk_free_persistent_span(gpu::Device* device, gpu::GpuSpan span) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    PersistentArenaState* arena = &state.persistent_arena;
+    if ((ulong)span.buffer != (ulong)arena.backing_buffer) return gpu::INVALID_ARGUMENT~;
+
+    if (try allocation = arena.live.get(span.offset)) {
+        arena.virtual_block.free(allocation);
+        arena.live.remove(span.offset)!;
+        return;
+    }
+    return gpu::INVALID_HANDLE~;
+}
+
+fn gpu::PersistentArenaStats? vk_get_persistent_stats(gpu::Device* device) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    PersistentArenaState* arena = &state.persistent_arena;
+    vma::Statistics stats;
+    arena.virtual_block.get_statistics(&stats);
+    return (gpu::PersistentArenaStats){
+        .capacity_bytes   = (ulong)arena.size,
+        .used_bytes       = (ulong)stats.allocation_bytes,
+        .allocation_count = (ulong)stats.allocation_count,
+    };
 }
