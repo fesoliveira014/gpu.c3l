@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import vma;
 import std::core::mem;
 
 // Per-device backend state, reached through Device.backend_state.
@@ -10,6 +11,7 @@ struct VkDeviceState {
     vk::DebugUtilsMessengerEXT messenger;
     vk::PhysicalDevice         physical_device;
     vk::Device                 device;
+    vma::Allocator             allocator;
     uint                       graphics_family;
     uint                       compute_family;
     uint                       transfer_family;
@@ -18,10 +20,15 @@ struct VkDeviceState {
     vk::Queue                  transfer_queue;
     gpu::DeviceCaps            caps;
     bool                       validation;
+    bool                       memory_budget_enabled;
 }
 
 // One static vtable shared by every Vulkan device.
-const gpu::BackendVTable VK_VTABLE = { .destroy_device = &vk_destroy_device };
+const gpu::BackendVTable VK_VTABLE = {
+    .destroy_device      = &vk_destroy_device,
+    .get_memory_stats    = &vk_get_memory_stats,
+    .build_memory_report = &vk_build_memory_report,
+};
 
 <* Build a Vulkan device end to end. On failure the partial state is torn down
    and freed before the fault propagates, so nothing leaks. *>
@@ -51,6 +58,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.compute_queue = state.graphics_queue;
     vk::get_device_queue(state.device, state.transfer_family, 0, &state.transfer_queue);
 
+    create_vk_allocator(state)!;
     state.caps = build_caps(&features12, &features13, state.physical_device);
 
     return (gpu::Device){
@@ -71,6 +79,10 @@ fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
     if (state.device != null) {
         vk::device_wait_idle(state.device);
+        if (state.allocator != null) {
+            state.allocator.destroy();
+            state.allocator = (vma::Allocator)null;
+        }
         vk::destroy_device(state.device, null);
         state.device = (vk::Device)null;
     }
@@ -146,11 +158,33 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @p
         .set_timeline_semaphore(vk::TRUE)
         .set_next(&features13);
 
+    state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
+    ZString[1] extensions = { "VK_EXT_memory_budget" };
+
     vk::DeviceCreateInfo device_info = vk::device_create_info()
         .set_next(&features12)
         .set_queue_create_infos((&queue_info)[:1]);
+    if (state.memory_budget_enabled) {
+        device_info = device_info.set_enabled_extension_names(extensions[..]);
+    }
 
     check(vk::create_device(state.physical_device, &device_info, null, &state.device))!;
+}
+
+<* True if `physical_device` advertises the named device extension. *>
+fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString name) @private {
+    uint count = 0;
+    if (catch vk::try_enumerate_device_extension_properties(physical_device, null, &count, null)) return false;
+    if (count == 0) return false;
+
+    @pool() {
+        vk::ExtensionProperties[] properties = mem::talloc_array(vk::ExtensionProperties, (sz)count);
+        if (catch vk::try_enumerate_device_extension_properties(physical_device, null, &count, properties.ptr)) return false;
+        for (uint i = 0; i < count; i++) {
+            if (((ZString)&properties[i].extension_name[0]).str_view() == name.str_view()) return true;
+        }
+    };
+    return false;
 }
 
 <* Populate public caps from queried features and limits. *>

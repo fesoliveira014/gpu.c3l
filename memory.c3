@@ -23,6 +23,26 @@ struct GpuSpan {
     MemoryKind   kind;
 }
 
+const usz MAX_MEMORY_HEAPS = 16;
+
+// Per-heap memory usage snapshot.
+struct MemoryHeapBudget {
+    ulong usage;
+    ulong budget;
+    ulong allocation_bytes;
+    ulong block_bytes;
+}
+
+// Device memory snapshot. `heaps[0..heap_count]` are valid. Resource counts are
+// 0 until the resource tables exist.
+struct MemoryStats {
+    MemoryHeapBudget[MAX_MEMORY_HEAPS] heaps;
+    uint  heap_count;
+    ulong buffer_count;
+    ulong texture_count;
+    ulong live_allocation_count;
+}
+
 // Round `value` up to the next multiple of `align` (a power of two).
 fn usz align_up(usz value, usz align) => (value + align - 1) & ~(align - 1);
 

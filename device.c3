@@ -4,10 +4,14 @@ import gpu::vk;
 
 // Backend dispatch vtable. Each fn takes the owning Device* so it reaches that
 // device's backend_state; the table grows one entry per milestone.
-alias DestroyDeviceFn = fn void (Device*);
+alias DestroyDeviceFn       = fn void (Device*);
+alias GetMemoryStatsFn      = fn MemoryStats? (Device*);
+alias BuildMemoryReportFn   = fn String? (Device*, bool detailed);
 
 struct BackendVTable {
-    DestroyDeviceFn destroy_device;
+    DestroyDeviceFn     destroy_device;
+    GetMemoryStatsFn    get_memory_stats;
+    BuildMemoryReportFn build_memory_report;
 }
 
 // A GPU device. `vtable` points at one static table shared by all devices of a
@@ -34,4 +38,17 @@ fn Device? create_device(DeviceDesc* desc) {
 fn void? destroy_device(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     device.vtable.destroy_device(device);
+}
+
+<* Snapshot per-heap memory usage and live allocation counts. *>
+fn MemoryStats? get_memory_stats(Device* device) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.get_memory_stats(device);
+}
+
+<* Build a human-readable memory report. Ownership: the caller frees the
+   returned String. *>
+fn String? build_memory_report(Device* device, bool detailed) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.build_memory_report(device, detailed);
 }
