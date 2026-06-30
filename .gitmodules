@@ -1,0 +1,6 @@
+[submodule "lib/vk.c3l"]
+	path = lib/vk.c3l
+	url = https://github.com/fesoliveira014/vk.c3l
+[submodule "lib/vma.c3l"]
+	path = lib/vma.c3l
+	url = https://github.com/fesoliveira014/vma.c3l

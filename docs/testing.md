@@ -189,21 +189,37 @@ Do not include milestone labels in test names.
 
 ## 9. Build commands
 
-Recommended developer commands:
+The shipped library is a `manifest.json` package (module `gpu`); it has no
+project of its own. Builds run through a consumer `project.json` that resolves
+`gpu`, `vk`, and `vma` from a `dependency-search-paths` directory.
+
+Smoke harness (`test/`), verified on C3 0.8.0 / `linux-x64`:
 
 ```sh
-c3c build
-c3c test
+# from the repo root; --path runs as if standing in test/
+c3c run smoke --path test
 ```
 
-If separate project files exist:
+`test/libs/` provides the search path: `gpu.c3l -> ../..` (this library) plus
+symlinks to the vendored `lib/vk.c3l` and `lib/vma.c3l`. A single
+`dependency-search-paths: ["libs"]` then finds all three by `<name>.c3l`.
+
+Prerequisites on `linux-x64`: a Vulkan loader (`libvulkan.so.1`) on the system
+and the `libVulkanMemoryAllocator.a` static lib shipped under
+`lib/vma.c3l/linked-libs/linux-x64/`. After cloning, init submodules:
 
 ```sh
-cd test && c3c test
-cd samples && c3c build
+git submodule update --init --recursive
 ```
 
-Exact commands should be pinned after `project.json` structure is finalized for C3 0.8.0.
+Notes pinned during scaffolding (C3 0.8.0):
+
+- Library `manifest.json` does **not** accept `dependency-search-paths` (that is
+  a `project.json` key); dependencies are declared per-target and resolved by
+  the consumer's search path.
+- `manifest.json` `sources` must list the backend subdir explicitly
+  (`"sources": ["gpu.c3", "gpu.c3i", "types.c3", "faults.c3", "vk/**"]`); a glob
+  like `*.c3` is rejected and the default does not recurse into `vk/`.
 
 ## 10. CI matrix
 
@@ -227,12 +243,14 @@ Windowed SDL3 tests are manual unless CI has a reliable display server.
 
 ## 11. Test data and shaders
 
-Test shaders should live in:
+Tests are consumers of the library, so test shaders are test-owned and live with the tests, not in the shipped library:
 
 ```text
-resources/shaders/compute/
-resources/shaders/graphics/
+test/shaders/compute/
+test/shaders/graphics/
 ```
+
+They `#include` the library's published shader-side ABI includes from `include/shaders/`.
 
 Generated SPIR-V should either:
 

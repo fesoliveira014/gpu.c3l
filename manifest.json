@@ -1,135 +1,26 @@
 {
-  "provides" : "gpu",
-  // "sources" : [ "src/**" ],
-  "linklib-dir" : "linked-libs",
-  "targets" : {
-    "android-aarch64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
+  // C3 library providing module `gpu`. Backend bindings (vk, vma) are vendored
+  // under lib/ as git submodules; consumers resolve them via their own
+  // dependency-search-paths (see test/project.json).
+  "provides": "gpu",
+  // Native libs for this library's own targets live here.
+  "linklib-dir": "linked-libs",
+  // Root module files plus the gpu::vk backend subdir. Without listing vk/**,
+  // the backend module is not compiled into the library.
+  "sources": [ "gpu.c3", "gpu.c3i", "types.c3", "faults.c3", "vk/**" ],
+  "targets": {
+    "linux-x64": {
+      "link-args": [],
+      // Backend bindings this target depends on.
+      "dependencies": [ "vk", "vma" ],
+      "linked-libraries": []
     },
-    "freebsd-x64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "linux-aarch64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "linux-riscv32" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "linux-riscv64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "linux-x86" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "linux-x64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "macos-aarch64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "macos-x64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "netbsd-aarch64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "netbsd-x64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "openbsd-x64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "wasm32" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "wasm64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "windows-aarch64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
-    "windows-x64" : {
-      // Extra flags to the linker for this target:
-      "link-args" : [],
-      // C3 libraries this target depends on:
-      "dependencies" : [],
-      // The external libraries to link for this target:
-      "linked-libraries" : []
-    },
+    "windows-x64": {
+      // Declare-only: builds/links here are not yet proven because vma.c3l
+      // does not ship a Windows VulkanMemoryAllocator static library.
+      "link-args": [],
+      "dependencies": [ "vk", "vma" ],
+      "linked-libraries": []
+    }
   }
 }

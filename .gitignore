@@ -1,5 +1,7 @@
 # C3 / c3c build output
 /build/
+build/
+obj/
 *.o
 *.obj
 *.a
@@ -13,6 +15,9 @@
 
 # Personal Claude Code instructions (not shared)
 CLAUDE.local.md
+
+# OpenSpec working dir
+openspec/
 
 # Editor / OS
 .DS_Store

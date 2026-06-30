@@ -1,0 +1,17 @@
+{
+  "langrev": "1",
+  // Stub backend imports vk/vma without using every symbol yet.
+  "warnings": [ "no-unused" ],
+  // libs/ holds: gpu.c3l -> ../.. (this library), and symlinks to the vendored
+  // vk.c3l / vma.c3l. A single search path then finds all three by <name>.c3l.
+  "dependency-search-paths": [ "libs" ],
+  "dependencies": [ "gpu", "vk", "vma" ],
+  "sources": [ "src/**" ],
+  "output": "build",
+  "targets": {
+    "smoke": {
+      "type": "executable",
+      "target": "linux-x64"
+    }
+  }
+}
