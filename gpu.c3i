@@ -1,5 +1,3 @@
 module gpu;
 
 // Public interface for consumers of gpu.c3l.
-// The concrete public type system and API are defined in later milestones;
-// for now the facade lives in gpu.c3.

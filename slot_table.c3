@@ -1,11 +1,6 @@
-// Generic, generation-checked slot table — the backend-agnostic backbone the
-// resource tables (buffers, textures, …) instantiate. Pure CPU, no allocation:
-// the caller provides the backing `Slot[]` storage.
-//
-// `Handle` is one of the handle bitstructs (it must expose `index` and
-// `generation`); `Value` is the stored payload. Instantiate per resource, e.g.
-//   import gpu::slots;
-//   SlotTable{BufferHandle, BufferRecord} table = { .slots = storage[..] };
+// Generic generation-checked slot table over caller-provided storage, the
+// backbone the backend resource tables instantiate. `Handle` is a handle
+// bitstruct (exposing index/generation); `Value` is the stored payload.
 module gpu::slots <Handle, Value>;
 
 import gpu;
@@ -25,9 +20,8 @@ struct SlotTable {
     uint   next_new;   // next never-yet-used slot index
 }
 
-<* Allocate a slot for `value` and return a fresh handle.
-   Reuses a freed slot if one is available, otherwise grows into unused
-   storage. Faults with SLOT_TABLE_FULL when capacity is exhausted. *>
+<* Allocate a slot (reusing a freed one if available) and return a fresh handle.
+   Faults SLOT_TABLE_FULL when capacity is exhausted. *>
 fn Handle? SlotTable.alloc(&self, Value value) {
     uint idx;
     if (self.free_head != FREE_NONE) {
@@ -46,9 +40,8 @@ fn Handle? SlotTable.alloc(&self, Value value) {
     return h;
 }
 
-<* Resolve a handle to a pointer to its stored value.
-   Faults with INVALID_HANDLE if the slot is out of range, unused, or the
-   handle's generation no longer matches (a stale handle to a reused slot). *>
+<* Resolve a handle to its stored value, or INVALID_HANDLE if the slot is out of
+   range, unused, or stale (generation mismatch). *>
 fn Value*? SlotTable.get(&self, Handle h) {
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
@@ -56,9 +49,8 @@ fn Value*? SlotTable.get(&self, Handle h) {
     return &self.slots[idx].value;
 }
 
-<* Retire the slot a handle refers to and bump its generation so any
-   outstanding handle to it becomes stale. Faults with INVALID_HANDLE if the
-   handle does not currently resolve. *>
+<* Retire a slot and bump its generation, invalidating outstanding handles.
+   Faults INVALID_HANDLE if the handle does not resolve. *>
 fn void? SlotTable.free(&self, Handle h) {
     self.get(h)!;
     uint idx = h.index;

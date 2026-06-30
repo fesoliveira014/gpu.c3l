@@ -1,9 +1,8 @@
 module gpu;
 
-// Strongly-typed resource handles. Each kind is a distinct bitstruct over
-// `ulong` so the compiler rejects passing one handle kind where another is
-// expected. Packed layout: index (0..31) | generation (32..55) | reserved.
-// A live handle always has generation >= 1, so raw 0 is reserved for INVALID.
+// Strongly-typed resource handles: one distinct bitstruct per kind over ulong,
+// packed index(0..31) | generation(32..55) | reserved. A live handle has
+// generation >= 1, so raw 0 is reserved for INVALID.
 
 bitstruct BufferHandle : ulong {
     uint index      : 0..31;

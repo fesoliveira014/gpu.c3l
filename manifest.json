@@ -8,7 +8,7 @@
   // Root module files plus the gpu::vk backend subdir. Without listing vk/**,
   // the backend module is not compiled into the library.
   "sources": [
-    "gpu.c3", "gpu.c3i", "types.c3", "faults.c3",
+    "gpu.c3", "gpu.c3i", "types.c3", "faults.c3", "device.c3",
     "caps.c3", "memory.c3", "buffer.c3", "texture.c3",
     "pipeline.c3", "command.c3", "sync.c3", "slot_table.c3",
     "vk/**"
