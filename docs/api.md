@@ -210,16 +210,19 @@ free_persistent_span(Device* device, GpuSpan span) -> void?
 
 ### Explicit buffers
 
+`BufferUsage` is a bitstruct of bool flags, composed by field-set
+(`{ .storage, .addressable }`), not OR-combined enum values.
+
 ```text
-BufferUsage
-    TRANSFER_SRC
-    TRANSFER_DST
-    UNIFORM
-    STORAGE
-    ADDRESSABLE
-    INDIRECT
-    INDEX
-    VERTEX
+bitstruct BufferUsage : uint
+    bool transfer_src : 0
+    bool transfer_dst : 1
+    bool uniform      : 2
+    bool storage      : 3
+    bool addressable  : 4
+    bool indirect     : 5
+    bool index        : 6
+    bool vertex       : 7
 
 BufferDesc
     usz size
@@ -237,7 +240,7 @@ flush_buffer(Device* device, BufferHandle buffer, usz offset, usz size) -> void?
 invalidate_buffer(Device* device, BufferHandle buffer, usz offset, usz size) -> void?
 ```
 
-`get_buffer_address` faults if the buffer was not created with `BufferUsage.ADDRESSABLE`.
+`get_buffer_address` faults if the buffer was not created with the `addressable` usage flag set.
 
 ## 6. Texture API
 
@@ -266,14 +269,16 @@ D24_UNORM_S8_UINT
 
 ### Texture descriptors
 
+`TextureUsage` is likewise a bitstruct of bool flags.
+
 ```text
-TextureUsage
-    SAMPLED
-    STORAGE
-    COLOR_ATTACH
-    DEPTH_ATTACH
-    TRANSFER_SRC
-    TRANSFER_DST
+bitstruct TextureUsage : uint
+    bool sampled      : 0
+    bool storage      : 1
+    bool color_attach : 2
+    bool depth_attach : 3
+    bool transfer_src : 4
+    bool transfer_dst : 5
 
 TextureDimension
     TEX_1D
@@ -608,7 +613,7 @@ fn void? run_compute() {
 
     gpu::BufferDesc input_desc = {
         .size = 4096,
-        .usage = gpu::BufferUsage.STORAGE | gpu::BufferUsage.ADDRESSABLE | gpu::BufferUsage.TRANSFER_DST,
+        .usage = { .storage, .addressable, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
         .debug_name = "input",
     };
