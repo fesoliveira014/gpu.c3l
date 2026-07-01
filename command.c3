@@ -15,6 +15,12 @@ enum StoreOp : int {
     DONT_CARE,
 }
 
+enum CommandState : int {
+    RECORDING,
+    EXECUTABLE,
+    SUBMITTED,
+}
+
 struct ClearColor {
     float[4] rgba;
 }
@@ -47,6 +53,16 @@ struct RenderPassDesc {
     uint              height;
 }
 
+// A recording session. Backend-opaque: the backend command buffer lives behind
+// `backend`. Carries its owning Device* so cmd_* reach the vtable without a
+// Device parameter.
+struct CommandList {
+    Device*      device;
+    void*        backend;
+    QueueKind    queue;
+    CommandState state;
+}
+
 struct BufferCopyDesc {
     BufferHandle src;
     BufferHandle dst;
@@ -69,4 +85,42 @@ struct TextureBufferCopyDesc {
     uint          array_layer;
     BufferHandle  buffer;
     usz           buffer_offset;
+}
+
+<* Begin recording a command list on the given queue.
+   Ownership: end with end_commands, then submit; the backing command buffer is
+   freed when its frame slot's pool is reset. *>
+fn CommandList? begin_commands(Device* device, QueueKind queue) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.begin_commands(device, queue);
+}
+
+fn void? end_commands(Device* device, CommandList* commands) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.end_commands(device, commands);
+}
+
+fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_copy_buffer(commands, desc);
+}
+
+fn void? cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset, usz size, uint value) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_fill_buffer(commands, buffer, offset, size, value);
+}
+
+fn void? cmd_buffer_barrier(CommandList* commands, BufferBarrier* barrier) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_buffer_barrier(commands, barrier);
+}
+
+fn void? cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_global_barrier(commands, barrier);
+}
+
+fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_texture_barrier(commands, barrier);
 }

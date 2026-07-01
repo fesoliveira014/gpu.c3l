@@ -2,8 +2,10 @@ module gpu;
 
 import gpu::vk;
 
-// Backend dispatch vtable. Each fn takes the owning Device* so it reaches that
-// device's backend_state; the table grows one entry per milestone.
+// Backend dispatch vtable. Most fns take the owning Device* so they reach that
+// device's backend_state; the cmd_* recording entries instead take a
+// CommandList* (which carries its owning Device*). The table grows one entry
+// per milestone.
 alias DestroyDeviceFn       = fn void (Device*);
 alias GetMemoryStatsFn      = fn MemoryStats? (Device*);
 alias BuildMemoryReportFn   = fn String? (Device*, bool detailed);
@@ -17,6 +19,18 @@ alias EndFrameFn            = fn void? (Device*);
 alias AllocPersistentSpanFn = fn GpuSpan? (Device*, PersistentAllocDesc*);
 alias FreePersistentSpanFn  = fn void? (Device*, GpuSpan);
 alias GetPersistentStatsFn  = fn PersistentArenaStats? (Device*);
+alias BeginCommandsFn       = fn CommandList? (Device*, QueueKind);
+alias EndCommandsFn         = fn void? (Device*, CommandList*);
+alias SubmitFn              = fn void? (Device*, SubmitDesc*);
+alias WaitQueueIdleFn       = fn void? (Device*, QueueKind);
+alias CmdCopyBufferFn       = fn void? (CommandList*, BufferCopyDesc*);
+alias CmdFillBufferFn       = fn void? (CommandList*, BufferHandle, usz, usz, uint);
+alias CmdBufferBarrierFn    = fn void? (CommandList*, BufferBarrier*);
+alias CmdGlobalBarrierFn    = fn void? (CommandList*, GlobalBarrier*);
+alias CmdTextureBarrierFn   = fn void? (CommandList*, TextureBarrier*);
+alias CreateSemaphoreFn     = fn SemaphoreHandle? (Device*, SemaphoreDesc*);
+alias DestroySemaphoreFn    = fn void? (Device*, SemaphoreHandle);
+alias WaitSemaphoreFn       = fn void? (Device*, SemaphoreHandle, SemaphoreValue, ulong);
 
 struct BackendVTable {
     DestroyDeviceFn         destroy_device;
@@ -32,6 +46,18 @@ struct BackendVTable {
     AllocPersistentSpanFn   alloc_persistent_span;
     FreePersistentSpanFn    free_persistent_span;
     GetPersistentStatsFn    get_persistent_stats;
+    BeginCommandsFn         begin_commands;
+    EndCommandsFn           end_commands;
+    SubmitFn                submit;
+    WaitQueueIdleFn         wait_queue_idle;
+    CmdCopyBufferFn         cmd_copy_buffer;
+    CmdFillBufferFn         cmd_fill_buffer;
+    CmdBufferBarrierFn      cmd_buffer_barrier;
+    CmdGlobalBarrierFn      cmd_global_barrier;
+    CmdTextureBarrierFn     cmd_texture_barrier;
+    CreateSemaphoreFn       create_semaphore;
+    DestroySemaphoreFn      destroy_semaphore;
+    WaitSemaphoreFn         wait_semaphore;
 }
 
 // A GPU device. `vtable` points at one static table shared by all devices of a

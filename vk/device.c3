@@ -29,6 +29,9 @@ struct VkDeviceState {
     uint                       frame_index;
     FrameArenaState[]          frame_arenas;
     PersistentArenaState       persistent_arena;
+    vk::CommandPool[]          graphics_pools;
+    vk::CommandPool[]          transfer_pools;
+    SemaphoreTable             semaphores;
 }
 
 // One static vtable shared by every Vulkan device.
@@ -46,6 +49,18 @@ const gpu::BackendVTable VK_VTABLE = {
     .alloc_persistent_span = &vk_alloc_persistent_span,
     .free_persistent_span  = &vk_free_persistent_span,
     .get_persistent_stats  = &vk_get_persistent_stats,
+    .begin_commands      = &vk_begin_commands,
+    .end_commands        = &vk_end_commands,
+    .submit              = &vk_submit,
+    .wait_queue_idle     = &vk_wait_queue_idle,
+    .cmd_copy_buffer     = &vk_cmd_copy_buffer,
+    .cmd_fill_buffer     = &vk_cmd_fill_buffer,
+    .cmd_buffer_barrier  = &vk_cmd_buffer_barrier,
+    .cmd_global_barrier  = &vk_cmd_global_barrier,
+    .cmd_texture_barrier = &vk_cmd_texture_barrier,
+    .create_semaphore    = &vk_create_semaphore,
+    .destroy_semaphore   = &vk_destroy_semaphore,
+    .wait_semaphore      = &vk_wait_semaphore,
 };
 
 <* Build a Vulkan device end to end. On failure the partial state is torn down
@@ -80,6 +95,8 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
     create_frame_resources(state, desc)!;
     create_persistent_arena(state)!;
+    create_command_pools(state)!;
+    state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     state.caps = build_caps(&features12, &features13, state.physical_device);
 
     return (gpu::Device){
@@ -109,6 +126,14 @@ fn void destroy_state(VkDeviceState* state) @private {
         if (state.buffers.slots.ptr != null) {
             mem::free(state.buffers.slots.ptr);
             state.buffers.slots = {};
+        }
+        destroy_command_pools(state);
+        if (state.semaphores.slots.ptr != null) {
+            foreach (&cell : state.semaphores.slots[:state.semaphores.next_new]) {
+                if (cell.used) vk::destroy_semaphore(state.device, cell.value.semaphore, null);
+            }
+            mem::free(state.semaphores.slots.ptr);
+            state.semaphores.slots = {};
         }
         destroy_frame_resources(state);
         destroy_persistent_arena(state);

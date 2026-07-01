@@ -10,7 +10,7 @@
   "sources": [
     "gpu.c3", "gpu.c3i", "types.c3", "faults.c3", "device.c3",
     "caps.c3", "memory.c3", "buffer.c3", "texture.c3",
-    "pipeline.c3", "command.c3", "sync.c3", "slot_table.c3",
+    "pipeline.c3", "command.c3", "sync.c3", "queue.c3", "slot_table.c3",
     "vk/**"
   ],
   "targets": {

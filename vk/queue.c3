@@ -38,3 +38,65 @@ fn QueueFamilies? select_queue_families(vk::PhysicalDevice physical_device) {
         return (QueueFamilies){ .graphics = main, .compute = main, .transfer = transfer };
     };
 }
+
+fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
+    switch (queue) {
+        case gpu::QueueKind.TRANSFER: return state.transfer_queue;
+        default:                      return state.graphics_queue;
+    }
+}
+
+<* Submit command lists to their queue via vkQueueSubmit2, waiting on and
+   signaling the requested timeline values at their stages. Empty wait/signal/
+   command arrays are left unset so the slice setters are never handed a
+   zero-length slice. *>
+fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;
+
+    @pool() {
+        vk::SubmitInfo2 submit = vk::submit_info2();
+
+        if (desc.command_lists.len > 0) {
+            vk::CommandBufferSubmitInfo[] cmds = mem::talloc_array(vk::CommandBufferSubmitInfo, desc.command_lists.len);
+            foreach (i, &cl : desc.command_lists) {
+                if (cl.state != gpu::CommandState.EXECUTABLE) return gpu::COMMAND_RECORDING_ERROR~;
+                cmds[i] = vk::command_buffer_submit_info().set_command_buffer((vk::CommandBuffer)cl.backend);
+            }
+            submit = submit.set_command_buffer_infos(cmds);
+        }
+
+        if (desc.waits.len > 0) {
+            vk::SemaphoreSubmitInfo[] waits = mem::talloc_array(vk::SemaphoreSubmitInfo, desc.waits.len);
+            foreach (i, w : desc.waits) {
+                SemaphoreSlot* slot = state.semaphores.get(w.semaphore)!;
+                waits[i] = vk::semaphore_submit_info()
+                    .set_semaphore(slot.semaphore)
+                    .set_value((ulong)w.value)
+                    .set_stage_mask(stage_to_vk(w.stage));
+            }
+            submit = submit.set_wait_semaphore_infos(waits);
+        }
+
+        if (desc.signals.len > 0) {
+            vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(vk::SemaphoreSubmitInfo, desc.signals.len);
+            foreach (i, s : desc.signals) {
+                SemaphoreSlot* slot = state.semaphores.get(s.semaphore)!;
+                signals[i] = vk::semaphore_submit_info()
+                    .set_semaphore(slot.semaphore)
+                    .set_value((ulong)s.value)
+                    .set_stage_mask(stage_to_vk(s.stage));
+            }
+            submit = submit.set_signal_semaphore_infos(signals);
+        }
+
+        gpu::QueueKind kind = desc.command_lists.len > 0 ? desc.command_lists[0].queue : gpu::QueueKind.GRAPHICS;
+        check(vk::queue_submit2(queue_for(state, kind), 1, &submit, (vk::Fence)null))!;
+        foreach (&cl : desc.command_lists) cl.state = gpu::CommandState.SUBMITTED;
+    };
+}
+
+fn void? vk_wait_queue_idle(gpu::Device* device, gpu::QueueKind queue) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    check(vk::queue_wait_idle(queue_for(state, queue)))!;
+}

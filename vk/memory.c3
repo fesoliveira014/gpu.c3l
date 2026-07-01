@@ -105,6 +105,8 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
     }
 
     reset_frame_arena(state, state.frame_index)!;
+    check(vk::reset_command_pool(state.device, state.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+    check(vk::reset_command_pool(state.device, state.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
     state.allocator.set_current_frame_index(state.frame_index);
 }
 

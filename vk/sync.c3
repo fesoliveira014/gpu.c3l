@@ -1,0 +1,84 @@
+module gpu::vk;
+
+import gpu;
+import gpu::slots;
+import vk;
+
+alias SemaphoreTable = SlotTable{gpu::SemaphoreHandle, SemaphoreSlot};
+alias SemaphoreCell  = Slot{gpu::SemaphoreHandle, SemaphoreSlot};
+
+struct SemaphoreSlot {
+    vk::Semaphore semaphore;
+}
+
+fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* barrier) @private {
+    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    BufferSlot* slot = state.buffers.get(barrier.buffer)!;
+
+    vk::BufferMemoryBarrier2 bar = vk::buffer_memory_barrier2()
+        .set_src_stage_mask(stage_to_vk(barrier.before_stage))
+        .set_src_access_mask(hazard_to_vk_access(barrier.before_hazard))
+        .set_dst_stage_mask(stage_to_vk(barrier.after_stage))
+        .set_dst_access_mask(hazard_to_vk_access(barrier.after_hazard))
+        .set_src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .set_buffer(slot.buffer)
+        .set_offset((vk::DeviceSize)barrier.offset)
+        .set_size((vk::DeviceSize)barrier.size);
+
+    vk::DependencyInfo dep = vk::dependency_info().set_buffer_memory_barriers((&bar)[:1]);
+    vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
+}
+
+fn void? vk_cmd_global_barrier(gpu::CommandList* commands, gpu::GlobalBarrier* barrier) @private {
+    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    vk::MemoryBarrier2 bar = vk::memory_barrier2()
+        .set_src_stage_mask(stage_to_vk(barrier.before_stage))
+        .set_src_access_mask(hazard_to_vk_access(barrier.before_hazard))
+        .set_dst_stage_mask(stage_to_vk(barrier.after_stage))
+        .set_dst_access_mask(hazard_to_vk_access(barrier.after_hazard));
+    vk::DependencyInfo dep = vk::dependency_info().set_memory_barriers((&bar)[:1]);
+    vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
+}
+
+<* No texture table exists yet: a TextureHandle cannot resolve to an image.
+   Faults by design; wired up when textures land. layout_to_vk is already
+   implemented and tested. *>
+fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier* barrier) @private {
+    return gpu::INVALID_HANDLE~;
+}
+
+fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::SemaphoreDesc* desc) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    vk::SemaphoreTypeCreateInfo type_info = vk::semaphore_type_create_info()
+        .set_semaphore_type(vk::SemaphoreType.TIMELINE)
+        .set_initial_value((ulong)desc.initial_value);
+    vk::SemaphoreCreateInfo info = vk::semaphore_create_info().set_next(&type_info);
+    vk::Semaphore semaphore;
+    check(vk::create_semaphore(state.device, &info, null, &semaphore))!;
+
+    if (try handle = state.semaphores.alloc({ .semaphore = semaphore })) {
+        return handle;
+    }
+    vk::destroy_semaphore(state.device, semaphore, null);
+    return gpu::SLOT_TABLE_FULL~;
+}
+
+fn void? vk_destroy_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    SemaphoreSlot* slot = state.semaphores.get(handle)!;
+    vk::destroy_semaphore(state.device, slot.semaphore, null);
+    state.semaphores.free(handle)!;
+}
+
+fn void? vk_wait_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle, gpu::SemaphoreValue value, ulong timeout_ns) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    SemaphoreSlot* slot = state.semaphores.get(handle)!;
+    ulong wait_value = (ulong)value;
+    vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
+        .set_semaphore_count(1)
+        .set_semaphores((&slot.semaphore)[:1])
+        .set_values((&wait_value)[:1]);
+    check(vk::wait_semaphores(state.device, &wait_info, timeout_ns))!;
+}
