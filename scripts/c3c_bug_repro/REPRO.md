@@ -100,11 +100,37 @@ c3c's debug-info generation and should be fixed upstream.
   `cast_if_present<DIType>` assert in `DwarfUnit::applySubprogramAttributes`
   during object emission of `gpu.vk.o`.
 - Repro requires the `gpu.c3l` repo + a Vulkan 1.3 loader (lavapipe is fine).
-- Minimal self-contained reduction not yet isolated; still emits with
-  `line-tables`, so any target that makes the offending subprogram reachable
-  should reproduce. Getting the textual IR (`--emit-llvm`) to identify the exact
-  malformed node needs `compile-only --no-obj --emit-llvm` with the c3l deps
-  wired on the CLI (project.json deps are not auto-resolved by `compile-only`).
+
+## Reduction status (what was tried, why the node is not dumped)
+
+- **Deterministic repro:** the full `vk_bootstrap` target (6 files). Reproduces
+  on 0.8.0 release, 0.8.1 release, and 0.8.1 static-debug (the static-debug +
+  gdb run is where the backtrace above came from).
+- **Reachability, not volume:** each of the 6 files compiled with its functions
+  forced live (a driver that calls them; `@test` stripped so they are callable)
+  builds fine **alone**. The abort needs a *combination* co-emitted into
+  `gpu.vk.o` — i.e. a debug node shared across functions that only goes bad when
+  a certain set is emitted together.
+- **Smallest pair found:** `test_vk_features.c3` + `test_vk_vma_allocator.c3`
+  together abort on the **release** static build (each alone is clean). This
+  pair is *marginal*: it does **not** trip the static-debug build, and a
+  hand-written single file that merely calls `check_required_features` +
+  `create_device` does **not** reproduce. So the trigger is a specific
+  type/function interaction, not simply "these two entry points". Use the full
+  6-file target for a dependable repro.
+- **Why no textual IR of the bad module:** the malformed metadata aborts c3c
+  even under `compile-only --no-obj --emit-llvm` (it asserts at IR
+  finalize/verify, before any `.ll` is written), so `gpu.vk.ll` for a
+  *crashing* build cannot be dumped. A near-identical *non-crashing* build
+  (backend forced live via `&gpu::vk::VK_VTABLE`) emits a clean `gpu.vk.ll`
+  whose `DISubroutineType` type-arrays and `DISubprogram` types all validate —
+  confirming the bad node exists only in the specific crashing combination.
+- **Recipe to emit IR for a non-crashing build** (deps wired on the CLI, since
+  `compile-only` does not read project.json dependencies):
+  ```sh
+  c3c compile-only <driver.c3> <gpu sources...> vk/*.c3 \
+      --libdir lib --lib vk --lib vma --no-obj --emit-llvm -g --llvm-out out
+  ```
 
 ## c3c edge cases noticed while minimizing (possibly separate issues)
 
