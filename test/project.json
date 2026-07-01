@@ -22,7 +22,11 @@
     },
     // Vulkan bootstrap: the feature gate needs no ICD; the create/destroy test
     // needs one — pin lavapipe via VK_DRIVER_FILES when running this target.
+    // debug-info off: c3c 0.8.0/0.8.1 emit a malformed DISubprogram for gpu::vk
+    // that aborts LLVM's DWARF finalizer (SIGABRT/139). "line-tables" also trips
+    // it; only "none" builds. See scripts/c3c_bug_repro/REPRO.md.
     "vk_bootstrap": {
+      "debug-info": "none",
       "type": "test",
       "target": "linux-x64",
       "sources": [ "src/test_vk_features.c3", "src/test_vk_bootstrap.c3", "src/test_vk_vma_allocator.c3", "src/test_vk_buffer.c3", "src/test_vk_frame_arena.c3", "src/test_vk_persistent_arena.c3" ]

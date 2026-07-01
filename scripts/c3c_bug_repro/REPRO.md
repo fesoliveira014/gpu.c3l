@@ -1,77 +1,116 @@
-# c3c 0.8.0 codegen SIGSEGV — reproduction & investigation notes
+# c3c codegen SIGABRT — DWARF debug-info assertion (root cause found)
 
 ## Summary
 
-`c3c 0.8.0` intermittently/​deterministically SIGSEGVs during LLVM codegen when
-building the `gpu.c3l` Vulkan backend test targets. No diagnostic is printed, no
-object file is emitted; exit code 139. The crash is in a background codegen
-thread (gdb backtrace lands in stripped libLLVM frames).
+`c3c` aborts while emitting the `gpu::vk` module's object file, with no C3-level
+diagnostic (exit 139 for the release build — the abort signal reaches the shell
+as a core dump). The crash is **inside LLVM's DWARF debug-info finalizer**, not
+in real code generation: c3c emits a malformed `DISubprogram` for a `gpu::vk`
+function whose type operand is not a `DIType`, and LLVM asserts when writing the
+debug info into `gpu.vk.o`.
 
-This is **not** disk-related (reproduces with 163 GB free), **not** raw code
-volume (c3vq — a much larger C3/Vulkan project on the same c3c — never hits it),
-and **not** cleanly attributable to a single language construct (see negative
-results below). It appears to be an accumulation/interaction effect in codegen.
+Confirmed present in **both c3c 0.8.0 (LLVM 22.1.5) and 0.8.1 (LLVM 22.1.7)**.
+
+## The assertion + backtrace (from the static-debug build under gdb)
+
+```
+Assertion failed: isa<X>(Val) && "cast_if_present<Ty>() argument of incompatible type!"
+  (llvm/include/llvm/Support/Casting.h: cast_if_present: 686)
+
+#4  llvm::cast_if_present<llvm::DIType, llvm::MDOperand>(...)
+#5  llvm::DwarfUnit::applySubprogramAttributes(DISubprogram const*, DIE&, bool)
+#6  llvm::DwarfCompileUnit::applySubprogramAttributesToDefinition(...)
+#7  llvm::DwarfDebug::finishSubprogramDefinitions()
+#8  llvm::DwarfDebug::finalizeModuleInfo()
+#9  llvm::DwarfDebug::endModule()
+#10 llvm::AsmPrinter::doFinalization(Module&)
+#11 llvm::FPPassManager::doFinalization(Module&)
+#12 llvm::legacy::PassManagerImpl::run(Module&)
+#13 LLVMTargetMachineEmit(...)
+#14 LLVMTargetMachineEmitToMemoryBuffer(...)
+#15 llvm_emit_file(... "build/obj/linux-x64/gpu.vk.o" ...)   src/compiler/llvm_codegen.c:691
+#16 llvm_codegen(...)                                        src/compiler/llvm_codegen.c:1129
+#17 thread_compile_task_llvm(...)                            src/compiler/compiler.c:157
+#18 taskqueue_thread(...)                                    src/utils/taskqueue.c:29
+```
+
+The worker thread aborts; the release build has stripped libLLVM frames (hence
+the earlier "crash in a stripped thread" dead end). A **static-debug** c3c build
+symbolizes it cleanly (see "How this was found").
+
+## Why it looked like an "accumulation" bug
+
+- The abort is in `finishSubprogramDefinitions()` — it fires only when the bad
+  `DISubprogram` is actually emitted into the object. Which functions get debug
+  metadata emitted depends on what is reachable per target, so:
+  - Each of `vk_bootstrap`'s 6 files compiled **alone** builds fine.
+  - `vk_command`, `vk_root_pointer`, `unit`, and `samples/root_pointer_compute`
+    build fine **with full debug info** — they don't pull in the offending
+    subprogram.
+  - Only `vk_bootstrap`'s combined file set makes it reachable → abort ~100%.
+- `--safe=no` "reduced frequency" only because it changed what was emitted, not
+  because safety was the cause.
+- The `set_stage` by-value builder was a real but **separate** issue (large
+  struct copy); fixing it did not remove this abort.
 
 ## Reliable reproduction (in-project)
-
-Requires the `gpu.c3l` repo + a Vulkan 1.3 loader (lavapipe is fine).
 
 ```sh
 # from repo root
 sh scripts/build_shaders.sh
 cd test
-c3c test vk_bootstrap          # -> SIGSEGV (139), no object emitted
+c3c test vk_bootstrap            # -> abort during gpu.vk.o debug-info emission
 ```
 
-- Deterministic in the current tree: `vk_bootstrap` (6 source files) crashes ~100%.
-- **Each of the 6 files compiled ALONE builds fine** (rc 0). Only the combination crashes.
-- Smaller targets built from the same backend are green: `vk_command`, `vk_root_pointer`, `unit`, and the `samples/root_pointer_compute` executable.
-- For the sample, `c3c --emit-llvm` writes `std.*`, `gpu.ll`, `gpu.slots.ll`, `vk.ll`, then dies emitting `gpu.vk.ll` — i.e. the crash is in the `gpu::vk` module's codegen.
+## Workaround (applied in-tree)
 
-## Confirmed contributing pattern (worked around in-tree)
+Disable debug info for the affected target — `test/project.json`:
 
-`vk::ComputePipelineCreateInfo.set_stage(stage)` takes the large embedded
-`PipelineShaderStageCreateInfo` **by value**. In the full backend this
-participated in a codegen crash; assigning the struct fields directly
-(`pipe.stage = ...; pipe.layout = ...;`) instead of the builder setter avoided
-that instance. (See `vk/pipeline_compute.c3`.)
+```json
+"vk_bootstrap": { "debug-info": "none", ... }
+```
 
-## Negative results — what does NOT reproduce standalone (safety on)
+- `debug-info: "none"` → **10/10 tests pass, safety on**, on both 0.8.0 and 0.8.1.
+- `debug-info: "line-tables"` → **still aborts** (the bad subprogram is emitted
+  even in line-tables mode).
+- CLI equivalent: `c3c test vk_bootstrap -g0`.
 
-Each of the following compiles cleanly in isolation; none triggers the SIGSEGV:
+This is a workaround, not a fix — the underlying malformed-metadata bug is in
+c3c's debug-info generation and should be fixed upstream.
 
-1. A generic slot-table module (`SlotTable{Handle, Value}`) instantiated **16×**
-   with distinct value types, methods returning optionals, bitstruct handles,
-   called from `main`. Compiles clean.
-2. The `set_stage` by-value builder pattern above, standalone with `import vk`.
-   Compiles clean.
-3. The `vk_submit`-shaped function (`@pool` + `talloc_array` + `foreach` +
-   by-value builder chain + slice setter) with dummy types. Compiles clean.
+## How this was found (reproducible diagnostic recipe)
 
-So the trigger is the **combination** in the real `gpu::vk` module (VMA + vk
-bindings + slot tables + command/submit/pipeline paths reachable via a
-function-pointer vtable), not any one of these alone. It resisted reduction to a
-minimal self-contained case within a large time budget.
+1. `-v/-vv/-vvv` did not help: the crash is in a codegen worker thread that
+   prints nothing before aborting.
+2. Download a **static-debug** c3c build (has symbols, no glibc dependency):
+   `https://github.com/c3lang/c3c/releases/download/v0.8.1/c3-linux-static-debug.tar.gz`
+   (regular Linux builds need GLIBC_2.38; this WSL host has 2.35 — use `-static`).
+3. Run under gdb and dump all threads:
+   ```sh
+   gdb --batch -nx -ex run -ex 'thread apply all bt' \
+       --args /path/to/staticdbg/c3c test vk_bootstrap
+   ```
+   The aborting thread's backtrace is the assertion above.
 
-## In-tree impact & mitigation
+## Upstream report checklist
 
-- The generic slot-table module (`gpu::slots`) was replaced with concrete
-  per-type tables (matching c3vq's pattern). This made the M9 targets
-  (`vk_root_pointer`, `vk_command`, sample) reliably green with safety on.
-- `vk_bootstrap` still crashes regardless of generic-vs-concrete tables, so the
-  generic module is **not** the sole cause.
+- c3c 0.8.0 (git d78f10d, LLVM 22.1.5) and 0.8.1 (git 075f481, LLVM 22.1.7).
+- linux-x64, WSL2.
+- Malformed `DISubprogram` type operand emitted for a `gpu::vk` function; LLVM
+  `cast_if_present<DIType>` assert in `DwarfUnit::applySubprogramAttributes`
+  during object emission of `gpu.vk.o`.
+- Repro requires the `gpu.c3l` repo + a Vulkan 1.3 loader (lavapipe is fine).
+- Minimal self-contained reduction not yet isolated; still emits with
+  `line-tables`, so any target that makes the offending subprogram reachable
+  should reproduce. Getting the textual IR (`--emit-llvm`) to identify the exact
+  malformed node needs `compile-only --no-obj --emit-llvm` with the c3l deps
+  wired on the CLI (project.json deps are not auto-resolved by `compile-only`).
 
 ## c3c edge cases noticed while minimizing (possibly separate issues)
 
-- All-uppercase identifiers (e.g. a type named `H`) are rejected as types in
-  local declarations ("Parameter names may not be all uppercase" / "Expected a
-  type here"). Using a mixed-case name resolves it.
+- All-uppercase identifiers (e.g. a type named `H`) rejected as types in local
+  declarations ("Parameter names may not be all uppercase" / "Expected a type
+  here"). Mixed-case name resolves it.
 - A generic-instantiation `alias T = SlotTable{H, V};` used as a **local
   variable** type reports "Expected a type here", while the same instantiation
   used as a **struct field** type or written inline compiles.
-
-## Environment
-
-- c3c 0.8.0 (git d78f10d), linux-x64, WSL2.
-- Reproduces at `--threads 1` and default; `--safe=no` reduces frequency for
-  small targets but does not fix `vk_bootstrap`.
