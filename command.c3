@@ -21,6 +21,12 @@ enum CommandState : int {
     SUBMITTED,
 }
 
+struct Vec3u {
+    uint x;
+    uint y;
+    uint z;
+}
+
 struct ClearColor {
     float[4] rgba;
 }
@@ -123,4 +129,11 @@ fn void? cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) {
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_texture_barrier(commands, barrier);
+}
+
+<* Dispatch a compute pipeline with a single root GPU address pushed as the
+   push constant at offset 0. *>
+fn void? cmd_dispatch(CommandList* commands, PipelineHandle pipeline, GpuAddress root, Vec3u groups) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_dispatch(commands, pipeline, root, groups);
 }

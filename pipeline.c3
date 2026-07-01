@@ -1,5 +1,8 @@
 module gpu;
 
+const uint MAX_SHADERS   = 256;
+const uint MAX_PIPELINES = 256;
+
 enum ShaderStage : int {
     COMPUTE,
     VERTEX,
@@ -103,4 +106,26 @@ struct GraphicsPipelineDesc {
     Format[]          color_formats;
     Format            depth_format;
     ZString           debug_name;
+}
+
+<* Create a shader module from SPIR-V bytes. Ownership: release with destroy_shader. *>
+fn ShaderHandle? create_shader(Device* device, ShaderDesc* desc) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.create_shader(device, desc);
+}
+
+fn void? destroy_shader(Device* device, ShaderHandle shader) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.destroy_shader(device, shader);
+}
+
+<* Create a compute pipeline. Ownership: release with destroy_pipeline. *>
+fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* desc) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.create_compute_pipeline(device, desc);
+}
+
+fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.destroy_pipeline(device, pipeline);
 }

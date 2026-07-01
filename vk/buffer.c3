@@ -1,12 +1,12 @@
 module gpu::vk;
 
 import gpu;
-import gpu::slots;
 import vk;
 import vma;
 
-alias BufferTable = SlotTable{gpu::BufferHandle, BufferSlot};
-alias BufferCell  = Slot{gpu::BufferHandle, BufferSlot};
+// Concrete (non-generic) slot table for buffers. Monomorphized twin of
+// gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
+const uint BUFFER_FREE_NONE = 0;
 
 // Backend record stored per buffer slot.
 struct BufferSlot {
@@ -18,6 +18,52 @@ struct BufferSlot {
     usz                 size;
     gpu::BufferUsage    usage;
     gpu::MemoryKind     memory_kind;
+}
+
+struct BufferCell {
+    BufferSlot value;
+    uint       generation;
+    uint       next_free;
+    bool       used;
+}
+
+struct BufferTable {
+    BufferCell[] slots;
+    uint         free_head;
+    uint         next_new;
+}
+
+fn gpu::BufferHandle? BufferTable.alloc(&self, BufferSlot value) {
+    uint idx;
+    if (self.free_head != BUFFER_FREE_NONE) {
+        idx = self.free_head - 1;
+        self.free_head = self.slots[idx].next_free;
+    } else if (self.next_new < self.slots.len) {
+        idx = self.next_new++;
+        self.slots[idx].generation = 0;
+    } else {
+        return gpu::SLOT_TABLE_FULL~;
+    }
+    self.slots[idx].value = value;
+    self.slots[idx].generation++;
+    self.slots[idx].used = true;
+    return (gpu::BufferHandle){ .index = idx, .generation = self.slots[idx].generation };
+}
+
+fn BufferSlot*? BufferTable.get(&self, gpu::BufferHandle h) {
+    uint idx = h.index;
+    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
+    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
+    return &self.slots[idx].value;
+}
+
+fn void? BufferTable.free(&self, gpu::BufferHandle h) {
+    self.get(h)!;
+    uint idx = h.index;
+    self.slots[idx].used = false;
+    self.slots[idx].generation++;
+    self.slots[idx].next_free = self.free_head;
+    self.free_head = idx + 1;
 }
 
 fn vk::BufferUsageFlags buffer_usage_to_vk(gpu::BufferUsage usage) @private {

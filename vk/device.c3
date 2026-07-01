@@ -1,7 +1,6 @@
 module gpu::vk;
 
 import gpu;
-import gpu::slots;
 import vk;
 import vma;
 import std::core::mem;
@@ -32,6 +31,8 @@ struct VkDeviceState {
     vk::CommandPool[]          graphics_pools;
     vk::CommandPool[]          transfer_pools;
     SemaphoreTable             semaphores;
+    ShaderTable                shaders;
+    PipelineTable              pipelines;
 }
 
 // One static vtable shared by every Vulkan device.
@@ -61,6 +62,11 @@ const gpu::BackendVTable VK_VTABLE = {
     .create_semaphore    = &vk_create_semaphore,
     .destroy_semaphore   = &vk_destroy_semaphore,
     .wait_semaphore      = &vk_wait_semaphore,
+    .create_shader           = &vk_create_shader,
+    .destroy_shader          = &vk_destroy_shader,
+    .create_compute_pipeline = &vk_create_compute_pipeline,
+    .destroy_pipeline        = &vk_destroy_pipeline,
+    .cmd_dispatch            = &vk_cmd_dispatch,
 };
 
 <* Build a Vulkan device end to end. On failure the partial state is torn down
@@ -79,7 +85,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features12);
     vk::get_physical_device_features2(state.physical_device, &features2);
-    check_required_features(&features12, &features13)!;
+    check_required_features(&features2.features, &features12, &features13)!;
 
     QueueFamilies families = select_queue_families(state.physical_device)!;
     state.graphics_family = families.graphics;
@@ -97,7 +103,9 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     create_persistent_arena(state)!;
     create_command_pools(state)!;
     state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
-    state.caps = build_caps(&features12, &features13, state.physical_device);
+    state.shaders.slots    = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
+    state.pipelines.slots  = mem::new_array(PipelineCell, gpu::MAX_PIPELINES);
+    state.caps = build_caps(&features2.features, &features12, &features13, state.physical_device);
 
     return (gpu::Device){
         .backend       = gpu::BackendKind.VULKAN,
@@ -127,6 +135,23 @@ fn void destroy_state(VkDeviceState* state) @private {
             mem::free(state.buffers.slots.ptr);
             state.buffers.slots = {};
         }
+        if (state.pipelines.slots.ptr != null) {
+            foreach (&cell : state.pipelines.slots[:state.pipelines.next_new]) {
+                if (cell.used) {
+                    vk::destroy_pipeline(state.device, cell.value.pipeline, null);
+                    vk::destroy_pipeline_layout(state.device, cell.value.layout, null);
+                }
+            }
+            mem::free(state.pipelines.slots.ptr);
+            state.pipelines.slots = {};
+        }
+        if (state.shaders.slots.ptr != null) {
+            foreach (&cell : state.shaders.slots[:state.shaders.next_new]) {
+                if (cell.used) vk::destroy_shader_module(state.device, cell.value.shader_module, null);
+            }
+            mem::free(state.shaders.slots.ptr);
+            state.shaders.slots = {};
+        }
         destroy_command_pools(state);
         if (state.semaphores.slots.ptr != null) {
             foreach (&cell : state.semaphores.slots[:state.semaphores.next_new]) {
@@ -152,9 +177,11 @@ fn void destroy_state(VkDeviceState* state) @private {
     mem::free(state);
 }
 
-<* Gate on the required 1.2/1.3 features. Pure, so it is unit-testable without
-   a device. *>
-fn void? check_required_features(vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13) {
+<* Gate on the required base/1.2/1.3 features. Pure, so it is unit-testable
+   without a device. shaderInt64 backs the root-pointer shader ABI's 64-bit
+   address scalars (SPIR-V Int64 capability). *>
+fn void? check_required_features(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13) {
+    if (base.shader_int64 == 0)         return gpu::UNSUPPORTED_FEATURE~;
     if (v12.buffer_device_address == 0) return gpu::UNSUPPORTED_FEATURE~;
     if (v12.timeline_semaphore == 0)    return gpu::UNSUPPORTED_FEATURE~;
     if (v13.synchronization2 == 0)      return gpu::UNSUPPORTED_FEATURE~;
@@ -215,12 +242,14 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @p
         .set_buffer_device_address(vk::TRUE)
         .set_timeline_semaphore(vk::TRUE)
         .set_next(&features13);
+    vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features12);
+    features2.features.shader_int64 = vk::TRUE;
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
     ZString[1] extensions = { "VK_EXT_memory_budget" };
 
     vk::DeviceCreateInfo device_info = vk::device_create_info()
-        .set_next(&features12)
+        .set_next(&features2)
         .set_queue_create_infos((&queue_info)[:1]);
     if (state.memory_budget_enabled) {
         device_info = device_info.set_enabled_extension_names(extensions[..]);
@@ -246,7 +275,7 @@ fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString na
 }
 
 <* Populate public caps from queried features and limits. *>
-fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13, vk::PhysicalDevice physical_device) @private {
+fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13, vk::PhysicalDevice physical_device) @private {
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(physical_device, &props);
     return (gpu::DeviceCaps){
@@ -254,6 +283,7 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceVulkan12Features* v12, vk::Physi
         .synchronization2           = v13.synchronization2 != 0,
         .dynamic_rendering          = v13.dynamic_rendering != 0,
         .timeline_semaphore         = v12.timeline_semaphore != 0,
+        .shader_int64               = base.shader_int64 != 0,
         .descriptor_buffer          = false,
         .descriptor_indexing        = v12.descriptor_indexing != 0,
         .max_texture_descriptors    = 0,

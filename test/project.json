@@ -31,6 +31,11 @@
       "type": "test",
       "target": "linux-x64",
       "sources": [ "src/test_vk_command_submit.c3" ]
+    },
+    "vk_root_pointer": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_vk_root_pointer_compute.c3" ]
     }
   }
 }

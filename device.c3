@@ -31,6 +31,11 @@ alias CmdTextureBarrierFn   = fn void? (CommandList*, TextureBarrier*);
 alias CreateSemaphoreFn     = fn SemaphoreHandle? (Device*, SemaphoreDesc*);
 alias DestroySemaphoreFn    = fn void? (Device*, SemaphoreHandle);
 alias WaitSemaphoreFn       = fn void? (Device*, SemaphoreHandle, SemaphoreValue, ulong);
+alias CreateShaderFn          = fn ShaderHandle? (Device*, ShaderDesc*);
+alias DestroyShaderFn         = fn void? (Device*, ShaderHandle);
+alias CreateComputePipelineFn = fn PipelineHandle? (Device*, ComputePipelineDesc*);
+alias DestroyPipelineFn       = fn void? (Device*, PipelineHandle);
+alias CmdDispatchFn           = fn void? (CommandList*, PipelineHandle, GpuAddress, Vec3u);
 
 struct BackendVTable {
     DestroyDeviceFn         destroy_device;
@@ -58,6 +63,11 @@ struct BackendVTable {
     CreateSemaphoreFn       create_semaphore;
     DestroySemaphoreFn      destroy_semaphore;
     WaitSemaphoreFn         wait_semaphore;
+    CreateShaderFn          create_shader;
+    DestroyShaderFn         destroy_shader;
+    CreateComputePipelineFn create_compute_pipeline;
+    DestroyPipelineFn       destroy_pipeline;
+    CmdDispatchFn           cmd_dispatch;
 }
 
 // A GPU device. `vtable` points at one static table shared by all devices of a
