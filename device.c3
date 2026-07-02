@@ -19,7 +19,11 @@ alias EndFrameFn            = fn void? (Device*);
 alias AllocPersistentSpanFn = fn GpuSpan? (Device*, PersistentAllocDesc*);
 alias FreePersistentSpanFn  = fn void? (Device*, GpuSpan);
 alias GetPersistentStatsFn  = fn PersistentArenaStats? (Device*);
-alias BeginCommandsFn       = fn CommandList? (Device*, QueueKind);
+// Out-param form works around a c3c 0.8.x debug-info crash: an
+// optional-of-struct return in a vtable fn-ptr signature dangles c3c's
+// debug-type cache (scripts/c3c_bug_repro/ISSUE.md). Revert to
+// `fn CommandList? (Device*, QueueKind)` once the upstream fix lands.
+alias BeginCommandsFn       = fn void? (Device*, QueueKind, CommandList* out_commands);
 alias EndCommandsFn         = fn void? (Device*, CommandList*);
 alias SubmitFn              = fn void? (Device*, SubmitDesc*);
 alias WaitQueueIdleFn       = fn void? (Device*, QueueKind);

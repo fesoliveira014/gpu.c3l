@@ -98,7 +98,9 @@ struct TextureBufferCopyDesc {
    freed when its frame slot's pool is reset. *>
 fn CommandList? begin_commands(Device* device, QueueKind queue) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.begin_commands(device, queue);
+    CommandList commands;
+    device.vtable.begin_commands(device, queue, &commands)!;
+    return commands;
 }
 
 fn void? end_commands(Device* device, CommandList* commands) {
