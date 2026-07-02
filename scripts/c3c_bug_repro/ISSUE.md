@@ -74,6 +74,12 @@ Observed:
 | 0.8.0 linux            | SIGSEGV (exit 139)                                |
 | any, with `-g0`        | compiles fine                                     |
 
+Note on the release-build failure mode: the dangling pointer can send the
+compiler into runaway memory growth before the segfault — one crash of this
+30-line repro (0.8.0) left a **~28 GB core dump** and a multi-minute stall.
+On memory-constrained machines the repro can therefore escalate to system-wide
+OOM pressure, not just a compiler crash.
+
 Negative controls (both compile cleanly, isolating the trigger):
 
 - Change `alias BeginFn = fn Cmd? (Dev*)` to return plain `Cmd` → no crash.
