@@ -147,6 +147,20 @@ fn gpu::GpuAddress? vk_get_buffer_address(gpu::Device* device, gpu::BufferHandle
     return slot.gpu_base;
 }
 
+fn void? vk_flush_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offset, usz size) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    BufferSlot* slot = state.buffers.get(handle)!;
+    vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
+    check(state.allocator.flush_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
+}
+
+fn void? vk_invalidate_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offset, usz size) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    BufferSlot* slot = state.buffers.get(handle)!;
+    vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
+    check(state.allocator.invalidate_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
+}
+
 fn gpu::GpuSpan? vk_get_buffer_span(gpu::Device* device, gpu::BufferHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     BufferSlot* slot = state.buffers.get(handle)!;

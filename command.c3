@@ -77,20 +77,33 @@ struct BufferCopyDesc {
     usz          size;
 }
 
+// Copy regions mirror vk::BufferImageCopy. Zero-value defaults: extent 0 is
+// the full mip level, layer_count 0 is one layer, row_length_texels 0 means
+// tightly packed rows.
 struct BufferTextureCopyDesc {
-    BufferHandle  buffer;
-    usz           buffer_offset;
+    GpuSpan       src;
+    uint          row_length_texels;
     TextureHandle texture;
-    uint          mip_level;
-    uint          array_layer;
+    uint          mip;
+    uint          base_layer;
+    uint          layer_count;
+    uint          x;
+    uint          y;
+    uint          width;
+    uint          height;
 }
 
 struct TextureBufferCopyDesc {
     TextureHandle texture;
-    uint          mip_level;
-    uint          array_layer;
-    BufferHandle  buffer;
-    usz           buffer_offset;
+    GpuSpan       dst;
+    uint          row_length_texels;
+    uint          mip;
+    uint          base_layer;
+    uint          layer_count;
+    uint          x;
+    uint          y;
+    uint          width;
+    uint          height;
 }
 
 <* Begin recording a command list on the given queue.
@@ -116,6 +129,19 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
 fn void? cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset, usz size, uint value) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_fill_buffer(commands, buffer, offset, size, value);
+}
+
+<* The texture's tracked layout must be TRANSFER_DST; the caller records the
+   surrounding barriers. *>
+fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_copy_buffer_to_texture(commands, desc);
+}
+
+<* The texture's tracked layout must be TRANSFER_SRC. *>
+fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_copy_texture_to_buffer(commands, desc);
 }
 
 fn void? cmd_buffer_barrier(CommandList* commands, BufferBarrier* barrier) {

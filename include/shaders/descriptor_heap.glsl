@@ -8,6 +8,10 @@
 // TextureIndex/SamplerIndex values are packed uints: slot in the low 16 bits,
 // generation in the high 16. Pass them straight from material records; the
 // helpers mask the slot. Both backend descriptor paths use identical GLSL.
+//
+// Layout convention: a texture must sit in the layout its usage implies when
+// shaders access it — sampled-only textures in SHADER_READ, storage-capable
+// textures in GENERAL.
 
 #ifndef GPU_DESCRIPTOR_HEAP_GLSL
 #define GPU_DESCRIPTOR_HEAP_GLSL

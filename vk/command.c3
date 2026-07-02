@@ -92,6 +92,92 @@ fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer
     vk::cmd_fill_buffer((vk::CommandBuffer)commands.backend, slot.buffer, (vk::DeviceSize)offset, (vk::DeviceSize)size, value);
 }
 
+<* Validate a copy region against the texture, the mip's clamped extent,
+   Vulkan's buffer-offset alignment, and the span's bounds, then translate it.
+   Zero defaults resolve here: extent 0 = full mip, layer_count 0 = 1. *>
+fn vk::BufferImageCopy? resolve_texture_copy_region(gpu::GpuSpan* span, TextureSlot* slot, uint row_length_texels, uint mip, uint base_layer, uint layer_count, uint x, uint y, uint width, uint height) @private {
+    if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
+    uint layers = layer_count == 0 ? 1 : layer_count;
+    if (base_layer + layers > slot.array_layers) return gpu::INVALID_ARGUMENT~;
+
+    uint mip_width  = slot.width >> mip;
+    uint mip_height = slot.height >> mip;
+    if (mip_width == 0)  mip_width = 1;
+    if (mip_height == 0) mip_height = 1;
+    if (width == 0)  width = mip_width;
+    if (height == 0) height = mip_height;
+    if (x + width > mip_width || y + height > mip_height) return gpu::INVALID_ARGUMENT~;
+    if (row_length_texels != 0 && row_length_texels < width) return gpu::INVALID_ARGUMENT~;
+
+    usz texel_size = format_texel_size(slot.format);
+    if (texel_size == 0) return gpu::INVALID_ARGUMENT~;
+    if (span.offset % texel_size != 0 || span.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
+
+    usz row_texels = row_length_texels == 0 ? width : row_length_texels;
+    usz copy_bytes = row_texels * texel_size * height * layers;
+    if (copy_bytes > span.size) return gpu::INVALID_ARGUMENT~;
+
+    return (vk::BufferImageCopy){
+        .buffer_offset      = (vk::DeviceSize)span.offset,
+        .buffer_row_length  = row_length_texels,
+        .buffer_image_height = 0,
+        .image_subresource  = {
+            .aspect_mask      = format_aspect(slot.format),
+            .mip_level        = mip,
+            .base_array_layer = base_layer,
+            .layer_count      = layers,
+        },
+        .image_offset = { .x = (int)x, .y = (int)y, .z = 0 },
+        .image_extent = { .width = width, .height = height, .depth = 1 },
+    };
+}
+
+fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTextureCopyDesc* desc) @private {
+    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    TextureSlot* texture = state.textures.get(desc.texture)!;
+    BufferSlot* buffer = state.buffers.get(desc.src.buffer)!;
+    if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
+    if (texture.current_layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
+
+    vk::BufferImageCopy region = resolve_texture_copy_region(
+        span:              &desc.src,
+        slot:              texture,
+        row_length_texels: desc.row_length_texels,
+        mip:               desc.mip,
+        base_layer:        desc.base_layer,
+        layer_count:       desc.layer_count,
+        x:                 desc.x,
+        y:                 desc.y,
+        width:             desc.width,
+        height:            desc.height,
+    )!;
+    vk::cmd_copy_buffer_to_image((vk::CommandBuffer)commands.backend, buffer.buffer, texture.image, layout_to_vk(texture.current_layout), 1, &region);
+}
+
+fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureBufferCopyDesc* desc) @private {
+    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    TextureSlot* texture = state.textures.get(desc.texture)!;
+    BufferSlot* buffer = state.buffers.get(desc.dst.buffer)!;
+    if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
+    if (texture.current_layout != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
+
+    vk::BufferImageCopy region = resolve_texture_copy_region(
+        span:              &desc.dst,
+        slot:              texture,
+        row_length_texels: desc.row_length_texels,
+        mip:               desc.mip,
+        base_layer:        desc.base_layer,
+        layer_count:       desc.layer_count,
+        x:                 desc.x,
+        y:                 desc.y,
+        width:             desc.width,
+        height:            desc.height,
+    )!;
+    vk::cmd_copy_image_to_buffer((vk::CommandBuffer)commands.backend, texture.image, layout_to_vk(texture.current_layout), buffer.buffer, 1, &region);
+}
+
 <* The heap is rebound per dispatch: pipeline layouts differ in push-constant
    range, which breaks descriptor set compatibility across pipelines. *>
 fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::Vec3u groups) @private {
