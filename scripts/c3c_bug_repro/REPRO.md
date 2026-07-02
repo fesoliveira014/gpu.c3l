@@ -1,4 +1,13 @@
-# c3c codegen SIGABRT — DWARF debug-info assertion (root cause found)
+# c3c codegen SIGABRT — DWARF debug-info assertion (ROOT-CAUSED, minimal repro in `repro.c3`)
+
+> **2026-07-01 (session 3): fully root-caused.** The bad node is a *deleted
+> forward temporary* captured by the `TYPE_OPTIONAL` debug-type cache while its
+> struct was mid-construction (`llvm_codegen_debug_info.c:621`); RAUW at struct
+> completion deletes the temp (line 81), the cache dangles, and the next
+> function whose signature uses `S?` embeds the freed node. 30-line
+> dependency-free repro in `repro.c3`; full mechanism, gdb evidence, and
+> negative controls in `ISSUE.md`. Sections below are the investigation
+> history.
 
 ## Summary
 
@@ -59,8 +68,12 @@ symbolizes it cleanly (see "How this was found").
 # from repo root
 sh scripts/build_shaders.sh
 cd test
-c3c test vk_bootstrap            # -> abort during gpu.vk.o debug-info emission
+c3c test vk_bootstrap -g         # -> abort during gpu.vk.o debug-info emission
 ```
+
+The `-g` is required in this checkout because `vk_bootstrap` now has
+`"debug-info": "none"` in `test/project.json`; plain `c3c test vk_bootstrap`
+exercises the workaround and should pass.
 
 ## Workaround (applied in-tree)
 
@@ -131,6 +144,43 @@ c3c's debug-info generation and should be fixed upstream.
   c3c compile-only <driver.c3> <gpu sources...> vk/*.c3 \
       --libdir lib --lib vk --lib vma --no-obj --emit-llvm -g --llvm-out out
   ```
+
+## Session 3: how the node was finally identified (in-memory, not via IR dump)
+
+Textual IR stayed impossible (asserts before `.ll` is written), but the node is
+inspectable **in memory** at abort time. Recipe (static-debug build, gdb, from
+`test/`; all heap addresses reproduce across runs because gdb disables ASLR and
+`--threads 1` makes allocation order deterministic):
+
+1. `break llvm::DwarfUnit::applySubprogramAttributes` (via its mangled name —
+   libLLVM has symbols but no DWARF, so `SP` isn't printable; record `$rsi`,
+   the 2nd SysV argument, at each hit; last hit before SIGABRT = the bad
+   `DISubprogram`). Then
+   `call ((void(*)(void*))'llvm::Metadata::dump() const')($lastsp)` → printed
+   `vk_begin_commands`, `fn CommandList? (Device*, QueueKind)`.
+2. Same trick one level down: dump the `DISubroutineType`, then its `types`
+   tuple. Dumping the tuple itself **aborts** — first hint an element is not
+   valid metadata. Decoding the tuple's co-allocated header
+   (`SmallNumOps = 3`) locates the operand slots; operand 0 (the return type,
+   `CommandList?`) held the bad pointer.
+3. The failing cast's ISRA clone
+   (`cast_if_present<DIType, MDOperand>`) takes the `Metadata*` directly in
+   `%rdi` — breakpoint on it, record last `$rdi`. Its `SubclassID` byte read
+   **96**, not a valid `MetadataKind` (tuple=5, DISubroutineType=15, DIFile=16,
+   DISubprogram=18) → freed/reallocated memory, i.e. a dangling pointer.
+4. `break LLVMMetadataReplaceAllUsesWith if $rdi == <addr>` and
+   `break llvm::MDNode::deleteTemporary if $rdi == <addr>` with `bt` — showed
+   the last metadata occupant of that address was the forward temp of
+   `gpu.CommandList` created by `llvm_debug_structlike_type` and deleted from
+   `llvm_get_debug_struct` (line 81), reached via
+   `CommandList.device → Device → BackendVTable → BeginCommandsFn`
+   (`fn CommandList? (Device*, QueueKind)`) — the `TYPE_OPTIONAL` cache capture
+   described at the top.
+
+Predicted-and-confirmed minimal repro: `repro.c3` (30 lines, no deps).
+`c3c compile-only repro.c3 -g` → SIGSEGV (release) / `cast<Ty>` assert
+(static-debug) on 0.8.0 and 0.8.1; `-g0` fine; non-optional fn-ptr return or
+reversed function order → no crash.
 
 ## c3c edge cases noticed while minimizing (possibly separate issues)
 
