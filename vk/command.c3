@@ -40,7 +40,7 @@ fn void destroy_command_pools(VkDeviceState* state) {
     }
 }
 
-fn gpu::CommandList? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue) @private {
+fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::CommandList* out_commands) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     vk::CommandPool pool = queue == gpu::QueueKind.TRANSFER
         ? state.transfer_pools[state.frame_index]
@@ -57,7 +57,7 @@ fn gpu::CommandList? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue
         .set_flags(vk::CommandBufferUsageFlagBits.ONE_TIME_SUBMIT_BIT);
     check(vk::begin_command_buffer(cmd, &begin))!;
 
-    return (gpu::CommandList){
+    *out_commands = (gpu::CommandList){
         .device  = device,
         .backend = (void*)cmd,
         .queue   = queue,
