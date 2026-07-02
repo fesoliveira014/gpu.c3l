@@ -36,17 +36,16 @@ fn void texture_unsupported_desc_rejected() @test {
     gpu::Device device = make_texture_test_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::TextureDesc mips = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
-        .width      = 16,
-        .height     = 16,
-        .mip_levels = 4,
-        .format     = gpu::Format.RGBA8_UNORM,
-        .usage      = { .sampled },
+    gpu::TextureDesc depth_format = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 16,
+        .height    = 16,
+        .format    = gpu::Format.D32_FLOAT,
+        .usage     = { .sampled },
     };
-    bool mips_faulted = false;
-    if (catch gpu::create_texture(&device, &mips)) mips_faulted = true;
-    assert(mips_faulted, "mip count above 1 is outside the slice and must fault");
+    bool depth_faulted = false;
+    if (catch gpu::create_texture(&device, &depth_format)) depth_faulted = true;
+    assert(depth_faulted, "depth formats are outside the slice and must fault");
 
     gpu::TextureDesc no_heap_usage = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -134,6 +133,65 @@ fn void texture_barrier_transitions_layout() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &general_to_general)!!;
 
+    gpu::end_commands(&device, &cmd)!!;
+
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_frame(&device)!!;
+}
+
+fn void texture_multi_mip_create_destroy() @test {
+    gpu::Device device = make_texture_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDesc desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = 16,
+        .height     = 16,
+        .mip_levels = 4,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .transfer_dst },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    assert(texture.is_valid(), "multi-mip texture created");
+    gpu::destroy_texture(&device, texture)!!;
+
+    gpu::TextureDesc over_chain = desc;
+    over_chain.mip_levels = 6;
+    bool faulted = false;
+    if (catch gpu::create_texture(&device, &over_chain)) faulted = true;
+    assert(faulted, "mip count past the full chain (16x16 -> 5) must fault");
+}
+
+fn void texture_multi_mip_barrier_covers_chain() @test {
+    gpu::Device device = make_texture_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDesc desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = 16,
+        .height     = 16,
+        .mip_levels = 5,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .storage, .transfer_dst },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::TextureBarrier to_general = {
+        .texture       = texture,
+        .before_stage  = gpu::Stage.HOST,
+        .after_stage   = gpu::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::Hazard.SHADER_WRITE,
+        .old_layout    = gpu::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::TextureLayout.GENERAL,
+    };
+    gpu::cmd_texture_barrier(&cmd, &to_general)!!;
     gpu::end_commands(&device, &cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };

@@ -305,12 +305,14 @@ fn void? check_view_desc(TextureSlot* texture, gpu::TextureViewDesc* view) @priv
 }
 
 <* Sampled and/or storage descriptor per the texture's usage, same slot in
-   both bindings, so one TextureIndex serves both access kinds. *>
+   both bindings, so one TextureIndex serves both access kinds. Descriptor
+   layout follows usage: sampled-only textures are accessed in SHADER_READ,
+   storage-capable ones in GENERAL. *>
 fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* texture) @private {
     DescriptorHeapState* heap = &state.heap;
     vk::DescriptorImageInfo image_info = {
         .image_view   = texture.default_view,
-        .image_layout = vk::ImageLayout.GENERAL,
+        .image_layout = texture.usage.storage ? vk::ImageLayout.GENERAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
     };
 
     if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {

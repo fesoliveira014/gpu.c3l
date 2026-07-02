@@ -16,6 +16,8 @@ struct TextureSlot {
     gpu::TextureUsage  usage;
     uint               width;
     uint               height;
+    uint               mip_levels;
+    uint               array_layers;
     gpu::TextureLayout current_layout;
 }
 
@@ -97,6 +99,37 @@ fn vk::ImageUsageFlags texture_usage_to_vk(gpu::TextureUsage usage) @private {
     return (vk::ImageUsageFlags)flags;
 }
 
+fn usz format_texel_size(gpu::Format format) {
+    switch (format) {
+        case gpu::Format.R8_UNORM:          return 1;
+        case gpu::Format.R8_UINT:           return 1;
+        case gpu::Format.RG8_UNORM:         return 2;
+        case gpu::Format.RGBA8_UNORM:       return 4;
+        case gpu::Format.RGBA8_SRGB:        return 4;
+        case gpu::Format.R16_UINT:          return 2;
+        case gpu::Format.R16_FLOAT:         return 2;
+        case gpu::Format.RG16_FLOAT:        return 4;
+        case gpu::Format.RGBA16_FLOAT:      return 8;
+        case gpu::Format.R32_UINT:          return 4;
+        case gpu::Format.R32_FLOAT:         return 4;
+        case gpu::Format.RG32_FLOAT:        return 8;
+        case gpu::Format.RGBA32_FLOAT:      return 16;
+        case gpu::Format.D32_FLOAT:         return 4;
+        case gpu::Format.D24_UNORM_S8_UINT: return 4;
+        default:                            return 0;
+    }
+}
+
+fn uint full_mip_chain(uint width, uint height) @private {
+    uint levels = 1;
+    uint size = width > height ? width : height;
+    while (size > 1) {
+        size >>= 1;
+        levels++;
+    }
+    return levels;
+}
+
 fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     switch (format) {
         case gpu::Format.D32_FLOAT:
@@ -108,30 +141,32 @@ fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     }
 }
 
-<* Supported slice: 2D, one mip, one layer, sampled/storage usage only;
-   anything else faults rather than silently degrading. *>
+<* Supported slice: 2D, mips up to the full chain, any layer count, and
+   sampled/storage/transfer usage; anything else faults rather than silently
+   degrading. Depth formats and attachment usages arrive with their consumers. *>
 fn void? check_texture_desc(gpu::TextureDesc* desc) @private {
     if (desc.dimension != gpu::TextureDimension.TEX_2D) return gpu::INVALID_ARGUMENT~;
     if (desc.width == 0 || desc.height == 0)            return gpu::INVALID_ARGUMENT~;
     if (desc.depth > 1)                                 return gpu::INVALID_ARGUMENT~;
-    if (desc.mip_levels > 1)                            return gpu::INVALID_ARGUMENT~;
-    if (desc.array_layers > 1)                          return gpu::INVALID_ARGUMENT~;
+    if (desc.mip_levels > full_mip_chain(desc.width, desc.height)) return gpu::INVALID_ARGUMENT~;
     if (format_to_vk(desc.format) == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+    if (desc.format == gpu::Format.D32_FLOAT || desc.format == gpu::Format.D24_UNORM_S8_UINT) return gpu::INVALID_ARGUMENT~;
     if (!desc.usage.sampled && !desc.usage.storage)     return gpu::INVALID_ARGUMENT~;
     if (desc.usage.color_attach || desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
-    if (desc.usage.transfer_src || desc.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
 }
 
 fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     check_texture_desc(desc)!;
+    uint mip_levels   = desc.mip_levels == 0 ? 1 : desc.mip_levels;
+    uint array_layers = desc.array_layers == 0 ? 1 : desc.array_layers;
 
     vk::ImageCreateInfo image_info = vk::image_create_info()
         .set_image_type(vk::ImageType.TYPE_2D)
         .set_format(format_to_vk(desc.format))
         .set_extent({ .width = desc.width, .height = desc.height, .depth = 1 })
-        .set_mip_levels(1)
-        .set_array_layers(1)
+        .set_mip_levels(mip_levels)
+        .set_array_layers(array_layers)
         .set_samples(vk::SampleCountFlagBits.COUNT_1_BIT)
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
@@ -143,6 +178,8 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .usage          = desc.usage,
         .width          = desc.width,
         .height         = desc.height,
+        .mip_levels     = mip_levels,
+        .array_layers   = array_layers,
         .current_layout = gpu::TextureLayout.UNDEFINED,
     };
     check(state.allocator.create_image(&image_info, &alloc_info, &slot.image, &slot.allocation, null))!;
@@ -153,14 +190,14 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
 
     vk::ImageViewCreateInfo view_info = vk::image_view_create_info()
         .set_image(slot.image)
-        .set_view_type(vk::ImageViewType.TYPE_2D)
+        .set_view_type(array_layers > 1 ? vk::ImageViewType.TYPE_2D_ARRAY : vk::ImageViewType.TYPE_2D)
         .set_format(format_to_vk(desc.format))
         .set_subresource_range({
             .aspect_mask      = format_aspect(desc.format),
             .base_mip_level   = 0,
-            .level_count      = 1,
+            .level_count      = mip_levels,
             .base_array_layer = 0,
-            .layer_count      = 1,
+            .layer_count      = array_layers,
         });
     if (catch err = check(vk::create_image_view(state.device, &view_info, null, &slot.default_view))) {
         state.allocator.destroy_image(slot.image, slot.allocation);

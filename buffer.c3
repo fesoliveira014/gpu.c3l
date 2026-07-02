@@ -44,3 +44,17 @@ fn GpuSpan? get_buffer_span(Device* device, BufferHandle buffer) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.get_buffer_span(device, buffer);
 }
+
+<* Make CPU writes to mapped memory visible to the GPU. No-op on coherent
+   memory; size 0 means the rest of the allocation. *>
+fn void? flush_buffer(Device* device, BufferHandle buffer, usz offset, usz size) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.flush_buffer(device, buffer, offset, size);
+}
+
+<* Make GPU writes visible to CPU reads of mapped memory. No-op on coherent
+   memory; size 0 means the rest of the allocation. *>
+fn void? invalidate_buffer(Device* device, BufferHandle buffer, usz offset, usz size) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.invalidate_buffer(device, buffer, offset, size);
+}

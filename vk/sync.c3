@@ -109,9 +109,9 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
         .set_subresource_range({
             .aspect_mask      = format_aspect(slot.format),
             .base_mip_level   = 0,
-            .level_count      = 1,
+            .level_count      = slot.mip_levels,
             .base_array_layer = 0,
-            .layer_count      = 1,
+            .layer_count      = slot.array_layers,
         });
 
     vk::DependencyInfo dep = vk::dependency_info().set_image_memory_barriers((&bar)[:1]);
