@@ -88,11 +88,35 @@ fn void? vk_cmd_global_barrier(gpu::CommandList* commands, gpu::GlobalBarrier* b
     vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
 }
 
-<* No texture table exists yet: a TextureHandle cannot resolve to an image.
-   Faults by design; wired up when textures land. layout_to_vk is already
-   implemented and tested. *>
+<* Whole-image barrier; a barrier whose old_layout disagrees with the tracked
+   layout faults INVALID_RESOURCE_STATE. *>
 fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier* barrier) @private {
-    return gpu::INVALID_HANDLE~;
+    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    TextureSlot* slot = state.textures.get(barrier.texture)!;
+    if (barrier.old_layout != slot.current_layout) return gpu::INVALID_RESOURCE_STATE~;
+
+    vk::ImageMemoryBarrier2 bar = vk::image_memory_barrier2()
+        .set_src_stage_mask(stage_to_vk(barrier.before_stage))
+        .set_src_access_mask(hazard_to_vk_access(barrier.before_hazard))
+        .set_dst_stage_mask(stage_to_vk(barrier.after_stage))
+        .set_dst_access_mask(hazard_to_vk_access(barrier.after_hazard))
+        .set_old_layout(layout_to_vk(barrier.old_layout))
+        .set_new_layout(layout_to_vk(barrier.new_layout))
+        .set_src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .set_image(slot.image)
+        .set_subresource_range({
+            .aspect_mask      = format_aspect(slot.format),
+            .base_mip_level   = 0,
+            .level_count      = 1,
+            .base_array_layer = 0,
+            .layer_count      = 1,
+        });
+
+    vk::DependencyInfo dep = vk::dependency_info().set_image_memory_barriers((&bar)[:1]);
+    vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
+    slot.current_layout = barrier.new_layout;
 }
 
 fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::SemaphoreDesc* desc) @private {

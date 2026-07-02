@@ -65,3 +65,66 @@ fn void missing_shader_int64_rejected() @test {
     if (catch gpu::vk::check_required_features(&base, &v12, &v13)) faulted = true;
     assert(faulted, "missing shaderInt64 must raise UNSUPPORTED_FEATURE");
 }
+
+fn vk::PhysicalDeviceVulkan12Features v12_with_heap_bits() {
+    return vk::physical_device_vulkan12features()
+        .set_runtime_descriptor_array(vk::TRUE)
+        .set_shader_sampled_image_array_non_uniform_indexing(vk::TRUE)
+        .set_shader_storage_image_array_non_uniform_indexing(vk::TRUE)
+        .set_descriptor_binding_partially_bound(vk::TRUE)
+        .set_descriptor_binding_sampled_image_update_after_bind(vk::TRUE)
+        .set_descriptor_binding_storage_image_update_after_bind(vk::TRUE)
+        .set_descriptor_binding_update_unused_while_pending(vk::TRUE);
+}
+
+fn vk::PhysicalDeviceFeatures base_with_storage_access() {
+    vk::PhysicalDeviceFeatures base;
+    base.shader_storage_image_read_without_format  = vk::TRUE;
+    base.shader_storage_image_write_without_format = vk::TRUE;
+    return base;
+}
+
+fn void heap_indexing_gate() @test {
+    vk::PhysicalDeviceFeatures base = base_with_storage_access();
+    vk::PhysicalDeviceVulkan12Features full = v12_with_heap_bits();
+    assert(gpu::vk::heap_shared_features_supported(&base, &full), "full bits pass the shared gate");
+    assert(gpu::vk::heap_indexing_supported(&base, &full), "full bits pass the indexing gate");
+
+    vk::PhysicalDeviceVulkan12Features no_partial = v12_with_heap_bits()
+        .set_descriptor_binding_partially_bound(vk::FALSE);
+    assert(gpu::vk::heap_shared_features_supported(&base, &no_partial), "shared gate ignores set-path bits");
+    assert(!gpu::vk::heap_indexing_supported(&base, &no_partial), "missing partially-bound fails the indexing gate");
+
+    vk::PhysicalDeviceFeatures no_storage_access;
+    assert(!gpu::vk::heap_shared_features_supported(&no_storage_access, &full), "missing format-less storage access fails the shared gate");
+
+    vk::PhysicalDeviceVulkan12Features empty = vk::physical_device_vulkan12features();
+    assert(!gpu::vk::heap_shared_features_supported(&base, &empty), "empty 1.2 features fail the shared gate");
+}
+
+fn void heap_mode_auto_resolution() @test {
+    gpu::DescriptorHeapMode auto_mode = gpu::DescriptorHeapMode.AUTO;
+
+    gpu::DescriptorHeapMode both = gpu::vk::resolve_heap_mode(auto_mode, true, true)!!;
+    assert(both == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, "AUTO prefers descriptor indexing");
+
+    gpu::DescriptorHeapMode buffer_only = gpu::vk::resolve_heap_mode(auto_mode, false, true)!!;
+    assert(buffer_only == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, "AUTO falls back to descriptor buffer");
+
+    bool faulted = false;
+    if (catch gpu::vk::resolve_heap_mode(auto_mode, false, false)) faulted = true;
+    assert(faulted, "AUTO with no supported path faults");
+}
+
+fn void heap_mode_forced_resolution() @test {
+    gpu::DescriptorHeapMode forced = gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, true, true)!!;
+    assert(forced == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, "forced indexing wins over available buffer");
+
+    bool buffer_faulted = false;
+    if (catch gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, true, false)) buffer_faulted = true;
+    assert(buffer_faulted, "forced buffer without support faults");
+
+    bool indexing_faulted = false;
+    if (catch gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, false, true)) indexing_faulted = true;
+    assert(indexing_faulted, "forced indexing without support faults");
+}

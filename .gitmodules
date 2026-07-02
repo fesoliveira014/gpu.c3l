@@ -4,3 +4,6 @@
 [submodule "lib/vma.c3l"]
 	path = lib/vma.c3l
 	url = https://github.com/fesoliveira014/vma.c3l
+[submodule "lib/spvreflect.c3l"]
+	path = lib/spvreflect.c3l
+	url = https://github.com/fesoliveira014/spvreflect.c3l

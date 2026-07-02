@@ -59,11 +59,10 @@ fn void? PipelineTable.free(&self, gpu::PipelineHandle h) {
     self.free_head = idx + 1;
 }
 
-<* Create a compute pipeline whose layout has one push-constant range for the
-   root address and zero descriptor set layouts. The ComputePipelineCreateInfo
-   stage/layout are assigned directly rather than through the builder setters:
-   set_stage takes the embedded PipelineShaderStageCreateInfo by value, and that
-   by-value struct flow crashes c3c 0.8.0 codegen. *>
+<* Layout = root push-constant range + the global heap set-0 layout. The
+   ComputePipelineCreateInfo stage/layout are assigned directly rather than
+   through the builder setters: set_stage takes the embedded struct by value,
+   and that by-value flow crashes c3c 0.8.0 codegen. *>
 fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::ComputePipelineDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (desc.push_constant_size < 8) return gpu::INVALID_ARGUMENT~;
@@ -75,6 +74,7 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
         .size        = desc.push_constant_size,
     };
     vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
+        .set_set_layouts((&state.heap.set_layout)[:1])
         .set_push_constant_ranges((&range)[:1]);
     vk::PipelineLayout layout;
     check(vk::create_pipeline_layout(state.device, &layout_info, null, &layout))!;
@@ -85,6 +85,9 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
         .set_mod(shader.shader_module)
         .set_name(shader.entry_point);
     pipe_info.layout = layout;
+    if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER) {
+        pipe_info.flags = vk::PipelineCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT;
+    }
 
     vk::Pipeline pipeline;
     if (catch check(vk::create_compute_pipelines(state.device, (vk::PipelineCache)null, 1, &pipe_info, null, &pipeline))) {

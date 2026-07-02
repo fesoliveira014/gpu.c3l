@@ -108,6 +108,7 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
     check(vk::reset_command_pool(state.device, state.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
     check(vk::reset_command_pool(state.device, state.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
     state.allocator.set_current_frame_index(state.frame_index);
+    state.frame_active = true;
 }
 
 fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @private {
@@ -140,6 +141,7 @@ fn void? vk_end_frame(gpu::Device* device) @private {
         .set_semaphore(state.frame_timeline)
         .set_value(state.timeline_counter);
     check(vk::signal_semaphore(state.device, &signal_info))!;
+    state.frame_active = false;
 }
 
 <* Create the persistent arena: a large addressable buffer plus a VMA virtual

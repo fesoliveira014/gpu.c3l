@@ -1,5 +1,7 @@
 module gpu;
 
+const uint MAX_TEXTURES = 1024;
+
 enum Format : int {
     UNDEFINED,
     R8_UNORM,
@@ -24,6 +26,18 @@ enum TextureDimension : int {
     TEX_2D,
     TEX_3D,
     CUBE,
+}
+
+enum Filter : int {
+    NEAREST,
+    LINEAR,
+}
+
+enum AddressMode : int {
+    REPEAT,
+    MIRRORED_REPEAT,
+    CLAMP_TO_EDGE,
+    CLAMP_TO_BORDER,
 }
 
 // Texture usage flags. Bitstruct of bools, composed by field-set.
@@ -54,4 +68,31 @@ struct TextureViewDesc {
     uint   mip_count;
     uint   base_layer;
     uint   layer_count;
+}
+
+struct SamplerDesc {
+    Filter      min_filter;
+    Filter      mag_filter;
+    Filter      mip_filter;
+    AddressMode address_u;
+    AddressMode address_v;
+    AddressMode address_w;
+    float       mip_lod_bias;
+    float       min_lod;
+    float       max_lod;
+    bool        anisotropy_enable;
+    float       max_anisotropy;
+    ZString     debug_name;
+}
+
+<* The handle owns the image; shader access goes through a TextureIndex.
+   Ownership: release with destroy_texture. *>
+fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.create_texture(device, desc);
+}
+
+fn void? destroy_texture(Device* device, TextureHandle texture) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.destroy_texture(device, texture);
 }
