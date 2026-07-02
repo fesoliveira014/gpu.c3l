@@ -1,0 +1,184 @@
+module gpu::vk;
+
+import gpu;
+import vk;
+import vma;
+
+// Concrete (non-generic) slot table for textures. Monomorphized twin of
+// gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
+const uint TEXTURE_FREE_NONE = 0;
+
+struct TextureSlot {
+    vk::Image          image;
+    vma::Allocation    allocation;
+    vk::ImageView      default_view;
+    gpu::Format        format;
+    gpu::TextureUsage  usage;
+    uint               width;
+    uint               height;
+    gpu::TextureLayout current_layout;
+}
+
+struct TextureCell {
+    TextureSlot value;
+    uint        generation;
+    uint        next_free;
+    bool        used;
+}
+
+struct TextureTable {
+    TextureCell[] slots;
+    uint          free_head;
+    uint          next_new;
+}
+
+fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {
+    uint idx;
+    if (self.free_head != TEXTURE_FREE_NONE) {
+        idx = self.free_head - 1;
+        self.free_head = self.slots[idx].next_free;
+    } else if (self.next_new < self.slots.len) {
+        idx = self.next_new++;
+        self.slots[idx].generation = 0;
+    } else {
+        return gpu::SLOT_TABLE_FULL~;
+    }
+    self.slots[idx].value = value;
+    self.slots[idx].generation++;
+    self.slots[idx].used = true;
+    return (gpu::TextureHandle){ .index = idx, .generation = self.slots[idx].generation };
+}
+
+fn TextureSlot*? TextureTable.get(&self, gpu::TextureHandle h) {
+    uint idx = h.index;
+    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
+    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
+    return &self.slots[idx].value;
+}
+
+fn void? TextureTable.free(&self, gpu::TextureHandle h) {
+    self.get(h)!;
+    uint idx = h.index;
+    self.slots[idx].used = false;
+    self.slots[idx].generation++;
+    self.slots[idx].next_free = self.free_head;
+    self.free_head = idx + 1;
+}
+
+fn vk::Format format_to_vk(gpu::Format format) {
+    switch (format) {
+        case gpu::Format.R8_UNORM:          return vk::Format.R8_UNORM;
+        case gpu::Format.R8_UINT:           return vk::Format.R8_UINT;
+        case gpu::Format.RG8_UNORM:         return vk::Format.R8G8_UNORM;
+        case gpu::Format.RGBA8_UNORM:       return vk::Format.R8G8B8A8_UNORM;
+        case gpu::Format.RGBA8_SRGB:        return vk::Format.R8G8B8A8_SRGB;
+        case gpu::Format.R16_UINT:          return vk::Format.R16_UINT;
+        case gpu::Format.R16_FLOAT:         return vk::Format.R16_SFLOAT;
+        case gpu::Format.RG16_FLOAT:        return vk::Format.R16G16_SFLOAT;
+        case gpu::Format.RGBA16_FLOAT:      return vk::Format.R16G16B16A16_SFLOAT;
+        case gpu::Format.R32_UINT:          return vk::Format.R32_UINT;
+        case gpu::Format.R32_FLOAT:         return vk::Format.R32_SFLOAT;
+        case gpu::Format.RG32_FLOAT:        return vk::Format.R32G32_SFLOAT;
+        case gpu::Format.RGBA32_FLOAT:      return vk::Format.R32G32B32A32_SFLOAT;
+        case gpu::Format.D32_FLOAT:         return vk::Format.D32_SFLOAT;
+        case gpu::Format.D24_UNORM_S8_UINT: return vk::Format.D24_UNORM_S8_UINT;
+        default:                            return vk::Format.UNDEFINED;
+    }
+}
+
+fn vk::ImageUsageFlags texture_usage_to_vk(gpu::TextureUsage usage) @private {
+    uint flags = 0;
+    if (usage.sampled)      flags |= (uint)vk::ImageUsageFlagBits.SAMPLED_BIT;
+    if (usage.storage)      flags |= (uint)vk::ImageUsageFlagBits.STORAGE_BIT;
+    if (usage.color_attach) flags |= (uint)vk::ImageUsageFlagBits.COLOR_ATTACHMENT_BIT;
+    if (usage.depth_attach) flags |= (uint)vk::ImageUsageFlagBits.DEPTH_STENCIL_ATTACHMENT_BIT;
+    if (usage.transfer_src) flags |= (uint)vk::ImageUsageFlagBits.TRANSFER_SRC_BIT;
+    if (usage.transfer_dst) flags |= (uint)vk::ImageUsageFlagBits.TRANSFER_DST_BIT;
+    return (vk::ImageUsageFlags)flags;
+}
+
+fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
+    switch (format) {
+        case gpu::Format.D32_FLOAT:
+            return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.DEPTH_BIT;
+        case gpu::Format.D24_UNORM_S8_UINT:
+            return (vk::ImageAspectFlags)((uint)vk::ImageAspectFlagBits.DEPTH_BIT | (uint)vk::ImageAspectFlagBits.STENCIL_BIT);
+        default:
+            return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.COLOR_BIT;
+    }
+}
+
+<* Supported slice: 2D, one mip, one layer, sampled/storage usage only;
+   anything else faults rather than silently degrading. *>
+fn void? check_texture_desc(gpu::TextureDesc* desc) @private {
+    if (desc.dimension != gpu::TextureDimension.TEX_2D) return gpu::INVALID_ARGUMENT~;
+    if (desc.width == 0 || desc.height == 0)            return gpu::INVALID_ARGUMENT~;
+    if (desc.depth > 1)                                 return gpu::INVALID_ARGUMENT~;
+    if (desc.mip_levels > 1)                            return gpu::INVALID_ARGUMENT~;
+    if (desc.array_layers > 1)                          return gpu::INVALID_ARGUMENT~;
+    if (format_to_vk(desc.format) == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+    if (!desc.usage.sampled && !desc.usage.storage)     return gpu::INVALID_ARGUMENT~;
+    if (desc.usage.color_attach || desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
+    if (desc.usage.transfer_src || desc.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
+}
+
+fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    check_texture_desc(desc)!;
+
+    vk::ImageCreateInfo image_info = vk::image_create_info()
+        .set_image_type(vk::ImageType.TYPE_2D)
+        .set_format(format_to_vk(desc.format))
+        .set_extent({ .width = desc.width, .height = desc.height, .depth = 1 })
+        .set_mip_levels(1)
+        .set_array_layers(1)
+        .set_samples(vk::SampleCountFlagBits.COUNT_1_BIT)
+        .set_tiling(vk::ImageTiling.OPTIMAL)
+        .set_usage(texture_usage_to_vk(desc.usage))
+        .set_initial_layout(vk::ImageLayout.UNDEFINED);
+    vma::AllocationCreateInfo alloc_info = { .usage = vma::MemoryUsage.AUTO_PREFER_DEVICE };
+
+    TextureSlot slot = {
+        .format         = desc.format,
+        .usage          = desc.usage,
+        .width          = desc.width,
+        .height         = desc.height,
+        .current_layout = gpu::TextureLayout.UNDEFINED,
+    };
+    check(state.allocator.create_image(&image_info, &alloc_info, &slot.image, &slot.allocation, null))!;
+
+    if (desc.debug_name != null) {
+        state.allocator.set_allocation_name(slot.allocation, desc.debug_name);
+    }
+
+    vk::ImageViewCreateInfo view_info = vk::image_view_create_info()
+        .set_image(slot.image)
+        .set_view_type(vk::ImageViewType.TYPE_2D)
+        .set_format(format_to_vk(desc.format))
+        .set_subresource_range({
+            .aspect_mask      = format_aspect(desc.format),
+            .base_mip_level   = 0,
+            .level_count      = 1,
+            .base_array_layer = 0,
+            .layer_count      = 1,
+        });
+    if (catch err = check(vk::create_image_view(state.device, &view_info, null, &slot.default_view))) {
+        state.allocator.destroy_image(slot.image, slot.allocation);
+        return err~;
+    }
+
+    if (try handle = state.textures.alloc(slot)) {
+        return handle;
+    }
+    vk::destroy_image_view(state.device, slot.default_view, null);
+    state.allocator.destroy_image(slot.image, slot.allocation);
+    return gpu::SLOT_TABLE_FULL~;
+}
+
+fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    TextureSlot* slot = state.textures.get(handle)!;
+    vk::destroy_image_view(state.device, slot.default_view, null);
+    state.allocator.destroy_image(slot.image, slot.allocation);
+    state.textures.free(handle)!;
+}

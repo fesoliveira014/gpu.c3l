@@ -29,3 +29,15 @@ RP="$ROOT/samples/root_pointer_compute/shaders/root_pointer.comp"
 compile "$RP.glsl" "$RP.spv"
 cp "$RP.spv" "$ROOT/test/src/shaders/root_pointer.comp.spv"
 echo "copied root_pointer.comp.spv -> test/src/shaders/"
+
+BT="$ROOT/samples/bindless_texture_compute/shaders"
+for name in heap_write heap_sample; do
+    compile "$BT/$name.comp.glsl" "$BT/$name.comp.spv"
+    cp "$BT/$name.comp.spv" "$ROOT/test/src/shaders/$name.comp.spv"
+    echo "copied $name.comp.spv -> test/src/shaders/"
+done
+
+# Reflection-validation fixtures: intentionally convention-violating shaders.
+for name in bad_set bad_binding; do
+    compile "$ROOT/test/shaders/$name.comp.glsl" "$ROOT/test/src/shaders/$name.comp.spv"
+done

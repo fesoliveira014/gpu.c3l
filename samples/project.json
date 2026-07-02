@@ -5,7 +5,7 @@
   // libs/ holds gpu.c3l -> ../.. plus symlinks to the vendored vk.c3l / vma.c3l,
   // mirroring test/libs so a single search path resolves all three by <name>.c3l.
   "dependency-search-paths": [ "libs" ],
-  "dependencies": [ "gpu", "vk", "vma" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
   "output": "build",
   "targets": {
     // Headless: no SDL. Proves the root-pointer compute ABI end to end.
@@ -13,6 +13,13 @@
       "type": "executable",
       "target": "linux-x64",
       "sources": [ "root_pointer_compute/main.c3" ]
+    },
+    // Headless: writes a pattern into a storage image by TextureIndex, then
+    // samples it back by the same index. Proves the bindless descriptor heap.
+    "bindless_texture_compute": {
+      "type": "executable",
+      "target": "linux-x64",
+      "sources": [ "bindless_texture_compute/main.c3" ]
     }
   }
 }

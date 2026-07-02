@@ -7,12 +7,12 @@ import gpu;
 
 fn void device_create_destroy() @test {
     gpu::DeviceDesc desc = {
-        .backend                            = gpu::BackendKind.VULKAN,
-        .enable_validation                  = true,
-        .enable_debug_names                 = true,
-        .frames_in_flight                   = 2,
-        .allow_descriptor_indexing_fallback = true,
-        .application_name                   = "gpu_vk_bootstrap_test",
+        .backend              = gpu::BackendKind.VULKAN,
+        .enable_validation    = true,
+        .enable_debug_names   = true,
+        .frames_in_flight     = 2,
+        .descriptor_heap_mode = gpu::DescriptorHeapMode.AUTO,
+        .application_name     = "gpu_vk_bootstrap_test",
     };
 
     gpu::Device device = gpu::create_device(&desc)!!;
@@ -26,6 +26,36 @@ fn void device_create_destroy() @test {
 
     gpu::destroy_device(&device)!!;
     assert(device.backend_state == null, "backend state cleared on destroy");
+}
+
+fn void device_heap_mode_and_capacities() @test {
+    gpu::DeviceDesc desc = {
+        .backend                     = gpu::BackendKind.VULKAN,
+        .enable_validation           = true,
+        .frames_in_flight            = 2,
+        .descriptor_heap_mode        = gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
+        .texture_descriptor_capacity = 64,
+        .sampler_descriptor_capacity = 8,
+        .application_name            = "gpu_vk_heap_mode_test",
+    };
+
+    gpu::Device device = gpu::create_device(&desc)!!;
+    assert(device.caps.descriptor_indexing, "indexing support reported");
+    assert(device.caps.max_texture_descriptors == 64, "texture capacity reflects the desc");
+    assert(device.caps.max_sampler_descriptors == 8, "sampler capacity reflects the desc");
+    gpu::destroy_device(&device)!!;
+}
+
+fn void device_capacity_over_ceiling_rejected() @test {
+    gpu::DeviceDesc desc = {
+        .backend                     = gpu::BackendKind.VULKAN,
+        .texture_descriptor_capacity = gpu::MAX_DESCRIPTOR_SLOTS + 1,
+        .application_name            = "gpu_vk_capacity_test",
+    };
+
+    bool faulted = false;
+    if (catch gpu::create_device(&desc)) faulted = true;
+    assert(faulted, "capacity above the packed-slot ceiling must fail device creation");
 }
 
 // Note: the UNSUPPORTED_BACKEND default arm is unreachable while BackendKind has

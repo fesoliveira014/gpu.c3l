@@ -10,21 +10,21 @@
   "sources": [
     "gpu.c3", "gpu.c3i", "types.c3", "faults.c3", "device.c3",
     "caps.c3", "memory.c3", "buffer.c3", "texture.c3",
-    "pipeline.c3", "command.c3", "sync.c3", "queue.c3",
+    "descriptor_heap.c3", "pipeline.c3", "command.c3", "sync.c3", "queue.c3",
     "vk/**"
   ],
   "targets": {
     "linux-x64": {
       "link-args": [],
       // Backend bindings this target depends on.
-      "dependencies": [ "vk", "vma" ],
+      "dependencies": [ "vk", "vma", "spvreflect" ],
       "linked-libraries": []
     },
     "windows-x64": {
       // Declare-only: builds/links here are not yet proven because vma.c3l
       // does not ship a Windows VulkanMemoryAllocator static library.
       "link-args": [],
-      "dependencies": [ "vk", "vma" ],
+      "dependencies": [ "vk", "vma", "spvreflect" ],
       "linked-libraries": []
     }
   }

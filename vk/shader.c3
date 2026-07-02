@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import spvreflect;
 import std::core::mem;
 
 // Concrete (non-generic) slot table for shaders. Monomorphized twin of
@@ -60,12 +61,51 @@ fn void? ShaderTable.free(&self, gpu::ShaderHandle h) {
     self.free_head = idx + 1;
 }
 
-<* Create a shader module. SPIR-V arrives as a byte slice with no alignment
-   guarantee; it is copied into a 4-byte-aligned word buffer for the uint* code
-   pointer Vulkan requires. *>
+<* Fault SHADER_INVALID on any set other than 0 or a set-0 binding that breaks
+   the heap convention; buffers-only shaders pass. *>
+fn void? check_shader_heap_convention(char[] spirv) @private {
+    // ulong storage keeps the opaque reflect blob 8-byte aligned.
+    ulong[spvreflect::SHADER_MODULE_SIZE / 8] module_storage;
+    spvreflect::ShaderModule* reflect_module = (spvreflect::ShaderModule*)&module_storage;
+    if (spvreflect::create_shader_module(spirv.len, spirv.ptr, reflect_module) != spvreflect::ReflectResult.RESULT_SUCCESS) {
+        return gpu::SHADER_INVALID~;
+    }
+    defer reflect_module.destroy();
+
+    uint count = 0;
+    if (reflect_module.enumerate_descriptor_bindings(&count, null) != spvreflect::ReflectResult.RESULT_SUCCESS) {
+        return gpu::SHADER_INVALID~;
+    }
+    if (count == 0) return;
+
+    @pool() {
+        spvreflect::DescriptorBinding*[] bindings = mem::talloc_array(spvreflect::DescriptorBinding*, (sz)count);
+        if (reflect_module.enumerate_descriptor_bindings(&count, bindings.ptr) != spvreflect::ReflectResult.RESULT_SUCCESS) {
+            return gpu::SHADER_INVALID~;
+        }
+        foreach (binding : bindings) {
+            if (binding.set_index() != HEAP_SET) return gpu::SHADER_INVALID~;
+            int descriptor_type = (int)binding.descriptor_type();
+            switch (binding.binding_index()) {
+                case HEAP_BINDING_SAMPLED:
+                    if (descriptor_type != (int)vk::DescriptorType.SAMPLED_IMAGE) return gpu::SHADER_INVALID~;
+                case HEAP_BINDING_STORAGE:
+                    if (descriptor_type != (int)vk::DescriptorType.STORAGE_IMAGE) return gpu::SHADER_INVALID~;
+                case HEAP_BINDING_SAMPLERS:
+                    if (descriptor_type != (int)vk::DescriptorType.SAMPLER) return gpu::SHADER_INVALID~;
+                default:
+                    return gpu::SHADER_INVALID~;
+            }
+        }
+    };
+}
+
+<* SPIR-V arrives with no alignment guarantee; it is copied into a
+   4-byte-aligned word buffer for the uint* code pointer Vulkan requires. *>
 fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (desc.spirv.len == 0 || desc.spirv.len % 4 != 0) return gpu::SHADER_INVALID~;
+    check_shader_heap_convention(desc.spirv)!;
 
     vk::ShaderModule sh_module;
     @pool() {

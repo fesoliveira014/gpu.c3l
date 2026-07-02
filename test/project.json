@@ -5,7 +5,7 @@
   // libs/ holds: gpu.c3l -> ../.. (this library), and symlinks to the vendored
   // vk.c3l / vma.c3l. A single search path then finds all three by <name>.c3l.
   "dependency-search-paths": [ "libs" ],
-  "dependencies": [ "gpu", "vk", "vma" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
   "output": "build",
   "targets": {
     // Link-proof: builds the gpu -> vma -> vk graph + native libs.
@@ -32,10 +32,30 @@
       "target": "linux-x64",
       "sources": [ "src/test_vk_command_submit.c3" ]
     },
+    "vk_texture": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_vk_texture.c3" ]
+    },
+    "vk_descriptor_heap": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_vk_descriptor_heap.c3" ]
+    },
     "vk_root_pointer": {
       "type": "test",
       "target": "linux-x64",
       "sources": [ "src/test_vk_root_pointer_compute.c3" ]
+    },
+    "vk_texture_heap": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_vk_texture_heap.c3", "src/test_vk_descriptor_buffer.c3" ]
+    },
+    "vk_shader_reflection": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_vk_shader_reflection.c3" ]
     }
   }
 }
