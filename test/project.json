@@ -76,6 +76,11 @@
       "type": "test",
       "target": "linux-x64",
       "sources": [ "src/test_vk_indirect_draw.c3" ]
+    },
+    "vk_depth": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_vk_depth_attachment.c3" ]
     }
   }
 }

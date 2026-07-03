@@ -44,6 +44,10 @@ done
 
 compile "$ROOT/test/shaders/build_indirect.comp.glsl" "$ROOT/test/src/shaders/build_indirect.comp.spv"
 
+for name in depth.vert depth.frag sample_depth.comp; do
+    compile "$ROOT/test/shaders/$name.glsl" "$ROOT/test/src/shaders/$name.spv"
+done
+
 GD="$ROOT/samples/gpu_driven_draw_sdl/shaders"
 compile "$GD/build_draws.comp.glsl" "$GD/build_draws.comp.spv"
 compile "$GD/gpu_driven.vert.glsl" "$GD/gpu_driven.vert.spv"

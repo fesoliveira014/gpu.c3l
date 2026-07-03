@@ -172,18 +172,20 @@ fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     }
 }
 
-<* Supported slice: 2D color-format textures, mips up to the full chain, any
-   layer count, sampled/storage/transfer/color-attachment usage; anything else
-   faults rather than silently degrading. Depth arrives with its consumer. *>
+<* Storage-image usage on depth formats is illegal Vulkan. D24_UNORM_S8_UINT
+   stays out: attachment support is not universal and no format-properties
+   query exists. *>
 fn void? check_texture_desc(gpu::TextureDesc* desc) @private {
     if (desc.dimension != gpu::TextureDimension.TEX_2D) return gpu::INVALID_ARGUMENT~;
     if (desc.width == 0 || desc.height == 0)            return gpu::INVALID_ARGUMENT~;
     if (desc.depth > 1)                                 return gpu::INVALID_ARGUMENT~;
     if (desc.mip_levels > full_mip_chain(desc.width, desc.height)) return gpu::INVALID_ARGUMENT~;
     if (format_to_vk(desc.format) == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
-    if (desc.format == gpu::Format.D32_FLOAT || desc.format == gpu::Format.D24_UNORM_S8_UINT) return gpu::INVALID_ARGUMENT~;
-    if (!desc.usage.sampled && !desc.usage.storage && !desc.usage.color_attach) return gpu::INVALID_ARGUMENT~;
-    if (desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
+    if (desc.format == gpu::Format.D24_UNORM_S8_UINT) return gpu::INVALID_ARGUMENT~;
+    bool is_depth = desc.format == gpu::Format.D32_FLOAT;
+    if (is_depth && (desc.usage.color_attach || desc.usage.storage)) return gpu::INVALID_ARGUMENT~;
+    if (!is_depth && desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
+    if (!desc.usage.sampled && !desc.usage.storage && !desc.usage.color_attach && !desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
 }
 
 <* Resolve a view desc to an image view: null/zero desc (or the explicit full

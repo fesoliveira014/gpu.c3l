@@ -1,0 +1,613 @@
+module gpu_test;
+
+import gpu;
+import gpu::vk;
+import vk;
+
+// Headless (lavapipe): D32_FLOAT depth attachments. Depth-tested overlap in
+// both draw orders, write/test toggles through dynamic state (one cache entry
+// per immutable state), depth-only passes, sampled depth through the heap,
+// and depth-value readback against exact NDC z.
+
+const char[*] DEPTH_VERT_SPIRV   = $embed("shaders/depth.vert.spv");
+const char[*] DEPTH_FRAG_SPIRV   = $embed("shaders/depth.frag.spv");
+const char[*] DEPTH_SAMPLE_SPIRV = $embed("shaders/sample_depth.comp.spv");
+
+const uint DP_RT = 16;
+const usz DP_COLOR_BYTES = DP_RT * DP_RT * 4;
+const usz DP_DEPTH_BYTES = DP_RT * DP_RT * 4;
+const float NEAR_Z = 0.25f;
+const float FAR_Z = 0.75f;
+
+// std430 mirror of sample_depth.comp's Root.
+struct SampleDepthRoot {
+    ulong out_gpu;
+    uint  texture_index;
+    uint  sampler_index;
+    float u;
+    float v;
+}
+$assert SampleDepthRoot::size == 24;
+
+struct DepthCtx {
+    gpu::ShaderHandle vert;
+    gpu::ShaderHandle frag;
+}
+
+fn gpu::Device make_depth_device() {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .application_name  = "gpu_depth_test",
+    };
+    return gpu::create_device(&desc)!!;
+}
+
+fn DepthCtx make_depth_ctx(gpu::Device* device) {
+    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = DEPTH_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = DEPTH_FRAG_SPIRV[..], .entry_point = "main" };
+    return {
+        .vert = gpu::create_shader(device, &vert_sd)!!,
+        .frag = gpu::create_shader(device, &frag_sd)!!,
+    };
+}
+
+fn void destroy_depth_ctx(gpu::Device* device, DepthCtx* ctx) {
+    gpu::destroy_shader(device, ctx.frag)!!;
+    gpu::destroy_shader(device, ctx.vert)!!;
+}
+
+fn gpu::PipelineHandle make_depth_pipeline(gpu::Device* device, DepthCtx* ctx, gpu::DepthState depth, bool with_color = true) {
+    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::GraphicsPipelineDesc desc = {
+        .vertex_shader   = ctx.vert,
+        .fragment_shader = ctx.frag,
+        .topology        = gpu::PrimitiveTopology.TRIANGLES,
+        .depth           = depth,
+        .color_formats   = with_color ? formats[..] : (gpu::Format[]){},
+        .depth_format    = gpu::Format.D32_FLOAT,
+    };
+    return gpu::create_graphics_pipeline(device, &desc)!!;
+}
+
+fn gpu::TextureHandle make_depth_texture(gpu::Device* device, bool sampled = false) {
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = DP_RT,
+        .height    = DP_RT,
+        .format    = gpu::Format.D32_FLOAT,
+        .usage     = { .depth_attach, .transfer_src, .sampled = sampled },
+    };
+    return gpu::create_texture(device, &desc)!!;
+}
+
+fn gpu::TextureHandle make_color_target(gpu::Device* device) {
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = DP_RT,
+        .height    = DP_RT,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .color_attach, .transfer_src },
+    };
+    return gpu::create_texture(device, &desc)!!;
+}
+
+fn gpu::GpuSpan write_tri(gpu::Device* device, float z) {
+    gpu::GpuSpan span = gpu::alloc_frame_span(device, 3 * 16, 16)!!;
+    float* verts = (float*)span.cpu;
+    float[12] data = {
+        -0.8f, -0.8f, z, 0.0f,
+         0.8f, -0.8f, z, 0.0f,
+         0.0f,  0.8f, z, 0.0f,
+    };
+    for (uint i = 0; i < 12; i++) verts[i] = data[i];
+    return span;
+}
+
+fn gpu::GpuSpan write_color(gpu::Device* device, float[4] rgba) {
+    gpu::GpuSpan span = gpu::alloc_frame_span(device, 16, 16)!!;
+    float* color = (float*)span.cpu;
+    for (uint i = 0; i < 4; i++) color[i] = rgba[i];
+    return span;
+}
+
+fn void record_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle depth) {
+    gpu::TextureBarrier to_attach = {
+        .texture       = depth,
+        .before_stage  = gpu::Stage.HOST,
+        .after_stage   = gpu::Stage.DEPTH_STENCIL,
+        .before_hazard = gpu::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::Hazard.DEPTH_WRITE,
+        .old_layout    = gpu::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::TextureLayout.DEPTH_STENCIL,
+    };
+    gpu::cmd_texture_barrier(cmd, &to_attach)!!;
+}
+
+fn void record_color_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target) {
+    gpu::TextureBarrier to_attach = {
+        .texture       = target,
+        .before_stage  = gpu::Stage.HOST,
+        .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
+        .before_hazard = gpu::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::Hazard.COLOR_WRITE,
+        .old_layout    = gpu::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+    };
+    gpu::cmd_texture_barrier(cmd, &to_attach)!!;
+}
+
+fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, gpu::GpuSpan* rb_span) {
+    gpu::TextureBarrier to_src = {
+        .texture       = target,
+        .before_stage  = gpu::Stage.COLOR_ATTACHMENT,
+        .after_stage   = gpu::Stage.TRANSFER,
+        .before_hazard = gpu::Hazard.COLOR_WRITE,
+        .after_hazard  = gpu::Hazard.TRANSFER_READ,
+        .old_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+    };
+    gpu::cmd_texture_barrier(cmd, &to_src)!!;
+    gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
+    gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
+    gpu::BufferBarrier host_read = {
+        .buffer = rb_span.buffer, .offset = rb_span.offset, .size = rb_span.size,
+        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    };
+    gpu::cmd_buffer_barrier(cmd, &host_read)!!;
+}
+
+fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, gpu::GpuSpan* rb_span) {
+    gpu::TextureBarrier to_src = {
+        .texture       = depth,
+        .before_stage  = gpu::Stage.DEPTH_STENCIL,
+        .after_stage   = gpu::Stage.TRANSFER,
+        .before_hazard = gpu::Hazard.DEPTH_WRITE,
+        .after_hazard  = gpu::Hazard.TRANSFER_READ,
+        .old_layout    = gpu::TextureLayout.DEPTH_STENCIL,
+        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+    };
+    gpu::cmd_texture_barrier(cmd, &to_src)!!;
+    gpu::TextureBufferCopyDesc copy = { .texture = depth, .dst = *rb_span };
+    gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
+    gpu::BufferBarrier host_read = {
+        .buffer = rb_span.buffer, .offset = rb_span.offset, .size = rb_span.size,
+        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    };
+    gpu::cmd_buffer_barrier(cmd, &host_read)!!;
+}
+
+fn gpu::BufferHandle make_readback(gpu::Device* device, usz size) {
+    gpu::BufferDesc desc = {
+        .size = size, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK,
+    };
+    return gpu::create_buffer(device, &desc)!!;
+}
+
+fn void submit_and_finish(gpu::Device* device, gpu::CommandList* cmd) {
+    gpu::end_commands(device, cmd)!!;
+    gpu::CommandList[1] lists = { *cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(device, &submit)!!;
+    gpu::wait_queue_idle(device, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn char* dp_center(gpu::GpuSpan* rb_span) {
+    char* pixels = (char*)rb_span.cpu;
+    return &pixels[(DP_RT / 2 * DP_RT + DP_RT / 2) * 4];
+}
+
+fn float* dp_center_depth(gpu::GpuSpan* rb_span) {
+    float* texels = (float*)rb_span.cpu;
+    return &texels[DP_RT / 2 * DP_RT + DP_RT / 2];
+}
+
+fn void depth_test_occludes_both_orders() @test {
+    gpu::Device device = make_depth_device();
+    defer gpu::destroy_device(&device)!!;
+    DepthCtx ctx = make_depth_ctx(&device);
+    defer destroy_depth_ctx(&device, &ctx);
+
+    gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
+    gpu::PipelineHandle pipeline = make_depth_pipeline(&device, &ctx, tested);
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+
+    bool[2] near_first_options = { true, false };
+    foreach (near_first : near_first_options) {
+        gpu::TextureHandle target = make_color_target(&device);
+        defer gpu::destroy_texture(&device, target)!!;
+        gpu::TextureHandle depth = make_depth_texture(&device);
+        defer gpu::destroy_texture(&device, depth)!!;
+        gpu::BufferHandle color_rb = make_readback(&device, DP_COLOR_BYTES);
+        defer gpu::destroy_buffer(&device, color_rb)!!;
+        gpu::BufferHandle depth_rb = make_readback(&device, DP_DEPTH_BYTES);
+        defer gpu::destroy_buffer(&device, depth_rb)!!;
+        gpu::GpuSpan color_rb_span = gpu::get_buffer_span(&device, color_rb)!!;
+        gpu::GpuSpan depth_rb_span = gpu::get_buffer_span(&device, depth_rb)!!;
+
+        gpu::begin_frame(&device)!!;
+        gpu::GpuSpan near_verts = write_tri(&device, NEAR_Z);
+        gpu::GpuSpan far_verts = write_tri(&device, FAR_Z);
+        gpu::GpuSpan red = write_color(&device, { 1.0f, 0.0f, 0.0f, 1.0f });
+        gpu::GpuSpan green = write_color(&device, { 0.0f, 1.0f, 0.0f, 1.0f });
+
+        gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+        record_color_to_attach(&cmd, target);
+        record_depth_to_attach(&cmd, depth);
+
+        gpu::ColorTargetDesc[1] colors = {{
+            .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+            .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
+        }};
+        gpu::DepthTargetDesc depth_target = {
+            .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+            .clear = { .depth = 1.0f },
+        };
+        gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
+        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+
+        gpu::GpuSpan first_verts = near_first ? near_verts : far_verts;
+        gpu::GpuSpan first_color = near_first ? red : green;
+        gpu::GpuSpan second_verts = near_first ? far_verts : near_verts;
+        gpu::GpuSpan second_color = near_first ? green : red;
+        gpu::cmd_draw(
+            commands:       &cmd,
+            pipeline:       pipeline,
+            vertex_root:    first_verts.gpu,
+            fragment_root:  first_color.gpu,
+            vertex_count:   3,
+            instance_count: 1,
+        )!!;
+        gpu::cmd_draw(
+            commands:       &cmd,
+            pipeline:       pipeline,
+            vertex_root:    second_verts.gpu,
+            fragment_root:  second_color.gpu,
+            vertex_count:   3,
+            instance_count: 1,
+        )!!;
+        gpu::cmd_end_render_pass(&cmd)!!;
+
+        record_color_readback(&cmd, target, &color_rb_span);
+        record_depth_readback(&cmd, depth, &depth_rb_span);
+        submit_and_finish(&device, &cmd);
+
+        gpu::invalidate_buffer(&device, color_rb, 0, 0)!!;
+        char* center = dp_center(&color_rb_span);
+        assert(center[0] == (char)255 && center[1] == (char)0,
+            "the near triangle wins regardless of draw order");
+
+        gpu::invalidate_buffer(&device, depth_rb, 0, 0)!!;
+        float* depth_center = dp_center_depth(&depth_rb_span);
+        assert(*depth_center == NEAR_Z, "depth buffer holds the near z");
+        float* depth_corner = (float*)depth_rb_span.cpu;
+        assert(depth_corner[0] == 1.0f, "untouched pixels hold the clear depth");
+
+        gpu::end_frame(&device)!!;
+    }
+}
+
+fn void depth_write_toggle_honored() @test {
+    gpu::Device device = make_depth_device();
+    defer gpu::destroy_device(&device)!!;
+    DepthCtx ctx = make_depth_ctx(&device);
+    defer destroy_depth_ctx(&device, &ctx);
+    gpu::TextureHandle target = make_color_target(&device);
+    defer gpu::destroy_texture(&device, target)!!;
+    gpu::TextureHandle depth = make_depth_texture(&device);
+    defer gpu::destroy_texture(&device, depth)!!;
+    gpu::BufferHandle color_rb = make_readback(&device, DP_COLOR_BYTES);
+    defer gpu::destroy_buffer(&device, color_rb)!!;
+    gpu::BufferHandle depth_rb = make_readback(&device, DP_DEPTH_BYTES);
+    defer gpu::destroy_buffer(&device, depth_rb)!!;
+    gpu::GpuSpan color_rb_span = gpu::get_buffer_span(&device, color_rb)!!;
+    gpu::GpuSpan depth_rb_span = gpu::get_buffer_span(&device, depth_rb)!!;
+
+    gpu::DepthState no_write = { .test_enable = true, .write_enable = false, .compare = gpu::CompareOp.LESS };
+    gpu::PipelineHandle near_pipeline = make_depth_pipeline(&device, &ctx, no_write);
+    defer gpu::destroy_pipeline(&device, near_pipeline)!!;
+    gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
+    gpu::PipelineHandle far_pipeline = make_depth_pipeline(&device, &ctx, tested);
+    defer gpu::destroy_pipeline(&device, far_pipeline)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::GpuSpan near_verts = write_tri(&device, NEAR_Z);
+    gpu::GpuSpan far_verts = write_tri(&device, FAR_Z);
+    gpu::GpuSpan red = write_color(&device, { 1.0f, 0.0f, 0.0f, 1.0f });
+    gpu::GpuSpan green = write_color(&device, { 0.0f, 1.0f, 0.0f, 1.0f });
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    record_color_to_attach(&cmd, target);
+    record_depth_to_attach(&cmd, depth);
+    gpu::ColorTargetDesc[1] colors = {{
+        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::DepthTargetDesc depth_target = {
+        .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .clear = { .depth = 1.0f },
+    };
+    gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::cmd_draw(
+        commands:       &cmd,
+        pipeline:       near_pipeline,
+        vertex_root:    near_verts.gpu,
+        fragment_root:  red.gpu,
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_draw(
+        commands:       &cmd,
+        pipeline:       far_pipeline,
+        vertex_root:    far_verts.gpu,
+        fragment_root:  green.gpu,
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&cmd)!!;
+    record_color_readback(&cmd, target, &color_rb_span);
+    record_depth_readback(&cmd, depth, &depth_rb_span);
+    submit_and_finish(&device, &cmd);
+
+    gpu::invalidate_buffer(&device, color_rb, 0, 0)!!;
+    char* center = dp_center(&color_rb_span);
+    assert(center[1] == (char)255, "far triangle renders because the near draw wrote no depth");
+    gpu::invalidate_buffer(&device, depth_rb, 0, 0)!!;
+    assert(*dp_center_depth(&depth_rb_span) == FAR_Z, "depth holds the far z, written by the tested draw");
+    gpu::end_frame(&device)!!;
+}
+
+fn void depth_state_variants_share_entry() @test {
+    gpu::Device device = make_depth_device();
+    defer gpu::destroy_device(&device)!!;
+    DepthCtx ctx = make_depth_ctx(&device);
+    defer destroy_depth_ctx(&device, &ctx);
+    gpu::TextureHandle target = make_color_target(&device);
+    defer gpu::destroy_texture(&device, target)!!;
+    gpu::TextureHandle depth = make_depth_texture(&device);
+    defer gpu::destroy_texture(&device, depth)!!;
+    gpu::BufferHandle color_rb = make_readback(&device, DP_COLOR_BYTES);
+    defer gpu::destroy_buffer(&device, color_rb)!!;
+    gpu::GpuSpan color_rb_span = gpu::get_buffer_span(&device, color_rb)!!;
+
+    gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
+    gpu::PipelineHandle test_on = make_depth_pipeline(&device, &ctx, tested);
+    defer gpu::destroy_pipeline(&device, test_on)!!;
+    gpu::DepthState untested = {};
+    gpu::PipelineHandle test_off = make_depth_pipeline(&device, &ctx, untested);
+    defer gpu::destroy_pipeline(&device, test_off)!!;
+
+    uint entries = vk::pipeline_cache_entry_count((vk::VkDeviceState*)device.backend_state);
+    assert(entries == 1, "depth-state variants share one cache entry");
+
+    gpu::begin_frame(&device)!!;
+    gpu::GpuSpan near_verts = write_tri(&device, NEAR_Z);
+    gpu::GpuSpan far_verts = write_tri(&device, FAR_Z);
+    gpu::GpuSpan red = write_color(&device, { 1.0f, 0.0f, 0.0f, 1.0f });
+    gpu::GpuSpan green = write_color(&device, { 0.0f, 1.0f, 0.0f, 1.0f });
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    record_color_to_attach(&cmd, target);
+    record_depth_to_attach(&cmd, depth);
+    gpu::ColorTargetDesc[1] colors = {{
+        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::DepthTargetDesc depth_target = {
+        .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .clear = { .depth = 1.0f },
+    };
+    gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::cmd_draw(
+        commands:       &cmd,
+        pipeline:       test_on,
+        vertex_root:    near_verts.gpu,
+        fragment_root:  red.gpu,
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_draw(
+        commands:       &cmd,
+        pipeline:       test_off,
+        vertex_root:    far_verts.gpu,
+        fragment_root:  green.gpu,
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&cmd)!!;
+    record_color_readback(&cmd, target, &color_rb_span);
+    submit_and_finish(&device, &cmd);
+
+    gpu::invalidate_buffer(&device, color_rb, 0, 0)!!;
+    char* center = dp_center(&color_rb_span);
+    assert(center[1] == (char)255, "test-off alias of the same entry overwrites the near triangle");
+    gpu::end_frame(&device)!!;
+}
+
+fn void depth_only_pass_renders_footprint() @test {
+    gpu::Device device = make_depth_device();
+    defer gpu::destroy_device(&device)!!;
+    DepthCtx ctx = make_depth_ctx(&device);
+    defer destroy_depth_ctx(&device, &ctx);
+    gpu::TextureHandle depth = make_depth_texture(&device);
+    defer gpu::destroy_texture(&device, depth)!!;
+    gpu::BufferHandle depth_rb = make_readback(&device, DP_DEPTH_BYTES);
+    defer gpu::destroy_buffer(&device, depth_rb)!!;
+    gpu::GpuSpan depth_rb_span = gpu::get_buffer_span(&device, depth_rb)!!;
+
+    gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
+    gpu::PipelineHandle pipeline = make_depth_pipeline(
+        device:     &device,
+        ctx:        &ctx,
+        depth:      tested,
+        with_color: false,
+    );
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::GpuSpan near_verts = write_tri(&device, NEAR_Z);
+    gpu::GpuSpan color = write_color(&device, { 1.0f, 1.0f, 1.0f, 1.0f });
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    record_depth_to_attach(&cmd, depth);
+    gpu::DepthTargetDesc depth_target = {
+        .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .clear = { .depth = 1.0f },
+    };
+    gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::cmd_draw(
+        commands:       &cmd,
+        pipeline:       pipeline,
+        vertex_root:    near_verts.gpu,
+        fragment_root:  color.gpu,
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&cmd)!!;
+    record_depth_readback(&cmd, depth, &depth_rb_span);
+    submit_and_finish(&device, &cmd);
+
+    gpu::invalidate_buffer(&device, depth_rb, 0, 0)!!;
+    assert(*dp_center_depth(&depth_rb_span) == NEAR_Z, "depth-only pass writes the triangle footprint");
+    float* corner = (float*)depth_rb_span.cpu;
+    assert(corner[0] == 1.0f, "outside the footprint the clear depth remains");
+    gpu::end_frame(&device)!!;
+}
+
+fn void sampled_depth_matches_readback() @test {
+    gpu::Device device = make_depth_device();
+    defer gpu::destroy_device(&device)!!;
+    DepthCtx ctx = make_depth_ctx(&device);
+    defer destroy_depth_ctx(&device, &ctx);
+    gpu::TextureHandle depth = make_depth_texture(&device, sampled: true);
+    defer gpu::destroy_texture(&device, depth)!!;
+
+    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, depth, null)!!;
+    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::SamplerDesc sampler_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
+    defer gpu::destroy_sampler(&device, smp_index)!!;
+
+    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DEPTH_SAMPLE_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
+    defer gpu::destroy_shader(&device, comp)!!;
+    gpu::ComputePipelineDesc comp_desc = { .shader = comp, .push_constant_size = 8 };
+    gpu::PipelineHandle sample_pipeline = gpu::create_compute_pipeline(&device, &comp_desc)!!;
+    defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
+
+    gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
+    gpu::PipelineHandle pipeline = make_depth_pipeline(
+        device:     &device,
+        ctx:        &ctx,
+        depth:      tested,
+        with_color: false,
+    );
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::GpuSpan near_verts = write_tri(&device, NEAR_Z);
+    gpu::GpuSpan color = write_color(&device, { 1.0f, 1.0f, 1.0f, 1.0f });
+    gpu::GpuSpan out_span = gpu::alloc_frame_span(&device, 4, 4)!!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, SampleDepthRoot::size, 16)!!;
+    SampleDepthRoot* root = (SampleDepthRoot*)root_span.cpu;
+    root.out_gpu = (ulong)out_span.gpu;
+    root.texture_index = (uint)tex_index;
+    root.sampler_index = (uint)smp_index;
+    root.u = 0.5f;
+    root.v = 0.5f;
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    record_depth_to_attach(&cmd, depth);
+    gpu::DepthTargetDesc depth_target = {
+        .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .clear = { .depth = 1.0f },
+    };
+    gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::cmd_draw(
+        commands:       &cmd,
+        pipeline:       pipeline,
+        vertex_root:    near_verts.gpu,
+        fragment_root:  color.gpu,
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&cmd)!!;
+
+    gpu::TextureBarrier to_read = {
+        .texture       = depth,
+        .before_stage  = gpu::Stage.DEPTH_STENCIL,
+        .after_stage   = gpu::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::Hazard.DEPTH_WRITE,
+        .after_hazard  = gpu::Hazard.SHADER_READ,
+        .old_layout    = gpu::TextureLayout.DEPTH_STENCIL,
+        .new_layout    = gpu::TextureLayout.SHADER_READ,
+    };
+    gpu::cmd_texture_barrier(&cmd, &to_read)!!;
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: sample_pipeline,
+        root:     root_span.gpu,
+        groups:   { 1, 1, 1 },
+    )!!;
+    gpu::BufferBarrier host_read = {
+        .buffer = out_span.buffer, .offset = out_span.offset, .size = out_span.size,
+        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    };
+    gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
+    submit_and_finish(&device, &cmd);
+
+    gpu::invalidate_buffer(&device, out_span.buffer, 0, 0)!!;
+    float* sampled = (float*)out_span.cpu;
+    assert(*sampled == NEAR_Z, "heap-sampled depth matches the rendered z");
+    gpu::end_frame(&device)!!;
+}
+
+fn void depth_pass_validation_faults() @test {
+    gpu::Device device = make_depth_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDesc sampled_only_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = DP_RT,
+        .height    = DP_RT,
+        .format    = gpu::Format.D32_FLOAT,
+        .usage     = { .sampled },
+    };
+    gpu::TextureHandle sampled_only = gpu::create_texture(&device, &sampled_only_desc)!!;
+    defer gpu::destroy_texture(&device, sampled_only)!!;
+
+    gpu::TextureHandle unbarriered = make_depth_texture(&device);
+    defer gpu::destroy_texture(&device, unbarriered)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+
+    gpu::DepthTargetDesc no_usage = { .texture = sampled_only, .load_op = gpu::LoadOp.CLEAR, .clear = { .depth = 1.0f } };
+    gpu::RenderPassDesc no_usage_pass = { .depth = &no_usage, .width = DP_RT, .height = DP_RT };
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &no_usage_pass)) == gpu::INVALID_ARGUMENT,
+        "depth target without depth_attach usage faults INVALID_ARGUMENT");
+
+    gpu::DepthTargetDesc wrong_layout = { .texture = unbarriered, .load_op = gpu::LoadOp.CLEAR, .clear = { .depth = 1.0f } };
+    gpu::RenderPassDesc wrong_layout_pass = { .depth = &wrong_layout, .width = DP_RT, .height = DP_RT };
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &wrong_layout_pass)) == gpu::INVALID_RESOURCE_STATE,
+        "depth target outside the DEPTH_STENCIL layout faults INVALID_RESOURCE_STATE");
+
+    gpu::RenderPassDesc empty_pass = { .width = DP_RT, .height = DP_RT };
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &empty_pass)) == gpu::INVALID_ARGUMENT,
+        "a pass with no attachments faults INVALID_ARGUMENT");
+
+    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_frame(&device)!!;
+}

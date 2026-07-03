@@ -27,45 +27,65 @@ fn vk::AttachmentStoreOp store_op_to_vk(gpu::StoreOp op) @private {
     }
 }
 
-<* Begin dynamic rendering. Attachment textures must carry color_attach usage
-   and sit in the COLOR_ATTACHMENT tracked layout; the attachment view for the
-   requested mip/layer comes from the texture's view cache. Viewport and
-   scissor are set to the full pass dimensions. *>
+<* Begin dynamic rendering. Attachments must sit in their attachment layouts
+   with matching usage; color views honor the target's mip/layer, the depth
+   view is the full resource. Viewport and scissor are set to the full pass
+   dimensions. *>
 fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDesc* desc) @private {
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    if (desc.colors.len == 0 || desc.width == 0 || desc.height == 0) return gpu::INVALID_ARGUMENT~;
-    if (desc.depth != null) return gpu::INVALID_ARGUMENT~;
+    if (desc.colors.len == 0 && desc.depth == null) return gpu::INVALID_ARGUMENT~;
+    if (desc.width == 0 || desc.height == 0) return gpu::INVALID_ARGUMENT~;
     vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
 
     @pool() {
-        vk::RenderingAttachmentInfo[] attachments = mem::talloc_array(vk::RenderingAttachmentInfo, desc.colors.len);
-        foreach (i, &target : desc.colors) {
-            TextureSlot* slot = state.textures.get(target.texture)!;
-            if (!slot.usage.color_attach) return gpu::INVALID_ARGUMENT~;
-            if (slot.current_layout != gpu::TextureLayout.COLOR_ATTACHMENT) return gpu::INVALID_RESOURCE_STATE~;
+        vk::RenderingAttachmentInfo[] attachments = {};
+        if (desc.colors.len > 0) {
+            attachments = mem::talloc_array(vk::RenderingAttachmentInfo, desc.colors.len);
+            foreach (i, &target : desc.colors) {
+                TextureSlot* slot = state.textures.get(target.texture)!;
+                if (!slot.usage.color_attach) return gpu::INVALID_ARGUMENT~;
+                if (slot.current_layout != gpu::TextureLayout.COLOR_ATTACHMENT) return gpu::INVALID_RESOURCE_STATE~;
 
-            gpu::TextureViewDesc view_desc = {
-                .base_mip    = target.mip_level,
-                .mip_count   = 1,
-                .base_layer  = target.array_layer,
-                .layer_count = 1,
-            };
-            vk::ImageView view = resolve_texture_view(state, slot, &view_desc)!;
+                gpu::TextureViewDesc view_desc = {
+                    .base_mip    = target.mip_level,
+                    .mip_count   = 1,
+                    .base_layer  = target.array_layer,
+                    .layer_count = 1,
+                };
+                vk::ImageView view = resolve_texture_view(state, slot, &view_desc)!;
 
-            attachments[i] = vk::rendering_attachment_info();
-            attachments[i].image_view = view;
-            attachments[i].image_layout = vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
-            attachments[i].load_op = load_op_to_vk(target.load_op);
-            attachments[i].store_op = store_op_to_vk(target.store_op);
-            attachments[i].clear_value.color.float32 = target.clear.rgba;
+                attachments[i] = vk::rendering_attachment_info();
+                attachments[i].image_view = view;
+                attachments[i].image_layout = vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
+                attachments[i].load_op = load_op_to_vk(target.load_op);
+                attachments[i].store_op = store_op_to_vk(target.store_op);
+                attachments[i].clear_value.color.float32 = target.clear.rgba;
+            }
         }
 
+        vk::RenderingAttachmentInfo depth_attach;
         vk::RenderingInfo rendering = vk::rendering_info();
         rendering.render_area = { .offset = { .x = 0, .y = 0 }, .extent = { .width = desc.width, .height = desc.height } };
         rendering.layer_count = 1;
         rendering.color_attachment_count = (uint)attachments.len;
         rendering.p_color_attachments = attachments.ptr;
+        if (desc.depth != null) {
+            TextureSlot* depth_slot = state.textures.get(desc.depth.texture)!;
+            if (!depth_slot.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
+            if (depth_slot.current_layout != gpu::TextureLayout.DEPTH_STENCIL) return gpu::INVALID_RESOURCE_STATE~;
+
+            depth_attach = vk::rendering_attachment_info();
+            depth_attach.image_view = depth_slot.default_view;
+            depth_attach.image_layout = vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            depth_attach.load_op = load_op_to_vk(desc.depth.load_op);
+            depth_attach.store_op = store_op_to_vk(desc.depth.store_op);
+            depth_attach.clear_value.depth_stencil = {
+                .depth   = desc.depth.clear.depth,
+                .stencil = desc.depth.clear.stencil,
+            };
+            rendering.p_depth_attachment = &depth_attach;
+        }
         vk::cmd_begin_rendering(cb, &rendering);
     };
 

@@ -377,7 +377,7 @@ fn void offscreen_render_to_mip() @test {
     gpu::end_frame(&device)!!;
 }
 
-fn void graphics_pipeline_depth_format_rejected() @test {
+fn void graphics_pipeline_depth_format_validation() @test {
     gpu::Device device = make_offscreen_test_device();
     defer gpu::destroy_device(&device)!!;
 
@@ -395,15 +395,24 @@ fn void graphics_pipeline_depth_format_rejected() @test {
         .color_formats   = color_formats[..],
         .depth_format    = gpu::Format.D32_FLOAT,
     };
-    assert(@catch(gpu::create_graphics_pipeline(&device, &with_depth)) == gpu::INVALID_ARGUMENT,
-        "depth formats are out of scope and fault INVALID_ARGUMENT");
+    gpu::PipelineHandle depth_pipeline = gpu::create_graphics_pipeline(&device, &with_depth)!!;
+    gpu::destroy_pipeline(&device, depth_pipeline)!!;
 
-    gpu::GraphicsPipelineDesc no_colors = {
+    gpu::GraphicsPipelineDesc packed_depth = {
+        .vertex_shader   = vert,
+        .fragment_shader = frag,
+        .color_formats   = color_formats[..],
+        .depth_format    = gpu::Format.D24_UNORM_S8_UINT,
+    };
+    assert(@catch(gpu::create_graphics_pipeline(&device, &packed_depth)) == gpu::INVALID_ARGUMENT,
+        "D24_UNORM_S8_UINT faults INVALID_ARGUMENT");
+
+    gpu::GraphicsPipelineDesc no_attachments = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
     };
-    assert(@catch(gpu::create_graphics_pipeline(&device, &no_colors)) == gpu::INVALID_ARGUMENT,
-        "at least one color format is required");
+    assert(@catch(gpu::create_graphics_pipeline(&device, &no_attachments)) == gpu::INVALID_ARGUMENT,
+        "zero color formats with no depth format faults INVALID_ARGUMENT");
 }
 
 fn void render_pass_state_machine() @test {

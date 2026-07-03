@@ -494,6 +494,18 @@ cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) -> void?
 cmd_end_render_pass(CommandList* commands) -> void?
 ```
 
+A pass names at least one color target or a depth target; depth-only passes
+(the shadow-map shape) are valid. A depth target needs `depth_attach` usage
+and the `DEPTH_STENCIL` tracked layout. `D32_FLOAT` is the only supported
+depth format; pipelines name it in `GraphicsPipelineDesc.depth_format`.
+Attachment extents matching the pass dimensions are the caller's
+responsibility.
+
+Depth clear values are explicit: a zero-initialized `ClearDepthStencil`
+clears depth to **0.0**, which fails every LESS-compare draw. The standard
+far-plane clear is an explicit `{ .depth = 1.0 }`; reverse-Z setups clear to
+0.0 deliberately.
+
 ### Draw
 
 ```text

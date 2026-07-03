@@ -74,8 +74,9 @@ fn vk::BlendOp blend_op_to_vk(gpu::BlendOp op) @private {
    builder setters (c3c 0.8.0 codegen crash). *>
 fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::GraphicsPipelineDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
-    if (desc.color_formats.len == 0 || desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS) return gpu::INVALID_ARGUMENT~;
-    if (desc.depth_format != gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+    if (desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS) return gpu::INVALID_ARGUMENT~;
+    if (desc.depth_format != gpu::Format.UNDEFINED && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
+    if (desc.color_formats.len == 0 && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
     ShaderSlot* vertex_shader = state.shaders.get(desc.vertex_shader)!;
     ShaderSlot* fragment_shader = state.shaders.get(desc.fragment_shader)!;
 
@@ -99,11 +100,14 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
     }
 
     @pool() {
-        vk::Format[] color_formats = mem::talloc_array(vk::Format, desc.color_formats.len);
-        foreach (i, format : desc.color_formats) {
-            vk::Format vk_format = format_to_vk(format);
-            if (vk_format == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
-            color_formats[i] = vk_format;
+        vk::Format[] color_formats = {};
+        if (desc.color_formats.len > 0) {
+            color_formats = mem::talloc_array(vk::Format, desc.color_formats.len);
+            foreach (i, format : desc.color_formats) {
+                vk::Format vk_format = format_to_vk(format);
+                if (vk_format == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+                color_formats[i] = vk_format;
+            }
         }
 
         vk::PipelineShaderStageCreateInfo[2] stages;
@@ -119,6 +123,9 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         vk::PipelineRenderingCreateInfo rendering_info = vk::pipeline_rendering_create_info();
         rendering_info.color_attachment_count = (uint)color_formats.len;
         rendering_info.p_color_attachment_formats = color_formats.ptr;
+        if (desc.depth_format != gpu::Format.UNDEFINED) {
+            rendering_info.depth_attachment_format = format_to_vk(desc.depth_format);
+        }
 
         vk::PipelineVertexInputStateCreateInfo vertex_input = vk::pipeline_vertex_input_state_create_info();
 
@@ -138,22 +145,24 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
 
         vk::PipelineDepthStencilStateCreateInfo depth_stencil = vk::pipeline_depth_stencil_state_create_info();
 
-        vk::PipelineColorBlendAttachmentState[] blend_attachments = mem::talloc_array(vk::PipelineColorBlendAttachmentState, color_formats.len);
-        foreach (&attachment : blend_attachments) {
-            *attachment = {
-                .blend_enable           = desc.blend.enable ? vk::TRUE : vk::FALSE,
-                .src_color_blend_factor = blend_factor_to_vk(desc.blend.src_color),
-                .dst_color_blend_factor = blend_factor_to_vk(desc.blend.dst_color),
-                .color_blend_op         = blend_op_to_vk(desc.blend.color_op),
-                .src_alpha_blend_factor = blend_factor_to_vk(desc.blend.src_alpha),
-                .dst_alpha_blend_factor = blend_factor_to_vk(desc.blend.dst_alpha),
-                .alpha_blend_op         = blend_op_to_vk(desc.blend.alpha_op),
-                .color_write_mask       = COLOR_WRITE_ALL,
-            };
-        }
         vk::PipelineColorBlendStateCreateInfo blend_state = vk::pipeline_color_blend_state_create_info();
-        blend_state.attachment_count = (uint)blend_attachments.len;
-        blend_state.p_attachments = blend_attachments.ptr;
+        if (color_formats.len > 0) {
+            vk::PipelineColorBlendAttachmentState[] blend_attachments = mem::talloc_array(vk::PipelineColorBlendAttachmentState, color_formats.len);
+            foreach (&attachment : blend_attachments) {
+                *attachment = {
+                    .blend_enable           = desc.blend.enable ? vk::TRUE : vk::FALSE,
+                    .src_color_blend_factor = blend_factor_to_vk(desc.blend.src_color),
+                    .dst_color_blend_factor = blend_factor_to_vk(desc.blend.dst_color),
+                    .color_blend_op         = blend_op_to_vk(desc.blend.color_op),
+                    .src_alpha_blend_factor = blend_factor_to_vk(desc.blend.src_alpha),
+                    .dst_alpha_blend_factor = blend_factor_to_vk(desc.blend.dst_alpha),
+                    .alpha_blend_op         = blend_op_to_vk(desc.blend.alpha_op),
+                    .color_write_mask       = COLOR_WRITE_ALL,
+                };
+            }
+            blend_state.attachment_count = (uint)blend_attachments.len;
+            blend_state.p_attachments = blend_attachments.ptr;
+        }
 
         vk::DynamicState[7] dynamic_states = {
             vk::DynamicState.VIEWPORT,
