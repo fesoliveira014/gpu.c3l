@@ -7,3 +7,6 @@
 [submodule "lib/spvreflect.c3l"]
 	path = lib/spvreflect.c3l
 	url = https://github.com/fesoliveira014/spvreflect.c3l
+[submodule "lib/sdl3.c3l"]
+	path = lib/sdl3.c3l
+	url = https://github.com/fesoliveira014/sdl3.c3l
