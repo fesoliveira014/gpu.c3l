@@ -630,7 +630,75 @@ draw args can be read back for validation
 async readback resolves without blocking the frame that recorded it
 ```
 
-## M17 — Debug names, stats, and leak reporting
+## M17 — Depth attachments
+
+### Goal
+
+Enable depth-tested rendering.
+
+### Deliverables
+
+```text
+texture.c3 updates
+render_pass handling in vk/render_pass.c3
+vk/pipeline_graphics.c3 and vk/pipeline_cache.c3 updates
+test/test_vk_depth_attachment.c3
+```
+
+### Tasks
+
+```text
+depth formats in create_texture (D32_FLOAT first)
+depth_stencil usage flag and aspect handling
+depth layouts and barriers (DEPTH_ATTACHMENT, DEPTH_READ)
+DepthTargetDesc plumbing in cmd_begin_render_pass
+accept non-UNDEFINED depth_format in graphics pipelines
+depth format participates in the pipeline cache key
+end-to-end verification of dynamic depth state (validation-only since the pipeline cache landed)
+```
+
+### Acceptance criteria
+
+```text
+depth-tested overlapping triangles render correctly
+depth write/test toggles behave per descriptor
+depth-state pipeline variants still share one cache entry
+zero validation messages
+```
+
+## M18 — Threading model
+
+### Goal
+
+Define and implement the library's thread-safety policy.
+
+### Deliverables
+
+```text
+docs/threading.md
+synchronization in backend state where the policy requires it
+test/test_vk_threading.c3
+```
+
+### Tasks
+
+```text
+explore ownership models (externally-synchronized device vs internal locks vs per-thread contexts)
+document guarantees per API family (resource creation, command recording, submit, frame lifecycle)
+implement the chosen synchronization for slot tables, pipeline cache, arenas, and queues
+concurrent command recording across threads
+concurrent resource creation policy
+```
+
+### Acceptance criteria
+
+```text
+documented thread-safety table covers every public entry point
+sanctioned concurrent usage runs clean under validation
+unsanctioned usage is documented as such, not undefined by omission
+```
+
+## M19 — Debug names, stats, and leak reporting
 
 ### Goal
 
@@ -666,7 +734,7 @@ memory stats include VMA budget
 clean samples report zero leaks
 ```
 
-## M18 — Shader ABI generator
+## M20 — Shader ABI generator
 
 ### Goal
 
@@ -700,7 +768,7 @@ manual ABI structs are removed or minimized
 shader tests use generated structs
 ```
 
-## M19 — Cross-platform packaging
+## M21 — Cross-platform packaging
 
 ### Goal
 
@@ -734,7 +802,7 @@ windows-x64 build path is documented
 samples document SDL3 native library requirements
 ```
 
-## M20 — First release hardening
+## M22 — First release hardening
 
 ### Goal
 
