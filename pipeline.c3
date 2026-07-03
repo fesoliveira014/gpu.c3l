@@ -61,6 +61,11 @@ enum BlendOp : int {
     MAX,
 }
 
+enum IndexType : int {
+    U32,
+    U16,
+}
+
 struct ShaderDesc {
     ShaderStage stage;
     char[]      spirv;
@@ -123,6 +128,14 @@ fn void? destroy_shader(Device* device, ShaderHandle shader) {
 fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* desc) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.create_compute_pipeline(device, desc);
+}
+
+<* Create a graphics pipeline targeting dynamic rendering. The layout is fixed:
+   the global heap set plus a 16-byte vertex/fragment root push range.
+   Ownership: release with destroy_pipeline. *>
+fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.create_graphics_pipeline(device, desc);
 }
 
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {

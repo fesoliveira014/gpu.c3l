@@ -186,7 +186,7 @@ fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle,
     PipelineSlot* slot = state.pipelines.get(handle)!;
     vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
     vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
-    bind_descriptor_heap(state, cb, slot.layout);
+    bind_descriptor_heap(state, cb, slot.layout, vk::PipelineBindPoint.COMPUTE);
     ulong addr = (ulong)root;
     vk::cmd_push_constants(cb, slot.layout, vk::ShaderStageFlagBits.COMPUTE_BIT, 0, 8, &addr);
     vk::cmd_dispatch(cb, groups.x, groups.y, groups.z);

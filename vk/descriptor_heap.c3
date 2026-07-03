@@ -295,23 +295,14 @@ fn SamplerDescriptorCell*? sampler_cell_get(DescriptorHeapState* heap, gpu::Samp
     return &heap.sampler_cells[slot];
 }
 
-<* Only the default full-resource view is supported; anything else faults
-   rather than silently degrading. *>
-fn void? check_view_desc(TextureSlot* texture, gpu::TextureViewDesc* view) @private {
-    if (view == null) return;
-    if (view.format != gpu::Format.UNDEFINED && view.format != texture.format) return gpu::INVALID_ARGUMENT~;
-    if (view.base_mip != 0 || view.mip_count > 1)                              return gpu::INVALID_ARGUMENT~;
-    if (view.base_layer != 0 || view.layer_count > 1)                          return gpu::INVALID_ARGUMENT~;
-}
-
 <* Sampled and/or storage descriptor per the texture's usage, same slot in
    both bindings, so one TextureIndex serves both access kinds. Descriptor
    layout follows usage: sampled-only textures are accessed in SHADER_READ,
    storage-capable ones in GENERAL. *>
-fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* texture) @private {
+fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* texture, vk::ImageView view) @private {
     DescriptorHeapState* heap = &state.heap;
     vk::DescriptorImageInfo image_info = {
-        .image_view   = texture.default_view,
+        .image_view   = view,
         .image_layout = texture.usage.storage ? vk::ImageLayout.GENERAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
     };
 
@@ -378,9 +369,9 @@ fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sa
     vk::get_descriptor_ext(state.device, &info, (sz)heap.sampler_descriptor_size, dst);
 }
 
-fn void bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::PipelineLayout layout) {
+fn void bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::PipelineLayout layout, vk::PipelineBindPoint bind_point) {
     if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
-        vk::cmd_bind_descriptor_sets(cb, vk::PipelineBindPoint.COMPUTE, layout, HEAP_SET, 1, &state.heap.descriptor_set, 0, null);
+        vk::cmd_bind_descriptor_sets(cb, bind_point, layout, HEAP_SET, 1, &state.heap.descriptor_set, 0, null);
         return;
     }
 
@@ -394,14 +385,14 @@ fn void bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pip
 
     uint buffer_index = 0;
     vk::DeviceSize offset = 0;
-    vk::cmd_set_descriptor_buffer_offsets_ext(cb, vk::PipelineBindPoint.COMPUTE, layout, HEAP_SET, 1, &buffer_index, &offset);
+    vk::cmd_set_descriptor_buffer_offsets_ext(cb, bind_point, layout, HEAP_SET, 1, &buffer_index, &offset);
 }
 
 fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::TextureHandle texture, gpu::TextureViewDesc* view) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     DescriptorHeapState* heap = &state.heap;
     TextureSlot* texture_slot = state.textures.get(texture)!;
-    check_view_desc(texture_slot, view)!;
+    vk::ImageView image_view = resolve_texture_view(state, texture_slot, view)!;
 
     drain_texture_retire(state);
     uint slot;
@@ -418,7 +409,7 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
     cell.used = true;
     cell.generation = bump_generation(cell.generation);
 
-    write_texture_descriptor(state, slot, texture_slot);
+    write_texture_descriptor(state, slot, texture_slot, image_view);
     return (gpu::TextureIndex){ .slot = (ushort)slot, .generation = cell.generation };
 }
 

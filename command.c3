@@ -17,6 +17,7 @@ enum StoreOp : int {
 
 enum CommandState : int {
     RECORDING,
+    RECORDING_RENDER_PASS,
     EXECUTABLE,
     SUBMITTED,
 }
@@ -164,4 +165,27 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
 fn void? cmd_dispatch(CommandList* commands, PipelineHandle pipeline, GpuAddress root, Vec3u groups) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_dispatch(commands, pipeline, root, groups);
+}
+
+<* Begin dynamic rendering into the desc's color targets. Viewport and scissor
+   are set to the full pass dimensions. *>
+fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_begin_render_pass(commands, desc);
+}
+
+fn void? cmd_end_render_pass(CommandList* commands) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_end_render_pass(commands);
+}
+
+<* Draw inside a render pass, pushing the vertex and fragment root addresses. *>
+fn void? cmd_draw(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_draw(commands, pipeline, vertex_root, fragment_root, vertex_count, instance_count);
+}
+
+fn void? cmd_draw_indexed(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_draw_indexed(commands, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count, index_type);
 }

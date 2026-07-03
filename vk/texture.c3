@@ -7,6 +7,17 @@ import vma;
 // Concrete (non-generic) slot table for textures. Monomorphized twin of
 // gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
 const uint TEXTURE_FREE_NONE = 0;
+const uint MAX_CACHED_VIEWS = 8;
+
+struct CachedView {
+    vk::ImageView     view;
+    uint              base_mip;
+    uint              mip_count;
+    uint              base_layer;
+    uint              layer_count;
+    vk::ImageViewType view_type;
+    bool              used;
+}
 
 struct TextureSlot {
     vk::Image          image;
@@ -19,6 +30,7 @@ struct TextureSlot {
     uint               mip_levels;
     uint               array_layers;
     gpu::TextureLayout current_layout;
+    CachedView[MAX_CACHED_VIEWS] views;
 }
 
 struct TextureCell {
@@ -141,9 +153,9 @@ fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     }
 }
 
-<* Supported slice: 2D, mips up to the full chain, any layer count, and
-   sampled/storage/transfer usage; anything else faults rather than silently
-   degrading. Depth formats and attachment usages arrive with their consumers. *>
+<* Supported slice: 2D color-format textures, mips up to the full chain, any
+   layer count, sampled/storage/transfer/color-attachment usage; anything else
+   faults rather than silently degrading. Depth arrives with its consumer. *>
 fn void? check_texture_desc(gpu::TextureDesc* desc) @private {
     if (desc.dimension != gpu::TextureDimension.TEX_2D) return gpu::INVALID_ARGUMENT~;
     if (desc.width == 0 || desc.height == 0)            return gpu::INVALID_ARGUMENT~;
@@ -151,8 +163,74 @@ fn void? check_texture_desc(gpu::TextureDesc* desc) @private {
     if (desc.mip_levels > full_mip_chain(desc.width, desc.height)) return gpu::INVALID_ARGUMENT~;
     if (format_to_vk(desc.format) == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
     if (desc.format == gpu::Format.D32_FLOAT || desc.format == gpu::Format.D24_UNORM_S8_UINT) return gpu::INVALID_ARGUMENT~;
-    if (!desc.usage.sampled && !desc.usage.storage)     return gpu::INVALID_ARGUMENT~;
-    if (desc.usage.color_attach || desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
+    if (!desc.usage.sampled && !desc.usage.storage && !desc.usage.color_attach) return gpu::INVALID_ARGUMENT~;
+    if (desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
+}
+
+<* Resolve a view desc to an image view: null/zero desc (or the explicit full
+   range) is the default view; anything else is normalized, validated, and
+   get-or-created in the slot's view cache. Cached views die with the texture.
+   Format reinterpretation is out of scope. *>
+fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view) {
+    if (view == null) return slot.default_view;
+    if (view.format != gpu::Format.UNDEFINED && view.format != slot.format) return gpu::INVALID_ARGUMENT~;
+    if (view.base_mip >= slot.mip_levels || view.base_layer >= slot.array_layers) return gpu::INVALID_ARGUMENT~;
+
+    uint mip_count   = view.mip_count == 0 ? slot.mip_levels - view.base_mip : view.mip_count;
+    uint layer_count = view.layer_count == 0 ? slot.array_layers - view.base_layer : view.layer_count;
+    if (view.base_mip + mip_count > slot.mip_levels)       return gpu::INVALID_ARGUMENT~;
+    if (view.base_layer + layer_count > slot.array_layers) return gpu::INVALID_ARGUMENT~;
+
+    vk::ImageViewType view_type = layer_count > 1 ? vk::ImageViewType.TYPE_2D_ARRAY : vk::ImageViewType.TYPE_2D;
+    bool full_range = view.base_mip == 0 && mip_count == slot.mip_levels
+        && view.base_layer == 0 && layer_count == slot.array_layers;
+    if (full_range) return slot.default_view;
+
+    foreach (&cached : slot.views) {
+        if (cached.used
+            && cached.base_mip == view.base_mip && cached.mip_count == mip_count
+            && cached.base_layer == view.base_layer && cached.layer_count == layer_count
+            && cached.view_type == view_type) {
+            return cached.view;
+        }
+    }
+
+    foreach (&cached : slot.views) {
+        if (cached.used) continue;
+        vk::ImageViewCreateInfo view_info = vk::image_view_create_info()
+            .set_image(slot.image)
+            .set_view_type(view_type)
+            .set_format(format_to_vk(slot.format))
+            .set_subresource_range({
+                .aspect_mask      = format_aspect(slot.format),
+                .base_mip_level   = view.base_mip,
+                .level_count      = mip_count,
+                .base_array_layer = view.base_layer,
+                .layer_count      = layer_count,
+            });
+        vk::ImageView image_view;
+        check(vk::create_image_view(state.device, &view_info, null, &image_view))!;
+        *cached = {
+            .view        = image_view,
+            .base_mip    = view.base_mip,
+            .mip_count   = mip_count,
+            .base_layer  = view.base_layer,
+            .layer_count = layer_count,
+            .view_type   = view_type,
+            .used        = true,
+        };
+        return image_view;
+    }
+    return gpu::SLOT_TABLE_FULL~;
+}
+
+fn void destroy_cached_views(VkDeviceState* state, TextureSlot* slot) {
+    foreach (&cached : slot.views) {
+        if (cached.used) {
+            vk::destroy_image_view(state.device, cached.view, null);
+            cached.used = false;
+        }
+    }
 }
 
 fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
@@ -215,6 +293,7 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
 fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     TextureSlot* slot = state.textures.get(handle)!;
+    destroy_cached_views(state, slot);
     vk::destroy_image_view(state.device, slot.default_view, null);
     state.allocator.destroy_image(slot.image, slot.allocation);
     state.textures.free(handle)!;
