@@ -100,13 +100,10 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(gpu::GpuSpan* span, TextureS
     uint layers = layer_count == 0 ? 1 : layer_count;
     if (base_layer + layers > slot.array_layers) return gpu::INVALID_ARGUMENT~;
 
-    uint mip_width  = slot.width >> mip;
-    uint mip_height = slot.height >> mip;
-    if (mip_width == 0)  mip_width = 1;
-    if (mip_height == 0) mip_height = 1;
-    if (width == 0)  width = mip_width;
-    if (height == 0) height = mip_height;
-    if (x + width > mip_width || y + height > mip_height) return gpu::INVALID_ARGUMENT~;
+    MipExtent extent = texture_mip_extent(slot, mip);
+    if (width == 0)  width = extent.width;
+    if (height == 0) height = extent.height;
+    if (x + width > extent.width || y + height > extent.height) return gpu::INVALID_ARGUMENT~;
     if (row_length_texels != 0 && row_length_texels < width) return gpu::INVALID_ARGUMENT~;
 
     usz texel_size = format_texel_size(slot.format);

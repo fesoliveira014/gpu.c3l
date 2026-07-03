@@ -137,6 +137,20 @@ fn usz format_texel_size(gpu::Format format) {
     }
 }
 
+struct MipExtent {
+    uint width;
+    uint height;
+}
+
+fn MipExtent texture_mip_extent(TextureSlot* slot, uint mip) {
+    uint width  = slot.width >> mip;
+    uint height = slot.height >> mip;
+    return {
+        .width  = width == 0 ? 1 : width,
+        .height = height == 0 ? 1 : height,
+    };
+}
+
 fn uint full_mip_chain(uint width, uint height) @private {
     uint levels = 1;
     uint size = width > height ? width : height;

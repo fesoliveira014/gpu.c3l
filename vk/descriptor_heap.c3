@@ -242,12 +242,6 @@ fn void report_descriptor_leaks(VkDeviceState* state) {
     }
 }
 
-<* In-frame retires wait for the value end_frame will signal; outside a frame
-   the current value makes reclaim immediate. *>
-fn ulong retire_timeline_value(VkDeviceState* state) @private {
-    return state.frame_active ? state.timeline_counter + 1 : state.timeline_counter;
-}
-
 fn void drain_texture_retire(VkDeviceState* state) @private {
     DescriptorHeapState* heap = &state.heap;
     if (heap.texture_retire.count == 0) return;

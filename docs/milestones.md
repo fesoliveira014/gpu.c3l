@@ -618,6 +618,7 @@ barrier shader write -> indirect read
 cmd_draw_indexed_indirect
 cmd_dispatch_indirect
 optional draw count buffer
+async readback tickets over the readback arena (cmd_readback_buffer/texture -> ReadbackTicket { GpuSpan, SemaphoreValue }; poll/resolve)
 ```
 
 ### Acceptance criteria
@@ -626,6 +627,7 @@ optional draw count buffer
 compute-generated draw renders correctly
 barrier is explicit
 draw args can be read back for validation
+async readback resolves without blocking the frame that recorded it
 ```
 
 ## M17 — Debug names, stats, and leak reporting
