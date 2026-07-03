@@ -81,8 +81,13 @@ const gpu::BackendVTable VK_VTABLE = {
     .create_shader           = &vk_create_shader,
     .destroy_shader          = &vk_destroy_shader,
     .create_compute_pipeline = &vk_create_compute_pipeline,
+    .create_graphics_pipeline = &vk_create_graphics_pipeline,
     .destroy_pipeline        = &vk_destroy_pipeline,
     .cmd_dispatch            = &vk_cmd_dispatch,
+    .cmd_begin_render_pass   = &vk_cmd_begin_render_pass,
+    .cmd_end_render_pass     = &vk_cmd_end_render_pass,
+    .cmd_draw                = &vk_cmd_draw,
+    .cmd_draw_indexed        = &vk_cmd_draw_indexed,
 };
 
 <* Build a Vulkan device end to end. On failure the partial state is torn down
@@ -176,6 +181,7 @@ fn void destroy_state(VkDeviceState* state) @private {
         if (state.textures.slots.ptr != null) {
             foreach (&cell : state.textures.slots[:state.textures.next_new]) {
                 if (cell.used) {
+                    destroy_cached_views(state, &cell.value);
                     vk::destroy_image_view(state.device, cell.value.default_view, null);
                     if (state.allocator != null) state.allocator.destroy_image(cell.value.image, cell.value.allocation);
                 }

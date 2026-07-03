@@ -14,6 +14,13 @@
       "target": "linux-x64",
       "sources": [ "root_pointer_compute/main.c3" ]
     },
+    // Headless rasterization: textured triangle to an offscreen target,
+    // dumped as PPM. Proves graphics pipelines + heap from the fragment stage.
+    "offscreen_triangle": {
+      "type": "executable",
+      "target": "linux-x64",
+      "sources": [ "offscreen_triangle/main.c3" ]
+    },
     // Headless: writes a pattern into a storage image by TextureIndex, then
     // samples it back by the same index. Proves the bindless descriptor heap.
     "bindless_texture_compute": {

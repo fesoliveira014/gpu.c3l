@@ -48,8 +48,13 @@ alias DestroySamplerFn           = fn void? (Device*, SamplerIndex);
 alias CreateShaderFn          = fn ShaderHandle? (Device*, ShaderDesc*);
 alias DestroyShaderFn         = fn void? (Device*, ShaderHandle);
 alias CreateComputePipelineFn = fn PipelineHandle? (Device*, ComputePipelineDesc*);
+alias CreateGraphicsPipelineFn = fn PipelineHandle? (Device*, GraphicsPipelineDesc*);
 alias DestroyPipelineFn       = fn void? (Device*, PipelineHandle);
 alias CmdDispatchFn           = fn void? (CommandList*, PipelineHandle, GpuAddress, Vec3u);
+alias CmdBeginRenderPassFn    = fn void? (CommandList*, RenderPassDesc*);
+alias CmdEndRenderPassFn      = fn void? (CommandList*);
+alias CmdDrawFn               = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuAddress, uint, uint);
+alias CmdDrawIndexedFn        = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuAddress, GpuSpan, uint, uint, IndexType);
 
 struct BackendVTable {
     DestroyDeviceFn         destroy_device;
@@ -90,8 +95,13 @@ struct BackendVTable {
     CreateShaderFn          create_shader;
     DestroyShaderFn         destroy_shader;
     CreateComputePipelineFn create_compute_pipeline;
+    CreateGraphicsPipelineFn create_graphics_pipeline;
     DestroyPipelineFn       destroy_pipeline;
     CmdDispatchFn           cmd_dispatch;
+    CmdBeginRenderPassFn    cmd_begin_render_pass;
+    CmdEndRenderPassFn      cmd_end_render_pass;
+    CmdDrawFn               cmd_draw;
+    CmdDrawIndexedFn        cmd_draw_indexed;
 }
 
 // A GPU device. `vtable` points at one static table shared by all devices of a

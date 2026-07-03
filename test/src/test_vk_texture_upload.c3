@@ -393,6 +393,127 @@ fn void copy_validation_faults() @test {
     gpu::end_frame(&device)!!;
 }
 
+fn void mip_subset_view_sampled() @test {
+    gpu::Device device = make_upload_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDesc tex_desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = UP_SIZE,
+        .height     = UP_SIZE,
+        .mip_levels = 2,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .transfer_dst },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    // Register a mip-1-only view: sampling it at lod 0 must return mip 1.
+    gpu::TextureViewDesc mip1_view = { .base_mip = 1, .mip_count = 1 };
+    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, texture, &mip1_view)!!;
+    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+
+    gpu::TextureViewDesc out_of_range = { .base_mip = 2, .mip_count = 1 };
+    fault range_fault = @catch(gpu::create_texture_descriptor(&device, texture, &out_of_range));
+    assert(range_fault == gpu::INVALID_ARGUMENT, "view past the mip chain faults INVALID_ARGUMENT");
+
+    gpu::SamplerDesc sampler_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
+    defer gpu::destroy_sampler(&device, smp_index)!!;
+
+    gpu::BufferDesc staging_desc = {
+        .size = MIP0_BYTES + MIP1_BYTES, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING,
+    };
+    gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
+    defer gpu::destroy_buffer(&device, staging)!!;
+    gpu::GpuSpan staging_span = gpu::get_buffer_span(&device, staging)!!;
+    char* bytes = (char*)staging_span.cpu;
+    for (uint i = 0; i < UP_SIZE * UP_SIZE; i++) {
+        bytes[i * 4] = (char)10; bytes[i * 4 + 1] = (char)20; bytes[i * 4 + 2] = (char)30; bytes[i * 4 + 3] = (char)255;
+    }
+    for (uint i = 0; i < (UP_SIZE / 2) * (UP_SIZE / 2); i++) {
+        char* texel = &bytes[MIP0_BYTES + (usz)i * 4];
+        texel[0] = (char)200; texel[1] = (char)210; texel[2] = (char)220; texel[3] = (char)255;
+    }
+    gpu::flush_buffer(&device, staging, 0, 0)!!;
+
+    gpu::BufferDesc out_desc = {
+        .size        = (UP_SIZE / 2) * (UP_SIZE / 2) * 16,
+        .usage       = { .storage, .addressable },
+        .memory_kind = gpu::MemoryKind.READBACK,
+    };
+    gpu::BufferHandle sample_out = gpu::create_buffer(&device, &out_desc)!!;
+    defer gpu::destroy_buffer(&device, sample_out)!!;
+
+    gpu::ShaderDesc sample_sd = {
+        .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
+    };
+    gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_sd)!!;
+    defer gpu::destroy_shader(&device, sample_shader)!!;
+    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = 8 };
+    gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
+    defer gpu::destroy_pipeline(&device, sample_pipe)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!!;
+    SampleRoot* root = (SampleRoot*)root_span.cpu;
+    root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
+    root.texture_index = (uint)tex_index;
+    root.sampler_index = (uint)smp_index;
+    root.width         = UP_SIZE / 2;
+    root.height        = UP_SIZE / 2;
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::TextureBarrier to_dst = {
+        .texture       = texture,
+        .before_stage  = gpu::Stage.HOST,
+        .after_stage   = gpu::Stage.TRANSFER,
+        .before_hazard = gpu::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
+        .old_layout    = gpu::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+    };
+    gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
+    gpu::BufferTextureCopyDesc mip0_copy = { .src = subspan(staging_span, 0, MIP0_BYTES), .texture = texture, .mip = 0 };
+    gpu::cmd_copy_buffer_to_texture(&cmd, &mip0_copy)!!;
+    gpu::BufferTextureCopyDesc mip1_copy = { .src = subspan(staging_span, MIP0_BYTES, MIP1_BYTES), .texture = texture, .mip = 1 };
+    gpu::cmd_copy_buffer_to_texture(&cmd, &mip1_copy)!!;
+    gpu::TextureBarrier to_read = {
+        .texture       = texture,
+        .before_stage  = gpu::Stage.TRANSFER,
+        .after_stage   = gpu::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+        .after_hazard  = gpu::Hazard.SHADER_READ,
+        .old_layout    = gpu::TextureLayout.TRANSFER_DST,
+        .new_layout    = gpu::TextureLayout.SHADER_READ,
+    };
+    gpu::cmd_texture_barrier(&cmd, &to_read)!!;
+    gpu::cmd_dispatch(&cmd, sample_pipe, root_span.gpu, { 1, 1, 1 })!!;
+    gpu::BufferBarrier out_bar = {
+        .buffer = sample_out, .offset = 0, .size = (UP_SIZE / 2) * (UP_SIZE / 2) * 16,
+        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    };
+    gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
+    gpu::end_commands(&device, &cmd)!!;
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+
+    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
+    float* sampled = (float*)out_span.cpu;
+    assert(quantize_unorm8(sampled[0]) == 200, "mip-subset view samples mip 1, not mip 0");
+    assert(quantize_unorm8(sampled[1]) == 210, "mip-subset view green matches mip 1");
+    gpu::end_frame(&device)!!;
+}
+
 fn void flush_invalidate_stale_handle_faults() @test {
     gpu::Device device = make_upload_test_device();
     defer gpu::destroy_device(&device)!!;

@@ -56,6 +56,11 @@
       "type": "test",
       "target": "linux-x64",
       "sources": [ "src/test_vk_shader_reflection.c3" ]
+    },
+    "vk_offscreen": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_vk_offscreen_triangle.c3" ]
     }
   }
 }

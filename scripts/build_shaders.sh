@@ -41,3 +41,10 @@ done
 for name in bad_set bad_binding; do
     compile "$ROOT/test/shaders/$name.comp.glsl" "$ROOT/test/src/shaders/$name.comp.spv"
 done
+
+OT="$ROOT/samples/offscreen_triangle/shaders"
+for name in offscreen.vert offscreen.frag; do
+    compile "$OT/$name.glsl" "$OT/$name.spv"
+    cp "$OT/$name.spv" "$ROOT/test/src/shaders/$name.spv"
+    echo "copied $name.spv -> test/src/shaders/"
+done

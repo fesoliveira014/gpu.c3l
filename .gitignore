@@ -25,3 +25,6 @@ openspec/
 # Editor / OS
 .DS_Store
 *.swp
+
+# Sample image dumps
+*.ppm
