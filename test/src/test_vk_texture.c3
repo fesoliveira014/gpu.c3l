@@ -36,15 +36,35 @@ fn void texture_unsupported_desc_rejected() @test {
     gpu::Device device = make_texture_test_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::TextureDesc depth_format = {
+    gpu::TextureDesc packed_depth = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 16,
+        .height    = 16,
+        .format    = gpu::Format.D24_UNORM_S8_UINT,
+        .usage     = { .depth_attach },
+    };
+    fault packed_fault = @catch(gpu::create_texture(&device, &packed_depth));
+    assert(packed_fault == gpu::INVALID_ARGUMENT, "D24_UNORM_S8_UINT faults INVALID_ARGUMENT");
+
+    gpu::TextureDesc depth_storage = {
         .dimension = gpu::TextureDimension.TEX_2D,
         .width     = 16,
         .height    = 16,
         .format    = gpu::Format.D32_FLOAT,
-        .usage     = { .sampled },
+        .usage     = { .depth_attach, .storage },
     };
-    fault depth_fault = @catch(gpu::create_texture(&device, &depth_format));
-    assert(depth_fault == gpu::INVALID_ARGUMENT, "depth formats fault INVALID_ARGUMENT");
+    fault storage_fault = @catch(gpu::create_texture(&device, &depth_storage));
+    assert(storage_fault == gpu::INVALID_ARGUMENT, "storage usage on a depth format faults INVALID_ARGUMENT");
+
+    gpu::TextureDesc color_with_depth_usage = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 16,
+        .height    = 16,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .depth_attach },
+    };
+    fault cross_fault = @catch(gpu::create_texture(&device, &color_with_depth_usage));
+    assert(cross_fault == gpu::INVALID_ARGUMENT, "depth_attach on a color format faults INVALID_ARGUMENT");
 
     gpu::TextureDesc no_heap_usage = {
         .dimension = gpu::TextureDimension.TEX_2D,
