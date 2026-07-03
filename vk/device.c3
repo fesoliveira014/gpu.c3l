@@ -21,6 +21,7 @@ struct VkDeviceState {
     gpu::DeviceCaps            caps;
     bool                       validation;
     bool                       memory_budget_enabled;
+    bool                       draw_indirect_count;
     gpu::DescriptorHeapMode    heap_mode;
     uint                       texture_descriptor_capacity;
     uint                       sampler_descriptor_capacity;
@@ -97,12 +98,20 @@ const gpu::BackendVTable VK_VTABLE = {
     .cmd_end_render_pass     = &vk_cmd_end_render_pass,
     .cmd_draw                = &vk_cmd_draw,
     .cmd_draw_indexed        = &vk_cmd_draw_indexed,
+    .cmd_draw_indirect       = &vk_cmd_draw_indirect,
+    .cmd_draw_indexed_indirect = &vk_cmd_draw_indexed_indirect,
+    .cmd_draw_indexed_indirect_count = &vk_cmd_draw_indexed_indirect_count,
+    .cmd_dispatch_indirect   = &vk_cmd_dispatch_indirect,
     .cmd_upload_buffer       = &vk_cmd_upload_buffer,
     .cmd_upload_texture      = &vk_cmd_upload_texture,
     .upload_buffer_data      = &vk_upload_buffer_data,
     .upload_texture_data     = &vk_upload_texture_data,
     .readback_buffer_data    = &vk_readback_buffer_data,
     .readback_texture_data   = &vk_readback_texture_data,
+    .cmd_readback_buffer     = &vk_cmd_readback_buffer,
+    .cmd_readback_texture    = &vk_cmd_readback_texture,
+    .poll_readback           = &vk_poll_readback,
+    .resolve_readback        = &vk_resolve_readback,
     .create_swapchain        = &vk_create_swapchain,
     .destroy_swapchain       = &vk_destroy_swapchain,
     .resize_swapchain        = &vk_resize_swapchain,
@@ -129,9 +138,16 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
 
     vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
-    vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features12);
+    vk::PhysicalDeviceVulkan11Features features11 = vk::physical_device_vulkan11features().set_next(&features12);
+    vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
     vk::get_physical_device_features2(state.physical_device, &features2);
-    check_required_features(&features2.features, &features12, &features13)!;
+    check_required_features(
+        base: &features2.features,
+        v11:  &features11,
+        v12:  &features12,
+        v13:  &features13,
+    )!;
+    state.draw_indirect_count = features12.draw_indirect_count != 0;
 
     bool indexing_supported = heap_indexing_supported(&features2.features, &features12);
     bool buffer_supported   = heap_shared_features_supported(&features2.features, &features12) && query_descriptor_buffer_support(state.physical_device);
@@ -259,11 +275,15 @@ fn void destroy_state(VkDeviceState* state) @private {
     mem::free(state);
 }
 
-<* Gate on the required base/1.2/1.3 features. Pure, so it is unit-testable
+<* Gate on the required base/1.1/1.2/1.3 features. Pure, so it is unit-testable
    without a device. shaderInt64 backs the root-pointer shader ABI's 64-bit
-   address scalars (SPIR-V Int64 capability). *>
-fn void? check_required_features(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13) {
+   address scalars (SPIR-V Int64 capability); multiDrawIndirect and
+   shaderDrawParameters back multi-draw indirect execution and the gl_DrawID
+   per-draw indexing convention. *>
+fn void? check_required_features(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan11Features* v11, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13) {
     if (base.shader_int64 == 0)         return gpu::UNSUPPORTED_FEATURE~;
+    if (base.multi_draw_indirect == 0)  return gpu::UNSUPPORTED_FEATURE~;
+    if (v11.shader_draw_parameters == 0) return gpu::UNSUPPORTED_FEATURE~;
     if (v12.buffer_device_address == 0) return gpu::UNSUPPORTED_FEATURE~;
     if (v12.timeline_semaphore == 0)    return gpu::UNSUPPORTED_FEATURE~;
     if (v13.synchronization2 == 0)      return gpu::UNSUPPORTED_FEATURE~;
@@ -322,9 +342,15 @@ fn bool candidate_satisfies(vk::PhysicalDevice candidate, gpu::DeviceDesc* desc)
 
     vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
-    vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features12);
+    vk::PhysicalDeviceVulkan11Features features11 = vk::physical_device_vulkan11features().set_next(&features12);
+    vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
     vk::get_physical_device_features2(candidate, &features2);
-    if (catch check_required_features(&features2.features, &features12, &features13)) return false;
+    if (catch check_required_features(
+        base: &features2.features,
+        v11:  &features11,
+        v12:  &features12,
+        v13:  &features13,
+    )) return false;
 
     bool indexing = heap_indexing_supported(&features2.features, &features12);
     bool buffer   = heap_shared_features_supported(&features2.features, &features12) && query_descriptor_buffer_support(candidate);
@@ -403,8 +429,15 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @p
             .set_descriptor_binding_storage_image_update_after_bind(vk::TRUE)
             .set_descriptor_binding_update_unused_while_pending(vk::TRUE);
     }
-    vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features12);
+    if (state.draw_indirect_count) {
+        features12 = features12.set_draw_indirect_count(vk::TRUE);
+    }
+    vk::PhysicalDeviceVulkan11Features features11 = vk::physical_device_vulkan11features()
+        .set_shader_draw_parameters(vk::TRUE)
+        .set_next(&features12);
+    vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
     features2.features.shader_int64 = vk::TRUE;
+    features2.features.multi_draw_indirect = vk::TRUE;
     features2.features.shader_storage_image_read_without_format  = vk::TRUE;
     features2.features.shader_storage_image_write_without_format = vk::TRUE;
 
@@ -457,6 +490,7 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .dynamic_rendering          = v13.dynamic_rendering != 0,
         .timeline_semaphore         = v12.timeline_semaphore != 0,
         .shader_int64               = base.shader_int64 != 0,
+        .draw_indirect_count        = v12.draw_indirect_count != 0,
         .descriptor_buffer          = buffer_supported,
         .descriptor_indexing        = indexing_supported,
         .max_texture_descriptors    = texture_capacity,

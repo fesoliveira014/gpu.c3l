@@ -69,6 +69,25 @@ Vertex shader receives `vertex_root`. Fragment shader receives `fragment_root`.
 
 Do not pass raw pointer values through vertex outputs to fragment shaders. Some backends and validation paths treat cross-stage pointer passing poorly. Pass each stage's root pointer directly.
 
+### Indirect multi-draw convention
+
+An indirect multi-draw shares one `vertex_root`/`fragment_root` pair across
+every draw it issues. Per-draw variation flows through `gl_DrawID`
+(`shaderDrawParameters` is a required device feature): the root points at a
+per-draw table, and the shader indexes it.
+
+```text
+Root { table_gpu, ... }
+record = Table(root.table_gpu).items[gl_DrawID]
+```
+
+Argument structs are part of the ABI and match Vulkan byte-for-byte —
+`DrawIndirectCommand` (16 B), `DrawIndexedIndirectCommand` (20 B),
+`DispatchIndirectCommand` (12 B) — declared on the C3 side in `command.c3`
+(size-asserted) and on the GLSL side in
+`include/shaders/indirect_commands.glsl` with identical field names. Compute
+shaders write them std430-tight; no padding exists in any of the three.
+
 ## 5. Buffer layout
 
 All root and table structs use `std430`-compatible layout.

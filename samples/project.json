@@ -34,6 +34,13 @@
       "type": "executable",
       "target": "linux-x64",
       "sources": [ "bindless_texture_compute/main.c3" ]
+    },
+    // Windowed: compute culls a quad grid and writes indirect draw args
+    // (+ count where supported); one multi-draw renders via gl_DrawID.
+    "gpu_driven_draw_sdl": {
+      "type": "executable",
+      "target": "linux-x64",
+      "sources": [ "gpu_driven_draw_sdl/main.c3", "shared/sample_window_sdl.c3" ]
     }
   }
 }

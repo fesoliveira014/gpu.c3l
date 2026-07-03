@@ -42,6 +42,13 @@ for name in bad_set bad_binding; do
     compile "$ROOT/test/shaders/$name.comp.glsl" "$ROOT/test/src/shaders/$name.comp.spv"
 done
 
+compile "$ROOT/test/shaders/build_indirect.comp.glsl" "$ROOT/test/src/shaders/build_indirect.comp.spv"
+
+GD="$ROOT/samples/gpu_driven_draw_sdl/shaders"
+compile "$GD/build_draws.comp.glsl" "$GD/build_draws.comp.spv"
+compile "$GD/gpu_driven.vert.glsl" "$GD/gpu_driven.vert.spv"
+compile "$GD/gpu_driven.frag.glsl" "$GD/gpu_driven.frag.spv"
+
 OT="$ROOT/samples/offscreen_triangle/shaders"
 for name in offscreen.vert offscreen.frag; do
     compile "$OT/$name.glsl" "$OT/$name.spv"

@@ -517,6 +517,36 @@ cmd_draw_indexed(
 ) -> void?
 ```
 
+### Indirect execution
+
+Argument layouts match Vulkan byte-for-byte and are shader-writable (GLSL
+twins in `include/shaders/indirect_commands.glsl`):
+
+```text
+DrawIndirectCommand        { vertex_count, instance_count, first_vertex, first_instance }
+DrawIndexedIndirectCommand { index_count, instance_count, first_index, vertex_offset, first_instance }
+DispatchIndirectCommand    { x, y, z }
+
+cmd_draw_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count) -> void?
+cmd_draw_indexed_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count, index_span, index_type) -> void?
+cmd_draw_indexed_indirect_count(commands, pipeline, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type) -> void?
+cmd_dispatch_indirect(commands, pipeline, root, args) -> void?
+```
+
+Argument spans must come from a buffer with `indirect` usage, 4-byte aligned,
+with `draw_count` (or `max_draw_count`) times the tight argument size inside
+the span. One vertex/fragment root pair applies to every draw in a
+multi-draw; per-draw variation indexes a table through `gl_DrawID` (see
+`docs/shader_abi.md`). Ordering between argument writes and indirect
+consumption is the caller's barrier (`INDIRECT_COMMAND` / `INDIRECT_READ`).
+
+The count variant requires `DeviceCaps.draw_indirect_count` and faults
+`UNSUPPORTED_FEATURE` without it.
+
+Index bounds in indirect indexed draws are **not validated**: `index_count`
+lives in GPU-written memory, so out-of-bounds indices follow device
+robustness behavior.
+
 ### Transfer
 
 ```text
@@ -525,6 +555,39 @@ cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) -
 cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) -> void?
 cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset, usz size, uint value) -> void?
 ```
+
+### Readback tickets
+
+Non-blocking readback: record now, resolve later.
+
+```text
+ReadbackTicket
+    GpuSpan span
+    SemaphoreValue value
+    (backend bookkeeping fields)
+
+cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) -> ReadbackTicket?
+cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) -> ReadbackTicket?
+poll_readback(Device* device, ReadbackTicket* ticket) -> bool
+resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) -> void?
+```
+
+Recording copies the source into readback memory inside the caller's command
+list and inserts only the internal transfer→host barrier on the destination;
+source-side ordering (and, for textures, the `TRANSFER_SRC` layout) is the
+caller's responsibility.
+
+Readiness is frame-boundary granular: the device timeline advances at
+`end_frame` (or inside blocking helpers), so a ticket recorded in frame N
+resolves after frame N ends. Applications that never run the frame loop
+never signal tickets.
+
+Tickets hold a pinned readback-arena range until resolved — an unresolved
+ticket blocks arena reclamation behind it (FIFO); when the arena is full,
+tickets fall back to dedicated buffers destroyed at resolve. `resolve_readback`
+faults `READBACK_NOT_READY` before the timeline signals, and
+`INVALID_ARGUMENT` on an already-resolved ticket or a `dest` smaller than the
+span. Each ticket resolves exactly once.
 
 ### Barriers
 

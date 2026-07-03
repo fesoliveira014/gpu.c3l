@@ -28,6 +28,32 @@ struct Vec3u {
     uint z;
 }
 
+// Indirect argument layouts, byte-identical to Vulkan's and shader-writable
+// (GLSL twins in include/shaders/indirect_commands.glsl).
+struct DrawIndirectCommand {
+    uint vertex_count;
+    uint instance_count;
+    uint first_vertex;
+    uint first_instance;
+}
+$assert DrawIndirectCommand::size == 16;
+
+struct DrawIndexedIndirectCommand {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int  vertex_offset;
+    uint first_instance;
+}
+$assert DrawIndexedIndirectCommand::size == 20;
+
+struct DispatchIndirectCommand {
+    uint x;
+    uint y;
+    uint z;
+}
+$assert DispatchIndirectCommand::size == 12;
+
 struct ClearColor {
     float[4] rgba;
 }
@@ -191,4 +217,34 @@ fn void? cmd_draw(CommandList* commands, PipelineHandle pipeline, GpuAddress ver
 fn void? cmd_draw_indexed(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_draw_indexed(commands, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count, index_type);
+}
+
+<* Draw from GPU-written DrawIndirectCommand arguments at the span's offset.
+   The args buffer needs indirect usage; the root pair applies to every draw
+   in the multi-draw (per-draw variation via gl_DrawID). Ordering against the
+   argument writes is the caller's barrier. *>
+fn void? cmd_draw_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_draw_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count);
+}
+
+<* Indexed variant over DrawIndexedIndirectCommand arguments. Index-range
+   bounds are read from GPU memory at execution time and are not validated;
+   out-of-bounds indices follow device robustness. *>
+fn void? cmd_draw_indexed_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_draw_indexed_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count, index_span, index_type);
+}
+
+<* Count-buffer variant: the GPU-written uint at count_span limits the draw
+   count up to max_draw_count. Requires DeviceCaps.draw_indirect_count. *>
+fn void? cmd_draw_indexed_indirect_count(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_draw_indexed_indirect_count(commands, pipeline, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type);
+}
+
+<* Dispatch from GPU-written DispatchIndirectCommand arguments. *>
+fn void? cmd_dispatch_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress root, GpuSpan args) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_dispatch_indirect(commands, pipeline, root, args);
 }

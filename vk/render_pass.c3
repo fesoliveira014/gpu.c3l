@@ -138,3 +138,98 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
         index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32);
     vk::cmd_draw_indexed(cb, index_count, instance_count, 0, 0, 0);
 }
+
+fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, uint draw_count) @private {
+    if (commands.state != gpu::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    BufferSlot* args_buffer = resolve_indirect_span(
+        state:    state,
+        span:     &args,
+        arg_size: gpu::DrawIndirectCommand::size,
+        count:    draw_count,
+    )!;
+    vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
+    bind_graphics_and_push(
+        commands:      commands,
+        handle:        handle,
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+        cb:            cb,
+    )!;
+    vk::cmd_draw_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset, draw_count, gpu::DrawIndirectCommand::size);
+}
+
+fn void? bind_index_span(VkDeviceState* state, vk::CommandBuffer cb, gpu::GpuSpan* index_span, gpu::IndexType index_type) @private {
+    BufferSlot* buffer = state.buffers.get(index_span.buffer)!;
+    vk::cmd_bind_index_buffer(cb, buffer.buffer, (vk::DeviceSize)index_span.offset,
+        index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32);
+}
+
+<* Index-range bounds live in the GPU-written arguments and are not validated
+   here; out-of-bounds indices follow device robustness. *>
+fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, uint draw_count, gpu::GpuSpan index_span, gpu::IndexType index_type) @private {
+    if (commands.state != gpu::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    BufferSlot* args_buffer = resolve_indirect_span(
+        state:    state,
+        span:     &args,
+        arg_size: gpu::DrawIndexedIndirectCommand::size,
+        count:    draw_count,
+    )!;
+    vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
+    bind_graphics_and_push(
+        commands:      commands,
+        handle:        handle,
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+        cb:            cb,
+    )!;
+    bind_index_span(
+        state:      state,
+        cb:         cb,
+        index_span: &index_span,
+        index_type: index_type,
+    )!;
+    vk::cmd_draw_indexed_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset, draw_count, gpu::DrawIndexedIndirectCommand::size);
+}
+
+fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, gpu::GpuSpan count_span, uint max_draw_count, gpu::GpuSpan index_span, gpu::IndexType index_type) @private {
+    if (commands.state != gpu::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
+    BufferSlot* args_buffer = resolve_indirect_span(
+        state:    state,
+        span:     &args,
+        arg_size: gpu::DrawIndexedIndirectCommand::size,
+        count:    max_draw_count,
+    )!;
+    BufferSlot* count_buffer = resolve_indirect_span(
+        state:    state,
+        span:     &count_span,
+        arg_size: 4,
+        count:    1,
+    )!;
+    vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
+    bind_graphics_and_push(
+        commands:      commands,
+        handle:        handle,
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+        cb:            cb,
+    )!;
+    bind_index_span(
+        state:      state,
+        cb:         cb,
+        index_span: &index_span,
+        index_type: index_type,
+    )!;
+    vk::cmd_draw_indexed_indirect_count(
+        cb,
+        args_buffer.buffer,
+        (vk::DeviceSize)args.offset,
+        count_buffer.buffer,
+        (vk::DeviceSize)count_span.offset,
+        max_draw_count,
+        gpu::DrawIndexedIndirectCommand::size,
+    );
+}

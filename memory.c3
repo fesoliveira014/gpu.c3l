@@ -23,6 +23,15 @@ struct GpuSpan {
     MemoryKind   kind;
 }
 
+// Non-blocking readback: data at `span` becomes valid once the device
+// timeline reaches `value`. `dedicated`/`range_end` are backend bookkeeping.
+struct ReadbackTicket {
+    GpuSpan        span;
+    SemaphoreValue value;
+    BufferHandle   dedicated;
+    ulong          range_end;
+}
+
 const usz MAX_MEMORY_HEAPS = 16;
 const usz ARENA_SIZE = 1 << 20;
 const usz PERSISTENT_ARENA_SIZE = 64 << 20;
@@ -157,6 +166,38 @@ fn void? readback_buffer_data(Device* device, BufferHandle src, usz offset, char
 fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char[] out_data, Stage from_stage, Hazard from_hazard, TextureLayout from_layout) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.readback_texture_data(device, src, mip, out_data, from_stage, from_hazard, from_layout);
+}
+
+<* Record a non-blocking buffer readback into the caller's command list.
+   Source-side synchronization is the caller's barrier; data is resolvable
+   after the recording frame ends (the device timeline advances at end_frame).
+   Ownership: the range is held until resolve_readback releases it. *>
+fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_readback_buffer(commands, src, offset, size);
+}
+
+<* Record a non-blocking full-mip texture readback. The texture must carry
+   transfer_src usage and sit in the TRANSFER_SRC tracked layout; the caller
+   owns the barriers on both sides. *>
+fn ReadbackTicket? cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_readback_texture(commands, src, mip);
+}
+
+<* True once the ticket's data is resolvable; false for resolved tickets.
+   Never faults. *>
+fn bool poll_readback(Device* device, ReadbackTicket* ticket) {
+    if (device.vtable == null) return false;
+    return device.vtable.poll_readback(device, ticket);
+}
+
+<* Copy the ticket's bytes into `dest` and release the underlying range.
+   Faults READBACK_NOT_READY before the ticket's timeline value signals and
+   INVALID_ARGUMENT on an already-resolved ticket or short `dest`. *>
+fn void? resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.resolve_readback(device, ticket, dest);
 }
 
 <* Derive a sub-range starting `offset` bytes into this span. The GPU address

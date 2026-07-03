@@ -13,6 +13,7 @@ const usz TRANSFER_ALIGN = 16;
 struct TransferRange {
     ulong virtual_end;
     ulong timeline_value;
+    bool  pinned;
 }
 
 struct TransferArenaState {
@@ -76,7 +77,7 @@ fn void drain_transfer_retire(VkDeviceState* state, TransferArenaState* arena) @
     vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
     while (arena.retire_count > 0) {
         TransferRange* entry = &arena.retire[arena.retire_head];
-        if (entry.timeline_value > current) break;
+        if (entry.pinned || entry.timeline_value > current) break;
         arena.virtual_head = entry.virtual_end;
         arena.retire_head = (arena.retire_head + 1) % TRANSFER_RETIRE_CAP;
         arena.retire_count--;
@@ -401,4 +402,151 @@ fn void? submit_and_wait(VkDeviceState* state, gpu::Device* device, gpu::Command
         .set_semaphore(state.frame_timeline)
         .set_value(state.timeline_counter);
     return check(vk::signal_semaphore(state.device, &signal_info));
+}
+
+struct TicketAlloc @private {
+    gpu::GpuSpan span;
+    ulong        range_end;
+}
+
+<* Arena range for a ticket: allocated like any transfer range but pinned, so
+   FIFO drain holds at it until resolve unpins. *>
+fn TicketAlloc? ticket_arena_alloc(VkDeviceState* state, TransferArenaState* arena, usz size) @private {
+    gpu::GpuSpan span = transfer_arena_alloc(
+        state: state,
+        arena: arena,
+        size:  size,
+        align: TRANSFER_ALIGN,
+    )!;
+    uint idx = (arena.retire_head + arena.retire_count - 1) % TRANSFER_RETIRE_CAP;
+    arena.retire[idx].pinned = true;
+    return { .span = span, .range_end = arena.retire[idx].virtual_end };
+}
+
+fn void unpin_ticket_range(TransferArenaState* arena, ulong range_end) @private {
+    for (uint i = 0; i < arena.retire_count; i++) {
+        TransferRange* entry = &arena.retire[(arena.retire_head + i) % TRANSFER_RETIRE_CAP];
+        if (entry.virtual_end == range_end) {
+            entry.pinned = false;
+            return;
+        }
+    }
+}
+
+<* Ticket destination: pinned readback-arena range, or a dedicated buffer
+   (destroyed at resolve) when the arena cannot fit the request. *>
+fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
+    if (try alloc = ticket_arena_alloc(state, &state.readback_arena, size)) {
+        return {
+            .span      = alloc.span,
+            .value     = (gpu::SemaphoreValue)(state.timeline_counter + 1),
+            .range_end = alloc.range_end,
+        };
+    }
+    gpu::BufferDesc desc = {
+        .size        = size,
+        .usage       = { .transfer_dst },
+        .memory_kind = gpu::MemoryKind.READBACK,
+        .debug_name  = "readback_ticket",
+    };
+    gpu::Device shim = device_shim(state);
+    gpu::BufferHandle buffer = vk_create_buffer(&shim, &desc)!;
+    if (try span = vk_get_buffer_span(&shim, buffer)) {
+        return {
+            .span      = span,
+            .value     = (gpu::SemaphoreValue)(state.timeline_counter + 1),
+            .dedicated = buffer,
+        };
+    }
+    (void)vk_destroy_buffer(&shim, buffer);
+    return gpu::ARENA_FULL~;
+}
+
+fn void release_ticket(VkDeviceState* state, gpu::ReadbackTicket* ticket) @private {
+    if (ticket.dedicated.is_valid()) {
+        gpu::Device shim = device_shim(state);
+        (void)vk_destroy_buffer(&shim, ticket.dedicated);
+    } else {
+        unpin_ticket_range(&state.readback_arena, ticket.range_end);
+    }
+}
+
+<* Record the copy plus the transfer→host barrier on the destination range;
+   source-side ordering stays with the caller. *>
+fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::BufferHandle src, usz offset, usz size) @private {
+    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    if (size == 0) return gpu::INVALID_ARGUMENT~;
+    BufferSlot* src_slot = state.buffers.get(src)!;
+    if (offset + size > src_slot.size) return gpu::INVALID_ARGUMENT~;
+
+    gpu::ReadbackTicket ticket = ticket_alloc(state, size)!;
+    defer catch release_ticket(state, &ticket);
+
+    gpu::BufferCopyDesc copy = {
+        .src        = src,
+        .dst        = ticket.span.buffer,
+        .src_offset = offset,
+        .dst_offset = ticket.span.offset,
+        .size       = size,
+    };
+    vk_cmd_copy_buffer(commands, &copy)!;
+    record_ticket_host_barrier(commands, &ticket)!;
+    return ticket;
+}
+
+<* Full-mip texture variant; requires transfer_src usage and the TRANSFER_SRC
+   tracked layout (caller's barriers on both sides). *>
+fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu::TextureHandle src, uint mip) @private {
+    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
+    usz size = texture_upload_bytes(state, &region)!;
+
+    gpu::ReadbackTicket ticket = ticket_alloc(state, size)!;
+    defer catch release_ticket(state, &ticket);
+
+    gpu::TextureBufferCopyDesc copy = {
+        .texture = src,
+        .dst     = ticket.span,
+        .mip     = mip,
+    };
+    vk_cmd_copy_texture_to_buffer(commands, &copy)!;
+    record_ticket_host_barrier(commands, &ticket)!;
+    return ticket;
+}
+
+fn void? record_ticket_host_barrier(gpu::CommandList* commands, gpu::ReadbackTicket* ticket) @private {
+    gpu::BufferBarrier host_read = {
+        .buffer        = ticket.span.buffer,
+        .offset        = ticket.span.offset,
+        .size          = ticket.span.size,
+        .before_stage  = gpu::Stage.TRANSFER,
+        .after_stage   = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+        .after_hazard  = gpu::Hazard.HOST_READ,
+    };
+    return vk_cmd_buffer_barrier(commands, &host_read);
+}
+
+fn bool vk_poll_readback(gpu::Device* device, gpu::ReadbackTicket* ticket) @private {
+    if ((ulong)ticket.value == 0) return false;
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    ulong current = 0;
+    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+    return current >= (ulong)ticket.value;
+}
+
+fn void? vk_resolve_readback(gpu::Device* device, gpu::ReadbackTicket* ticket, char[] dest) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if ((ulong)ticket.value == 0) return gpu::INVALID_ARGUMENT~;
+    if (dest.len < ticket.span.size) return gpu::INVALID_ARGUMENT~;
+    ulong current = 0;
+    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+    if (current < (ulong)ticket.value) return gpu::READBACK_NOT_READY~;
+
+    vk_invalidate_buffer(device, ticket.span.buffer, ticket.span.offset, ticket.span.size)!;
+    mem::copy(dest.ptr, ticket.span.cpu, (sz)ticket.span.size);
+    release_ticket(state, ticket);
+    *ticket = {};
 }
