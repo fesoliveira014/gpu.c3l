@@ -50,7 +50,7 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
     for (uint i = 0; i < state.frames_in_flight; i++) {
         gpu::BufferDesc arena_desc = {
             .size        = gpu::ARENA_SIZE,
-            .usage       = { .storage, .addressable },
+            .usage       = { .storage, .addressable, .indirect, .index },
             .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
             .debug_name  = "frame_arena",
         };

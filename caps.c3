@@ -37,6 +37,7 @@ struct DeviceCaps {
     bool dynamic_rendering;
     bool timeline_semaphore;
     bool shader_int64;
+    bool draw_indirect_count;
     bool descriptor_buffer;
     bool descriptor_indexing;
     uint max_texture_descriptors;

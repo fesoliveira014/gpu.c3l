@@ -71,6 +71,11 @@
       "type": "test",
       "target": "linux-x64",
       "sources": [ "src/test_vk_pipeline_cache.c3" ]
+    },
+    "vk_indirect": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_vk_indirect_draw.c3" ]
     }
   }
 }

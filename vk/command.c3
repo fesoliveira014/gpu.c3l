@@ -177,14 +177,19 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
     vk::cmd_copy_image_to_buffer((vk::CommandBuffer)commands.backend, texture.image, layout_to_vk(texture.current_layout), buffer.buffer, 1, &region);
 }
 
-<* Pipeline and heap binds are skipped when the handle is unchanged since the
-   last bind; the heap otherwise rebinds because compute layouts differ in
-   push-constant range, which breaks descriptor set compatibility. *>
-fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::Vec3u groups) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+<* Resolve an indirect argument span: indirect usage, 4-byte offset alignment,
+   and count*arg_size within bounds. *>
+fn BufferSlot*? resolve_indirect_span(VkDeviceState* state, gpu::GpuSpan* span, usz arg_size, uint count) {
+    BufferSlot* slot = state.buffers.get(span.buffer)!;
+    if (!slot.usage.indirect) return gpu::INVALID_ARGUMENT~;
+    if (span.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
+    if ((usz)count * arg_size > span.size) return gpu::INVALID_ARGUMENT~;
+    return slot;
+}
+
+fn void? bind_compute_and_push(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, vk::CommandBuffer cb) @private {
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     PipelineSlot* slot = state.pipelines.get(handle)!;
-    vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
     if ((ulong)handle != (ulong)commands.last_pipeline) {
         vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
         bind_descriptor_heap(state, cb, slot.layout, vk::PipelineBindPoint.COMPUTE);
@@ -193,5 +198,38 @@ fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle,
     }
     ulong addr = (ulong)root;
     vk::cmd_push_constants(cb, slot.layout, vk::ShaderStageFlagBits.COMPUTE_BIT, 0, 8, &addr);
+}
+
+<* Pipeline and heap binds are skipped when the handle is unchanged since the
+   last bind; the heap otherwise rebinds because compute layouts differ in
+   push-constant range, which breaks descriptor set compatibility. *>
+fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::Vec3u groups) @private {
+    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
+    bind_compute_and_push(
+        commands: commands,
+        handle:   handle,
+        root:     root,
+        cb:       cb,
+    )!;
     vk::cmd_dispatch(cb, groups.x, groups.y, groups.z);
+}
+
+fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::GpuSpan args) @private {
+    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    BufferSlot* args_buffer = resolve_indirect_span(
+        state:    state,
+        span:     &args,
+        arg_size: gpu::DispatchIndirectCommand::size,
+        count:    1,
+    )!;
+    vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
+    bind_compute_and_push(
+        commands: commands,
+        handle:   handle,
+        root:     root,
+        cb:       cb,
+    )!;
+    vk::cmd_dispatch_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset);
 }
