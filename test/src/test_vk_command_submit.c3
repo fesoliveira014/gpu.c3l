@@ -54,7 +54,12 @@ fn void copy_upload_to_readback() @test {
     gpu::SemaphoreSignal[1] sigs = { { .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.TRANSFER } };
     gpu::SubmitDesc submit = { .command_lists = lists[..], .signals = sigs[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_semaphore(&device, sem, (gpu::SemaphoreValue)1, 1_000_000_000)!!;
+    gpu::wait_semaphore(
+        device:     &device,
+        semaphore:  sem,
+        value:      (gpu::SemaphoreValue)1,
+        timeout_ns: 1_000_000_000,
+    )!!;
 
     gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
     char* dst = (char*)rb_span.cpu;
@@ -93,9 +98,8 @@ fn void bad_command_state_rejected() @test {
         .before_stage = gpu::Stage.HOST, .after_stage = gpu::Stage.TRANSFER,
         .before_hazard = gpu::Hazard.HOST_WRITE, .after_hazard = gpu::Hazard.TRANSFER_READ,
     };
-    bool rejected = false;
-    if (catch gpu::cmd_global_barrier(&cmd, &gb)) rejected = true;
-    assert(rejected, "recording after end returns COMMAND_RECORDING_ERROR");
+    fault rejected = @catch(gpu::cmd_global_barrier(&cmd, &gb));
+    assert(rejected == gpu::COMMAND_RECORDING_ERROR, "recording after end returns COMMAND_RECORDING_ERROR");
     gpu::end_frame(&device)!!;
 }
 
@@ -112,9 +116,8 @@ fn void texture_barrier_faults() @test {
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
         .old_layout = gpu::TextureLayout.TRANSFER_DST, .new_layout = gpu::TextureLayout.SHADER_READ,
     };
-    bool faulted = false;
-    if (catch gpu::cmd_texture_barrier(&cmd, &bar)) faulted = true;
-    assert(faulted, "texture barrier faults until texture table exists");
+    fault barrier_fault = @catch(gpu::cmd_texture_barrier(&cmd, &bar));
+    assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on an invalid texture handle faults INVALID_HANDLE");
     gpu::end_commands(&device, &cmd)!!;
     gpu::end_frame(&device)!!;
 }

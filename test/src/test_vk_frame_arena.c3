@@ -31,9 +31,8 @@ fn void frame_arena_alloc_and_reset() @test {
     assert((ulong)b.gpu == base_gpu + 128, "GPU address is base + aligned offset");
     assert((char*)b.cpu == base_cpu + 128, "CPU pointer is base + aligned offset");
 
-    bool full = false;
-    if (catch gpu::alloc_frame_span(&device, gpu::ARENA_SIZE, 16)) full = true;
-    assert(full, "over-allocation returns ARENA_FULL");
+    fault full = @catch(gpu::alloc_frame_span(&device, gpu::ARENA_SIZE, 16));
+    assert(full == gpu::ARENA_FULL, "over-allocation returns ARENA_FULL");
 
     gpu::end_frame(&device)!!;
 
@@ -59,13 +58,10 @@ fn void reset_before_retire_rejected() @test {
 
     // Slot demands a timeline value the counter has not reached.
     state.frame_arenas[0].frame_timeline_value = 999;
-    bool rejected = false;
-    if (catch gpu::vk::reset_frame_arena(state, 0)) rejected = true;
-    assert(rejected, "premature reset is rejected (INVALID_RESOURCE_STATE)");
+    fault rejected = @catch(gpu::vk::reset_frame_arena(state, 0));
+    assert(rejected == gpu::INVALID_RESOURCE_STATE, "premature reset returns INVALID_RESOURCE_STATE");
 
     // A retired slot resets fine.
     state.frame_arenas[0].frame_timeline_value = 0;
-    bool ok = true;
-    if (catch gpu::vk::reset_frame_arena(state, 0)) ok = false;
-    assert(ok, "retired slot may be reset");
+    assert(!@catch(gpu::vk::reset_frame_arena(state, 0)), "retired slot may be reset");
 }

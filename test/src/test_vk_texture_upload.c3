@@ -164,7 +164,12 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
 
     const uint GROUPS = (UP_SIZE + 7) / 8;
-    gpu::cmd_dispatch(&cmd, sample_pipe, sample_root_span.gpu, { GROUPS, GROUPS, 1 })!!;
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: sample_pipe,
+        root:     sample_root_span.gpu,
+        groups:   { GROUPS, GROUPS, 1 },
+    )!!;
 
     gpu::TextureBarrier to_src = {
         .texture       = texture,
@@ -276,7 +281,12 @@ fn void storage_write_direct_readback() @test {
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
     const uint GROUPS = (UP_SIZE + 7) / 8;
-    gpu::cmd_dispatch(&cmd, write_pipe, root_span.gpu, { GROUPS, GROUPS, 1 })!!;
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: write_pipe,
+        root:     root_span.gpu,
+        groups:   { GROUPS, GROUPS, 1 },
+    )!!;
 
     gpu::TextureBarrier to_src = {
         .texture       = texture,
@@ -348,9 +358,8 @@ fn void copy_validation_faults() @test {
 
     // Tracked layout is UNDEFINED, not TRANSFER_DST.
     gpu::BufferTextureCopyDesc wrong_layout = { .src = span, .texture = texture };
-    bool layout_faulted = false;
-    if (catch gpu::cmd_copy_buffer_to_texture(&cmd, &wrong_layout)) layout_faulted = true;
-    assert(layout_faulted, "copy into a non-TRANSFER_DST layout must fault");
+    fault layout_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &wrong_layout));
+    assert(layout_fault == gpu::INVALID_RESOURCE_STATE, "copy into a non-TRANSFER_DST layout faults INVALID_RESOURCE_STATE");
 
     gpu::TextureBarrier to_dst = {
         .texture       = texture,
@@ -364,30 +373,25 @@ fn void copy_validation_faults() @test {
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
 
     gpu::BufferTextureCopyDesc past_extent = { .src = span, .texture = texture, .width = UP_SIZE + 1 };
-    bool extent_faulted = false;
-    if (catch gpu::cmd_copy_buffer_to_texture(&cmd, &past_extent)) extent_faulted = true;
-    assert(extent_faulted, "region past the mip extent must fault");
+    fault extent_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &past_extent));
+    assert(extent_fault == gpu::INVALID_ARGUMENT, "region past the mip extent faults INVALID_ARGUMENT");
 
     gpu::BufferTextureCopyDesc past_span = { .src = subspan(span, 0, MIP0_BYTES - 4), .texture = texture };
-    bool span_faulted = false;
-    if (catch gpu::cmd_copy_buffer_to_texture(&cmd, &past_span)) span_faulted = true;
-    assert(span_faulted, "copy bytes past the span must fault");
+    fault span_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &past_span));
+    assert(span_fault == gpu::INVALID_ARGUMENT, "copy bytes past the span fault INVALID_ARGUMENT");
 
     gpu::BufferTextureCopyDesc misaligned = { .src = subspan(span, 2, MIP0_BYTES - 2), .texture = texture };
-    bool align_faulted = false;
-    if (catch gpu::cmd_copy_buffer_to_texture(&cmd, &misaligned)) align_faulted = true;
-    assert(align_faulted, "span offset misaligned to the texel size must fault");
+    fault align_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &misaligned));
+    assert(align_fault == gpu::INVALID_ARGUMENT, "misaligned span offset faults INVALID_ARGUMENT");
 
     gpu::BufferTextureCopyDesc bad_mip = { .src = span, .texture = texture, .mip = 1 };
-    bool mip_faulted = false;
-    if (catch gpu::cmd_copy_buffer_to_texture(&cmd, &bad_mip)) mip_faulted = true;
-    assert(mip_faulted, "copy to a missing mip must fault");
+    fault mip_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &bad_mip));
+    assert(mip_fault == gpu::INVALID_ARGUMENT, "copy to a missing mip faults INVALID_ARGUMENT");
 
     // No transfer_src usage: reading the texture back must fault.
     gpu::TextureBufferCopyDesc no_src_usage = { .texture = texture, .dst = span };
-    bool usage_faulted = false;
-    if (catch gpu::cmd_copy_texture_to_buffer(&cmd, &no_src_usage)) usage_faulted = true;
-    assert(usage_faulted, "texture without transfer_src cannot be read back");
+    fault usage_fault = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &no_src_usage));
+    assert(usage_fault == gpu::INVALID_ARGUMENT, "texture without transfer_src faults INVALID_ARGUMENT on readback");
 
     gpu::end_commands(&device, &cmd)!!;
     gpu::end_frame(&device)!!;
@@ -494,7 +498,12 @@ fn void mip_subset_view_sampled() @test {
         .new_layout    = gpu::TextureLayout.SHADER_READ,
     };
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
-    gpu::cmd_dispatch(&cmd, sample_pipe, root_span.gpu, { 1, 1, 1 })!!;
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: sample_pipe,
+        root:     root_span.gpu,
+        groups:   { 1, 1, 1 },
+    )!!;
     gpu::BufferBarrier out_bar = {
         .buffer = sample_out, .offset = 0, .size = (UP_SIZE / 2) * (UP_SIZE / 2) * 16,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
@@ -528,7 +537,6 @@ fn void flush_invalidate_stale_handle_faults() @test {
     gpu::invalidate_buffer(&device, buffer, 0, 64)!!;
     gpu::destroy_buffer(&device, buffer)!!;
 
-    bool faulted = false;
-    if (catch gpu::flush_buffer(&device, buffer, 0, 0)) faulted = true;
-    assert(faulted, "flush on a destroyed buffer must fault INVALID_HANDLE");
+    fault stale_fault = @catch(gpu::flush_buffer(&device, buffer, 0, 0));
+    assert(stale_fault == gpu::INVALID_HANDLE, "flush on a destroyed buffer faults INVALID_HANDLE");
 }

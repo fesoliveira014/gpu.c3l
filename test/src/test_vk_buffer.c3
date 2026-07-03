@@ -46,15 +46,13 @@ fn void buffer_create_address_span() @test {
     assert((ulong)address != 0, "addressable buffer has a non-zero GPU address");
 
     // A non-addressable buffer faults on get_buffer_address.
-    bool address_faulted = false;
-    if (catch gpu::get_buffer_address(&device, device_buffer)) address_faulted = true;
-    assert(address_faulted, "non-addressable buffer get_buffer_address faults");
+    fault address_fault = @catch(gpu::get_buffer_address(&device, device_buffer));
+    assert(address_fault == gpu::INVALID_ARGUMENT, "non-addressable buffer get_buffer_address faults INVALID_ARGUMENT");
 
     // Destroying retires the handle.
     gpu::destroy_buffer(&device, device_buffer)!!;
-    bool stale_faulted = false;
-    if (catch gpu::get_buffer_span(&device, device_buffer)) stale_faulted = true;
-    assert(stale_faulted, "destroyed handle returns INVALID_HANDLE");
+    fault stale_fault = @catch(gpu::get_buffer_span(&device, device_buffer));
+    assert(stale_fault == gpu::INVALID_HANDLE, "destroyed handle returns INVALID_HANDLE");
 
     gpu::destroy_buffer(&device, upload_buffer)!!;
     gpu::destroy_buffer(&device, addressable_buffer)!!;

@@ -56,13 +56,11 @@ fn void persistent_alloc_free_stats() @test {
 
     // Wrong memory kind faults.
     gpu::PersistentAllocDesc bad_kind = { .size = 64, .align = 16, .memory_kind = gpu::MemoryKind.DEVICE };
-    bool kind_faulted = false;
-    if (catch gpu::alloc_persistent_span(&device, &bad_kind)) kind_faulted = true;
-    assert(kind_faulted, "non-persistent memory kind faults");
+    fault kind_fault = @catch(gpu::alloc_persistent_span(&device, &bad_kind));
+    assert(kind_fault == gpu::INVALID_ARGUMENT, "non-persistent memory kind faults INVALID_ARGUMENT");
 
     // Bogus free faults.
     gpu::GpuSpan bogus = { .buffer = a.buffer, .offset = 999_999 };
-    bool free_faulted = false;
-    if (catch gpu::free_persistent_span(&device, bogus)) free_faulted = true;
-    assert(free_faulted, "freeing a bogus span faults");
+    fault free_fault = @catch(gpu::free_persistent_span(&device, bogus));
+    assert(free_fault == gpu::INVALID_HANDLE, "freeing a bogus span faults INVALID_HANDLE");
 }

@@ -39,9 +39,8 @@ fn void texture_descriptor_round_trip() @test {
     assert(index.is_valid(), "created index is valid");
     gpu::destroy_texture_descriptor(&device, index)!!;
 
-    bool faulted = false;
-    if (catch gpu::destroy_texture_descriptor(&device, index)) faulted = true;
-    assert(faulted, "destroying a stale index must fault INVALID_HANDLE");
+    fault stale_fault = @catch(gpu::destroy_texture_descriptor(&device, index));
+    assert(stale_fault == gpu::INVALID_HANDLE, "destroying a stale index faults INVALID_HANDLE");
 }
 
 fn void texture_descriptor_exhaustion() @test {
@@ -53,9 +52,8 @@ fn void texture_descriptor_exhaustion() @test {
     gpu::TextureIndex a = gpu::create_texture_descriptor(&device, texture, null)!!;
     gpu::TextureIndex b = gpu::create_texture_descriptor(&device, texture, null)!!;
 
-    bool faulted = false;
-    if (catch gpu::create_texture_descriptor(&device, texture, null)) faulted = true;
-    assert(faulted, "allocating past capacity must fault DESCRIPTOR_HEAP_FULL");
+    fault full_fault = @catch(gpu::create_texture_descriptor(&device, texture, null));
+    assert(full_fault == gpu::DESCRIPTOR_HEAP_FULL, "allocating past capacity faults DESCRIPTOR_HEAP_FULL");
     assert(a.is_valid() && b.is_valid(), "existing indices stay valid after exhaustion");
 
     gpu::destroy_texture_descriptor(&device, a)!!;
@@ -83,9 +81,8 @@ fn void texture_descriptor_deferred_reuse() @test {
     assert(recycled.slot == first_slot, "retired slot is recycled once the frame timeline passes");
     assert(recycled.generation != first.generation, "recycled slot carries a new generation");
 
-    bool faulted = false;
-    if (catch gpu::destroy_texture_descriptor(&device, first)) faulted = true;
-    assert(faulted, "the pre-recycle index is stale after reuse");
+    fault recycled_fault = @catch(gpu::destroy_texture_descriptor(&device, first));
+    assert(recycled_fault == gpu::INVALID_HANDLE, "the pre-recycle index is stale after reuse");
 
     gpu::destroy_texture_descriptor(&device, during)!!;
     gpu::destroy_texture_descriptor(&device, recycled)!!;
@@ -97,9 +94,8 @@ fn void texture_descriptor_stale_texture_rejected() @test {
     gpu::TextureHandle texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, texture)!!;
 
-    bool faulted = false;
-    if (catch gpu::create_texture_descriptor(&device, texture, null)) faulted = true;
-    assert(faulted, "registering a destroyed texture must fault INVALID_HANDLE");
+    fault texture_fault = @catch(gpu::create_texture_descriptor(&device, texture, null));
+    assert(texture_fault == gpu::INVALID_HANDLE, "registering a destroyed texture faults INVALID_HANDLE");
 }
 
 fn void texture_descriptor_bad_view_rejected() @test {
@@ -109,9 +105,8 @@ fn void texture_descriptor_bad_view_rejected() @test {
     defer gpu::destroy_texture(&device, texture)!!;
 
     gpu::TextureViewDesc reinterpret = { .format = gpu::Format.R32_UINT };
-    bool faulted = false;
-    if (catch gpu::create_texture_descriptor(&device, texture, &reinterpret)) faulted = true;
-    assert(faulted, "format-reinterpreting views are outside the slice and must fault");
+    fault view_fault = @catch(gpu::create_texture_descriptor(&device, texture, &reinterpret));
+    assert(view_fault == gpu::INVALID_ARGUMENT, "format-reinterpreting views fault INVALID_ARGUMENT");
 }
 
 fn void sampler_round_trip_and_exhaustion() @test {
@@ -129,14 +124,12 @@ fn void sampler_round_trip_and_exhaustion() @test {
     gpu::SamplerIndex b = gpu::create_sampler(&device, &desc)!!;
     assert(a.is_valid() && b.is_valid(), "sampler indices valid");
 
-    bool faulted = false;
-    if (catch gpu::create_sampler(&device, &desc)) faulted = true;
-    assert(faulted, "allocating past sampler capacity must fault DESCRIPTOR_HEAP_FULL");
+    fault full_fault = @catch(gpu::create_sampler(&device, &desc));
+    assert(full_fault == gpu::DESCRIPTOR_HEAP_FULL, "allocating past sampler capacity faults DESCRIPTOR_HEAP_FULL");
 
     gpu::destroy_sampler(&device, a)!!;
-    bool stale_faulted = false;
-    if (catch gpu::destroy_sampler(&device, a)) stale_faulted = true;
-    assert(stale_faulted, "destroying a stale sampler index must fault");
+    fault stale_fault = @catch(gpu::destroy_sampler(&device, a));
+    assert(stale_fault == gpu::INVALID_HANDLE, "destroying a stale sampler index faults INVALID_HANDLE");
 
     gpu::destroy_sampler(&device, b)!!;
 }
