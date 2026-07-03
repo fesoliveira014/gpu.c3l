@@ -43,6 +43,18 @@ fn void setup_debug_messenger(VkDeviceState* state) @private {
     }
 }
 
+<* Best-effort object naming: silently a no-op when the debug-utils entry
+   point is unavailable or no name was given. *>
+fn void set_object_name(VkDeviceState* state, vk::ObjectType object_type, ulong object_handle, ZString name) {
+    if (name == null) return;
+    if (vk::extensions.vk_set_debug_utils_object_name_ext == null) return;
+    vk::DebugUtilsObjectNameInfoEXT info = vk::debug_utils_object_name_info_ext();
+    info.object_type = object_type;
+    info.object_handle = object_handle;
+    info.p_object_name = (char*)name;
+    if (catch vk::try_set_debug_utils_object_name_ext(state.device, &info)) return;
+}
+
 fn void destroy_debug_messenger(VkDeviceState* state) @private {
     if (state.messenger == null) return;
     if (vk::extensions.vk_destroy_debug_utils_messenger_ext != null) {

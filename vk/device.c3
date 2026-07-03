@@ -37,6 +37,10 @@ struct VkDeviceState {
     SemaphoreTable             semaphores;
     ShaderTable                shaders;
     PipelineTable              pipelines;
+    PipelineCacheTable         pipeline_cache;
+    vk::PipelineLayout         graphics_layout;
+    ComputeLayoutEntry[COMPUTE_LAYOUT_CAP] compute_layouts;
+    vk::PipelineCache          driver_cache;
     TextureTable               textures;
     SwapchainTable             swapchains;
     DescriptorHeapState        heap;
@@ -155,6 +159,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
+    create_pipeline_shared(state)!;
     state.caps = build_caps(
         base:               &features2.features,
         v12:                &features12,
@@ -216,16 +221,12 @@ fn void destroy_state(VkDeviceState* state) @private {
             mem::free(state.textures.slots.ptr);
             state.textures.slots = {};
         }
+        // Cache entries own the pipelines; slots only alias them.
         if (state.pipelines.slots.ptr != null) {
-            foreach (&cell : state.pipelines.slots[:state.pipelines.next_new]) {
-                if (cell.used) {
-                    vk::destroy_pipeline(state.device, cell.value.pipeline, null);
-                    vk::destroy_pipeline_layout(state.device, cell.value.layout, null);
-                }
-            }
             mem::free(state.pipelines.slots.ptr);
             state.pipelines.slots = {};
         }
+        destroy_pipeline_shared(state);
         if (state.shaders.slots.ptr != null) {
             foreach (&cell : state.shaders.slots[:state.shaders.next_new]) {
                 if (cell.used) vk::destroy_shader_module(state.device, cell.value.shader_module, null);

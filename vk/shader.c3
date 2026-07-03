@@ -116,6 +116,12 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
             .set_code(code.ptr);
         check(vk::create_shader_module(state.device, &info, null, &sh_module))!;
     };
+    set_object_name(
+        state:         state,
+        object_type:   vk::ObjectType.SHADER_MODULE,
+        object_handle: (ulong)sh_module,
+        name:          desc.debug_name,
+    );
 
     ShaderSlot slot = {
         .shader_module = sh_module,

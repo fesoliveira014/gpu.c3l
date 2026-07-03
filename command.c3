@@ -68,6 +68,9 @@ struct CommandList {
     void*        backend;
     QueueKind    queue;
     CommandState state;
+    // Backend redundant-bind tracking; callers must not touch.
+    PipelineHandle last_pipeline;
+    uint           last_entry;
 }
 
 struct BufferCopyDesc {

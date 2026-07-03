@@ -70,16 +70,37 @@ fn vk::BlendOp blend_op_to_vk(gpu::BlendOp op) @private {
     }
 }
 
-<* Layout = global heap set-0 + the fixed 16-byte vertex/fragment root push
-   range. Formats flow through the dynamic-rendering chain; viewport and
-   scissor are dynamic. Create-info structs are assigned directly rather than
-   through by-value builder setters (c3c 0.8.0 codegen crash). *>
+<* Dedup through the descriptor cache: an identical immutable-state key
+   aliases the existing entry under a fresh handle. Layout is the shared
+   graphics layout; formats flow through the dynamic-rendering chain; all
+   core-1.3 dynamic state is dynamic. Create-info structs are assigned
+   directly rather than through by-value builder setters (c3c 0.8.0 codegen
+   crash). *>
 fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::GraphicsPipelineDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
-    if (desc.color_formats.len == 0) return gpu::INVALID_ARGUMENT~;
+    if (desc.color_formats.len == 0 || desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS) return gpu::INVALID_ARGUMENT~;
     if (desc.depth_format != gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
     ShaderSlot* vertex_shader = state.shaders.get(desc.vertex_shader)!;
     ShaderSlot* fragment_shader = state.shaders.get(desc.fragment_shader)!;
+
+    PipelineKey key = build_graphics_key(desc);
+    ulong hash = hash_key(&key);
+    uint hit = find_entry(&state.pipeline_cache, hash, &key);
+    if (hit != PIPELINE_ENTRY_NONE) {
+        PipelineCacheEntry* entry = &state.pipeline_cache.entries[hit];
+        entry.refcount++;
+        if (try handle = state.pipelines.alloc({
+            .pipeline = entry.pipeline,
+            .layout   = entry.layout,
+            .entry    = hit,
+            .raster   = desc.raster,
+            .depth    = desc.depth,
+        })) {
+            return handle;
+        }
+        entry.refcount--;
+        return gpu::SLOT_TABLE_FULL~;
+    }
 
     @pool() {
         vk::Format[] color_formats = mem::talloc_array(vk::Format, desc.color_formats.len);
@@ -88,18 +109,6 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
             if (vk_format == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
             color_formats[i] = vk_format;
         }
-
-        uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
-        vk::PushConstantRange range = {
-            .stage_flags = (vk::ShaderStageFlags)push_stages,
-            .offset      = 0,
-            .size        = GRAPHICS_ROOT_PUSH_SIZE,
-        };
-        vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
-            .set_set_layouts((&state.heap.set_layout)[:1])
-            .set_push_constant_ranges((&range)[:1]);
-        vk::PipelineLayout layout;
-        check(vk::create_pipeline_layout(state.device, &layout_info, null, &layout))!;
 
         vk::PipelineShaderStageCreateInfo[2] stages;
         stages[0] = vk::pipeline_shader_stage_create_info()
@@ -126,17 +135,12 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
 
         vk::PipelineRasterizationStateCreateInfo raster = vk::pipeline_rasterization_state_create_info();
         raster.polygon_mode = desc.raster.polygon_mode == gpu::PolygonMode.LINE ? vk::PolygonMode.LINE : vk::PolygonMode.FILL;
-        raster.cull_mode    = (vk::CullModeFlags)cull_mode_to_vk(desc.raster.cull_mode);
-        raster.front_face   = desc.raster.front_face == gpu::FrontFace.CLOCKWISE ? vk::FrontFace.CLOCKWISE : vk::FrontFace.COUNTER_CLOCKWISE;
         raster.line_width   = 1.0;
 
         vk::PipelineMultisampleStateCreateInfo multisample = vk::pipeline_multisample_state_create_info();
         multisample.rasterization_samples = vk::SampleCountFlagBits.COUNT_1_BIT;
 
         vk::PipelineDepthStencilStateCreateInfo depth_stencil = vk::pipeline_depth_stencil_state_create_info();
-        depth_stencil.depth_test_enable  = desc.depth.test_enable ? vk::TRUE : vk::FALSE;
-        depth_stencil.depth_write_enable = desc.depth.write_enable ? vk::TRUE : vk::FALSE;
-        depth_stencil.depth_compare_op   = compare_op_to_vk(desc.depth.compare);
 
         vk::PipelineColorBlendAttachmentState[] blend_attachments = mem::talloc_array(vk::PipelineColorBlendAttachmentState, color_formats.len);
         foreach (&attachment : blend_attachments) {
@@ -155,9 +159,17 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         blend_state.attachment_count = (uint)blend_attachments.len;
         blend_state.p_attachments = blend_attachments.ptr;
 
-        vk::DynamicState[2] dynamic_states = { vk::DynamicState.VIEWPORT, vk::DynamicState.SCISSOR };
+        vk::DynamicState[7] dynamic_states = {
+            vk::DynamicState.VIEWPORT,
+            vk::DynamicState.SCISSOR,
+            vk::DynamicState.CULL_MODE,
+            vk::DynamicState.FRONT_FACE,
+            vk::DynamicState.DEPTH_TEST_ENABLE,
+            vk::DynamicState.DEPTH_WRITE_ENABLE,
+            vk::DynamicState.DEPTH_COMPARE_OP,
+        };
         vk::PipelineDynamicStateCreateInfo dynamic_state = vk::pipeline_dynamic_state_create_info();
-        dynamic_state.dynamic_state_count = 2;
+        dynamic_state.dynamic_state_count = dynamic_states.len;
         dynamic_state.p_dynamic_states = &dynamic_states[0];
 
         vk::GraphicsPipelineCreateInfo pipe_info = vk::graphics_pipeline_create_info();
@@ -172,22 +184,45 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         pipe_info.p_depth_stencil_state = &depth_stencil;
         pipe_info.p_color_blend_state = &blend_state;
         pipe_info.p_dynamic_state = &dynamic_state;
-        pipe_info.layout = layout;
+        pipe_info.layout = state.graphics_layout;
         if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER) {
             pipe_info.flags = vk::PipelineCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT;
         }
 
         vk::Pipeline pipeline;
-        if (catch check(vk::create_graphics_pipelines(state.device, (vk::PipelineCache)null, 1, &pipe_info, null, &pipeline))) {
-            vk::destroy_pipeline_layout(state.device, layout, null);
+        if (catch check(vk::create_graphics_pipelines(state.device, state.driver_cache, 1, &pipe_info, null, &pipeline))) {
             return gpu::PIPELINE_CREATE_FAILED~;
         }
+        set_object_name(
+            state:         state,
+            object_type:   vk::ObjectType.PIPELINE,
+            object_handle: (ulong)pipeline,
+            name:          desc.debug_name,
+        );
 
-        if (try handle = state.pipelines.alloc({ .pipeline = pipeline, .layout = layout })) {
+        uint entry_index;
+        if (try idx = insert_entry(&state.pipeline_cache, {
+            .hash     = hash,
+            .key      = key,
+            .pipeline = pipeline,
+            .layout   = state.graphics_layout,
+        })) {
+            entry_index = idx;
+        } else {
+            vk::destroy_pipeline(state.device, pipeline, null);
+            return gpu::SLOT_TABLE_FULL~;
+        }
+
+        if (try handle = state.pipelines.alloc({
+            .pipeline = pipeline,
+            .layout   = state.graphics_layout,
+            .entry    = entry_index,
+            .raster   = desc.raster,
+            .depth    = desc.depth,
+        })) {
             return handle;
         }
-        vk::destroy_pipeline(state.device, pipeline, null);
-        vk::destroy_pipeline_layout(state.device, layout, null);
+        release_entry(state, entry_index);
         return gpu::SLOT_TABLE_FULL~;
     };
 }

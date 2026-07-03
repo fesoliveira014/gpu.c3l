@@ -1,7 +1,8 @@
 module gpu;
 
-const uint MAX_SHADERS   = 256;
-const uint MAX_PIPELINES = 256;
+const uint MAX_SHADERS           = 256;
+const uint MAX_PIPELINES         = 256;
+const uint MAX_COLOR_ATTACHMENTS = 8;
 
 enum ShaderStage : int {
     COMPUTE,
@@ -124,7 +125,9 @@ fn void? destroy_shader(Device* device, ShaderHandle shader) {
     return device.vtable.destroy_shader(device, shader);
 }
 
-<* Create a compute pipeline. Ownership: release with destroy_pipeline. *>
+<* Create a compute pipeline. Identical descriptors may alias one backend
+   pipeline under distinct handles. Ownership: release with destroy_pipeline,
+   once per create. *>
 fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* desc) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.create_compute_pipeline(device, desc);
@@ -132,7 +135,10 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
 
 <* Create a graphics pipeline targeting dynamic rendering. The layout is fixed:
    the global heap set plus a 16-byte vertex/fragment root push range.
-   Ownership: release with destroy_pipeline. *>
+   Descriptors identical in immutable state alias one backend pipeline under
+   distinct handles; raster cull/front-face and depth state apply per handle
+   at draw time. At most MAX_COLOR_ATTACHMENTS color formats. Ownership:
+   release with destroy_pipeline, once per create. *>
 fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.create_graphics_pipeline(device, desc);

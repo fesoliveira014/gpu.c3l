@@ -58,10 +58,12 @@ fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::Comma
     check(vk::begin_command_buffer(cmd, &begin))!;
 
     *out_commands = (gpu::CommandList){
-        .device  = device,
-        .backend = (void*)cmd,
-        .queue   = queue,
-        .state   = gpu::CommandState.RECORDING,
+        .device        = device,
+        .backend       = (void*)cmd,
+        .queue         = queue,
+        .state         = gpu::CommandState.RECORDING,
+        .last_pipeline = gpu::PIPELINE_HANDLE_INVALID,
+        .last_entry    = PIPELINE_ENTRY_NONE,
     };
 }
 
@@ -175,15 +177,20 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
     vk::cmd_copy_image_to_buffer((vk::CommandBuffer)commands.backend, texture.image, layout_to_vk(texture.current_layout), buffer.buffer, 1, &region);
 }
 
-<* The heap is rebound per dispatch: pipeline layouts differ in push-constant
-   range, which breaks descriptor set compatibility across pipelines. *>
+<* Pipeline and heap binds are skipped when the handle is unchanged since the
+   last bind; the heap otherwise rebinds because compute layouts differ in
+   push-constant range, which breaks descriptor set compatibility. *>
 fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::Vec3u groups) @private {
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     PipelineSlot* slot = state.pipelines.get(handle)!;
     vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
-    vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
-    bind_descriptor_heap(state, cb, slot.layout, vk::PipelineBindPoint.COMPUTE);
+    if ((ulong)handle != (ulong)commands.last_pipeline) {
+        vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
+        bind_descriptor_heap(state, cb, slot.layout, vk::PipelineBindPoint.COMPUTE);
+        commands.last_pipeline = handle;
+        commands.last_entry = slot.entry;
+    }
     ulong addr = (ulong)root;
     vk::cmd_push_constants(cb, slot.layout, vk::ShaderStageFlagBits.COMPUTE_BIT, 0, 8, &addr);
     vk::cmd_dispatch(cb, groups.x, groups.y, groups.z);
