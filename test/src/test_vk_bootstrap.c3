@@ -53,9 +53,8 @@ fn void device_capacity_over_ceiling_rejected() @test {
         .application_name            = "gpu_vk_capacity_test",
     };
 
-    bool faulted = false;
-    if (catch gpu::create_device(&desc)) faulted = true;
-    assert(faulted, "capacity above the packed-slot ceiling must fail device creation");
+    fault capacity_fault = @catch(gpu::create_device(&desc));
+    assert(capacity_fault == gpu::INVALID_ARGUMENT, "capacity above the packed-slot ceiling fails with INVALID_ARGUMENT");
 }
 
 // Note: the UNSUPPORTED_BACKEND default arm is unreachable while BackendKind has

@@ -68,7 +68,12 @@ fn void? run() {
     root.count      = COUNT;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!;
-    gpu::cmd_dispatch(&cmd, pipeline, root_span.gpu, { (COUNT + 63) / 64, 1, 1 })!;
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: pipeline,
+        root:     root_span.gpu,
+        groups:   { (COUNT + 63) / 64, 1, 1 },
+    )!;
     gpu::BufferBarrier bar = {
         .buffer = output, .offset = 0, .size = COUNT * float::size,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,

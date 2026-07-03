@@ -43,9 +43,8 @@ fn void texture_unsupported_desc_rejected() @test {
         .format    = gpu::Format.D32_FLOAT,
         .usage     = { .sampled },
     };
-    bool depth_faulted = false;
-    if (catch gpu::create_texture(&device, &depth_format)) depth_faulted = true;
-    assert(depth_faulted, "depth formats are outside the slice and must fault");
+    fault depth_fault = @catch(gpu::create_texture(&device, &depth_format));
+    assert(depth_fault == gpu::INVALID_ARGUMENT, "depth formats fault INVALID_ARGUMENT");
 
     gpu::TextureDesc no_heap_usage = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -54,9 +53,8 @@ fn void texture_unsupported_desc_rejected() @test {
         .format    = gpu::Format.RGBA8_UNORM,
         .usage     = { .transfer_dst },
     };
-    bool usage_faulted = false;
-    if (catch gpu::create_texture(&device, &no_heap_usage)) usage_faulted = true;
-    assert(usage_faulted, "non-heap usage is outside the slice and must fault");
+    fault usage_fault = @catch(gpu::create_texture(&device, &no_heap_usage));
+    assert(usage_fault == gpu::INVALID_ARGUMENT, "non-heap usage faults INVALID_ARGUMENT");
 
     gpu::TextureDesc not_2d = {
         .dimension = gpu::TextureDimension.TEX_3D,
@@ -66,9 +64,8 @@ fn void texture_unsupported_desc_rejected() @test {
         .format    = gpu::Format.RGBA8_UNORM,
         .usage     = { .sampled },
     };
-    bool dim_faulted = false;
-    if (catch gpu::create_texture(&device, &not_2d)) dim_faulted = true;
-    assert(dim_faulted, "non-2D dimension is outside the slice and must fault");
+    fault dim_fault = @catch(gpu::create_texture(&device, &not_2d));
+    assert(dim_fault == gpu::INVALID_ARGUMENT, "non-2D dimensions fault INVALID_ARGUMENT");
 }
 
 fn void texture_stale_handle_rejected() @test {
@@ -85,9 +82,8 @@ fn void texture_stale_handle_rejected() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     gpu::destroy_texture(&device, texture)!!;
 
-    bool faulted = false;
-    if (catch gpu::destroy_texture(&device, texture)) faulted = true;
-    assert(faulted, "double destroy must fault INVALID_HANDLE");
+    fault stale_fault = @catch(gpu::destroy_texture(&device, texture));
+    assert(stale_fault == gpu::INVALID_HANDLE, "double destroy faults INVALID_HANDLE");
 }
 
 fn void texture_barrier_transitions_layout() @test {
@@ -118,9 +114,8 @@ fn void texture_barrier_transitions_layout() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
-    bool mismatch_faulted = false;
-    if (catch gpu::cmd_texture_barrier(&cmd, &to_general)) mismatch_faulted = true;
-    assert(mismatch_faulted, "old_layout disagreeing with the tracked layout must fault");
+    fault mismatch_fault = @catch(gpu::cmd_texture_barrier(&cmd, &to_general));
+    assert(mismatch_fault == gpu::INVALID_RESOURCE_STATE, "old_layout disagreeing with the tracked layout faults INVALID_RESOURCE_STATE");
 
     gpu::TextureBarrier general_to_general = {
         .texture       = texture,
@@ -160,9 +155,8 @@ fn void texture_multi_mip_create_destroy() @test {
 
     gpu::TextureDesc over_chain = desc;
     over_chain.mip_levels = 6;
-    bool faulted = false;
-    if (catch gpu::create_texture(&device, &over_chain)) faulted = true;
-    assert(faulted, "mip count past the full chain (16x16 -> 5) must fault");
+    fault chain_fault = @catch(gpu::create_texture(&device, &over_chain));
+    assert(chain_fault == gpu::INVALID_ARGUMENT, "mip count past the full chain (16x16 -> 5) faults INVALID_ARGUMENT");
 }
 
 fn void texture_multi_mip_barrier_covers_chain() @test {
@@ -223,9 +217,8 @@ fn void texture_barrier_stale_handle_rejected() @test {
         .old_layout = gpu::TextureLayout.UNDEFINED,
         .new_layout = gpu::TextureLayout.GENERAL,
     };
-    bool faulted = false;
-    if (catch gpu::cmd_texture_barrier(&cmd, &barrier)) faulted = true;
-    assert(faulted, "barrier on a destroyed texture must fault INVALID_HANDLE");
+    fault barrier_fault = @catch(gpu::cmd_texture_barrier(&cmd, &barrier));
+    assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on a destroyed texture faults INVALID_HANDLE");
 
     gpu::end_commands(&device, &cmd)!!;
     gpu::end_frame(&device)!!;

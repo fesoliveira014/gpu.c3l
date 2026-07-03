@@ -43,9 +43,8 @@ fn void descriptor_capacity_resolution() @test {
     uint at_ceiling = gpu::resolve_descriptor_capacity(gpu::MAX_DESCRIPTOR_SLOTS, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
     assert(at_ceiling == gpu::MAX_DESCRIPTOR_SLOTS, "the packed-slot ceiling itself is allowed");
 
-    bool faulted = false;
-    if (catch gpu::resolve_descriptor_capacity(gpu::MAX_DESCRIPTOR_SLOTS + 1, gpu::DEFAULT_TEXTURE_DESCRIPTORS)) faulted = true;
-    assert(faulted, "capacity above the packed-slot ceiling faults");
+    fault ceiling_fault = @catch(gpu::resolve_descriptor_capacity(gpu::MAX_DESCRIPTOR_SLOTS + 1, gpu::DEFAULT_TEXTURE_DESCRIPTORS));
+    assert(ceiling_fault == gpu::INVALID_ARGUMENT, "capacity above the packed-slot ceiling faults INVALID_ARGUMENT");
 }
 
 // Concrete generation-checked slot table mirroring the backend's per-type
@@ -108,9 +107,8 @@ fn void slot_alloc_get_free() @test {
     assert(*t.get(a)!! == 100, "get returns the stored value");
 
     t.free(a)!!;
-    bool faulted = false;
-    if (catch t.get(a)) faulted = true;
-    assert(faulted, "freed handle no longer resolves");
+    fault freed_fault = @catch(t.get(a));
+    assert(freed_fault == gpu::INVALID_HANDLE, "freed handle returns INVALID_HANDLE");
 }
 
 fn void generation_mismatch_rejected() @test {
@@ -124,9 +122,8 @@ fn void generation_mismatch_rejected() @test {
     assert(fresh.index == stale.index, "freed slot index is reused");
     assert(fresh.generation > stale.generation, "reused slot bumps generation");
 
-    bool faulted = false;
-    if (catch t.get(stale)) faulted = true;
-    assert(faulted, "stale handle to reused slot is rejected");
+    fault stale_fault = @catch(t.get(stale));
+    assert(stale_fault == gpu::INVALID_HANDLE, "stale handle to reused slot returns INVALID_HANDLE");
     assert(*t.get(fresh)!! == 2, "fresh handle resolves");
 }
 
@@ -136,7 +133,6 @@ fn void slot_table_full() @test {
 
     t.alloc(1)!!;
     t.alloc(2)!!;
-    bool faulted = false;
-    if (catch t.alloc(3)) faulted = true;
-    assert(faulted, "allocating past capacity raises SLOT_TABLE_FULL");
+    fault full_fault = @catch(t.alloc(3));
+    assert(full_fault == gpu::SLOT_TABLE_FULL, "allocating past capacity raises SLOT_TABLE_FULL");
 }

@@ -21,9 +21,7 @@ fn void required_features_present_ok() @test {
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
 
-    bool faulted = false;
-    if (catch gpu::vk::check_required_features(&base, &v12, &v13)) faulted = true;
-    assert(!faulted, "all required features present must pass the gate");
+    assert(!@catch(gpu::vk::check_required_features(&base, &v12, &v13)), "all required features present must pass the gate");
 }
 
 fn void missing_feature_rejected() @test {
@@ -32,9 +30,8 @@ fn void missing_feature_rejected() @test {
     vk::PhysicalDeviceVulkan12Features v12 = vk::physical_device_vulkan12features();
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features();
 
-    bool faulted = false;
-    if (catch gpu::vk::check_required_features(&base, &v12, &v13)) faulted = true;
-    assert(faulted, "a missing required feature must raise UNSUPPORTED_FEATURE");
+    fault gate_fault = @catch(gpu::vk::check_required_features(&base, &v12, &v13));
+    assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "a missing required feature raises UNSUPPORTED_FEATURE");
 }
 
 fn void one_missing_feature_rejected() @test {
@@ -46,9 +43,8 @@ fn void one_missing_feature_rejected() @test {
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE);
 
-    bool faulted = false;
-    if (catch gpu::vk::check_required_features(&base, &v12, &v13)) faulted = true;
-    assert(faulted, "a single missing feature must still fault");
+    fault gate_fault = @catch(gpu::vk::check_required_features(&base, &v12, &v13));
+    assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "a single missing feature still raises UNSUPPORTED_FEATURE");
 }
 
 fn void missing_shader_int64_rejected() @test {
@@ -61,9 +57,8 @@ fn void missing_shader_int64_rejected() @test {
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
 
-    bool faulted = false;
-    if (catch gpu::vk::check_required_features(&base, &v12, &v13)) faulted = true;
-    assert(faulted, "missing shaderInt64 must raise UNSUPPORTED_FEATURE");
+    fault gate_fault = @catch(gpu::vk::check_required_features(&base, &v12, &v13));
+    assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "missing shaderInt64 raises UNSUPPORTED_FEATURE");
 }
 
 fn vk::PhysicalDeviceVulkan12Features v12_with_heap_bits() {
@@ -111,20 +106,17 @@ fn void heap_mode_auto_resolution() @test {
     gpu::DescriptorHeapMode buffer_only = gpu::vk::resolve_heap_mode(auto_mode, false, true)!!;
     assert(buffer_only == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, "AUTO falls back to descriptor buffer");
 
-    bool faulted = false;
-    if (catch gpu::vk::resolve_heap_mode(auto_mode, false, false)) faulted = true;
-    assert(faulted, "AUTO with no supported path faults");
+    fault auto_fault = @catch(gpu::vk::resolve_heap_mode(auto_mode, false, false));
+    assert(auto_fault == gpu::UNSUPPORTED_FEATURE, "AUTO with no supported path raises UNSUPPORTED_FEATURE");
 }
 
 fn void heap_mode_forced_resolution() @test {
     gpu::DescriptorHeapMode forced = gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, true, true)!!;
     assert(forced == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, "forced indexing wins over available buffer");
 
-    bool buffer_faulted = false;
-    if (catch gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, true, false)) buffer_faulted = true;
-    assert(buffer_faulted, "forced buffer without support faults");
+    fault buffer_fault = @catch(gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, true, false));
+    assert(buffer_fault == gpu::UNSUPPORTED_FEATURE, "forced buffer without support raises UNSUPPORTED_FEATURE");
 
-    bool indexing_faulted = false;
-    if (catch gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, false, true)) indexing_faulted = true;
-    assert(indexing_faulted, "forced indexing without support faults");
+    fault indexing_fault = @catch(gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, false, true));
+    assert(indexing_fault == gpu::UNSUPPORTED_FEATURE, "forced indexing without support raises UNSUPPORTED_FEATURE");
 }

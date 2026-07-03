@@ -51,9 +51,8 @@ fn void foreign_set_rejected() @test {
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BAD_SET_SPIRV[..], .entry_point = "main",
     };
-    bool faulted = false;
-    if (catch gpu::create_shader(&device, &desc)) faulted = true;
-    assert(faulted, "a set-1 binding must fault SHADER_INVALID");
+    fault set_fault = @catch(gpu::create_shader(&device, &desc));
+    assert(set_fault == gpu::SHADER_INVALID, "a set-1 binding faults SHADER_INVALID");
 }
 
 fn void convention_violating_binding_rejected() @test {
@@ -63,7 +62,6 @@ fn void convention_violating_binding_rejected() @test {
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BAD_BINDING_SPIRV[..], .entry_point = "main",
     };
-    bool faulted = false;
-    if (catch gpu::create_shader(&device, &desc)) faulted = true;
-    assert(faulted, "a combined-image-sampler at set-0 binding 0 must fault SHADER_INVALID");
+    fault binding_fault = @catch(gpu::create_shader(&device, &desc));
+    assert(binding_fault == gpu::SHADER_INVALID, "a combined-image-sampler at set-0 binding 0 faults SHADER_INVALID");
 }

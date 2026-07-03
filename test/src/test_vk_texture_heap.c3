@@ -121,7 +121,12 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
     const uint GROUPS = (TEX_SIZE + 7) / 8;
-    gpu::cmd_dispatch(&cmd, write_pipe, write_root_span.gpu, { GROUPS, GROUPS, 1 })!!;
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: write_pipe,
+        root:     write_root_span.gpu,
+        groups:   { GROUPS, GROUPS, 1 },
+    )!!;
 
     gpu::TextureBarrier write_to_sample = {
         .texture       = texture,
@@ -134,7 +139,12 @@ fn void bindless_texture_write_then_sample() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
 
-    gpu::cmd_dispatch(&cmd, sample_pipe, sample_root_span.gpu, { GROUPS, GROUPS, 1 })!!;
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: sample_pipe,
+        root:     sample_root_span.gpu,
+        groups:   { GROUPS, GROUPS, 1 },
+    )!!;
 
     gpu::BufferBarrier out_bar = {
         .buffer = output, .offset = 0, .size = TEX_SIZE * TEX_SIZE * 16,
