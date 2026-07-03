@@ -98,10 +98,8 @@ fn void replay_dynamic_state(vk::CommandBuffer cb, PipelineSlot* slot) @private 
     vk::cmd_set_depth_compare_op(cb, compare_op_to_vk(slot.depth.compare));
 }
 
-<* Two-level redundant-bind filter: an unchanged handle skips everything but
-   the push constants; a changed handle over the same cache entry skips the
-   pipeline/heap bind but replays the slot's dynamic-state snapshot, which may
-   differ between aliases of one entry. *>
+<* Aliases of one cache entry can carry different dynamic-state snapshots, so
+   a handle change replays state even when the pipeline bind is skipped. *>
 fn void? bind_graphics_and_push(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::CommandBuffer cb) @private {
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     PipelineSlot* slot = state.pipelines.get(handle)!;

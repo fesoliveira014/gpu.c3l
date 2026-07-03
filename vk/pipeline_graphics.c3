@@ -70,12 +70,8 @@ fn vk::BlendOp blend_op_to_vk(gpu::BlendOp op) @private {
     }
 }
 
-<* Dedup through the descriptor cache: an identical immutable-state key
-   aliases the existing entry under a fresh handle. Layout is the shared
-   graphics layout; formats flow through the dynamic-rendering chain; all
-   core-1.3 dynamic state is dynamic. Create-info structs are assigned
-   directly rather than through by-value builder setters (c3c 0.8.0 codegen
-   crash). *>
+<* Create-info structs are assigned directly rather than through by-value
+   builder setters (c3c 0.8.0 codegen crash). *>
 fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::GraphicsPipelineDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (desc.color_formats.len == 0 || desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS) return gpu::INVALID_ARGUMENT~;
