@@ -30,6 +30,7 @@ struct TextureSlot {
     uint               mip_levels;
     uint               array_layers;
     gpu::TextureLayout current_layout;
+    bool               swapchain_owned;
     CachedView[MAX_CACHED_VIEWS] views;
 }
 
@@ -86,6 +87,8 @@ fn vk::Format format_to_vk(gpu::Format format) {
         case gpu::Format.RG8_UNORM:         return vk::Format.R8G8_UNORM;
         case gpu::Format.RGBA8_UNORM:       return vk::Format.R8G8B8A8_UNORM;
         case gpu::Format.RGBA8_SRGB:        return vk::Format.R8G8B8A8_SRGB;
+        case gpu::Format.BGRA8_UNORM:       return vk::Format.B8G8R8A8_UNORM;
+        case gpu::Format.BGRA8_SRGB:        return vk::Format.B8G8R8A8_SRGB;
         case gpu::Format.R16_UINT:          return vk::Format.R16_UINT;
         case gpu::Format.R16_FLOAT:         return vk::Format.R16_SFLOAT;
         case gpu::Format.RG16_FLOAT:        return vk::Format.R16G16_SFLOAT;
@@ -118,6 +121,8 @@ fn usz format_texel_size(gpu::Format format) {
         case gpu::Format.RG8_UNORM:         return 2;
         case gpu::Format.RGBA8_UNORM:       return 4;
         case gpu::Format.RGBA8_SRGB:        return 4;
+        case gpu::Format.BGRA8_UNORM:       return 4;
+        case gpu::Format.BGRA8_SRGB:        return 4;
         case gpu::Format.R16_UINT:          return 2;
         case gpu::Format.R16_FLOAT:         return 2;
         case gpu::Format.RG16_FLOAT:        return 4;
@@ -293,6 +298,7 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
 fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     TextureSlot* slot = state.textures.get(handle)!;
+    if (slot.swapchain_owned) return gpu::INVALID_ARGUMENT~;
     destroy_cached_views(state, slot);
     vk::destroy_image_view(state.device, slot.default_view, null);
     state.allocator.destroy_image(slot.image, slot.allocation);

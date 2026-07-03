@@ -130,6 +130,11 @@ fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @
     return span;
 }
 
+<* The frame fence is a queue-ordered empty submit: the timeline reaches the
+   frame's value only after all prior graphics-queue work completes, so
+   begin_frame's wait actually covers the GPU (a host-side signal would let
+   command pools reset under in-flight buffers). Transfer-queue work is not
+   covered by this fence; transfer-heavy frames must synchronize explicitly. *>
 fn void? vk_end_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
@@ -137,10 +142,12 @@ fn void? vk_end_frame(gpu::Device* device) @private {
     state.timeline_counter++;
     slot.frame_timeline_value = state.timeline_counter;
 
-    vk::SemaphoreSignalInfo signal_info = vk::semaphore_signal_info()
+    vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
         .set_semaphore(state.frame_timeline)
-        .set_value(state.timeline_counter);
-    check(vk::signal_semaphore(state.device, &signal_info))!;
+        .set_value(state.timeline_counter)
+        .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+    vk::SubmitInfo2 submit = vk::submit_info2().set_signal_semaphore_infos((&signal)[:1]);
+    check(vk::queue_submit2(state.graphics_queue, 1, &submit, (vk::Fence)null))!;
     state.frame_active = false;
 }
 

@@ -1,9 +1,13 @@
 module gpu;
 
+// A non-zero `swapchain` couples this submit to the last acquire: rendering
+// waits the acquire semaphore, presentation waits this submit. One coupled
+// submit per acquire — the binary semaphores cannot be waited twice.
 struct SubmitDesc {
     CommandList[]     command_lists;
     SemaphoreWait[]   waits;
     SemaphoreSignal[] signals;
+    SwapchainHandle   swapchain;
 }
 
 <* Submit command lists to their queue, waiting on and signaling the requested

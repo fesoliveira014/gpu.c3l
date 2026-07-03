@@ -76,6 +76,8 @@ fn void texture_descriptor_deferred_reuse() @test {
     assert(during.slot != first_slot, "slot is not reused while its frame is in flight");
 
     gpu::end_frame(&device)!!;
+    // The frame fence signals GPU-side; idle so the timeline has passed.
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::TextureIndex recycled = gpu::create_texture_descriptor(&device, texture, null)!!;
     assert(recycled.slot == first_slot, "retired slot is recycled once the frame timeline passes");
