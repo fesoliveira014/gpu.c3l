@@ -5,9 +5,16 @@
   // libs/ holds gpu.c3l -> ../.. plus symlinks to the vendored vk.c3l / vma.c3l,
   // mirroring test/libs so a single search path resolves all three by <name>.c3l.
   "dependency-search-paths": [ "libs" ],
-  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect", "sdl3" ],
   "output": "build",
   "targets": {
+    // Windowed: SDL3 window + swapchain, presents the textured triangle.
+    // Run with --frames N for an auto-exit smoke, --no-vsync for MAILBOX.
+    "hello_triangle_sdl": {
+      "type": "executable",
+      "target": "linux-x64",
+      "sources": [ "hello_triangle_sdl/main.c3", "shared/sample_window_sdl.c3" ]
+    },
     // Headless: no SDL. Proves the root-pointer compute ABI end to end.
     "root_pointer_compute": {
       "type": "executable",

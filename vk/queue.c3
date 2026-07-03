@@ -66,8 +66,17 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
             submit = submit.set_command_buffer_infos(cmds);
         }
 
-        if (desc.waits.len > 0) {
-            vk::SemaphoreSubmitInfo[] waits = mem::talloc_array(vk::SemaphoreSubmitInfo, desc.waits.len);
+        // A named swapchain couples this submit to its pending acquire: wait
+        // the binary acquire semaphore, signal the image's present semaphore.
+        SwapchainSlot* swapchain = null;
+        if (desc.swapchain.is_valid()) {
+            swapchain = state.swapchains.get(desc.swapchain)!;
+            if (!swapchain.acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
+        }
+
+        usz wait_count = desc.waits.len + (swapchain != null ? 1 : 0);
+        if (wait_count > 0) {
+            vk::SemaphoreSubmitInfo[] waits = mem::talloc_array(vk::SemaphoreSubmitInfo, (sz)wait_count);
             foreach (i, w : desc.waits) {
                 SemaphoreSlot* slot = state.semaphores.get(w.semaphore)!;
                 waits[i] = vk::semaphore_submit_info()
@@ -75,17 +84,28 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
                     .set_value((ulong)w.value)
                     .set_stage_mask(stage_to_vk(w.stage));
             }
+            if (swapchain != null) {
+                waits[desc.waits.len] = vk::semaphore_submit_info()
+                    .set_semaphore(swapchain.pending_acquire_semaphore)
+                    .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            }
             submit = submit.set_wait_semaphore_infos(waits);
         }
 
-        if (desc.signals.len > 0) {
-            vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(vk::SemaphoreSubmitInfo, desc.signals.len);
+        usz signal_count = desc.signals.len + (swapchain != null ? 1 : 0);
+        if (signal_count > 0) {
+            vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(vk::SemaphoreSubmitInfo, (sz)signal_count);
             foreach (i, s : desc.signals) {
                 SemaphoreSlot* slot = state.semaphores.get(s.semaphore)!;
                 signals[i] = vk::semaphore_submit_info()
                     .set_semaphore(slot.semaphore)
                     .set_value((ulong)s.value)
                     .set_stage_mask(stage_to_vk(s.stage));
+            }
+            if (swapchain != null) {
+                signals[desc.signals.len] = vk::semaphore_submit_info()
+                    .set_semaphore(swapchain.present_semaphores[swapchain.pending_image])
+                    .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             }
             submit = submit.set_signal_semaphore_infos(signals);
         }

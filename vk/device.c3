@@ -24,6 +24,7 @@ struct VkDeviceState {
     gpu::DescriptorHeapMode    heap_mode;
     uint                       texture_descriptor_capacity;
     uint                       sampler_descriptor_capacity;
+    bool                       presentation_enabled;
     BufferTable                buffers;
     vk::Semaphore              frame_timeline;
     ulong                      timeline_counter;
@@ -37,6 +38,7 @@ struct VkDeviceState {
     ShaderTable                shaders;
     PipelineTable              pipelines;
     TextureTable               textures;
+    SwapchainTable             swapchains;
     DescriptorHeapState        heap;
     bool                       frame_active;
 }
@@ -88,6 +90,11 @@ const gpu::BackendVTable VK_VTABLE = {
     .cmd_end_render_pass     = &vk_cmd_end_render_pass,
     .cmd_draw                = &vk_cmd_draw,
     .cmd_draw_indexed        = &vk_cmd_draw_indexed,
+    .create_swapchain        = &vk_create_swapchain,
+    .destroy_swapchain       = &vk_destroy_swapchain,
+    .resize_swapchain        = &vk_resize_swapchain,
+    .acquire_next_image      = &vk_acquire_next_image,
+    .present                 = &vk_present,
 };
 
 <* Build a Vulkan device end to end. On failure the partial state is torn down
@@ -100,6 +107,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.sampler_descriptor_capacity = gpu::resolve_descriptor_capacity(desc.sampler_descriptor_capacity, gpu::DEFAULT_SAMPLER_DESCRIPTORS)!;
 
     state.validation = desc.enable_validation;
+    state.presentation_enabled = desc.enable_presentation;
     state.instance = create_vk_instance(desc)!;
     vk::load_extensions(state.instance);
     if (desc.enable_validation) setup_debug_messenger(state);
@@ -135,6 +143,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.shaders.slots    = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
     state.pipelines.slots  = mem::new_array(PipelineCell, gpu::MAX_PIPELINES);
     state.textures.slots   = mem::new_array(TextureCell, gpu::MAX_TEXTURES);
+    state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     create_descriptor_heap(state)!;
     state.caps = build_caps(
         base:               &features2.features,
@@ -174,6 +183,14 @@ fn void destroy_state(VkDeviceState* state) @private {
         if (state.buffers.slots.ptr != null) {
             mem::free(state.buffers.slots.ptr);
             state.buffers.slots = {};
+        }
+        // Swapchains before textures: their wrapped image slots free here.
+        if (state.swapchains.slots.ptr != null) {
+            foreach (&cell : state.swapchains.slots[:state.swapchains.next_new]) {
+                if (cell.used) destroy_swapchain_slot(state, &cell.value);
+            }
+            mem::free(state.swapchains.slots.ptr);
+            state.swapchains.slots = {};
         }
         if (state.validation) report_descriptor_leaks(state);
         destroy_descriptor_heap(state);
@@ -381,11 +398,15 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @p
     features2.features.shader_storage_image_write_without_format = vk::TRUE;
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[2] extensions;
+    ZString[3] extensions;
     uint extension_count = 0;
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
     if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER) {
         extensions[extension_count++] = "VK_EXT_descriptor_buffer";
+    }
+    if (state.presentation_enabled) {
+        if (!device_supports_extension(state.physical_device, "VK_KHR_swapchain")) return gpu::UNSUPPORTED_FEATURE~;
+        extensions[extension_count++] = "VK_KHR_swapchain";
     }
 
     vk::DeviceCreateInfo device_info = vk::device_create_info()

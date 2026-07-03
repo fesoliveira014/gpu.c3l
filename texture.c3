@@ -9,6 +9,8 @@ enum Format : int {
     RG8_UNORM,
     RGBA8_UNORM,
     RGBA8_SRGB,
+    BGRA8_UNORM,
+    BGRA8_SRGB,
     R16_UINT,
     R16_FLOAT,
     RG16_FLOAT,

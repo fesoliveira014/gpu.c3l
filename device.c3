@@ -55,6 +55,11 @@ alias CmdBeginRenderPassFn    = fn void? (CommandList*, RenderPassDesc*);
 alias CmdEndRenderPassFn      = fn void? (CommandList*);
 alias CmdDrawFn               = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuAddress, uint, uint);
 alias CmdDrawIndexedFn        = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuAddress, GpuSpan, uint, uint, IndexType);
+alias CreateSwapchainFn       = fn SwapchainHandle? (Device*, SurfaceDesc*, SwapchainDesc*);
+alias DestroySwapchainFn      = fn void? (Device*, SwapchainHandle);
+alias ResizeSwapchainFn       = fn void? (Device*, SwapchainHandle, uint, uint);
+alias AcquireNextImageFn      = fn AcquiredImage? (Device*, SwapchainHandle);
+alias PresentFn               = fn void? (Device*, PresentDesc*);
 
 struct BackendVTable {
     DestroyDeviceFn         destroy_device;
@@ -102,6 +107,11 @@ struct BackendVTable {
     CmdEndRenderPassFn      cmd_end_render_pass;
     CmdDrawFn               cmd_draw;
     CmdDrawIndexedFn        cmd_draw_indexed;
+    CreateSwapchainFn       create_swapchain;
+    DestroySwapchainFn      destroy_swapchain;
+    ResizeSwapchainFn       resize_swapchain;
+    AcquireNextImageFn      acquire_next_image;
+    PresentFn               present;
 }
 
 // A GPU device. `vtable` points at one static table shared by all devices of a

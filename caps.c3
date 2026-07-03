@@ -21,6 +21,7 @@ struct DeviceDesc {
     BackendKind        backend;
     bool               enable_validation;
     bool               enable_debug_names;
+    bool               enable_presentation;
     DescriptorHeapMode descriptor_heap_mode;
     uint               texture_descriptor_capacity;
     uint               sampler_descriptor_capacity;
