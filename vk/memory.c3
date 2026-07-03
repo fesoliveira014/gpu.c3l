@@ -83,6 +83,13 @@ fn bool frame_arena_retired(VkDeviceState* state, FrameArenaState* slot) {
     return value >= slot.frame_timeline_value;
 }
 
+<* In-frame retires wait for the value end_frame will signal; outside a frame
+   the current value makes reclaim immediate. Shared by the descriptor heap,
+   the transfer arenas, and dedicated staging buffers. *>
+fn ulong retire_timeline_value(VkDeviceState* state) {
+    return state.frame_active ? state.timeline_counter + 1 : state.timeline_counter;
+}
+
 <* Reset an arena slot's cursor. Rejects if the slot has not yet retired. *>
 fn void? reset_frame_arena(VkDeviceState* state, uint index) {
     FrameArenaState* slot = &state.frame_arenas[index];

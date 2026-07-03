@@ -40,6 +40,9 @@ struct VkDeviceState {
     TextureTable               textures;
     SwapchainTable             swapchains;
     DescriptorHeapState        heap;
+    TransferArenaState         staging_arena;
+    TransferArenaState         readback_arena;
+    DedicatedRetireState       dedicated_staging;
     bool                       frame_active;
 }
 
@@ -90,6 +93,12 @@ const gpu::BackendVTable VK_VTABLE = {
     .cmd_end_render_pass     = &vk_cmd_end_render_pass,
     .cmd_draw                = &vk_cmd_draw,
     .cmd_draw_indexed        = &vk_cmd_draw_indexed,
+    .cmd_upload_buffer       = &vk_cmd_upload_buffer,
+    .cmd_upload_texture      = &vk_cmd_upload_texture,
+    .upload_buffer_data      = &vk_upload_buffer_data,
+    .upload_texture_data     = &vk_upload_texture_data,
+    .readback_buffer_data    = &vk_readback_buffer_data,
+    .readback_texture_data   = &vk_readback_texture_data,
     .create_swapchain        = &vk_create_swapchain,
     .destroy_swapchain       = &vk_destroy_swapchain,
     .resize_swapchain        = &vk_resize_swapchain,
@@ -144,6 +153,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.pipelines.slots  = mem::new_array(PipelineCell, gpu::MAX_PIPELINES);
     state.textures.slots   = mem::new_array(TextureCell, gpu::MAX_TEXTURES);
     state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
+    create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
     state.caps = build_caps(
         base:               &features2.features,
