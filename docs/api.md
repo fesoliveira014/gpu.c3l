@@ -428,6 +428,23 @@ create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) -> Pipeline
 destroy_pipeline(Device* device, PipelineHandle pipeline) -> void?
 ```
 
+`color_formats` carries at most `MAX_COLOR_ATTACHMENTS` (8) entries.
+
+### Pipeline deduplication
+
+Pipeline creation deduplicates through a descriptor-keyed cache. Every create
+returns a fresh handle, but descriptors identical in immutable state (shaders,
+topology, polygon mode, blend, formats, and — for compute — push size) alias
+one backend pipeline underneath. Raster cull/front-face and depth
+test/write/compare state are applied per handle at draw time as dynamic state,
+so descriptors differing only there also share a backend pipeline.
+
+Each successful create must be balanced by exactly one `destroy_pipeline`; the
+backend pipeline is destroyed when its last alias is released. Destroying a
+handle twice faults `INVALID_HANDLE` and never affects other aliases. Handles
+must not be compared to decide whether two pipelines are "the same object" —
+distinct handles may or may not share backend state.
+
 ## 9. Command API
 
 ### Command lifecycle

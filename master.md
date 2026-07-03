@@ -729,10 +729,12 @@ M13 SDL3 windowed swapchain sample
 M14 upload/readback helpers
 M15 pipeline cache and state policy
 M16 GPU-driven indirect execution
-M17 debug names, stats, leak reporting
-M18 shader ABI generator
-M19 cross-platform packaging
-M20 first release hardening
+M17 depth attachments
+M18 threading model
+M19 debug names, stats, leak reporting
+M20 shader ABI generator
+M21 cross-platform packaging
+M22 first release hardening
 ```
 
 ---

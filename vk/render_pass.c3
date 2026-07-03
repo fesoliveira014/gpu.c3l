@@ -87,11 +87,31 @@ fn void? vk_cmd_end_render_pass(gpu::CommandList* commands) @private {
     commands.state = gpu::CommandState.RECORDING;
 }
 
+<* Apply the slot's raster/depth snapshot through the core-1.3 dynamic-state
+   commands; graphics pipelines bake none of this state. *>
+fn void replay_dynamic_state(vk::CommandBuffer cb, PipelineSlot* slot) @private {
+    vk::cmd_set_cull_mode(cb, (vk::CullModeFlags)cull_mode_to_vk(slot.raster.cull_mode));
+    vk::cmd_set_front_face(cb, slot.raster.front_face == gpu::FrontFace.CLOCKWISE
+        ? vk::FrontFace.CLOCKWISE : vk::FrontFace.COUNTER_CLOCKWISE);
+    vk::cmd_set_depth_test_enable(cb, slot.depth.test_enable ? vk::TRUE : vk::FALSE);
+    vk::cmd_set_depth_write_enable(cb, slot.depth.write_enable ? vk::TRUE : vk::FALSE);
+    vk::cmd_set_depth_compare_op(cb, compare_op_to_vk(slot.depth.compare));
+}
+
+<* Aliases of one cache entry can carry different dynamic-state snapshots, so
+   a handle change replays state even when the pipeline bind is skipped. *>
 fn void? bind_graphics_and_push(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::CommandBuffer cb) @private {
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     PipelineSlot* slot = state.pipelines.get(handle)!;
-    vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.GRAPHICS, slot.pipeline);
-    bind_descriptor_heap(state, cb, slot.layout, vk::PipelineBindPoint.GRAPHICS);
+    if ((ulong)handle != (ulong)commands.last_pipeline) {
+        if (slot.entry != commands.last_entry) {
+            vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.GRAPHICS, slot.pipeline);
+            bind_descriptor_heap(state, cb, slot.layout, vk::PipelineBindPoint.GRAPHICS);
+            commands.last_entry = slot.entry;
+        }
+        replay_dynamic_state(cb, slot);
+        commands.last_pipeline = handle;
+    }
     GraphicsRootPush push = { .vertex_root = (ulong)vertex_root, .fragment_root = (ulong)fragment_root };
     uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     vk::cmd_push_constants(cb, slot.layout, (vk::ShaderStageFlags)push_stages, 0, GRAPHICS_ROOT_PUSH_SIZE, &push);
