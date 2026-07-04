@@ -2,7 +2,10 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import std::core::mem;
+import std::atomic;
+import std::atomic::types;
 
 const uint TRANSFER_RETIRE_CAP = 1024;
 const uint DEDICATED_RETIRE_CAP = 64;
@@ -103,7 +106,7 @@ fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* 
     // range before their command list is submitted.
     arena.retire[(arena.retire_head + arena.retire_count) % TRANSFER_RETIRE_CAP] = {
         .virtual_end    = tail + size,
-        .timeline_value = state.timeline_counter + 1,
+        .timeline_value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1,
     };
     arena.retire_count++;
     arena.virtual_tail = tail + size;
@@ -127,6 +130,8 @@ fn void drain_dedicated_transfers(VkDeviceState* state) @private {
 <* Span from the arena, or a dedicated one-shot buffer (destroyed once its
    timeline value retires) when the arena cannot fit the request. *>
 fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, gpu::BufferDesc* dedicated_desc) @private {
+    state.transfer_mutex.lock()!!;
+    defer state.transfer_mutex.unlock();
     drain_dedicated_transfers(state);
     if (try span = transfer_arena_alloc(state, arena, size, align)) return span;
     if (state.dedicated_staging.count == DEDICATED_RETIRE_CAP) return gpu::ARENA_FULL~;
@@ -135,7 +140,7 @@ fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena,
     gpu::BufferHandle buffer = vk_create_buffer(&shim, dedicated_desc)!;
     state.dedicated_staging.entries[(state.dedicated_staging.head + state.dedicated_staging.count) % DEDICATED_RETIRE_CAP] = {
         .buffer         = buffer,
-        .timeline_value = state.timeline_counter + 1,
+        .timeline_value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1,
     };
     state.dedicated_staging.count++;
     return vk_get_buffer_span(&shim, buffer);
@@ -223,8 +228,15 @@ fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDes
 
 fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz offset, char[] data, gpu::Stage next_stage, gpu::Hazard next_hazard) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
     gpu::CommandList commands;
-    vk_begin_commands(device, gpu::QueueKind.GRAPHICS, &commands)!;
+    vk_begin_commands(
+        device:       device,
+        queue:        gpu::QueueKind.GRAPHICS,
+        ctx:          {},
+        out_commands: &commands,
+    )!;
     vk_cmd_upload_buffer(&commands, dst, offset, data)!;
 
     gpu::BufferBarrier next_use = {
@@ -242,9 +254,12 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
 
 fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uint mip, char[] data, gpu::Stage next_stage, gpu::Hazard next_hazard, gpu::TextureLayout next_layout) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
     TextureSlot* slot = state.textures.get(dst)!;
-    if (slot.current_layout != gpu::TextureLayout.UNDEFINED
-        && slot.current_layout != gpu::TextureLayout.TRANSFER_DST) {
+    gpu::TextureLayout tracked = texture_layout(slot);
+    if (tracked != gpu::TextureLayout.UNDEFINED
+        && tracked != gpu::TextureLayout.TRANSFER_DST) {
         return gpu::INVALID_RESOURCE_STATE~;
     }
     // Validate before recording: a fault after the entry barrier would leave
@@ -254,9 +269,14 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     if (data.len != expected) return gpu::INVALID_ARGUMENT~;
 
     gpu::CommandList commands;
-    vk_begin_commands(device, gpu::QueueKind.GRAPHICS, &commands)!;
+    vk_begin_commands(
+        device:       device,
+        queue:        gpu::QueueKind.GRAPHICS,
+        ctx:          {},
+        out_commands: &commands,
+    )!;
 
-    if (slot.current_layout == gpu::TextureLayout.UNDEFINED) {
+    if (tracked == gpu::TextureLayout.UNDEFINED) {
         gpu::TextureBarrier to_dst = {
             .texture       = dst,
             .before_stage  = gpu::Stage.HOST,
@@ -287,6 +307,8 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
 
 fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz offset, char[] out_data, gpu::Stage from_stage, gpu::Hazard from_hazard) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
     if (out_data.len == 0) return gpu::INVALID_ARGUMENT~;
     BufferSlot* src_slot = state.buffers.get(src)!;
     if (offset + out_data.len > src_slot.size) return gpu::INVALID_ARGUMENT~;
@@ -294,7 +316,12 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     gpu::GpuSpan readback = readback_alloc(state, out_data.len, TRANSFER_ALIGN)!;
 
     gpu::CommandList commands;
-    vk_begin_commands(device, gpu::QueueKind.GRAPHICS, &commands)!;
+    vk_begin_commands(
+        device:       device,
+        queue:        gpu::QueueKind.GRAPHICS,
+        ctx:          {},
+        out_commands: &commands,
+    )!;
 
     gpu::BufferBarrier from = {
         .buffer        = src,
@@ -334,6 +361,8 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
 
 fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, uint mip, char[] out_data, gpu::Stage from_stage, gpu::Hazard from_hazard, gpu::TextureLayout from_layout) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
     usz expected = texture_upload_bytes(state, &region)!;
     if (out_data.len != expected) return gpu::INVALID_ARGUMENT~;
@@ -344,7 +373,12 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     gpu::GpuSpan readback = readback_alloc(state, out_data.len, align)!;
 
     gpu::CommandList commands;
-    vk_begin_commands(device, gpu::QueueKind.GRAPHICS, &commands)!;
+    vk_begin_commands(
+        device:       device,
+        queue:        gpu::QueueKind.GRAPHICS,
+        ctx:          {},
+        out_commands: &commands,
+    )!;
 
     gpu::TextureBarrier to_src = {
         .texture       = src,
@@ -397,10 +431,10 @@ fn void? submit_and_wait(VkDeviceState* state, gpu::Device* device, gpu::Command
     vk_submit(device, &submit)!;
     vk_wait_queue_idle(device, gpu::QueueKind.GRAPHICS)!;
 
-    state.timeline_counter++;
+    ulong helper_value = state.timeline_counter.add(1, AtomicOrdering.RELAXED) + 1;
     vk::SemaphoreSignalInfo signal_info = vk::semaphore_signal_info()
         .set_semaphore(state.frame_timeline)
-        .set_value(state.timeline_counter);
+        .set_value(helper_value);
     return check(vk::signal_semaphore(state.device, &signal_info));
 }
 
@@ -436,10 +470,12 @@ fn void unpin_ticket_range(TransferArenaState* arena, ulong range_end) @private 
 <* Ticket destination: pinned readback-arena range, or a dedicated buffer
    (destroyed at resolve) when the arena cannot fit the request. *>
 fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
+    state.transfer_mutex.lock()!!;
+    defer state.transfer_mutex.unlock();
     if (try alloc = ticket_arena_alloc(state, &state.readback_arena, size)) {
         return {
             .span      = alloc.span,
-            .value     = (gpu::SemaphoreValue)(state.timeline_counter + 1),
+            .value     = (gpu::SemaphoreValue)(state.timeline_counter.load(AtomicOrdering.RELAXED) + 1),
             .range_end = alloc.range_end,
         };
     }
@@ -454,7 +490,7 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
     if (try span = vk_get_buffer_span(&shim, buffer)) {
         return {
             .span      = span,
-            .value     = (gpu::SemaphoreValue)(state.timeline_counter + 1),
+            .value     = (gpu::SemaphoreValue)(state.timeline_counter.load(AtomicOrdering.RELAXED) + 1),
             .dedicated = buffer,
         };
     }
@@ -463,6 +499,8 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
 }
 
 fn void release_ticket(VkDeviceState* state, gpu::ReadbackTicket* ticket) @private {
+    state.transfer_mutex.lock()!!;
+    defer state.transfer_mutex.unlock();
     if (ticket.dedicated.is_valid()) {
         gpu::Device shim = device_shim(state);
         (void)vk_destroy_buffer(&shim, ticket.dedicated);
@@ -539,6 +577,8 @@ fn bool vk_poll_readback(gpu::Device* device, gpu::ReadbackTicket* ticket) @priv
 
 fn void? vk_resolve_readback(gpu::Device* device, gpu::ReadbackTicket* ticket, char[] dest) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
     if ((ulong)ticket.value == 0) return gpu::INVALID_ARGUMENT~;
     if (dest.len < ticket.span.size) return gpu::INVALID_ARGUMENT~;
     ulong current = 0;

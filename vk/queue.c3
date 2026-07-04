@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import std::core::mem;
 
 struct QueueFamilies {
@@ -50,6 +51,10 @@ fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
    signaling the requested timeline values at their stages. Empty wait/signal/
    command arrays are left unset so the slice setters are never handed a
    zero-length slice. *>
+fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
+    return kind == gpu::QueueKind.TRANSFER ? &state.transfer_queue_mutex : &state.graphics_queue_mutex;
+}
+
 fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;
@@ -111,6 +116,9 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
         }
 
         gpu::QueueKind kind = desc.command_lists.len > 0 ? desc.command_lists[0].queue : gpu::QueueKind.GRAPHICS;
+        Mutex* queue_mutex = queue_mutex_for(state, kind);
+        queue_mutex.lock()!!;
+        defer queue_mutex.unlock();
         check(vk::queue_submit2(queue_for(state, kind), 1, &submit, (vk::Fence)null))!;
         foreach (&cl : desc.command_lists) cl.state = gpu::CommandState.SUBMITTED;
     };
@@ -118,5 +126,8 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
 
 fn void? vk_wait_queue_idle(gpu::Device* device, gpu::QueueKind queue) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    Mutex* queue_mutex = queue_mutex_for(state, queue);
+    queue_mutex.lock()!!;
+    defer queue_mutex.unlock();
     check(vk::queue_wait_idle(queue_for(state, queue)))!;
 }

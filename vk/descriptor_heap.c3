@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import vma;
 import std::io;
 import std::core::mem;
@@ -384,6 +385,10 @@ fn void bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pip
 
 fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::TextureHandle texture, gpu::TextureViewDesc* view) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.heap;
     TextureSlot* texture_slot = state.textures.get(texture)!;
     vk::ImageView image_view = resolve_texture_view(state, texture_slot, view)!;
@@ -409,6 +414,10 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
 
 fn void? vk_destroy_texture_descriptor(gpu::Device* device, gpu::TextureIndex index) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     TextureDescriptorCell* cell = texture_cell_get(&state.heap, index)!;
     cell.used = false;
     cell.generation = bump_generation(cell.generation);
@@ -431,6 +440,10 @@ fn vk::SamplerAddressMode address_mode_to_vk(gpu::AddressMode mode) @private {
 
 fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.heap;
 
     drain_sampler_retire(state);
@@ -477,6 +490,10 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
 
 fn void? vk_destroy_sampler(gpu::Device* device, gpu::SamplerIndex index) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     SamplerDescriptorCell* cell = sampler_cell_get(&state.heap, index)!;
     cell.used = false;
     cell.generation = bump_generation(cell.generation);

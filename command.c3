@@ -22,6 +22,8 @@ enum CommandState : int {
     SUBMITTED,
 }
 
+const uint MAX_RECORDING_CONTEXTS = 16;
+
 struct Vec3u {
     uint x;
     uint y;
@@ -136,13 +138,26 @@ struct TextureBufferCopyDesc {
     uint          height;
 }
 
-<* Begin recording a command list on the given queue.
-   Ownership: end with end_commands, then submit; the backing command buffer is
-   freed when its frame slot's pool is reset. *>
-fn CommandList? begin_commands(Device* device, QueueKind queue) {
+<* Create a recording context: per-frame command pools confined to one
+   thread at a time. Ownership: release with destroy_recording_context. *>
+fn RecordingContextHandle? create_recording_context(Device* device) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.create_recording_context(device);
+}
+
+fn void? destroy_recording_context(Device* device, RecordingContextHandle ctx) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.destroy_recording_context(device, ctx);
+}
+
+<* Begin recording a command list on the given queue. ctx = {} selects the
+   device's built-in context; pass a created context to record from another
+   thread. Ownership: end with end_commands, then submit; the backing command
+   buffer is freed when its frame slot's pool is reset. *>
+fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     CommandList commands;
-    device.vtable.begin_commands(device, queue, &commands)!;
+    device.vtable.begin_commands(device, queue, ctx, &commands)!;
     return commands;
 }
 

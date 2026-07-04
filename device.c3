@@ -23,7 +23,9 @@ alias GetPersistentStatsFn  = fn PersistentArenaStats? (Device*);
 // optional-of-struct return in a vtable fn-ptr signature dangles c3c's
 // debug-type cache (scripts/c3c_bug_repro/ISSUE.md). Revert to
 // `fn CommandList? (Device*, QueueKind)` once the upstream fix lands.
-alias BeginCommandsFn       = fn void? (Device*, QueueKind, CommandList* out_commands);
+alias BeginCommandsFn       = fn void? (Device*, QueueKind, RecordingContextHandle, CommandList* out_commands);
+alias CreateRecordingContextFn  = fn RecordingContextHandle? (Device*);
+alias DestroyRecordingContextFn = fn void? (Device*, RecordingContextHandle);
 alias EndCommandsFn         = fn void? (Device*, CommandList*);
 alias SubmitFn              = fn void? (Device*, SubmitDesc*);
 alias WaitQueueIdleFn       = fn void? (Device*, QueueKind);
@@ -90,6 +92,8 @@ struct BackendVTable {
     FreePersistentSpanFn    free_persistent_span;
     GetPersistentStatsFn    get_persistent_stats;
     BeginCommandsFn         begin_commands;
+    CreateRecordingContextFn  create_recording_context;
+    DestroyRecordingContextFn destroy_recording_context;
     EndCommandsFn           end_commands;
     SubmitFn                submit;
     WaitQueueIdleFn         wait_queue_idle;

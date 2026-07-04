@@ -2,7 +2,9 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import vma;
+import std::atomic;
 
 // Concrete (non-generic) slot table for textures. Monomorphized twin of
 // gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
@@ -29,7 +31,7 @@ struct TextureSlot {
     uint               height;
     uint               mip_levels;
     uint               array_layers;
-    gpu::TextureLayout current_layout;
+    Atomic{int}        current_layout;
     bool               swapchain_owned;
     CachedView[MAX_CACHED_VIEWS] views;
 }
@@ -172,6 +174,16 @@ fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     }
 }
 
+<* Tracked layout is a relaxed atomic: exact under the per-texture
+   single-recorder discipline, best-effort outside it. *>
+fn gpu::TextureLayout texture_layout(TextureSlot* slot) {
+    return (gpu::TextureLayout)slot.current_layout.load(AtomicOrdering.RELAXED);
+}
+
+fn void set_texture_layout(TextureSlot* slot, gpu::TextureLayout layout) {
+    slot.current_layout.store((int)layout, AtomicOrdering.RELAXED);
+}
+
 <* Storage-image usage on depth formats is illegal Vulkan. D24_UNORM_S8_UINT
    stays out: attachment support is not universal and no format-properties
    query exists. *>
@@ -256,6 +268,10 @@ fn void destroy_cached_views(VkDeviceState* state, TextureSlot* slot) {
 
 fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     check_texture_desc(desc)!;
     uint mip_levels   = desc.mip_levels == 0 ? 1 : desc.mip_levels;
     uint array_layers = desc.array_layers == 0 ? 1 : desc.array_layers;
@@ -279,7 +295,6 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .height         = desc.height,
         .mip_levels     = mip_levels,
         .array_layers   = array_layers,
-        .current_layout = gpu::TextureLayout.UNDEFINED,
     };
     check(state.allocator.create_image(&image_info, &alloc_info, &slot.image, &slot.allocation, null))!;
 
@@ -313,6 +328,10 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
 
 fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;
     if (slot.swapchain_owned) return gpu::INVALID_ARGUMENT~;
     destroy_cached_views(state, slot);

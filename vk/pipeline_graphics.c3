@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import std::core::mem;
 
 // GraphicsRootPush: vertex_root_gpu + fragment_root_gpu (docs/shader_abi.md §10).
@@ -74,6 +75,8 @@ fn vk::BlendOp blend_op_to_vk(gpu::BlendOp op) @private {
    builder setters (c3c 0.8.0 codegen crash). *>
 fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::GraphicsPipelineDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
     if (desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS) return gpu::INVALID_ARGUMENT~;
     if (desc.depth_format != gpu::Format.UNDEFINED && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
     if (desc.color_formats.len == 0 && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
@@ -82,21 +85,25 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
 
     PipelineKey key = build_graphics_key(desc);
     ulong hash = hash_key(&key);
-    uint hit = find_entry(&state.pipeline_cache, hash, &key);
-    if (hit != PIPELINE_ENTRY_NONE) {
-        PipelineCacheEntry* entry = &state.pipeline_cache.entries[hit];
-        entry.refcount++;
-        if (try handle = state.pipelines.alloc({
-            .pipeline = entry.pipeline,
-            .layout   = entry.layout,
-            .entry    = hit,
-            .raster   = desc.raster,
-            .depth    = desc.depth,
-        })) {
-            return handle;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        uint hit = find_entry(&state.pipeline_cache, hash, &key);
+        if (hit != PIPELINE_ENTRY_NONE) {
+            PipelineCacheEntry* entry = &state.pipeline_cache.entries[hit];
+            entry.refcount++;
+            if (try handle = state.pipelines.alloc({
+                .pipeline = entry.pipeline,
+                .layout   = entry.layout,
+                .entry    = hit,
+                .raster   = desc.raster,
+                .depth    = desc.depth,
+            })) {
+                return handle;
+            }
+            entry.refcount--;
+            return gpu::SLOT_TABLE_FULL~;
         }
-        entry.refcount--;
-        return gpu::SLOT_TABLE_FULL~;
     }
 
     @pool() {
@@ -205,8 +212,18 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
             name:          desc.debug_name,
         );
 
+        // Compiled outside the lock; a same-key racer may have inserted
+        // meanwhile — the loser destroys its pipeline and refs the winner.
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
         uint entry_index;
-        if (try idx = insert_entry(&state.pipeline_cache, {
+        uint raced = find_entry(&state.pipeline_cache, hash, &key);
+        if (raced != PIPELINE_ENTRY_NONE) {
+            vk::destroy_pipeline(state.device, pipeline, null);
+            state.pipeline_cache.entries[raced].refcount++;
+            entry_index = raced;
+            pipeline = state.pipeline_cache.entries[raced].pipeline;
+        } else if (try idx = insert_entry(&state.pipeline_cache, {
             .hash     = hash,
             .key      = key,
             .pipeline = pipeline,

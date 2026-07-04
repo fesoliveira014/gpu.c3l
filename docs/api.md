@@ -447,6 +447,17 @@ distinct handles may or may not share backend state.
 
 ## 9. Command API
 
+### Threading
+
+Thread-safety is tiered per entry point — see `docs/threading.md` for the
+full table, lock order, and disciplines. Summary: resource creation and the
+transfer helpers are thread-safe; frame lifecycle, submit/present, and
+swapchain operations are externally synchronized; recording is confined —
+`begin_commands(device, queue, ctx)` takes a `RecordingContextHandle`
+(default `{}` = the device's built-in context), and each context records from
+one thread at a time. Create one context per recording thread with
+`create_recording_context`.
+
 ### Command lifecycle
 
 ```text

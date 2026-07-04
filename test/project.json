@@ -81,6 +81,11 @@
       "type": "test",
       "target": "linux-x64",
       "sources": [ "src/test_vk_depth_attachment.c3" ]
+    },
+    "vk_threading": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_vk_threading.c3" ]
     }
   }
 }
