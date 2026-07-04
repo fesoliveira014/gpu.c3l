@@ -33,6 +33,8 @@ struct TextureSlot {
     uint               array_layers;
     Atomic{int}        current_layout;
     bool               swapchain_owned;
+    usz                allocation_size;
+    char[DEBUG_NAME_CAP] debug_name;
     CachedView[MAX_CACHED_VIEWS] views;
 }
 
@@ -296,10 +298,19 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .mip_levels     = mip_levels,
         .array_layers   = array_layers,
     };
-    check(state.allocator.create_image(&image_info, &alloc_info, &slot.image, &slot.allocation, null))!;
+    vma::AllocationInfo allocation_info;
+    check(state.allocator.create_image(&image_info, &alloc_info, &slot.image, &slot.allocation, &allocation_info))!;
+    slot.allocation_size = (usz)allocation_info.size;
 
+    copy_debug_name(&slot.debug_name[0], desc.debug_name);
     if (desc.debug_name != null) {
         state.allocator.set_allocation_name(slot.allocation, desc.debug_name);
+        set_object_name(
+            state:         state,
+            object_type:   vk::ObjectType.IMAGE,
+            object_handle: (ulong)slot.image,
+            name:          desc.debug_name,
+        );
     }
 
     vk::ImageViewCreateInfo view_info = vk::image_view_create_info()

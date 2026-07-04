@@ -126,6 +126,8 @@ const gpu::BackendVTable VK_VTABLE = {
     .cmd_draw_indexed_indirect = &vk_cmd_draw_indexed_indirect,
     .cmd_draw_indexed_indirect_count = &vk_cmd_draw_indexed_indirect_count,
     .cmd_dispatch_indirect   = &vk_cmd_dispatch_indirect,
+    .cmd_begin_label         = &vk_cmd_begin_label,
+    .cmd_end_label           = &vk_cmd_end_label,
     .cmd_upload_buffer       = &vk_cmd_upload_buffer,
     .cmd_upload_texture      = &vk_cmd_upload_texture,
     .upload_buffer_data      = &vk_upload_buffer_data,
@@ -236,6 +238,8 @@ fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
     if (state.device != null) {
         vk::device_wait_idle(state.device);
+        // Leak reporting first: the sweeps below free the tables it reads.
+        if (state.validation) (void)report_resource_leaks(state);
         // Destroy any buffers the caller did not, so no VMA allocation leaks.
         if (state.allocator != null && state.buffers.slots.ptr != null) {
             foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {

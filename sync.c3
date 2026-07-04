@@ -72,6 +72,7 @@ struct GlobalBarrier {
 
 struct SemaphoreDesc {
     SemaphoreValue initial_value;
+    ZString        debug_name;
 }
 
 struct SemaphoreWait {

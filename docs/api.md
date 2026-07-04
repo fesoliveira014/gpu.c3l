@@ -663,6 +663,24 @@ cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) -> void?
 
 No command helper should silently insert barriers for a later use.
 
+### Debug labels and leak reporting
+
+```text
+cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) -> void?
+cmd_end_label(CommandList* commands) -> void?
+```
+
+Labels group work for capture tools; they are valid while recording,
+including inside render passes, and silently succeed when debug-utils is
+absent. Balance is the caller's responsibility.
+
+With validation enabled, `destroy_device` reports every leaked resource to
+stderr before sweeping it: buffers by debug name and handle, textures by
+name and allocation size, pipeline cache entries by alias count, shaders,
+semaphores, and recording contexts by index, plus live persistent-span
+counts. Debug names are stored as truncating 63-byte copies — no lifetime
+requirement on the caller's string.
+
 ## 10. Swapchain API
 
 Core WSI types should be platform-neutral.

@@ -252,6 +252,13 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
                 .array_layers    = 1,
                 .swapchain_owned = true,
             };
+            copy_debug_name(&texture.debug_name[0], slot.requested.debug_name);
+            set_object_name(
+                state:         state,
+                object_type:   vk::ObjectType.IMAGE,
+                object_handle: (ulong)images[i],
+                name:          slot.requested.debug_name,
+            );
             if (try handle = state.textures.alloc(texture)) {
                 slot.textures[i] = handle;
             } else {

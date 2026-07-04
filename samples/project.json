@@ -37,6 +37,11 @@
     },
     // Windowed: compute culls a quad grid and writes indirect draw args
     // (+ count where supported); one multi-draw renders via gl_DrawID.
+    "memory_report": {
+      "type": "executable",
+      "target": "linux-x64",
+      "sources": [ "memory_report/main.c3" ]
+    },
     "gpu_driven_draw_sdl": {
       "type": "executable",
       "target": "linux-x64",

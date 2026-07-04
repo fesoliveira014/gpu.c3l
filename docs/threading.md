@@ -43,6 +43,7 @@ library's own state, but results and validation verdicts are undefined.
 | `get_memory_stats` / `build_memory_report` / `get_persistent_stats` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
 | `begin_commands` / `end_commands` | C | confined to the context's thread |
 | every `cmd_*` recording call | C | confined to the list's thread |
+| `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
 ## Phase rule
 
