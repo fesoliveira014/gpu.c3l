@@ -43,8 +43,8 @@ fn void? run_checked(String[] args) {
 
     foreach (path : options.files) {
         char[]? source = file::load(mem, path);
-        if (catch source) {
-            io::eprintfn("error: cannot read schema file '%s'", path);
+        if (catch err = source) {
+            io::eprintfn("error: cannot read schema file '%s' (%s)", path, err);
             return IO_ERROR~;
         }
         sources.push(source);
@@ -127,7 +127,7 @@ fn String? flag_value(String[] args, usz* i) {
 
 fn bool check_file(String path, String expected) {
     char[]? existing = file::load(mem, path);
-    if (catch existing) {
+    if (catch err = existing) {
         io::eprintfn("stale: '%s' is missing; regenerate with scripts/gen_abi.sh", path);
         return false;
     }
@@ -140,8 +140,8 @@ fn bool check_file(String path, String expected) {
 }
 
 fn void? save_file(String path, String content) {
-    if (catch file::save(path, content)) {
-        io::eprintfn("error: cannot write '%s'", path);
+    if (catch err = file::save(path, content)) {
+        io::eprintfn("error: cannot write '%s' (%s)", path, err);
         return IO_ERROR~;
     }
 }

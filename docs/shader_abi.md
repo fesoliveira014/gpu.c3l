@@ -325,6 +325,10 @@ type      := "uint" | "int" | "float" | "u64" | "vec2" | "vec4"
 scalar    := "uint" | "int" | "float" | "u64"
 ```
 
+Keywords are contextual — structural only at declaration position, so `type`,
+`root`, `push` etc. remain valid field and constant names. Constant literals
+are range-checked against their declared type at generation time.
+
 Block kinds and emission:
 
 ```text

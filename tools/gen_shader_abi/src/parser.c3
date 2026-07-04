@@ -26,10 +26,21 @@ fn Token? Parser.expect(&self, TokenKind kind, String what) {
     return self.advance();
 }
 
+<* Accept an identifier or any keyword — keywords are structural only at
+   declaration position, so 'type', 'root' etc. remain valid names. *>
+fn Token? Parser.expect_name(&self, String what) {
+    Token token = self.peek();
+    if (token.kind != TokenKind.IDENT && !is_keyword(token.kind)) {
+        diagnostic(token.loc, "expected %s, got '%s'", what, token.text.len > 0 ? token.text : "end of file");
+        return PARSE_ERROR~;
+    }
+    return self.advance();
+}
+
 <* Parse one schema file into the shared schema/type table (multi-file merge). *>
 fn void? Parser.parse_file(&self, Schema* schema, TypeTable* types) {
     Token abi_kw = self.expect(TokenKind.KW_ABI, "'abi' header")!;
-    Token name = self.expect(TokenKind.IDENT, "abi name")!;
+    Token name = self.expect_name("abi name")!;
     self.expect(TokenKind.SEMICOLON, "';'")!;
     if (schema.abi_name.len == 0) {
         schema.abi_name = name.text;
@@ -65,7 +76,7 @@ fn void? Parser.parse_const(&self, Schema* schema, TypeTable* types) {
         diagnostic(type_name.loc, "constants must be primitive-typed (uint, int, float, u64), got '%s'", type_name.text);
         return PARSE_ERROR~;
     }
-    Token name = self.expect(TokenKind.IDENT, "constant name")!;
+    Token name = self.expect_name("constant name")!;
     self.expect(TokenKind.EQUALS, "'='")!;
     bool negative = false;
     if (self.peek().kind == TokenKind.MINUS) {
@@ -74,6 +85,7 @@ fn void? Parser.parse_const(&self, Schema* schema, TypeTable* types) {
     }
     Token number = self.expect(TokenKind.NUMBER, "literal value")!;
     self.expect(TokenKind.SEMICOLON, "';'")!;
+    validate_const_literal(type_name.text, number.text, negative, number.loc)!;
     types.declare(name.text, name.loc)!;
     schema.consts.push({
         .type_name = type_name.text,
@@ -86,7 +98,7 @@ fn void? Parser.parse_const(&self, Schema* schema, TypeTable* types) {
 
 fn void? Parser.parse_typedecl(&self, Schema* schema, TypeTable* types) {
     self.advance();
-    Token name = self.expect(TokenKind.IDENT, "type name")!;
+    Token name = self.expect_name("type name")!;
     self.expect(TokenKind.COLON, "':'")!;
     Token base = self.expect(TokenKind.IDENT, "base scalar type")!;
     self.expect(TokenKind.SEMICOLON, "';'")!;
@@ -112,19 +124,19 @@ fn void? Parser.parse_struct(&self, Schema* schema, TypeTable* types, DeclKind k
 }
 
 fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclKind kind) {
-    Token name = self.expect(TokenKind.IDENT, "struct name")!;
+    Token name = self.expect_name("struct name")!;
     types.declare(name.text, name.loc)!;
     self.expect(TokenKind.LBRACE, "'{'")!;
     StructDecl decl = { .kind = kind, .name = name.text, .loc = name.loc };
     decl.fields.init(mem);
     defer catch decl.fields.free();
     while (self.peek().kind != TokenKind.RBRACE) {
-        Token type_name = self.expect(TokenKind.IDENT, "field type")!;
+        Token type_name = self.expect_name("field type")!;
         if (self.peek().kind == TokenKind.LBRACKET) {
             diagnostic(self.peek().loc, "fixed-size array fields are not supported");
             return PARSE_ERROR~;
         }
-        Token field_name = self.expect(TokenKind.IDENT, "field name")!;
+        Token field_name = self.expect_name("field name")!;
         if (self.peek().kind == TokenKind.LBRACKET) {
             diagnostic(self.peek().loc, "fixed-size array fields are not supported");
             return PARSE_ERROR~;
@@ -143,4 +155,58 @@ fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclK
         return PARSE_ERROR~;
     }
     schema.structs.push(decl);
+}
+
+fn bool is_keyword(TokenKind kind) {
+    switch (kind) {
+        case KW_ABI:
+        case KW_CONST:
+        case KW_TYPE:
+        case KW_STRUCT:
+        case KW_ROOT:
+        case KW_PUSH:
+        case KW_EXTERN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn void? validate_const_literal(String type_name, String value, bool negative, Loc loc) {
+    if (type_name == "float") {
+        if (catch err = value.to_double()) {
+            diagnostic(loc, "invalid float literal '%s' (%s)", value, err);
+            return PARSE_ERROR~;
+        }
+        return;
+    }
+    if (value.contains(".")) {
+        diagnostic(loc, "%s constant cannot have a fractional literal '%s'", type_name, value);
+        return PARSE_ERROR~;
+    }
+    ulong? magnitude = value.to_ulong();
+    if (catch err = magnitude) {
+        diagnostic(loc, "integer literal '%s' does not fit in u64 (%s)", value, err);
+        return PARSE_ERROR~;
+    }
+    switch (type_name) {
+        case "uint":
+            if (negative || magnitude > uint::max) {
+                diagnostic(loc, "literal %s%s does not fit in uint", negative ? "-" : "", value);
+                return PARSE_ERROR~;
+            }
+        case "int":
+            ulong limit = negative ? (ulong)int::max + 1 : int::max;
+            if (magnitude > limit) {
+                diagnostic(loc, "literal %s%s does not fit in int", negative ? "-" : "", value);
+                return PARSE_ERROR~;
+            }
+        case "u64":
+            if (negative) {
+                diagnostic(loc, "u64 constant cannot be negative");
+                return PARSE_ERROR~;
+            }
+        default:
+            unreachable();
+    }
 }

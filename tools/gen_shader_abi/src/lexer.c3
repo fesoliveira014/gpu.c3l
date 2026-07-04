@@ -49,25 +49,6 @@ fn void Lexer.skip_trivia(&self) {
     }
 }
 
-fn bool is_ident_start(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
-
-fn bool is_ident_char(char c) => is_ident_start(c) || (c >= '0' && c <= '9');
-
-fn bool is_digit(char c) => c >= '0' && c <= '9';
-
-fn TokenKind classify_word(String word) {
-    switch (word) {
-        case "abi":    return KW_ABI;
-        case "const":  return KW_CONST;
-        case "type":   return KW_TYPE;
-        case "struct": return KW_STRUCT;
-        case "root":   return KW_ROOT;
-        case "push":   return KW_PUSH;
-        case "extern": return KW_EXTERN;
-        default:       return IDENT;
-    }
-}
-
 <* Lex the whole source into tokens (END_OF_FILE terminated). *>
 fn void? Lexer.tokenize(&self, TokenList* out) {
     while (true) {
@@ -112,6 +93,25 @@ fn void? Lexer.tokenize(&self, TokenList* out) {
         String text = self.source[self.pos..self.pos];
         self.advance();
         out.push({ .kind = kind, .text = text, .loc = loc });
+    }
+}
+
+fn bool is_ident_start(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+
+fn bool is_ident_char(char c) => is_ident_start(c) || (c >= '0' && c <= '9');
+
+fn bool is_digit(char c) => c >= '0' && c <= '9';
+
+fn TokenKind classify_word(String word) {
+    switch (word) {
+        case "abi":    return KW_ABI;
+        case "const":  return KW_CONST;
+        case "type":   return KW_TYPE;
+        case "struct": return KW_STRUCT;
+        case "root":   return KW_ROOT;
+        case "push":   return KW_PUSH;
+        case "extern": return KW_EXTERN;
+        default:       return IDENT;
     }
 }
 

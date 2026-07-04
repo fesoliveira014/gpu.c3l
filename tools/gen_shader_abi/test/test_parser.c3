@@ -82,6 +82,56 @@ fn void cross_file_duplicate() @test {
     assert(err == DUPLICATE_SYMBOL, "expected DUPLICATE_SYMBOL, got %s", err);
 }
 
+fn void keywords_valid_as_names() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        struct S {
+            uint type;
+            uint root;
+            uint push;
+            uint _pad0;
+        }
+    `, &schema, &types)!!;
+    assert(schema.structs.get_ref(0).fields.get_ref(0).name == "type");
+}
+
+fn void const_out_of_range_rejected() @test {
+    @expect_fault(`
+        abi t;
+        const uint TOO_BIG = 4294967296;
+    `, PARSE_ERROR);
+    @expect_fault(`
+        abi t;
+        const uint NEGATIVE = -1;
+    `, PARSE_ERROR);
+    @expect_fault(`
+        abi t;
+        const int FRACTIONAL = 1.5;
+    `, PARSE_ERROR);
+}
+
+fn void const_in_range_accepted() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        const uint MAX_UINT = 4294967295;
+        const int MIN_INT = -2147483648;
+        const float HALF = 0.5;
+    `, &schema, &types)!!;
+    assert(schema.consts.len() == 3);
+}
+
 fn void semantic_type_registers() @test {
     Schema schema;
     schema.init();
