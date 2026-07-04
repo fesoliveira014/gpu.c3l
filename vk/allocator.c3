@@ -46,6 +46,16 @@ fn gpu::MemoryStats? vk_get_memory_stats(gpu::Device* device) @private {
         };
         stats.live_allocation_count += (ulong)budgets[i].statistics.allocation_count;
     }
+    if (state.buffers.slots.ptr != null) {
+        foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {
+            if (cell.used && !cell.value.internal) stats.buffer_count++;
+        }
+    }
+    if (state.textures.slots.ptr != null) {
+        foreach (&cell : state.textures.slots[:state.textures.next_new]) {
+            if (cell.used) stats.texture_count++;
+        }
+    }
     return stats;
 }
 

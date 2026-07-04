@@ -57,6 +57,7 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
             .debug_name  = "frame_arena",
         };
         gpu::BufferHandle buffer = vk_create_buffer(&handle, &arena_desc)!;
+        mark_buffer_internal(state, buffer);
         gpu::GpuSpan span = vk_get_buffer_span(&handle, buffer)!;
         state.frame_arenas[i] = {
             .backing_buffer = buffer,
@@ -186,6 +187,7 @@ fn void? create_persistent_arena(VkDeviceState* state) {
         .debug_name  = "persistent_arena",
     };
     gpu::BufferHandle buffer = vk_create_buffer(&handle, &desc)!;
+    mark_buffer_internal(state, buffer);
     gpu::GpuSpan span = vk_get_buffer_span(&handle, buffer)!;
 
     vma::VirtualBlockCreateInfo block_info = { .size = (vk::DeviceSize)gpu::PERSISTENT_ARENA_SIZE };

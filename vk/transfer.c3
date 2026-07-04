@@ -60,6 +60,7 @@ fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
         .debug_name  = "staging_arena",
     };
     state.staging_arena.backing = vk_create_buffer(&shim, &staging_desc)!;
+    mark_buffer_internal(state, state.staging_arena.backing);
     state.staging_arena.span = vk_get_buffer_span(&shim, state.staging_arena.backing)!;
     state.staging_arena.size = staging_size;
 
@@ -70,6 +71,7 @@ fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
         .debug_name  = "readback_arena",
     };
     state.readback_arena.backing = vk_create_buffer(&shim, &readback_desc)!;
+    mark_buffer_internal(state, state.readback_arena.backing);
     state.readback_arena.span = vk_get_buffer_span(&shim, state.readback_arena.backing)!;
     state.readback_arena.size = readback_size;
 }
@@ -138,6 +140,7 @@ fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena,
 
     gpu::Device shim = device_shim(state);
     gpu::BufferHandle buffer = vk_create_buffer(&shim, dedicated_desc)!;
+    mark_buffer_internal(state, buffer);
     state.dedicated_staging.entries[(state.dedicated_staging.head + state.dedicated_staging.count) % DEDICATED_RETIRE_CAP] = {
         .buffer         = buffer,
         .timeline_value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1,
@@ -487,6 +490,7 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
     };
     gpu::Device shim = device_shim(state);
     gpu::BufferHandle buffer = vk_create_buffer(&shim, &desc)!;
+    mark_buffer_internal(state, buffer);
     if (try span = vk_get_buffer_span(&shim, buffer)) {
         return {
             .span      = span,

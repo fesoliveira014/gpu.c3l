@@ -61,6 +61,8 @@ alias CmdDrawIndirectFn       = fn void? (CommandList*, PipelineHandle, GpuAddre
 alias CmdDrawIndexedIndirectFn = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuAddress, GpuSpan, uint, GpuSpan, IndexType);
 alias CmdDrawIndexedIndirectCountFn = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuAddress, GpuSpan, GpuSpan, uint, GpuSpan, IndexType);
 alias CmdDispatchIndirectFn   = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuSpan);
+alias CmdBeginLabelFn         = fn void? (CommandList*, ZString, float[4]);
+alias CmdEndLabelFn           = fn void? (CommandList*);
 alias CmdUploadBufferFn       = fn void? (CommandList*, BufferHandle, usz, char[]);
 alias CmdUploadTextureFn      = fn void? (CommandList*, TextureUploadDesc*, char[]);
 alias UploadBufferDataFn      = fn void? (Device*, BufferHandle, usz, char[], Stage, Hazard);
@@ -129,6 +131,8 @@ struct BackendVTable {
     CmdDrawIndexedIndirectFn cmd_draw_indexed_indirect;
     CmdDrawIndexedIndirectCountFn cmd_draw_indexed_indirect_count;
     CmdDispatchIndirectFn   cmd_dispatch_indirect;
+    CmdBeginLabelFn         cmd_begin_label;
+    CmdEndLabelFn           cmd_end_label;
     CmdUploadBufferFn       cmd_upload_buffer;
     CmdUploadTextureFn      cmd_upload_texture;
     UploadBufferDataFn      upload_buffer_data;

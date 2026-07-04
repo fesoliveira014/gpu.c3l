@@ -132,6 +132,12 @@ fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::Semaphore
     vk::SemaphoreCreateInfo info = vk::semaphore_create_info().set_next(&type_info);
     vk::Semaphore semaphore;
     check(vk::create_semaphore(state.device, &info, null, &semaphore))!;
+    set_object_name(
+        state:         state,
+        object_type:   vk::ObjectType.SEMAPHORE,
+        object_handle: (ulong)semaphore,
+        name:          desc.debug_name,
+    );
 
     if (try handle = state.semaphores.alloc({ .semaphore = semaphore })) {
         return handle;

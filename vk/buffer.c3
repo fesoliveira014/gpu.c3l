@@ -19,6 +19,8 @@ struct BufferSlot {
     usz                 size;
     gpu::BufferUsage    usage;
     gpu::MemoryKind     memory_kind;
+    char[DEBUG_NAME_CAP] debug_name;
+    bool                internal;
 }
 
 struct BufferCell {
@@ -117,8 +119,15 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
     check(state.allocator.create_buffer(&buffer_info, &alloc_info, &slot.buffer, &slot.allocation, &slot.allocation_info))!;
     slot.cpu_base = slot.allocation_info.mapped_data;
 
+    copy_debug_name(&slot.debug_name[0], desc.debug_name);
     if (desc.debug_name != null) {
         state.allocator.set_allocation_name(slot.allocation, desc.debug_name);
+        set_object_name(
+            state:         state,
+            object_type:   vk::ObjectType.BUFFER,
+            object_handle: (ulong)slot.buffer,
+            name:          desc.debug_name,
+        );
     }
 
     if (desc.usage.addressable) {
