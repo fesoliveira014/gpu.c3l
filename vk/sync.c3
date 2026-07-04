@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 
 // Concrete (non-generic) slot table for semaphores. Monomorphized twin of
 // gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
@@ -94,7 +95,7 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TextureSlot* slot = state.textures.get(barrier.texture)!;
-    if (barrier.old_layout != slot.current_layout) return gpu::INVALID_RESOURCE_STATE~;
+    if (barrier.old_layout != texture_layout(slot)) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::ImageMemoryBarrier2 bar = vk::image_memory_barrier2()
         .set_src_stage_mask(stage_to_vk(barrier.before_stage))
@@ -116,11 +117,15 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
 
     vk::DependencyInfo dep = vk::dependency_info().set_image_memory_barriers((&bar)[:1]);
     vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
-    slot.current_layout = barrier.new_layout;
+    set_texture_layout(slot, barrier.new_layout);
 }
 
 fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::SemaphoreDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     vk::SemaphoreTypeCreateInfo type_info = vk::semaphore_type_create_info()
         .set_semaphore_type(vk::SemaphoreType.TIMELINE)
         .set_initial_value((ulong)desc.initial_value);
@@ -137,6 +142,10 @@ fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::Semaphore
 
 fn void? vk_destroy_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     SemaphoreSlot* slot = state.semaphores.get(handle)!;
     vk::destroy_semaphore(state.device, slot.semaphore, null);
     state.semaphores.free(handle)!;

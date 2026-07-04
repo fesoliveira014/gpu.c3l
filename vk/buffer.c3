@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import vma;
 
 // Concrete (non-generic) slot table for buffers. Monomorphized twin of
@@ -98,6 +99,10 @@ fn vma::AllocationCreateInfo memory_kind_to_vma(gpu::MemoryKind kind) @private {
 
 fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
 
     vk::BufferCreateInfo buffer_info = vk::buffer_create_info()
         .set_size((vk::DeviceSize)desc.size)
@@ -135,6 +140,10 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
 
 fn void? vk_destroy_buffer(gpu::Device* device, gpu::BufferHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     BufferSlot* slot = state.buffers.get(handle)!;
     state.allocator.destroy_buffer(slot.buffer, slot.allocation);
     state.buffers.free(handle)!;

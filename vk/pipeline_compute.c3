@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 
 // Concrete (non-generic) slot table for pipelines. Mirrors gpu::slots but
 // monomorphized to sidestep a c3c 0.8.0 codegen crash tied to generic-module
@@ -69,24 +70,30 @@ fn void? PipelineTable.free(&self, gpu::PipelineHandle h) {
    crashes c3c 0.8.0 codegen. *>
 fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::ComputePipelineDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
     if (desc.push_constant_size < 8) return gpu::INVALID_ARGUMENT~;
     ShaderSlot* shader = state.shaders.get(desc.shader)!;
 
     PipelineKey key = build_compute_key(desc);
     ulong hash = hash_key(&key);
-    uint hit = find_entry(&state.pipeline_cache, hash, &key);
-    if (hit != PIPELINE_ENTRY_NONE) {
-        PipelineCacheEntry* entry = &state.pipeline_cache.entries[hit];
-        entry.refcount++;
-        if (try handle = state.pipelines.alloc({
-            .pipeline = entry.pipeline,
-            .layout   = entry.layout,
-            .entry    = hit,
-        })) {
-            return handle;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        uint hit = find_entry(&state.pipeline_cache, hash, &key);
+        if (hit != PIPELINE_ENTRY_NONE) {
+            PipelineCacheEntry* entry = &state.pipeline_cache.entries[hit];
+            entry.refcount++;
+            if (try handle = state.pipelines.alloc({
+                .pipeline = entry.pipeline,
+                .layout   = entry.layout,
+                .entry    = hit,
+            })) {
+                return handle;
+            }
+            entry.refcount--;
+            return gpu::SLOT_TABLE_FULL~;
         }
-        entry.refcount--;
-        return gpu::SLOT_TABLE_FULL~;
     }
 
     vk::PipelineLayout layout = get_compute_layout(state, desc.push_constant_size)!;
@@ -112,8 +119,16 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
         name:          desc.debug_name,
     );
 
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     uint entry_index;
-    if (try idx = insert_entry(&state.pipeline_cache, {
+    uint raced = find_entry(&state.pipeline_cache, hash, &key);
+    if (raced != PIPELINE_ENTRY_NONE) {
+        vk::destroy_pipeline(state.device, pipeline, null);
+        state.pipeline_cache.entries[raced].refcount++;
+        entry_index = raced;
+        pipeline = state.pipeline_cache.entries[raced].pipeline;
+    } else if (try idx = insert_entry(&state.pipeline_cache, {
         .hash     = hash,
         .key      = key,
         .pipeline = pipeline,
@@ -138,6 +153,10 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
 
 fn void? vk_destroy_pipeline(gpu::Device* device, gpu::PipelineHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     PipelineSlot* slot = state.pipelines.get(handle)!;
     uint entry_index = slot.entry;
     state.pipelines.free(handle)!;

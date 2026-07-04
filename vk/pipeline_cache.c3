@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import std::core::mem;
 import std::hash::fnv64a;
 
@@ -145,6 +146,8 @@ fn uint pipeline_cache_entry_count(VkDeviceState* state) {
 <* Compute layout for `push_size`, created on first use. All compute layouts
    share the global heap set-0 layout and differ only in push range size. *>
 fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     foreach (&entry : state.compute_layouts[:COMPUTE_LAYOUT_CAP]) {
         if (entry.used && entry.push_size == push_size) return entry.layout;
     }

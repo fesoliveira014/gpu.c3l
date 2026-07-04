@@ -2,8 +2,11 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import vma;
 import std::core::mem;
+import std::atomic;
+import std::atomic::types;
 import std::collections::map;
 
 alias PersistentAllocMap = HashMap{usz, vma::VirtualAllocation};
@@ -27,7 +30,7 @@ struct FrameArenaState {
     gpu::GpuAddress   gpu_base;
     void*             cpu_base;
     usz               size;
-    usz               cursor;
+    Atomic{usz}       cursor;
     ulong             frame_timeline_value;
 }
 
@@ -37,7 +40,6 @@ struct FrameArenaState {
 fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
     state.frames_in_flight = desc.frames_in_flight == 0 ? 2 : desc.frames_in_flight;
     state.frame_index = 0;
-    state.timeline_counter = 0;
 
     vk::SemaphoreTypeCreateInfo type_info = vk::semaphore_type_create_info()
         .set_semaphore_type(vk::SemaphoreType.TIMELINE)
@@ -87,18 +89,20 @@ fn bool frame_arena_retired(VkDeviceState* state, FrameArenaState* slot) {
    the current value makes reclaim immediate. Shared by the descriptor heap,
    the transfer arenas, and dedicated staging buffers. *>
 fn ulong retire_timeline_value(VkDeviceState* state) {
-    return state.frame_active ? state.timeline_counter + 1 : state.timeline_counter;
+    ulong counter = state.timeline_counter.load(AtomicOrdering.RELAXED);
+    return state.frame_active ? counter + 1 : counter;
 }
 
 <* Reset an arena slot's cursor. Rejects if the slot has not yet retired. *>
 fn void? reset_frame_arena(VkDeviceState* state, uint index) {
     FrameArenaState* slot = &state.frame_arenas[index];
     if (!frame_arena_retired(state, slot)) return gpu::INVALID_RESOURCE_STATE~;
-    slot.cursor = 0;
+    slot.cursor.store(0, AtomicOrdering.RELAXED);
 }
 
 fn void? vk_begin_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     state.frame_index = (state.frame_index + 1) % state.frames_in_flight;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
@@ -112,29 +116,39 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
     }
 
     reset_frame_arena(state, state.frame_index)!;
-    check(vk::reset_command_pool(state.device, state.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
-    check(vk::reset_command_pool(state.device, state.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+    foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
+        if (!cell.used) continue;
+        check(vk::reset_command_pool(state.device, cell.value.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+        check(vk::reset_command_pool(state.device, cell.value.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+    }
     state.allocator.set_current_frame_index(state.frame_index);
     state.frame_active = true;
 }
 
+<* Lock-free CAS bump: concurrent callers get disjoint, aligned spans. *>
 fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
-    usz aligned = gpu::align_up(slot.cursor, align);
-    if (aligned + size > slot.size) return gpu::ARENA_FULL~;
-
-    gpu::GpuSpan span = {
-        .gpu    = (gpu::GpuAddress)((ulong)slot.gpu_base + aligned),
-        .cpu    = slot.cpu_base == null ? null : (char*)slot.cpu_base + aligned,
-        .size   = size,
-        .buffer = slot.backing_buffer,
-        .offset = aligned,
-        .kind   = gpu::MemoryKind.FRAME_UPLOAD,
-    };
-    slot.cursor = aligned + size;
-    return span;
+    usz old = slot.cursor.load(AtomicOrdering.RELAXED);
+    while (true) {
+        usz aligned = gpu::align_up(old, align);
+        if (aligned + size > slot.size) return gpu::ARENA_FULL~;
+        usz seen = mem::compare_exchange(&slot.cursor.data, old, aligned + size, AtomicOrdering.SEQ_CONSISTENT, AtomicOrdering.RELAXED);
+        if (seen == old) {
+            return {
+                .gpu    = (gpu::GpuAddress)((ulong)slot.gpu_base + aligned),
+                .cpu    = slot.cpu_base == null ? null : (char*)slot.cpu_base + aligned,
+                .size   = size,
+                .buffer = slot.backing_buffer,
+                .offset = aligned,
+                .kind   = gpu::MemoryKind.FRAME_UPLOAD,
+            };
+        }
+        old = seen;
+    }
 }
 
 <* The frame fence is a queue-ordered empty submit: the timeline reaches the
@@ -144,16 +158,19 @@ fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @
    covered by this fence; transfer-heavy frames must synchronize explicitly. *>
 fn void? vk_end_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
-    state.timeline_counter++;
-    slot.frame_timeline_value = state.timeline_counter;
+    ulong frame_value = state.timeline_counter.add(1, AtomicOrdering.RELAXED) + 1;
+    slot.frame_timeline_value = frame_value;
 
     vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
         .set_semaphore(state.frame_timeline)
-        .set_value(state.timeline_counter)
+        .set_value(frame_value)
         .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
     vk::SubmitInfo2 submit = vk::submit_info2().set_signal_semaphore_infos((&signal)[:1]);
+    state.graphics_queue_mutex.lock()!!;
+    defer state.graphics_queue_mutex.unlock();
     check(vk::queue_submit2(state.graphics_queue, 1, &submit, (vk::Fence)null))!;
     state.frame_active = false;
 }
@@ -192,6 +209,10 @@ fn void destroy_persistent_arena(VkDeviceState* state) @private {
 
 fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAllocDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     if (desc.memory_kind != gpu::MemoryKind.PERSISTENT_UPLOAD) return gpu::INVALID_ARGUMENT~;
     PersistentArenaState* arena = &state.persistent_arena;
 
@@ -216,6 +237,10 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
 
 fn void? vk_free_persistent_span(gpu::Device* device, gpu::GpuSpan span) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     PersistentArenaState* arena = &state.persistent_arena;
     if ((ulong)span.buffer != (ulong)arena.backing_buffer) return gpu::INVALID_ARGUMENT~;
 

@@ -4,6 +4,9 @@ import gpu;
 import vk;
 import vma;
 import std::core::mem;
+import std::atomic;
+import std::atomic::types;
+import std::thread;
 
 // Per-device backend state, reached through Device.backend_state.
 struct VkDeviceState {
@@ -28,13 +31,19 @@ struct VkDeviceState {
     bool                       presentation_enabled;
     BufferTable                buffers;
     vk::Semaphore              frame_timeline;
-    ulong                      timeline_counter;
+    Atomic{ulong}              timeline_counter;
+    // Lock order: transfer_mutex -> resource_mutex -> queue mutexes.
+    Mutex                      resource_mutex;
+    Mutex                      transfer_mutex;
+    Mutex                      graphics_queue_mutex;
+    Mutex                      transfer_queue_mutex;
+    Atomic{int}                inflight_calls;
     uint                       frames_in_flight;
     uint                       frame_index;
     FrameArenaState[]          frame_arenas;
     PersistentArenaState       persistent_arena;
-    vk::CommandPool[]          graphics_pools;
-    vk::CommandPool[]          transfer_pools;
+    RecordingContextTable      recording_contexts;
+    gpu::RecordingContextHandle default_context;
     SemaphoreTable             semaphores;
     ShaderTable                shaders;
     PipelineTable              pipelines;
@@ -49,6 +58,19 @@ struct VkDeviceState {
     TransferArenaState         readback_arena;
     DedicatedRetireState       dedicated_staging;
     bool                       frame_active;
+}
+
+<* Frame-boundary quiescence accounting, active only under validation. *>
+fn void enter_tracked(VkDeviceState* state) {
+    if (state.validation) state.inflight_calls.add(1, AtomicOrdering.RELAXED);
+}
+
+fn void exit_tracked(VkDeviceState* state) {
+    if (state.validation) state.inflight_calls.sub(1, AtomicOrdering.RELAXED);
+}
+
+fn bool boundary_blocked(VkDeviceState* state) {
+    return state.validation && state.inflight_calls.load(AtomicOrdering.RELAXED) != 0;
 }
 
 // One static vtable shared by every Vulkan device.
@@ -67,6 +89,8 @@ const gpu::BackendVTable VK_VTABLE = {
     .free_persistent_span  = &vk_free_persistent_span,
     .get_persistent_stats  = &vk_get_persistent_stats,
     .begin_commands      = &vk_begin_commands,
+    .create_recording_context  = &vk_create_recording_context,
+    .destroy_recording_context = &vk_destroy_recording_context,
     .end_commands        = &vk_end_commands,
     .submit              = &vk_submit,
     .wait_queue_idle     = &vk_wait_queue_idle,
@@ -124,6 +148,10 @@ const gpu::BackendVTable VK_VTABLE = {
 fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     VkDeviceState* state = mem::new(VkDeviceState);
     defer catch destroy_state(state);
+    state.resource_mutex.init()!;
+    state.transfer_mutex.init()!;
+    state.graphics_queue_mutex.init()!;
+    state.transfer_queue_mutex.init()!;
 
     state.texture_descriptor_capacity = gpu::resolve_descriptor_capacity(desc.texture_descriptor_capacity, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!;
     state.sampler_descriptor_capacity = gpu::resolve_descriptor_capacity(desc.sampler_descriptor_capacity, gpu::DEFAULT_SAMPLER_DESCRIPTORS)!;
@@ -167,7 +195,10 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
     create_frame_resources(state, desc)!;
     create_persistent_arena(state)!;
-    create_command_pools(state)!;
+    state.recording_contexts.slots = mem::new_array(RecordingContextCell, gpu::MAX_RECORDING_CONTEXTS);
+    RecordingContextState default_ctx;
+    create_context_pools(state, &default_ctx)!;
+    state.default_context = state.recording_contexts.alloc(default_ctx)!;
     state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     state.shaders.slots    = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
     state.pipelines.slots  = mem::new_array(PipelineCell, gpu::MAX_PIPELINES);
@@ -250,7 +281,13 @@ fn void destroy_state(VkDeviceState* state) @private {
             mem::free(state.shaders.slots.ptr);
             state.shaders.slots = {};
         }
-        destroy_command_pools(state);
+        if (state.recording_contexts.slots.ptr != null) {
+            foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
+                if (cell.used) destroy_context_pools(state, &cell.value);
+            }
+            mem::free(state.recording_contexts.slots.ptr);
+            state.recording_contexts.slots = {};
+        }
         if (state.semaphores.slots.ptr != null) {
             foreach (&cell : state.semaphores.slots[:state.semaphores.next_new]) {
                 if (cell.used) vk::destroy_semaphore(state.device, cell.value.semaphore, null);
@@ -272,6 +309,10 @@ fn void destroy_state(VkDeviceState* state) @private {
         vk::destroy_instance(state.instance, null);
         state.instance = (vk::Instance)null;
     }
+    if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
+    if (state.transfer_mutex.is_initialized())       (void)state.transfer_mutex.destroy();
+    if (state.graphics_queue_mutex.is_initialized()) (void)state.graphics_queue_mutex.destroy();
+    if (state.transfer_queue_mutex.is_initialized()) (void)state.transfer_queue_mutex.destroy();
     mem::free(state);
 }
 

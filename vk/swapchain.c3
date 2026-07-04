@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import std::core::mem;
 
 // Concrete (non-generic) slot table for swapchains. Monomorphized twin of
@@ -249,7 +250,6 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
                 .height          = extent.height,
                 .mip_levels      = 1,
                 .array_layers    = 1,
-                .current_layout  = gpu::TextureLayout.UNDEFINED,
                 .swapchain_owned = true,
             };
             if (try handle = state.textures.alloc(texture)) {
@@ -335,7 +335,11 @@ fn void destroy_swapchain_slot(VkDeviceState* state, SwapchainSlot* slot) @priva
 fn void? vk_destroy_swapchain(gpu::Device* device, gpu::SwapchainHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     SwapchainSlot* slot = state.swapchains.get(handle)!;
-    check(vk::queue_wait_idle(state.graphics_queue))!;
+    {
+        state.graphics_queue_mutex.lock()!!;
+        defer state.graphics_queue_mutex.unlock();
+        check(vk::queue_wait_idle(state.graphics_queue))!;
+    }
     destroy_swapchain_slot(state, slot);
     state.swapchains.free(handle)!;
 }
@@ -343,7 +347,11 @@ fn void? vk_destroy_swapchain(gpu::Device* device, gpu::SwapchainHandle handle) 
 fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, uint width, uint height) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     SwapchainSlot* slot = state.swapchains.get(handle)!;
-    check(vk::queue_wait_idle(state.graphics_queue))!;
+    {
+        state.graphics_queue_mutex.lock()!!;
+        defer state.graphics_queue_mutex.unlock();
+        check(vk::queue_wait_idle(state.graphics_queue))!;
+    }
 
     vk::SwapchainKHR old = slot.swapchain;
     release_swapchain_images(state, slot);
@@ -400,6 +408,8 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
     };
     slot.acquire_pending = false;
 
+    state.graphics_queue_mutex.lock()!!;
+    defer state.graphics_queue_mutex.unlock();
     vk::Result result = vk::extensions.vk_queue_present_khr(state.graphics_queue, &info);
     switch (result) {
         case vk::Result.ERROR_OUT_OF_DATE_KHR:

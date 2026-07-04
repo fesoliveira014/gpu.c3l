@@ -45,7 +45,7 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
             foreach (i, &target : desc.colors) {
                 TextureSlot* slot = state.textures.get(target.texture)!;
                 if (!slot.usage.color_attach) return gpu::INVALID_ARGUMENT~;
-                if (slot.current_layout != gpu::TextureLayout.COLOR_ATTACHMENT) return gpu::INVALID_RESOURCE_STATE~;
+                if (texture_layout(slot) != gpu::TextureLayout.COLOR_ATTACHMENT) return gpu::INVALID_RESOURCE_STATE~;
 
                 gpu::TextureViewDesc view_desc = {
                     .base_mip    = target.mip_level,
@@ -73,7 +73,7 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
         if (desc.depth != null) {
             TextureSlot* depth_slot = state.textures.get(desc.depth.texture)!;
             if (!depth_slot.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
-            if (depth_slot.current_layout != gpu::TextureLayout.DEPTH_STENCIL) return gpu::INVALID_RESOURCE_STATE~;
+            if (texture_layout(depth_slot) != gpu::TextureLayout.DEPTH_STENCIL) return gpu::INVALID_RESOURCE_STATE~;
 
             depth_attach = vk::rendering_attachment_info();
             depth_attach.image_view = depth_slot.default_view;

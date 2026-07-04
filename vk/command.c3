@@ -2,49 +2,138 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::thread;
 import std::core::mem;
 
-<* One command pool per queue family per frame-in-flight. Command buffers are
-   freed by pool reset at frame retire, so there is no per-command-list free
-   path. Two pool arrays are kept even when the families are equal. *>
-fn void? create_command_pools(VkDeviceState* state) {
-    state.graphics_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
-    state.transfer_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+// Concrete (non-generic) slot table for recording contexts. Monomorphized
+// twin of gpu::slots, same c3c 0.8.0 rationale as PipelineTable.
+const uint RECORDING_CONTEXT_FREE_NONE = 0;
+
+struct RecordingContextState {
+    vk::CommandPool[] graphics_pools;
+    vk::CommandPool[] transfer_pools;
+}
+
+struct RecordingContextCell {
+    RecordingContextState value;
+    uint                  generation;
+    uint                  next_free;
+    bool                  used;
+}
+
+struct RecordingContextTable {
+    RecordingContextCell[] slots;
+    uint                   free_head;
+    uint                   next_new;
+}
+
+fn gpu::RecordingContextHandle? RecordingContextTable.alloc(&self, RecordingContextState value) {
+    uint idx;
+    if (self.free_head != RECORDING_CONTEXT_FREE_NONE) {
+        idx = self.free_head - 1;
+        self.free_head = self.slots[idx].next_free;
+    } else if (self.next_new < self.slots.len) {
+        idx = self.next_new++;
+        self.slots[idx].generation = 0;
+    } else {
+        return gpu::SLOT_TABLE_FULL~;
+    }
+    self.slots[idx].value = value;
+    self.slots[idx].generation++;
+    self.slots[idx].used = true;
+    return (gpu::RecordingContextHandle){ .index = idx, .generation = self.slots[idx].generation };
+}
+
+fn RecordingContextState*? RecordingContextTable.get(&self, gpu::RecordingContextHandle h) {
+    uint idx = h.index;
+    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
+    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
+    return &self.slots[idx].value;
+}
+
+fn void? RecordingContextTable.free(&self, gpu::RecordingContextHandle h) {
+    self.get(h)!;
+    uint idx = h.index;
+    self.slots[idx].used = false;
+    self.slots[idx].generation++;
+    self.slots[idx].next_free = self.free_head;
+    self.free_head = idx + 1;
+}
+
+<* One command pool per queue family per frame-in-flight, owned by a
+   recording context (confined to one thread at a time). Command buffers are
+   freed by pool reset at frame retire. *>
+fn void? create_context_pools(VkDeviceState* state, RecordingContextState* context) {
+    context.graphics_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+    context.transfer_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
     for (uint i = 0; i < state.frames_in_flight; i++) {
         vk::CommandPoolCreateInfo gfx = vk::command_pool_create_info()
             .set_queue_family_index(state.graphics_family)
             .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
-        check(vk::create_command_pool(state.device, &gfx, null, &state.graphics_pools[i]))!;
+        check(vk::create_command_pool(state.device, &gfx, null, &context.graphics_pools[i]))!;
 
         vk::CommandPoolCreateInfo xfer = vk::command_pool_create_info()
             .set_queue_family_index(state.transfer_family)
             .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
-        check(vk::create_command_pool(state.device, &xfer, null, &state.transfer_pools[i]))!;
+        check(vk::create_command_pool(state.device, &xfer, null, &context.transfer_pools[i]))!;
     }
 }
 
-fn void destroy_command_pools(VkDeviceState* state) {
-    if (state.graphics_pools.ptr != null) {
-        foreach (pool : state.graphics_pools) {
+fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* context) {
+    if (context.graphics_pools.ptr != null) {
+        foreach (pool : context.graphics_pools) {
             if (pool != null) vk::destroy_command_pool(state.device, pool, null);
         }
-        mem::free(state.graphics_pools.ptr);
-        state.graphics_pools = {};
+        mem::free(context.graphics_pools.ptr);
+        context.graphics_pools = {};
     }
-    if (state.transfer_pools.ptr != null) {
-        foreach (pool : state.transfer_pools) {
+    if (context.transfer_pools.ptr != null) {
+        foreach (pool : context.transfer_pools) {
             if (pool != null) vk::destroy_command_pool(state.device, pool, null);
         }
-        mem::free(state.transfer_pools.ptr);
-        state.transfer_pools = {};
+        mem::free(context.transfer_pools.ptr);
+        context.transfer_pools = {};
     }
 }
 
-fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::CommandList* out_commands) @private {
+fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    RecordingContextState context;
+    create_context_pools(state, &context)!;
+    if (try handle = state.recording_contexts.alloc(context)) {
+        return handle;
+    }
+    destroy_context_pools(state, &context);
+    return gpu::SLOT_TABLE_FULL~;
+}
+
+<* The built-in default context cannot be destroyed; a context's command
+   lists must be retired first (device teardown sweeps leftovers). *>
+fn void? vk_destroy_recording_context(gpu::Device* device, gpu::RecordingContextHandle handle) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    if ((ulong)handle == (ulong)state.default_context) return gpu::INVALID_ARGUMENT~;
+    RecordingContextState* context = state.recording_contexts.get(handle)!;
+    destroy_context_pools(state, context);
+    state.recording_contexts.free(handle)!;
+}
+
+fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::RecordingContextHandle ctx, gpu::CommandList* out_commands) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    gpu::RecordingContextHandle resolved = ctx.is_valid() ? ctx : state.default_context;
+    RecordingContextState* context = state.recording_contexts.get(resolved)!;
     vk::CommandPool pool = queue == gpu::QueueKind.TRANSFER
-        ? state.transfer_pools[state.frame_index]
-        : state.graphics_pools[state.frame_index];
+        ? context.transfer_pools[state.frame_index]
+        : context.graphics_pools[state.frame_index];
 
     vk::CommandBufferAllocateInfo alloc = vk::command_buffer_allocate_info()
         .set_command_pool(pool)
@@ -137,7 +226,7 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
     TextureSlot* texture = state.textures.get(desc.texture)!;
     BufferSlot* buffer = state.buffers.get(desc.src.buffer)!;
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
-    if (texture.current_layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
+    if (texture_layout(texture) != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
         span:              &desc.src,
@@ -151,7 +240,7 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
         width:             desc.width,
         height:            desc.height,
     )!;
-    vk::cmd_copy_buffer_to_image((vk::CommandBuffer)commands.backend, buffer.buffer, texture.image, layout_to_vk(texture.current_layout), 1, &region);
+    vk::cmd_copy_buffer_to_image((vk::CommandBuffer)commands.backend, buffer.buffer, texture.image, layout_to_vk(texture_layout(texture)), 1, &region);
 }
 
 fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureBufferCopyDesc* desc) @private {
@@ -160,7 +249,7 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
     TextureSlot* texture = state.textures.get(desc.texture)!;
     BufferSlot* buffer = state.buffers.get(desc.dst.buffer)!;
     if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
-    if (texture.current_layout != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
+    if (texture_layout(texture) != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
         span:              &desc.dst,
@@ -174,7 +263,7 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
         width:             desc.width,
         height:            desc.height,
     )!;
-    vk::cmd_copy_image_to_buffer((vk::CommandBuffer)commands.backend, texture.image, layout_to_vk(texture.current_layout), buffer.buffer, 1, &region);
+    vk::cmd_copy_image_to_buffer((vk::CommandBuffer)commands.backend, texture.image, layout_to_vk(texture_layout(texture)), buffer.buffer, 1, &region);
 }
 
 <* Resolve an indirect argument span: indirect usage, 4-byte offset alignment,
