@@ -20,6 +20,12 @@
       "target": "linux-x64",
       "sources": [ "src/test_handles.c3", "src/test_ranges.c3" ]
     },
+    // Pure-CPU: generated shader ABI struct layouts vs hand-computed std430.
+    "shader_abi": {
+      "type": "test",
+      "target": "linux-x64",
+      "sources": [ "src/test_shader_abi_layout.c3" ]
+    },
     // Vulkan bootstrap: the feature gate needs no ICD; the create/destroy test
     // needs one — pin lavapipe via VK_DRIVER_FILES when running this target.
     "vk_bootstrap": {
@@ -45,12 +51,12 @@
     "vk_root_pointer": {
       "type": "test",
       "target": "linux-x64",
-      "sources": [ "src/test_vk_root_pointer_compute.c3" ]
+      "sources": [ "src/test_vk_root_pointer_compute.c3", "src/root_pointer_abi.c3" ]
     },
     "vk_texture_heap": {
       "type": "test",
       "target": "linux-x64",
-      "sources": [ "src/test_vk_texture_heap.c3", "src/test_vk_descriptor_buffer.c3", "src/test_vk_texture_upload.c3", "src/test_vk_upload_readback.c3" ]
+      "sources": [ "src/test_vk_texture_heap.c3", "src/test_vk_descriptor_buffer.c3", "src/test_vk_texture_upload.c3", "src/test_vk_upload_readback.c3", "src/bindless_abi.c3" ]
     },
     "vk_shader_reflection": {
       "type": "test",
@@ -60,7 +66,7 @@
     "vk_offscreen": {
       "type": "test",
       "target": "linux-x64",
-      "sources": [ "src/test_vk_offscreen_triangle.c3" ]
+      "sources": [ "src/test_vk_offscreen_triangle.c3", "src/offscreen_abi.c3" ]
     },
     "vk_swapchain": {
       "type": "test",
@@ -70,22 +76,22 @@
     "vk_pipeline_cache": {
       "type": "test",
       "target": "linux-x64",
-      "sources": [ "src/test_vk_pipeline_cache.c3" ]
+      "sources": [ "src/test_vk_pipeline_cache.c3", "src/offscreen_abi.c3" ]
     },
     "vk_indirect": {
       "type": "test",
       "target": "linux-x64",
-      "sources": [ "src/test_vk_indirect_draw.c3" ]
+      "sources": [ "src/test_vk_indirect_draw.c3", "src/indirect_abi.c3", "src/root_pointer_abi.c3", "src/offscreen_abi.c3" ]
     },
     "vk_depth": {
       "type": "test",
       "target": "linux-x64",
-      "sources": [ "src/test_vk_depth_attachment.c3" ]
+      "sources": [ "src/test_vk_depth_attachment.c3", "src/depth_abi.c3" ]
     },
     "vk_threading": {
       "type": "test",
       "target": "linux-x64",
-      "sources": [ "src/test_vk_threading.c3" ]
+      "sources": [ "src/test_vk_threading.c3", "src/root_pointer_abi.c3" ]
     },
     "vk_debug": {
       "type": "test",

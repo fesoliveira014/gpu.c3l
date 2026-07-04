@@ -17,37 +17,6 @@ const char[*] IND_DOUBLE_SPIRV = $embed("shaders/root_pointer.comp.spv");
 const uint IND_RT = 16;
 const usz IND_RT_BYTES = IND_RT * IND_RT * 4;
 
-// std430 mirror of build_indirect.comp's Root.
-struct BuildRoot {
-    ulong indexed_args_gpu;
-    ulong plain_args_gpu;
-    ulong dispatch_args_gpu;
-    ulong count_gpu;
-    uint  index_count;
-    uint  vertex_count;
-    uint  dispatch_x;
-    uint  count_value;
-}
-$assert BuildRoot::size == 48;
-
-// std430 mirror of root_pointer.comp's Root (float doubler).
-struct DoubleRoot {
-    ulong input_gpu;
-    ulong output_gpu;
-    uint  count;
-    uint  _pad0;
-    uint  _pad1;
-    uint  _pad2;
-}
-$assert DoubleRoot::size == 32;
-
-struct IndFragRoot {
-    uint texture_index;
-    uint sampler_index;
-    uint _pad0;
-    uint _pad1;
-}
-
 struct IndDrawCtx {
     gpu::ShaderHandle   vert;
     gpu::ShaderHandle   frag;
@@ -197,7 +166,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle build_shader = gpu::create_shader(&device, &build_sd)!!;
     defer gpu::destroy_shader(&device, build_shader)!!;
-    gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!!;
     defer gpu::destroy_pipeline(&device, build_pipeline)!!;
 
@@ -227,17 +196,17 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::GpuSpan index_span = gpu::alloc_frame_span(&device, 3 * 4, 4)!!;
     uint* indices = (uint*)index_span.cpu;
     indices[0] = 0; indices[1] = 1; indices[2] = 2;
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, IndFragRoot::size, 16)!!;
-    IndFragRoot* frag_root = (IndFragRoot*)frag_span.cpu;
-    frag_root.texture_index = (uint)ctx.tex_index;
-    frag_root.sampler_index = (uint)ctx.smp_index;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
+    FragRoot* frag_root = (FragRoot*)frag_span.cpu;
+    frag_root.texture_index = ctx.tex_index;
+    frag_root.sampler_index = ctx.smp_index;
 
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, BuildRoot::size, 16)!!;
     BuildRoot* root = (BuildRoot*)root_span.cpu;
-    root.indexed_args_gpu = (ulong)args_span.gpu;
-    root.plain_args_gpu   = (ulong)scratch.gpu;
-    root.dispatch_args_gpu = (ulong)((ulong)scratch.gpu + 16);
-    root.count_gpu        = (ulong)((ulong)scratch.gpu + 32);
+    root.indexed_args_gpu = args_span.gpu;
+    root.plain_args_gpu   = scratch.gpu;
+    root.dispatch_args_gpu = (gpu::GpuAddress)((ulong)scratch.gpu + 16);
+    root.count_gpu        = (gpu::GpuAddress)((ulong)scratch.gpu + 32);
     root.index_count      = 3;
     root.vertex_count     = 3;
     root.dispatch_x       = 1;
@@ -349,10 +318,10 @@ fn void plain_indirect_draw_from_frame_span() @test {
     gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
     write_triangle_verts(&verts_span);
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, IndFragRoot::size, 16)!!;
-    IndFragRoot* frag_root = (IndFragRoot*)frag_span.cpu;
-    frag_root.texture_index = (uint)ctx.tex_index;
-    frag_root.sampler_index = (uint)ctx.smp_index;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
+    FragRoot* frag_root = (FragRoot*)frag_span.cpu;
+    frag_root.texture_index = ctx.tex_index;
+    frag_root.sampler_index = ctx.smp_index;
 
     // Host-written args in a frame span: the arena carries indirect usage.
     gpu::GpuSpan args_span = gpu::alloc_frame_span(&device, gpu::DrawIndirectCommand::size, 16)!!;
@@ -396,14 +365,14 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle build_shader = gpu::create_shader(&device, &build_sd)!!;
     defer gpu::destroy_shader(&device, build_shader)!!;
-    gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!!;
     defer gpu::destroy_pipeline(&device, build_pipeline)!!;
 
     gpu::ShaderDesc double_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_DOUBLE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle double_shader = gpu::create_shader(&device, &double_sd)!!;
     defer gpu::destroy_shader(&device, double_shader)!!;
-    gpu::ComputePipelineDesc double_desc = { .shader = double_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc double_desc = { .shader = double_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle double_pipeline = gpu::create_compute_pipeline(&device, &double_desc)!!;
     defer gpu::destroy_pipeline(&device, double_pipeline)!!;
 
@@ -419,19 +388,19 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
 
     gpu::GpuSpan build_root_span = gpu::alloc_frame_span(&device, BuildRoot::size, 16)!!;
     BuildRoot* build_root = (BuildRoot*)build_root_span.cpu;
-    build_root.indexed_args_gpu = (ulong)scratch.gpu;
-    build_root.plain_args_gpu   = (ulong)scratch.gpu;
-    build_root.dispatch_args_gpu = (ulong)dispatch_args.gpu;
-    build_root.count_gpu        = (ulong)((ulong)scratch.gpu + 48);
+    build_root.indexed_args_gpu = scratch.gpu;
+    build_root.plain_args_gpu   = scratch.gpu;
+    build_root.dispatch_args_gpu = dispatch_args.gpu;
+    build_root.count_gpu        = (gpu::GpuAddress)((ulong)scratch.gpu + 48);
     build_root.index_count      = 3;
     build_root.vertex_count     = 3;
     build_root.dispatch_x       = (COUNT + 63) / 64;
     build_root.count_value      = 1;
 
-    gpu::GpuSpan double_root_span = gpu::alloc_frame_span(&device, DoubleRoot::size, 16)!!;
-    DoubleRoot* double_root = (DoubleRoot*)double_root_span.cpu;
-    double_root.input_gpu  = (ulong)io_span.gpu;
-    double_root.output_gpu = (ulong)((ulong)io_span.gpu + COUNT * 4);
+    gpu::GpuSpan double_root_span = gpu::alloc_frame_span(&device, ComputeRoot::size, 16)!!;
+    ComputeRoot* double_root = (ComputeRoot*)double_root_span.cpu;
+    double_root.input_gpu  = io_span.gpu;
+    double_root.output_gpu = (gpu::GpuAddress)((ulong)io_span.gpu + COUNT * 4);
     double_root.count      = COUNT;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -505,10 +474,10 @@ fn void count_buffer_limits_draws() @test {
     gpu::GpuSpan index_span = gpu::alloc_frame_span(&device, 3 * 4, 4)!!;
     uint* indices = (uint*)index_span.cpu;
     indices[0] = 0; indices[1] = 1; indices[2] = 2;
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, IndFragRoot::size, 16)!!;
-    IndFragRoot* frag_root = (IndFragRoot*)frag_span.cpu;
-    frag_root.texture_index = (uint)ctx.tex_index;
-    frag_root.sampler_index = (uint)ctx.smp_index;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
+    FragRoot* frag_root = (FragRoot*)frag_span.cpu;
+    frag_root.texture_index = ctx.tex_index;
+    frag_root.sampler_index = ctx.smp_index;
 
     gpu::GpuSpan args_span = gpu::alloc_frame_span(&device, gpu::DrawIndexedIndirectCommand::size, 16)!!;
     gpu::DrawIndexedIndirectCommand* args = (gpu::DrawIndexedIndirectCommand*)args_span.cpu;

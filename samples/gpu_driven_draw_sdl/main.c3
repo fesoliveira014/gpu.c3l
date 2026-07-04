@@ -12,33 +12,6 @@ const uint GRID = 16;
 const uint INSTANCES = GRID * GRID;
 const uint MAX_TRACKED_IMAGES = 8;
 
-// std430 mirror of the shaders' Instance.
-struct Instance {
-    float[2] pos;
-    float    scale;
-    float    _pad;
-    float[4] color;
-}
-$assert Instance::size == 32;
-
-// std430 mirror of build_draws.comp's Root.
-struct BuildRoot {
-    ulong instances_gpu;
-    ulong args_gpu;
-    ulong count_gpu;
-    uint  instance_count;
-    float time;
-    uint  _pad0;
-    uint  _pad1;
-}
-$assert BuildRoot::size == 40;
-
-// std430 mirror of gpu_driven.vert's Root.
-struct DrawRoot {
-    ulong corners_gpu;
-    ulong instances_gpu;
-}
-
 struct Options {
     long frames;
     bool vsync;
@@ -103,7 +76,7 @@ fn void? run(Options options) {
     gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = BUILD_SPIRV[..], .entry_point = "main", .debug_name = "build_draws" };
     gpu::ShaderHandle build_shader = gpu::create_shader(&device, &build_sd)!;
     defer (void)gpu::destroy_shader(&device, build_shader);
-    gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = 8, .debug_name = "build_draws" };
+    gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = gpu::RootPush::size, .debug_name = "build_draws" };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!;
     defer (void)gpu::destroy_pipeline(&device, build_pipeline);
 
@@ -192,16 +165,16 @@ fn void? run(Options options) {
 
         gpu::GpuSpan build_root_span = gpu::alloc_frame_span(&device, BuildRoot::size, 16)!;
         BuildRoot* build_root = (BuildRoot*)build_root_span.cpu;
-        build_root.instances_gpu  = (ulong)instances_span.gpu;
-        build_root.args_gpu       = (ulong)args_span.gpu;
-        build_root.count_gpu      = (ulong)count_span.gpu;
+        build_root.instances_gpu  = instances_span.gpu;
+        build_root.args_gpu       = args_span.gpu;
+        build_root.count_gpu      = count_span.gpu;
         build_root.instance_count = INSTANCES;
         build_root.time           = time;
 
         gpu::GpuSpan draw_root_span = gpu::alloc_frame_span(&device, DrawRoot::size, 16)!;
         DrawRoot* draw_root = (DrawRoot*)draw_root_span.cpu;
-        draw_root.corners_gpu   = (ulong)corners_span.gpu;
-        draw_root.instances_gpu = (ulong)instances_span.gpu;
+        draw_root.corners_gpu   = corners_span.gpu;
+        draw_root.instances_gpu = instances_span.gpu;
 
         gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!;
 
@@ -209,7 +182,7 @@ fn void? run(Options options) {
             commands: &cmd,
             pipeline: build_pipeline,
             root:     build_root_span.gpu,
-            groups:   { (INSTANCES + 63) / 64, 1, 1 },
+            groups:   { (INSTANCES + BUILD_WORKGROUP - 1) / BUILD_WORKGROUP, 1, 1 },
         )!;
 
         gpu::BufferBarrier args_ready = {

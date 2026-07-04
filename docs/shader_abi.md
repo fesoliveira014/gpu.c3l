@@ -104,6 +104,12 @@ field order must match between C3 and shader code
 C3 side must assert sizeof and important offsets
 ```
 
+`Vec2f`, `Vec4f`, and `Vec4u` are public aliases of the C3 SIMD vectors
+(`float[<2>]`, `float[<4>]`, `uint[<4>]`). C3 packs vector struct members
+element-aligned, not vector-aligned, so std430's vec2/vec4 alignment is met
+through explicit `_padN` fields — the ABI generator (§12) computes std430
+layout and rejects any struct whose packed C3 layout would diverge from it.
+
 Bad ABI struct:
 
 ```text
@@ -298,56 +304,82 @@ The public ABI should not depend on GLSL-specific naming. The ABI generator shou
 
 ## 12. ABI generator
 
-The generator should become the source of truth for shared structs.
+`tools/gen_shader_abi/` is the source of truth for shared structs. It compiles
+`.abi` schema files into a C3 file and a self-contained GLSL include, and owns
+the only std430 layout math in the system.
 
-Input concept:
-
-```text
-abi/root.abi
-abi/material.abi
-abi/draw.abi
-```
-
-Outputs (the C3 struct ships as library source; the GLSL files are published shader-side ABI includes the consumer's own shaders `#include`):
+Schema grammar (complete):
 
 ```text
-shader_abi.c3                              (library source)
-include/shaders/generated/shader_abi.glsl
-include/shaders/generated/shader_abi_offsets.glsl
+file      := "abi" IDENT ";" decl*
+decl      := const | typedecl | structdecl | rootdecl | pushdecl | externdecl
+const     := "const" scalar IDENT "=" literal ";"
+typedecl  := "type" IDENT ":" scalar ";"
+structdecl:= "struct" IDENT "{" field+ "}"
+rootdecl  := "root"   IDENT "{" field+ "}"
+pushdecl  := "push"   IDENT "{" field+ "}"
+externdecl:= "extern" "struct" IDENT "{" field+ "}"
+field     := type IDENT ";"
+type      := "uint" | "int" | "float" | "u64" | "vec2" | "vec4"
+           | IDENT   (semantic type or previously declared struct)
+scalar    := "uint" | "int" | "float" | "u64"
 ```
 
-Generated C3 should include:
+Block kinds and emission:
 
 ```text
-struct declarations
-constants
-sizeof asserts
-offset asserts where C3 supports them
+struct        plain struct on both sides
+root          C3 struct; GLSL layout(buffer_reference, std430,
+              buffer_reference_align = A) buffer block
+push          C3 struct; GLSL plain struct — the shader hand-writes the one
+              binding line: layout(push_constant) uniform Push { RootPush pc; };
+extern struct C3 declaration already exists (e.g. command.c3); emits the GLSL
+              twin plus C3 size/offset asserts against the existing type
+type X : uint user semantic type; C3 typedef, plain scalar in GLSL
+const         primitive constant on both sides (workgroup sizes etc.)
 ```
 
-Generated shader code should include:
+Builtin semantic types: `GpuAddress`, `TextureIndex`, `SamplerIndex`.
+
+The generator rejects `vec3`, fixed arrays, and any layout requiring implicit
+padding — diagnostics name the exact `_padN` fields to insert. Generated C3
+carries `$assert T::size` plus a `$reflect(T.field).offset` assert per field,
+so consumer compiles prove the C3 layout equals std430.
+
+Invocation (see `scripts/gen_abi.sh` for the repo's generation map):
 
 ```text
-struct declarations
-constants
-layout helper macros or declarations
+gen_shader_abi --module <c3-module> --c3-out <path> --glsl-out <path> [--check] <files.abi...>
 ```
 
-## 13. Manual ABI phase
-
-Before the generator exists, manual structs are allowed with strict rules:
+Outputs are committed; `--check` regenerates in memory and diffs against the
+files on disk (the CI/test drift gate). No build-time trust elevation is
+required of consumers. Library outputs:
 
 ```text
-field order documented in shader_abi.md
-C3 and GLSL names match
-C3 side has sizeof asserts
-shader code uses explicit constants
-no vec3
-no implicit packing assumptions
-small number of structs only
+shader_abi.c3                              (library source, module gpu)
+include/shaders/generated/shader_abi.glsl  (published shader-side include)
 ```
 
-Manual ABI structs should be considered technical debt and migrated into generated ABI files by the shader ABI generator milestone.
+The generated GLSL include is self-contained: include guard derived from the
+`abi` name plus the `#extension` lines its content requires. Shaders that
+declare their own `buffer_reference` wrapper blocks (array views) still declare
+the buffer-reference extensions themselves.
+
+## 13. Ownership: generator vs shaders
+
+The generator owns layouts; shaders own bindings. Hand-written shader code is
+limited to:
+
+```text
+array-view wrapper blocks:  layout(buffer_reference, std430) readonly buffer
+                            Instances { Instance items[]; }
+push binding blocks:        layout(push_constant) uniform Push { RootPush pc; };
+```
+
+Wrappers reference generated layouts only, so they carry no drift risk;
+`readonly`/`writeonly` stay at the use site where the semantics live. New
+hand-mirrored ABI structs are not acceptable — add them to a schema instead.
 
 ## 14. SPIR-V reflection validation
 

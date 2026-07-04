@@ -13,14 +13,6 @@ const usz RT_BYTES = RT_SIZE * RT_SIZE * 4;
 const uint TEX_SIZE = 16;
 const usz PPM_HEADER_MAX = 32;
 
-struct FragRoot {
-    uint texture_index;
-    uint sampler_index;
-    uint _pad0;
-    uint _pad1;
-}
-$assert FragRoot::size == 16;
-
 fn int main() {
     if (catch err = run()) {
         io::printfn("offscreen_triangle: FAIL (%s)", err);
@@ -129,8 +121,8 @@ fn void? run() {
 
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!;
     FragRoot* frag_root = (FragRoot*)frag_span.cpu;
-    frag_root.texture_index = (uint)tex_index;
-    frag_root.sampler_index = (uint)smp_index;
+    frag_root.texture_index = tex_index;
+    frag_root.sampler_index = smp_index;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!;
 

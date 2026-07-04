@@ -543,7 +543,8 @@ cmd_draw_indexed(
 ### Indirect execution
 
 Argument layouts match Vulkan byte-for-byte and are shader-writable (GLSL
-twins in `include/shaders/indirect_commands.glsl`):
+twins generated into `include/shaders/generated/shader_abi.glsl` by the ABI
+generator — see `docs/shader_abi.md` §12):
 
 ```text
 DrawIndirectCommand        { vertex_count, instance_count, first_vertex, first_instance }

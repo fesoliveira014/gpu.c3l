@@ -1,0 +1,9 @@
+abi depth;
+
+root SampleDepthRoot {
+    GpuAddress   out_gpu;
+    TextureIndex texture_index;
+    SamplerIndex sampler_index;
+    float        u;
+    float        v;
+}
