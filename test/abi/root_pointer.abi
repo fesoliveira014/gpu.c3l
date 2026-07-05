@@ -1,0 +1,12 @@
+abi root_pointer;
+
+const uint ROOT_POINTER_WORKGROUP = 64;
+
+root ComputeRoot {
+    GpuAddress input_gpu;
+    GpuAddress output_gpu;
+    uint       count;
+    uint       _pad0;
+    uint       _pad1;
+    uint       _pad2;
+}

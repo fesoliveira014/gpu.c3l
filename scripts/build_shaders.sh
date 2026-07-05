@@ -1,61 +1,26 @@
 #!/usr/bin/env sh
-# Compile sample GLSL shaders to SPIR-V and place the .spv next to each source
-# and into the test's local shader dir. .spv is gitignored; .glsl is the source
-# of truth. Run this before building the sample or the vk_root_pointer test.
+# Compile test GLSL shaders to SPIR-V into test/src/shaders/. .spv is
+# gitignored; .glsl under test/shaders/ is the source of truth. Run after
+# editing a shader or regenerating ABI includes (scripts/gen_abi.sh).
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GLSLC="${GLSLC:-glslc}"
 INC="$ROOT/include/shaders"
+OUT="$ROOT/test/src/shaders"
 
-mkdir -p "$ROOT/test/src/shaders"
+mkdir -p "$OUT"
 
-compile() {
-    src="$1"
-    out="$2"
-    # Stage is the middle extension (foo.comp.glsl -> compute); glslc cannot infer
-    # it from a .glsl suffix.
+for src in "$ROOT"/test/shaders/*.glsl; do
+    base="$(basename "$src" .glsl)"
+    # Stage is the middle extension (foo.comp.glsl -> compute); glslc cannot
+    # infer it from a .glsl suffix.
     case "$src" in
         *.comp.glsl) stage=compute ;;
         *.vert.glsl) stage=vertex ;;
         *.frag.glsl) stage=fragment ;;
         *) echo "build_shaders: unknown shader stage for $src" >&2; exit 1 ;;
     esac
-    "$GLSLC" -fshader-stage="$stage" --target-env=vulkan1.3 -I "$INC" "$src" -o "$out"
-    echo "built $out"
-}
-
-RP="$ROOT/samples/root_pointer_compute/shaders/root_pointer.comp"
-compile "$RP.glsl" "$RP.spv"
-cp "$RP.spv" "$ROOT/test/src/shaders/root_pointer.comp.spv"
-echo "copied root_pointer.comp.spv -> test/src/shaders/"
-
-BT="$ROOT/samples/bindless_texture_compute/shaders"
-for name in heap_write heap_sample; do
-    compile "$BT/$name.comp.glsl" "$BT/$name.comp.spv"
-    cp "$BT/$name.comp.spv" "$ROOT/test/src/shaders/$name.comp.spv"
-    echo "copied $name.comp.spv -> test/src/shaders/"
-done
-
-# Reflection-validation fixtures: intentionally convention-violating shaders.
-for name in bad_set bad_binding; do
-    compile "$ROOT/test/shaders/$name.comp.glsl" "$ROOT/test/src/shaders/$name.comp.spv"
-done
-
-compile "$ROOT/test/shaders/build_indirect.comp.glsl" "$ROOT/test/src/shaders/build_indirect.comp.spv"
-
-for name in depth.vert depth.frag sample_depth.comp; do
-    compile "$ROOT/test/shaders/$name.glsl" "$ROOT/test/src/shaders/$name.spv"
-done
-
-GD="$ROOT/samples/gpu_driven_draw_sdl/shaders"
-compile "$GD/build_draws.comp.glsl" "$GD/build_draws.comp.spv"
-compile "$GD/gpu_driven.vert.glsl" "$GD/gpu_driven.vert.spv"
-compile "$GD/gpu_driven.frag.glsl" "$GD/gpu_driven.frag.spv"
-
-OT="$ROOT/samples/offscreen_triangle/shaders"
-for name in offscreen.vert offscreen.frag; do
-    compile "$OT/$name.glsl" "$OT/$name.spv"
-    cp "$OT/$name.spv" "$ROOT/test/src/shaders/$name.spv"
-    echo "copied $name.spv -> test/src/shaders/"
+    "$GLSLC" -fshader-stage="$stage" --target-env=vulkan1.3 -I "$INC" "$src" -o "$OUT/$base.spv"
+    echo "built $OUT/$base.spv"
 done
