@@ -41,7 +41,7 @@ jobs:
       - name: Install glslc and lavapipe
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y glslc mesa-vulkan-drivers
+          sudo apt-get install -y glslc mesa-vulkan-drivers vulkan-validationlayers
 
       - name: Generator unit tests
         run: c3c test unit --path tools/gen_shader_abi
@@ -88,8 +88,9 @@ jobs:
           path: |
             ~/tools/c3
             ~/tools/VulkanSDK
+            ~/tools/vma
             ~/tools/mesa
-          key: win-tools-${{ env.C3C_VERSION }}-${{ env.VULKAN_SDK_VERSION }}-${{ env.MESA_DIST_WIN_VERSION }}
+          key: win-tools-${{ env.C3C_VERSION }}-${{ env.VULKAN_SDK_VERSION }}-${{ env.MESA_DIST_WIN_VERSION }}-vma310
 
       - name: Install c3c
         run: |
@@ -111,6 +112,18 @@ jobs:
           fi
           echo "VULKAN_SDK=$(cygpath -w "$HOME/tools/VulkanSDK")" >> "$GITHUB_ENV"
           echo "$HOME/tools/VulkanSDK/Bin" >> "$GITHUB_PATH"
+
+      - name: VMA header (pinned)
+        # The SDK's silent install does not ship include/vma/; the build script
+        # includes <vma/vk_mem_alloc.h>, so stage the pinned upstream header.
+        run: |
+          if [ ! -f ~/tools/vma/include/vma/vk_mem_alloc.h ]; then
+            git clone -q --depth 1 --branch v3.1.0 \
+              https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator /tmp/vma-src
+            mkdir -p ~/tools/vma/include/vma
+            cp /tmp/vma-src/include/vk_mem_alloc.h ~/tools/vma/include/vma/
+          fi
+          echo "VMA_INCLUDE=$(cygpath -w "$HOME/tools/vma/include")" >> "$GITHUB_ENV"
 
       - name: MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
