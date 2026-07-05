@@ -25,6 +25,7 @@ struct VkDeviceState {
     bool                       validation;
     bool                       memory_budget_enabled;
     bool                       draw_indirect_count;
+    float                      max_sampler_anisotropy;
     gpu::DescriptorHeapMode    heap_mode;
     uint                       texture_descriptor_capacity;
     uint                       sampler_descriptor_capacity;
@@ -179,6 +180,11 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     )!;
     state.draw_indirect_count = features12.draw_indirect_count != 0;
 
+    if (features2.features.sampler_anisotropy != 0) {
+        vk::PhysicalDeviceProperties anisotropy_props;
+        vk::get_physical_device_properties(state.physical_device, &anisotropy_props);
+        state.max_sampler_anisotropy = anisotropy_props.limits.max_sampler_anisotropy;
+    }
     bool indexing_supported = heap_indexing_supported(&features2.features, &features12);
     bool buffer_supported   = heap_shared_features_supported(&features2.features, &features12) && query_descriptor_buffer_support(state.physical_device);
     state.heap_mode = resolve_heap_mode(desc.descriptor_heap_mode, indexing_supported, buffer_supported)!;
@@ -482,6 +488,7 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @p
         .set_next(&features12);
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
     features2.features.shader_int64 = vk::TRUE;
+    if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;
     features2.features.shader_storage_image_read_without_format  = vk::TRUE;
     features2.features.shader_storage_image_write_without_format = vk::TRUE;
@@ -543,5 +550,6 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,
+        .max_sampler_anisotropy     = base.sampler_anisotropy != 0 ? props.limits.max_sampler_anisotropy : 0.0f,
     };
 }

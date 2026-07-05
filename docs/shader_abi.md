@@ -234,7 +234,8 @@ include/shaders/descriptor_heap.glsl
 That file should define:
 
 ```text
-sample_texture_2d(TextureIndex, SamplerIndex, Vec2f) -> Vec4f
+sample_texture_2d(TextureIndex, SamplerIndex, Vec2f) -> Vec4f          (explicit LOD 0; compute-safe)
+sample_texture_2d_implicit(TextureIndex, SamplerIndex, Vec2f) -> Vec4f (derivative LOD; fragment stage)
 load_storage_texture(TextureIndex, Vec2i) -> Vec4f
 store_storage_texture(TextureIndex, Vec2i, Vec4f)
 ```

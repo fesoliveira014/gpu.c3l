@@ -35,6 +35,15 @@ vec4 sample_texture_2d(uint tex_index, uint smp_index, vec2 uv) {
         0.0);
 }
 
+// Implicit-LOD sampling: fragment-stage use (derivatives drive mip selection).
+vec4 sample_texture_2d_implicit(uint tex_index, uint smp_index, vec2 uv) {
+    return texture(
+        sampler2D(
+            gpu_texture_heap[nonuniformEXT(tex_index & GPU_HEAP_SLOT_MASK)],
+            gpu_sampler_heap[nonuniformEXT(smp_index & GPU_HEAP_SLOT_MASK)]),
+        uv);
+}
+
 vec4 load_storage_texture(uint tex_index, ivec2 coord) {
     return imageLoad(gpu_storage_heap[nonuniformEXT(tex_index & GPU_HEAP_SLOT_MASK)], coord);
 }
