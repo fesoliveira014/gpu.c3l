@@ -41,7 +41,7 @@ jobs:
       - name: Install glslc and lavapipe
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y glslc mesa-vulkan-drivers vulkan-validationlayers
+          sudo apt-get install -y glslc mesa-vulkan-drivers vulkan-validationlayers vulkan-tools
 
       - name: Generator unit tests
         run: c3c test unit --path tools/gen_shader_abi
@@ -51,6 +51,11 @@ jobs:
 
       - name: Build shaders
         run: ./scripts/build_shaders.sh
+
+      - name: Vulkan environment report
+        run: |
+          ls /usr/share/vulkan/icd.d/ || true
+          VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json vulkaninfo --summary || true
 
       - name: Test sweep (lavapipe)
         run: |
