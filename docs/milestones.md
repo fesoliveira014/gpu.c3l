@@ -802,7 +802,103 @@ windows-x64 build path is documented
 the gpu.c3l-samples repository documents SDL3 native library requirements
 ```
 
-## M22 — First release hardening
+## M22 — Sample library
+
+### Goal
+
+Grow `gpu.c3l-samples` into a rich, self-documenting sample set in the spirit
+of Sascha Willems' Vulkan examples — each sample a small, readable, standalone
+consumer proving one technique through the library's root-pointer/bindless
+model. All samples live in the `gpu.c3l-samples` repository; work there is
+tracked against these sub-milestones.
+
+### M22.1 — Foundations
+
+```text
+samples repo CI (reuses the library's job shape; SUBMODULE_TOKEN)
+shared sample framework pass (window/loop/camera/args in shared/)
+texture mapping (mipmaps, sampler address modes and filtering)
+uniform-style per-frame data through frame-arena root structs
+depth-tested scene (extends the depth groundwork past the test)
+```
+
+### M22.2 — Compute
+
+```text
+image processing chain (separable blur or tonemap over storage images)
+N-body or particle simulation (ping-pong buffers, async-friendly)
+GPU frustum culling feeding indirect draws (extends gpu_driven_draw)
+readback-driven histogram or reduction
+```
+
+### M22.3 — Rendering techniques
+
+```text
+instanced rendering from a GPU instance table
+shadow mapping (depth-only pass + sampled depth)
+deferred shading (multi-target offscreen pass + resolve)
+PBR-lite material pass (material table + TextureIndex sets)
+```
+
+### M22.4 — Performance and stress
+
+```text
+bindless stress (thousands of textures through the heap)
+multithreaded command recording showcase (tiered contexts)
+pipeline cache warm/cold timing sample
+swapchain latency/present-mode explorer
+```
+
+### Acceptance criteria
+
+```text
+each sub-milestone's samples run validation-clean on lavapipe (headless
+  ones) or a real driver (windowed ones)
+every sample has a README explaining the technique and the ABI schema it uses
+samples repo CI green with each sub-milestone merge
+no sample requires code changes in gpu.c3l (gaps become library issues first)
+```
+
+## M23 — Documentation
+
+### Goal
+
+Real consumer documentation for the library — not just design docs.
+
+### Deliverables
+
+```text
+docs/getting_started.md (install, vendor, first triangle/compute from zero)
+API reference generated or hand-written per public module (gpu.c3i surface)
+docs/limitations.md (what the model deliberately does not do; caps tables;
+  known driver quirks — lavapipe descriptor-buffer, mesa-dist-win)
+docs/cookbook.md (task-oriented recipes: upload a texture, indirect draws,
+  readbacks, threading patterns, ABI schema authoring)
+architecture/design docs refreshed against shipped source
+samples repo cross-links (each recipe points at a running sample)
+```
+
+### Tasks
+
+```text
+audit gpu.c3i doc-strings as the API-reference source of truth
+write getting-started against a fresh-machine walkthrough (linux + windows)
+document every public fault and when it fires
+document the shader ABI authoring flow for consumers end to end
+document threading tiers and their guarantees
+decide reference tooling (doc generator vs hand-maintained) and wire it
+```
+
+### Acceptance criteria
+
+```text
+new consumer reaches a running compute sample from docs alone
+every public function/type/fault appears in the reference
+limitations doc answers "why doesn't X work" for the known cases
+docs contain no stale references to pre-split layout or removed APIs
+```
+
+## M24 — First release hardening
 
 ### Goal
 
