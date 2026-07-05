@@ -90,6 +90,7 @@ jobs:
           path: |
             ~/tools/c3
             ~/tools/VulkanSDK
+            ~/tools/VulkanRT
             ~/tools/vma
             ~/tools/mesa
           key: win-tools-${{ env.C3C_VERSION }}-${{ env.VULKAN_SDK_VERSION }}-${{ env.MESA_DIST_WIN_VERSION }}-vma310
@@ -120,9 +121,20 @@ jobs:
           fi
           echo "VULKAN_SDK=$(cygpath -w "$HOME/tools/VulkanSDK")" >> "$GITHUB_ENV"
           echo "$HOME/tools/VulkanSDK/Bin" >> "$GITHUB_PATH"
-          # Portable SDK install does not register the loader; every linked
-          # binary needs vulkan-1.dll on PATH at process start.
-          DLL=$(find "$HOME/tools/VulkanSDK" -maxdepth 3 -iname vulkan-1.dll | head -1)
+          ls "$HOME/tools/VulkanSDK" || true
+
+      - name: Install Vulkan runtime (loader dll)
+        # The portable SDK ships no vulkan-1.dll; every linked binary needs the
+        # loader on PATH at process start. LunarG publishes it standalone.
+        run: |
+          if [ ! -f ~/tools/VulkanRT/x64/vulkan-1.dll ]; then
+            curl -fsSL -o /tmp/vulkanrt.zip \
+              "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/windows/VulkanRT-${VULKAN_SDK_VERSION}-Components.zip"
+            mkdir -p ~/tools/VulkanRT
+            unzip -q -j /tmp/vulkanrt.zip -d ~/tools/VulkanRT/x64 "*/x64/vulkan-1.dll" || unzip -q /tmp/vulkanrt.zip -d ~/tools/VulkanRT
+            find ~/tools/VulkanRT -iname vulkan-1.dll
+          fi
+          DLL=$(find ~/tools/VulkanRT -iname vulkan-1.dll | head -1)
           echo "loader dll: $DLL"
           echo "$(dirname "$DLL")" >> "$GITHUB_PATH"
 
