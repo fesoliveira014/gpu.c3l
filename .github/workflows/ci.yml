@@ -120,6 +120,11 @@ jobs:
           fi
           echo "VULKAN_SDK=$(cygpath -w "$HOME/tools/VulkanSDK")" >> "$GITHUB_ENV"
           echo "$HOME/tools/VulkanSDK/Bin" >> "$GITHUB_PATH"
+          # Portable SDK install does not register the loader; every linked
+          # binary needs vulkan-1.dll on PATH at process start.
+          DLL=$(find "$HOME/tools/VulkanSDK" -maxdepth 3 -iname vulkan-1.dll | head -1)
+          echo "loader dll: $DLL"
+          echo "$(dirname "$DLL")" >> "$GITHUB_PATH"
 
       - name: VMA header (pinned)
         # The SDK's silent install does not ship include/vma/; the build script
