@@ -173,6 +173,8 @@ jobs:
       - name: Link proof (smoke)
         run: |
           c3c build smoke --path test
+          find test -iname "smoke*" | head
+          ldd test/build/smoke.exe || true
           ./test/build/smoke.exe
 
       - name: CPU test targets
