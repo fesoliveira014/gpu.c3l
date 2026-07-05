@@ -33,7 +33,7 @@ gpu::vk Vulkan backend
         |
         +--> vk.c3l    -> Vulkan API calls
         +--> vma.c3l   -> Vulkan memory allocation
-        +--> sdl3.c3l  -> samples/tests only, not backend public API
+        +--> sdl3.c3l  -> gpu.c3l-samples repository only, not backend public API
 ```
 
 The public API does not expose backend handles. A Vulkan backend can be replaced or supplemented later without changing shader data structures or most user code.
@@ -67,7 +67,6 @@ gpu.c3l/
 ├── include/
 │   └── shaders/        published shader-side ABI includes only (no application shaders)
 ├── test/
-├── samples/
 ├── tools/
 └── docs/
 ```

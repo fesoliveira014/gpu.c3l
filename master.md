@@ -5,7 +5,7 @@
 **Primary backend:** Vulkan 1.3  
 **Language target:** C3 0.8.0  
 **Required backend bindings:** `vk.c3l`, `vma.c3l`  
-**Windowed sample/test binding:** `sdl3.c3l` (`module sdl`, dependency name `sdl3`)  
+**Windowed sample binding:** `sdl3.c3l` — vendored by the `gpu.c3l-samples` repository, not by this library  
 **Memory allocator:** Vulkan Memory Allocator through `vma.c3l`  
 **Document role:** master architecture and document map
 
@@ -24,7 +24,7 @@ The first backend is Vulkan. The Vulkan backend lives under `module gpu::vk` and
 ```text
 vk.c3l     -> Vulkan 1.3 C3 binding, imported as module vk
 vma.c3l    -> Vulkan Memory Allocator C3 binding, imported as module vma
-sdl3.c3l   -> SDL3 binding for windowed samples/tests only, imported as module sdl
+sdl3.c3l   -> SDL3 binding, vendored by the gpu.c3l-samples repo (samples only)
 ```
 
 The core shader ABI is:
@@ -72,7 +72,7 @@ This master document is supported by topic documents. The documents should be ke
 | `docs/style.md` | C3 project conventions: modules, naming, construction/destruction, faults, formatting. |
 | `docs/milestones.md` | Milestone plan, deliverables, acceptance criteria, and verification checks. |
 | `docs/platforms_and_dependencies.md` | Dependency setup, library manifest policy, sample/test dependencies, platform support. |
-| `docs/samples.md` | Sample applications and test harness plan, including SDL3 windowed samples. |
+| `docs/samples.md` | Samples design; sample sources live in the `gpu.c3l-samples` repository. |
 
 ---
 
@@ -241,15 +241,6 @@ gpu.c3l/
 │   ├── README.md
 │   ├── shaders/              test-owned shaders (tests are consumers)
 │   └── *.c3
-├── samples/
-│   ├── project.json
-│   ├── shared/
-│   ├── hello_compute/        each sample owns its shaders/ subdirectory
-│   ├── root_pointer_compute/
-│   ├── bindless_texture_compute/
-│   ├── offscreen_triangle/
-│   ├── hello_triangle_sdl/
-│   └── gpu_driven_draw_sdl/
 └── docs/
     ├── document_index.md
     ├── architecture.md
@@ -280,7 +271,7 @@ If C3 manifest behavior requires target-specific dependency sections, keep the s
 
 ### 4.2 Developer project files
 
-`test/project.json` and `samples/project.json` may depend on `sdl3` for windowed paths:
+The samples repository's `project.json` depends on `sdl3` for windowed paths (the test harness does not):
 
 ```json
 {
@@ -693,7 +684,7 @@ Use three test layers:
 ```text
 pure CPU tests
 headless Vulkan tests
-SDL3 windowed samples/tests
+SDL3 windowed samples (gpu.c3l-samples repository)
 ```
 
 Pure CPU tests must not require a Vulkan ICD. Headless Vulkan tests require Vulkan but no window. SDL3 tests/samples validate WSI, resize, event handling, and presentation.
@@ -741,7 +732,7 @@ M22 first release hardening
 
 ## 12. First implementation target
 
-The first complete proof should be `samples/root_pointer_compute` and its matching headless test:
+The first complete proof should be the `root_pointer_compute` sample and its matching headless test:
 
 ```text
 create_device

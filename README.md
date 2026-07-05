@@ -15,4 +15,4 @@ This folder contains the generated documentation set for the `gpu.c3l` C3 librar
 - `docs/style.md` — C3 style and project conventions.
 - `docs/milestones.md` — milestone plan with deliverables and acceptance criteria.
 - `docs/platforms_and_dependencies.md` — dependency, platform, and package setup.
-- `docs/samples.md` — samples and SDL3 windowed test plan.
+- `docs/samples.md` — samples design (sources live in the `gpu.c3l-samples` repository).

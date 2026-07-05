@@ -46,5 +46,5 @@ Architecture-first. The design docs are complete; almost no source exists yet (`
 ## Build & deps
 
 - Built with the `c3c` compiler (C3 0.8.0). `manifest.json` provides `gpu`; native libs live under `linked-libs/<target>/`. No build/test scripts exist yet.
-- Backend needs a Vulkan 1.3 loader + VMA. SDL3 is for windowed samples/tests only, not the core library.
+- Backend needs a Vulkan 1.3 loader + VMA. SDL3 is used only by the separate `gpu.c3l-samples` repository, not this library.
 - Primary dev target: `linux-x64` (then `windows-x64`).

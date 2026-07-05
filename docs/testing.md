@@ -7,7 +7,7 @@
 ```text
 pure CPU tests
 headless Vulkan tests
-SDL3 windowed samples/tests
+SDL3 windowed samples (gpu.c3l-samples repository)
 ```
 
 Pure CPU tests must run without Vulkan, VMA static library loading beyond compile/link, SDL3, or a window system. Headless Vulkan tests require a Vulkan ICD but no window. SDL3 windowed tests/samples require SDL3 and platform WSI support.
@@ -91,13 +91,12 @@ offscreen render target clear/draw/readback
 
 SDL3 belongs to sample/test harnesses. The binding package dependency is `sdl3`; the import module is `sdl`.
 
-Windowed samples:
+Windowed samples live in the `gpu.c3l-samples` repository (this library repo
+carries no SDL3 dependency):
 
 ```text
-samples/hello_triangle_sdl
-samples/gpu_driven_draw_sdl
-samples/texture_viewer_sdl
-samples/swapchain_resize_sdl
+hello_triangle_sdl
+gpu_driven_draw_sdl
 ```
 
 Coverage:
@@ -124,19 +123,10 @@ vk
 vma
 ```
 
-Sample/test project dependencies:
-
-```text
-gpu
-sdl3
-```
-
-Sample source imports:
-
-```c3
-import gpu;
-import sdl;
-```
+The test harness compiles the library sources directly (whitebox — see
+`test/project.json`); its dependencies are `vk`, `vma`, `spvreflect` only.
+Samples in `gpu.c3l-samples` depend on `gpu` (vendored submodule) plus `sdl3`
+and import `gpu` / `sdl`.
 
 Do not make SDL3 a required dependency of the shipped library unless a public helper module explicitly becomes part of the library.
 

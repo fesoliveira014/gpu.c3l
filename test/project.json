@@ -1,11 +1,18 @@
 {
   "langrev": "1",
-  // Stub backend imports vk/vma without using every symbol yet.
+  // Whitebox harness: compiles the library sources directly (list mirrors
+  // manifest.json — c3c has no single-star glob) so no gpu.c3l resolution or
+  // symlinks are needed. Bindings resolve from ../lib by real directory name.
+  // Consumer-style resolution is exercised by the gpu.c3l-samples repo.
   "warnings": [ "no-unused" ],
-  // libs/ holds: gpu.c3l -> ../.. (this library), and symlinks to the vendored
-  // vk.c3l / vma.c3l. A single search path then finds all three by <name>.c3l.
-  "dependency-search-paths": [ "libs" ],
-  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
+  "dependency-search-paths": [ "../lib" ],
+  "dependencies": [ "vk", "vma", "spvreflect" ],
+  "sources": [
+    "../gpu.c3", "../types.c3", "../faults.c3", "../device.c3", "../caps.c3",
+    "../memory.c3", "../buffer.c3", "../texture.c3", "../descriptor_heap.c3",
+    "../pipeline.c3", "../command.c3", "../sync.c3", "../queue.c3",
+    "../swapchain.c3", "../debug.c3", "../shader_abi.c3", "../vk/**"
+  ],
   "output": "build",
   "targets": {
     // Link-proof: builds the gpu -> vma -> vk graph + native libs.
