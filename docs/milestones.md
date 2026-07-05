@@ -781,7 +781,7 @@ docs/platforms_and_dependencies.md updates
 CI scripts
 windows-x64 setup docs
 VMA static library artifact policy
-SDL3 setup docs
+SDL3 setup docs (gpu.c3l-samples repository)
 ```
 
 ### Tasks
@@ -799,7 +799,7 @@ automate headless Vulkan smoke tests where available
 ```text
 fresh linux-x64 checkout builds from docs
 windows-x64 build path is documented
-samples document SDL3 native library requirements
+the gpu.c3l-samples repository documents SDL3 native library requirements
 ```
 
 ## M22 — First release hardening
