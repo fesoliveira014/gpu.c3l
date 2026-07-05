@@ -18,6 +18,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          # Fine-grained PAT (Contents: read) covering this repo + the private
+          # binding submodules; default GITHUB_TOKEN cannot read sibling repos.
+          token: ${{ secrets.SUBMODULE_TOKEN }}
 
       - name: Cache c3c
         uses: actions/cache@v4
@@ -75,6 +78,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          # Fine-grained PAT (Contents: read) covering this repo + the private
+          # binding submodules; default GITHUB_TOKEN cannot read sibling repos.
+          token: ${{ secrets.SUBMODULE_TOKEN }}
 
       - name: Cache toolchain
         uses: actions/cache@v4
