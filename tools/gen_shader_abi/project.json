@@ -4,12 +4,10 @@
   "targets": {
     "gen_shader_abi": {
       "type": "executable",
-      "target": "linux-x64",
       "sources": [ "src/**" ]
     },
     "unit": {
       "type": "test",
-      "target": "linux-x64",
       "sources": [
         "src/token.c3", "src/lexer.c3", "src/ast.c3", "src/parser.c3",
         "src/layout.c3", "src/emit_c3.c3", "src/emit_glsl.c3", "src/faults.c3",
