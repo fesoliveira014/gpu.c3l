@@ -161,3 +161,32 @@ fn void bindless_texture_write_then_sample() @test {
 fn uint quantize_unorm8(float value) {
     return (uint)(value * 255.0f + 0.5f);
 }
+
+fn void anisotropic_sampler_caps_honest() @test {
+    gpu::DeviceDesc desc = {
+        .backend = gpu::BackendKind.VULKAN, .enable_validation = true,
+        .frames_in_flight = 2, .application_name = "gpu_aniso_test",
+    };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::SamplerDesc aniso = {
+        .min_filter = gpu::Filter.LINEAR,
+        .mag_filter = gpu::Filter.LINEAR,
+        .mip_filter = gpu::Filter.LINEAR,
+        .address_u  = gpu::AddressMode.REPEAT,
+        .address_v  = gpu::AddressMode.REPEAT,
+        .address_w  = gpu::AddressMode.REPEAT,
+        .max_lod    = 16.0f,
+        .anisotropy_enable = true,
+        .max_anisotropy    = 1024.0f,
+    };
+    if (device.caps.max_sampler_anisotropy > 0) {
+        // Creation succeeds (max_anisotropy clamps to the device limit).
+        gpu::SamplerIndex smp = gpu::create_sampler(&device, &aniso)!!;
+        gpu::destroy_sampler(&device, smp)!!;
+    } else {
+        fault err = @catch(gpu::create_sampler(&device, &aniso));
+        assert(err == gpu::UNSUPPORTED_FEATURE, "expected UNSUPPORTED_FEATURE, got %s", err);
+    }
+}

@@ -440,6 +440,7 @@ fn vk::SamplerAddressMode address_mode_to_vk(gpu::AddressMode mode) @private {
 
 fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (desc.anisotropy_enable && state.max_sampler_anisotropy <= 0) return gpu::UNSUPPORTED_FEATURE~;
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
@@ -467,7 +468,7 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
         .set_address_mode_w(address_mode_to_vk(desc.address_w))
         .set_mip_lod_bias(desc.mip_lod_bias)
         .set_anisotropy_enable(desc.anisotropy_enable ? vk::TRUE : vk::FALSE)
-        .set_max_anisotropy(desc.max_anisotropy)
+        .set_max_anisotropy(desc.max_anisotropy > state.max_sampler_anisotropy ? state.max_sampler_anisotropy : desc.max_anisotropy)
         .set_min_lod(desc.min_lod)
         .set_max_lod(desc.max_lod);
 

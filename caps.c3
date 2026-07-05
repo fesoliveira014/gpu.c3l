@@ -45,4 +45,5 @@ struct DeviceCaps {
     usz  min_uniform_alignment;
     usz  min_storage_alignment;
     usz  min_texel_buffer_alignment;
+    float max_sampler_anisotropy;
 }

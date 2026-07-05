@@ -1,5 +1,6 @@
 module gpu::vk;
 
+import std::io;
 import gpu;
 import vk;
 
@@ -20,8 +21,13 @@ fn void? check(vk::Result result) {
             return gpu::DEVICE_LOST~;
         case vk::Result.ERROR_FEATURE_NOT_PRESENT:
         case vk::Result.ERROR_EXTENSION_NOT_PRESENT:
+        case vk::Result.ERROR_LAYER_NOT_PRESENT:
             return gpu::UNSUPPORTED_FEATURE~;
+        case vk::Result.ERROR_INCOMPATIBLE_DRIVER:
+        case vk::Result.ERROR_INITIALIZATION_FAILED:
+            return gpu::UNSUPPORTED_BACKEND~;
         default:
+            io::eprintfn("vk: unmapped VkResult %d", (int)result);
             return gpu::DEVICE_LOST~;
     }
 }
