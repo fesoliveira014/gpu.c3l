@@ -136,7 +136,8 @@ jobs:
           fi
           DLL=$(find ~/tools/VulkanRT -iname vulkan-1.dll | head -1)
           echo "loader dll: $DLL"
-          echo "$(dirname "$DLL")" >> "$GITHUB_PATH"
+          # GITHUB_PATH needs a Windows-form path — the OS loader reads it.
+          cygpath -w "$(dirname "$DLL")" >> "$GITHUB_PATH"
 
       - name: VMA header (pinned)
         # The SDK's silent install does not ship include/vma/; the build script
