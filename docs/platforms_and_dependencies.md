@@ -199,9 +199,13 @@ The documented shell for `scripts/*.sh` on Windows is git-bash (ships with Git
 for Windows); CI runs the same scripts under `shell: bash`.
 
 ```sh
-# 1. c3c: unpack the pinned release and put it on PATH
+# 1. c3c: unpack the pinned release and put it on PATH, then fetch the MSVC
+#    link libraries once (c3c discovers msvc_sdk beside its own binary):
 #    https://github.com/c3lang/c3c/releases/download/v0.8.0/c3-windows.zip
-# 2. Vulkan SDK (headers, glslc, vulkan-1 import lib, loader runtime)
+c3c fetch-sdk windows && cp -r ~/AppData/Local/c3/msvc_sdk <c3c-install-dir>/
+# 2. Vulkan SDK (headers, glslc, vulkan-1 import lib). A GPU driver provides
+#    the vulkan-1.dll loader; headless machines get it from LunarG's
+#    VulkanRT-<ver>-Components.zip.
 # 3. MSVC build tools (cl/lib) — any Visual Studio or Build Tools install
 git clone --recursive https://github.com/fesoliveira014/gpu.c3l
 cd gpu.c3l
@@ -211,6 +215,12 @@ cp "$VULKAN_SDK/Lib/vulkan-1.lib" lib/vma.c3l/linked-libs/windows-x64/
 c3c build smoke --path test && ./test/build/smoke.exe
 c3c test unit --path test && c3c test shader_abi --path test
 ```
+
+Notes proven by CI: harness `project.json`s declare no `target` (the host is
+correct on both platforms — a pinned `linux-x64` makes windows c3c
+cross-compile); `.gitattributes` enforces LF so golden tests and the drift
+gate compare byte-exact; the windows Vulkan test sweep is advisory (see the
+tracking issue for mesa-dist-win lavapipe failures).
 
 Headless Vulkan tests on Windows use lavapipe from
 [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) via
