@@ -10,14 +10,6 @@ const char[*] TRIANGLE_FRAG_SPIRV = $embed("../offscreen_triangle/shaders/offscr
 const uint TEX_SIZE = 16;
 const uint MAX_TRACKED_IMAGES = 8;
 
-struct FragRoot {
-    uint texture_index;
-    uint sampler_index;
-    uint _pad0;
-    uint _pad1;
-}
-$assert FragRoot::size == 16;
-
 struct Options {
     long frames;
     bool vsync;
@@ -236,8 +228,8 @@ fn void? run(Options options) {
 
         gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!;
         FragRoot* frag_root = (FragRoot*)frag_span.cpu;
-        frag_root.texture_index = (uint)tex_index;
-        frag_root.sampler_index = (uint)smp_index;
+        frag_root.texture_index = tex_index;
+        frag_root.sampler_index = smp_index;
 
         gpu::ColorTargetDesc[1] colors = {{
             .texture = acquired.texture,

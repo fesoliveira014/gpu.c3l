@@ -285,8 +285,8 @@ fn void? bind_compute_and_push(gpu::CommandList* commands, gpu::PipelineHandle h
         commands.last_pipeline = handle;
         commands.last_entry = slot.entry;
     }
-    ulong addr = (ulong)root;
-    vk::cmd_push_constants(cb, slot.layout, vk::ShaderStageFlagBits.COMPUTE_BIT, 0, 8, &addr);
+    gpu::RootPush push = { .root_gpu = root };
+    vk::cmd_push_constants(cb, slot.layout, vk::ShaderStageFlagBits.COMPUTE_BIT, 0, gpu::RootPush::size, &push);
 }
 
 <* Pipeline and heap binds are skipped when the handle is unchanged since the

@@ -1,0 +1,25 @@
+abi gpu_driven;
+
+const uint BUILD_WORKGROUP = 64;
+
+struct Instance {
+    vec2  pos;
+    float scale;
+    float _pad0;
+    vec4  color;
+}
+
+root BuildRoot {
+    GpuAddress instances_gpu;
+    GpuAddress args_gpu;
+    GpuAddress count_gpu;
+    uint       instance_count;
+    float      time;
+    uint       _pad0;
+    uint       _pad1;
+}
+
+root DrawRoot {
+    GpuAddress corners_gpu;
+    GpuAddress instances_gpu;
+}

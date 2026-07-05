@@ -1,37 +1,18 @@
 #version 460
-#extension GL_EXT_buffer_reference : require
-#extension GL_EXT_buffer_reference2 : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#include "generated/shader_abi.glsl"
+#include "generated/gpu_driven_abi.glsl"
 
-#include "indirect_commands.glsl"
-
-layout(local_size_x = 64) in;
-
-struct Instance {
-    vec2 pos;
-    float scale;
-    float _pad;
-    vec4 color;
-};
+layout(local_size_x = BUILD_WORKGROUP) in;
 
 layout(buffer_reference, std430) readonly buffer Instances { Instance items[]; };
 layout(buffer_reference, std430) writeonly buffer Args { DrawIndexedIndirectCommand cmds[]; };
 layout(buffer_reference, std430) writeonly buffer CountBuf { uint value; };
-layout(buffer_reference, std430) buffer Root {
-    uint64_t instances_gpu;
-    uint64_t args_gpu;
-    uint64_t count_gpu;
-    uint instance_count;
-    float time;
-    uint _pad0;
-    uint _pad1;
-};
-layout(push_constant) uniform Push { uint64_t root_gpu; };
+layout(push_constant) uniform Push { RootPush pc; };
 
 // Slot i drives instance i (gl_DrawID == i in the vertex stage); culled
 // instances draw zero instances rather than compacting.
 void main() {
-    Root root = Root(root_gpu);
+    BuildRoot root = BuildRoot(pc.root_gpu);
     uint i = gl_GlobalInvocationID.x;
     if (i >= root.instance_count) return;
 

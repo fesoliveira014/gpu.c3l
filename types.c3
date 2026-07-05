@@ -1,5 +1,15 @@
 module gpu;
 
+// Shared-ABI vector aliases: plain SIMD vectors (element-aligned in structs;
+// std430 vector alignment comes from explicit padding validated by the ABI
+// generator, not from these types).
+alias Vec2f = float[<2>];
+alias Vec4f = float[<4>];
+alias Vec4u = uint[<4>];
+$assert Vec2f::size == 8;
+$assert Vec4f::size == 16;
+$assert Vec4u::size == 16;
+
 // Strongly-typed resource handles: one distinct bitstruct per kind over ulong,
 // packed index(0..31) | generation(32..55) | reserved. A live handle has
 // generation >= 1, so raw 0 is reserved for INVALID.

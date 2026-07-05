@@ -17,17 +17,6 @@ const uint THR_THREADS = 4;
 const uint THR_ITERS = 32;
 const uint THR_ELEMENTS = 64;
 
-// std430 mirror of root_pointer.comp's Root.
-struct ThrRoot {
-    ulong input_gpu;
-    ulong output_gpu;
-    uint  count;
-    uint  _pad0;
-    uint  _pad1;
-    uint  _pad2;
-}
-$assert ThrRoot::size == 32;
-
 fn gpu::Device make_thr_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -95,7 +84,7 @@ struct PipelineRaceArgs {
 fn int pipeline_race_worker(void* arg) {
     PipelineRaceArgs* args = (PipelineRaceArgs*)arg;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-        gpu::ComputePipelineDesc desc = { .shader = args.shader, .push_constant_size = 8 };
+        gpu::ComputePipelineDesc desc = { .shader = args.shader, .push_constant_size = gpu::RootPush::size };
         args.handle = gpu::create_compute_pipeline(args.device, &desc)!!;
     };
     return 0;
@@ -192,9 +181,9 @@ struct RecordArgs {
 fn int record_worker(void* arg) {
     RecordArgs* args = (RecordArgs*)arg;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-    ThrRoot* root = (ThrRoot*)args.root_span.cpu;
-    root.input_gpu  = (ulong)args.io_span.gpu;
-    root.output_gpu = (ulong)((ulong)args.io_span.gpu + THR_ELEMENTS * 4);
+    ComputeRoot* root = (ComputeRoot*)args.root_span.cpu;
+    root.input_gpu  = args.io_span.gpu;
+    root.output_gpu = (gpu::GpuAddress)((ulong)args.io_span.gpu + THR_ELEMENTS * 4);
     root.count      = THR_ELEMENTS;
 
     args.list = gpu::begin_commands(args.device, gpu::QueueKind.GRAPHICS, args.ctx)!!;
@@ -222,7 +211,7 @@ fn void parallel_recording_across_contexts() @test {
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle shader = gpu::create_shader(&device, &comp_sd)!!;
     defer gpu::destroy_shader(&device, shader)!!;
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
@@ -239,7 +228,7 @@ fn void parallel_recording_across_contexts() @test {
         args[i].ctx = contexts[i];
         args[i].pipeline = pipeline;
         args[i].io_span = gpu::alloc_frame_span(&device, THR_ELEMENTS * 4 * 2, 16)!!;
-        args[i].root_span = gpu::alloc_frame_span(&device, ThrRoot::size, 16)!!;
+        args[i].root_span = gpu::alloc_frame_span(&device, ComputeRoot::size, 16)!!;
         float* values = (float*)args[i].io_span.cpu;
         for (uint e = 0; e < THR_ELEMENTS; e++) values[e] = (float)(i * 1000 + e);
     }

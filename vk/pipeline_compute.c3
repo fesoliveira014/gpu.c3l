@@ -72,7 +72,7 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    if (desc.push_constant_size < 8) return gpu::INVALID_ARGUMENT~;
+    if (desc.push_constant_size < gpu::RootPush::size) return gpu::INVALID_ARGUMENT~;
     ShaderSlot* shader = state.shaders.get(desc.shader)!;
 
     PipelineKey key = build_compute_key(desc);

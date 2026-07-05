@@ -15,14 +15,6 @@ const char[*] CACHE_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 const uint CACHE_RT_SIZE = 16;
 const usz CACHE_RT_BYTES = CACHE_RT_SIZE * CACHE_RT_SIZE * 4;
 
-struct CacheFragRoot {
-    uint texture_index;
-    uint sampler_index;
-    uint _pad0;
-    uint _pad1;
-}
-$assert CacheFragRoot::size == 16;
-
 fn gpu::Device make_cache_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -170,7 +162,7 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
     gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
     defer gpu::destroy_shader(&device, comp)!!;
 
-    gpu::ComputePipelineDesc desc = { .shader = comp, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc desc = { .shader = comp, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle first = gpu::create_compute_pipeline(&device, &desc)!!;
     defer gpu::destroy_pipeline(&device, first)!!;
     gpu::PipelineHandle second = gpu::create_compute_pipeline(&device, &desc)!!;
@@ -274,10 +266,10 @@ fn void cull_replay_renders_per_alias() @test {
     };
     for (uint i = 0; i < 12; i++) verts[i] = vertex_data[i];
 
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, CacheFragRoot::size, 16)!!;
-    CacheFragRoot* frag_root = (CacheFragRoot*)frag_span.cpu;
-    frag_root.texture_index = (uint)tex_index;
-    frag_root.sampler_index = (uint)smp_index;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
+    FragRoot* frag_root = (FragRoot*)frag_span.cpu;
+    frag_root.texture_index = tex_index;
+    frag_root.sampler_index = smp_index;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 

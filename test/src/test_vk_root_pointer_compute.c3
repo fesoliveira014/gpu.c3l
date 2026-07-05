@@ -9,16 +9,6 @@ import gpu;
 
 const char[*] ROOT_POINTER_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
-struct ComputeRoot {
-    gpu::GpuAddress input_gpu;
-    gpu::GpuAddress output_gpu;
-    uint            count;
-    uint            _pad0;
-    uint            _pad1;
-    uint            _pad2;
-}
-$assert ComputeRoot::size == 32;
-
 fn void root_pointer_compute_readback() @test {
     const uint COUNT = 256;
     gpu::DeviceDesc device_desc = {
@@ -47,7 +37,7 @@ fn void root_pointer_compute_readback() @test {
     gpu::ShaderHandle shader = gpu::create_shader(&device, &shader_desc)!!;
     defer gpu::destroy_shader(&device, shader)!!;
 
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
@@ -63,7 +53,7 @@ fn void root_pointer_compute_readback() @test {
         commands: &cmd,
         pipeline: pipeline,
         root:     root_span.gpu,
-        groups:   { (COUNT + 63) / 64, 1, 1 },
+        groups:   { (COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;
     gpu::BufferBarrier bar = {
         .buffer = output, .offset = 0, .size = COUNT * float::size,

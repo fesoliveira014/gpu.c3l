@@ -13,27 +13,27 @@
     "hello_triangle_sdl": {
       "type": "executable",
       "target": "linux-x64",
-      "sources": [ "hello_triangle_sdl/main.c3", "shared/sample_window_sdl.c3" ]
+      "sources": [ "hello_triangle_sdl/main.c3", "hello_triangle_sdl/shader_abi.c3", "shared/sample_window_sdl.c3" ]
     },
     // Headless: no SDL. Proves the root-pointer compute ABI end to end.
     "root_pointer_compute": {
       "type": "executable",
       "target": "linux-x64",
-      "sources": [ "root_pointer_compute/main.c3" ]
+      "sources": [ "root_pointer_compute/main.c3", "root_pointer_compute/shader_abi.c3" ]
     },
     // Headless rasterization: textured triangle to an offscreen target,
     // dumped as PPM. Proves graphics pipelines + heap from the fragment stage.
     "offscreen_triangle": {
       "type": "executable",
       "target": "linux-x64",
-      "sources": [ "offscreen_triangle/main.c3" ]
+      "sources": [ "offscreen_triangle/main.c3", "offscreen_triangle/shader_abi.c3" ]
     },
     // Headless: writes a pattern into a storage image by TextureIndex, then
     // samples it back by the same index. Proves the bindless descriptor heap.
     "bindless_texture_compute": {
       "type": "executable",
       "target": "linux-x64",
-      "sources": [ "bindless_texture_compute/main.c3" ]
+      "sources": [ "bindless_texture_compute/main.c3", "bindless_texture_compute/shader_abi.c3" ]
     },
     // Windowed: compute culls a quad grid and writes indirect draw args
     // (+ count where supported); one multi-draw renders via gl_DrawID.
@@ -45,7 +45,7 @@
     "gpu_driven_draw_sdl": {
       "type": "executable",
       "target": "linux-x64",
-      "sources": [ "gpu_driven_draw_sdl/main.c3", "shared/sample_window_sdl.c3" ]
+      "sources": [ "gpu_driven_draw_sdl/main.c3", "gpu_driven_draw_sdl/shader_abi.c3", "shared/sample_window_sdl.c3" ]
     }
   }
 }

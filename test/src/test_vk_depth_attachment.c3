@@ -19,16 +19,6 @@ const usz DP_DEPTH_BYTES = DP_RT * DP_RT * 4;
 const float NEAR_Z = 0.25f;
 const float FAR_Z = 0.75f;
 
-// std430 mirror of sample_depth.comp's Root.
-struct SampleDepthRoot {
-    ulong out_gpu;
-    uint  texture_index;
-    uint  sampler_index;
-    float u;
-    float v;
-}
-$assert SampleDepthRoot::size == 24;
-
 struct DepthCtx {
     gpu::ShaderHandle vert;
     gpu::ShaderHandle frag;
@@ -501,7 +491,7 @@ fn void sampled_depth_matches_readback() @test {
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DEPTH_SAMPLE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
     defer gpu::destroy_shader(&device, comp)!!;
-    gpu::ComputePipelineDesc comp_desc = { .shader = comp, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc comp_desc = { .shader = comp, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipeline = gpu::create_compute_pipeline(&device, &comp_desc)!!;
     defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
 
@@ -520,9 +510,9 @@ fn void sampled_depth_matches_readback() @test {
     gpu::GpuSpan out_span = gpu::alloc_frame_span(&device, 4, 4)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, SampleDepthRoot::size, 16)!!;
     SampleDepthRoot* root = (SampleDepthRoot*)root_span.cpu;
-    root.out_gpu = (ulong)out_span.gpu;
-    root.texture_index = (uint)tex_index;
-    root.sampler_index = (uint)smp_index;
+    root.out_gpu = out_span.gpu;
+    root.texture_index = tex_index;
+    root.sampler_index = smp_index;
     root.u = 0.5f;
     root.v = 0.5f;
 

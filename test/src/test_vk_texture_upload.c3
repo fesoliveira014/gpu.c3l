@@ -112,7 +112,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     };
     gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_sd)!!;
     defer gpu::destroy_shader(&device, sample_shader)!!;
-    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
 
@@ -121,8 +121,8 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!!;
     SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
     sample_root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
-    sample_root.texture_index = (uint)tex_index;
-    sample_root.sampler_index = (uint)smp_index;
+    sample_root.texture_index = tex_index;
+    sample_root.sampler_index = smp_index;
     sample_root.width         = UP_SIZE;
     sample_root.height        = UP_SIZE;
 
@@ -257,14 +257,14 @@ fn void storage_write_direct_readback() @test {
     };
     gpu::ShaderHandle write_shader = gpu::create_shader(&device, &write_sd)!!;
     defer gpu::destroy_shader(&device, write_shader)!!;
-    gpu::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pd)!!;
     defer gpu::destroy_pipeline(&device, write_pipe)!!;
 
     gpu::begin_frame(&device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, WriteRoot::size, 16)!!;
     WriteRoot* root = (WriteRoot*)root_span.cpu;
-    root.texture_index = (uint)tex_index;
+    root.texture_index = tex_index;
     root.width         = UP_SIZE;
     root.height        = UP_SIZE;
 
@@ -460,7 +460,7 @@ fn void mip_subset_view_sampled() @test {
     };
     gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_sd)!!;
     defer gpu::destroy_shader(&device, sample_shader)!!;
-    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
 
@@ -468,8 +468,8 @@ fn void mip_subset_view_sampled() @test {
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!!;
     SampleRoot* root = (SampleRoot*)root_span.cpu;
     root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
-    root.texture_index = (uint)tex_index;
-    root.sampler_index = (uint)smp_index;
+    root.texture_index = tex_index;
+    root.sampler_index = smp_index;
     root.width         = UP_SIZE / 2;
     root.height        = UP_SIZE / 2;
 

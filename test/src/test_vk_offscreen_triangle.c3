@@ -12,14 +12,6 @@ const char[*] OFFSCREEN_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 const uint RT_SIZE = 32;
 const usz RT_BYTES = RT_SIZE * RT_SIZE * 4;
 
-struct FragRoot {
-    uint texture_index;
-    uint sampler_index;
-    uint _pad0;
-    uint _pad1;
-}
-$assert FragRoot::size == 16;
-
 fn gpu::Device make_offscreen_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -203,8 +195,8 @@ fn void offscreen_textured_triangle() @test {
 
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
     FragRoot* frag_root = (FragRoot*)frag_span.cpu;
-    frag_root.texture_index = (uint)tex_index;
-    frag_root.sampler_index = (uint)smp_index;
+    frag_root.texture_index = tex_index;
+    frag_root.sampler_index = smp_index;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 

@@ -1,0 +1,36 @@
+abi gpu_core;
+
+// Push constant payloads (docs/shader_abi.md section 10). Shaders bind them
+// with a hand-written block: layout(push_constant) uniform Push { RootPush pc; };
+push RootPush {
+    GpuAddress root_gpu;
+}
+
+push GraphicsRootPush {
+    GpuAddress vertex_root_gpu;
+    GpuAddress fragment_root_gpu;
+}
+
+// Indirect argument layouts, byte-identical to Vulkan's. The C3 declarations
+// live in command.c3 (public API); these entries generate the GLSL twins and
+// the drift-detecting offset asserts.
+extern struct DrawIndirectCommand {
+    uint vertex_count;
+    uint instance_count;
+    uint first_vertex;
+    uint first_instance;
+}
+
+extern struct DrawIndexedIndirectCommand {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int  vertex_offset;
+    uint first_instance;
+}
+
+extern struct DispatchIndirectCommand {
+    uint x;
+    uint y;
+    uint z;
+}

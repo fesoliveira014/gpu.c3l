@@ -5,8 +5,7 @@ import vk;
 import std::thread;
 import std::core::mem;
 
-// GraphicsRootPush: vertex_root_gpu + fragment_root_gpu (docs/shader_abi.md §10).
-const uint GRAPHICS_ROOT_PUSH_SIZE = 16;
+const uint GRAPHICS_ROOT_PUSH_SIZE = gpu::GraphicsRootPush::size;
 
 const vk::ColorComponentFlags COLOR_WRITE_ALL = (vk::ColorComponentFlags)(
     (uint)vk::ColorComponentFlagBits.R_BIT

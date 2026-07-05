@@ -11,15 +11,6 @@ const char[*] UPLOAD_HEAP_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");
 const uint UR_TEX = 8;
 const usz UR_TEX_BYTES = UR_TEX * UR_TEX * 4;
 
-struct UploadSampleRoot {
-    gpu::GpuAddress output_gpu;
-    uint            texture_index;
-    uint            sampler_index;
-    uint            width;
-    uint            height;
-}
-$assert UploadSampleRoot::size == 24;
-
 fn gpu::Device make_transfer_test_device(usz staging_size = 0) {
     gpu::DeviceDesc desc = {
         .backend            = gpu::BackendKind.VULKAN,
@@ -262,16 +253,16 @@ fn void texture_upload_helper_sampled() @test {
     };
     gpu::ShaderHandle shader = gpu::create_shader(&device, &sample_sd)!!;
     defer gpu::destroy_shader(&device, shader)!!;
-    gpu::ComputePipelineDesc pd = { .shader = shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc pd = { .shader = shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pd)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     gpu::begin_frame(&device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, UploadSampleRoot::size, 16)!!;
-    UploadSampleRoot* root = (UploadSampleRoot*)root_span.cpu;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!!;
+    SampleRoot* root = (SampleRoot*)root_span.cpu;
     root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
-    root.texture_index = (uint)tex_index;
-    root.sampler_index = (uint)smp_index;
+    root.texture_index = tex_index;
+    root.sampler_index = smp_index;
     root.width         = UR_TEX;
     root.height        = UR_TEX;
 

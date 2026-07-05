@@ -4,12 +4,6 @@ import gpu;
 import vk;
 import std::core::mem;
 
-struct GraphicsRootPush @private {
-    ulong vertex_root;
-    ulong fragment_root;
-}
-$assert GraphicsRootPush::size == GRAPHICS_ROOT_PUSH_SIZE;
-
 fn vk::AttachmentLoadOp load_op_to_vk(gpu::LoadOp op) @private {
     switch (op) {
         case gpu::LoadOp.LOAD:      return vk::AttachmentLoadOp.LOAD;
@@ -132,7 +126,7 @@ fn void? bind_graphics_and_push(gpu::CommandList* commands, gpu::PipelineHandle 
         replay_dynamic_state(cb, slot);
         commands.last_pipeline = handle;
     }
-    GraphicsRootPush push = { .vertex_root = (ulong)vertex_root, .fragment_root = (ulong)fragment_root };
+    gpu::GraphicsRootPush push = { .vertex_root_gpu = vertex_root, .fragment_root_gpu = fragment_root };
     uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     vk::cmd_push_constants(cb, slot.layout, (vk::ShaderStageFlags)push_stages, 0, GRAPHICS_ROOT_PUSH_SIZE, &push);
 }

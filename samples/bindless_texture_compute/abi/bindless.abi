@@ -1,0 +1,18 @@
+abi bindless;
+
+const uint HEAP_TILE = 8;
+
+root WriteRoot {
+    TextureIndex texture_index;
+    uint         width;
+    uint         height;
+    uint         _pad0;
+}
+
+root SampleRoot {
+    GpuAddress   output_gpu;
+    TextureIndex texture_index;
+    SamplerIndex sampler_index;
+    uint         width;
+    uint         height;
+}

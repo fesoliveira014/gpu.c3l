@@ -118,10 +118,10 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_sd)!!;
     defer gpu::destroy_shader(&device, sample_shader)!!;
 
-    gpu::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pd)!!;
     defer gpu::destroy_pipeline(&device, write_pipe)!!;
-    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
 
@@ -129,15 +129,15 @@ fn void descriptor_buffer_write_then_sample() @test {
 
     gpu::GpuSpan write_root_span = gpu::alloc_frame_span(&device, WriteRoot::size, 16)!!;
     WriteRoot* write_root = (WriteRoot*)write_root_span.cpu;
-    write_root.texture_index = (uint)tex_index;
+    write_root.texture_index = tex_index;
     write_root.width         = TEX;
     write_root.height        = TEX;
 
     gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!!;
     SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
     sample_root.output_gpu    = gpu::get_buffer_address(&device, output)!!;
-    sample_root.texture_index = (uint)tex_index;
-    sample_root.sampler_index = (uint)smp_index;
+    sample_root.texture_index = tex_index;
+    sample_root.sampler_index = smp_index;
     sample_root.width         = TEX;
     sample_root.height        = TEX;
 

@@ -1,0 +1,35 @@
+abi gpu_core;
+
+const uint BUILD_WORKGROUP = 64;
+
+type MaterialIndex : uint;
+
+struct Instance {
+    vec2  pos;
+    float scale;
+    float _pad0;
+    vec4  color;
+}
+
+root BuildRoot {
+    GpuAddress instances_gpu;
+    GpuAddress args_gpu;
+    GpuAddress count_gpu;
+    uint       instance_count;
+    float      time;
+    uint       _pad0;
+    uint       _pad1;
+}
+
+push GraphicsRootPush {
+    GpuAddress vertex_root_gpu;
+    GpuAddress fragment_root_gpu;
+}
+
+extern struct DrawIndexedIndirectCommand {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int  vertex_offset;
+    uint first_instance;
+}

@@ -8,23 +8,6 @@ const char[*] HEAP_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");
 
 const uint TEX_SIZE = 16;
 
-struct WriteRoot {
-    uint texture_index;
-    uint width;
-    uint height;
-    uint _pad0;
-}
-$assert WriteRoot::size == 16;
-
-struct SampleRoot {
-    gpu::GpuAddress output_gpu;
-    uint            texture_index;
-    uint            sampler_index;
-    uint            width;
-    uint            height;
-}
-$assert SampleRoot::size == 24;
-
 fn int main() {
     if (catch err = run()) {
         io::printfn("bindless_texture_compute: FAIL (%s)", err);
@@ -88,10 +71,10 @@ fn void? run() {
     gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_shader_desc)!;
     defer (void)gpu::destroy_shader(&device, sample_shader);
 
-    gpu::ComputePipelineDesc write_pipe_desc = { .shader = write_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc write_pipe_desc = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pipe_desc)!;
     defer (void)gpu::destroy_pipeline(&device, write_pipe);
-    gpu::ComputePipelineDesc sample_pipe_desc = { .shader = sample_shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc sample_pipe_desc = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pipe_desc)!;
     defer (void)gpu::destroy_pipeline(&device, sample_pipe);
 
@@ -99,15 +82,15 @@ fn void? run() {
 
     gpu::GpuSpan write_root_span = gpu::alloc_frame_span(&device, WriteRoot::size, 16)!;
     WriteRoot* write_root = (WriteRoot*)write_root_span.cpu;
-    write_root.texture_index = (uint)tex_index;
+    write_root.texture_index = tex_index;
     write_root.width         = TEX_SIZE;
     write_root.height        = TEX_SIZE;
 
     gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!;
     SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
     sample_root.output_gpu    = gpu::get_buffer_address(&device, output)!;
-    sample_root.texture_index = (uint)tex_index;
-    sample_root.sampler_index = (uint)smp_index;
+    sample_root.texture_index = tex_index;
+    sample_root.sampler_index = smp_index;
     sample_root.width         = TEX_SIZE;
     sample_root.height        = TEX_SIZE;
 
@@ -124,7 +107,7 @@ fn void? run() {
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!;
 
-    const uint GROUPS = (TEX_SIZE + 7) / 8;
+    const uint GROUPS = (TEX_SIZE + HEAP_TILE - 1) / HEAP_TILE;
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: write_pipe,

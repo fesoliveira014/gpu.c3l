@@ -1,0 +1,12 @@
+abi indirect;
+
+root BuildRoot {
+    GpuAddress indexed_args_gpu;
+    GpuAddress plain_args_gpu;
+    GpuAddress dispatch_args_gpu;
+    GpuAddress count_gpu;
+    uint       index_count;
+    uint       vertex_count;
+    uint       dispatch_x;
+    uint       count_value;
+}

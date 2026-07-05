@@ -1,0 +1,10 @@
+module gen_shader_abi;
+
+faultdef
+    PARSE_ERROR,
+    LAYOUT_ERROR,
+    DUPLICATE_SYMBOL,
+    UNKNOWN_TYPE,
+    IO_ERROR,
+    USAGE_ERROR,
+    DRIFT_DETECTED;
