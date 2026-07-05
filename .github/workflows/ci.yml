@@ -89,6 +89,7 @@ jobs:
         with:
           path: |
             ~/tools/c3
+            ~/AppData/Local/c3
             ~/tools/VulkanSDK
             ~/tools/vma
             ~/tools/mesa
@@ -102,9 +103,10 @@ jobs:
               "https://github.com/c3lang/c3c/releases/download/v${C3C_VERSION}/c3-windows.zip"
             unzip -q /tmp/c3.zip -d ~/tools
           fi
-          if [ ! -d ~/tools/c3/msvc_sdk ]; then
-            (cd ~/tools/c3 && ./c3c.exe fetch-sdk windows)
-            ls ~/tools/c3
+          # fetch-sdk downloads the MSVC/WinSDK link libraries to
+          # ~/AppData/Local/c3/msvc_sdk and prompts for license acceptance.
+          if [ ! -d ~/AppData/Local/c3/msvc_sdk ]; then
+            echo Y | ~/tools/c3/c3c.exe fetch-sdk windows
           fi
           echo "$HOME/tools/c3" >> "$GITHUB_PATH"
 
