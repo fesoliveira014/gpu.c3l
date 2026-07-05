@@ -817,6 +817,8 @@ tracked against these sub-milestones.
 ```text
 samples repo CI (reuses the library's job shape; SUBMODULE_TOKEN)
 shared sample framework pass (window/loop/camera/args in shared/)
+screenshot capture helper in shared/ (render-target/swapchain readback to
+  image file; --screenshot flag on every visual sample)
 texture mapping (mipmaps, sampler address modes and filtering)
 uniform-style per-frame data through frame-arena root structs
 depth-tested scene (extends the depth groundwork past the test)
@@ -855,6 +857,8 @@ swapchain latency/present-mode explorer
 each sub-milestone's samples run validation-clean on lavapipe (headless
   ones) or a real driver (windowed ones)
 every sample has a README explaining the technique and the ABI schema it uses
+every visual sample's README embeds a screenshot captured via the shared
+  helper (compute/readback-only samples exempt)
 samples repo CI green with each sub-milestone merge
 no sample requires code changes in gpu.c3l (gaps become library issues first)
 ```
