@@ -192,16 +192,20 @@ jobs:
             7z x -y -o"$HOME/tools/mesa" /tmp/mesa.7z >/dev/null
           fi
 
+      - name: Register lavapipe and validation layer
+        # GH windows runners are elevated, and the Vulkan loader ignores
+        # VK_DRIVER_FILES / VK_LAYER_PATH in elevated processes (issue #18's
+        # root cause). Registry registration is the elevated-safe path.
+        run: |
+          ICD="$(cygpath -w "$HOME/tools/mesa/x64/lvp_icd.x86_64.json")"
+          LAYER="$(cygpath -w "$HOME/tools/VulkanSDK/Bin/VkLayer_khronos_validation.json")"
+          reg add "HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers" //v "$ICD" //t REG_DWORD //d 0 //f
+          reg add "HKLM\\SOFTWARE\\Khronos\\Vulkan\\ExplicitLayers" //v "$LAYER" //t REG_DWORD //d 0 //f
+          "$HOME/tools/VulkanSDK/Bin/vulkaninfoSDK.exe" --summary 2>&1 | head -25 || true
+
       - name: Vulkan sweep (lavapipe, advisory)
         continue-on-error: true
         run: |
-          export VK_DRIVER_FILES="$(cygpath -w "$HOME/tools/mesa/x64/lvp_icd.x86_64.json")"
-          # Validation layers ship with the portable SDK but need explicit discovery.
-          export VK_LAYER_PATH="$(cygpath -w "$HOME/tools/VulkanSDK/Bin")"
-          # Layer-discovery diagnostics for issue #18: what the loader sees.
-          ls "$HOME/tools/VulkanSDK/Bin" | grep -i "VkLayer" || echo "no layer manifests in SDK Bin"
-          "$HOME/tools/VulkanSDK/Bin/vulkaninfoSDK.exe" --summary 2>&1 | head -40 || true
-          VK_LOADER_DEBUG=error,warn,layer c3c test vk_bootstrap --path test 2>&1 | grep -iE "layer|not.present|error" | head -40 || true
           FAIL=0
           for t in vk_bootstrap vk_command vk_texture vk_descriptor_heap \
                    vk_root_pointer vk_texture_heap vk_shader_reflection vk_offscreen \
