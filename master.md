@@ -725,7 +725,9 @@ M18 threading model
 M19 debug names, stats, leak reporting
 M20 shader ABI generator
 M21 cross-platform packaging
-M22 first release hardening
+M22 sample library (gpu.c3l-samples, four sub-milestones)
+M23 documentation
+M24 first release hardening
 ```
 
 ---

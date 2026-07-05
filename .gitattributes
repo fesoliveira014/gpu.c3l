@@ -1,0 +1,3 @@
+# Byte-exact text everywhere: generated-output comparisons (golden tests,
+# gen_abi.sh --check) and shader sources must not vary by checkout platform.
+* text=auto eol=lf

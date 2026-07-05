@@ -193,6 +193,49 @@ Samples (consumer path):
 git clone --recursive https://github.com/fesoliveira014/gpu.c3l-samples
 ```
 
+### windows-x64 setup
+
+The documented shell for `scripts/*.sh` on Windows is git-bash (ships with Git
+for Windows); CI runs the same scripts under `shell: bash`.
+
+```sh
+# 1. c3c: unpack the pinned release and put it on PATH, then fetch the MSVC
+#    link libraries once (c3c discovers msvc_sdk beside its own binary):
+#    https://github.com/c3lang/c3c/releases/download/v0.8.0/c3-windows.zip
+c3c fetch-sdk windows && cp -r ~/AppData/Local/c3/msvc_sdk <c3c-install-dir>/
+# 2. Vulkan SDK (headers, glslc, vulkan-1 import lib). A GPU driver provides
+#    the vulkan-1.dll loader; headless machines get it from LunarG's
+#    VulkanRT-<ver>-Components.zip.
+# 3. MSVC build tools (cl/lib) — any Visual Studio or Build Tools install
+git clone --recursive https://github.com/fesoliveira014/gpu.c3l
+cd gpu.c3l
+sh lib/vma.c3l/scripts/build-vma-windows.sh   # from a shell with cl/lib on PATH; uses VULKAN_SDK
+cp "$VULKAN_SDK/Lib/vulkan-1.lib" lib/vma.c3l/linked-libs/windows-x64/
+./scripts/gen_abi.sh --check && ./scripts/build_shaders.sh
+c3c build smoke --path test && ./test/build/smoke.exe
+c3c test unit --path test && c3c test shader_abi --path test
+```
+
+Notes proven by CI: harness `project.json`s declare no `target` (the host is
+correct on both platforms — a pinned `linux-x64` makes windows c3c
+cross-compile); `.gitattributes` enforces LF so golden tests and the drift
+gate compare byte-exact; the windows Vulkan test sweep is advisory (see the
+tracking issue for mesa-dist-win lavapipe failures).
+
+Headless Vulkan tests on Windows use lavapipe from
+[mesa-dist-win](https://github.com/pal1000/mesa-dist-win) via
+`VK_DRIVER_FILES=<extracted>/x64/lvp_icd.x86_64.json`. They are advisory: CI
+runs them non-blocking, and behavior may differ from linux lavapipe.
+
+### VMA static library artifact policy
+
+Per supported target, `vma.c3l` either ships a prebuilt static library in
+`linked-libs/<target>/` (linux-x64 today) or provides a build script that
+produces it from Vulkan headers alone (`build-vma.sh`, `build-vma-windows.sh`),
+both guarded by the ABI size probe. The end-state for windows-x64 is a
+committed prebuilt `.lib` mirroring linux; until a maintainer blesses one, CI
+and developers build it in place with the script.
+
 ## 9. Build organization
 
 Recommended separation:
@@ -232,7 +275,29 @@ VK_INSTANCE_LAYERS
 
 These belong in testing documentation, not in core code.
 
-## 12. Dependency acceptance criteria
+## 12. Continuous integration
+
+`.github/workflows/ci.yml` — one workflow, two jobs, `bash` on both:
+
+```text
+linux (ubuntu-24.04, blocking):
+    pinned c3c release, glslc, mesa-vulkan-drivers (lavapipe)
+    generator unit tests, gen_abi.sh --check, build_shaders.sh
+    full test-target sweep under VK_DRIVER_FILES (any failure fails the job)
+
+windows (windows-2022, blocking except the last step):
+    pinned c3c release, Vulkan SDK, MSVC env
+    VMA static lib built in-job (build-vma-windows.sh)
+    generator unit tests, gen_abi.sh --check, build_shaders.sh
+    link proof (smoke) + pure-CPU test targets
+    lavapipe (mesa-dist-win) Vulkan sweep — advisory, continue-on-error
+```
+
+The c3c version is pinned once, in the workflow's `C3C_VERSION` env var
+(currently 0.8.0). Tool downloads are cached by version key. Compiler upgrades
+are a one-line workflow change plus this document.
+
+## 13. Dependency acceptance criteria
 
 Dependency setup is acceptable when:
 
