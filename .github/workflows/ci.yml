@@ -52,14 +52,11 @@ jobs:
       - name: Build shaders
         run: ./scripts/build_shaders.sh
 
-      - name: Vulkan environment report
-        run: |
-          ls /usr/share/vulkan/icd.d/ || true
-          VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json vulkaninfo --summary || true
-
       - name: Test sweep (lavapipe)
         run: |
-          export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          export VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
+          echo "ICD: $VK_DRIVER_FILES"
+          vulkaninfo --summary | head -30 || true
           FAIL=0
           for t in unit shader_abi vk_bootstrap vk_command vk_texture vk_descriptor_heap \
                    vk_root_pointer vk_texture_heap vk_shader_reflection vk_offscreen \
@@ -104,6 +101,10 @@ jobs:
             curl -fsSL -o /tmp/c3.zip \
               "https://github.com/c3lang/c3c/releases/download/v${C3C_VERSION}/c3-windows.zip"
             unzip -q /tmp/c3.zip -d ~/tools
+          fi
+          if [ ! -d ~/tools/c3/msvc_sdk ]; then
+            (cd ~/tools/c3 && ./c3c.exe fetch-sdk windows)
+            ls ~/tools/c3
           fi
           echo "$HOME/tools/c3" >> "$GITHUB_PATH"
 
