@@ -196,6 +196,8 @@ jobs:
         continue-on-error: true
         run: |
           export VK_DRIVER_FILES="$(cygpath -w "$HOME/tools/mesa/x64/lvp_icd.x86_64.json")"
+          # Validation layers ship with the portable SDK but need explicit discovery.
+          export VK_LAYER_PATH="$(cygpath -w "$HOME/tools/VulkanSDK/Bin")"
           FAIL=0
           for t in vk_bootstrap vk_command vk_texture vk_descriptor_heap \
                    vk_root_pointer vk_texture_heap vk_shader_reflection vk_offscreen \
