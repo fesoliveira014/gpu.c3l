@@ -1,8 +1,0 @@
-abi offscreen;
-
-root FragRoot {
-    TextureIndex texture_index;
-    SamplerIndex sampler_index;
-    uint         _pad0;
-    uint         _pad1;
-}

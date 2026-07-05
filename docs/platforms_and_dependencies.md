@@ -89,24 +89,22 @@ No public gpu function or struct exposes vma:: types.
 
 ## 5. SDL3 binding: sdl3.c3l
 
-SDL3 is used for windowed samples and optional windowed tests.
-
-Expected vendored layout for sample/test development:
+SDL3 belongs to the `gpu.c3l-samples` repository, which vendors it alongside
+this library:
 
 ```text
-gpu.c3l/
+gpu.c3l-samples/
 └── lib/
-    ├── vk.c3l/
-    ├── vma.c3l/
+    ├── gpu.c3l/        (this repository, pinned submodule; nested lib/ holds vk/vma/spvreflect)
     └── sdl3.c3l/
 ```
 
-Sample/test project dependency:
+Samples project dependency:
 
 ```json
 {
-  "dependency-search-paths": [ "../lib", ".." ],
-  "dependencies": [ "gpu", "sdl3" ]
+  "dependency-search-paths": [ "lib", "lib/gpu.c3l/lib" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect", "sdl3" ]
 }
 ```
 
@@ -117,7 +115,8 @@ import gpu;
 import sdl;
 ```
 
-The package/dependency name is `sdl3`; the C3 module name is `sdl`.
+The package/dependency name is `sdl3`; the C3 module name is `sdl`. This
+library repository carries no SDL3 dependency or submodule.
 
 Public API rule:
 
@@ -160,27 +159,39 @@ Other targets require building/providing the VMA static library.
 
 ### SDL3
 
-`sdl3.c3l` is bindings-only. The sample/test environment must provide the SDL3 native library.
+`sdl3.c3l` ships or documents the SDL3 native library for the samples
+repository's targets. Nothing in this repository links SDL3.
 
 ## 7. Platform support plan
 
 | Platform | Library build | Headless Vulkan tests | SDL3 samples | Notes |
 |---|---:|---:|---:|---|
-| linux-x64 | Required first | Required first | Required first | Primary development target. |
+| linux-x64 | Required first | Required first | Required first (samples repo) | Primary development target. |
 | windows-x64 | Required second | Desired | Desired | Needs VMA static lib and SDL3 native setup. |
 | linux-aarch64 | Deferred | Deferred | Deferred | Requires VMA static lib and Vulkan ICD. |
 | macOS | Deferred | Deferred | Deferred | Vulkan requires portability stack; not first scope. |
 | wasm | Out of scope | No | No | Vulkan backend not applicable. |
 
-## 8. Developer setup concept
+## 8. Developer setup
+
+Library + tests (this repository):
 
 ```sh
-git submodule add https://github.com/fesoliveira014/vk.c3l   lib/vk.c3l
-git submodule add https://github.com/fesoliveira014/vma.c3l  lib/vma.c3l
-git submodule add https://github.com/fesoliveira014/sdl3.c3l lib/sdl3.c3l
+git clone --recursive https://github.com/fesoliveira014/gpu.c3l
+cd gpu.c3l
+./scripts/gen_abi.sh --check && ./scripts/build_shaders.sh
+c3c test unit --path test
 ```
 
-SDL3 is needed only for samples/windowed tests.
+The test harness compiles the library sources directly and resolves the
+vendored bindings from `lib/` by real directory name — no symlinks, no
+requirement on the checkout directory's name.
+
+Samples (consumer path):
+
+```sh
+git clone --recursive https://github.com/fesoliveira014/gpu.c3l-samples
+```
 
 ## 9. Build organization
 
@@ -190,7 +201,6 @@ Recommended separation:
 manifest.json        -> shipped library metadata
 project.json         -> optional developer workspace if useful
 test/project.json    -> test harness
-samples/project.json -> sample harness
 ```
 
 The shipped library manifest should not pull sample/test sources or SDL3 into consumers.
@@ -228,9 +238,9 @@ Dependency setup is acceptable when:
 
 ```text
 gpu.c3l consumers depend on gpu, vk, and vma only as required by manifest
-SDL3 is required only by samples/windowed tests
+SDL3 lives only in the gpu.c3l-samples repository
 linux-x64 builds with vendored vk.c3l and vma.c3l
-sample project can import gpu and sdl
+the samples repository can import gpu and sdl through vendored submodules
 public API signatures contain no vk::, vma::, or sdl:: types
 platform setup steps are documented
 ```

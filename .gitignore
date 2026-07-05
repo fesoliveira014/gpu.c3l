@@ -28,3 +28,4 @@ openspec/
 
 # Sample image dumps
 *.ppm
+.claude/
