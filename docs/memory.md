@@ -82,11 +82,14 @@ VkDeviceState
     vk::Device device
     vma::Allocator allocator
     FrameArenaState[] frame_arenas
-    PersistentArenaState persistent_upload_arena
-    PersistentArenaState persistent_device_arena
-    StagingArenaState staging_arena
-    ReadbackArenaState readback_arena
+    PersistentArenaState persistent_arena
+    TransferArenaState staging_arena
+    TransferArenaState readback_arena
+    DedicatedRetireState dedicated_staging
 ```
+
+(One persistent arena, PERSISTENT_UPLOAD only — device-local persistent data
+goes through explicit DEVICE buffers, not an arena.)
 
 Allocator creation happens after Vulkan device creation and before buffer/image creation. Allocator destruction happens after all resource destruction queues have been drained.
 
@@ -401,22 +404,21 @@ FrameArenaState
     GpuAddress gpu_base
     void* cpu_base
     usz size
-    usz cursor
+    Atomic{usz} cursor
     ulong frame_timeline_value
 ```
 
-Allocation:
+Allocation (lock-free — the cursor is an atomic bumped with a CAS loop, so
+worker threads allocate concurrently; see docs/threading.md):
 
 ```text
 alloc_frame_span(size, align)
+    retry:
     aligned = align_up(cursor, align)
     if aligned + size > arena.size: return ARENA_FULL
-    span.gpu = gpu_base + aligned
-    span.cpu = cpu_base + aligned
-    span.buffer = backing_buffer
-    span.offset = aligned
-    span.size = size
-    cursor = aligned + size
+    if !compare_exchange(cursor, aligned + size): goto retry
+    span = { gpu_base + aligned, cpu_base + aligned,
+             backing_buffer, aligned, size, FRAME_UPLOAD }
 ```
 
 Reset:
@@ -437,7 +439,7 @@ PersistentArenaState
     GpuAddress gpu_base
     void* cpu_base
     usz size
-    MemoryKind kind
+    PersistentAllocMap allocations   (offset -> virtual allocation, for free-by-span)
 ```
 
 Allocation flow:
@@ -461,7 +463,7 @@ Free flow:
 
 Readback buffers may be explicit buffers or arena spans. They must support CPU invalidation before reads.
 
-Readback flow:
+Blocking flow (the `readback_buffer_data` / `readback_texture_data` helpers):
 
 ```text
 1. Create readback buffer/span.
@@ -471,6 +473,14 @@ Readback flow:
 5. Invalidate VMA allocation range if non-coherent.
 6. Read CPU pointer.
 ```
+
+Non-blocking flow (tickets): `cmd_readback_buffer` / `cmd_readback_texture`
+record the copy into the caller's command list and return a `ReadbackTicket`
+carrying the arena span and the timeline value it becomes valid at. The
+caller keeps rendering; `poll_readback` answers readiness without blocking,
+and `resolve_readback` copies out and releases the span (faulting
+`READBACK_NOT_READY` if polled early). The ticket owns its range until
+resolved.
 
 ## 13. Staging arena
 

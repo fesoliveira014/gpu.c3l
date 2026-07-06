@@ -17,28 +17,36 @@ The shipped library depends on:
 ```text
 vk.c3l
 vma.c3l
+spvreflect.c3l
 ```
 
-Expected vendored layout:
+Vendored layout:
 
 ```text
 gpu.c3l/
 └── lib/
     ├── vk.c3l/
-    └── vma.c3l/
+    ├── vma.c3l/
+    └── spvreflect.c3l/
 ```
 
-Manifest concept:
+Manifest shape (shipped):
 
 ```json
 {
   "provides": "gpu",
-  "dependency-search-paths": [ "lib" ],
-  "dependencies": [ "vk", "vma" ]
+  "linklib-dir": "linked-libs",
+  "sources": [ "gpu.c3", "gpu.c3i", "types.c3", /* ...all root files... */ "vk/**" ],
+  "targets": {
+    "linux-x64":   { "dependencies": [ "vk", "vma", "spvreflect" ] },
+    "windows-x64": { "dependencies": [ "vk", "vma", "spvreflect" ] }
+  }
 }
 ```
 
-Exact C3 manifest syntax should be verified against C3 0.8.0 during implementation.
+`manifest.json` accepts no top-level `dependency-search-paths` (a
+`project.json` key): dependencies are declared per-target and resolved by the
+consumer's search path.
 
 ## 3. Vulkan binding: vk.c3l
 
@@ -223,9 +231,14 @@ gate compare byte-exact; the windows Vulkan test sweep is advisory (see the
 tracking issue for mesa-dist-win lavapipe failures).
 
 Headless Vulkan tests on Windows use lavapipe from
-[mesa-dist-win](https://github.com/pal1000/mesa-dist-win) via
-`VK_DRIVER_FILES=<extracted>/x64/lvp_icd.x86_64.json`. They are advisory: CI
-runs them non-blocking, and behavior may differ from linux lavapipe.
+[mesa-dist-win](https://github.com/pal1000/mesa-dist-win). In elevated shells
+— GitHub runners included — the Vulkan loader ignores `VK_DRIVER_FILES` and
+`VK_LAYER_PATH`, so CI registers the ICD under
+`HKLM\SOFTWARE\Khronos\Vulkan\Drivers` (and the validation layer under
+`...\ExplicitLayers`). Non-elevated shells can use
+`VK_DRIVER_FILES=<extracted>/x64/lvp_icd.x86_64.json` instead. The sweep is
+advisory: CI runs it non-blocking, and behavior may differ from linux
+lavapipe.
 
 ### VMA static library artifact policy
 
@@ -250,13 +263,10 @@ The shipped library manifest should not pull sample/test sources or SDL3 into co
 
 ## 10. Shader toolchain dependencies
 
-First implementation should consume SPIR-V. The shader build tool can be one of:
-
-```text
-glslangValidator
-shaderc
-custom C3 wrapper around shaderc.c3l if adopted later
-```
+The library consumes SPIR-V only. The shipped shader build uses `glslc`
+(`scripts/build_shaders.sh`); linux CI installs it via apt, windows CI uses
+the Vulkan SDK's copy. `glslangValidator` appears only in the getting-started
+walkthrough.
 
 Keep shader compilation outside the core runtime unless runtime compilation becomes an explicit feature.
 
@@ -277,20 +287,26 @@ These belong in testing documentation, not in core code.
 
 ## 12. Continuous integration
 
-`.github/workflows/ci.yml` — one workflow, two jobs, `bash` on both:
+`.github/workflows/ci.yml` — one workflow, three jobs, `bash` on all:
 
 ```text
 linux (ubuntu-24.04, blocking):
     pinned c3c release, glslc, mesa-vulkan-drivers (lavapipe)
     generator unit tests, gen_abi.sh --check, build_shaders.sh
     full test-target sweep under VK_DRIVER_FILES (any failure fails the job)
+    c3c docgen API reference, uploaded as the api-reference artifact
+
+docs-walkthrough (ubuntu-24.04, blocking):
+    executes docs/getting_started.md verbatim via scripts/run_doc.py on a
+    bare runner — the walkthrough is its own regression test
 
 windows (windows-2022, blocking except the last step):
     pinned c3c release, Vulkan SDK, MSVC env
     VMA static lib built in-job (build-vma-windows.sh)
     generator unit tests, gen_abi.sh --check, build_shaders.sh
     link proof (smoke) + pure-CPU test targets
-    lavapipe (mesa-dist-win) Vulkan sweep — advisory, continue-on-error
+    lavapipe (mesa-dist-win) registered under the HKLM Vulkan driver key,
+    then the Vulkan sweep — advisory, continue-on-error
 ```
 
 The c3c version is pinned once, in the workflow's `C3C_VERSION` env var
@@ -302,9 +318,9 @@ are a one-line workflow change plus this document.
 Dependency setup is acceptable when:
 
 ```text
-gpu.c3l consumers depend on gpu, vk, and vma only as required by manifest
+gpu.c3l consumers depend on gpu, vk, vma, and spvreflect only as required by manifest
 SDL3 lives only in the gpu.c3l-samples repository
-linux-x64 builds with vendored vk.c3l and vma.c3l
+linux-x64 builds with vendored vk.c3l, vma.c3l, and spvreflect.c3l
 the samples repository can import gpu and sdl through vendored submodules
 public API signatures contain no vk::, vma::, or sdl:: types
 platform setup steps are documented
