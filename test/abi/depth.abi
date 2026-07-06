@@ -7,3 +7,15 @@ root SampleDepthRoot {
     float        u;
     float        v;
 }
+
+root ShadowProbeRoot {
+    GpuAddress   out_gpu;
+    TextureIndex depth_texture;
+    SamplerIndex shadow_sampler;
+    float        u;
+    float        v;
+    float        ref_lo;
+    float        ref_hi;
+    uint         _pad0;
+    uint         _pad1;
+}

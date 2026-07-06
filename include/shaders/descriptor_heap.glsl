@@ -22,6 +22,9 @@
 layout(set = 0, binding = 0) uniform texture2D gpu_texture_heap[];
 layout(set = 0, binding = 1) uniform image2D gpu_storage_heap[];
 layout(set = 0, binding = 2) uniform sampler gpu_sampler_heap[];
+// Aliased view of the sampler binding for depth-compare (shadow) access;
+// SPIR-V samplers are untyped, so both views share binding 2.
+layout(set = 0, binding = 2) uniform samplerShadow gpu_shadow_sampler_heap[];
 
 #define GPU_HEAP_SLOT_MASK 0xFFFFu
 
@@ -42,6 +45,17 @@ vec4 sample_texture_2d_implicit(uint tex_index, uint smp_index, vec2 uv) {
             gpu_texture_heap[nonuniformEXT(tex_index & GPU_HEAP_SLOT_MASK)],
             gpu_sampler_heap[nonuniformEXT(smp_index & GPU_HEAP_SLOT_MASK)]),
         uv);
+}
+
+// Depth-compare fetch: coord.xy samples, coord.z is the reference depth.
+// Explicit LOD — safe in any stage. The sampler must be compare-enabled.
+float sample_shadow_2d(uint tex_index, uint smp_index, vec3 coord) {
+    return textureLod(
+        sampler2DShadow(
+            gpu_texture_heap[nonuniformEXT(tex_index & GPU_HEAP_SLOT_MASK)],
+            gpu_shadow_sampler_heap[nonuniformEXT(smp_index & GPU_HEAP_SLOT_MASK)]),
+        coord,
+        0.0);
 }
 
 vec4 load_storage_texture(uint tex_index, ivec2 coord) {

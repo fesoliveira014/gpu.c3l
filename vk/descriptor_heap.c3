@@ -469,6 +469,8 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
         .set_mip_lod_bias(desc.mip_lod_bias)
         .set_anisotropy_enable(desc.anisotropy_enable ? vk::TRUE : vk::FALSE)
         .set_max_anisotropy(desc.max_anisotropy > state.max_sampler_anisotropy ? state.max_sampler_anisotropy : desc.max_anisotropy)
+        .set_compare_enable(desc.compare_enable ? vk::TRUE : vk::FALSE)
+        .set_compare_op(compare_op_to_vk(desc.compare))
         .set_min_lod(desc.min_lod)
         .set_max_lod(desc.max_lod);
 
