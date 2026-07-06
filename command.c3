@@ -145,6 +145,7 @@ fn RecordingContextHandle? create_recording_context(Device* device) {
     return device.vtable.create_recording_context(device);
 }
 
+<* Counterpart of create_recording_context; the context's command lists must be retired first. *>
 fn void? destroy_recording_context(Device* device, RecordingContextHandle ctx) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.destroy_recording_context(device, ctx);
@@ -161,16 +162,19 @@ fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContext
     return commands;
 }
 
+<* Finish recording; the list becomes submittable exactly once. *>
 fn void? end_commands(Device* device, CommandList* commands) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.end_commands(device, commands);
 }
 
+<* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_copy_buffer(commands, desc);
 }
 
+<* Record a 32-bit-pattern fill over [offset, offset + size); size passes through to the backend untouched. *>
 fn void? cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset, usz size, uint value) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_fill_buffer(commands, buffer, offset, size, value);
@@ -189,16 +193,19 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
     return commands.device.vtable.cmd_copy_texture_to_buffer(commands, desc);
 }
 
+<* Record an execution/memory barrier over a buffer range. *>
 fn void? cmd_buffer_barrier(CommandList* commands, BufferBarrier* barrier) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_buffer_barrier(commands, barrier);
 }
 
+<* Record a device-wide execution/memory barrier with no resource transition. *>
 fn void? cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_global_barrier(commands, barrier);
 }
 
+<* Record a texture barrier; old_layout must match the texture's tracked layout. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_texture_barrier(commands, barrier);
@@ -218,6 +225,7 @@ fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     return commands.device.vtable.cmd_begin_render_pass(commands, desc);
 }
 
+<* Counterpart of cmd_begin_render_pass. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_end_render_pass(commands);
@@ -229,6 +237,7 @@ fn void? cmd_draw(CommandList* commands, PipelineHandle pipeline, GpuAddress ver
     return commands.device.vtable.cmd_draw(commands, pipeline, vertex_root, fragment_root, vertex_count, instance_count);
 }
 
+<* Draw indexed geometry; indices are read from the start of index_span. *>
 fn void? cmd_draw_indexed(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_draw_indexed(commands, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count, index_type);

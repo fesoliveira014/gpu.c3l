@@ -56,6 +56,7 @@ fn SwapchainHandle? create_swapchain(Device* device, SurfaceDesc* surface, Swapc
     return device.vtable.create_swapchain(device, surface, desc);
 }
 
+<* Counterpart of create_swapchain; in-flight presentation must be idle. *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.destroy_swapchain(device, swapchain);

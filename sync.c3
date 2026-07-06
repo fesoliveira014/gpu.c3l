@@ -93,6 +93,7 @@ fn SemaphoreHandle? create_semaphore(Device* device, SemaphoreDesc* desc) {
     return device.vtable.create_semaphore(device, desc);
 }
 
+<* Counterpart of create_semaphore. *>
 fn void? destroy_semaphore(Device* device, SemaphoreHandle semaphore) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.destroy_semaphore(device, semaphore);

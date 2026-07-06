@@ -81,13 +81,22 @@ const RecordingContextHandle RECORDING_CONTEXT_HANDLE_INVALID = {};
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
 
+<* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool BufferHandle.is_valid(self)    => (ulong)self != 0;
+<* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool TextureHandle.is_valid(self)   => (ulong)self != 0;
+<* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool PipelineHandle.is_valid(self)  => (ulong)self != 0;
+<* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool SemaphoreHandle.is_valid(self) => (ulong)self != 0;
+<* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool SwapchainHandle.is_valid(self) => (ulong)self != 0;
+<* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool ShaderHandle.is_valid(self)    => (ulong)self != 0;
+<* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool RecordingContextHandle.is_valid(self) => (ulong)self != 0;
 
+<* True for a live heap index; the zero value is the invalid sentinel. *>
 fn bool TextureIndex.is_valid(self) => (uint)self != 0;
+<* True for a live heap index; the zero value is the invalid sentinel. *>
 fn bool SamplerIndex.is_valid(self) => (uint)self != 0;

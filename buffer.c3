@@ -28,6 +28,7 @@ fn BufferHandle? create_buffer(Device* device, BufferDesc* desc) {
     return device.vtable.create_buffer(device, desc);
 }
 
+<* Counterpart of create_buffer; the handle is invalid afterwards. *>
 fn void? destroy_buffer(Device* device, BufferHandle buffer) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.destroy_buffer(device, buffer);
@@ -40,6 +41,7 @@ fn GpuAddress? get_buffer_address(Device* device, BufferHandle buffer) {
     return device.vtable.get_buffer_address(device, buffer);
 }
 
+<* Host-visible view of a buffer; `cpu` is null for non-mappable memory kinds. *>
 fn GpuSpan? get_buffer_span(Device* device, BufferHandle buffer) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.get_buffer_span(device, buffer);
