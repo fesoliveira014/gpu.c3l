@@ -118,6 +118,8 @@ const gpu::BackendVTable VK_VTABLE = {
     .create_compute_pipeline = &vk_create_compute_pipeline,
     .create_graphics_pipeline = &vk_create_graphics_pipeline,
     .destroy_pipeline        = &vk_destroy_pipeline,
+    .get_pipeline_cache_size = &vk_get_pipeline_cache_size,
+    .get_pipeline_cache_data = &vk_get_pipeline_cache_data,
     .cmd_dispatch            = &vk_cmd_dispatch,
     .cmd_begin_render_pass   = &vk_cmd_begin_render_pass,
     .cmd_end_render_pass     = &vk_cmd_end_render_pass,
@@ -144,6 +146,7 @@ const gpu::BackendVTable VK_VTABLE = {
     .resize_swapchain        = &vk_resize_swapchain,
     .acquire_next_image      = &vk_acquire_next_image,
     .present                 = &vk_present,
+    .get_present_mode_support = &vk_get_present_mode_support,
 };
 
 <* Build a Vulkan device end to end. On failure the partial state is torn down
@@ -214,7 +217,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
-    create_pipeline_shared(state)!;
+    create_pipeline_shared(state, desc.pipeline_cache_data)!;
     state.caps = build_caps(
         base:               &features2.features,
         v12:                &features12,

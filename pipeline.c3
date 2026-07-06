@@ -151,3 +151,20 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.destroy_pipeline(device, pipeline);
 }
+
+<* Byte size of the driver pipeline cache blob. The cache grows as pipelines
+   are built — re-query before each export. Must not be called concurrently
+   with pipeline creation. *>
+fn usz? get_pipeline_cache_size(Device* device) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.get_pipeline_cache_size(device);
+}
+
+<* Fill `out` with the driver pipeline cache blob and return the bytes
+   written; faults INVALID_ARGUMENT if `out` is smaller than the current
+   blob. Feed the blob to DeviceDesc.pipeline_cache_data to warm-start a
+   later device. Must not be called concurrently with pipeline creation. *>
+fn usz? get_pipeline_cache_data(Device* device, char[] out) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.get_pipeline_cache_data(device, out);
+}

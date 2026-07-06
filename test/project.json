@@ -70,7 +70,7 @@
     },
     "vk_pipeline_cache": {
       "type": "test",
-      "sources": [ "src/test_vk_pipeline_cache.c3", "src/offscreen_abi.c3" ]
+      "sources": [ "src/test_vk_pipeline_cache.c3", "src/test_vk_pipeline_cache_io.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
     },
     "vk_indirect": {
       "type": "test",

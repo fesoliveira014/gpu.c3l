@@ -184,7 +184,7 @@ fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) 
 
 <* Shared graphics layout, cache entry storage, and the driver VkPipelineCache.
    Requires the descriptor heap (set layout) to exist. *>
-fn void? create_pipeline_shared(VkDeviceState* state) {
+fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data) {
     uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     vk::PushConstantRange range = {
         .stage_flags = (vk::ShaderStageFlags)push_stages,
@@ -202,10 +202,30 @@ fn void? create_pipeline_shared(VkDeviceState* state) {
         name:          "gpu_graphics_layout",
     );
 
+    // The driver validates the blob header and ignores incompatible data.
     vk::PipelineCacheCreateInfo cache_info = vk::pipeline_cache_create_info();
+    cache_info.initial_data_size = (sz)initial_cache_data.len;
+    cache_info.p_initial_data    = initial_cache_data.ptr;
     check(vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache))!;
 
     state.pipeline_cache.entries = mem::new_array(PipelineCacheEntry, gpu::MAX_PIPELINES);
+}
+
+fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    sz size = 0;
+    check(vk::get_pipeline_cache_data(state.device, state.driver_cache, &size, null))!;
+    return (usz)size;
+}
+
+fn usz? vk_get_pipeline_cache_data(gpu::Device* device, char[] out) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    sz required = 0;
+    check(vk::get_pipeline_cache_data(state.device, state.driver_cache, &required, null))!;
+    if ((usz)required > out.len) return gpu::INVALID_ARGUMENT~;
+    sz written = required;
+    check(vk::get_pipeline_cache_data(state.device, state.driver_cache, &written, out.ptr))!;
+    return (usz)written;
 }
 
 <* Teardown counterpart; safe on a partial state. Destroys surviving entries

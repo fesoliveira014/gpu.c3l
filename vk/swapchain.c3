@@ -429,3 +429,27 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
             check(result)!;
     }
 }
+
+fn gpu::PresentModeSupport? vk_get_present_mode_support(gpu::Device* device, gpu::SwapchainHandle handle) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    SwapchainSlot* slot = state.swapchains.get(handle)!;
+
+    uint mode_count = 0;
+    check(vk::extensions.vk_get_physical_device_surface_present_modes_khr(state.physical_device, slot.surface, &mode_count, null))!;
+    gpu::PresentModeSupport support;
+    if (mode_count == 0) return support;
+
+    @pool() {
+        vk::PresentModeKHR[] modes = mem::talloc_array(vk::PresentModeKHR, (sz)mode_count);
+        check(vk::extensions.vk_get_physical_device_surface_present_modes_khr(state.physical_device, slot.surface, &mode_count, modes.ptr))!;
+        foreach (mode : modes[:mode_count]) {
+            switch (mode) {
+                case vk::PresentModeKHR.FIFO_KHR:      support.fifo = true;
+                case vk::PresentModeKHR.IMMEDIATE_KHR: support.immediate = true;
+                case vk::PresentModeKHR.MAILBOX_KHR:   support.mailbox = true;
+                default:                               break;
+            }
+        }
+    };
+    return support;
+}
