@@ -25,6 +25,7 @@ struct DeviceDesc {
     DescriptorHeapMode descriptor_heap_mode;
     uint               texture_descriptor_capacity;
     uint               sampler_descriptor_capacity;
+    uint               texture_capacity;
     usz                staging_arena_size;
     usz                readback_arena_size;
     uint               frames_in_flight;

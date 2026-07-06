@@ -243,3 +243,28 @@ fn void texture_barrier_stale_handle_rejected() @test {
     gpu::end_commands(&device, &cmd)!!;
     gpu::end_frame(&device)!!;
 }
+
+fn void raised_texture_capacity_holds_more_than_default() @test {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .texture_capacity  = 2048,
+        .application_name  = "gpu_texture_capacity_test",
+    };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    const uint COUNT = 1500;
+    gpu::TextureHandle[] handles = mem::new_array(gpu::TextureHandle, COUNT);
+    defer mem::free(handles.ptr);
+    gpu::TextureDesc tex_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 1,
+        .height    = 1,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .sampled },
+    };
+    foreach (&h : handles) *h = gpu::create_texture(&device, &tex_desc)!!;
+    foreach (h : handles) gpu::destroy_texture(&device, h)!!;
+}

@@ -1,6 +1,6 @@
 module gpu;
 
-const uint MAX_TEXTURES = 1024;
+const uint DEFAULT_TEXTURE_CAPACITY = 1024;
 
 enum Format : int {
     UNDEFINED,

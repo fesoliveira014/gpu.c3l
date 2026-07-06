@@ -213,7 +213,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     state.shaders.slots    = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
     state.pipelines.slots  = mem::new_array(PipelineCell, gpu::MAX_PIPELINES);
-    state.textures.slots   = mem::new_array(TextureCell, gpu::MAX_TEXTURES);
+    state.textures.slots   = mem::new_array(TextureCell, gpu::resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
     state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
