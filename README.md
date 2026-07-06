@@ -2,37 +2,82 @@
 
 [![ci](https://github.com/fesoliveira014/gpu.c3l/actions/workflows/ci.yml/badge.svg)](https://github.com/fesoliveira014/gpu.c3l/actions/workflows/ci.yml)
 
-A C3 GPU programming library (module `gpu`, Vulkan 1.3 backend). Samples live
-in [gpu.c3l-samples](https://github.com/fesoliveira014/gpu.c3l-samples).
+A GPU programming library for [C3](https://c3-lang.org/), built on Vulkan 1.3
+— with the Vulkan kept out of your way. One module (`gpu`), strongly-typed
+handles, C3 optionals for every error, and an execution model built around
+two ideas:
 
-## Quick start (linux-x64)
+- **Root pointers instead of descriptor sets.** Buffers are reached through
+  a single 64-bit GPU address pushed per dispatch/draw; your shader casts it
+  to a struct and walks to its data. No binding numbers, no set layouts, no
+  descriptor churn for buffer data.
+- **One bindless heap for textures.** `TextureIndex`/`SamplerIndex` are
+  plain integers you put in your own structs; a global descriptor heap the
+  library manages is the only set that exists.
 
-```sh
-git clone --recursive https://github.com/fesoliveira014/gpu.c3l
-cd gpu.c3l
-./scripts/gen_abi.sh --check && ./scripts/build_shaders.sh
-c3c test unit --path test        # pure CPU
-VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json c3c test vk_bootstrap --path test
+```c3
+gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, DoublerRoot::size, 16)!;
+DoublerRoot* root = (DoublerRoot*)root_span.cpu;
+root.input_gpu  = gpu::get_buffer_address(&device, input)!;
+root.output_gpu = gpu::get_buffer_address(&device, output)!;
+root.count      = COUNT;
+
+gpu::cmd_dispatch(
+    commands: &cmd,
+    pipeline: pipeline,
+    root:     root_span.gpu,
+    groups:   { (COUNT + 63) / 64, 1, 1 },
+)!;
 ```
 
-c3c 0.8.0 and `glslc` on PATH; any Vulkan 1.3 ICD to run (lavapipe works
-headless). Windows setup: `docs/platforms_and_dependencies.md` §8.
+## Features
 
-# Documentation artifact set
+- Vulkan 1.3 backend (dynamic rendering, timeline semaphores, sync2, BDA);
+  the public API is GPU-shaped, not Vulkan-shaped — no `vk::` types leak
+- Shader ABI generator: one `.abi` schema emits the C3 struct (with
+  compile-time size/offset asserts) and the GLSL include, plus a CI drift gate
+- VMA-backed memory: per-frame arenas, persistent arena, staging/readback
+  arenas, dedicated allocations, leak reporting
+- Explicit barrier model with tracked texture layouts; validation-clean is a
+  test gate across the whole suite
+- GPU-driven path: multi-draw indirect (+ count), draw tables via `gl_DrawID`
+- Tiered threading: per-thread recording contexts, lock-free frame-arena
+  allocation, one submit
+- Pipeline dedup cache + driver-cache save/load; swapchain with present-mode
+  query; compare samplers, depth bias, MRT
+- Runs entirely on lavapipe (CPU Vulkan) — CI needs no GPU, and neither does
+  your first program
 
-This folder contains the generated documentation set for the `gpu.c3l` C3 library architecture.
+## Status
 
-## Files
+Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
 
-- `master.md` — master architecture and document map.
-- `docs/document_index.md` — reading order and maintenance rules.
-- `docs/architecture.md` — architecture, modules, object model, resources.
-- `docs/api.md` — public API shape and usage examples.
-- `docs/memory.md` — VMA-backed memory model and arenas.
-- `docs/shader_abi.md` — root pointer ABI and shared layout rules.
-- `docs/vulkan_backend.md` — Vulkan backend implementation plan.
-- `docs/testing.md` — test matrix and verification rules.
-- `docs/style.md` — C3 style and project conventions.
-- `docs/milestones.md` — milestone plan with deliverables and acceptance criteria.
-- `docs/platforms_and_dependencies.md` — dependency, platform, and package setup.
-- `docs/samples.md` — samples design (sources live in the `gpu.c3l-samples` repository).
+| Target | State |
+|---|---|
+| linux-x64 | CI: full test suite + 17 samples, validation-clean on lavapipe |
+| windows-x64 | CI: same suite on windows-2022 (lavapipe via mesa-dist-win) |
+
+## Start here
+
+- **[Getting started](docs/getting_started.md)** — empty directory to a
+  running GPU compute program; the walkthrough is executed by CI, so it
+  cannot rot.
+- **[gpu.c3l-samples](https://github.com/fesoliveira014/gpu.c3l-samples)** —
+  17 runnable samples: triangle → textured cube → GPU-driven culling →
+  shadow mapping → deferred shading → PBR → stress/perf harnesses.
+- **[docs/document_index.md](docs/document_index.md)** — map of the full
+  documentation set (architecture, API, memory model, shader ABI, backend,
+  testing, style).
+
+## Layout
+
+```
+gpu.c3l/
+├── *.c3               public module `gpu`
+├── vk/                Vulkan backend (module gpu::vk)
+├── lib/               vendored bindings: vk.c3l, vma.c3l, spvreflect.c3l
+├── include/shaders/   GLSL includes consumed by shaders
+├── tools/gen_shader_abi/
+├── test/              whitebox test suite (compiles library sources directly)
+└── docs/
+```

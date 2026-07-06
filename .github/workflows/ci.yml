@@ -70,6 +70,49 @@ jobs:
           done
           exit $FAIL
 
+  docs-walkthrough:
+    # Executes docs/getting_started.md verbatim (scripts/run_doc.py) on a bare
+    # runner: the walkthrough is its own regression test. Only the checkout of
+    # this repo and the private-phase clone shim below are outside the doc.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache c3c
+        uses: actions/cache@v4
+        with:
+          path: ~/tools/c3
+          key: c3c-linux-${{ env.C3C_VERSION }}
+
+      - name: Install c3c
+        run: |
+          if [ ! -x ~/tools/c3/c3c ]; then
+            mkdir -p ~/tools
+            curl -fsSL -o /tmp/c3.tar.gz \
+              "https://github.com/c3lang/c3c/releases/download/v${C3C_VERSION}/c3-linux.tar.gz"
+            tar -xzf /tmp/c3.tar.gz -C ~/tools
+          fi
+          echo "$HOME/tools/c3" >> "$GITHUB_PATH"
+
+      - name: Install walkthrough prerequisites
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y mesa-vulkan-drivers glslang-tools
+
+      # private-phase: rewrite the doc's public clone URL through the PAT so
+      # the recursive clone reaches the private repos. Delete this step (and
+      # nothing else) when the repositories go public.
+      - name: Authenticate submodule clones
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.SUBMODULE_TOKEN }}@github.com/fesoliveira014/".insteadOf \
+            "https://github.com/fesoliveira014/"
+
+      - name: Run the walkthrough
+        run: |
+          export VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
+          python3 scripts/run_doc.py docs/getting_started.md --workspace /tmp/walkthrough
+
   windows:
     runs-on: windows-2022
     timeout-minutes: 45
