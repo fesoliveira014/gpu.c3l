@@ -14,4 +14,16 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer SampleDepthR
     float v;
 };
 
+layout(buffer_reference, std430, buffer_reference_align = 8) buffer ShadowProbeRoot {
+    uint64_t out_gpu;
+    uint depth_texture;
+    uint shadow_sampler;
+    float u;
+    float v;
+    float ref_lo;
+    float ref_hi;
+    uint _pad0;
+    uint _pad1;
+};
+
 #endif

@@ -84,6 +84,9 @@ struct RasterState {
     CullMode    cull_mode;
     FrontFace   front_face;
     PolygonMode polygon_mode;
+    float       depth_bias_constant;
+    float       depth_bias_slope;
+    float       depth_bias_clamp;
 }
 
 struct BlendState {

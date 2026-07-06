@@ -16,3 +16,25 @@ $assert $reflect(SampleDepthRoot.texture_index).offset == 8;
 $assert $reflect(SampleDepthRoot.sampler_index).offset == 12;
 $assert $reflect(SampleDepthRoot.u).offset == 16;
 $assert $reflect(SampleDepthRoot.v).offset == 20;
+
+struct ShadowProbeRoot {
+    GpuAddress   out_gpu;
+    TextureIndex depth_texture;
+    SamplerIndex shadow_sampler;
+    float        u;
+    float        v;
+    float        ref_lo;
+    float        ref_hi;
+    uint         _pad0;
+    uint         _pad1;
+}
+$assert ShadowProbeRoot::size == 40;
+$assert $reflect(ShadowProbeRoot.out_gpu).offset == 0;
+$assert $reflect(ShadowProbeRoot.depth_texture).offset == 8;
+$assert $reflect(ShadowProbeRoot.shadow_sampler).offset == 12;
+$assert $reflect(ShadowProbeRoot.u).offset == 16;
+$assert $reflect(ShadowProbeRoot.v).offset == 20;
+$assert $reflect(ShadowProbeRoot.ref_lo).offset == 24;
+$assert $reflect(ShadowProbeRoot.ref_hi).offset == 28;
+$assert $reflect(ShadowProbeRoot._pad0).offset == 32;
+$assert $reflect(ShadowProbeRoot._pad1).offset == 36;

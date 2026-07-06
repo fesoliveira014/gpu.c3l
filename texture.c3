@@ -84,6 +84,8 @@ struct SamplerDesc {
     float       max_lod;
     bool        anisotropy_enable;
     float       max_anisotropy;
+    bool        compare_enable;
+    CompareOp   compare;
     ZString     debug_name;
 }
 

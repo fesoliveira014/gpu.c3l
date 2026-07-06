@@ -145,6 +145,12 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         vk::PipelineRasterizationStateCreateInfo raster = vk::pipeline_rasterization_state_create_info();
         raster.polygon_mode = desc.raster.polygon_mode == gpu::PolygonMode.LINE ? vk::PolygonMode.LINE : vk::PolygonMode.FILL;
         raster.line_width   = 1.0;
+        if (desc.raster.depth_bias_constant != 0 || desc.raster.depth_bias_slope != 0 || desc.raster.depth_bias_clamp != 0) {
+            raster.depth_bias_enable          = vk::TRUE;
+            raster.depth_bias_constant_factor = desc.raster.depth_bias_constant;
+            raster.depth_bias_slope_factor    = desc.raster.depth_bias_slope;
+            raster.depth_bias_clamp           = desc.raster.depth_bias_clamp;
+        }
 
         vk::PipelineMultisampleStateCreateInfo multisample = vk::pipeline_multisample_state_create_info();
         multisample.rasterization_samples = vk::SampleCountFlagBits.COUNT_1_BIT;
