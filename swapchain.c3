@@ -14,6 +14,12 @@ enum PresentMode : int {
     MAILBOX,
 }
 
+bitstruct PresentModeSupport : uint {
+    bool fifo;
+    bool immediate;
+    bool mailbox;
+}
+
 struct SurfaceDesc {
     PlatformKind platform;
     void*        native_display;
@@ -76,4 +82,11 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) 
 fn void? present(Device* device, PresentDesc* desc) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.present(device, desc);
+}
+
+<* Present modes the swapchain's surface supports. Unsupported requested
+   modes fall back to FIFO at creation; query this to pick deliberately. *>
+fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle swapchain) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.get_present_mode_support(device, swapchain);
 }

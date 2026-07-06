@@ -28,6 +28,9 @@ struct DeviceDesc {
     usz                staging_arena_size;
     usz                readback_arena_size;
     uint               frames_in_flight;
+    // Warm-start blob from get_pipeline_cache_data; empty = cold. Only read
+    // during create_device (the driver copies it).
+    char[]             pipeline_cache_data;
     ZString            application_name;
 }
 

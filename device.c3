@@ -52,6 +52,8 @@ alias DestroyShaderFn         = fn void? (Device*, ShaderHandle);
 alias CreateComputePipelineFn = fn PipelineHandle? (Device*, ComputePipelineDesc*);
 alias CreateGraphicsPipelineFn = fn PipelineHandle? (Device*, GraphicsPipelineDesc*);
 alias DestroyPipelineFn       = fn void? (Device*, PipelineHandle);
+alias GetPipelineCacheSizeFn  = fn usz? (Device*);
+alias GetPipelineCacheDataFn  = fn usz? (Device*, char[]);
 alias CmdDispatchFn           = fn void? (CommandList*, PipelineHandle, GpuAddress, Vec3u);
 alias CmdBeginRenderPassFn    = fn void? (CommandList*, RenderPassDesc*);
 alias CmdEndRenderPassFn      = fn void? (CommandList*);
@@ -78,6 +80,7 @@ alias DestroySwapchainFn      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn       = fn void? (Device*, SwapchainHandle, uint, uint);
 alias AcquireNextImageFn      = fn AcquiredImage? (Device*, SwapchainHandle);
 alias PresentFn               = fn void? (Device*, PresentDesc*);
+alias GetPresentModeSupportFn = fn PresentModeSupport? (Device*, SwapchainHandle);
 
 struct BackendVTable {
     DestroyDeviceFn         destroy_device;
@@ -122,6 +125,8 @@ struct BackendVTable {
     CreateComputePipelineFn create_compute_pipeline;
     CreateGraphicsPipelineFn create_graphics_pipeline;
     DestroyPipelineFn       destroy_pipeline;
+    GetPipelineCacheSizeFn  get_pipeline_cache_size;
+    GetPipelineCacheDataFn  get_pipeline_cache_data;
     CmdDispatchFn           cmd_dispatch;
     CmdBeginRenderPassFn    cmd_begin_render_pass;
     CmdEndRenderPassFn      cmd_end_render_pass;
@@ -148,6 +153,7 @@ struct BackendVTable {
     ResizeSwapchainFn       resize_swapchain;
     AcquireNextImageFn      acquire_next_image;
     PresentFn               present;
+    GetPresentModeSupportFn get_present_mode_support;
 }
 
 // A GPU device. `vtable` points at one static table shared by all devices of a
