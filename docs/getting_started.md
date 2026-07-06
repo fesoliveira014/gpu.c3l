@@ -74,12 +74,53 @@ own `lib/` for the bindings it vendors:
 }
 ```
 
-## 3. A compute shader
+## 3. A compute shader — and why there are no descriptor sets
 
-The library's execution model is the **root pointer**: no descriptor sets
-for buffers, no binding numbers. You push one 64-bit GPU address; the shader
-casts it to a struct of `buffer_reference`s and walks to its data. The
-root struct below is this program's whole binding model:
+If you have not written Vulkan before, here is the problem this library's
+execution model removes. In classic Vulkan, a shader cannot just be handed a
+buffer. Every resource access goes through **descriptor sets** — driver-owned
+tables of resource references. You describe each table's shape up front (a
+*descriptor set layout*: "binding 0 is a storage buffer, binding 1 is a
+uniform buffer…"), bake that shape into every pipeline (a *pipeline layout*),
+allocate tables from a *descriptor pool*, write your buffer handles into
+slots with `vkUpdateDescriptorSets`, and bind the right tables before each
+draw or dispatch. The shader side then declares matching
+`layout(set = 1, binding = 3)` plumbing. That is five API concepts and two
+places to keep in sync before the first byte of data reaches a shader — and
+changing *which* buffer a dispatch uses means rewriting or re-binding tables.
+
+The root-pointer model replaces all of it with something you already know:
+**a pointer to a struct**.
+
+```
+classic Vulkan                          root pointer
+──────────────                          ────────────
+set layouts ─┐                          struct DoublerRoot {
+pipeline layout ├─ describe shapes          input_gpu;   ← raw GPU address
+descriptor pool ─┤                          output_gpu;  ← raw GPU address
+vkUpdateDescriptorSets ─ fill slots         count;
+vkCmdBindDescriptorSets ─ bind          }
+layout(set=N, binding=M) in shader      push 1 address of that struct
+```
+
+Vulkan 1.3 lets a shader dereference raw 64-bit GPU addresses
+(`buffer_reference` — *buffer device address* on the API side). So instead
+of tables and slots: write your parameters into a plain struct in GPU-visible
+memory, push the struct's 64-bit address as the only push constant, and let
+the shader cast the address back to the struct type and follow the pointers
+inside it. Which buffers a dispatch uses is just *data in a struct* — change
+the fields, dispatch again. Nothing to allocate, update, or bind, and the
+struct definition is shared between C3 and GLSL, so there is exactly one
+shape to keep in sync (and the ABI generator, later, keeps it for you).
+
+Textures are the one thing GPUs still want tables for (samplers and image
+descriptors are opaque hardware state, not addresses) — for those the
+library manages a single global **bindless heap** and hands you plain
+integer indices (`TextureIndex`, `SamplerIndex`) that you put in your root
+structs like any other field. You will meet it in the samples; this program
+needs no textures.
+
+The root struct below is this program's whole binding model:
 
 ```glsl file=hello_gpu/shaders/doubler.comp.glsl
 #version 460
