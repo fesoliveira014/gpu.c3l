@@ -139,27 +139,28 @@ GpuSpan.buffer identifies the backing buffer for barriers/copies/debug.
 
 ## 4. Faults
 
-Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix:
+Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix. `faults.c3` documents each fault at its definition; the table below maps them to the operations that raise them.
 
-```c3
-faultdef
-    UNSUPPORTED_BACKEND,
-    UNSUPPORTED_FEATURE,
-    INVALID_ARGUMENT,
-    INVALID_HANDLE,
-    INVALID_RESOURCE_STATE,
-    OUT_OF_HOST_MEMORY,
-    OUT_OF_DEVICE_MEMORY,
-    DEVICE_LOST,
-    RESOURCE_IN_USE,
-    ARENA_FULL,
-    DESCRIPTOR_HEAP_FULL,
-    PIPELINE_CREATE_FAILED,
-    SHADER_INVALID,
-    SURFACE_LOST,
-    SWAPCHAIN_OUT_OF_DATE,
-    COMMAND_RECORDING_ERROR;
-```
+| Fault | Fired by | Typical cause |
+|---|---|---|
+| `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
+| `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, sampler/aniso paths | validation layers not installed; presentation off; missing device feature |
+| `INVALID_ARGUMENT` | any create/upload/export | malformed descriptor, zero size, undersized output buffer, out-of-range value |
+| `INVALID_HANDLE` | any handle-taking call | use after destroy (generation mismatch) or never-live handle |
+| `INVALID_RESOURCE_STATE` | `cmd_texture_barrier`, readback helpers | `old_layout` disagrees with the tracked layout chain |
+| `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
+| `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
+| `DEVICE_LOST` | submits, waits | driver reported device loss; unrecoverable |
+| `RESOURCE_IN_USE` | destroys | resource still inside the frames-in-flight window |
+| `ARENA_FULL` | `alloc_frame_span`, staging/readback paths | per-frame data outgrew the arena (sizing knobs: gpu.c3l#28) |
+| `SLOT_TABLE_FULL` | creates | handle table at capacity; textures scale via `DeviceDesc.texture_capacity` |
+| `DESCRIPTOR_HEAP_FULL` | `create_texture_descriptor`, `create_sampler` | capacity < live descriptors + same-frame retires (they recycle a frame later) |
+| `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination or failed compiling |
+| `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
+| `SURFACE_LOST` | acquire/present | window/surface destroyed mid-frame |
+| `SWAPCHAIN_OUT_OF_DATE` | `acquire_next_image`, `present` | surface changed (resize); `resize_swapchain` and retry |
+| `COMMAND_RECORDING_ERROR` | `cmd_*` | call outside its required recording state |
+| `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |
 
 Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled.
 

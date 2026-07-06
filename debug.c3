@@ -8,6 +8,7 @@ fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = 
     return commands.device.vtable.cmd_begin_label(commands, label, color);
 }
 
+<* Counterpart of cmd_begin_label. *>
 fn void? cmd_end_label(CommandList* commands) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_end_label(commands);

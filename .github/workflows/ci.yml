@@ -70,6 +70,18 @@ jobs:
           done
           exit $FAIL
 
+      # Whole-compile reference (public module gpu + gpu::vk internals; a
+      # scoped docgen needs a closed source set, which only the whitebox test
+      # project provides). Published per-run; Pages publishing is #29.
+      - name: Generate API reference
+        run: |
+          cd test && c3c docgen
+      - name: Upload API reference
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-reference
+          path: test/docs.html
+
   docs-walkthrough:
     # Executes docs/getting_started.md verbatim (scripts/run_doc.py) on a bare
     # runner: the walkthrough is its own regression test. Only the checkout of

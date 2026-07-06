@@ -32,6 +32,7 @@ fn SamplerIndex? create_sampler(Device* device, SamplerDesc* desc) {
     return device.vtable.create_sampler(device, desc);
 }
 
+<* Counterpart of create_sampler; the heap slot recycles after in-flight frames retire. *>
 fn void? destroy_sampler(Device* device, SamplerIndex index) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.destroy_sampler(device, index);

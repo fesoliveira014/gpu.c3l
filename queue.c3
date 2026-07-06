@@ -17,6 +17,7 @@ fn void? submit(Device* device, SubmitDesc* desc) {
     return device.vtable.submit(device, desc);
 }
 
+<* Block until the queue drains — a heavyweight sync for shutdown and one-shot work, not per-frame pacing. *>
 fn void? wait_queue_idle(Device* device, QueueKind queue) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.wait_queue_idle(device, queue);

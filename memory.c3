@@ -57,6 +57,7 @@ struct MemoryStats {
 }
 
 // Round `value` up to the next multiple of `align` (a power of two).
+<* Round value up to a power-of-two alignment. *>
 fn usz align_up(usz value, usz align) => (value + align - 1) & ~(align - 1);
 
 <* Begin the next frame: advance to the next frame-in-flight slot, wait for its
@@ -113,11 +114,13 @@ fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
     return device.vtable.alloc_persistent_span(device, desc);
 }
 
+<* Counterpart of alloc_persistent_span. *>
 fn void? free_persistent_span(Device* device, GpuSpan span) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.free_persistent_span(device, span);
 }
 
+<* Snapshot of persistent-arena usage and fragmentation counters. *>
 fn PersistentArenaStats? get_persistent_stats(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.get_persistent_stats(device);

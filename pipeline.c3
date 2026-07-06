@@ -123,6 +123,7 @@ fn ShaderHandle? create_shader(Device* device, ShaderDesc* desc) {
     return device.vtable.create_shader(device, desc);
 }
 
+<* Counterpart of create_shader; pipelines already built from it stay valid. *>
 fn void? destroy_shader(Device* device, ShaderHandle shader) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.destroy_shader(device, shader);
@@ -147,6 +148,7 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     return device.vtable.create_graphics_pipeline(device, desc);
 }
 
+<* Counterpart of the pipeline creates, once per returned handle; descriptors aliasing one backend pipeline are refcounted. *>
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.destroy_pipeline(device, pipeline);

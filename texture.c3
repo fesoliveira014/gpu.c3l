@@ -96,6 +96,7 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     return device.vtable.create_texture(device, desc);
 }
 
+<* Counterpart of create_texture; descriptors created from the texture must be destroyed first. *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.destroy_texture(device, texture);
