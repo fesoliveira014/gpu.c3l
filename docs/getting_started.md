@@ -17,11 +17,13 @@ Install c3c 0.8.0 from the [C3 releases](https://github.com/c3lang/c3c/releases)
 and put it on your PATH. Then:
 
 ```sh
-sudo apt install -y mesa-vulkan-drivers glslang-tools
+sudo apt install -y mesa-vulkan-drivers vulkan-validationlayers glslang-tools
 ```
 
 `mesa-vulkan-drivers` includes **lavapipe**, a CPU implementation of
-Vulkan 1.3 — everything in this walkthrough (and the entire library test
+Vulkan 1.3, and `vulkan-validationlayers` is required because the program
+below turns validation on — the right default while learning an explicit
+API — everything in this walkthrough (and the entire library test
 suite) runs on it, so a machine with no GPU at all is fine. If you have a
 real GPU with a Vulkan driver, nothing changes.
 
@@ -230,9 +232,14 @@ Expected output:
 hello_gpu: all 256 values doubled on the GPU
 ```
 
-If the loader cannot find a driver (`UNSUPPORTED_BACKEND`), point it at
-lavapipe explicitly:
-`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json ./build/hello_gpu`.
+Troubleshooting the two most likely faults:
+
+- `UNSUPPORTED_BACKEND` — the loader found no driver. Point it at lavapipe
+  explicitly:
+  `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json ./build/hello_gpu`
+- `UNSUPPORTED_FEATURE` — `enable_validation = true` but the validation
+  layer is not installed (`vulkan-validationlayers` on apt; on Windows it
+  ships with the Vulkan SDK). Install it, or set `enable_validation = false`.
 
 ## 6. Where to go next
 

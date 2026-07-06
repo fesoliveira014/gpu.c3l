@@ -98,7 +98,7 @@ jobs:
       - name: Install walkthrough prerequisites
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y mesa-vulkan-drivers glslang-tools
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers glslang-tools
 
       # private-phase: rewrite the doc's public clone URL through the PAT so
       # the recursive clone reaches the private repos. Delete this step (and
