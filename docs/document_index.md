@@ -7,6 +7,8 @@ This document lists the project documentation set, the intended reading order, a
 0. `docs/getting_started.md` — consumer walkthrough: fresh machine to a
    running compute program (executed verbatim by the CI docs job).
 1. `master.md` — high-level architecture and document map.
+1. `docs/cookbook.md` — task-oriented recipes, each linked to a running sample.
+1. `docs/limitations.md` — deliberate exclusions, limits tables, driver quirks.
 2. `docs/architecture.md` — full system architecture.
 3. `docs/api.md` — public API and examples.
 4. `docs/memory.md` — VMA-backed memory architecture.
@@ -24,6 +26,8 @@ This document lists the project documentation set, the intended reading order, a
 |---|---|
 | `master.md` | Any major design direction changes. |
 | `docs/getting_started.md` | Toolchain, vendoring flow, or the minimal program's API surface changes — the CI docs job fails when it drifts. |
+| `docs/cookbook.md` | A core workflow's API shape changes or a new sample introduces a pattern worth a recipe. |
+| `docs/limitations.md` | A limit constant, knob, or known quirk changes; a workaround lands or an issue closes. |
 | `docs/architecture.md` | Layers, modules, object model, or resource lifetime rules change. |
 | `docs/api.md` | Public types, descriptors, functions, or examples change. |
 | `docs/memory.md` | Memory kind policy, VMA usage, arenas, or allocation behavior changes. |
