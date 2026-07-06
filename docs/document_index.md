@@ -4,6 +4,8 @@ This document lists the project documentation set, the intended reading order, a
 
 ## Reading order
 
+0. `docs/getting_started.md` — consumer walkthrough: fresh machine to a
+   running compute program (executed verbatim by the CI docs job).
 1. `master.md` — high-level architecture and document map.
 2. `docs/architecture.md` — full system architecture.
 3. `docs/api.md` — public API and examples.
@@ -21,6 +23,7 @@ This document lists the project documentation set, the intended reading order, a
 | Document | Maintained when |
 |---|---|
 | `master.md` | Any major design direction changes. |
+| `docs/getting_started.md` | Toolchain, vendoring flow, or the minimal program's API surface changes — the CI docs job fails when it drifts. |
 | `docs/architecture.md` | Layers, modules, object model, or resource lifetime rules change. |
 | `docs/api.md` | Public types, descriptors, functions, or examples change. |
 | `docs/memory.md` | Memory kind policy, VMA usage, arenas, or allocation behavior changes. |
