@@ -10,6 +10,7 @@ and glslc do, including native Windows (no bash required).
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +20,9 @@ STAGES = {".comp": "compute", ".vert": "vertex", ".frag": "fragment"}
 
 
 def main():
-    glslc = os.environ.get("GLSLC", "glslc")
+    glslc = shutil.which(os.environ.get("GLSLC", "glslc"))
+    if glslc is None:
+        sys.exit("build_shaders: glslc not found (set GLSLC or add it to PATH)")
     include_dir = ROOT / "include" / "shaders"
     out_dir = ROOT / "test" / "src" / "shaders"
     out_dir.mkdir(parents=True, exist_ok=True)

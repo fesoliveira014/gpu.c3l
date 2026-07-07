@@ -9,6 +9,7 @@ Portable replacement for the old gen_abi.sh — runs anywhere python3 and c3c
 do, including native Windows (no bash required).
 """
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -23,8 +24,11 @@ def generator_binary(tool_dir):
 
 def build_generator():
     tool_dir = ROOT / "tools" / "gen_shader_abi"
+    c3c = shutil.which("c3c")
+    if c3c is None:
+        sys.exit("gen_abi: c3c not found on PATH")
     subprocess.run(
-        ["c3c", "build", "gen_shader_abi", "--path", str(tool_dir)],
+        [c3c, "build", "gen_shader_abi", "--path", str(tool_dir)],
         check=True,
         stdout=subprocess.DEVNULL,
     )
