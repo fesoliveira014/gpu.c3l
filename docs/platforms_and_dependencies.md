@@ -187,7 +187,7 @@ Library + tests (this repository):
 ```sh
 git clone --recursive https://github.com/fesoliveira014/gpu.c3l
 cd gpu.c3l
-./scripts/gen_abi.sh --check && ./scripts/build_shaders.sh
+python3 scripts/gen_abi.py --check && python3 scripts/build_shaders.py
 c3c test unit --path test
 ```
 
@@ -219,7 +219,7 @@ git clone --recursive https://github.com/fesoliveira014/gpu.c3l
 cd gpu.c3l
 sh lib/vma.c3l/scripts/build-vma-windows.sh   # from a shell with cl/lib on PATH; uses VULKAN_SDK
 cp "$VULKAN_SDK/Lib/vulkan-1.lib" lib/vma.c3l/linked-libs/windows-x64/
-./scripts/gen_abi.sh --check && ./scripts/build_shaders.sh
+python3 scripts/gen_abi.py --check && python3 scripts/build_shaders.py
 c3c build smoke --path test && ./test/build/smoke.exe
 c3c test unit --path test && c3c test shader_abi --path test
 ```
@@ -264,7 +264,7 @@ The shipped library manifest should not pull sample/test sources or SDL3 into co
 ## 10. Shader toolchain dependencies
 
 The library consumes SPIR-V only. The shipped shader build uses `glslc`
-(`scripts/build_shaders.sh`); linux CI installs it via apt, windows CI uses
+(`scripts/build_shaders.py`); linux CI installs it via apt, windows CI uses
 the Vulkan SDK's copy. `glslangValidator` appears only in the getting-started
 walkthrough.
 
@@ -292,7 +292,7 @@ These belong in testing documentation, not in core code.
 ```text
 linux (ubuntu-24.04, blocking):
     pinned c3c release, glslc, mesa-vulkan-drivers (lavapipe)
-    generator unit tests, gen_abi.sh --check, build_shaders.sh
+    generator unit tests, gen_abi.py --check, build_shaders.py
     full test-target sweep under VK_DRIVER_FILES (any failure fails the job)
     c3c docgen API reference, uploaded as the api-reference artifact
 
@@ -303,7 +303,7 @@ docs-walkthrough (ubuntu-24.04, blocking):
 windows (windows-2022, blocking except the last step):
     pinned c3c release, Vulkan SDK, MSVC env
     VMA static lib built in-job (build-vma-windows.sh)
-    generator unit tests, gen_abi.sh --check, build_shaders.sh
+    generator unit tests, gen_abi.py --check, build_shaders.py
     link proof (smoke) + pure-CPU test targets
     lavapipe (mesa-dist-win) registered under the HKLM Vulkan driver key,
     then the Vulkan sweep — advisory, continue-on-error

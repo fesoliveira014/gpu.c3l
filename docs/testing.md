@@ -243,7 +243,7 @@ test/shaders/graphics/
 
 They `#include` the library's published shader-side ABI includes from `include/shaders/`.
 
-Shared CPU/shader structs come from `.abi` schemas (see `docs/shader_abi.md` §12). Generated outputs are committed; `scripts/gen_abi.sh --check` is the drift gate — run it as part of any full test sweep, and rerun `scripts/gen_abi.sh` (then `scripts/build_shaders.sh`) after editing a schema.
+Shared CPU/shader structs come from `.abi` schemas (see `docs/shader_abi.md` §12). Generated outputs are committed; `scripts/gen_abi.py --check` is the drift gate — run it as part of any full test sweep, and rerun `scripts/gen_abi.py` (then `scripts/build_shaders.py`) after editing a schema.
 
 CI tiers (`.github/workflows/ci.yml`):
 

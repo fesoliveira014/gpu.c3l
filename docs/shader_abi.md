@@ -352,7 +352,7 @@ padding — diagnostics name the exact `_padN` fields to insert. Generated C3
 carries `$assert T::size` plus a `$reflect(T.field).offset` assert per field,
 so consumer compiles prove the C3 layout equals std430.
 
-Invocation (see `scripts/gen_abi.sh` for the repo's generation map):
+Invocation (see `scripts/gen_abi.py` for the repo's generation map):
 
 ```text
 gen_shader_abi --module <c3-module> --c3-out <path> --glsl-out <path> [--check] <files.abi...>

@@ -47,10 +47,10 @@ jobs:
         run: c3c test unit --path tools/gen_shader_abi
 
       - name: ABI drift gate
-        run: ./scripts/gen_abi.sh --check
+        run: python3 scripts/gen_abi.py --check
 
       - name: Build shaders
-        run: ./scripts/build_shaders.sh
+        run: python3 scripts/build_shaders.py
 
       - name: Test sweep (lavapipe)
         run: |
@@ -221,10 +221,10 @@ jobs:
         run: c3c test unit --path tools/gen_shader_abi
 
       - name: ABI drift gate
-        run: ./scripts/gen_abi.sh --check
+        run: python scripts/gen_abi.py --check
 
       - name: Build shaders
-        run: ./scripts/build_shaders.sh
+        run: python scripts/build_shaders.py
 
       - name: Link proof (smoke)
         run: |
