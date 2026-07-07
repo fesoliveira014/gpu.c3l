@@ -221,10 +221,10 @@ jobs:
         run: c3c test unit --path tools/gen_shader_abi
 
       - name: ABI drift gate
-        run: python scripts/gen_abi.py --check
+        run: C3C="$(cygpath -w "$(command -v c3c)")" python scripts/gen_abi.py --check
 
       - name: Build shaders
-        run: python scripts/build_shaders.py
+        run: GLSLC="$(cygpath -w "$(command -v glslc)")" python scripts/build_shaders.py
 
       - name: Link proof (smoke)
         run: |
