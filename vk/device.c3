@@ -37,7 +37,9 @@ struct VkDeviceState {
     Mutex                      resource_mutex;
     Mutex                      transfer_mutex;
     Mutex                      graphics_queue_mutex;
+    Mutex                      compute_queue_mutex;
     Mutex                      transfer_queue_mutex;
+    bool                       compute_queue_distinct;
     Atomic{int}                inflight_calls;
     uint                       frames_in_flight;
     uint                       frame_index;
@@ -59,6 +61,14 @@ struct VkDeviceState {
     TransferArenaState         readback_arena;
     DedicatedRetireState       dedicated_staging;
     bool                       frame_active;
+}
+
+struct CapsInputs {
+    bool indexing_supported;
+    bool buffer_supported;
+    bool async_compute;
+    uint texture_capacity;
+    uint sampler_capacity;
 }
 
 <* Frame-boundary quiescence accounting, active only under validation. *>
@@ -157,6 +167,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.resource_mutex.init()!;
     state.transfer_mutex.init()!;
     state.graphics_queue_mutex.init()!;
+    state.compute_queue_mutex.init()!;
     state.transfer_queue_mutex.init()!;
 
     state.texture_descriptor_capacity = gpu::resolve_descriptor_capacity(desc.texture_descriptor_capacity, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!;
@@ -199,7 +210,12 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
 
     create_logical_device(state, &families)!;
     vk::get_device_queue(state.device, state.graphics_family, 0, &state.graphics_queue);
-    state.compute_queue = state.graphics_queue;
+    state.compute_queue_distinct = families.async_compute;
+    if (families.async_compute) {
+        vk::get_device_queue(state.device, families.compute, families.compute_index, &state.compute_queue);
+    } else {
+        state.compute_queue = state.graphics_queue;
+    }
     vk::get_device_queue(state.device, state.transfer_family, 0, &state.transfer_queue);
 
     create_vk_allocator(state)!;
@@ -218,15 +234,19 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
     create_pipeline_shared(state, desc.pipeline_cache_data)!;
+    CapsInputs caps_inputs = {
+        .indexing_supported = indexing_supported,
+        .buffer_supported   = buffer_supported,
+        .async_compute      = state.compute_queue_distinct,
+        .texture_capacity   = state.texture_descriptor_capacity,
+        .sampler_capacity   = state.sampler_descriptor_capacity,
+    };
     state.caps = build_caps(
-        base:               &features2.features,
-        v12:                &features12,
-        v13:                &features13,
-        physical_device:    state.physical_device,
-        indexing_supported: indexing_supported,
-        buffer_supported:   buffer_supported,
-        texture_capacity:   state.texture_descriptor_capacity,
-        sampler_capacity:   state.sampler_descriptor_capacity,
+        base:            &features2.features,
+        v12:             &features12,
+        v13:             &features13,
+        physical_device: state.physical_device,
+        inputs:          &caps_inputs,
     );
 
     return (gpu::Device){
@@ -325,6 +345,7 @@ fn void destroy_state(VkDeviceState* state) @private {
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
     if (state.transfer_mutex.is_initialized())       (void)state.transfer_mutex.destroy();
     if (state.graphics_queue_mutex.is_initialized()) (void)state.graphics_queue_mutex.destroy();
+    if (state.compute_queue_mutex.is_initialized())  (void)state.compute_queue_mutex.destroy();
     if (state.transfer_queue_mutex.is_initialized()) (void)state.transfer_queue_mutex.destroy();
     mem::free(state);
 }
@@ -453,12 +474,27 @@ fn int score_device(int device_type) @private {
 
 <* Create the logical device with one graphics+compute queue and the required
    feature chain enabled. maintenance4 is enabled for SPIR-V 1.6 compute later;
-   heap-path features follow state.heap_mode. *>
+   heap-path features follow state.heap_mode. Emits one queue create info per
+   distinct family in use; the main family asks for a second queue when the
+   compute tier lives there. *>
 fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @private {
-    float priority = 1.0;
-    vk::DeviceQueueCreateInfo queue_info = vk::device_queue_create_info()
+    float[2] priorities = { 1.0, 1.0 };
+    uint main_queue_count = families.async_compute && families.compute == families.graphics ? 2 : 1;
+    vk::DeviceQueueCreateInfo[MAX_QUEUE_FAMILIES] queue_infos;
+    uint queue_info_count = 0;
+    queue_infos[queue_info_count++] = vk::device_queue_create_info()
         .set_queue_family_index(families.graphics)
-        .set_queue_priorities((&priority)[:1]);
+        .set_queue_priorities(priorities[:main_queue_count]);
+    if (families.compute != families.graphics) {
+        queue_infos[queue_info_count++] = vk::device_queue_create_info()
+            .set_queue_family_index(families.compute)
+            .set_queue_priorities(priorities[:1]);
+    }
+    if (families.transfer != families.graphics && families.transfer != families.compute) {
+        queue_infos[queue_info_count++] = vk::device_queue_create_info()
+            .set_queue_family_index(families.transfer)
+            .set_queue_priorities(priorities[:1]);
+    }
 
     vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features = vk::physical_device_descriptor_buffer_features_ext()
         .set_descriptor_buffer(vk::TRUE);
@@ -510,7 +546,7 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @p
 
     vk::DeviceCreateInfo device_info = vk::device_create_info()
         .set_next(&features2)
-        .set_queue_create_infos((&queue_info)[:1]);
+        .set_queue_create_infos(queue_infos[:queue_info_count]);
     if (extension_count > 0) {
         device_info = device_info.set_enabled_extension_names(extensions[:extension_count]);
     }
@@ -536,7 +572,7 @@ fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString na
 
 <* Descriptor flags report adapter support per heap path; max counts report
    the configured capacities. *>
-fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13, vk::PhysicalDevice physical_device, bool indexing_supported, bool buffer_supported, uint texture_capacity, uint sampler_capacity) @private {
+fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13, vk::PhysicalDevice physical_device, CapsInputs* inputs) @private {
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(physical_device, &props);
     return (gpu::DeviceCaps){
@@ -546,10 +582,11 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .timeline_semaphore         = v12.timeline_semaphore != 0,
         .shader_int64               = base.shader_int64 != 0,
         .draw_indirect_count        = v12.draw_indirect_count != 0,
-        .descriptor_buffer          = buffer_supported,
-        .descriptor_indexing        = indexing_supported,
-        .max_texture_descriptors    = texture_capacity,
-        .max_sampler_descriptors    = sampler_capacity,
+        .descriptor_buffer          = inputs.buffer_supported,
+        .descriptor_indexing        = inputs.indexing_supported,
+        .async_compute              = inputs.async_compute,
+        .max_texture_descriptors    = inputs.texture_capacity,
+        .max_sampler_descriptors    = inputs.sampler_capacity,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,

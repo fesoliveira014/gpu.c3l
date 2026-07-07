@@ -288,6 +288,14 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
         .set_initial_layout(vk::ImageLayout.UNDEFINED);
+    if ((uint)texture_usage_to_vk(desc.usage) == 0) return gpu::INVALID_ARGUMENT~;
+    uint[MAX_QUEUE_FAMILIES] share_families;
+    uint share_count = used_queue_families(state, share_families[..]);
+    if (desc.usage.shared_queues && share_count >= 2) {
+        image_info = image_info
+            .set_sharing_mode(vk::SharingMode.CONCURRENT)
+            .set_queue_family_indices(share_families[:share_count]);
+    }
     vma::AllocationCreateInfo alloc_info = { .usage = vma::MemoryUsage.AUTO_PREFER_DEVICE };
 
     TextureSlot slot = {

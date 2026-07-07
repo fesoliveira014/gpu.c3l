@@ -116,7 +116,9 @@ gpu::SubmitDesc draw_submit = { .command_lists = draw_lists[..],
     .waits = draw_waits[..], .swapchain = swapchain };
 ```
 
-Async-compute overlap arrives with #23; the pattern is already correct.
+Real overlap happens when `caps.async_compute` is true (distinct compute
+queue); buffers both queues touch need the `shared_queues` usage flag.
+Single-queue devices run the same code serialized.
 Running example: `particle_sim`.
 
 ## 8. Record command lists from many threads

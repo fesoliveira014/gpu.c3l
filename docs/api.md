@@ -91,6 +91,7 @@ DeviceCaps
     bool draw_indirect_count
     bool descriptor_buffer
     bool descriptor_indexing
+    bool async_compute
     uint max_texture_descriptors
     uint max_sampler_descriptors
     usz min_uniform_alignment
@@ -527,6 +528,11 @@ SubmitDesc
 create_semaphore / destroy_semaphore / wait_semaphore   (timeline; SemaphoreValue = distinct ulong)
 create_recording_context / destroy_recording_context    (one per worker thread; docs/threading.md)
 ```
+
+`QueueKind.COMPUTE` routes to a real compute queue when
+`DeviceCaps.async_compute` is true; resources used by both GRAPHICS and
+COMPUTE must then carry the `shared_queues` usage flag (concurrent sharing;
+no-op on single-queue devices). See docs/limitations.md.
 
 Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
 `TextureBufferCopyDesc`, `TextureUploadDesc`, `ClearColor`,

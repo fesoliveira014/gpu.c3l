@@ -84,6 +84,10 @@
       "type": "test",
       "sources": [ "src/test_vk_threading.c3", "src/root_pointer_abi.c3" ]
     },
+    "vk_queue": {
+      "type": "test",
+      "sources": [ "src/test_vk_queue_selection.c3" ]
+    },
     "vk_debug": {
       "type": "test",
       "sources": [ "src/test_vk_debug_report.c3" ]

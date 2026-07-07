@@ -14,11 +14,14 @@ page doesn't explain it, that's a bug in this page — file an issue.
 - **Dynamic rendering only.** No `VkRenderPass`/framebuffer objects, no
   subpasses, no tile-based subpass dependencies. Render targets are
   described per pass begin (`RenderPassDesc`) and that is the whole model.
-- **One hardware queue today.** `QueueKind.COMPUTE`/`TRANSFER` submit to the
-  graphics queue; async compute overlap does not happen yet. The split-submit
-  pattern (timeline-linked compute → graphics, see `particle_sim`) is
-  API-ready for it — the backend gap is tracked in
-  [#23](https://github.com/fesoliveira014/gpu.c3l/issues/23).
+- **Async compute is capability-gated.** A distinct compute queue is used
+  when the hardware offers one (second queue in the main family, or a
+  compute-only family); `DeviceCaps.async_compute` reports it, and resources
+  touched by both GRAPHICS and COMPUTE must then carry the `shared_queues`
+  usage flag (concurrent sharing). Single-queue devices (lavapipe) keep the
+  graphics alias — the flag is a no-op there. EXCLUSIVE cross-family
+  ownership transfers are deliberately absent
+  ([#36](https://github.com/fesoliveira014/gpu.c3l/issues/36)).
 - **Vendored distribution.** There is no package registry; consumers vendor
   the repo (with its binding submodules) under `lib/`. See
   `docs/getting_started.md`.

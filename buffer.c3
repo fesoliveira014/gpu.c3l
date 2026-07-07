@@ -5,14 +5,25 @@ const usz MAX_BUFFERS = 4096;
 // Buffer usage flags. A bitstruct of bools, composed by field-set:
 //   BufferUsage u = { .storage, .addressable, .transfer_dst };
 bitstruct BufferUsage : uint {
+    // Source of copy commands.
     bool transfer_src : 0;
+    // Destination of copy/fill commands.
     bool transfer_dst : 1;
+    // Uniform buffer binding.
     bool uniform      : 2;
+    // Storage buffer access from shaders.
     bool storage      : 3;
+    // get_buffer_address / root-pointer access.
     bool addressable  : 4;
+    // Indirect draw/dispatch argument source.
     bool indirect     : 5;
+    // Index buffer for cmd_draw_indexed.
     bool index        : 6;
+    // Reserved for vertex-buffer interop.
     bool vertex       : 7;
+    // Concurrent sharing across queue families; required when GRAPHICS and
+    // COMPUTE both touch it and caps.async_compute is set.
+    bool shared_queues : 8;
 }
 
 struct BufferDesc {

@@ -44,12 +44,21 @@ enum AddressMode : int {
 
 // Texture usage flags. Bitstruct of bools, composed by field-set.
 bitstruct TextureUsage : uint {
+    // Sampled through the descriptor heap.
     bool sampled      : 0;
+    // Storage-image access from shaders.
     bool storage      : 1;
+    // Render-pass color target.
     bool color_attach : 2;
+    // Render-pass depth target.
     bool depth_attach : 3;
+    // Source of copies/readbacks.
     bool transfer_src : 4;
+    // Destination of uploads/copies.
     bool transfer_dst : 5;
+    // Concurrent sharing across queue families; required when GRAPHICS and
+    // COMPUTE both touch it and caps.async_compute is set.
+    bool shared_queues : 6;
 }
 
 struct TextureDesc {
