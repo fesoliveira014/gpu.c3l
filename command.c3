@@ -31,7 +31,7 @@ struct Vec3u {
 }
 
 // Indirect argument layouts, byte-identical to Vulkan's and shader-writable
-// (GLSL twins in include/shaders/indirect_commands.glsl).
+// (GLSL twins in include/shaders/generated/shader_abi.glsl).
 struct DrawIndirectCommand {
     uint vertex_count;
     uint instance_count;

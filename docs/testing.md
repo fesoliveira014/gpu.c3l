@@ -58,14 +58,14 @@ Examples:
 ```text
 test_vk_bootstrap.c3
 test_vk_vma_allocator.c3
-test_vk_buffer_address.c3
+test_vk_buffer.c3
 test_vk_frame_arena.c3
 test_vk_persistent_arena.c3
 test_vk_command_submit.c3
-test_vk_compute.c3
+test_vk_root_pointer_compute.c3
 test_vk_texture_heap.c3
 test_vk_texture_upload.c3
-test_vk_offscreen_graphics.c3
+test_vk_offscreen_triangle.c3
 ```
 
 Coverage:
@@ -92,12 +92,9 @@ offscreen render target clear/draw/readback
 SDL3 belongs to sample/test harnesses. The binding package dependency is `sdl3`; the import module is `sdl`.
 
 Windowed samples live in the `gpu.c3l-samples` repository (this library repo
-carries no SDL3 dependency):
-
-```text
-hello_triangle_sdl
-gpu_driven_draw_sdl
-```
+carries no SDL3 dependency). Ten windowed samples ship today —
+`hello_triangle_sdl`, `textured_cube`, `shadow_mapping`, `gpu_driven_draw_sdl`
+among them; see that repository and `docs/samples.md` for the full list.
 
 Coverage:
 
@@ -121,6 +118,7 @@ Core library manifest dependencies:
 ```text
 vk
 vma
+spvreflect
 ```
 
 The test harness compiles the library sources directly (whitebox — see
@@ -176,23 +174,29 @@ Do not include milestone labels in test names.
 | Texture heap | descriptor allocation, sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback. |
 | Swapchain | SDL windowed present and resize. |
+| Pipeline cache | cache create/reuse, blob save/load, warm start. |
+| Threading | per-thread recording contexts, parallel record, identical submit. |
+| Debug report | leak report contents, debug names, command labels. |
+| Depth | depth attachment creation, depth-tested draw, readback. |
+| Indirect draw | compute-written draw args, indirect draw, readback. |
 
 ## 9. Build commands
 
 The shipped library is a `manifest.json` package (module `gpu`); it has no
-project of its own. Builds run through a consumer `project.json` that resolves
-`gpu`, `vk`, and `vma` from a `dependency-search-paths` directory.
+project of its own. The test harness (`test/project.json`) is whitebox: it
+lists the library sources directly (mirroring `manifest.json`) and declares
+`vk`, `vma`, and `spvreflect` as dependencies, resolved via
+`"dependency-search-paths": ["../lib"]` — vendored bindings by real directory
+name, no symlink directory. Consumer-style resolution of `gpu` is exercised by
+the `gpu.c3l-samples` repository.
 
-Smoke harness (`test/`), verified on C3 0.8.0 / `linux-x64`:
+Smoke target, as CI runs it:
 
 ```sh
 # from the repo root; --path runs as if standing in test/
-c3c run smoke --path test
+c3c build smoke --path test
+./test/build/smoke
 ```
-
-`test/libs/` provides the search path: `gpu.c3l -> ../..` (this library) plus
-symlinks to the vendored `lib/vk.c3l` and `lib/vma.c3l`. A single
-`dependency-search-paths: ["libs"]` then finds all three by `<name>.c3l`.
 
 Prerequisites on `linux-x64`: a Vulkan loader (`libvulkan.so.1`) on the system
 and the `libVulkanMemoryAllocator.a` static lib shipped under
@@ -207,29 +211,26 @@ Notes pinned during scaffolding (C3 0.8.0):
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
   a `project.json` key); dependencies are declared per-target and resolved by
   the consumer's search path.
-- `manifest.json` `sources` must list the backend subdir explicitly
-  (`"sources": ["gpu.c3", "gpu.c3i", "types.c3", "faults.c3", "vk/**"]`); a glob
-  like `*.c3` is rejected and the default does not recurse into `vk/`.
+- `manifest.json` `sources` must list files explicitly — all 17 root source
+  files plus `vk/**`; a glob like `*.c3` is rejected and the default does not
+  recurse into `vk/`.
 
 ## 10. CI matrix
 
-Minimum CI:
+CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
 
 ```text
-linux-x64 pure CPU tests
-linux-x64 headless Vulkan tests when a Vulkan software ICD is available
-format/style static checks implemented as scripts, not c3fmt
+linux (blocking): generator tests, ABI drift gate, shader build, full
+    lavapipe test sweep, then a c3c docgen API reference uploaded as the
+    api-reference artifact
+windows (blocking except the advisory sweep): same suite via mesa-dist-win
+    lavapipe, registered in the HKLM Vulkan driver registry
+docs-walkthrough (blocking): executes docs/getting_started.md verbatim on a
+    bare runner
 ```
 
-Second-stage CI:
-
-```text
-windows-x64 build
-windows-x64 pure CPU tests
-windows-x64 headless Vulkan smoke test where environment permits
-```
-
-Windowed SDL3 tests are manual unless CI has a reliable display server.
+Windowed SDL3 samples run in the `gpu.c3l-samples` repository CI under
+xvfb/lavapipe.
 
 ## 11. Test data and shaders
 
@@ -249,7 +250,8 @@ CI tiers (`.github/workflows/ci.yml`):
 | Tier | Platform | Blocking |
 |---|---|---|
 | Generator tests, drift gate, shader build | linux + windows | yes |
-| Full lavapipe test sweep | linux | yes |
+| Full lavapipe test sweep + api-reference docgen artifact | linux | yes |
+| Getting-started walkthrough (docs-walkthrough job, `scripts/run_doc.py`) | linux | yes |
 | Link proof (smoke) + pure-CPU targets | windows | yes |
 | lavapipe (mesa-dist-win) Vulkan sweep | windows | no — advisory |
 

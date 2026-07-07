@@ -4,7 +4,7 @@
 **Public module:** `gpu`  
 **Primary backend:** Vulkan 1.3  
 **Language target:** C3 0.8.0  
-**Required backend bindings:** `vk.c3l`, `vma.c3l`  
+**Required backend bindings:** `vk.c3l`, `vma.c3l`, `spvreflect.c3l`  
 **Windowed sample binding:** `sdl3.c3l` — vendored by the `gpu.c3l-samples` repository, not by this library  
 **Memory allocator:** Vulkan Memory Allocator through `vma.c3l`  
 **Document role:** master architecture and document map
@@ -24,6 +24,7 @@ The first backend is Vulkan. The Vulkan backend lives under `module gpu::vk` and
 ```text
 vk.c3l     -> Vulkan 1.3 C3 binding, imported as module vk
 vma.c3l    -> Vulkan Memory Allocator C3 binding, imported as module vma
+spvreflect.c3l -> SPIRV-Reflect binding, used by the backend for shader reflection
 sdl3.c3l   -> SDL3 binding, vendored by the gpu.c3l-samples repo (samples only)
 ```
 
@@ -93,8 +94,10 @@ TextureHandle
 TextureIndex
 SamplerIndex
 PipelineHandle
+ShaderHandle
 SemaphoreHandle
 SwapchainHandle
+RecordingContextHandle
 ```
 
 It should not expose backend implementation types:
@@ -209,9 +212,9 @@ gpu.c3l/
 ├── pipeline.c3
 ├── command.c3
 ├── sync.c3
-├── render_pass.c3
 ├── swapchain.c3
 ├── vk/
+│   ├── backend.c3
 │   ├── instance.c3
 │   ├── device.c3
 │   ├── queue.c3
@@ -223,10 +226,12 @@ gpu.c3l/
 │   ├── shader.c3
 │   ├── pipeline_compute.c3
 │   ├── pipeline_graphics.c3
+│   ├── pipeline_cache.c3
 │   ├── command.c3
 │   ├── sync.c3
 │   ├── render_pass.c3
 │   ├── swapchain.c3
+│   ├── transfer.c3
 │   ├── debug.c3
 │   └── helpers.c3
 ├── include/
@@ -234,8 +239,7 @@ gpu.c3l/
 │       ├── descriptor_heap.glsl
 │       └── generated/        generated ABI structs/offsets
 ├── tools/
-│   ├── gen_shader_abi/
-│   └── shader_build/
+│   └── gen_shader_abi/
 ├── test/
 │   ├── project.json
 │   ├── README.md
@@ -262,12 +266,20 @@ The shipped library manifest should provide `gpu` and depend on backend bindings
 ```json
 {
   "provides": "gpu",
-  "dependency-search-paths": [ "lib" ],
-  "dependencies": [ "vk", "vma" ]
+  "linklib-dir": "linked-libs",
+  "sources": [ "gpu.c3", "types.c3", "...", "vk/**" ],
+  "targets": {
+    "linux-x64": { "dependencies": [ "vk", "vma", "spvreflect" ] }
+  }
 }
 ```
 
-If C3 manifest behavior requires target-specific dependency sections, keep the same rule: the library depends on `vk` and `vma`; SDL3 is not a library dependency unless a public API begins exposing SDL types, which should be avoided.
+(Shipped shape: dependencies are declared per target, there is no top-level
+`dependency-search-paths` — consumers resolve the vendored bindings via their
+own search paths — and the manifest carries the full source list.) The
+library depends on `vk`, `vma`, and `spvreflect`; SDL3 is not a library
+dependency unless a public API begins exposing SDL types, which should be
+avoided.
 
 ### 4.2 Developer project files
 
@@ -297,8 +309,8 @@ gpu.c3i                  public declarations and imports expected by consumers
 gpu.c3                   root module façade and convenience wrappers
 types.c3                 handles, aliases, common structs
 faults.c3                public fault definitions
-caps.c3                  device capability structs
-device.c3                DeviceDesc, Device, create/destroy
+caps.c3                  DeviceDesc, DeviceCaps, backend/queue enums
+device.c3                Device, backend vtable, create/destroy
 queue.c3                 queues and submit descriptors
 memory.c3                GpuAddress, GpuSpan, arenas, memory kinds
 buffer.c3                BufferDesc and buffer API
@@ -306,7 +318,7 @@ texture.c3               TextureDesc, views, texture descriptors
 pipeline.c3              shader and pipeline descriptors
 command.c3               command list functions
 sync.c3                  stages, hazards, barriers, semaphores
-render_pass.c3           render target and render pass descriptors
+command.c3 (render)      render target and render pass descriptors live here
 swapchain.c3             optional WSI abstraction
 ```
 
@@ -358,6 +370,7 @@ Public fields should be minimal. Prefer opaque storage or a pointer to backend s
 Device
     BackendKind backend
     DeviceCaps caps
+    BackendVTable* vtable
     void* backend_state
 ```
 
@@ -368,9 +381,15 @@ DeviceDesc
     BackendKind backend
     bool enable_validation
     bool enable_debug_names
-    bool require_descriptor_buffer
-    bool allow_descriptor_indexing_fallback
+    bool enable_presentation
+    DescriptorHeapMode descriptor_heap_mode   (AUTO / DESCRIPTOR_BUFFER / DESCRIPTOR_INDEXING)
+    uint texture_descriptor_capacity
+    uint sampler_descriptor_capacity
+    uint texture_capacity
+    usz staging_arena_size
+    usz readback_arena_size
     uint frames_in_flight
+    char[] pipeline_cache_data                (warm-start blob; see pipeline cache)
     ZString application_name
 ```
 
@@ -384,50 +403,58 @@ QueueKind.COMPUTE
 QueueKind.TRANSFER
 ```
 
-A queue owns or references:
-
-```text
-vk::Queue backend handle
-family index
-queue index
-current timeline value
-submit statistics
-```
+There is no public queue object — `QueueKind` selects among backend-owned
+queues (today all three map to the graphics queue; async compute is
+gpu.c3l#23). The backend internally tracks the vk::Queue handles, family
+indices, and the frame timeline.
 
 ### 6.3 Command lists
 
 Command lists are explicitly begun, recorded, ended, and submitted.
 
 ```text
-begin_commands(device, QueueKind) -> CommandList?
+begin_commands(device, QueueKind, RecordingContextHandle ctx = {}) -> CommandList?
 end_commands(device, CommandList) -> void?
 submit(device, SubmitDesc) -> void?
 ```
 
+The optional recording context enables concurrent recording from worker
+threads (one context per thread; see docs/threading.md).
+
 Command list states:
 
 ```text
-EMPTY
 RECORDING
-CLOSED
+RECORDING_RENDER_PASS
+EXECUTABLE
 SUBMITTED
-RETIRED
 ```
 
 Invalid state transitions return faults.
 
+Adjacent shipped surface not detailed here: pipeline-cache serialization
+(`get_pipeline_cache_size`/`get_pipeline_cache_data` +
+`DeviceDesc.pipeline_cache_data`) and the swapchain present-mode query
+(`get_present_mode_support` → `PresentModeSupport`) — both documented in
+docs/api.md.
+
 ### 6.4 Handles
 
-Use typed handles backed by `ulong`.
+Typed handles are `bitstruct : ulong` — index (0..31), generation (32..55),
+reserved (56..63); a live handle has generation >= 1 so raw zero is invalid.
 
 ```text
 BufferHandle
 TextureHandle
 PipelineHandle
-SamplerHandle
+ShaderHandle
 SemaphoreHandle
 SwapchainHandle
+RecordingContextHandle
 ```
+
+(Samplers are not handles — they are `SamplerIndex` heap indices, like
+`TextureIndex`.)
 
 Handles pack:
 
@@ -608,7 +635,7 @@ Root pointers are passed through push constants as `uint64` values.
 
 ### 8.2 Root struct
 
-Root structs are `std430`-compatible and should be generated once the ABI generator exists.
+Root structs are `std430`-compatible and generated by `tools/gen_shader_abi` (see docs/shader_abi.md §12).
 
 Manual ABI structs must obey:
 

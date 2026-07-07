@@ -31,9 +31,10 @@ backend dispatch layer
         v
 gpu::vk Vulkan backend
         |
-        +--> vk.c3l    -> Vulkan API calls
-        +--> vma.c3l   -> Vulkan memory allocation
-        +--> sdl3.c3l  -> gpu.c3l-samples repository only, not backend public API
+        +--> vk.c3l         -> Vulkan API calls
+        +--> vma.c3l        -> Vulkan memory allocation
+        +--> spvreflect.c3l -> SPIR-V shader reflection
+        +--> sdl3.c3l       -> gpu.c3l-samples repository only, not backend public API
 ```
 
 The public API does not expose backend handles. A Vulkan backend can be replaced or supplemented later without changing shader data structures or most user code.
@@ -60,7 +61,6 @@ gpu.c3l/
 ├── pipeline.c3
 ├── command.c3
 ├── sync.c3
-├── render_pass.c3
 ├── swapchain.c3
 ├── vk/
 │   └── *.c3
@@ -118,6 +118,7 @@ Public shape:
 Device
     BackendKind backend
     DeviceCaps caps
+    BackendVTable* vtable
     void* backend_state
 ```
 
@@ -142,10 +143,10 @@ A command list is a transient recorder.
 State transitions:
 
 ```text
-EMPTY -> RECORDING -> CLOSED -> SUBMITTED -> RETIRED
+RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTED
 ```
 
-Invalid transitions return faults. Commands that require a render pass must fault if recorded outside one. Commands that cannot be recorded inside a render pass must fault if a render pass is active.
+`begin_commands` returns a list in `RECORDING`. Render passes nest into `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes the list to `EXECUTABLE`; submission moves it to `SUBMITTED`. Invalid transitions return faults. Commands that require a render pass must fault if recorded outside one. Commands that cannot be recorded inside a render pass must fault if a render pass is active.
 
 ### Buffers
 
@@ -225,16 +226,14 @@ Destroying a texture must invalidate or reject descriptors pointing at it accord
 
 ### Pipelines
 
-Pipelines are immutable shader execution objects.
-
-Kinds:
+Pipelines are immutable shader execution objects. Creation is split by kind:
 
 ```text
-PipelineKind.COMPUTE
-PipelineKind.GRAPHICS
+create_compute_pipeline(device, ComputePipelineDesc)   -> PipelineHandle?
+create_graphics_pipeline(device, GraphicsPipelineDesc) -> PipelineHandle?
 ```
 
-Graphics pipelines include the minimum Vulkan-required immutable state. Dynamic viewport/scissor should be used. Blend/depth/raster state should be deduplicated through the pipeline cache.
+Graphics pipelines include the minimum Vulkan-required immutable state. Dynamic viewport/scissor should be used. Blend/depth/raster state should be deduplicated through the pipeline cache. The cache also fronts a serializable driver cache: `get_pipeline_cache_size` / `get_pipeline_cache_data` export the driver blob, and `DeviceDesc.pipeline_cache_data` warm-starts it at device creation.
 
 ### Semaphores
 
@@ -273,9 +272,12 @@ create/destroy buffer
 create/destroy texture
 create/destroy descriptors
 create/destroy pipeline
+create/destroy recording contexts
 begin/end/submit commands
 record commands
+upload/readback helpers
 create/destroy swapchain
+query present-mode support
 query stats
 ```
 
@@ -351,6 +353,8 @@ Headless tests may skip swapchain-specific acquire/present steps.
 
 ## 8. Command model
 
+`begin_commands` takes an optional `RecordingContextHandle`. One context per worker thread (`create_recording_context` / `destroy_recording_context`) enables concurrent recording; see `docs/threading.md`.
+
 ### Compute
 
 ```text
@@ -364,7 +368,7 @@ The command binds the compute pipeline, pushes the root pointer, and dispatches.
 ```text
 cmd_begin_render_pass(command_list, render_pass_desc)
 cmd_draw(command_list, pipeline, vertex_root, fragment_root, vertex_count, instance_count)
-cmd_draw_indexed(command_list, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count)
+cmd_draw_indexed(command_list, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count, index_type = IndexType.U32)
 cmd_end_render_pass(command_list)
 ```
 
@@ -407,11 +411,11 @@ destroy_sampler(device, index) -> void?
 Backend implementations:
 
 ```text
-preferred: VK_EXT_descriptor_buffer
-fallback: descriptor indexing + large descriptor arrays
+default (AUTO): descriptor indexing + large descriptor arrays
+opt-in: VK_EXT_descriptor_buffer (DescriptorHeapMode.DESCRIPTOR_BUFFER)
 ```
 
-The fallback does not change shader material records.
+Neither path changes shader material records.
 
 ## 10. Swapchain model
 
@@ -421,8 +425,11 @@ Swapchain operations:
 create_swapchain(device, SurfaceDesc, SwapchainDesc) -> SwapchainHandle?
 acquire_next_image(device, swapchain) -> AcquiredImage?
 present(device, PresentDesc) -> void?
+get_present_mode_support(device, swapchain) -> PresentModeSupport?
 resize/recreate on SWAPCHAIN_OUT_OF_DATE
 ```
+
+`PresentModeSupport` is a bitstruct reporting fifo/immediate/mailbox availability for the swapchain's surface.
 
 Surface creation is platform-specific. The sample harness may provide helper functions that take `sdl::Window*`, but those helpers should live outside the core public API.
 

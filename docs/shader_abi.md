@@ -84,8 +84,8 @@ record = Table(root.table_gpu).items[gl_DrawID]
 Argument structs are part of the ABI and match Vulkan byte-for-byte —
 `DrawIndirectCommand` (16 B), `DrawIndexedIndirectCommand` (20 B),
 `DispatchIndirectCommand` (12 B) — declared on the C3 side in `command.c3`
-(size-asserted) and on the GLSL side in
-`include/shaders/indirect_commands.glsl` with identical field names. Compute
+(size-asserted) and on the GLSL side as `extern struct` twins emitted into
+`include/shaders/generated/shader_abi.glsl` with identical field names. Compute
 shaders write them std430-tight; no padding exists in any of the three.
 
 ## 5. Buffer layout
@@ -105,7 +105,9 @@ C3 side must assert sizeof and important offsets
 ```
 
 `Vec2f`, `Vec4f`, and `Vec4u` are public aliases of the C3 SIMD vectors
-(`float[<2>]`, `float[<4>]`, `uint[<4>]`). C3 packs vector struct members
+(`float[<2>]`, `float[<4>]`, `uint[<4>]`); the schema DSL itself only
+expresses the float vectors (`vec2`/`vec4`) — `Vec4u` exists for
+hand-written structs outside the generator. C3 packs vector struct members
 element-aligned, not vector-aligned, so std430's vec2/vec4 alignment is met
 through explicit `_padN` fields — the ABI generator (§12) computes std430
 layout and rejects any struct whose packed C3 layout would diverge from it.
@@ -272,8 +274,6 @@ Changing push constant layout requires updating:
 
 ```text
 docs/shader_abi.md
-C3 push constant structs
-GLSL push constant declarations
 SPIR-V reflection validation
 pipeline layout creation
 ```
@@ -443,7 +443,7 @@ Material
     TextureIndex albedo_texture
     TextureIndex normal_texture
     TextureIndex roughness_texture
-    SamplerIndex sampler
+    SamplerIndex heap_sampler
     uint flags
     uint _pad0
     uint _pad1
@@ -454,8 +454,13 @@ Shader usage:
 
 ```text
 material = material_table[material_index]
-base_color = sample_texture_2d(material.albedo_texture, material.sampler, uv)
+base_color = sample_texture_2d(material.albedo_texture, material.heap_sampler, uv)
 ```
+
+Field names are emitted into GLSL verbatim, so they must not collide with
+GLSL reserved words — a field named `sampler` breaks every consumer shader
+(gpu.c3l#26 tracks generator-side diagnosis; until then, rename, e.g.
+`heap_sampler`).
 
 ## 17. ABI acceptance criteria
 

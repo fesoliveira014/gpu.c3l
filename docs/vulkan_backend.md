@@ -14,13 +14,17 @@ It imports:
 import gpu;
 import vk;
 import vma;
+import spvreflect;
 ```
+
+`spvreflect` is used by `vk/shader.c3` for SPIR-V reflection.
 
 No `vk::` or `vma::` type should appear in public `gpu` API signatures.
 
 ## 2. Backend files
 
 ```text
+vk/backend.c3              loader/VMA link probes, backend availability
 vk/instance.c3             instance creation, validation layers, debug messenger
 vk/device.c3               physical device selection, logical device, feature chain
 vk/queue.c3                queue family selection, queue handles, submit
@@ -30,9 +34,11 @@ vk/buffer.c3               VkBuffer + VMA allocation path
 vk/texture.c3              VkImage + VMA allocation, views, layout tracking
 vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
 vk/shader.c3               SPIR-V modules and reflection validation
+vk/pipeline_cache.c3       pipeline dedup cache and driver cache
 vk/pipeline_compute.c3     compute pipeline creation
 vk/pipeline_graphics.c3    graphics pipeline creation
 vk/command.c3              command buffers and command recording
+vk/transfer.c3             upload/readback helpers and staging arenas
 vk/sync.c3                 barriers, timeline semaphores
 vk/render_pass.c3          dynamic rendering
 vk/swapchain.c3            WSI and swapchain
@@ -50,14 +56,19 @@ buffer device address
 synchronization2
 dynamic rendering
 timeline semaphores
+shaderInt64
+multiDrawIndirect
+shaderDrawParameters
 ```
 
 Descriptor path:
 
 ```text
-preferred: descriptor buffer
-fallback: descriptor indexing
+default (AUTO): descriptor indexing
+opt-in: descriptor buffer (DescriptorHeapMode.DESCRIPTOR_BUFFER)
 ```
+
+`AUTO` prefers indexing: lavapipe (Mesa 25.0.7) miscompiles descriptor-buffer image access, so descriptor buffer is never auto-selected (`resolve_heap_mode` in `vk/device.c3`).
 
 Device creation should fail with `UNSUPPORTED_FEATURE` if required features are missing.
 
@@ -86,52 +97,56 @@ must support buffer device address
 must support synchronization2
 must support dynamic rendering
 must support timeline semaphores
-must support at least one graphics or compute queue according to requested use
-must support descriptor buffer or descriptor indexing fallback
+must support shaderInt64
+must support multiDrawIndirect
+must support shaderDrawParameters
+must support the heap non-uniform-indexing features
+must resolve a heap mode from the requested DescriptorHeapMode
 ```
 
-Scoring criteria:
+Scoring is by device type only (`score_device`):
 
 ```text
-discrete GPU preferred
-larger device-local memory preferred
-descriptor buffer support preferred
-separate transfer queue optional bonus
+discrete > integrated > virtual > cpu > other
 ```
 
 Device selection result:
 
 ```text
-PhysicalDeviceChoice
-    vk::PhysicalDevice physical_device
-    uint graphics_family
-    uint compute_family
-    uint transfer_family
-    DeviceCaps caps
+pick_physical_device(instance, desc) -> vk::PhysicalDevice?
 ```
+
+Queue families are resolved separately after selection (`vk/queue.c3`).
 
 ## 6. Logical device creation
 
 Logical device creation builds a Vulkan feature chain.
 
-Required features:
+Required features (device rejected without them, always enabled):
 
 ```text
 bufferDeviceAddress
 synchronization2
 dynamicRendering
 timelineSemaphore
+shaderInt64
+multiDrawIndirect
+shaderDrawParameters
+runtimeDescriptorArray
+shaderSampledImageArrayNonUniformIndexing
+shaderStorageImageArrayNonUniformIndexing
+shaderStorageImageReadWithoutFormat
+shaderStorageImageWriteWithoutFormat
 ```
 
-Optional features:
+`maintenance4` is always enabled.
+
+Heap-path-dependent features:
 
 ```text
 descriptorBuffer
-runtimeDescriptorArray
 descriptorBindingPartiallyBound
 descriptorBindingUpdateAfterBind
-shaderSampledImageArrayNonUniformIndexing
-shaderStorageImageArrayNonUniformIndexing
 ```
 
 The exact feature structs depend on the Vulkan headers exposed by `vk.c3l`.
@@ -214,9 +229,22 @@ The backend tracks image layout per texture. For complex subresource layout trac
 
 ## 10. Descriptor heap implementation
 
+### Descriptor indexing path
+
+Default under `DescriptorHeapMode.AUTO`.
+
+Uses:
+
+```text
+large descriptor arrays
+runtime descriptor array support
+partially bound descriptors
+update-after-bind where needed
+```
+
 ### Descriptor buffer path
 
-Preferred when supported.
+Opt-in via `DescriptorHeapMode.DESCRIPTOR_BUFFER`. `AUTO` never selects it: lavapipe (Mesa 25.0.7) miscompiles descriptor-buffer image access.
 
 Backend owns descriptor buffers for:
 
@@ -226,20 +254,7 @@ storage images
 samplers
 ```
 
-Public indices map to descriptor entries.
-
-### Descriptor indexing fallback
-
-Fallback uses:
-
-```text
-large descriptor arrays
-runtime descriptor array support
-partially bound descriptors
-update-after-bind where needed
-```
-
-Public API and shader material records remain unchanged.
+Public indices map to descriptor entries. Neither path changes the public API or shader material records.
 
 ### Descriptor slot policy
 
@@ -303,6 +318,10 @@ viewport/scissor dynamic state
 pipeline cache lookup
 vk::Pipeline
 ```
+
+### Pipeline cache
+
+Two layers. A descriptor-keyed dedup cache (`PipelineKey` over the immutable pipeline state; entries refcounted so identical descriptors alias one `vk::Pipeline`) sits in front of a driver `vk::PipelineCache`. The driver cache is created with `DeviceDesc.pipeline_cache_data` as initial data and exported via `get_pipeline_cache_size` / `get_pipeline_cache_data`.
 
 ## 12. Command buffers
 
@@ -413,8 +432,11 @@ Swapchain operations:
 create
 acquire
 present
+query present-mode support
 recreate on out-of-date/suboptimal
 ```
+
+`vk_get_present_mode_support` queries the retained `vk::SurfaceKHR` for fifo/immediate/mailbox availability. At creation, `select_present_mode` falls back to FIFO silently when the requested mode is unavailable.
 
 ## 17. Debug implementation
 

@@ -18,7 +18,7 @@ This document lists the project documentation set, the intended reading order, a
 8. `docs/style.md` — coding conventions.
 9. `docs/milestones.md` — implementation plan.
 10. `docs/platforms_and_dependencies.md` — dependency and platform setup.
-11. `docs/samples.md` — sample and windowed test plan.
+11. `docs/samples.md` — pointer to the samples repository and its catalog.
 
 ## Document responsibilities
 
