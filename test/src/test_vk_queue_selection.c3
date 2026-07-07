@@ -8,13 +8,13 @@ import vk;
 // lavapipe integration: alias tier, caps flag, cross-queue timeline chain,
 // and the shared_queues no-op on a single-family device.
 
-fn vk::QueueFamilyProperties family(uint flags, uint count) {
-    return { .queue_flags = (vk::QueueFlags)flags, .queue_count = count };
-}
-
 const uint QF_G = (uint)vk::QueueFlagBits.GRAPHICS_BIT;
 const uint QF_C = (uint)vk::QueueFlagBits.COMPUTE_BIT;
 const uint QF_T = (uint)vk::QueueFlagBits.TRANSFER_BIT;
+
+fn vk::QueueFamilyProperties family(uint flags, uint count) {
+    return { .queue_flags = (vk::QueueFlags)flags, .queue_count = count };
+}
 
 fn void nvidia_like_uses_second_main_queue() @test {
     vk::QueueFamilyProperties[3] table = {
@@ -120,4 +120,17 @@ fn void shared_queues_noop_on_single_family() @test {
     };
     gpu::TextureHandle tex = gpu::create_texture(&device, &tex_desc)!!;
     gpu::destroy_texture(&device, tex)!!;
+}
+
+fn void shared_queues_alone_is_invalid() @test {
+    gpu::Device device = make_queue_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::BufferDesc buf_desc = {
+        .size        = 64,
+        .usage       = { .shared_queues },
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+    };
+    fault f = @catch(gpu::create_buffer(&device, &buf_desc));
+    assert(f == gpu::INVALID_ARGUMENT, "usage with no Vulkan bits faults INVALID_ARGUMENT");
 }

@@ -63,6 +63,14 @@ struct VkDeviceState {
     bool                       frame_active;
 }
 
+struct CapsInputs {
+    bool indexing_supported;
+    bool buffer_supported;
+    bool async_compute;
+    uint texture_capacity;
+    uint sampler_capacity;
+}
+
 <* Frame-boundary quiescence accounting, active only under validation. *>
 fn void enter_tracked(VkDeviceState* state) {
     if (state.validation) state.inflight_calls.add(1, AtomicOrdering.RELAXED);
@@ -337,7 +345,7 @@ fn void destroy_state(VkDeviceState* state) @private {
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
     if (state.transfer_mutex.is_initialized())       (void)state.transfer_mutex.destroy();
     if (state.graphics_queue_mutex.is_initialized()) (void)state.graphics_queue_mutex.destroy();
-    if (state.compute_queue_mutex.is_initialized()) (void)state.compute_queue_mutex.destroy();
+    if (state.compute_queue_mutex.is_initialized())  (void)state.compute_queue_mutex.destroy();
     if (state.transfer_queue_mutex.is_initialized()) (void)state.transfer_queue_mutex.destroy();
     mem::free(state);
 }
@@ -466,10 +474,10 @@ fn int score_device(int device_type) @private {
 
 <* Create the logical device with one graphics+compute queue and the required
    feature chain enabled. maintenance4 is enabled for SPIR-V 1.6 compute later;
-   heap-path features follow state.heap_mode. *>
+   heap-path features follow state.heap_mode. Emits one queue create info per
+   distinct family in use; the main family asks for a second queue when the
+   compute tier lives there. *>
 fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @private {
-    // One create info per distinct family in use; the main family asks for a
-    // second queue when the compute tier lives there.
     float[2] priorities = { 1.0, 1.0 };
     uint main_queue_count = families.async_compute && families.compute == families.graphics ? 2 : 1;
     vk::DeviceQueueCreateInfo[MAX_QUEUE_FAMILIES] queue_infos;
@@ -564,14 +572,6 @@ fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString na
 
 <* Descriptor flags report adapter support per heap path; max counts report
    the configured capacities. *>
-struct CapsInputs {
-    bool indexing_supported;
-    bool buffer_supported;
-    bool async_compute;
-    uint texture_capacity;
-    uint sampler_capacity;
-}
-
 fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13, vk::PhysicalDevice physical_device, CapsInputs* inputs) @private {
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(physical_device, &props);

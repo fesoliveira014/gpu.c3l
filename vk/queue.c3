@@ -5,6 +5,9 @@ import vk;
 import std::thread;
 import std::core::mem;
 
+// Graphics, compute, transfer — the most distinct families a device uses.
+const uint MAX_QUEUE_FAMILIES = 3;
+
 struct QueueFamilies {
     uint graphics;
     uint compute;
@@ -60,16 +63,13 @@ fn QueueFamilies? select_queue_families(vk::PhysicalDevice physical_device) {
     };
 }
 
-// Graphics, compute, transfer — the most distinct families a device uses.
-const uint MAX_QUEUE_FAMILIES = 3;
-
 <* Distinct queue families in use, for CONCURRENT-shared resources. *>
-fn uint used_queue_families(VkDeviceState* state, uint* out) {
+fn uint used_queue_families(VkDeviceState* state, uint[] out_families) {
     uint count = 0;
-    out[count++] = state.graphics_family;
-    if (state.compute_family != state.graphics_family) out[count++] = state.compute_family;
+    out_families[count++] = state.graphics_family;
+    if (state.compute_family != state.graphics_family) out_families[count++] = state.compute_family;
     if (state.transfer_family != state.graphics_family && state.transfer_family != state.compute_family) {
-        out[count++] = state.transfer_family;
+        out_families[count++] = state.transfer_family;
     }
     return count;
 }
@@ -82,18 +82,23 @@ fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
     }
 }
 
+<* One mutex per distinct VkQueue: an aliased queue must share the graphics
+   mutex or two locks would guard one queue. *>
+fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
+    switch (kind) {
+        case gpu::QueueKind.TRANSFER:
+            return state.transfer_queue == state.graphics_queue ? &state.graphics_queue_mutex : &state.transfer_queue_mutex;
+        case gpu::QueueKind.COMPUTE:
+            return state.compute_queue_distinct ? &state.compute_queue_mutex : &state.graphics_queue_mutex;
+        default:
+            return &state.graphics_queue_mutex;
+    }
+}
+
 <* Submit command lists to their queue via vkQueueSubmit2, waiting on and
    signaling the requested timeline values at their stages. Empty wait/signal/
    command arrays are left unset so the slice setters are never handed a
    zero-length slice. *>
-fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
-    switch (kind) {
-        case gpu::QueueKind.TRANSFER: return &state.transfer_queue_mutex;
-        case gpu::QueueKind.COMPUTE:  return state.compute_queue_distinct ? &state.compute_queue_mutex : &state.graphics_queue_mutex;
-        default:                      return &state.graphics_queue_mutex;
-    }
-}
-
 fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;

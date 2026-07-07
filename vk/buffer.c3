@@ -106,11 +106,14 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
 
+    // shared_queues maps to no Vulkan usage bit; a desc carrying only it
+    // would emit usage == 0, which Vulkan forbids.
+    if ((uint)buffer_usage_to_vk(desc.usage) == 0) return gpu::INVALID_ARGUMENT~;
     vk::BufferCreateInfo buffer_info = vk::buffer_create_info()
         .set_size((vk::DeviceSize)desc.size)
         .set_usage(buffer_usage_to_vk(desc.usage));
     uint[MAX_QUEUE_FAMILIES] share_families;
-    uint share_count = used_queue_families(state, &share_families[0]);
+    uint share_count = used_queue_families(state, share_families[..]);
     if (desc.usage.shared_queues && share_count >= 2) {
         buffer_info = buffer_info
             .set_sharing_mode(vk::SharingMode.CONCURRENT)
