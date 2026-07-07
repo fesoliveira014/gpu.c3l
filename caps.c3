@@ -44,6 +44,7 @@ struct DeviceCaps {
     bool draw_indirect_count;
     bool descriptor_buffer;
     bool descriptor_indexing;
+    bool async_compute;
     uint max_texture_descriptors;
     uint max_sampler_descriptors;
     usz  min_uniform_alignment;

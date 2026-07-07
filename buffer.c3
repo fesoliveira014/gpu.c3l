@@ -13,6 +13,9 @@ bitstruct BufferUsage : uint {
     bool indirect     : 5;
     bool index        : 6;
     bool vertex       : 7;
+    // Concurrent sharing across the device's queue families; required for
+    // resources touched by both GRAPHICS and COMPUTE when caps.async_compute.
+    bool shared_queues : 8;
 }
 
 struct BufferDesc {

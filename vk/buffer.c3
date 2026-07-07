@@ -109,6 +109,13 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
     vk::BufferCreateInfo buffer_info = vk::buffer_create_info()
         .set_size((vk::DeviceSize)desc.size)
         .set_usage(buffer_usage_to_vk(desc.usage));
+    uint[3] share_families;
+    uint share_count = used_queue_families(state, &share_families[0]);
+    if (desc.usage.shared_queues && share_count >= 2) {
+        buffer_info = buffer_info
+            .set_sharing_mode(vk::SharingMode.CONCURRENT)
+            .set_queue_family_indices(share_families[:share_count]);
+    }
     vma::AllocationCreateInfo alloc_info = memory_kind_to_vma(desc.memory_kind);
 
     BufferSlot slot = {

@@ -8,11 +8,46 @@ import std::core::mem;
 struct QueueFamilies {
     uint graphics;
     uint compute;
+    uint compute_index;
     uint transfer;
+    bool async_compute;
 }
 
-<* A graphics+compute family backs both; a transfer-only family is used for
-   transfer when present, else the main family is reused. *>
+<* Compute tiers: a second queue in the main family when it has one, else a
+   compute-capable non-graphics family, else the graphics queue itself. A
+   transfer-only family is used for transfer when present. *>
+fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
+    int main_family = -1;
+    int compute_only = -1;
+    int transfer_only = -1;
+    foreach (i, family : families) {
+        uint flags = (uint)family.queue_flags;
+        bool graphics = (flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0;
+        bool compute  = (flags & (uint)vk::QueueFlagBits.COMPUTE_BIT) != 0;
+        bool transfer = (flags & (uint)vk::QueueFlagBits.TRANSFER_BIT) != 0;
+        if (graphics && compute && main_family < 0) main_family = (int)i;
+        if (compute && !graphics && compute_only < 0) compute_only = (int)i;
+        if (transfer && !graphics && !compute && transfer_only < 0) transfer_only = (int)i;
+    }
+
+    if (main_family < 0) return gpu::UNSUPPORTED_FEATURE~;
+    uint main = (uint)main_family;
+    QueueFamilies picked = {
+        .graphics = main,
+        .compute = main,
+        .compute_index = 0,
+        .transfer = transfer_only < 0 ? main : (uint)transfer_only,
+    };
+    if (families[main].queue_count >= 2) {
+        picked.compute_index = 1;
+        picked.async_compute = true;
+    } else if (compute_only >= 0) {
+        picked.compute = (uint)compute_only;
+        picked.async_compute = true;
+    }
+    return picked;
+}
+
 fn QueueFamilies? select_queue_families(vk::PhysicalDevice physical_device) {
     uint count = 0;
     vk::get_physical_device_queue_family_properties(physical_device, &count, null);
@@ -21,28 +56,25 @@ fn QueueFamilies? select_queue_families(vk::PhysicalDevice physical_device) {
     @pool() {
         vk::QueueFamilyProperties[] families = mem::talloc_array(vk::QueueFamilyProperties, (sz)count);
         vk::get_physical_device_queue_family_properties(physical_device, &count, families.ptr);
-
-        int main_family = -1;
-        int transfer_only = -1;
-        foreach (i, family : families) {
-            uint flags = (uint)family.queue_flags;
-            bool graphics = (flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0;
-            bool compute  = (flags & (uint)vk::QueueFlagBits.COMPUTE_BIT) != 0;
-            bool transfer = (flags & (uint)vk::QueueFlagBits.TRANSFER_BIT) != 0;
-            if (graphics && compute && main_family < 0) main_family = (int)i;
-            if (transfer && !graphics && !compute && transfer_only < 0) transfer_only = (int)i;
-        }
-
-        if (main_family < 0) return gpu::UNSUPPORTED_FEATURE~;
-        uint main = (uint)main_family;
-        uint transfer = transfer_only < 0 ? main : (uint)transfer_only;
-        return (QueueFamilies){ .graphics = main, .compute = main, .transfer = transfer };
+        return pick_queue_families(families[:count]);
     };
+}
+
+<* Distinct queue families in use, for CONCURRENT-shared resources. *>
+fn uint used_queue_families(VkDeviceState* state, uint* out) {
+    uint count = 0;
+    out[count++] = state.graphics_family;
+    if (state.compute_family != state.graphics_family) out[count++] = state.compute_family;
+    if (state.transfer_family != state.graphics_family && state.transfer_family != state.compute_family) {
+        out[count++] = state.transfer_family;
+    }
+    return count;
 }
 
 fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
     switch (queue) {
         case gpu::QueueKind.TRANSFER: return state.transfer_queue;
+        case gpu::QueueKind.COMPUTE:  return state.compute_queue;
         default:                      return state.graphics_queue;
     }
 }
@@ -52,7 +84,11 @@ fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
    command arrays are left unset so the slice setters are never handed a
    zero-length slice. *>
 fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
-    return kind == gpu::QueueKind.TRANSFER ? &state.transfer_queue_mutex : &state.graphics_queue_mutex;
+    switch (kind) {
+        case gpu::QueueKind.TRANSFER: return &state.transfer_queue_mutex;
+        case gpu::QueueKind.COMPUTE:  return state.compute_queue_distinct ? &state.compute_queue_mutex : &state.graphics_queue_mutex;
+        default:                      return &state.graphics_queue_mutex;
+    }
 }
 
 fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {

@@ -60,7 +60,7 @@ jobs:
           FAIL=0
           for t in unit shader_abi vk_bootstrap vk_command vk_texture vk_descriptor_heap \
                    vk_root_pointer vk_texture_heap vk_shader_reflection vk_offscreen \
-                   vk_swapchain vk_pipeline_cache vk_indirect vk_depth vk_threading vk_debug; do
+                   vk_swapchain vk_pipeline_cache vk_indirect vk_depth vk_threading vk_queue vk_debug; do
             echo "::group::$t"
             if ! c3c test "$t" --path test; then
               echo "::error::target $t failed"
@@ -264,7 +264,7 @@ jobs:
           FAIL=0
           for t in vk_bootstrap vk_command vk_texture vk_descriptor_heap \
                    vk_root_pointer vk_texture_heap vk_shader_reflection vk_offscreen \
-                   vk_swapchain vk_pipeline_cache vk_indirect vk_depth vk_threading vk_debug; do
+                   vk_swapchain vk_pipeline_cache vk_indirect vk_depth vk_threading vk_queue vk_debug; do
             echo "::group::$t"
             if ! c3c test "$t" --path test; then
               echo "::warning::advisory target $t failed on windows lavapipe"

@@ -50,6 +50,9 @@ bitstruct TextureUsage : uint {
     bool depth_attach : 3;
     bool transfer_src : 4;
     bool transfer_dst : 5;
+    // Concurrent sharing across the device's queue families; required for
+    // resources touched by both GRAPHICS and COMPUTE when caps.async_compute.
+    bool shared_queues : 6;
 }
 
 struct TextureDesc {
