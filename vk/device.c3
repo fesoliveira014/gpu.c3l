@@ -226,16 +226,19 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
     create_pipeline_shared(state, desc.pipeline_cache_data)!;
+    CapsInputs caps_inputs = {
+        .indexing_supported = indexing_supported,
+        .buffer_supported   = buffer_supported,
+        .async_compute      = state.compute_queue_distinct,
+        .texture_capacity   = state.texture_descriptor_capacity,
+        .sampler_capacity   = state.sampler_descriptor_capacity,
+    };
     state.caps = build_caps(
-        base:               &features2.features,
-        v12:                &features12,
-        v13:                &features13,
-        physical_device:    state.physical_device,
-        indexing_supported: indexing_supported,
-        buffer_supported:   buffer_supported,
-        async_compute:      state.compute_queue_distinct,
-        texture_capacity:   state.texture_descriptor_capacity,
-        sampler_capacity:   state.sampler_descriptor_capacity,
+        base:            &features2.features,
+        v12:             &features12,
+        v13:             &features13,
+        physical_device: state.physical_device,
+        inputs:          &caps_inputs,
     );
 
     return (gpu::Device){
@@ -469,7 +472,7 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @p
     // second queue when the compute tier lives there.
     float[2] priorities = { 1.0, 1.0 };
     uint main_queue_count = families.async_compute && families.compute == families.graphics ? 2 : 1;
-    vk::DeviceQueueCreateInfo[3] queue_infos;
+    vk::DeviceQueueCreateInfo[MAX_QUEUE_FAMILIES] queue_infos;
     uint queue_info_count = 0;
     queue_infos[queue_info_count++] = vk::device_queue_create_info()
         .set_queue_family_index(families.graphics)
@@ -561,7 +564,15 @@ fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString na
 
 <* Descriptor flags report adapter support per heap path; max counts report
    the configured capacities. *>
-fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13, vk::PhysicalDevice physical_device, bool indexing_supported, bool buffer_supported, bool async_compute, uint texture_capacity, uint sampler_capacity) @private {
+struct CapsInputs {
+    bool indexing_supported;
+    bool buffer_supported;
+    bool async_compute;
+    uint texture_capacity;
+    uint sampler_capacity;
+}
+
+fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13, vk::PhysicalDevice physical_device, CapsInputs* inputs) @private {
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(physical_device, &props);
     return (gpu::DeviceCaps){
@@ -571,11 +582,11 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .timeline_semaphore         = v12.timeline_semaphore != 0,
         .shader_int64               = base.shader_int64 != 0,
         .draw_indirect_count        = v12.draw_indirect_count != 0,
-        .descriptor_buffer          = buffer_supported,
-        .descriptor_indexing        = indexing_supported,
-        .async_compute              = async_compute,
-        .max_texture_descriptors    = texture_capacity,
-        .max_sampler_descriptors    = sampler_capacity,
+        .descriptor_buffer          = inputs.buffer_supported,
+        .descriptor_indexing        = inputs.indexing_supported,
+        .async_compute              = inputs.async_compute,
+        .max_texture_descriptors    = inputs.texture_capacity,
+        .max_sampler_descriptors    = inputs.sampler_capacity,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,

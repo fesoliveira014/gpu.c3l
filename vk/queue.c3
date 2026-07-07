@@ -60,6 +60,9 @@ fn QueueFamilies? select_queue_families(vk::PhysicalDevice physical_device) {
     };
 }
 
+// Graphics, compute, transfer — the most distinct families a device uses.
+const uint MAX_QUEUE_FAMILIES = 3;
+
 <* Distinct queue families in use, for CONCURRENT-shared resources. *>
 fn uint used_queue_families(VkDeviceState* state, uint* out) {
     uint count = 0;

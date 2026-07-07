@@ -288,7 +288,7 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
         .set_initial_layout(vk::ImageLayout.UNDEFINED);
-    uint[3] share_families;
+    uint[MAX_QUEUE_FAMILIES] share_families;
     uint share_count = used_queue_families(state, &share_families[0]);
     if (desc.usage.shared_queues && share_count >= 2) {
         image_info = image_info
