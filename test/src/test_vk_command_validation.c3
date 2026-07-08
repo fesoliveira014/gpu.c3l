@@ -101,8 +101,7 @@ fn gpu::TextureHandle make_val_target(gpu::Device* device) {
     return gpu::create_texture(device, &desc)!!;
 }
 
-// Minimal compute pipeline for cmd_dispatch_indirect span-validation tests;
-// never actually dispatched, so root_pointer.comp.spv's ABI content is unused.
+// Never actually dispatched, so the shader's ABI content is unused.
 struct ValComputeCtx {
     gpu::ShaderHandle   shader;
     gpu::PipelineHandle pipeline;
@@ -475,12 +474,8 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     gpu::end_frame(&device)!!;
 }
 
-// Span backing-range validation (#82): resolve_span_slot's range_fits check
-// catches spans whose own [offset, offset + size) escapes their backing
-// buffer, even when the span-internal count*arg_size / index_count*index_size
-// check already passes. GpuSpan.subspan builds the escaping span without
-// faulting (it never faults, by design); the fault lands here, at the
-// command that consumes it.
+// Backing-range faults: subspan builds escaping spans without faulting;
+// the fault lands at the consuming command.
 
 fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
@@ -492,8 +487,6 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
-    // 12 bytes (DispatchIndirectCommand::size) fit the span itself, but
-    // offset 8 pushes [8, 20) past the 16-byte backing buffer.
     gpu::GpuSpan escaped = full_span.subspan(8, gpu::DispatchIndirectCommand::size);
 
     gpu::begin_frame(&device)!!;
@@ -520,7 +513,6 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
-    // offset 4 + 12 bytes lands exactly at the 16-byte buffer's end.
     gpu::GpuSpan boundary = full_span.subspan(4, gpu::DispatchIndirectCommand::size);
 
     gpu::begin_frame(&device)!!;
@@ -554,8 +546,6 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::BufferHandle count_buffer = gpu::create_buffer(&device, &count_desc)!!;
     defer gpu::destroy_buffer(&device, count_buffer)!!;
     gpu::GpuSpan full_count_span = gpu::get_buffer_span(&device, count_buffer)!!;
-    // The GPU-written uint fits the span (4 <= 4), but offset 8 pushes it
-    // past the 8-byte backing buffer.
     gpu::GpuSpan escaped_count = full_count_span.subspan(8, 4);
 
     gpu::begin_frame(&device)!!;
@@ -595,8 +585,6 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
     defer gpu::destroy_buffer(&device, index_buffer)!!;
     gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
-    // One U32 index (4 bytes) fits the span, but offset 16 sits exactly at
-    // the 16-byte buffer's end, leaving no room for it.
     gpu::GpuSpan escaped = full_index_span.subspan(16, 4);
 
     gpu::begin_frame(&device)!!;
@@ -634,7 +622,6 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
     defer gpu::destroy_buffer(&device, index_buffer)!!;
     gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
-    // offset 12 + 4 bytes lands exactly at the 16-byte buffer's end.
     gpu::GpuSpan boundary = full_index_span.subspan(12, 4);
 
     gpu::begin_frame(&device)!!;
@@ -677,8 +664,6 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
-    // The full 4x4 RGBA8 copy is 64 bytes, matching the span's size exactly,
-    // but offset 32 pushes it past the 64-byte backing buffer.
     gpu::GpuSpan escaped = full_span.subspan(32, 64);
 
     gpu::begin_frame(&device)!!;
@@ -743,7 +728,6 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
-    // offset 32 + 64 bytes lands exactly at the 96-byte buffer's end.
     gpu::GpuSpan boundary = full_span.subspan(32, 64);
 
     gpu::begin_frame(&device)!!;
@@ -810,7 +794,6 @@ fn void buffer_barrier_zero_size_whole_buffer_succeeds() @test {
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    // size 0 means whole buffer from offset onward (VK_WHOLE_SIZE).
     gpu::BufferBarrier barrier = {
         .buffer = buffer, .offset = 0, .size = 0,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,

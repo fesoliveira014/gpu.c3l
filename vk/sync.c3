@@ -64,8 +64,7 @@ fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* b
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* slot = state.buffers.get(barrier.buffer)!;
-    // size 0 is the whole-buffer convention (translated to WHOLE_SIZE below),
-    // mirroring flush/invalidate/fill.
+    // size 0 is the whole-buffer convention, matching flush/invalidate/fill.
     if (!gpu::range_fits(slot.size, barrier.offset, barrier.size)) return gpu::INVALID_ARGUMENT~;
     if (barrier.size == 0 && barrier.offset >= slot.size) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize barrier_size = barrier.size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)barrier.size;
