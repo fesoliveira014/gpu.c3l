@@ -182,9 +182,12 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
     vk::BufferCreateInfo buffer_info = vk::buffer_create_info()
         .set_size(layout_size)
         .set_usage((vk::BufferUsageFlags)usage);
+    // Descriptor bytes are written mapped (vkGetDescriptorEXT) with no
+    // flush hook — require coherent memory.
     vma::AllocationCreateInfo alloc_info = {
-        .usage = vma::MemoryUsage.AUTO_PREFER_HOST,
-        .flags = { .host_access_sequential_write, .mapped },
+        .usage          = vma::MemoryUsage.AUTO_PREFER_HOST,
+        .flags          = { .host_access_sequential_write, .mapped },
+        .required_flags = (vk::MemoryPropertyFlags)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT,
     };
     vma::AllocationInfo allocation_info;
     check(state.allocator.create_buffer(&buffer_info, &alloc_info, &heap.descriptor_buffer, &heap.descriptor_buffer_allocation, &allocation_info))!;

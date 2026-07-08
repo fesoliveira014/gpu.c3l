@@ -85,7 +85,13 @@ fn vk::BufferUsageFlags buffer_usage_to_vk(gpu::BufferUsage usage) @private {
 fn vma::AllocationCreateInfo memory_kind_to_vma(gpu::MemoryKind kind) @private {
     switch (kind) {
         case gpu::MemoryKind.FRAME_UPLOAD:
-            return { .usage = vma::MemoryUsage.AUTO_PREFER_HOST, .flags = { .host_access_sequential_write, .mapped } };
+            // Roots are written mapped with no flush hook — require coherent
+            // memory (a HOST_VISIBLE|HOST_COHERENT type is spec-guaranteed).
+            return {
+                .usage          = vma::MemoryUsage.AUTO_PREFER_HOST,
+                .flags          = { .host_access_sequential_write, .mapped },
+                .required_flags = (vk::MemoryPropertyFlags)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT,
+            };
         case gpu::MemoryKind.PERSISTENT_UPLOAD:
             return { .usage = vma::MemoryUsage.AUTO, .flags = { .host_access_sequential_write, .mapped } };
         case gpu::MemoryKind.DEVICE:

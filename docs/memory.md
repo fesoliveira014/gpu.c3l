@@ -408,6 +408,12 @@ FrameArenaState
     ulong frame_timeline_value
 ```
 
+Frame-upload memory is allocated host-coherent by requirement (a
+HOST_VISIBLE|HOST_COHERENT type is spec-guaranteed), so root writes need no
+flush; the same holds for the descriptor-buffer storage. STAGING, READBACK,
+and PERSISTENT_UPLOAD keep VMA's memory-type freedom and the explicit
+`flush_buffer`/`invalidate_buffer` contract.
+
 Allocation (lock-free — the cursor is an atomic bumped with a CAS loop, so
 worker threads allocate concurrently; see docs/threading.md):
 
