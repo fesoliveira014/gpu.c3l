@@ -21,10 +21,13 @@ enum Format : int {
     RG32_FLOAT,
     RGBA32_FLOAT,
     D32_FLOAT,
+    // Backend-unsupported: creation faults INVALID_ARGUMENT (no
+    // format-properties query exists yet to gate it per device).
     D24_UNORM_S8_UINT,
 }
 
-<* Texture dimensionality. *>
+<* Texture dimensionality. Only TEX_2D creates today; the others are
+   declared for API stability and fault INVALID_ARGUMENT at creation. *>
 enum TextureDimension : int {
     TEX_1D,
     TEX_2D,

@@ -27,6 +27,10 @@ page doesn't explain it, that's a bug in this page — file an issue.
   `docs/getting_started.md`.
 - **C3 0.8.0 pinned.** The language is pre-1.0 and syntax moves between
   releases; the pin is deliberate and bumped explicitly.
+- **2D textures only, and no D24S8.** `TEX_1D`/`TEX_3D`/`CUBE` and
+  `D24_UNORM_S8_UINT` are declared for API stability but fault
+  `INVALID_ARGUMENT` at creation — the backend implements 2D images and
+  gates D24S8 out statically until a format-properties query exists.
 - **Matrices are not a schema type.** The ABI DSL has no `mat4`; matrices
   travel as four `vec4` columns and are reassembled in the shader
   (`mat4(c0, c1, c2, c3)`). This keeps layout rules trivial (`docs/shader_abi.md`).

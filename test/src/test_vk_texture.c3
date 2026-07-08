@@ -268,3 +268,31 @@ fn void raised_texture_capacity_holds_more_than_default() @test {
     foreach (&h : handles) *h = gpu::create_texture(&device, &tex_desc)!!;
     foreach (h : handles) gpu::destroy_texture(&device, h)!!;
 }
+
+fn void unsupported_dimensions_and_formats_fault() @test {
+    gpu::Device device = make_texture_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDimension[3] dims = { gpu::TextureDimension.TEX_1D, gpu::TextureDimension.TEX_3D, gpu::TextureDimension.CUBE };
+    foreach (dim : dims) {
+        gpu::TextureDesc desc = {
+            .dimension = dim,
+            .width     = 4,
+            .height    = 4,
+            .format    = gpu::Format.RGBA8_UNORM,
+            .usage     = { .sampled },
+        };
+        fault f = @catch(gpu::create_texture(&device, &desc));
+        assert(f == gpu::INVALID_ARGUMENT, "unsupported dimension faults INVALID_ARGUMENT");
+    }
+
+    gpu::TextureDesc d24 = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.D24_UNORM_S8_UINT,
+        .usage     = { .depth_attach },
+    };
+    fault f = @catch(gpu::create_texture(&device, &d24));
+    assert(f == gpu::INVALID_ARGUMENT, "D24S8 faults INVALID_ARGUMENT");
+}

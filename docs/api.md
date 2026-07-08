@@ -299,7 +299,7 @@ R32_FLOAT
 RG32_FLOAT
 RGBA32_FLOAT
 D32_FLOAT
-D24_UNORM_S8_UINT
+D24_UNORM_S8_UINT   (backend-unsupported: creation faults INVALID_ARGUMENT)
 ```
 
 ### Texture descriptors
@@ -316,10 +316,10 @@ bitstruct TextureUsage : uint
     bool transfer_dst : 5
 
 TextureDimension
-    TEX_1D
+    TEX_1D   (backend-unsupported — faults at creation)
     TEX_2D
-    TEX_3D
-    CUBE
+    TEX_3D   (backend-unsupported — faults at creation)
+    CUBE     (backend-unsupported — faults at creation)
 
 TextureDesc
     TextureDimension dimension
