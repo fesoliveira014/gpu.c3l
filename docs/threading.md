@@ -101,8 +101,47 @@ they abort on first temp allocation.
 ## Frame retirement across queues
 
 `end_frame`'s fence is a chain of queue-ordered empty submits: distinct
-compute/transfer queues used during the frame signal auxiliary timeline
-values first, and the graphics-side signal waits on them before signaling
-the frame value. A host-side wait on the frame value therefore covers every
-queue's frame work — arenas, command pools, descriptor retires, and readback
-tickets stay safe under any queue topology.
+compute/transfer queues used since the last frame boundary — including any
+off-frame submissions made before this `begin_frame` — signal auxiliary
+timeline values first, and the graphics-side signal waits on them before
+signaling the frame value. A host-side wait on the frame value therefore
+covers every queue's work — arenas, command pools, descriptor retires, and
+readback tickets stay safe under any queue topology. `submit` sets these
+per-queue used flags unconditionally, not just while a frame is active, so
+an off-frame submission on a distinct compute or transfer queue is still
+waited by the next `end_frame`'s chain (off-frame graphics-queue submits
+need no flag: the chain's own final signal already runs on that queue, and
+Vulkan's per-queue submission order covers them for free). See "Off-frame
+submissions" below for the destruction-side half of this contract.
+
+## Helper timeline
+
+Blocking helpers (`upload_buffer_data`, `upload_texture_data`,
+`readback_buffer_data`, `readback_texture_data`) never touch `frame_timeline`
+or the frame counter. Each reserves a value on a separate `helper_timeline`
+under `transfer_mutex`, before its (single) transfer allocation, and tags
+that allocation's arena range or dedicated buffer with it. At completion
+(after the helper's own queue-idle wait) it signals `helper_timeline` to
+that value — turnstiled: it first waits for `helper_timeline` to reach
+`value - 1`, so concurrent helpers' completions land in strictly increasing
+order even when they finish out of reservation order, and one helper's
+completion can never retire another helper's or an unsubmitted list's
+resources. This turnstile wait carries no lock (it would deadlock a slower
+predecessor out of the very primitive it needs to reach its own signal — the
+wait-for-predecessor is itself the ordering guarantee) and is generous but
+finite; a helper that faults after reserving its value still signals it on
+every exit path, so one stuck helper costs its immediate successor one
+timeout rather than an unbounded stall. Frame-scoped paths
+(`cmd_upload_buffer`, `cmd_upload_texture`, `cmd_readback_buffer`,
+`cmd_readback_texture`) are unaffected: they still tag `frame_timeline` at
+`counter + 1`, retired only by `end_frame`. See docs/memory.md §13.1.
+
+## Off-frame submissions
+
+Tier E's `submit`/`present` may run outside a `begin_frame`/`end_frame`
+bracket — sanctioned for frame-loop-free apps and one-shot setup work.
+Resources a command list submitted off-frame refers to must not be freed
+while that work may still be in flight: destroying such a resource enqueues
+it in the deferred-release queue (docs/memory.md §17) rather than freeing it
+synchronously, and it stays queued until the next `end_frame`'s cross-queue
+chain covers it, or until device teardown if no further frame ever runs.

@@ -18,12 +18,28 @@ const uint THR_ITERS = 32;
 const uint THR_ELEMENTS = 64;
 const uint HAMMER_ITERS = 32;
 
+const uint HELPER_HAMMER_THREADS = 2;
+const uint HELPER_HAMMER_ITERS = 32;
+const usz HELPER_HAMMER_TINY_STAGING = 384;
+const usz HELPER_HAMMER_PAYLOAD = 128;
+
 fn gpu::Device make_thr_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
         .application_name  = "gpu_threading_test",
+    };
+    return gpu::create_device(&desc)!!;
+}
+
+fn gpu::Device make_thr_device_tiny_staging(usz staging_size) {
+    gpu::DeviceDesc desc = {
+        .backend            = gpu::BackendKind.VULKAN,
+        .enable_validation  = true,
+        .frames_in_flight   = 2,
+        .staging_arena_size = staging_size,
+        .application_name   = "gpu_threading_test",
     };
     return gpu::create_device(&desc)!!;
 }
@@ -446,6 +462,75 @@ fn void concurrent_upload_hammer() @test {
         foreach (b : readback) assert(b == (char)(i + 1), "the device survived and buffers stayed isolated");
         gpu::destroy_buffer(&device, buffers[i])!!;
     }
+}
+
+struct HelperHammerArgs {
+    gpu::Device*      device;
+    gpu::BufferHandle buffer;
+    uint              seed;
+    bool              mismatch;
+}
+
+fn int helper_hammer_worker(void* arg) {
+    HelperHammerArgs* args = (HelperHammerArgs*)arg;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+    char[HELPER_HAMMER_PAYLOAD] payload;
+    char[HELPER_HAMMER_PAYLOAD] readback;
+    for (uint iter = 0; iter < HELPER_HAMMER_ITERS; iter++) {
+        for (uint i = 0; i < HELPER_HAMMER_PAYLOAD; i++) {
+            payload[i] = (char)(args.seed * 37 + iter * 3 + i);
+        }
+        gpu::upload_buffer_data(
+            device:      args.device,
+            dst:         args.buffer,
+            offset:      0,
+            data:        payload[..],
+            next_stage:  gpu::Stage.TRANSFER,
+            next_hazard: gpu::Hazard.TRANSFER_READ,
+        )!!;
+        gpu::readback_buffer_data(
+            device:      args.device,
+            src:         args.buffer,
+            offset:      0,
+            out_data:    readback[..],
+            from_stage:  gpu::Stage.TRANSFER,
+            from_hazard: gpu::Hazard.TRANSFER_READ,
+        )!!;
+        for (uint i = 0; i < HELPER_HAMMER_PAYLOAD; i++) {
+            if (readback[i] != payload[i]) args.mismatch = true;
+        }
+    }
+    };
+    return 0;
+}
+
+<* Reuse-pressure coverage, not a guaranteed repro: per-thread varying
+   patterns surface staging aliasing as byte mismatches. Parameters stay
+   below the threshold of the separate shared-command-pool race (gpu.c3l#94)
+   — crank them back up when that is fixed. *>
+fn void two_helper_tiny_arena_hammer() @test {
+    gpu::Device device = make_thr_device_tiny_staging(HELPER_HAMMER_TINY_STAGING);
+    defer gpu::destroy_device(&device)!!;
+
+    HelperHammerArgs[HELPER_HAMMER_THREADS] args;
+    gpu::BufferHandle[HELPER_HAMMER_THREADS] buffers;
+    Thread[HELPER_HAMMER_THREADS] threads;
+    for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) {
+        gpu::BufferDesc desc = {
+            .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+        };
+        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+        args[i] = { .device = &device, .buffer = buffers[i], .seed = i + 1 };
+    }
+    for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) {
+        threads[i].create(&helper_hammer_worker, &args[i])!!;
+    }
+    foreach (&t : threads) t.join()!!;
+
+    foreach (&a : args) {
+        assert(!a.mismatch, "each helper's readback pattern matched its own upload despite tiny-arena reuse pressure");
+    }
+    for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) gpu::destroy_buffer(&device, buffers[i])!!;
 }
 
 struct BoundaryArgs {

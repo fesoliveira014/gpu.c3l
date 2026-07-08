@@ -510,6 +510,22 @@ Upload flow:
 6. Staging span is recycled after submit timeline retires.
 ```
 
+### 13.1 Which timeline retires a range
+
+Every staging range, dedicated staging buffer, and readback range carries a
+timeline tag decided at allocation time: `FRAME` (`frame_timeline`, tagged
+`counter + 1`) for in-frame command-list paths (`cmd_upload_buffer`,
+`cmd_upload_texture`), or `HELPER` (`helper_timeline`) for the blocking
+helpers (`upload_buffer_data`, `upload_texture_data`, `readback_buffer_data`,
+`readback_texture_data`). A blocking helper reserves its retire value once,
+under `transfer_mutex`, before its (single) allocation, and every range or
+dedicated buffer it tags carries that exact value — never the value another
+concurrent helper reserved, and never `frame_timeline`. Drains compare each
+entry against its own tagged timeline's current counter value, so one
+helper's completion can never retire another helper's or an unsubmitted
+list's ranges (gpu.c3l#80). See docs/threading.md §Helper timeline for the
+completion-side turnstile.
+
 ## 14. Flush and invalidate policy
 
 The backend should track whether memory is host-coherent.
@@ -586,6 +602,17 @@ arena:readback
 ## 17. Deferred destruction
 
 `destroy_buffer`/`destroy_texture`/`destroy_pipeline`/`destroy_shader`/`destroy_semaphore` free the public handle immediately but cannot free the backend VMA buffer/image, image view, `vk::Pipeline`, shader module, or semaphore right away — a frame already submitted may still reference it. The backend queues those objects (`vk/deferred.c3`) keyed by `retire_timeline_value` (memory.c3, the same "safe after" value the descriptor heap and transfer arenas use) and frees each once the frame timeline reaches it. The queue drains on every `begin_frame` (after its wait) and opportunistically on every enqueue; teardown drains everything unconditionally once the device is idle. Destroying a resource never faults on the frames-in-flight window alone — see `RESOURCE_IN_USE` in `faults.c3`. `destroy_texture` does fault `RESOURCE_IN_USE` when a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first. Retired-but-undrained descriptors (destroyed, no frame boundary since) do not block, and device teardown stays lenient — `report_descriptor_leaks` reports leftovers instead of faulting.
+
+`retire_timeline_value` also defers while off-frame work is pending: `submit`
+outside a frame bracket (threading.md Tier E, sanctioned for frame-loop-free
+apps) sets an off-frame-pending marker in addition to `begin_frame`/`end_frame`'s
+`frame_active` flag, so a destroy of a resource an off-frame submit
+referenced enqueues rather than freeing synchronously. `end_frame`'s
+cross-queue chain (§ frame retirement across queues, threading.md) waits
+every queue used since the last boundary — off-frame or in-frame — before
+clearing the marker; a frame-loop-free app that never calls `begin_frame`
+again holds its deferred entries until teardown, which is safe by
+construction (`deferred_drain_all` after `device_wait_idle`).
 
 ## 18. Defragmentation policy
 

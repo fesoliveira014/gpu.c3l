@@ -60,6 +60,57 @@ fn void buffer_upload_readback_round_trip() @test {
     }
 }
 
+<* An unrelated blocking helper's completion must never make an unsubmitted
+   ticket poll ready. *>
+fn void cmd_readback_ticket_not_ready_before_submit() @test {
+    gpu::Device device = make_transfer_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    // Settle the timeline to a known baseline.
+    gpu::begin_frame(&device)!!;
+    gpu::end_frame(&device)!!;
+
+    gpu::BufferDesc src_desc = {
+        .size        = 256,
+        .usage       = { .storage, .transfer_src, .transfer_dst },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .debug_name  = "ticket_src",
+    };
+    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
+    defer gpu::destroy_buffer(&device, src)!!;
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, src, 0, 256)!!;
+    gpu::end_commands(&device, &cmd)!!;
+    // Deliberately never gpu::submit(&device, ...): the ticket's copy never runs.
+
+    gpu::BufferDesc unrelated_desc = {
+        .size        = 64,
+        .usage       = { .transfer_src, .transfer_dst },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .debug_name  = "unrelated",
+    };
+    gpu::BufferHandle unrelated = gpu::create_buffer(&device, &unrelated_desc)!!;
+    defer gpu::destroy_buffer(&device, unrelated)!!;
+
+    char[64] payload;
+    foreach (&b : payload) *b = (char)0xAB;
+    gpu::upload_buffer_data(
+        device:      &device,
+        dst:         unrelated,
+        offset:      0,
+        data:        payload[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+    )!!;
+
+    assert(!gpu::poll_readback(&device, &ticket), "an unrelated blocking helper must not retire an unsubmitted ticket");
+
+    char[256] dest;
+    fault not_ready = @catch(gpu::resolve_readback(&device, &ticket, dest[..]));
+    assert(not_ready == gpu::READBACK_NOT_READY, "resolve on an unsubmitted ticket faults READBACK_NOT_READY");
+}
+
 fn void oversized_upload_uses_dedicated_staging() @test {
     // Tiny arena: every upload larger than 1 KiB falls back to a dedicated buffer.
     gpu::Device device = make_transfer_test_device(staging_size: 1024);

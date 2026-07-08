@@ -171,7 +171,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | submits, waits | driver reported device loss; unrecoverable |
-| `RESOURCE_IN_USE` | `destroy_texture` | a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first (gpu.c3l#81). Frames-in-flight destroys are unaffected — those are handled by deferred backend release instead (gpu.c3l#44) |
+| `RESOURCE_IN_USE` | `destroy_texture` | a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first (gpu.c3l#81). Frames-in-flight destroys — including a resource an off-frame `submit` referenced — are unaffected: those are handled by deferred backend release instead (gpu.c3l#44, gpu.c3l#80) |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths | per-frame data outgrew the arena (sizing knobs: gpu.c3l#28) |
 | `SLOT_TABLE_FULL` | creates | handle table at capacity; textures scale via `DeviceDesc.texture_capacity` |
 | `DESCRIPTOR_HEAP_FULL` | `create_texture_descriptor`, `create_sampler` | capacity < live descriptors + same-frame retires (they recycle a frame later) |
@@ -673,10 +673,13 @@ list and inserts only the internal transfer→host barrier on the destination;
 source-side ordering (and, for textures, the `TRANSFER_SRC` layout) is the
 caller's responsibility.
 
-Readiness is frame-boundary granular: the device timeline advances at
-`end_frame` (or inside blocking helpers), so a ticket recorded in frame N
-resolves after frame N ends. Applications that never run the frame loop
-never signal tickets.
+Readiness is frame-boundary granular: a ticket's copy is a Tier C recording
+that always retires on the frame timeline, which only `end_frame` signals
+(blocking helpers signal a separate helper timeline and never retire a
+ticket, including one an unrelated helper happens to finish while it sits
+unsubmitted — see docs/threading.md §Helper timeline). A ticket recorded in
+frame N resolves after frame N ends; applications that never run the frame
+loop never signal tickets.
 
 Tickets hold a pinned readback-arena range until resolved — an unresolved
 ticket blocks arena reclamation behind it (FIFO); when the arena is full,

@@ -36,7 +36,16 @@ struct VkDeviceState {
     // frame_timeline at exactly one signal per frame so retire_timeline_value
     // stays correct.
     vk::Semaphore              aux_timeline;
+    // Blocking-helper completions signal here (turnstiled), never frame_timeline.
+    vk::Semaphore              helper_timeline;
     Atomic{ulong}              timeline_counter;
+    // Next helper reservation value; mutated only under transfer_mutex.
+    ulong                      helper_counter;
+    // Set unconditionally by vk_submit so end_frame also waits off-frame use.
+    bool                       compute_used_since_frame;
+    bool                       transfer_used_since_frame;
+    // Off-frame submission not yet covered by an end_frame chain or teardown.
+    Atomic{bool}               off_frame_pending;
     // Lock order: transfer_mutex -> resource_mutex -> queue mutexes.
     Mutex                      resource_mutex;
     Mutex                      transfer_mutex;

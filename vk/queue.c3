@@ -98,7 +98,8 @@ fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
 <* Submit command lists to their queue via vkQueueSubmit2, waiting on and
    signaling the requested timeline values at their stages. Empty wait/signal/
    command arrays are left unset so the slice setters are never handed a
-   zero-length slice. *>
+   zero-length slice. Queue-used flags and the off-frame marker are set
+   unconditionally so retirement also covers off-frame submissions. *>
 fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;
@@ -168,11 +169,9 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
         // Only past this point did the queue accept the wait on the acquire
         // semaphore; a rejected submit must leave the acquire retryable.
         if (swapchain != null) swapchain.acquire_consumed = true;
-        if (state.frame_active) {
-            FrameArenaState* frame_slot = &state.frame_arenas[state.frame_index];
-            if (kind == gpu::QueueKind.COMPUTE && state.compute_queue_distinct) frame_slot.compute_used = true;
-            if (kind == gpu::QueueKind.TRANSFER && state.transfer_queue != state.graphics_queue) frame_slot.transfer_used = true;
-        }
+        if (kind == gpu::QueueKind.COMPUTE && state.compute_queue_distinct) state.compute_used_since_frame = true;
+        if (kind == gpu::QueueKind.TRANSFER && state.transfer_queue != state.graphics_queue) state.transfer_used_since_frame = true;
+        if (!state.frame_active) state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
         // Commit each list's pending texture-layout transitions in submission
         // order, still under the queue mutex, now that the GPU work is queued.
         foreach (&cl : desc.command_lists) {
