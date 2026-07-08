@@ -133,6 +133,8 @@ fn void? bind_graphics_and_push(gpu::CommandList* commands, gpu::PipelineHandle 
 
 fn void? vk_cmd_draw(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, uint vertex_count, uint instance_count) @private {
     if (commands.state != gpu::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
     vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
     bind_graphics_and_push(commands, handle, vertex_root, fragment_root, cb)!;
     vk::cmd_draw(cb, vertex_count, instance_count, 0, 0);
@@ -141,7 +143,8 @@ fn void? vk_cmd_draw(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu
 fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan index_span, uint index_count, uint instance_count, gpu::IndexType index_type) @private {
     if (commands.state != gpu::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    BufferSlot* buffer = state.buffers.get(index_span.buffer)!;
+    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
+    BufferSlot* buffer = resolve_index_span(state, &index_span, index_type)!;
 
     usz index_size = index_type == gpu::IndexType.U16 ? 2 : 4;
     if ((usz)index_count * index_size > index_span.size) return gpu::INVALID_ARGUMENT~;
@@ -156,6 +159,7 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
 fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, uint draw_count) @private {
     if (commands.state != gpu::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:    state,
         span:     &args,
@@ -173,8 +177,9 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
     vk::cmd_draw_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset, draw_count, gpu::DrawIndirectCommand::size);
 }
 
+<* Element count comes from the GPU-written args and is not checked here. *>
 fn void? bind_index_span(VkDeviceState* state, vk::CommandBuffer cb, gpu::GpuSpan* index_span, gpu::IndexType index_type) @private {
-    BufferSlot* buffer = state.buffers.get(index_span.buffer)!;
+    BufferSlot* buffer = resolve_index_span(state, index_span, index_type)!;
     vk::cmd_bind_index_buffer(cb, buffer.buffer, (vk::DeviceSize)index_span.offset,
         index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32);
 }
@@ -184,6 +189,7 @@ fn void? bind_index_span(VkDeviceState* state, vk::CommandBuffer cb, gpu::GpuSpa
 fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, uint draw_count, gpu::GpuSpan index_span, gpu::IndexType index_type) @private {
     if (commands.state != gpu::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:    state,
         span:     &args,
@@ -210,6 +216,7 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
 fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, gpu::GpuSpan count_span, uint max_draw_count, gpu::GpuSpan index_span, gpu::IndexType index_type) @private {
     if (commands.state != gpu::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:    state,

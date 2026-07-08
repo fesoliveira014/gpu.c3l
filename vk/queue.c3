@@ -106,10 +106,12 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     @pool() {
         vk::SubmitInfo2 submit = vk::submit_info2();
 
+        gpu::QueueKind kind = desc.command_lists.len > 0 ? desc.command_lists[0].queue : gpu::QueueKind.GRAPHICS;
         if (desc.command_lists.len > 0) {
             vk::CommandBufferSubmitInfo[] cmds = mem::talloc_array(vk::CommandBufferSubmitInfo, desc.command_lists.len);
             foreach (i, &cl : desc.command_lists) {
                 if (cl.state != gpu::CommandState.EXECUTABLE) return gpu::COMMAND_RECORDING_ERROR~;
+                if (cl.queue != kind) return gpu::INVALID_ARGUMENT~;
                 cmds[i] = vk::command_buffer_submit_info().set_command_buffer((vk::CommandBuffer)cl.backend);
             }
             submit = submit.set_command_buffer_infos(cmds);
@@ -159,7 +161,6 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
             submit = submit.set_signal_semaphore_infos(signals);
         }
 
-        gpu::QueueKind kind = desc.command_lists.len > 0 ? desc.command_lists[0].queue : gpu::QueueKind.GRAPHICS;
         Mutex* queue_mutex = queue_mutex_for(state, kind);
         queue_mutex.lock()!!;
         defer queue_mutex.unlock();

@@ -165,7 +165,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, sampler/aniso paths | validation layers not installed; presentation off; missing device feature |
-| `INVALID_ARGUMENT` | any create/upload/export | malformed descriptor, zero size, undersized output buffer, out-of-range value |
+| `INVALID_ARGUMENT` | any create/upload/export; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates | malformed descriptor, zero size, undersized output buffer, out-of-range value; mixed-queue-kind submit; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch |
 | `INVALID_HANDLE` | any handle-taking call | use after destroy (generation mismatch) or never-live handle |
 | `INVALID_RESOURCE_STATE` | `cmd_texture_barrier`, readback helpers | `old_layout` disagrees with the tracked layout chain |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |

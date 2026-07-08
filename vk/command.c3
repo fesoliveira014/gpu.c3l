@@ -197,6 +197,8 @@ fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* des
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* src = state.buffers.get(desc.src)!;
     BufferSlot* dst = state.buffers.get(desc.dst)!;
+    if (!src.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
+    if (!dst.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
     if (!gpu::range_fits(src.size, desc.src_offset, desc.size)) return gpu::INVALID_ARGUMENT~;
     if (!gpu::range_fits(dst.size, desc.dst_offset, desc.size)) return gpu::INVALID_ARGUMENT~;
@@ -219,6 +221,7 @@ fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* slot = state.buffers.get(buffer)!;
+    if (!slot.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     // Vulkan: offset and size must be 4-byte multiples; size 0 is the
     // whole-buffer convention (translated to WHOLE_SIZE below).
     if (offset % 4 != 0 || size % 4 != 0) return gpu::INVALID_ARGUMENT~;
@@ -269,6 +272,7 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TextureSlot* texture = state.textures.get(desc.texture)!;
     BufferSlot* buffer = state.buffers.get(desc.src.buffer)!;
+    if (!buffer.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     if (texture_layout(texture) != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
 
@@ -292,6 +296,7 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TextureSlot* texture = state.textures.get(desc.texture)!;
     BufferSlot* buffer = state.buffers.get(desc.dst.buffer)!;
+    if (!buffer.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     if (texture_layout(texture) != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
 
@@ -338,6 +343,8 @@ fn void? bind_compute_and_push(gpu::CommandList* commands, gpu::PipelineHandle h
    push-constant range, which breaks descriptor set compatibility. *>
 fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::Vec3u groups) @private {
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    validate_pipeline_kind(state, handle, PipelineKind.COMPUTE)!;
     vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
     bind_compute_and_push(
         commands: commands,
@@ -351,6 +358,7 @@ fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle,
 fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::GpuSpan args) @private {
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    validate_pipeline_kind(state, handle, PipelineKind.COMPUTE)!;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:    state,
         span:     &args,

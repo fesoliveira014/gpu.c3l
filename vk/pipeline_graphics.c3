@@ -81,6 +81,8 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
     if (desc.color_formats.len == 0 && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
     ShaderSlot* vertex_shader = state.shaders.get(desc.vertex_shader)!;
     ShaderSlot* fragment_shader = state.shaders.get(desc.fragment_shader)!;
+    validate_shader_stage(vertex_shader, gpu::ShaderStage.VERTEX)!;
+    validate_shader_stage(fragment_shader, gpu::ShaderStage.FRAGMENT)!;
 
     PipelineKey key = build_graphics_key(desc);
     ulong hash = hash_key(&key);
