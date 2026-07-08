@@ -122,7 +122,7 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
         SwapchainSlot* swapchain = null;
         if (desc.swapchain.is_valid()) {
             swapchain = state.swapchains.get(desc.swapchain)!;
-            if (!swapchain.acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
+            swapchain_submit_guard(swapchain.acquire_pending, swapchain.acquire_consumed, kind)!;
         }
 
         usz wait_count = desc.waits.len + (swapchain != null ? 1 : 0);
@@ -165,6 +165,9 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
         queue_mutex.lock()!!;
         defer queue_mutex.unlock();
         check(vk::queue_submit2(queue_for(state, kind), 1, &submit, (vk::Fence)null))!;
+        // Only past this point did the queue accept the wait on the acquire
+        // semaphore; a rejected submit must leave the acquire retryable.
+        if (swapchain != null) swapchain.acquire_consumed = true;
         if (state.frame_active) {
             FrameArenaState* frame_slot = &state.frame_arenas[state.frame_index];
             if (kind == gpu::QueueKind.COMPUTE && state.compute_queue_distinct) frame_slot.compute_used = true;

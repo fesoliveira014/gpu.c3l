@@ -24,6 +24,9 @@ struct SwapchainSlot {
     gpu::SwapchainDesc  requested;
     bool                dormant;
     bool                acquire_pending;
+    // Set once the pending acquire's coupled submit has consumed its binary
+    // acquire semaphore; present requires this to avoid waiting it unsignaled.
+    bool                acquire_consumed;
     uint                pending_image;
     vk::Semaphore       pending_acquire_semaphore;
 }
@@ -137,6 +140,30 @@ fn vk::Extent2D clamp_extent(vk::SurfaceCapabilitiesKHR* caps, uint width, uint 
     return extent;
 }
 
+<* Coupled-submit guard: the acquire must be pending and not yet consumed, and
+   the coupling must run on GRAPHICS — the only queue these binary semaphores
+   wait/signal on. Pure. *>
+fn void? swapchain_submit_guard(bool acquire_pending, bool acquire_consumed, gpu::QueueKind kind) {
+    if (!acquire_pending || acquire_consumed) return gpu::INVALID_RESOURCE_STATE~;
+    if (kind != gpu::QueueKind.GRAPHICS) return gpu::INVALID_ARGUMENT~;
+}
+
+<* Present guard: the acquired image must have been consumed by exactly one
+   coupled submit before its present semaphore is safe to wait. Pure. *>
+fn void? swapchain_present_guard(bool acquire_pending, bool acquire_consumed) {
+    if (!acquire_pending || !acquire_consumed) return gpu::INVALID_RESOURCE_STATE~;
+}
+
+<* Map the VkImageUsageFlags granted at swapchain creation to the wrapped
+   TextureSlot's usage: color attach is always requested, transfer_src
+   carries over iff the surface granted it. Pure. *>
+fn gpu::TextureUsage swapchain_image_usage(uint granted_vk_usage) {
+    if ((granted_vk_usage & (uint)vk::ImageUsageFlagBits.TRANSFER_SRC_BIT) != 0) {
+        return (gpu::TextureUsage){ .color_attach, .transfer_src };
+    }
+    return (gpu::TextureUsage){ .color_attach };
+}
+
 fn vk::SurfaceKHR? create_platform_surface(VkDeviceState* state, gpu::SurfaceDesc* surface) @private {
     vk::SurfaceKHR vk_surface;
     switch (surface.platform) {
@@ -178,6 +205,8 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
     vk::Extent2D extent = clamp_extent(&caps, width, height);
     if (extent.width == 0 || extent.height == 0) {
         slot.dormant = true;
+        slot.acquire_pending = false;
+        slot.acquire_consumed = false;
         return;
     }
 
@@ -245,7 +274,7 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
                 .image           = images[i],
                 .default_view    = view,
                 .format          = format,
-                .usage           = { .color_attach, .transfer_src },
+                .usage           = swapchain_image_usage(usage),
                 .width           = extent.width,
                 .height          = extent.height,
                 .mip_levels      = 1,
@@ -278,6 +307,7 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
         slot.height = extent.height;
         slot.dormant = false;
         slot.acquire_pending = false;
+        slot.acquire_consumed = false;
     };
 }
 
@@ -377,6 +407,7 @@ fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, u
         }
         slot.dormant = true;
         slot.acquire_pending = false;
+        slot.acquire_consumed = false;
         return build_fault~;
     }
 }
@@ -406,6 +437,7 @@ fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::Swapchain
     }
 
     slot.acquire_pending = true;
+    slot.acquire_consumed = false;
     slot.pending_image = image_index;
     slot.pending_acquire_semaphore = acquire_semaphore;
     return (gpu::AcquiredImage){
@@ -418,7 +450,7 @@ fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::Swapchain
 fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     SwapchainSlot* slot = state.swapchains.get(desc.swapchain)!;
-    if (!slot.acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
+    swapchain_present_guard(slot.acquire_pending, slot.acquire_consumed)!;
     // The public contract requires the image in PRESENT layout; enforce it
     // here instead of leaving it to the driver.
     TextureSlot* image_slot = state.textures.get(slot.textures[slot.pending_image])!;
@@ -433,6 +465,7 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
         .p_image_indices      = &slot.pending_image,
     };
     slot.acquire_pending = false;
+    slot.acquire_consumed = false;
 
     state.graphics_queue_mutex.lock()!!;
     defer state.graphics_queue_mutex.unlock();
