@@ -74,24 +74,27 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     return device.vtable.destroy_swapchain(device, swapchain);
 }
 
-<* Recreate under the same handle at a new extent. A zero clamped extent
-   leaves the swapchain dormant (acquire faults SWAPCHAIN_OUT_OF_DATE) until a
-   non-zero resize. Prior acquired-image handles become stale. *>
+<* Recreate under the same handle at a new extent. A zero clamped extent or
+   a failed rebuild leaves the swapchain dormant (acquire faults
+   SWAPCHAIN_OUT_OF_DATE) until a successful resize. Prior acquired-image
+   handles become stale. *>
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.resize_swapchain(device, swapchain, width, height);
 }
 
 <* Acquire the next image. Faults SWAPCHAIN_OUT_OF_DATE when the swapchain
-   needs a resize; a true `suboptimal` is a soft signal to resize soon. The
-   submit that renders to the image must name the swapchain in its SubmitDesc. *>
+   needs a resize and INVALID_RESOURCE_STATE while a prior acquire is still
+   pending; a true `suboptimal` is a soft signal to resize soon. The submit
+   that renders to the image must name the swapchain in its SubmitDesc. *>
 fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.acquire_next_image(device, swapchain);
 }
 
-<* Present the last acquired image. The image must be in the PRESENT layout.
-   Faults SWAPCHAIN_OUT_OF_DATE when the surface changed. *>
+<* Present the last acquired image. The image must be in the PRESENT tracked
+   layout (INVALID_RESOURCE_STATE otherwise). Faults SWAPCHAIN_OUT_OF_DATE
+   when the surface changed. *>
 fn void? present(Device* device, PresentDesc* desc) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.present(device, desc);
