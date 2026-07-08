@@ -438,6 +438,13 @@ cursor = 0
 
 Persistent arenas use VMA virtual allocator to suballocate ranges from large real buffers.
 
+The backing buffer is created once with a fixed usage superset (`transfer_src`,
+`transfer_dst`, `uniform`, `storage`, `addressable`, `indirect`, `index` —
+`vertex` and `shared_queues` are deliberately excluded). `PersistentAllocDesc.usage`
+is validated as a subset of that superset at allocation time (`INVALID_ARGUMENT`
+on unsupported bits) rather than applied per span; empty usage is a valid
+storage-style default.
+
 ```text
 PersistentArenaState
     BufferHandle backing_buffer
