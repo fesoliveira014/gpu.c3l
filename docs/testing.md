@@ -243,6 +243,11 @@ test/shaders/graphics/
 
 They `#include` the library's published shader-side ABI includes from `include/shaders/`.
 
+Pure-CPU tests (handles, ranges, ABI layout) live in the `test/cpu` project:
+the full public module plus a stub backend, linking no native libraries — a
+clean checkout runs them with no Vulkan/VMA installed, and CI runs them
+before any native setup.
+
 Shared CPU/shader structs come from `.abi` schemas (see `docs/shader_abi.md` §12). Generated outputs are committed; `scripts/gen_abi.py --check` is the drift gate — run it as part of any full test sweep, and rerun `scripts/gen_abi.py` (then `scripts/build_shaders.py`) after editing a schema.
 
 CI tiers (`.github/workflows/ci.yml`):
