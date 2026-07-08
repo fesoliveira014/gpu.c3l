@@ -132,6 +132,12 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
         check(vk::wait_semaphores(state.device, &wait_info, 1_000_000_000))!;
     }
 
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        deferred_drain(state);
+    }
+
     reset_frame_arena(state, state.frame_index)!;
     foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
         if (!cell.used) continue;

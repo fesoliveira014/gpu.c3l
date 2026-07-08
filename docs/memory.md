@@ -583,7 +583,11 @@ arena:staging
 arena:readback
 ```
 
-## 17. Defragmentation policy
+## 17. Deferred destruction
+
+`destroy_buffer`/`destroy_texture`/`destroy_pipeline`/`destroy_shader`/`destroy_semaphore` free the public handle immediately but cannot free the backend VMA buffer/image, image view, `vk::Pipeline`, shader module, or semaphore right away — a frame already submitted may still reference it. The backend queues those objects (`vk/deferred.c3`) keyed by `retire_timeline_value` (memory.c3, the same "safe after" value the descriptor heap and transfer arenas use) and frees each once the frame timeline reaches it. The queue drains on every `begin_frame` (after its wait) and opportunistically on every enqueue; teardown drains everything unconditionally once the device is idle. Destroying a resource no longer faults on the frames-in-flight window — see `RESOURCE_IN_USE` in `faults.c3`.
+
+## 18. Defragmentation policy
 
 VMA defragmentation is deferred.
 
@@ -605,7 +609,7 @@ non-addressable resource defrag
 rebuild all addressable references after move
 ```
 
-## 18. Memory acceptance criteria
+## 19. Memory acceptance criteria
 
 The memory layer is acceptable when:
 
@@ -619,4 +623,6 @@ readback path invalidates non-coherent memory
 staging path flushes non-coherent memory
 memory stats report VMA budget and live resources
 allocation names appear in debug reports
+destroyed buffers/textures/pipelines/shaders/semaphores free their backend
+    object only after retire_timeline_value passes
 ```

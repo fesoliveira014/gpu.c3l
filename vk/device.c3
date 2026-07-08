@@ -64,6 +64,7 @@ struct VkDeviceState {
     TransferArenaState         staging_arena;
     TransferArenaState         readback_arena;
     DedicatedRetireState       dedicated_staging;
+    DeferredQueue              deferred;
     bool                       frame_active;
 }
 
@@ -235,6 +236,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.pipelines.slots  = mem::new_array(PipelineCell, gpu::MAX_PIPELINES);
     state.textures.slots   = mem::new_array(TextureCell, gpu::resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
     state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
+    state.deferred.entries = mem::new_array(DeferredEntry, DEFERRED_QUEUE_INITIAL_CAP);
     create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
     create_pipeline_shared(state, desc.pipeline_cache_data)!;
@@ -271,6 +273,8 @@ fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
     if (state.device != null) {
         vk::device_wait_idle(state.device);
+        deferred_drain_all(state);
+        destroy_deferred_queue(state);
         // Leak reporting first: the sweeps below free the tables it reads.
         if (state.validation) (void)report_resource_leaks(state);
         // Destroy any buffers the caller did not, so no VMA allocation leaks.

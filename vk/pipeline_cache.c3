@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import vma;
 import std::thread;
 import std::core::mem;
 import std::hash::fnv64a;
@@ -129,13 +130,12 @@ fn uint? insert_entry(PipelineCacheTable* cache, PipelineCacheEntry value) {
     return idx;
 }
 
-<* Single release choke point: drop one alias, destroy the backend pipeline
-   when the last alias goes. Layouts are shared and never destroyed here. When
-   deferred destruction lands, only this function changes. *>
+<* Drops one alias; the pipeline's deferred release happens when the last
+   alias goes. Shared layouts are never destroyed here. *>
 fn void release_entry(VkDeviceState* state, uint entry_index) {
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[entry_index];
     if (--entry.refcount > 0) return;
-    vk::destroy_pipeline(state.device, entry.pipeline, null);
+    enqueue_deferred(state, DeferredKind.PIPELINE, retire_timeline_value(state), (void*)entry.pipeline, (vma::Allocation)null);
     entry.used = false;
     entry.next_free = state.pipeline_cache.free_head;
     state.pipeline_cache.free_head = entry_index + 1;

@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import vma;
 import std::thread;
 
 // Concrete (non-generic) slot table for semaphores. Monomorphized twin of
@@ -146,6 +147,8 @@ fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::Semaphore
     return gpu::SLOT_TABLE_FULL~;
 }
 
+<* Frees the handle now; the vk semaphore release is deferred. The public
+   contract already forbids pending waits at destroy. *>
 fn void? vk_destroy_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
@@ -153,8 +156,10 @@ fn void? vk_destroy_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle) 
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     SemaphoreSlot* slot = state.semaphores.get(handle)!;
-    vk::destroy_semaphore(state.device, slot.semaphore, null);
+    vk::Semaphore semaphore = slot.semaphore;
+    ulong retire = retire_timeline_value(state);
     state.semaphores.free(handle)!;
+    enqueue_deferred(state, DeferredKind.SEMAPHORE, retire, (void*)semaphore, (vma::Allocation)null);
 }
 
 fn void? vk_wait_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle, gpu::SemaphoreValue value, ulong timeout_ns) @private {
