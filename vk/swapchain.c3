@@ -366,13 +366,28 @@ fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, u
 
     fault build_fault = @catch(build_swapchain(state, slot, width, height, old));
     if (old != null) vk::extensions.vk_destroy_swapchain_khr(state.device, old, null);
-    if (build_fault) return build_fault~;
+    if (build_fault) {
+        // Never leave a half-built slot live: tear down whatever the failed
+        // build produced and park the slot dormant so the next acquire gets
+        // SWAPCHAIN_OUT_OF_DATE instead of undefined state.
+        release_swapchain_images(state, slot);
+        if (slot.swapchain != null) {
+            vk::extensions.vk_destroy_swapchain_khr(state.device, slot.swapchain, null);
+            slot.swapchain = (vk::SwapchainKHR)null;
+        }
+        slot.dormant = true;
+        slot.acquire_pending = false;
+        return build_fault~;
+    }
 }
 
 fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::SwapchainHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     SwapchainSlot* slot = state.swapchains.get(handle)!;
     if (slot.dormant || slot.swapchain == null) return gpu::SWAPCHAIN_OUT_OF_DATE~;
+    // A pending acquire owns this frame's binary semaphore; acquiring again
+    // would reuse it and orphan the pending image.
+    if (slot.acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::Semaphore acquire_semaphore = slot.acquire_semaphores[state.frame_index];
     uint image_index = 0;
@@ -404,6 +419,10 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     SwapchainSlot* slot = state.swapchains.get(desc.swapchain)!;
     if (!slot.acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
+    // The public contract requires the image in PRESENT layout; enforce it
+    // here instead of leaving it to the driver.
+    TextureSlot* image_slot = state.textures.get(slot.textures[slot.pending_image])!;
+    if (texture_layout(image_slot) != gpu::TextureLayout.PRESENT) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::PresentInfoKHR info = {
         .s_type               = vk::StructureType.PRESENT_INFO_KHR,
