@@ -199,7 +199,8 @@ fn void? check_texture_desc(gpu::TextureDesc* desc) @private {
     bool is_depth = desc.format == gpu::Format.D32_FLOAT;
     if (is_depth && (desc.usage.color_attach || desc.usage.storage)) return gpu::INVALID_ARGUMENT~;
     if (!is_depth && desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
-    if (!desc.usage.sampled && !desc.usage.storage && !desc.usage.color_attach && !desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
+    // Transfer-only textures (staging targets, readback sources) are valid;
+    // usage that maps to zero Vulkan bits is rejected at create.
 }
 
 <* Resolve a view desc to an image view: null/zero desc (or the explicit full
