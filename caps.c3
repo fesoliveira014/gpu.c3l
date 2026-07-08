@@ -55,7 +55,11 @@ struct DeviceCaps {
     bool descriptor_buffer;
     bool descriptor_indexing;
     bool async_compute;
+    // Configured heap capacity (DeviceDesc.texture_descriptor_capacity), not
+    // the device's hardware maximum — see create_device's limit rejection.
     uint max_texture_descriptors;
+    // Configured heap capacity (DeviceDesc.sampler_descriptor_capacity), not
+    // the device's hardware maximum — see create_device's limit rejection.
     uint max_sampler_descriptors;
     usz  min_uniform_alignment;
     usz  min_storage_alignment;
