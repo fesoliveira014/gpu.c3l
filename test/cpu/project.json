@@ -1,0 +1,45 @@
+{
+  "langrev": "1",
+  // Pure-CPU lane: the full public module plus a stub gpu::vk backend, zero
+  // native libraries — a clean checkout runs these with no Vulkan/VMA
+  // installed. Shared sources at project scope; targets add only test files.
+  "warnings": [
+    "no-unused"
+  ],
+  "sources": [
+    "../../gpu.c3",
+    "../../gpu.c3i",
+    "../../types.c3",
+    "../../faults.c3",
+    "../../device.c3",
+    "../../caps.c3",
+    "../../memory.c3",
+    "../../buffer.c3",
+    "../../texture.c3",
+    "../../descriptor_heap.c3",
+    "../../pipeline.c3",
+    "../../command.c3",
+    "../../sync.c3",
+    "../../queue.c3",
+    "../../swapchain.c3",
+    "../../debug.c3",
+    "../../shader_abi.c3",
+    "vk_stub.c3"
+  ],
+  "output": "build",
+  "targets": {
+    "unit": {
+      "type": "test",
+      "sources": [
+        "../src/test_handles.c3",
+        "../src/test_ranges.c3"
+      ]
+    },
+    "shader_abi": {
+      "type": "test",
+      "sources": [
+        "../src/test_shader_abi_layout.c3"
+      ]
+    }
+  }
+}

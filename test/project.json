@@ -21,15 +21,7 @@
       "sources": [ "src/smoke.c3" ]
     },
     // Pure-CPU unit tests for the public type system (no Vulkan calls).
-    "unit": {
-      "type": "test",
-      "sources": [ "src/test_handles.c3", "src/test_ranges.c3" ]
-    },
     // Pure-CPU: generated shader ABI struct layouts vs hand-computed std430.
-    "shader_abi": {
-      "type": "test",
-      "sources": [ "src/test_shader_abi_layout.c3" ]
-    },
     // Vulkan bootstrap: the feature gate needs no ICD; the create/destroy test
     // needs one — pin lavapipe via VK_DRIVER_FILES when running this target.
     "vk_bootstrap": {
