@@ -169,5 +169,47 @@ fn void deferred_destroy_outside_frame_is_immediate() @test {
 
     assert(deferred_count(&device) == 0, "queue starts empty");
     gpu::destroy_buffer(&device, buffer)!!;
-    assert(deferred_count(&device) == 0, "a destroy outside a frame retires through the opportunistic drain immediately");
+    assert(deferred_count(&device) == 0, "a destroy with no pending off-frame work retires through the opportunistic drain immediately");
+}
+
+<* An off-frame submit is sanctioned usage (threading.md Tier E, api.md's
+   frame-loop-free apps): destroying a buffer it referenced must defer
+   backend release rather than free synchronously under in-flight GPU work
+   (gpu.c3l#80). Before the off-frame-pending marker, retire_timeline_value
+   returned the bare counter outside a frame, and enqueue_deferred's
+   opportunistic drain freed the buffer inside this very destroy call. *>
+fn void off_frame_destroy_defers_release() @test {
+    gpu::Device device = make_defer_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::BufferDesc src_desc = {
+        .size = 256, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "off_frame_src",
+    };
+    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
+
+    gpu::BufferDesc dst_desc = {
+        .size = 256, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "off_frame_dst",
+    };
+    gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::BufferCopyDesc copy = { .src = src, .dst = dst, .src_offset = 0, .dst_offset = 0, .size = 256 };
+    gpu::cmd_copy_buffer(&cmd, &copy)!!;
+    gpu::end_commands(&device, &cmd)!!;
+
+    // No begin_frame/end_frame anywhere in this test: the submit and the
+    // destroy both happen outside any frame bracket.
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+
+    assert(deferred_count(&device) == 0, "queue starts empty");
+    gpu::destroy_buffer(&device, dst)!!;
+    assert(deferred_count(&device) > 0, "destroying an off-frame submission's target enqueues rather than freeing synchronously");
+    gpu::destroy_buffer(&device, src)!!;
+
+    // Teardown (device_wait_idle + deferred_drain_all) must retire it
+    // validation-clean even though no end_frame ever covered it.
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    assert(vk::report_resource_leaks(state) == 0, "off-frame destroy leaves no leaked slots at teardown");
 }

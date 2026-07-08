@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import std::io;
 import std::thread;
 import std::core::mem;
 import std::atomic;
@@ -10,13 +11,31 @@ import std::atomic::types;
 const uint TRANSFER_RETIRE_CAP = 1024;
 const uint DEDICATED_RETIRE_CAP = 64;
 const usz TRANSFER_ALIGN = 16;
+// Per-round wait; rounds repeat with a warning until the predecessor signals
+// (signaling past a slow sibling would retire its in-flight ranges).
+const ulong HELPER_TURNSTILE_ROUND_NS = 5_000_000_000;
+
+// Which timeline retires a tagged range/entry: in-frame command-list paths
+// tag FRAME (frame_timeline), blocking helpers tag HELPER (helper_timeline) —
+// keeping the two disjoint is what stops one helper's completion from
+// retiring another helper's or an unsubmitted list's resources (gpu.c3l#80).
+enum TimelineKind : int {
+    FRAME,
+    HELPER,
+}
+
+struct TimelineTag {
+    TimelineKind kind;
+    ulong        value;
+}
 
 // Ranges live as monotonic virtual offsets (physical = virtual % size), so
 // wrap gaps fold into the next entry and head-drain stays a single compare.
 struct TransferRange {
-    ulong virtual_end;
-    ulong timeline_value;
-    bool  pinned;
+    ulong        virtual_end;
+    ulong        timeline_value;
+    TimelineKind timeline_kind;
+    bool         pinned;
 }
 
 struct TransferArenaState {
@@ -33,6 +52,7 @@ struct TransferArenaState {
 struct DedicatedStaging {
     gpu::BufferHandle buffer;
     ulong             timeline_value;
+    TimelineKind      timeline_kind;
 }
 
 struct DedicatedRetireState {
@@ -76,12 +96,20 @@ fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
     state.readback_arena.size = readback_size;
 }
 
+<* Both timelines are read once per drain call: entries in a single arena's
+   ring can carry either tag (a mid-frame blocking helper interleaves with
+   in-frame recordings), but the ring itself stays strict FIFO regardless of
+   tag — the head must retire before anything behind it can, since
+   virtual_head has to track a contiguous consumed prefix. *>
 fn void drain_transfer_retire(VkDeviceState* state, TransferArenaState* arena) @private {
     if (arena.retire_count == 0) return;
-    ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+    ulong frame_current = 0;
+    ulong helper_current = 0;
+    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &frame_current);
+    vk::get_semaphore_counter_value(state.device, state.helper_timeline, &helper_current);
     while (arena.retire_count > 0) {
         TransferRange* entry = &arena.retire[arena.retire_head];
+        ulong current = entry.timeline_kind == TimelineKind.HELPER ? helper_current : frame_current;
         if (entry.pinned || entry.timeline_value > current) break;
         arena.virtual_head = entry.virtual_end;
         arena.retire_head = (arena.retire_head + 1) % TRANSFER_RETIRE_CAP;
@@ -90,10 +118,12 @@ fn void drain_transfer_retire(VkDeviceState* state, TransferArenaState* arena) @
 }
 
 <* Contiguous ring allocation over virtual offsets; the allocated range
-   retires against the current frame's timeline value. Faults ARENA_FULL when
-   the request cannot fit the live window (callers fall back to a dedicated
-   buffer). *>
-fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align) @private {
+   retires against the tagged timeline's value, so a range holds until that
+   timeline actually advances past it (frame end or the covering helper's
+   turnstiled signal) — never a different call's advance. Faults ARENA_FULL
+   when the request cannot fit the live window (callers fall back to a
+   dedicated buffer). *>
+fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, TimelineTag tag) @private {
     if (size > arena.size) return gpu::ARENA_FULL~;
     drain_transfer_retire(state, arena);
     if (arena.retire_count == TRANSFER_RETIRE_CAP) return gpu::ARENA_FULL~;
@@ -103,12 +133,10 @@ fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* 
     if (physical + size > arena.size) tail += arena.size - physical;
     if (tail + size - arena.virtual_head > arena.size) return gpu::ARENA_FULL~;
 
-    // Always counter+1: ranges hold until the next timeline advance (frame
-    // end or a blocking helper), so out-of-frame recordings cannot reuse a
-    // range before their command list is submitted.
     arena.retire[(arena.retire_head + arena.retire_count) % TRANSFER_RETIRE_CAP] = {
         .virtual_end    = tail + size,
-        .timeline_value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1,
+        .timeline_value = tag.value,
+        .timeline_kind  = tag.kind,
     };
     arena.retire_count++;
     arena.virtual_tail = tail + size;
@@ -118,10 +146,13 @@ fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* 
 fn void drain_dedicated_transfers(VkDeviceState* state) @private {
     if (state.dedicated_staging.count == 0) return;
     gpu::Device shim = device_shim(state);
-    ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+    ulong frame_current = 0;
+    ulong helper_current = 0;
+    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &frame_current);
+    vk::get_semaphore_counter_value(state.device, state.helper_timeline, &helper_current);
     while (state.dedicated_staging.count > 0) {
         DedicatedStaging* entry = &state.dedicated_staging.entries[state.dedicated_staging.head];
+        ulong current = entry.timeline_kind == TimelineKind.HELPER ? helper_current : frame_current;
         if (entry.timeline_value > current) break;
         (void)vk_destroy_buffer(&shim, entry.buffer);
         state.dedicated_staging.head = (state.dedicated_staging.head + 1) % DEDICATED_RETIRE_CAP;
@@ -130,12 +161,18 @@ fn void drain_dedicated_transfers(VkDeviceState* state) @private {
 }
 
 <* Span from the arena, or a dedicated one-shot buffer (destroyed once its
-   timeline value retires) when the arena cannot fit the request. *>
-fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, gpu::BufferDesc* dedicated_desc) @private {
+   tagged timeline retires) when the arena cannot fit the request. *>
+fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, gpu::BufferDesc* dedicated_desc, TimelineTag tag) @private {
     state.transfer_mutex.lock()!!;
     defer state.transfer_mutex.unlock();
     drain_dedicated_transfers(state);
-    if (try span = transfer_arena_alloc(state, arena, size, align)) return span;
+    if (try span = transfer_arena_alloc(
+        state: state,
+        arena: arena,
+        size:  size,
+        align: align,
+        tag:   tag,
+    )) return span;
     if (state.dedicated_staging.count == DEDICATED_RETIRE_CAP) return gpu::ARENA_FULL~;
 
     gpu::Device shim = device_shim(state);
@@ -143,30 +180,45 @@ fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena,
     mark_buffer_internal(state, buffer);
     state.dedicated_staging.entries[(state.dedicated_staging.head + state.dedicated_staging.count) % DEDICATED_RETIRE_CAP] = {
         .buffer         = buffer,
-        .timeline_value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1,
+        .timeline_value = tag.value,
+        .timeline_kind  = tag.kind,
     };
     state.dedicated_staging.count++;
     return vk_get_buffer_span(&shim, buffer);
 }
 
-fn gpu::GpuSpan? staging_alloc(VkDeviceState* state, usz size, usz align) @private {
+fn gpu::GpuSpan? staging_alloc(VkDeviceState* state, usz size, usz align, TimelineTag tag) @private {
     gpu::BufferDesc desc = {
         .size        = size,
         .usage       = { .transfer_src },
         .memory_kind = gpu::MemoryKind.STAGING,
         .debug_name  = "staging_dedicated",
     };
-    return transfer_alloc(state, &state.staging_arena, size, align, &desc);
+    return transfer_alloc(
+        state:          state,
+        arena:          &state.staging_arena,
+        size:           size,
+        align:          align,
+        dedicated_desc: &desc,
+        tag:            tag,
+    );
 }
 
-fn gpu::GpuSpan? readback_alloc(VkDeviceState* state, usz size, usz align) @private {
+fn gpu::GpuSpan? readback_alloc(VkDeviceState* state, usz size, usz align, TimelineTag tag) @private {
     gpu::BufferDesc desc = {
         .size        = size,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
         .debug_name  = "readback_dedicated",
     };
-    return transfer_alloc(state, &state.readback_arena, size, align, &desc);
+    return transfer_alloc(
+        state:          state,
+        arena:          &state.readback_arena,
+        size:           size,
+        align:          align,
+        dedicated_desc: &desc,
+        tag:            tag,
+    );
 }
 
 <* Byte size of a texture-upload region with the copy-desc 0-defaults
@@ -181,14 +233,22 @@ fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc)
     return (usz)width * height * layers * format_texel_size(slot.format);
 }
 
-fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data) @private {
+<* Shared by the public Tier C recording entry point and the blocking upload
+   helper: the caller supplies the timeline tag its staging range retires
+   against. *>
+fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data, TimelineTag tag) @private {
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     if (data.len == 0) return gpu::INVALID_ARGUMENT~;
     BufferSlot* dst_slot = state.buffers.get(dst)!;
     if (!gpu::range_fits(dst_slot.size, offset, data.len)) return gpu::INVALID_ARGUMENT~;
 
-    gpu::GpuSpan staging = staging_alloc(state, data.len, TRANSFER_ALIGN)!;
+    gpu::GpuSpan staging = staging_alloc(
+        state: state,
+        size:  data.len,
+        align: TRANSFER_ALIGN,
+        tag:   tag,
+    )!;
     mem::copy(staging.cpu, data.ptr, data.len);
     vk_flush_buffer(commands.device, staging.buffer, staging.offset, staging.size)!;
 
@@ -202,7 +262,19 @@ fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst,
     return vk_cmd_copy_buffer(commands, &copy);
 }
 
-fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data) @private {
+fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data) @private {
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
+    return cmd_upload_buffer_impl(
+        commands: commands,
+        dst:      dst,
+        offset:   offset,
+        data:     data,
+        tag:      tag,
+    );
+}
+
+fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data, TimelineTag tag) @private {
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     usz expected = texture_upload_bytes(state, desc)!;
@@ -211,7 +283,12 @@ fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDes
     TextureSlot* slot = state.textures.get(desc.texture)!;
     usz align = format_texel_size(slot.format);
     if (align < 4) align = 4;
-    gpu::GpuSpan staging = staging_alloc(state, data.len, align)!;
+    gpu::GpuSpan staging = staging_alloc(
+        state: state,
+        size:  data.len,
+        align: align,
+        tag:   tag,
+    )!;
     mem::copy(staging.cpu, data.ptr, data.len);
     vk_flush_buffer(commands.device, staging.buffer, staging.offset, staging.size)!;
 
@@ -229,10 +306,60 @@ fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDes
     return vk_cmd_copy_buffer_to_texture(commands, &copy);
 }
 
+fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data) @private {
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
+    return cmd_upload_texture_impl(
+        commands: commands,
+        desc:     desc,
+        data:     data,
+        tag:      tag,
+    );
+}
+
+<* Reserves this blocking helper's retirement value under transfer_mutex,
+   before any of its allocations tag a range with it — the reservation and
+   every allocation tagged from it therefore agree on the same value that
+   `signal_helper_timeline` will eventually signal (gpu.c3l#80). *>
+fn ulong reserve_helper_value(VkDeviceState* state) @private {
+    state.transfer_mutex.lock()!!;
+    defer state.transfer_mutex.unlock();
+    state.helper_counter++;
+    return state.helper_counter;
+}
+
+<* Turnstile: wait for `v - 1`, then signal `v`, so signals land in
+   reservation order. Mutex-free — vkSignalSemaphore is internally
+   synchronized and the wait-for-predecessor provides the ordering; a mutex
+   here would deadlock the predecessor out of its own signal. Callers `defer`
+   this on every exit path once `v` is reserved. *>
+fn void? signal_helper_timeline(VkDeviceState* state, ulong v) @private {
+    ulong prior = v - 1;
+    ulong current = 0;
+    vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current);
+    while (current < prior) {
+        vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
+            .set_semaphore_count(1)
+            .set_semaphores((&state.helper_timeline)[:1])
+            .set_values((&prior)[:1]);
+        if (vk::wait_semaphores(state.device, &wait_info, HELPER_TURNSTILE_ROUND_NS) == vk::Result.SUCCESS) break;
+        io::eprintfn("gpu: helper turnstile %d still waiting on %d", v, prior);
+        vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current);
+    }
+    vk::SemaphoreSignalInfo signal_info = vk::semaphore_signal_info()
+        .set_semaphore(state.helper_timeline)
+        .set_value(v);
+    return check(vk::signal_semaphore(state.device, &signal_info));
+}
+
 fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz offset, char[] data, gpu::Stage next_stage, gpu::Hazard next_hazard) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
+    ulong helper_value = reserve_helper_value(state);
+    defer (void)signal_helper_timeline(state, helper_value);
+    TimelineTag tag = { .kind = TimelineKind.HELPER, .value = helper_value };
+
     gpu::CommandList commands;
     vk_begin_commands(
         device:       device,
@@ -240,7 +367,13 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
         ctx:          {},
         out_commands: &commands,
     )!;
-    vk_cmd_upload_buffer(&commands, dst, offset, data)!;
+    cmd_upload_buffer_impl(
+        commands: &commands,
+        dst:      dst,
+        offset:   offset,
+        data:     data,
+        tag:      tag,
+    )!;
 
     gpu::BufferBarrier next_use = {
         .buffer        = dst,
@@ -252,13 +385,17 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
         .after_hazard  = next_hazard,
     };
     vk_cmd_buffer_barrier(&commands, &next_use)!;
-    return submit_and_wait(state, device, &commands);
+    return submit_and_wait(device, &commands);
 }
 
 fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uint mip, char[] data, gpu::Stage next_stage, gpu::Hazard next_hazard, gpu::TextureLayout next_layout) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
+    ulong helper_value = reserve_helper_value(state);
+    defer (void)signal_helper_timeline(state, helper_value);
+    TimelineTag tag = { .kind = TimelineKind.HELPER, .value = helper_value };
+
     TextureSlot* slot = state.textures.get(dst)!;
     gpu::TextureLayout tracked = texture_layout(slot);
     if (tracked != gpu::TextureLayout.UNDEFINED
@@ -293,7 +430,12 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     }
 
     gpu::TextureUploadDesc upload = { .texture = dst, .mip = mip };
-    vk_cmd_upload_texture(&commands, &upload, data)!;
+    cmd_upload_texture_impl(
+        commands: &commands,
+        desc:     &upload,
+        data:     data,
+        tag:      tag,
+    )!;
 
     gpu::TextureBarrier next_use = {
         .texture       = dst,
@@ -305,18 +447,27 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
         .new_layout    = next_layout,
     };
     vk_cmd_texture_barrier(&commands, &next_use)!;
-    return submit_and_wait(state, device, &commands);
+    return submit_and_wait(device, &commands);
 }
 
 fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz offset, char[] out_data, gpu::Stage from_stage, gpu::Hazard from_hazard) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
+    ulong helper_value = reserve_helper_value(state);
+    defer (void)signal_helper_timeline(state, helper_value);
+    TimelineTag tag = { .kind = TimelineKind.HELPER, .value = helper_value };
+
     if (out_data.len == 0) return gpu::INVALID_ARGUMENT~;
     BufferSlot* src_slot = state.buffers.get(src)!;
     if (!gpu::range_fits(src_slot.size, offset, out_data.len)) return gpu::INVALID_ARGUMENT~;
 
-    gpu::GpuSpan readback = readback_alloc(state, out_data.len, TRANSFER_ALIGN)!;
+    gpu::GpuSpan readback = readback_alloc(
+        state: state,
+        size:  out_data.len,
+        align: TRANSFER_ALIGN,
+        tag:   tag,
+    )!;
 
     gpu::CommandList commands;
     vk_begin_commands(
@@ -357,7 +508,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     };
     vk_cmd_buffer_barrier(&commands, &host_read)!;
 
-    submit_and_wait(state, device, &commands)!;
+    submit_and_wait(device, &commands)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
 }
@@ -366,6 +517,10 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
+    ulong helper_value = reserve_helper_value(state);
+    defer (void)signal_helper_timeline(state, helper_value);
+    TimelineTag tag = { .kind = TimelineKind.HELPER, .value = helper_value };
+
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
     usz expected = texture_upload_bytes(state, &region)!;
     if (out_data.len != expected) return gpu::INVALID_ARGUMENT~;
@@ -373,7 +528,12 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     TextureSlot* slot = state.textures.get(src)!;
     usz align = format_texel_size(slot.format);
     if (align < 4) align = 4;
-    gpu::GpuSpan readback = readback_alloc(state, out_data.len, align)!;
+    gpu::GpuSpan readback = readback_alloc(
+        state: state,
+        size:  out_data.len,
+        align: align,
+        tag:   tag,
+    )!;
 
     gpu::CommandList commands;
     vk_begin_commands(
@@ -419,30 +579,20 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     };
     vk_cmd_buffer_barrier(&commands, &host_read)!;
 
-    submit_and_wait(state, device, &commands)!;
+    submit_and_wait(device, &commands)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
 }
 
-<* Blocking helpers act as mini-frames: after the idle-wait the timeline
-   advances (host signal is truthful once the queue is drained), retiring
-   this call's transfer ranges and any pending dedicated buffers. The
-   increment and signal are serialized under transfer_mutex so concurrent
-   helpers can't land signals out of increment order. *>
-fn void? submit_and_wait(VkDeviceState* state, gpu::Device* device, gpu::CommandList* commands) @private {
+<* Ends recording, submits, and blocks until the queue idles. Does not touch
+   any timeline: the caller has already reserved and tagged a helper value
+   (or is the FRAME path, retired by end_frame) and owns signaling it. *>
+fn void? submit_and_wait(gpu::Device* device, gpu::CommandList* commands) @private {
     vk_end_commands(device, commands)!;
     gpu::CommandList[1] lists = { *commands };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     vk_submit(device, &submit)!;
-    vk_wait_queue_idle(device, gpu::QueueKind.GRAPHICS)!;
-
-    state.transfer_mutex.lock()!!;
-    defer state.transfer_mutex.unlock();
-    ulong helper_value = state.timeline_counter.add(1, AtomicOrdering.RELAXED) + 1;
-    vk::SemaphoreSignalInfo signal_info = vk::semaphore_signal_info()
-        .set_semaphore(state.frame_timeline)
-        .set_value(helper_value);
-    return check(vk::signal_semaphore(state.device, &signal_info));
+    return vk_wait_queue_idle(device, gpu::QueueKind.GRAPHICS);
 }
 
 struct TicketAlloc @private {
@@ -452,12 +602,13 @@ struct TicketAlloc @private {
 
 <* Arena range for a ticket: allocated like any transfer range but pinned, so
    FIFO drain holds at it until resolve unpins. *>
-fn TicketAlloc? ticket_arena_alloc(VkDeviceState* state, TransferArenaState* arena, usz size) @private {
+fn TicketAlloc? ticket_arena_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, TimelineTag tag) @private {
     gpu::GpuSpan span = transfer_arena_alloc(
         state: state,
         arena: arena,
         size:  size,
         align: TRANSFER_ALIGN,
+        tag:   tag,
     )!;
     uint idx = (arena.retire_head + arena.retire_count - 1) % TRANSFER_RETIRE_CAP;
     arena.retire[idx].pinned = true;
@@ -475,14 +626,22 @@ fn void unpin_ticket_range(TransferArenaState* arena, ulong range_end) @private 
 }
 
 <* Ticket destination: pinned readback-arena range, or a dedicated buffer
-   (destroyed at resolve) when the arena cannot fit the request. *>
+   (destroyed at resolve) when the arena cannot fit the request. Tickets only
+   come from Tier C recording (cmd_readback_buffer/cmd_readback_texture),
+   never from a blocking helper, so they always tag FRAME. *>
 fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
     state.transfer_mutex.lock()!!;
     defer state.transfer_mutex.unlock();
-    if (try alloc = ticket_arena_alloc(state, &state.readback_arena, size)) {
+    TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
+    if (try alloc = ticket_arena_alloc(
+        state: state,
+        arena: &state.readback_arena,
+        size:  size,
+        tag:   tag,
+    )) {
         return {
             .span      = alloc.span,
-            .value     = (gpu::SemaphoreValue)(state.timeline_counter.load(AtomicOrdering.RELAXED) + 1),
+            .value     = (gpu::SemaphoreValue)tag.value,
             .range_end = alloc.range_end,
         };
     }
@@ -498,7 +657,7 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
     if (try span = vk_get_buffer_span(&shim, buffer)) {
         return {
             .span      = span,
-            .value     = (gpu::SemaphoreValue)(state.timeline_counter.load(AtomicOrdering.RELAXED) + 1),
+            .value     = (gpu::SemaphoreValue)tag.value,
             .dedicated = buffer,
         };
     }

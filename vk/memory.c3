@@ -38,10 +38,6 @@ struct FrameArenaState {
     usz               size;
     Atomic{usz}       cursor;
     ulong             frame_timeline_value;
-    // Distinct-queue submits this frame; end_frame chains their completion
-    // into the frame value. Written under the owning queue's mutex.
-    bool              compute_used;
-    bool              transfer_used;
 }
 
 <* Create the frame timeline semaphore and one arena buffer per frame-in-flight.
@@ -57,6 +53,7 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
     vk::SemaphoreCreateInfo semaphore_info = vk::semaphore_create_info().set_next(&type_info);
     check(vk::create_semaphore(state.device, &semaphore_info, null, &state.frame_timeline))!;
     check(vk::create_semaphore(state.device, &semaphore_info, null, &state.aux_timeline))!;
+    check(vk::create_semaphore(state.device, &semaphore_info, null, &state.helper_timeline))!;
 
     usz frame_arena_size = desc.frame_arena_size == 0 ? gpu::DEFAULT_FRAME_ARENA_SIZE : desc.frame_arena_size;
     state.frame_arenas = mem::new_array(FrameArenaState, state.frames_in_flight);
@@ -85,6 +82,10 @@ fn void destroy_frame_resources(VkDeviceState* state) @private {
         mem::free(state.frame_arenas.ptr);
         state.frame_arenas = {};
     }
+    if (state.helper_timeline != null) {
+        vk::destroy_semaphore(state.device, state.helper_timeline, null);
+        state.helper_timeline = (vk::Semaphore)null;
+    }
     if (state.aux_timeline != null) {
         vk::destroy_semaphore(state.device, state.aux_timeline, null);
         state.aux_timeline = (vk::Semaphore)null;
@@ -102,12 +103,14 @@ fn bool frame_arena_retired(VkDeviceState* state, FrameArenaState* slot) {
     return value >= slot.frame_timeline_value;
 }
 
-<* In-frame retires wait for the value end_frame will signal; outside a frame
-   the current value makes reclaim immediate. Shared by the descriptor heap,
-   the transfer arenas, and dedicated staging buffers. *>
+<* In-frame retires wait for the value end_frame will signal; so does an
+   off-frame retire while off_frame_pending holds, since that work has not
+   yet been covered by an end_frame chain or teardown. Outside both, the
+   current value makes reclaim immediate. Shared by the descriptor heap, the
+   transfer arenas, and dedicated staging buffers. *>
 fn ulong retire_timeline_value(VkDeviceState* state) {
     ulong counter = state.timeline_counter.load(AtomicOrdering.RELAXED);
-    return state.frame_active ? counter + 1 : counter;
+    return (state.frame_active || state.off_frame_pending.load(AtomicOrdering.RELAXED)) ? counter + 1 : counter;
 }
 
 <* Reset an arena slot's cursor. Rejects if the slot has not yet retired. *>
@@ -194,11 +197,14 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
 }
 
 <* The frame fence is a chain of queue-ordered empty submits: distinct
-   compute/transfer queues used this frame first signal auxiliary values,
-   then the graphics signal waits on those and signals the frame value — so
-   the frame value implies every queue's frame work completed and a
-   host-side wait on it safely retires arenas, pools, descriptors, and
-   tickets regardless of queue topology. *>
+   compute/transfer queues used since the last boundary — including any
+   off-frame submissions made before this begin_frame — first signal
+   auxiliary values, then the graphics signal waits on those and signals the
+   frame value — so the frame value implies every queue's work completed and
+   a host-side wait on it safely retires arenas, pools, descriptors, and
+   tickets regardless of queue topology. Off-frame graphics-queue submits
+   need no separate flag: this same signal runs on the graphics queue, so
+   Vulkan's per-queue submission order covers them for free. *>
 fn void? vk_end_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
@@ -213,7 +219,7 @@ fn void? vk_end_frame(gpu::Device* device) @private {
     vk::SemaphoreSubmitInfo[2] waits;
     uint wait_count = 0;
     ulong aux_value = frame_value * 2;
-    if (slot.compute_used) {
+    if (state.compute_used_since_frame) {
         submit_timeline_signal(
             state:     state,
             semaphore: state.aux_timeline,
@@ -227,7 +233,7 @@ fn void? vk_end_frame(gpu::Device* device) @private {
             .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
         aux_value++;
     }
-    if (slot.transfer_used) {
+    if (state.transfer_used_since_frame) {
         Mutex* transfer_mutex = state.transfer_queue == state.graphics_queue ? &state.graphics_queue_mutex : &state.transfer_queue_mutex;
         submit_timeline_signal(
             state:     state,
@@ -242,8 +248,9 @@ fn void? vk_end_frame(gpu::Device* device) @private {
             .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
         aux_value++;
     }
-    slot.compute_used = false;
-    slot.transfer_used = false;
+    state.compute_used_since_frame = false;
+    state.transfer_used_since_frame = false;
+    state.off_frame_pending.store(false, AtomicOrdering.RELAXED);
 
     submit_timeline_signal(
         state:      state,

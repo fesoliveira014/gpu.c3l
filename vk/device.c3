@@ -36,7 +36,21 @@ struct VkDeviceState {
     // frame_timeline at exactly one signal per frame so retire_timeline_value
     // stays correct.
     vk::Semaphore              aux_timeline;
+    // Blocking-helper completions signal here, turnstiled, never
+    // frame_timeline — so one helper's completion can never retire another
+    // helper's or an unsubmitted list's resources (gpu.c3l#80).
+    vk::Semaphore              helper_timeline;
     Atomic{ulong}              timeline_counter;
+    // Next helper reservation value; mutated only under transfer_mutex.
+    ulong                      helper_counter;
+    // Set unconditionally by vk_submit (in-frame or off-frame) so end_frame's
+    // cross-queue chain also waits queues used purely off-frame.
+    bool                       compute_used_since_frame;
+    bool                       transfer_used_since_frame;
+    // True while a submission outside a frame bracket has not yet been
+    // covered by an end_frame chain or teardown; retire_timeline_value
+    // defers destroys while this holds (gpu.c3l#80).
+    Atomic{bool}               off_frame_pending;
     // Lock order: transfer_mutex -> resource_mutex -> queue mutexes.
     Mutex                      resource_mutex;
     Mutex                      transfer_mutex;
