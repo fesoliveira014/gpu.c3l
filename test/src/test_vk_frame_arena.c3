@@ -2,6 +2,7 @@ module gpu_test;
 
 import gpu;
 import gpu::vk;
+import vk;
 
 // Headless (lavapipe): frame upload arena bump allocation, reset across the
 // frame loop, ARENA_FULL, and the timeline-gated reset.
@@ -82,4 +83,30 @@ fn void custom_frame_arena_size_holds_larger_spans() @test {
     gpu::GpuSpan span = gpu::alloc_frame_span(&device, 20 << 20, 16)!!;
     assert(span.size == 20 << 20, "oversized span allocates in a custom-sized arena");
     gpu::end_frame(&device)!!;
+}
+
+fn void frame_upload_memory_is_coherent() @test {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .application_name  = "gpu_coherency_test",
+    };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::BufferDesc buf_desc = {
+        .size        = 256,
+        .usage       = { .storage, .addressable },
+        .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+        .debug_name  = "coherency_probe",
+    };
+    gpu::BufferHandle buf = gpu::create_buffer(&device, &buf_desc)!!;
+    defer gpu::destroy_buffer(&device, buf)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::BufferSlot* slot = state.buffers.get(buf)!!;
+    vk::MemoryPropertyFlags props = state.allocator.allocation_memory_properties(slot.allocation);
+    assert(((uint)props & (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT) != 0,
+        "frame-upload memory is host-coherent");
 }
