@@ -109,7 +109,7 @@ struct SamplerDesc {
     // Requires caps.max_sampler_anisotropy > 0 and max_anisotropy >= 1.
     bool        anisotropy_enable;
     // Must be >= 1 when anisotropy_enable is set (INVALID_ARGUMENT
-    // otherwise); clamped to caps.max_sampler_anisotropy above.
+    // otherwise); upper-bounded by caps.max_sampler_anisotropy.
     float       max_anisotropy;
     // With `compare`, enables depth-compare (shadow) sampling.
     bool        compare_enable;
