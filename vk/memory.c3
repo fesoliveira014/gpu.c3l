@@ -32,6 +32,10 @@ struct FrameArenaState {
     usz               size;
     Atomic{usz}       cursor;
     ulong             frame_timeline_value;
+    // Distinct-queue submits this frame; end_frame chains their completion
+    // into the frame value. Written under the owning queue's mutex.
+    bool              compute_used;
+    bool              transfer_used;
 }
 
 <* Create the frame timeline semaphore and one arena buffer per frame-in-flight.
@@ -121,6 +125,9 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
     foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
         if (!cell.used) continue;
         check(vk::reset_command_pool(state.device, cell.value.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+        if (cell.value.compute_pools_distinct) {
+            check(vk::reset_command_pool(state.device, cell.value.compute_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+        }
         check(vk::reset_command_pool(state.device, cell.value.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
     }
     state.allocator.set_current_frame_index(state.frame_index);
@@ -153,27 +160,76 @@ fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @
     }
 }
 
-<* The frame fence is a queue-ordered empty submit: the timeline reaches the
-   frame's value only after all prior graphics-queue work completes, so
-   begin_frame's wait actually covers the GPU (a host-side signal would let
-   command pools reset under in-flight buffers). Transfer-queue work is not
-   covered by this fence; transfer-heavy frames must synchronize explicitly. *>
+<* Queue-ordered empty submit signaling `value` on the frame timeline after
+   all prior work on `queue` completes. *>
+fn void? submit_timeline_signal(VkDeviceState* state, vk::Queue queue, Mutex* mutex, ulong value, vk::SemaphoreSubmitInfo[] wait_infos = {}) @private {
+    vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
+        .set_semaphore(state.frame_timeline)
+        .set_value(value)
+        .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+    vk::SubmitInfo2 submit = vk::submit_info2().set_signal_semaphore_infos((&signal)[:1]);
+    if (wait_infos.len > 0) submit = submit.set_wait_semaphore_infos(wait_infos);
+    mutex.lock()!!;
+    defer mutex.unlock();
+    return check(vk::queue_submit2(queue, 1, &submit, (vk::Fence)null));
+}
+
+<* The frame fence is a chain of queue-ordered empty submits: distinct
+   compute/transfer queues used this frame first signal auxiliary values,
+   then the graphics signal waits on those and signals the frame value — so
+   the frame value implies every queue's frame work completed and a
+   host-side wait on it safely retires arenas, pools, descriptors, and
+   tickets regardless of queue topology. *>
 fn void? vk_end_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
-    ulong frame_value = state.timeline_counter.add(1, AtomicOrdering.RELAXED) + 1;
+    uint aux_count = (uint)slot.compute_used + (uint)slot.transfer_used;
+    ulong base = state.timeline_counter.add((ulong)(aux_count + 1), AtomicOrdering.RELAXED) + 1;
+    ulong frame_value = base + aux_count;
     slot.frame_timeline_value = frame_value;
 
-    vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
-        .set_semaphore(state.frame_timeline)
-        .set_value(frame_value)
-        .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
-    vk::SubmitInfo2 submit = vk::submit_info2().set_signal_semaphore_infos((&signal)[:1]);
-    state.graphics_queue_mutex.lock()!!;
-    defer state.graphics_queue_mutex.unlock();
-    check(vk::queue_submit2(state.graphics_queue, 1, &submit, (vk::Fence)null))!;
+    vk::SemaphoreSubmitInfo[2] waits;
+    uint wait_count = 0;
+    ulong aux_value = base;
+    if (slot.compute_used) {
+        submit_timeline_signal(
+            state: state,
+            queue: state.compute_queue,
+            mutex: &state.compute_queue_mutex,
+            value: aux_value,
+        )!;
+        waits[wait_count++] = vk::semaphore_submit_info()
+            .set_semaphore(state.frame_timeline)
+            .set_value(aux_value)
+            .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+        aux_value++;
+    }
+    if (slot.transfer_used) {
+        Mutex* transfer_mutex = state.transfer_queue == state.graphics_queue ? &state.graphics_queue_mutex : &state.transfer_queue_mutex;
+        submit_timeline_signal(
+            state: state,
+            queue: state.transfer_queue,
+            mutex: transfer_mutex,
+            value: aux_value,
+        )!;
+        waits[wait_count++] = vk::semaphore_submit_info()
+            .set_semaphore(state.frame_timeline)
+            .set_value(aux_value)
+            .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+        aux_value++;
+    }
+    slot.compute_used = false;
+    slot.transfer_used = false;
+
+    submit_timeline_signal(
+        state:      state,
+        queue:      state.graphics_queue,
+        mutex:      &state.graphics_queue_mutex,
+        value:      frame_value,
+        wait_infos: waits[:wait_count],
+    )!;
     state.frame_active = false;
 }
 

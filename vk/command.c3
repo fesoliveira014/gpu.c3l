@@ -11,7 +11,11 @@ const uint RECORDING_CONTEXT_FREE_NONE = 0;
 
 struct RecordingContextState {
     vk::CommandPool[] graphics_pools;
+    // Aliases graphics_pools when the compute queue shares the graphics
+    // family; owned storage only when distinct (compute_pools_distinct).
+    vk::CommandPool[] compute_pools;
     vk::CommandPool[] transfer_pools;
+    bool              compute_pools_distinct;
 }
 
 struct RecordingContextCell {
@@ -66,17 +70,29 @@ fn void? RecordingContextTable.free(&self, gpu::RecordingContextHandle h) {
 fn void? create_context_pools(VkDeviceState* state, RecordingContextState* context) {
     context.graphics_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
     context.transfer_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+    context.compute_pools_distinct = state.compute_family != state.graphics_family;
+    if (context.compute_pools_distinct) {
+        context.compute_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+    }
     for (uint i = 0; i < state.frames_in_flight; i++) {
         vk::CommandPoolCreateInfo gfx = vk::command_pool_create_info()
             .set_queue_family_index(state.graphics_family)
             .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
         check(vk::create_command_pool(state.device, &gfx, null, &context.graphics_pools[i]))!;
 
+        if (context.compute_pools_distinct) {
+            vk::CommandPoolCreateInfo comp = vk::command_pool_create_info()
+                .set_queue_family_index(state.compute_family)
+                .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
+            check(vk::create_command_pool(state.device, &comp, null, &context.compute_pools[i]))!;
+        }
+
         vk::CommandPoolCreateInfo xfer = vk::command_pool_create_info()
             .set_queue_family_index(state.transfer_family)
             .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
         check(vk::create_command_pool(state.device, &xfer, null, &context.transfer_pools[i]))!;
     }
+    if (!context.compute_pools_distinct) context.compute_pools = context.graphics_pools;
 }
 
 fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* context) {
@@ -87,6 +103,13 @@ fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* conte
         mem::free(context.graphics_pools.ptr);
         context.graphics_pools = {};
     }
+    if (context.compute_pools_distinct && context.compute_pools.ptr != null) {
+        foreach (pool : context.compute_pools) {
+            if (pool != null) vk::destroy_command_pool(state.device, pool, null);
+        }
+        mem::free(context.compute_pools.ptr);
+    }
+    context.compute_pools = {};
     if (context.transfer_pools.ptr != null) {
         foreach (pool : context.transfer_pools) {
             if (pool != null) vk::destroy_command_pool(state.device, pool, null);
@@ -125,15 +148,22 @@ fn void? vk_destroy_recording_context(gpu::Device* device, gpu::RecordingContext
     state.recording_contexts.free(handle)!;
 }
 
+<* The pool whose family matches the queue the list will submit to. *>
+fn vk::CommandPool pool_for(RecordingContextState* context, gpu::QueueKind queue, uint frame_index) {
+    switch (queue) {
+        case gpu::QueueKind.TRANSFER: return context.transfer_pools[frame_index];
+        case gpu::QueueKind.COMPUTE:  return context.compute_pools[frame_index];
+        default:                      return context.graphics_pools[frame_index];
+    }
+}
+
 fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::RecordingContextHandle ctx, gpu::CommandList* out_commands) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
     gpu::RecordingContextHandle resolved = ctx.is_valid() ? ctx : state.default_context;
     RecordingContextState* context = state.recording_contexts.get(resolved)!;
-    vk::CommandPool pool = queue == gpu::QueueKind.TRANSFER
-        ? context.transfer_pools[state.frame_index]
-        : context.graphics_pools[state.frame_index];
+    vk::CommandPool pool = pool_for(context, queue, state.frame_index);
 
     vk::CommandBufferAllocateInfo alloc = vk::command_buffer_allocate_info()
         .set_command_pool(pool)
