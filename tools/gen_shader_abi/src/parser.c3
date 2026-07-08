@@ -77,6 +77,7 @@ fn void? Parser.parse_const(&self, Schema* schema, TypeTable* types) {
         return PARSE_ERROR~;
     }
     Token name = self.expect_name("constant name")!;
+    validate_glsl_name(name.text, name.loc)!;
     self.expect(TokenKind.EQUALS, "'='")!;
     bool negative = false;
     if (self.peek().kind == TokenKind.MINUS) {
@@ -99,6 +100,7 @@ fn void? Parser.parse_const(&self, Schema* schema, TypeTable* types) {
 fn void? Parser.parse_typedecl(&self, Schema* schema, TypeTable* types) {
     self.advance();
     Token name = self.expect_name("type name")!;
+    validate_glsl_name(name.text, name.loc)!;
     self.expect(TokenKind.COLON, "':'")!;
     Token base = self.expect(TokenKind.IDENT, "base scalar type")!;
     self.expect(TokenKind.SEMICOLON, "';'")!;
@@ -125,6 +127,7 @@ fn void? Parser.parse_struct(&self, Schema* schema, TypeTable* types, DeclKind k
 
 fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclKind kind) {
     Token name = self.expect_name("struct name")!;
+    validate_glsl_name(name.text, name.loc)!;
     types.declare(name.text, name.loc)!;
     self.expect(TokenKind.LBRACE, "'{'")!;
     StructDecl decl = { .kind = kind, .name = name.text, .loc = name.loc };
@@ -137,6 +140,7 @@ fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclK
             return PARSE_ERROR~;
         }
         Token field_name = self.expect_name("field name")!;
+        validate_glsl_name(field_name.text, field_name.loc)!;
         if (self.peek().kind == TokenKind.LBRACKET) {
             diagnostic(self.peek().loc, "fixed-size array fields are not supported");
             return PARSE_ERROR~;
