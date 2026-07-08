@@ -120,11 +120,11 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         stages[0] = vk::pipeline_shader_stage_create_info()
             .set_stage(vk::ShaderStageFlagBits.VERTEX_BIT)
             .set_mod(vertex_shader.shader_module)
-            .set_name(vertex_shader.entry_point);
+            .set_name(&vertex_shader.entry_point[0]);
         stages[1] = vk::pipeline_shader_stage_create_info()
             .set_stage(vk::ShaderStageFlagBits.FRAGMENT_BIT)
             .set_mod(fragment_shader.shader_module)
-            .set_name(fragment_shader.entry_point);
+            .set_name(&fragment_shader.entry_point[0]);
 
         vk::PipelineRenderingCreateInfo rendering_info = vk::pipeline_rendering_create_info();
         rendering_info.color_attachment_count = (uint)color_formats.len;

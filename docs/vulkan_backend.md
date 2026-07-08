@@ -287,8 +287,8 @@ set debug names
 Reflection validation checks:
 
 ```text
-entry point exists
-expected push constant range exists
+entry point exists and matches the declared stage
+push constant blocks fit the stage's root-push range
 unexpected descriptor sets are rejected
 descriptor heap bindings match convention
 ```
