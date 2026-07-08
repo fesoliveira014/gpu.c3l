@@ -103,7 +103,7 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     pipe_info.stage = vk::pipeline_shader_stage_create_info()
         .set_stage(vk::ShaderStageFlagBits.COMPUTE_BIT)
         .set_mod(shader.shader_module)
-        .set_name(shader.entry_point);
+        .set_name(&shader.entry_point[0]);
     pipe_info.layout = layout;
     if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER) {
         pipe_info.flags = vk::PipelineCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT;

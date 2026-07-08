@@ -394,9 +394,8 @@ Reflection should validate the convention, not define it.
 Checks:
 
 ```text
-entry point exists
-push constant size matches expected struct
-push constant offset for root pointer is zero
+entry point exists and matches the declared stage
+push constant blocks fit the stage's root-push range
 descriptor heap set/binding matches backend convention
 shader stages use explicit locations
 required capabilities are present
