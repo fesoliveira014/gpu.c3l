@@ -4,6 +4,7 @@ import gpu;
 import vk;
 import vma;
 import std::thread;
+import std::io;
 
 // Concrete (non-generic) slot table for semaphores. Monomorphized twin of
 // gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
@@ -90,13 +91,68 @@ fn void? vk_cmd_global_barrier(gpu::CommandList* commands, gpu::GlobalBarrier* b
     vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
 }
 
-<* Whole-image barrier; a barrier whose old_layout disagrees with the tracked
-   layout faults INVALID_RESOURCE_STATE. *>
+<* Record-time layout for `tex` on `list`: its own pending transition if it
+   has recorded one, else the committed tracked layout. *>
+fn gpu::TextureLayout effective_layout(gpu::CommandList* list, TextureSlot* slot, gpu::TextureHandle tex) @private {
+    for (uint i = 0; i < list.pending_layout_count; i++) {
+        if ((ulong)list.pending_layouts[i].texture == (ulong)tex) return list.pending_layouts[i].latest;
+    }
+    return texture_layout(slot);
+}
+
+<* Record or update `list`'s pending transition for `tex`. Faults once
+   PENDING_LAYOUT_CAP distinct textures are tracked on one list. *>
+fn void? record_pending_layout(gpu::CommandList* list, gpu::TextureHandle tex, gpu::TextureLayout old_layout, gpu::TextureLayout new_layout) @private {
+    for (uint i = 0; i < list.pending_layout_count; i++) {
+        if ((ulong)list.pending_layouts[i].texture == (ulong)tex) {
+            list.pending_layouts[i].latest = new_layout;
+            return;
+        }
+    }
+    if (list.pending_layout_count == gpu::PENDING_LAYOUT_CAP) return gpu::INVALID_ARGUMENT~;
+    list.pending_layouts[list.pending_layout_count] = { .texture = tex, .first_old = old_layout, .latest = new_layout };
+    list.pending_layout_count++;
+}
+
+<* Replay a submitted list's pending transitions onto tracked state, in
+   record order; called under the queue mutex once queue_submit2 succeeds.
+   Best-effort drift check: a mismatch against the layout seen at record time
+   means a concurrent recorder raced this texture; only validation logs it,
+   matching today's relaxed-atomic looseness. *>
+fn void commit_pending_layouts(VkDeviceState* state, gpu::CommandList* list) @private {
+    for (uint i = 0; i < list.pending_layout_count; i++) {
+        gpu::PendingLayout* entry = &list.pending_layouts[i];
+        if (try slot = state.textures.get(entry.texture)) {
+            if (state.validation && texture_layout(slot) != entry.first_old) {
+                io::eprintfn(
+                    "gpu: texture layout drift at commit (texture index %d): expected %d, observed %d",
+                    entry.texture.index, (int)entry.first_old, (int)texture_layout(slot),
+                );
+            }
+            set_texture_layout(slot, entry.latest);
+        }
+    }
+    list.pending_layout_count = 0;
+}
+
+<* Whole-image barrier; a barrier whose old_layout disagrees with the
+   effective layout (this list's own pending transition, else the tracked
+   layout) faults INVALID_RESOURCE_STATE. The transition is recorded as
+   pending, not committed until the list submits. *>
 fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier* barrier) @private {
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TextureSlot* slot = state.textures.get(barrier.texture)!;
-    if (barrier.old_layout != texture_layout(slot)) return gpu::INVALID_RESOURCE_STATE~;
+    if (barrier.old_layout != effective_layout(commands, slot, barrier.texture)) return gpu::INVALID_RESOURCE_STATE~;
+    // Recorded before the GPU-visible barrier: an overflow fault must not
+    // leave a transition baked into the command buffer that our bookkeeping
+    // never tracked.
+    record_pending_layout(
+        list:       commands,
+        tex:        barrier.texture,
+        old_layout: barrier.old_layout,
+        new_layout: barrier.new_layout,
+    )!;
 
     vk::ImageMemoryBarrier2 bar = vk::image_memory_barrier2()
         .set_src_stage_mask(stage_to_vk(barrier.before_stage))
@@ -118,7 +174,6 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
 
     vk::DependencyInfo dep = vk::dependency_info().set_image_memory_barriers((&bar)[:1]);
     vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
-    set_texture_layout(slot, barrier.new_layout);
 }
 
 fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::SemaphoreDesc* desc) @private {

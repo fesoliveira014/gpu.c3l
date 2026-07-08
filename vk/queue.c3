@@ -170,7 +170,12 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
             if (kind == gpu::QueueKind.COMPUTE && state.compute_queue_distinct) frame_slot.compute_used = true;
             if (kind == gpu::QueueKind.TRANSFER && state.transfer_queue != state.graphics_queue) frame_slot.transfer_used = true;
         }
-        foreach (&cl : desc.command_lists) cl.state = gpu::CommandState.SUBMITTED;
+        // Commit each list's pending texture-layout transitions in submission
+        // order, still under the queue mutex, now that the GPU work is queued.
+        foreach (&cl : desc.command_lists) {
+            commit_pending_layouts(state, cl);
+            cl.state = gpu::CommandState.SUBMITTED;
+        }
     };
 }
 

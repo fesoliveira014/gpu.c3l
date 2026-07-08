@@ -27,6 +27,10 @@ enum CommandState : int {
 
 const uint MAX_RECORDING_CONTEXTS = 16;
 
+// Distinct textures one list can carry a pending layout transition for
+// before recording faults INVALID_ARGUMENT.
+const uint PENDING_LAYOUT_CAP = 16;
+
 <* Unsigned 3-vector; dispatches take their workgroup counts as one. *>
 struct Vec3u {
     uint x;
@@ -102,6 +106,15 @@ struct RenderPassDesc {
     uint              height;
 }
 
+<* One texture's recorded-but-uncommitted layout transition: `first_old` is
+   the layout seen the first time this list touched the texture (the commit-
+   time drift check), `latest` is what record-time reads see. *>
+struct PendingLayout {
+    TextureHandle texture;
+    TextureLayout first_old;
+    TextureLayout latest;
+}
+
 // A recording session. Backend-opaque: the backend command buffer lives behind
 // `backend`. Carries its owning Device* so cmd_* reach the vtable without a
 // Device parameter.
@@ -113,6 +126,11 @@ struct CommandList {
     // Backend redundant-bind tracking; callers must not touch.
     PipelineHandle last_pipeline;
     uint           last_entry;
+    // Pending texture-layout transitions recorded on this list; replayed onto
+    // tracked state at submit, dropped if the list is never submitted.
+    // Callers must not touch.
+    PendingLayout[PENDING_LAYOUT_CAP] pending_layouts;
+    uint                              pending_layout_count;
 }
 
 <* Byte-range copy for cmd_copy_buffer; src and dst ranges must not overlap. *>
@@ -197,14 +215,14 @@ fn void? cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset,
     return commands.device.vtable.cmd_fill_buffer(commands, buffer, offset, size, value);
 }
 
-<* The texture's tracked layout must be TRANSFER_DST; the caller records the
-   surrounding barriers. *>
+<* The texture's effective layout must be TRANSFER_DST; the caller records
+   the surrounding barriers. *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_copy_buffer_to_texture(commands, desc);
 }
 
-<* The texture's tracked layout must be TRANSFER_SRC. *>
+<* The texture's effective layout must be TRANSFER_SRC. *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_copy_texture_to_buffer(commands, desc);
