@@ -128,8 +128,10 @@ struct TextureUploadDesc {
     uint          height;
 }
 
-<* Allocate a long-lived span from the persistent arena. Its GPU address is
-   stable until freed. Ownership: free with free_persistent_span. *>
+<* Allocate a long-lived span from the persistent arena. `size` must be
+   nonzero; `align` 0 means no requirement, otherwise a power of two
+   (INVALID_ARGUMENT). Its GPU address is stable until freed. Ownership: free
+   with free_persistent_span. *>
 fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.alloc_persistent_span(device, desc);

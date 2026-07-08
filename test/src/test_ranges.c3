@@ -34,3 +34,15 @@ fn void subspan_null_cpu() @test {
     assert(sub.cpu == null, "null cpu pointer stays null");
     assert((ulong)sub.gpu == 0x2010, "gpu address still advances");
 }
+
+fn void pow2_and_range_helpers() @test {
+    assert(gpu::is_pow2(1) && gpu::is_pow2(16) && gpu::is_pow2(4096), "powers of two accepted");
+    assert(!gpu::is_pow2(0) && !gpu::is_pow2(3) && !gpu::is_pow2(48), "zero and non-powers rejected");
+
+    assert(gpu::range_fits(256, 0, 256), "exact fit passes");
+    assert(gpu::range_fits(256, 256, 0), "to-end at limit passes offset check");
+    assert(!gpu::range_fits(256, 257, 0), "offset past limit fails");
+    assert(!gpu::range_fits(256, 0, 257), "oversized fails");
+    assert(!gpu::range_fits(256, 200, usz::max), "overflowing size fails");
+    assert(gpu::range_fits(256, 255, 1), "last byte fits");
+}

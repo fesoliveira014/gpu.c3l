@@ -223,6 +223,7 @@ fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer
     // whole-buffer convention (translated to WHOLE_SIZE below).
     if (offset % 4 != 0 || size % 4 != 0) return gpu::INVALID_ARGUMENT~;
     if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
+    if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize fill_size = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
     vk::cmd_fill_buffer((vk::CommandBuffer)commands.backend, slot.buffer, (vk::DeviceSize)offset, fill_size, value);
 }

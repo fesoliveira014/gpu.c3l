@@ -103,6 +103,8 @@ fn void range_and_alignment_validation() @test {
     gpu::BufferCopyDesc overlap = { .src = buf, .dst = buf, .src_offset = 0, .dst_offset = 32, .size = 64 };
     fault f11 = @catch(gpu::cmd_copy_buffer(&cmd, &overlap));
     assert(f11 == gpu::INVALID_ARGUMENT, "overlapping same-buffer copy faults");
+    gpu::BufferCopyDesc touching = { .src = buf, .dst = buf, .src_offset = 0, .dst_offset = 64, .size = 64 };
+    gpu::cmd_copy_buffer(&cmd, &touching)!!;
     gpu::BufferCopyDesc disjoint = { .src = buf, .dst = buf, .src_offset = 0, .dst_offset = 128, .size = 64 };
     gpu::cmd_copy_buffer(&cmd, &disjoint)!!;
     gpu::end_commands(&device, &cmd)!!;

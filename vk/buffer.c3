@@ -186,6 +186,8 @@ fn void? vk_flush_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offs
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     BufferSlot* slot = state.buffers.get(handle)!;
     if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
+    // WHOLE_SIZE requires offset strictly inside the buffer.
+    if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
     check(state.allocator.flush_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
 }
@@ -194,6 +196,7 @@ fn void? vk_invalidate_buffer(gpu::Device* device, gpu::BufferHandle handle, usz
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     BufferSlot* slot = state.buffers.get(handle)!;
     if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
+    if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
     check(state.allocator.invalidate_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
 }
