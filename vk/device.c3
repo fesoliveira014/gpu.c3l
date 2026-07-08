@@ -32,6 +32,10 @@ struct VkDeviceState {
     bool                       presentation_enabled;
     BufferTable                buffers;
     vk::Semaphore              frame_timeline;
+    // Auxiliary timeline for end_frame's cross-queue chain; keeps
+    // frame_timeline at exactly one signal per frame so retire_timeline_value
+    // stays correct.
+    vk::Semaphore              aux_timeline;
     Atomic{ulong}              timeline_counter;
     // Lock order: transfer_mutex -> resource_mutex -> queue mutexes.
     Mutex                      resource_mutex;

@@ -50,6 +50,7 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
         .set_initial_value(0);
     vk::SemaphoreCreateInfo semaphore_info = vk::semaphore_create_info().set_next(&type_info);
     check(vk::create_semaphore(state.device, &semaphore_info, null, &state.frame_timeline))!;
+    check(vk::create_semaphore(state.device, &semaphore_info, null, &state.aux_timeline))!;
 
     usz frame_arena_size = desc.frame_arena_size == 0 ? gpu::DEFAULT_FRAME_ARENA_SIZE : desc.frame_arena_size;
     state.frame_arenas = mem::new_array(FrameArenaState, state.frames_in_flight);
@@ -77,6 +78,10 @@ fn void destroy_frame_resources(VkDeviceState* state) @private {
     if (state.frame_arenas.ptr != null) {
         mem::free(state.frame_arenas.ptr);
         state.frame_arenas = {};
+    }
+    if (state.aux_timeline != null) {
+        vk::destroy_semaphore(state.device, state.aux_timeline, null);
+        state.aux_timeline = (vk::Semaphore)null;
     }
     if (state.frame_timeline != null) {
         vk::destroy_semaphore(state.device, state.frame_timeline, null);
@@ -160,11 +165,11 @@ fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @
     }
 }
 
-<* Queue-ordered empty submit signaling `value` on the frame timeline after
-   all prior work on `queue` completes. *>
-fn void? submit_timeline_signal(VkDeviceState* state, vk::Queue queue, Mutex* mutex, ulong value, vk::SemaphoreSubmitInfo[] wait_infos = {}) @private {
+<* Queue-ordered empty submit signaling `value` on `semaphore` after all
+   prior work on `queue` completes. *>
+fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, vk::Queue queue, Mutex* mutex, ulong value, vk::SemaphoreSubmitInfo[] wait_infos = {}) @private {
     vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
-        .set_semaphore(state.frame_timeline)
+        .set_semaphore(semaphore)
         .set_value(value)
         .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
     vk::SubmitInfo2 submit = vk::submit_info2().set_signal_semaphore_infos((&signal)[:1]);
@@ -185,23 +190,25 @@ fn void? vk_end_frame(gpu::Device* device) @private {
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
-    uint aux_count = (uint)slot.compute_used + (uint)slot.transfer_used;
-    ulong base = state.timeline_counter.add((ulong)(aux_count + 1), AtomicOrdering.RELAXED) + 1;
-    ulong frame_value = base + aux_count;
+    // frame_timeline receives exactly one signal per frame (counter + 1),
+    // preserving retire_timeline_value's mid-frame contract; the cross-queue
+    // chain runs on aux_timeline.
+    ulong frame_value = state.timeline_counter.add(1, AtomicOrdering.RELAXED) + 1;
     slot.frame_timeline_value = frame_value;
 
     vk::SemaphoreSubmitInfo[2] waits;
     uint wait_count = 0;
-    ulong aux_value = base;
+    ulong aux_value = frame_value * 2;
     if (slot.compute_used) {
         submit_timeline_signal(
-            state: state,
-            queue: state.compute_queue,
-            mutex: &state.compute_queue_mutex,
-            value: aux_value,
+            state:     state,
+            semaphore: state.aux_timeline,
+            queue:     state.compute_queue,
+            mutex:     &state.compute_queue_mutex,
+            value:     aux_value,
         )!;
         waits[wait_count++] = vk::semaphore_submit_info()
-            .set_semaphore(state.frame_timeline)
+            .set_semaphore(state.aux_timeline)
             .set_value(aux_value)
             .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
         aux_value++;
@@ -209,13 +216,14 @@ fn void? vk_end_frame(gpu::Device* device) @private {
     if (slot.transfer_used) {
         Mutex* transfer_mutex = state.transfer_queue == state.graphics_queue ? &state.graphics_queue_mutex : &state.transfer_queue_mutex;
         submit_timeline_signal(
-            state: state,
-            queue: state.transfer_queue,
-            mutex: transfer_mutex,
-            value: aux_value,
+            state:     state,
+            semaphore: state.aux_timeline,
+            queue:     state.transfer_queue,
+            mutex:     transfer_mutex,
+            value:     aux_value,
         )!;
         waits[wait_count++] = vk::semaphore_submit_info()
-            .set_semaphore(state.frame_timeline)
+            .set_semaphore(state.aux_timeline)
             .set_value(aux_value)
             .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
         aux_value++;
@@ -225,6 +233,7 @@ fn void? vk_end_frame(gpu::Device* device) @private {
 
     submit_timeline_signal(
         state:      state,
+        semaphore:  state.frame_timeline,
         queue:      state.graphics_queue,
         mutex:      &state.graphics_queue_mutex,
         value:      frame_value,
