@@ -26,6 +26,8 @@ bitstruct BufferUsage : uint {
     bool shared_queues : 8;
 }
 
+// Creation parameters for create_buffer. `size` must be non-zero; `usage`
+// must include at least one access flag (shared_queues alone maps to none).
 struct BufferDesc {
     usz         size;
     BufferUsage usage;

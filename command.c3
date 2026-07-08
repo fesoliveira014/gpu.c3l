@@ -1,20 +1,23 @@
 module gpu;
 
-// Command-area descriptor types (render targets and copies). The command-list
-// recorder and submit descriptors depend on backend state and arrive with the
-// command milestone, not here.
+// Command recording: render-target and copy descriptors, the command-list
+// recorder, and recording contexts.
 
+<* What happens to an attachment's contents when a render pass begins. *>
 enum LoadOp : int {
     LOAD,
     CLEAR,
     DONT_CARE,
 }
 
+<* Whether an attachment's contents persist after the render pass ends. *>
 enum StoreOp : int {
     STORE,
     DONT_CARE,
 }
 
+<* CommandList lifecycle: RECORDING from begin_commands, RECORDING_RENDER_PASS
+   inside a pass, EXECUTABLE after end_commands, SUBMITTED after submit. *>
 enum CommandState : int {
     RECORDING,
     RECORDING_RENDER_PASS,
@@ -24,6 +27,7 @@ enum CommandState : int {
 
 const uint MAX_RECORDING_CONTEXTS = 16;
 
+<* Unsigned 3-vector; dispatches take their workgroup counts as one. *>
 struct Vec3u {
     uint x;
     uint y;
@@ -40,6 +44,7 @@ struct DrawIndirectCommand {
 }
 $assert DrawIndirectCommand::size == 16;
 
+<* Arguments for the indexed indirect draws; Vulkan layout, shader-writable. *>
 struct DrawIndexedIndirectCommand {
     uint index_count;
     uint instance_count;
@@ -49,6 +54,7 @@ struct DrawIndexedIndirectCommand {
 }
 $assert DrawIndexedIndirectCommand::size == 20;
 
+<* Workgroup counts for cmd_dispatch_indirect; Vulkan layout, shader-writable. *>
 struct DispatchIndirectCommand {
     uint x;
     uint y;
@@ -56,15 +62,19 @@ struct DispatchIndirectCommand {
 }
 $assert DispatchIndirectCommand::size == 12;
 
+<* Color clear value; rgba is interpreted in the target's format. *>
 struct ClearColor {
     float[4] rgba;
 }
 
+<* Depth/stencil clear value; depth in [0, 1]. *>
 struct ClearDepthStencil {
     float depth;
     uint  stencil;
 }
 
+<* One color attachment of a render pass: a single mip/layer of the texture.
+   `clear` applies only with LoadOp.CLEAR. *>
 struct ColorTargetDesc {
     TextureHandle texture;
     uint          mip_level;
@@ -74,6 +84,7 @@ struct ColorTargetDesc {
     ClearColor    clear;
 }
 
+<* Depth attachment of a render pass; `clear` applies only with LoadOp.CLEAR. *>
 struct DepthTargetDesc {
     TextureHandle     texture;
     LoadOp            load_op;
@@ -81,8 +92,11 @@ struct DepthTargetDesc {
     ClearDepthStencil clear;
 }
 
+<* A dynamic-rendering pass. width/height set the render area and every
+   attachment must cover it. *>
 struct RenderPassDesc {
     ColorTargetDesc[] colors;
+    // Null means no depth attachment.
     DepthTargetDesc*  depth;
     uint              width;
     uint              height;
@@ -101,6 +115,7 @@ struct CommandList {
     uint           last_entry;
 }
 
+<* Byte-range copy for cmd_copy_buffer; src and dst ranges must not overlap. *>
 struct BufferCopyDesc {
     BufferHandle src;
     BufferHandle dst;
@@ -125,6 +140,8 @@ struct BufferTextureCopyDesc {
     uint          height;
 }
 
+<* Texture-to-buffer readback region; same zero-value defaults as
+   BufferTextureCopyDesc. *>
 struct TextureBufferCopyDesc {
     TextureHandle texture;
     GpuSpan       dst;

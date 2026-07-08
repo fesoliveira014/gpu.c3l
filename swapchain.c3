@@ -2,36 +2,47 @@ module gpu;
 
 const uint MAX_SWAPCHAINS = 8;
 
+<* Windowing system that owns the native handles in SurfaceDesc. *>
 enum PlatformKind : int {
     WAYLAND,
     X11,
     WIN32,
 }
 
+<* Pacing of presentation; unsupported requested modes fall back to FIFO. *>
 enum PresentMode : int {
+    // Vsync; always available.
     FIFO,
+    // No vsync; may tear.
     IMMEDIATE,
+    // Low-latency vsync; may drop frames.
     MAILBOX,
 }
 
+<* Present modes a swapchain's surface supports, from get_present_mode_support. *>
 bitstruct PresentModeSupport : uint {
     bool fifo;
     bool immediate;
     bool mailbox;
 }
 
+<* Native window-system handles; meaning follows `platform`: wl_display/wl_surface
+   (WAYLAND), Display*/Window (X11), HINSTANCE/HWND (WIN32). *>
 struct SurfaceDesc {
     PlatformKind platform;
     void*        native_display;
     void*        native_window;
 }
 
+<* Creation parameters for create_swapchain. *>
 struct SwapchainDesc {
     uint        width;
     uint        height;
     Format      preferred_format;
     PresentMode present_mode;
+    // 0 means backend default.
     uint        image_count;
+    // Selects sRGB over UNORM encoding for the swapchain format.
     bool        srgb;
     ZString     debug_name;
 }
@@ -44,6 +55,7 @@ struct AcquiredImage {
     bool          suboptimal;
 }
 
+<* Parameters for present; targets the swapchain's most recently acquired image. *>
 struct PresentDesc {
     SwapchainHandle swapchain;
 }
