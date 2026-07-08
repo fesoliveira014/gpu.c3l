@@ -9,7 +9,7 @@
     "unit": {
       "type": "test",
       "sources": [
-        "src/token.c3", "src/lexer.c3", "src/ast.c3", "src/parser.c3",
+        "src/token.c3", "src/lexer.c3", "src/ast.c3", "src/parser.c3", "src/glsl_names.c3",
         "src/layout.c3", "src/emit_c3.c3", "src/emit_glsl.c3", "src/faults.c3",
         "src/cli.c3", "test/**"
       ]

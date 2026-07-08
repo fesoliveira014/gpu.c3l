@@ -457,10 +457,10 @@ material = material_table[material_index]
 base_color = sample_texture_2d(material.albedo_texture, material.heap_sampler, uv)
 ```
 
-Field names are emitted into GLSL verbatim, so they must not collide with
-GLSL reserved words — a field named `sampler` breaks every consumer shader
-(gpu.c3l#26 tracks generator-side diagnosis; until then, rename, e.g.
-`heap_sampler`).
+Schema identifiers are emitted into GLSL verbatim, so the generator rejects
+any declaration, field, type, or constant name that collides with a GLSL
+reserved word or builtin type name — diagnosed at the schema line with a
+rename suggestion (e.g. `sampler` → `heap_sampler`).
 
 ## 17. ABI acceptance criteria
 

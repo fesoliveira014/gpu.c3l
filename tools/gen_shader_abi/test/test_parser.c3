@@ -155,3 +155,65 @@ fn void semantic_type_registers() @test {
     assert(info.kind == TypeKind.SEMANTIC);
     assert(info.glsl_name == "uint");
 }
+
+fn void glsl_reserved_names_rejected() @test {
+    // Field name colliding with a GLSL keyword.
+    @expect_fault(`
+        abi t;
+        root R {
+            SamplerIndex sampler;
+            uint _pad0;
+            uint _pad1;
+            uint _pad2;
+        }
+    `, PARSE_ERROR);
+    // Field name colliding with a builtin vector type.
+    @expect_fault(`
+        abi t;
+        root R {
+            uint vec2;
+            uint _pad0;
+            uint _pad1;
+            uint _pad2;
+        }
+    `, PARSE_ERROR);
+    // Declaration name colliding with a keyword.
+    @expect_fault(`
+        abi t;
+        struct layout {
+            uint value;
+            uint _pad0;
+            uint _pad1;
+            uint _pad2;
+        }
+    `, PARSE_ERROR);
+    // Constant name colliding with a builtin type.
+    @expect_fault(`
+        abi t;
+        const uint sampler2D = 1;
+    `, PARSE_ERROR);
+    // Semantic type name colliding with a keyword.
+    @expect_fault(`
+        abi t;
+        type buffer : uint;
+    `, PARSE_ERROR);
+}
+
+fn void non_reserved_names_still_accepted() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        root R {
+            SamplerIndex heap_sampler;
+            uint sampler_count;
+            uint _pad0;
+            uint _pad1;
+        }
+    `, &schema, &types)!!;
+    assert(schema.structs.get_ref(0).fields.get_ref(0).name == "heap_sampler");
+}
