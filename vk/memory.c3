@@ -11,6 +11,12 @@ import std::collections::map;
 
 alias PersistentAllocMap = HashMap{usz, vma::VirtualAllocation};
 
+// vertex stays out (unimplemented interop); shared_queues stays out (the
+// arena is single-queue-consumed today).
+const gpu::BufferUsage PERSISTENT_ARENA_USAGE = {
+    .transfer_src, .transfer_dst, .uniform, .storage, .addressable, .indirect, .index,
+};
+
 // One persistent arena per device: a large addressable buffer suballocated by a
 // VMA virtual block. `live` maps each allocation's offset to its virtual
 // allocation handle so a span can be freed by offset.
@@ -251,7 +257,7 @@ fn void? create_persistent_arena(VkDeviceState* state, gpu::DeviceDesc* device_d
     gpu::Device handle = { .backend = gpu::BackendKind.VULKAN, .vtable = &VK_VTABLE, .backend_state = (void*)state };
     gpu::BufferDesc desc = {
         .size        = arena_size,
-        .usage       = { .storage, .addressable },
+        .usage       = PERSISTENT_ARENA_USAGE,
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
         .debug_name  = "persistent_arena",
     };
@@ -289,6 +295,8 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
     // align 0 = no requirement (documented); anything else must be a power
     // of two (VMA virtual-alloc requirement).
     if (desc.align != 0 && !gpu::is_pow2(desc.align)) return gpu::INVALID_ARGUMENT~;
+    uint unsupported_usage = (uint)desc.usage & ~(uint)PERSISTENT_ARENA_USAGE;
+    if (unsupported_usage != 0) return gpu::INVALID_ARGUMENT~;
     PersistentArenaState* arena = &state.persistent_arena;
 
     vma::VirtualAllocationCreateInfo create_info = {
