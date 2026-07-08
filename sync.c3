@@ -5,6 +5,7 @@ typedef SemaphoreValue = ulong;
 
 const uint MAX_SEMAPHORES = 256;
 
+<* Pipeline stage for barrier before/after pairs and semaphore wait/signal points. *>
 enum Stage : int {
     HOST,
     TRANSFER,
@@ -17,6 +18,8 @@ enum Stage : int {
     PRESENT,
 }
 
+<* Memory access kind, paired with a Stage in barriers: before_* is the access
+   to make visible, after_* the access that waits on it. *>
 enum Hazard : int {
     HOST_WRITE,
     HOST_READ,
@@ -32,6 +35,7 @@ enum Hazard : int {
     PRESENT_READ,
 }
 
+<* Layout a texture must hold for a given use; transitioned via TextureBarrier. *>
 enum TextureLayout : int {
     UNDEFINED,
     GENERAL,
@@ -43,6 +47,7 @@ enum TextureLayout : int {
     PRESENT,
 }
 
+<* Orders before_* access against after_* access on a range of one buffer. *>
 struct BufferBarrier {
     BufferHandle buffer;
     usz          offset;
@@ -53,6 +58,8 @@ struct BufferBarrier {
     Hazard       after_hazard;
 }
 
+<* Orders access and transitions layout on a whole texture. `old_layout` must match
+   the texture's tracked layout or recording faults INVALID_RESOURCE_STATE. *>
 struct TextureBarrier {
     TextureHandle texture;
     Stage         before_stage;
@@ -63,6 +70,7 @@ struct TextureBarrier {
     TextureLayout new_layout;
 }
 
+<* Resource-agnostic barrier: orders all before_* access against all after_* access. *>
 struct GlobalBarrier {
     Stage  before_stage;
     Stage  after_stage;
@@ -70,17 +78,20 @@ struct GlobalBarrier {
     Hazard after_hazard;
 }
 
+<* Creation parameters for a timeline semaphore (monotonic 64-bit counter). *>
 struct SemaphoreDesc {
     SemaphoreValue initial_value;
     ZString        debug_name;
 }
 
+<* Blocks `stage` in a submit until the timeline reaches `value`. *>
 struct SemaphoreWait {
     SemaphoreHandle semaphore;
     SemaphoreValue  value;
     Stage           stage;
 }
 
+<* Sets the timeline to `value` once the submit's work clears `stage`. *>
 struct SemaphoreSignal {
     SemaphoreHandle semaphore;
     SemaphoreValue  value;

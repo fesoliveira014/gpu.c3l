@@ -82,6 +82,7 @@ alias AcquireNextImageFn      = fn AcquiredImage? (Device*, SwapchainHandle);
 alias PresentFn               = fn void? (Device*, PresentDesc*);
 alias GetPresentModeSupportFn = fn PresentModeSupport? (Device*, SwapchainHandle);
 
+// One static table per backend; Device.vtable points at it.
 struct BackendVTable {
     DestroyDeviceFn         destroy_device;
     GetMemoryStatsFn        get_memory_stats;

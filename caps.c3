@@ -1,12 +1,16 @@
 module gpu;
 
+<* Graphics API a device is created against. *>
 enum BackendKind : int {
     VULKAN,
 }
 
+<* Queue a command list records for and submits on. *>
 enum QueueKind : int {
     GRAPHICS,
+    // Its own queue only when caps.async_compute; otherwise aliases GRAPHICS.
     COMPUTE,
+    // May map to a dedicated transfer family.
     TRANSFER,
 }
 
@@ -17,6 +21,8 @@ enum DescriptorHeapMode : int {
     DESCRIPTOR_INDEXING,
 }
 
+<* Creation parameters for create_device; a zero-initialized desc works — every
+   zero field resolves to a backend default. *>
 struct DeviceDesc {
     BackendKind        backend;
     bool               enable_validation;
@@ -37,6 +43,8 @@ struct DeviceDesc {
     ZString            application_name;
 }
 
+<* Capabilities of the created device, filled by create_device into Device.caps;
+   query these instead of hardcoding limits. *>
 struct DeviceCaps {
     bool buffer_device_address;
     bool synchronization2;
@@ -52,5 +60,6 @@ struct DeviceCaps {
     usz  min_uniform_alignment;
     usz  min_storage_alignment;
     usz  min_texel_buffer_alignment;
+    // 0 means anisotropic filtering is unsupported.
     float max_sampler_anisotropy;
 }

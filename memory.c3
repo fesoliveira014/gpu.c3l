@@ -4,11 +4,17 @@ module gpu;
 // be confused with sizes, offsets, or handles.
 typedef GpuAddress = ulong;
 
+// Where a resource's memory lives and how the host may access it.
 enum MemoryKind : int {
+    // Per-frame upload arena; contents live for one frame.
     FRAME_UPLOAD,
+    // Host-visible with persistent lifetime; stable until freed.
     PERSISTENT_UPLOAD,
+    // GPU-only; not host-mappable.
     DEVICE,
+    // GPU-to-CPU readback; invalidate before reading.
     READBACK,
+    // Transfer sources for staged uploads.
     STAGING,
 }
 
@@ -80,6 +86,8 @@ fn void? end_frame(Device* device) {
     return device.vtable.end_frame(device);
 }
 
+// Request for a long-lived span from the persistent arena. `memory_kind` must
+// be PERSISTENT_UPLOAD; `align` 0 means no alignment requirement.
 struct PersistentAllocDesc {
     usz         size;
     usz         align;
@@ -88,6 +96,7 @@ struct PersistentAllocDesc {
     ZString     debug_name;
 }
 
+// Persistent-arena usage snapshot, returned by get_persistent_stats.
 struct PersistentArenaStats {
     ulong capacity_bytes;
     ulong used_bytes;

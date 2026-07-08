@@ -2,6 +2,7 @@ module gpu;
 
 const uint DEFAULT_TEXTURE_CAPACITY = 1024;
 
+<* Texel format for textures and swapchain images. *>
 enum Format : int {
     UNDEFINED,
     R8_UNORM,
@@ -23,6 +24,7 @@ enum Format : int {
     D24_UNORM_S8_UINT,
 }
 
+<* Texture dimensionality. *>
 enum TextureDimension : int {
     TEX_1D,
     TEX_2D,
@@ -30,11 +32,13 @@ enum TextureDimension : int {
     CUBE,
 }
 
+<* Sampler texel filtering. *>
 enum Filter : int {
     NEAREST,
     LINEAR,
 }
 
+<* How samplers treat coordinates outside [0, 1]. *>
 enum AddressMode : int {
     REPEAT,
     MIRRORED_REPEAT,
@@ -61,26 +65,34 @@ bitstruct TextureUsage : uint {
     bool shared_queues : 6;
 }
 
+<* Creation parameters for create_texture. *>
 struct TextureDesc {
     TextureDimension dimension;
     uint             width;
     uint             height;
     uint             depth;
+    // 0 means 1.
     uint             mip_levels;
+    // 0 means 1.
     uint             array_layers;
     Format           format;
     TextureUsage     usage;
     ZString          debug_name;
 }
 
+<* Subresource view of a texture; a zero-initialized desc is the full default view. *>
 struct TextureViewDesc {
+    // UNDEFINED means the texture's own format; reinterpretation is unsupported.
     Format format;
     uint   base_mip;
+    // 0 means all mips from base_mip.
     uint   mip_count;
     uint   base_layer;
+    // 0 means all layers from base_layer.
     uint   layer_count;
 }
 
+<* Creation parameters for create_sampler. *>
 struct SamplerDesc {
     Filter      min_filter;
     Filter      mag_filter;
@@ -91,8 +103,11 @@ struct SamplerDesc {
     float       mip_lod_bias;
     float       min_lod;
     float       max_lod;
+    // Requires caps.max_sampler_anisotropy > 0.
     bool        anisotropy_enable;
+    // Clamped to caps.max_sampler_anisotropy.
     float       max_anisotropy;
+    // With `compare`, enables depth-compare (shadow) sampling.
     bool        compare_enable;
     CompareOp   compare;
     ZString     debug_name;

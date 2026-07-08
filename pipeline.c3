@@ -4,18 +4,21 @@ const uint MAX_SHADERS           = 256;
 const uint MAX_PIPELINES         = 256;
 const uint MAX_COLOR_ATTACHMENTS = 8;
 
+<* Pipeline stage a shader module targets. *>
 enum ShaderStage : int {
     COMPUTE,
     VERTEX,
     FRAGMENT,
 }
 
+<* How draws assemble vertices into primitives. *>
 enum PrimitiveTopology : int {
     TRIANGLES,
     LINES,
     POINTS,
 }
 
+<* Comparison function for depth testing. *>
 enum CompareOp : int {
     NEVER,
     LESS,
@@ -27,22 +30,26 @@ enum CompareOp : int {
     ALWAYS,
 }
 
+<* Triangle facing discarded by the rasterizer. *>
 enum CullMode : int {
     NONE,
     FRONT,
     BACK,
 }
 
+<* Winding order that counts as front-facing. *>
 enum FrontFace : int {
     COUNTER_CLOCKWISE,
     CLOCKWISE,
 }
 
+<* Triangle rasterization: filled or wireframe. *>
 enum PolygonMode : int {
     FILL,
     LINE,
 }
 
+<* Multiplier for the source or destination term of the blend equation. *>
 enum BlendFactor : int {
     ZERO,
     ONE,
@@ -54,6 +61,7 @@ enum BlendFactor : int {
     ONE_MINUS_DST_ALPHA,
 }
 
+<* Operator combining the weighted source and destination blend terms. *>
 enum BlendOp : int {
     ADD,
     SUBTRACT,
@@ -62,33 +70,41 @@ enum BlendOp : int {
     MAX,
 }
 
+<* Element width of an index buffer; indexed draws default to U32. *>
 enum IndexType : int {
     U32,
     U16,
 }
 
+<* Inputs to create_shader; the SPIR-V bytes must match `stage`. *>
 struct ShaderDesc {
     ShaderStage stage;
     char[]      spirv;
+    // Null selects "main".
     ZString     entry_point;
     ZString     debug_name;
 }
 
+<* Depth test/write state; the zero value means depth off. *>
 struct DepthState {
     bool      test_enable;
     bool      write_enable;
     CompareOp compare;
 }
 
+<* Rasterizer state; cull_mode and front_face apply per handle at draw time. *>
 struct RasterState {
     CullMode    cull_mode;
     FrontFace   front_face;
     PolygonMode polygon_mode;
+    // Any non-zero bias field enables depth bias.
     float       depth_bias_constant;
     float       depth_bias_slope;
     float       depth_bias_clamp;
 }
 
+<* Blend equation, applied to every color target alike; disabled (the zero
+   value) writes source unmodified. *>
 struct BlendState {
     bool        enable;
     BlendFactor src_color;
@@ -99,12 +115,17 @@ struct BlendState {
     BlendOp     alpha_op;
 }
 
+<* Inputs to create_compute_pipeline; the layout is the global heap set plus
+   a push range of push_constant_size bytes. *>
 struct ComputePipelineDesc {
     ShaderHandle shader;
+    // At least the 8-byte root address (RootPush).
     uint         push_constant_size;
     ZString      debug_name;
 }
 
+<* Inputs to create_graphics_pipeline, targeting dynamic rendering. The layout
+   is fixed: the global heap set plus a 16-byte vertex/fragment root push range. *>
 struct GraphicsPipelineDesc {
     ShaderHandle      vertex_shader;
     ShaderHandle      fragment_shader;

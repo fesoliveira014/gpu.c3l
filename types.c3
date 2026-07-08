@@ -4,7 +4,9 @@ module gpu;
 // std430 vector alignment comes from explicit padding validated by the ABI
 // generator, not from these types).
 alias Vec2f = float[<2>];
+// Same shared-ABI rules as Vec2f.
 alias Vec4f = float[<4>];
+// Same shared-ABI rules as Vec2f.
 alias Vec4u = uint[<4>];
 $assert Vec2f::size == 8;
 $assert Vec4f::size == 16;
@@ -20,36 +22,42 @@ bitstruct BufferHandle : ulong {
     uint reserved   : 56..63;
 }
 
+// Same packing as BufferHandle.
 bitstruct TextureHandle : ulong {
     uint index      : 0..31;
     uint generation : 32..55;
     uint reserved   : 56..63;
 }
 
+// Same packing as BufferHandle.
 bitstruct PipelineHandle : ulong {
     uint index      : 0..31;
     uint generation : 32..55;
     uint reserved   : 56..63;
 }
 
+// Same packing as BufferHandle.
 bitstruct SemaphoreHandle : ulong {
     uint index      : 0..31;
     uint generation : 32..55;
     uint reserved   : 56..63;
 }
 
+// Same packing as BufferHandle.
 bitstruct SwapchainHandle : ulong {
     uint index      : 0..31;
     uint generation : 32..55;
     uint reserved   : 56..63;
 }
 
+// Same packing as BufferHandle.
 bitstruct ShaderHandle : ulong {
     uint index      : 0..31;
     uint generation : 32..55;
     uint reserved   : 56..63;
 }
 
+// Same packing as BufferHandle.
 bitstruct RecordingContextHandle : ulong {
     uint index      : 0..31;
     uint generation : 32..55;
@@ -65,6 +73,7 @@ bitstruct TextureIndex : uint {
     ushort generation : 16..31;
 }
 
+// Same packing as TextureIndex.
 bitstruct SamplerIndex : uint {
     ushort slot       : 0..15;
     ushort generation : 16..31;
