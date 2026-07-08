@@ -191,7 +191,7 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
     return commands.device.vtable.cmd_copy_buffer(commands, desc);
 }
 
-<* Record a 32-bit-pattern fill over [offset, offset + size); size passes through to the backend untouched. *>
+<* Record a 32-bit-pattern fill over [offset, offset + size); offset and size must be 4-byte multiples, size 0 fills to the end. *>
 fn void? cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset, usz size, uint value) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_fill_buffer(commands, buffer, offset, size, value);

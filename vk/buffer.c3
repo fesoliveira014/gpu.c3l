@@ -112,6 +112,7 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
 
+    if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
     // shared_queues maps to no Vulkan usage bit; a desc carrying only it
     // would emit usage == 0, which Vulkan forbids.
     if ((uint)buffer_usage_to_vk(desc.usage) == 0) return gpu::INVALID_ARGUMENT~;
@@ -184,6 +185,7 @@ fn gpu::GpuAddress? vk_get_buffer_address(gpu::Device* device, gpu::BufferHandle
 fn void? vk_flush_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offset, usz size) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     BufferSlot* slot = state.buffers.get(handle)!;
+    if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
     check(state.allocator.flush_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
 }
@@ -191,6 +193,7 @@ fn void? vk_flush_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offs
 fn void? vk_invalidate_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offset, usz size) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     BufferSlot* slot = state.buffers.get(handle)!;
+    if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
     check(state.allocator.invalidate_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
 }

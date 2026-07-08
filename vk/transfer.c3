@@ -186,7 +186,7 @@ fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst,
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     if (data.len == 0) return gpu::INVALID_ARGUMENT~;
     BufferSlot* dst_slot = state.buffers.get(dst)!;
-    if (offset + data.len > dst_slot.size) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::range_fits(dst_slot.size, offset, data.len)) return gpu::INVALID_ARGUMENT~;
 
     gpu::GpuSpan staging = staging_alloc(state, data.len, TRANSFER_ALIGN)!;
     mem::copy(staging.cpu, data.ptr, data.len);
@@ -314,7 +314,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     defer exit_tracked(state);
     if (out_data.len == 0) return gpu::INVALID_ARGUMENT~;
     BufferSlot* src_slot = state.buffers.get(src)!;
-    if (offset + out_data.len > src_slot.size) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::range_fits(src_slot.size, offset, out_data.len)) return gpu::INVALID_ARGUMENT~;
 
     gpu::GpuSpan readback = readback_alloc(state, out_data.len, TRANSFER_ALIGN)!;
 
@@ -520,7 +520,7 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     if (size == 0) return gpu::INVALID_ARGUMENT~;
     BufferSlot* src_slot = state.buffers.get(src)!;
-    if (offset + size > src_slot.size) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::range_fits(src_slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
 
     gpu::ReadbackTicket ticket = ticket_alloc(state, size)!;
     defer catch release_ticket(state, &ticket);

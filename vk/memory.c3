@@ -145,6 +145,8 @@ fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @
     enter_tracked(state);
     defer exit_tracked(state);
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
+    if (!gpu::is_pow2(align)) return gpu::INVALID_ARGUMENT~;
+    if (size == 0) return gpu::INVALID_ARGUMENT~;
 
     usz old = slot.cursor.load(AtomicOrdering.RELAXED);
     while (true) {
@@ -283,6 +285,10 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     if (desc.memory_kind != gpu::MemoryKind.PERSISTENT_UPLOAD) return gpu::INVALID_ARGUMENT~;
+    if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
+    // align 0 = no requirement (documented); anything else must be a power
+    // of two (VMA virtual-alloc requirement).
+    if (desc.align != 0 && !gpu::is_pow2(desc.align)) return gpu::INVALID_ARGUMENT~;
     PersistentArenaState* arena = &state.persistent_arena;
 
     vma::VirtualAllocationCreateInfo create_info = {
