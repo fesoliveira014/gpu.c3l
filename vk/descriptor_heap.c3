@@ -41,6 +41,24 @@ struct DescriptorRetireRing {
     uint                    count;
 }
 
+// Device limits governing the active heap mode. Indexing fields come from
+// PhysicalDeviceVulkan12Properties; buffer fields come from
+// PhysicalDeviceDescriptorBufferPropertiesEXT plus the computed layout size.
+struct HeapLimits {
+    uint           max_sampled_images;
+    uint           max_storage_images;
+    uint           max_samplers;
+    uint           max_per_stage_sampled_images;
+    uint           max_per_stage_storage_images;
+    uint           max_per_stage_samplers;
+    vk::DeviceSize max_resource_descriptor_buffer_range;
+    vk::DeviceSize max_sampler_descriptor_buffer_range;
+    vk::DeviceSize resource_descriptor_address_space_size;
+    vk::DeviceSize sampler_descriptor_address_space_size;
+    vk::DeviceSize descriptor_buffer_address_space_size;
+    vk::DeviceSize layout_size;
+}
+
 struct DescriptorHeapState {
     TextureDescriptorCell[] texture_cells;
     SamplerDescriptorCell[] sampler_cells;
@@ -80,10 +98,61 @@ fn ushort bump_generation(ushort generation) @private {
     return next == 0 ? (ushort)1 : (ushort)next;
 }
 
+<* Texture capacity binds both SAMPLED_IMAGE and STORAGE_IMAGE, so on the
+   indexing path it must satisfy both image limits. On the buffer path the
+   bound quantity is the descriptor set's byte layout, not slot counts. *>
+fn bool heap_fits_limits(gpu::DescriptorHeapMode mode, uint tex_capacity, uint smp_capacity, HeapLimits limits) {
+    if (mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+        // Bindings use ALL stages, so per-stage limits bind alongside the
+        // set-level ones.
+        return tex_capacity <= limits.max_sampled_images
+            && tex_capacity <= limits.max_storage_images
+            && tex_capacity <= limits.max_per_stage_sampled_images
+            && tex_capacity <= limits.max_per_stage_storage_images
+            && smp_capacity <= limits.max_samplers
+            && smp_capacity <= limits.max_per_stage_samplers;
+    }
+    // One buffer carries both usage bits, so it counts against each per-type
+    // address space as well as the combined budget.
+    return limits.layout_size <= limits.max_resource_descriptor_buffer_range
+        && limits.layout_size <= limits.max_sampler_descriptor_buffer_range
+        && limits.layout_size <= limits.resource_descriptor_address_space_size
+        && limits.layout_size <= limits.sampler_descriptor_address_space_size
+        && limits.layout_size <= limits.descriptor_buffer_address_space_size;
+}
+
 fn void? create_descriptor_heap(VkDeviceState* state) {
     DescriptorHeapState* heap = &state.heap;
     uint tex_capacity = state.texture_descriptor_capacity;
     uint smp_capacity = state.sampler_descriptor_capacity;
+
+    if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+        vk::PhysicalDeviceVulkan12Properties v12_props = vk::physical_device_vulkan12properties();
+        vk::PhysicalDeviceProperties2 v12_props2 = vk::physical_device_properties2().set_next(&v12_props);
+        vk::get_physical_device_properties2(state.physical_device, &v12_props2);
+        HeapLimits limits = {
+            .max_sampled_images           = v12_props.max_descriptor_set_update_after_bind_sampled_images,
+            .max_storage_images           = v12_props.max_descriptor_set_update_after_bind_storage_images,
+            .max_samplers                 = v12_props.max_descriptor_set_update_after_bind_samplers,
+            .max_per_stage_sampled_images = v12_props.max_per_stage_descriptor_update_after_bind_sampled_images,
+            .max_per_stage_storage_images = v12_props.max_per_stage_descriptor_update_after_bind_storage_images,
+            .max_per_stage_samplers       = v12_props.max_per_stage_descriptor_update_after_bind_samplers,
+        };
+        bool fits = heap_fits_limits(
+            mode:         state.heap_mode,
+            tex_capacity: tex_capacity,
+            smp_capacity: smp_capacity,
+            limits:       limits,
+        );
+        if (!fits) {
+            io::eprintfn(
+                "gpu: descriptor capacities (tex %d, smp %d) exceed a device update-after-bind limit (set %d/%d/%d, per-stage %d/%d/%d)",
+                tex_capacity, smp_capacity,
+                limits.max_sampled_images, limits.max_storage_images, limits.max_samplers,
+                limits.max_per_stage_sampled_images, limits.max_per_stage_storage_images, limits.max_per_stage_samplers);
+            return gpu::INVALID_ARGUMENT~;
+        }
+    }
 
     heap.texture_cells          = mem::new_array(TextureDescriptorCell, tex_capacity);
     heap.sampler_cells          = mem::new_array(SamplerDescriptorCell, smp_capacity);
@@ -172,6 +241,31 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
 
     vk::DeviceSize layout_size;
     vk::extensions.vk_get_descriptor_set_layout_size_ext(state.device, heap.set_layout, &layout_size);
+
+    HeapLimits limits = {
+        .max_resource_descriptor_buffer_range    = db_props.max_resource_descriptor_buffer_range,
+        .max_sampler_descriptor_buffer_range     = db_props.max_sampler_descriptor_buffer_range,
+        .resource_descriptor_address_space_size  = db_props.resource_descriptor_buffer_address_space_size,
+        .sampler_descriptor_address_space_size   = db_props.sampler_descriptor_buffer_address_space_size,
+        .descriptor_buffer_address_space_size    = db_props.descriptor_buffer_address_space_size,
+        .layout_size                          = layout_size,
+    };
+    bool fits = heap_fits_limits(
+        mode:         state.heap_mode,
+        tex_capacity: state.texture_descriptor_capacity,
+        smp_capacity: state.sampler_descriptor_capacity,
+        limits:       limits,
+    );
+    if (!fits) {
+        io::eprintfn(
+            "gpu: descriptor buffer layout size %d exceeds a device descriptor-buffer bound (ranges %d/%d, address space %d/%d/%d)",
+            layout_size,
+            limits.max_resource_descriptor_buffer_range, limits.max_sampler_descriptor_buffer_range,
+            limits.resource_descriptor_address_space_size, limits.sampler_descriptor_address_space_size,
+            limits.descriptor_buffer_address_space_size);
+        return gpu::INVALID_ARGUMENT~;
+    }
+
     vk::extensions.vk_get_descriptor_set_layout_binding_offset_ext(state.device, heap.set_layout, HEAP_BINDING_SAMPLED, &heap.binding_offset_sampled);
     vk::extensions.vk_get_descriptor_set_layout_binding_offset_ext(state.device, heap.set_layout, HEAP_BINDING_STORAGE, &heap.binding_offset_storage);
     vk::extensions.vk_get_descriptor_set_layout_binding_offset_ext(state.device, heap.set_layout, HEAP_BINDING_SAMPLERS, &heap.binding_offset_samplers);
