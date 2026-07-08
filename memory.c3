@@ -62,9 +62,19 @@ struct MemoryStats {
     ulong live_allocation_count;
 }
 
-// Round `value` up to the next multiple of `align` (a power of two).
-<* Round value up to a power-of-two alignment. *>
+<* Round value up to a power-of-two alignment. `align` must be a nonzero
+   power of two — validate with is_pow2 first; align_up(v, 0) returns 0. *>
 fn usz align_up(usz value, usz align) => (value + align - 1) & ~(align - 1);
+
+<* True for nonzero powers of two — the only valid alignments. *>
+fn bool is_pow2(usz value) => value != 0 && (value & (value - 1)) == 0;
+
+<* Overflow-safe bounds check: offset + size must fit in limit. `size` 0 is
+   the caller's to-end convention and only checks the offset. *>
+fn bool range_fits(usz limit, usz offset, usz size) {
+    if (offset > limit) return false;
+    return size <= limit - offset;
+}
 
 <* Begin the next frame: advance to the next frame-in-flight slot, wait for its
    arena to retire, reset it, and update the allocator's frame index. *>
@@ -73,8 +83,10 @@ fn void? begin_frame(Device* device) {
     return device.vtable.begin_frame(device);
 }
 
-<* Bump-allocate a span from the current frame's upload arena. Returns ARENA_FULL
-   when the arena is exhausted. The span is valid until the arena is reset. *>
+<* Bump-allocate a span from the current frame's upload arena. `size` must be
+   nonzero and `align` a nonzero power of two (INVALID_ARGUMENT otherwise);
+   returns ARENA_FULL when the arena is exhausted. The span is valid until the
+   arena is reset. *>
 fn GpuSpan? alloc_frame_span(Device* device, usz size, usz align) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.alloc_frame_span(device, size, align);

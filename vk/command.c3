@@ -167,6 +167,15 @@ fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* des
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* src = state.buffers.get(desc.src)!;
     BufferSlot* dst = state.buffers.get(desc.dst)!;
+    if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::range_fits(src.size, desc.src_offset, desc.size)) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::range_fits(dst.size, desc.dst_offset, desc.size)) return gpu::INVALID_ARGUMENT~;
+    // Vulkan forbids overlapping regions within one buffer.
+    if (desc.src == desc.dst
+        && desc.src_offset < desc.dst_offset + desc.size
+        && desc.dst_offset < desc.src_offset + desc.size) {
+        return gpu::INVALID_ARGUMENT~;
+    }
 
     vk::BufferCopy region = {
         .src_offset = (vk::DeviceSize)desc.src_offset,
@@ -180,7 +189,12 @@ fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* slot = state.buffers.get(buffer)!;
-    vk::cmd_fill_buffer((vk::CommandBuffer)commands.backend, slot.buffer, (vk::DeviceSize)offset, (vk::DeviceSize)size, value);
+    // Vulkan: offset and size must be 4-byte multiples; size 0 is the
+    // whole-buffer convention (translated to WHOLE_SIZE below).
+    if (offset % 4 != 0 || size % 4 != 0) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
+    vk::DeviceSize fill_size = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
+    vk::cmd_fill_buffer((vk::CommandBuffer)commands.backend, slot.buffer, (vk::DeviceSize)offset, fill_size, value);
 }
 
 <* Validate a copy region against the texture, the mip's clamped extent,
