@@ -2,6 +2,7 @@ module gpu::vk;
 
 import gpu;
 import vk;
+import vma;
 import std::thread;
 import spvreflect;
 import std::core::mem;
@@ -140,6 +141,9 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
     return gpu::SLOT_TABLE_FULL~;
 }
 
+<* Frees the public handle immediately; the shader module is enqueued for
+   release once the GPU has provably finished any frame that could reference
+   a pipeline built from it (see vk/deferred.c3). *>
 fn void? vk_destroy_shader(gpu::Device* device, gpu::ShaderHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
@@ -147,6 +151,8 @@ fn void? vk_destroy_shader(gpu::Device* device, gpu::ShaderHandle handle) @priva
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     ShaderSlot* slot = state.shaders.get(handle)!;
-    vk::destroy_shader_module(state.device, slot.shader_module, null);
+    vk::ShaderModule sh_module = slot.shader_module;
+    ulong retire = retire_timeline_value(state);
     state.shaders.free(handle)!;
+    enqueue_deferred(state, DeferredKind.SHADER_MODULE, retire, (void*)sh_module, (vma::Allocation)null);
 }

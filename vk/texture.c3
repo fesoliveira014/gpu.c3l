@@ -268,6 +268,17 @@ fn void destroy_cached_views(VkDeviceState* state, TextureSlot* slot) {
     }
 }
 
+<* Same sweep as destroy_cached_views, but enqueues each view instead of
+   destroying it immediately — used by vk_destroy_texture. *>
+fn void enqueue_cached_views(VkDeviceState* state, TextureSlot* slot, ulong retire) @private {
+    foreach (&cached : slot.views) {
+        if (cached.used) {
+            enqueue_deferred(state, DeferredKind.IMAGE_VIEW, retire, (void*)cached.view, (vma::Allocation)null);
+            cached.used = false;
+        }
+    }
+}
+
 fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
@@ -345,6 +356,9 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     return gpu::SLOT_TABLE_FULL~;
 }
 
+<* Frees the public handle immediately; cached views, the default view, and
+   the image + allocation are enqueued for release once the GPU has provably
+   finished any frame that could reference them (see vk/deferred.c3). *>
 fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
@@ -353,8 +367,12 @@ fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @pri
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;
     if (slot.swapchain_owned) return gpu::INVALID_ARGUMENT~;
-    destroy_cached_views(state, slot);
-    vk::destroy_image_view(state.device, slot.default_view, null);
-    state.allocator.destroy_image(slot.image, slot.allocation);
+    ulong retire = retire_timeline_value(state);
+    vk::Image image = slot.image;
+    vma::Allocation allocation = slot.allocation;
+    vk::ImageView default_view = slot.default_view;
+    enqueue_cached_views(state, slot, retire);
     state.textures.free(handle)!;
+    enqueue_deferred(state, DeferredKind.IMAGE_VIEW, retire, (void*)default_view, (vma::Allocation)null);
+    enqueue_deferred(state, DeferredKind.IMAGE, retire, (void*)image, allocation);
 }

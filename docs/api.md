@@ -171,7 +171,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | submits, waits | driver reported device loss; unrecoverable |
-| `RESOURCE_IN_USE` | destroys | resource still inside the frames-in-flight window |
+| `RESOURCE_IN_USE` | — (reserved) | not yet raised; frames-in-flight destroys are handled by deferred backend release instead (gpu.c3l#44). Reserved for future in-use checks, e.g. a live descriptor reference (gpu.c3l#51) |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths | per-frame data outgrew the arena (sizing knobs: gpu.c3l#28) |
 | `SLOT_TABLE_FULL` | creates | handle table at capacity; textures scale via `DeviceDesc.texture_capacity` |
 | `DESCRIPTOR_HEAP_FULL` | `create_texture_descriptor`, `create_sampler` | capacity < live descriptors + same-frame retires (they recycle a frame later) |
