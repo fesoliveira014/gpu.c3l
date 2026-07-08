@@ -130,9 +130,8 @@ fn uint? insert_entry(PipelineCacheTable* cache, PipelineCacheEntry value) {
     return idx;
 }
 
-<* Single release choke point: drop one alias, enqueue the backend pipeline
-   for deferred release when the last alias goes. Layouts are shared and
-   never destroyed here. *>
+<* Drops one alias; the pipeline's deferred release happens when the last
+   alias goes. Shared layouts are never destroyed here. *>
 fn void release_entry(VkDeviceState* state, uint entry_index) {
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[entry_index];
     if (--entry.refcount > 0) return;

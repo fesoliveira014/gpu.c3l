@@ -147,10 +147,8 @@ fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::Semaphore
     return gpu::SLOT_TABLE_FULL~;
 }
 
-<* Frees the public handle immediately; the underlying semaphore is enqueued
-   for release once the GPU has provably finished any frame that could
-   reference it (see vk/deferred.c3). The public contract already requires no
-   pending waits at destroy — deferral only delays the vk free. *>
+<* Frees the handle now; the vk semaphore release is deferred. The public
+   contract already forbids pending waits at destroy. *>
 fn void? vk_destroy_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);

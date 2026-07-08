@@ -163,9 +163,8 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
     return gpu::SLOT_TABLE_FULL~;
 }
 
-<* Frees the public handle immediately; the VMA buffer and its allocation are
-   enqueued for release once the GPU has provably finished any frame that
-   could reference them (see vk/deferred.c3). *>
+<* Frees the handle now; buffer + allocation release is deferred until every
+   referencing frame retires. *>
 fn void? vk_destroy_buffer(gpu::Device* device, gpu::BufferHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);

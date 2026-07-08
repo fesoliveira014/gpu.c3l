@@ -4,11 +4,9 @@ import gpu;
 import gpu::vk;
 import vk;
 
-// Headless (lavapipe): deferred destruction (openspec/changes/deferred-destruction).
-// Destroy paths free the public handle immediately but keep the backend
-// object alive until the frame that could reference it retires. (a) proves
-// destroy-after-submit survives a frame cycle validation- and leak-clean;
-// (b) is a whitebox check on the drain queue's own accounting.
+// Headless (lavapipe): destroys free the handle immediately but defer the
+// backend release until the referencing frame retires; plus a whitebox check
+// on the drain queue's accounting.
 
 const char[*] DEFER_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 const uint DEFER_COUNT = 64;
@@ -34,9 +32,7 @@ struct DeferRig {
     gpu::PipelineHandle pipeline;
 }
 
-<* A storage buffer, a sampled texture, and a compute pipeline that reads and
-   writes the buffer in place — enough surface to submit real GPU work against
-   all three before destroying them. *>
+<* Enough surface to submit real GPU work against before destroying it. *>
 fn DeferRig build_defer_rig(gpu::Device* device) {
     gpu::BufferDesc io_desc = {
         .size        = DEFER_COUNT * float::size,
@@ -70,9 +66,8 @@ fn DeferRig build_defer_rig(gpu::Device* device) {
     return { .io = io, .texture = texture, .shader = shader, .pipeline = pipeline };
 }
 
-<* Records a texture layout transition, a compute dispatch over the buffer,
-   and submits both without waiting — the caller destroys the referenced
-   resources immediately afterward, while the GPU may still be running them. *>
+<* Submits without waiting, so the caller destroys resources the GPU may
+   still be running against. *>
 fn void submit_defer_rig(gpu::Device* device, DeferRig* rig) {
     gpu::GpuSpan root_span = gpu::alloc_frame_span(device, ComputeRoot::size, 16)!!;
     ComputeRoot* root = (ComputeRoot*)root_span.cpu;
@@ -124,8 +119,6 @@ fn void destroy_after_submit_survives_frame_cycle() @test {
     DeferRig rig = build_defer_rig(&device);
     submit_defer_rig(&device, &rig);
 
-    // Destroy immediately after submit, with no idle wait: the GPU may still
-    // be running the dispatch and the barrier against these handles.
     gpu::destroy_texture(&device, rig.texture)!!;
     gpu::destroy_buffer(&device, rig.io)!!;
     gpu::destroy_pipeline(&device, rig.pipeline)!!;

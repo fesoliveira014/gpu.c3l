@@ -5,10 +5,9 @@ import vk;
 import vma;
 import std::core::mem;
 
-// Backend objects a destroy path can no longer free immediately: the frame
-// that recorded a reference to them may still be in flight. Growable FIFO
-// queue on VkDeviceState, keyed by retire_timeline_value; push order is
-// non-decreasing in timeline value, so head-drain is exact.
+// Backend objects whose release must outlive in-flight frames. Growable FIFO
+// keyed by retire_timeline_value; push order is non-decreasing, so head-drain
+// is exact.
 
 const uint DEFERRED_QUEUE_INITIAL_CAP = 64;
 
@@ -51,10 +50,8 @@ fn void free_deferred_entry(VkDeviceState* state, DeferredEntry* entry) @private
     }
 }
 
-<* Doubles the backing array (or allocates the initial capacity), preserving
-   FIFO order from the current head. Growth allocates on the destroying
-   thread — fine for real allocators; the test TrackingAllocator tolerates it
-   only because storm tests drain immediately. *>
+<* Growth allocates on the destroying thread; the test TrackingAllocator
+   tolerates that only because storm tests drain immediately. *>
 fn void grow_deferred_queue(DeferredQueue* queue) @private {
     usz new_cap = queue.entries.len == 0 ? DEFERRED_QUEUE_INITIAL_CAP : queue.entries.len * 2;
     DeferredEntry[] grown = mem::new_array(DeferredEntry, (sz)new_cap);
@@ -66,9 +63,7 @@ fn void grow_deferred_queue(DeferredQueue* queue) @private {
     queue.head = 0;
 }
 
-<* Queue a backend object for release once `timeline_value` retires. Caller
-   must already hold resource_mutex (every destroy path does); also runs an
-   opportunistic head-drain so already-retired entries do not linger. *>
+<* Caller must hold resource_mutex; also runs an opportunistic head-drain. *>
 fn void enqueue_deferred(VkDeviceState* state, DeferredKind kind, ulong timeline_value, void* object, vma::Allocation allocation) @private {
     DeferredQueue* queue = &state.deferred;
     if (queue.count == queue.entries.len) grow_deferred_queue(queue);
@@ -78,8 +73,7 @@ fn void enqueue_deferred(VkDeviceState* state, DeferredKind kind, ulong timeline
     deferred_drain(state);
 }
 
-<* Free every head entry whose timeline_value has retired against the frame
-   timeline's current counter. Caller must already hold resource_mutex. *>
+<* Caller must hold resource_mutex. *>
 fn void deferred_drain(VkDeviceState* state) @private {
     DeferredQueue* queue = &state.deferred;
     if (queue.count == 0) return;
@@ -94,8 +88,7 @@ fn void deferred_drain(VkDeviceState* state) @private {
     }
 }
 
-<* Unconditional drain for teardown: the device is idle, so every entry is
-   provably safe to free regardless of its recorded retire value. *>
+<* Teardown only: an idle device makes every entry free-able. *>
 fn void deferred_drain_all(VkDeviceState* state) @private {
     DeferredQueue* queue = &state.deferred;
     while (queue.count > 0) {

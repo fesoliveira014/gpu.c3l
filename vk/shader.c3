@@ -141,9 +141,8 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
     return gpu::SLOT_TABLE_FULL~;
 }
 
-<* Frees the public handle immediately; the shader module is enqueued for
-   release once the GPU has provably finished any frame that could reference
-   a pipeline built from it (see vk/deferred.c3). *>
+<* Frees the handle now; module release is deferred until frames referencing
+   its pipelines retire. *>
 fn void? vk_destroy_shader(gpu::Device* device, gpu::ShaderHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);

@@ -268,8 +268,7 @@ fn void destroy_cached_views(VkDeviceState* state, TextureSlot* slot) {
     }
 }
 
-<* Same sweep as destroy_cached_views, but enqueues each view instead of
-   destroying it immediately — used by vk_destroy_texture. *>
+<* destroy_cached_views, but enqueueing instead of destroying. *>
 fn void enqueue_cached_views(VkDeviceState* state, TextureSlot* slot, ulong retire) @private {
     foreach (&cached : slot.views) {
         if (cached.used) {
@@ -356,9 +355,8 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     return gpu::SLOT_TABLE_FULL~;
 }
 
-<* Frees the public handle immediately; cached views, the default view, and
-   the image + allocation are enqueued for release once the GPU has provably
-   finished any frame that could reference them (see vk/deferred.c3). *>
+<* Frees the handle now; views, image, and allocation release is deferred
+   until every referencing frame retires. *>
 fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
