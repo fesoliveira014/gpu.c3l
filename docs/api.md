@@ -811,7 +811,10 @@ get_present_mode_support(Device* device, SwapchainHandle swapchain) -> PresentMo
 
 An unsupported requested mode falls back to FIFO silently at creation; query
 `get_present_mode_support` to choose deliberately (`present_mode_explorer`
-sample).
+sample). State-machine contracts: acquiring while an acquire is pending
+faults INVALID_RESOURCE_STATE; present enforces the PRESENT tracked layout;
+a failed resize parks the swapchain dormant (next acquire reports
+SWAPCHAIN_OUT_OF_DATE).
 
 SDL helper functions should live in samples or an optional helper module, not in the core API.
 
