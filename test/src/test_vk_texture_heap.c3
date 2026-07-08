@@ -211,7 +211,7 @@ fn void anisotropy_range_validated() @test {
             .max_anisotropy    = value,
         };
         fault f = @catch(gpu::create_sampler(&device, &desc));
-        assert(f == gpu::INVALID_ARGUMENT, "non-positive max_anisotropy faults INVALID_ARGUMENT");
+        assert(f == gpu::INVALID_ARGUMENT, "max_anisotropy < 1 faults INVALID_ARGUMENT");
     }
 
     gpu::SamplerDesc huge = {
