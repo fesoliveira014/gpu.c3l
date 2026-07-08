@@ -120,8 +120,9 @@ fn void? reset_frame_arena(VkDeviceState* state, uint index) {
 fn void? vk_begin_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
-    state.frame_index = (state.frame_index + 1) % state.frames_in_flight;
-    FrameArenaState* slot = &state.frame_arenas[state.frame_index];
+    // WAIT_TIMEOUT must leave frame_index untouched so retry is clean.
+    uint next_index = (state.frame_index + 1) % state.frames_in_flight;
+    FrameArenaState* slot = &state.frame_arenas[next_index];
 
     if (slot.frame_timeline_value > 0) {
         ulong wait_value = slot.frame_timeline_value;
@@ -129,8 +130,9 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
             .set_semaphore_count(1)
             .set_semaphores((&state.frame_timeline)[:1])
             .set_values((&wait_value)[:1]);
-        check(vk::wait_semaphores(state.device, &wait_info, 1_000_000_000))!;
+        check_wait(vk::wait_semaphores(state.device, &wait_info, 1_000_000_000))!;
     }
+    state.frame_index = next_index;
 
     {
         state.resource_mutex.lock()!!;

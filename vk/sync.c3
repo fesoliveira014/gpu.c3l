@@ -229,5 +229,5 @@ fn void? vk_wait_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle, gpu
         .set_semaphore_count(1)
         .set_semaphores((&slot.semaphore)[:1])
         .set_values((&wait_value)[:1]);
-    check(vk::wait_semaphores(state.device, &wait_info, timeout_ns))!;
+    check_wait(vk::wait_semaphores(state.device, &wait_info, timeout_ns))!;
 }

@@ -112,7 +112,9 @@ fn void? destroy_semaphore(Device* device, SemaphoreHandle semaphore) {
     return device.vtable.destroy_semaphore(device, semaphore);
 }
 
-<* Wait on the host until the timeline reaches `value`, up to `timeout_ns`. *>
+<* Wait on the host until the timeline reaches `value`, up to `timeout_ns`
+   (0 polls without blocking). Faults WAIT_TIMEOUT — safe to retry — if
+   `timeout_ns` elapses first. *>
 fn void? wait_semaphore(Device* device, SemaphoreHandle semaphore, SemaphoreValue value, ulong timeout_ns) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.wait_semaphore(device, semaphore, value, timeout_ns);

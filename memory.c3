@@ -76,8 +76,9 @@ fn bool range_fits(usz limit, usz offset, usz size) {
     return size <= limit - offset;
 }
 
-<* Begin the next frame: advance to the next frame-in-flight slot, wait for its
-   arena to retire, reset it, and update the allocator's frame index. *>
+<* Begin the next frame: advance to the next frame-in-flight slot, wait for
+   its arena to retire, and reset it. Faults WAIT_TIMEOUT if the retire wait
+   elapses first — safe to retry. *>
 fn void? begin_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.begin_frame(device);

@@ -53,4 +53,7 @@ faultdef
     COMMAND_RECORDING_ERROR,
     // resolve_readback called before the ticket's timeline value was
     // reached; poll_readback first.
-    READBACK_NOT_READY;
+    READBACK_NOT_READY,
+    // A bounded host wait (wait_semaphore, begin_frame's arena wait) elapsed
+    // before the timeline reached its target value; safe to retry.
+    WAIT_TIMEOUT;

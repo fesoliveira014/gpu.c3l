@@ -32,6 +32,17 @@ fn void? check(vk::Result result) {
     }
 }
 
+<* For bounded host waits only: TIMEOUT faults WAIT_TIMEOUT, everything else
+   delegates to check(). *>
+fn void? check_wait(vk::Result result) {
+    switch (result) {
+        case vk::Result.TIMEOUT:
+            return gpu::WAIT_TIMEOUT~;
+        default:
+            return check(result);
+    }
+}
+
 <* Pure translation of a public execution stage to a synchronization2 stage
    mask. Unit-testable without a device. *>
 fn vk::PipelineStageFlags2 stage_to_vk(gpu::Stage stage) {

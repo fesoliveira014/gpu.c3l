@@ -121,3 +121,41 @@ fn void texture_barrier_faults() @test {
     gpu::end_commands(&device, &cmd)!!;
     gpu::end_frame(&device)!!;
 }
+
+// vkWaitSemaphores with timeout 0 is a spec-guaranteed poll: it returns
+// immediately, so these are deterministic on lavapipe.
+
+fn void wait_timeout_zero_on_unreached_value_faults() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::SemaphoreDesc sem_desc = { .initial_value = (gpu::SemaphoreValue)0 };
+    gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
+    defer gpu::destroy_semaphore(&device, sem)!!;
+
+    fault timeout_fault = @catch(gpu::wait_semaphore(
+        device:     &device,
+        semaphore:  sem,
+        value:      (gpu::SemaphoreValue)1,
+        timeout_ns: 0,
+    ));
+    assert(timeout_fault == gpu::WAIT_TIMEOUT, "timeout-0 wait on an unreached value faults WAIT_TIMEOUT");
+}
+
+fn void wait_timeout_zero_on_reached_value_succeeds() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::SemaphoreDesc sem_desc = { .initial_value = (gpu::SemaphoreValue)1 };
+    gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
+    defer gpu::destroy_semaphore(&device, sem)!!;
+
+    gpu::wait_semaphore(
+        device:     &device,
+        semaphore:  sem,
+        value:      (gpu::SemaphoreValue)1,
+        timeout_ns: 0,
+    )!!;
+}
