@@ -137,8 +137,6 @@ fn void destroy_texture_retired_undrained_descriptor_succeeds() @test {
     gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
     gpu::destroy_texture_descriptor(&device, index)!!;
 
-    // No frame boundary since the descriptor was destroyed: its cell is
-    // retired but undrained. destroy_texture must not treat it as live.
     gpu::destroy_texture(&device, texture)!!;
 }
 

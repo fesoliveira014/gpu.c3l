@@ -26,10 +26,8 @@ faultdef
     OUT_OF_DEVICE_MEMORY,
     // The driver reported VK_ERROR_DEVICE_LOST; the device is unrecoverable.
     DEVICE_LOST,
-    // destroy_texture while a live TextureIndex descriptor still owns the
-    // texture (gpu.c3l#81); destroy the descriptor first. Frames-in-flight
-    // destroys are unaffected — those defer the backend release instead of
-    // faulting.
+    // destroy_texture while a live TextureIndex still owns the texture;
+    // destroy the descriptor first. In-flight destroys defer instead.
     RESOURCE_IN_USE,
     // A frame/staging/readback arena ran out for this frame; raise the
     // arena size or split the work (see gpu.c3l#28 for the sizing knobs).
