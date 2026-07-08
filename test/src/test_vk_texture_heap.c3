@@ -190,3 +190,36 @@ fn void anisotropic_sampler_caps_honest() @test {
         assert(err == gpu::UNSUPPORTED_FEATURE, "expected UNSUPPORTED_FEATURE, got %s", err);
     }
 }
+
+fn void anisotropy_range_validated() @test {
+    gpu::DeviceDesc device_desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .application_name  = "gpu_aniso_range_test",
+    };
+    gpu::Device device = gpu::create_device(&device_desc)!!;
+    defer gpu::destroy_device(&device)!!;
+    if (device.caps.max_sampler_anisotropy <= 0) return;
+
+    float[3] bad = { 0.0f, -1.0f, 0.5f };
+    foreach (value : bad) {
+        gpu::SamplerDesc desc = {
+            .min_filter        = gpu::Filter.LINEAR,
+            .mag_filter        = gpu::Filter.LINEAR,
+            .anisotropy_enable = true,
+            .max_anisotropy    = value,
+        };
+        fault f = @catch(gpu::create_sampler(&device, &desc));
+        assert(f == gpu::INVALID_ARGUMENT, "non-positive max_anisotropy faults INVALID_ARGUMENT");
+    }
+
+    gpu::SamplerDesc huge = {
+        .min_filter        = gpu::Filter.LINEAR,
+        .mag_filter        = gpu::Filter.LINEAR,
+        .anisotropy_enable = true,
+        .max_anisotropy    = 1.0e6f,
+    };
+    gpu::SamplerIndex clamped = gpu::create_sampler(&device, &huge)!!;
+    gpu::destroy_sampler(&device, clamped)!!;
+}

@@ -444,6 +444,9 @@ fn vk::SamplerAddressMode address_mode_to_vk(gpu::AddressMode mode) @private {
 fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (desc.anisotropy_enable && state.max_sampler_anisotropy <= 0) return gpu::UNSUPPORTED_FEATURE~;
+    // Vulkan requires 1.0 <= maxAnisotropy when enabled; enabling without a
+    // valid value is a caller error, not a default request.
+    if (desc.anisotropy_enable && desc.max_anisotropy < 1.0f) return gpu::INVALID_ARGUMENT~;
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
