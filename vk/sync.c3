@@ -64,6 +64,10 @@ fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* b
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* slot = state.buffers.get(barrier.buffer)!;
+    // size 0 is the whole-buffer convention, matching flush/invalidate/fill.
+    if (!gpu::range_fits(slot.size, barrier.offset, barrier.size)) return gpu::INVALID_ARGUMENT~;
+    if (barrier.size == 0 && barrier.offset >= slot.size) return gpu::INVALID_ARGUMENT~;
+    vk::DeviceSize barrier_size = barrier.size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)barrier.size;
 
     vk::BufferMemoryBarrier2 bar = vk::buffer_memory_barrier2()
         .set_src_stage_mask(stage_to_vk(barrier.before_stage))
@@ -74,7 +78,7 @@ fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* b
         .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .set_buffer(slot.buffer)
         .set_offset((vk::DeviceSize)barrier.offset)
-        .set_size((vk::DeviceSize)barrier.size);
+        .set_size(barrier_size);
 
     vk::DependencyInfo dep = vk::dependency_info().set_buffer_memory_barriers((&bar)[:1]);
     vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);

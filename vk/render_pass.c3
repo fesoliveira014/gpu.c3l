@@ -144,10 +144,13 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
     if (commands.state != gpu::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
-    BufferSlot* buffer = resolve_index_span(state, &index_span, index_type)!;
-
-    usz index_size = index_type == gpu::IndexType.U16 ? 2 : 4;
-    if ((usz)index_count * index_size > index_span.size) return gpu::INVALID_ARGUMENT~;
+    usz index_size = index_element_size(index_type);
+    BufferSlot* buffer = resolve_index_span(
+        state:      state,
+        span:       &index_span,
+        index_type: index_type,
+        required:   (usz)index_count * index_size,
+    )!;
 
     vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
     bind_graphics_and_push(commands, handle, vertex_root, fragment_root, cb)!;
@@ -179,7 +182,12 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
 
 <* Element count comes from the GPU-written args and is not checked here. *>
 fn void? bind_index_span(VkDeviceState* state, vk::CommandBuffer cb, gpu::GpuSpan* index_span, gpu::IndexType index_type) @private {
-    BufferSlot* buffer = resolve_index_span(state, index_span, index_type)!;
+    BufferSlot* buffer = resolve_index_span(
+        state:      state,
+        span:       index_span,
+        index_type: index_type,
+        required:   0,
+    )!;
     vk::cmd_bind_index_buffer(cb, buffer.buffer, (vk::DeviceSize)index_span.offset,
         index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32);
 }

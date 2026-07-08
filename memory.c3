@@ -228,7 +228,9 @@ fn void? resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) {
 
 <* Derive a sub-range starting `offset` bytes into this span. The GPU address
    and (when present) CPU pointer advance by `offset`; the backing buffer and
-   memory kind are inherited. *>
+   memory kind are inherited. Not bounds-checked against this span or its
+   backing buffer: a span that escapes either faults INVALID_ARGUMENT at the
+   command that consumes it, not here. *>
 fn GpuSpan GpuSpan.subspan(self, usz offset, usz size) {
     return {
         .gpu    = (GpuAddress)((ulong)self.gpu + offset),

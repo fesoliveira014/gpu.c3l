@@ -47,7 +47,9 @@ enum TextureLayout : int {
     PRESENT,
 }
 
-<* Orders before_* access against after_* access on a range of one buffer. *>
+<* Orders before_* access against after_* access on a range of one buffer.
+   `size` 0 means the whole buffer from `offset` onward (VK_WHOLE_SIZE),
+   matching the flush/invalidate/fill convention. *>
 struct BufferBarrier {
     BufferHandle buffer;
     usz          offset;

@@ -232,17 +232,18 @@ fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer
 }
 
 <* Validate a copy region against the texture, the mip's clamped extent,
-   Vulkan's buffer-offset alignment, and the span's bounds, then translate it.
-   Zero defaults resolve here: extent 0 = full mip, layer_count 0 = 1. *>
-fn vk::BufferImageCopy? resolve_texture_copy_region(gpu::GpuSpan* span, TextureSlot* slot, uint row_length_texels, uint mip, uint base_layer, uint layer_count, uint x, uint y, uint width, uint height) @private {
+   Vulkan's buffer-offset alignment, and the span's bounds against its backing
+   buffer, then translate it. Zero defaults resolve here: extent 0 = full mip,
+   layer_count 0 = 1. *>
+fn vk::BufferImageCopy? resolve_texture_copy_region(VkDeviceState* state, gpu::GpuSpan* span, TextureSlot* slot, uint row_length_texels, uint mip, uint base_layer, uint layer_count, uint x, uint y, uint width, uint height) @private {
     if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
     uint layers = layer_count == 0 ? 1 : layer_count;
-    if (base_layer + layers > slot.array_layers) return gpu::INVALID_ARGUMENT~;
+    if ((ulong)base_layer + (ulong)layers > (ulong)slot.array_layers) return gpu::INVALID_ARGUMENT~;
 
     MipExtent extent = texture_mip_extent(slot, mip);
     if (width == 0)  width = extent.width;
     if (height == 0) height = extent.height;
-    if (x + width > extent.width || y + height > extent.height) return gpu::INVALID_ARGUMENT~;
+    if ((ulong)x + (ulong)width > (ulong)extent.width || (ulong)y + (ulong)height > (ulong)extent.height) return gpu::INVALID_ARGUMENT~;
     if (row_length_texels != 0 && row_length_texels < width) return gpu::INVALID_ARGUMENT~;
 
     usz texel_size = format_texel_size(slot.format);
@@ -251,7 +252,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(gpu::GpuSpan* span, TextureS
 
     usz row_texels = row_length_texels == 0 ? width : row_length_texels;
     usz copy_bytes = row_texels * texel_size * height * layers;
-    if (copy_bytes > span.size) return gpu::INVALID_ARGUMENT~;
+    resolve_span_slot(state, span, copy_bytes)!;
 
     return (vk::BufferImageCopy){
         .buffer_offset      = (vk::DeviceSize)span.offset,
@@ -279,6 +280,7 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
     if (layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
+        state:             state,
         span:              &desc.src,
         slot:              texture,
         row_length_texels: desc.row_length_texels,
@@ -304,6 +306,7 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
     if (layout != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
+        state:             state,
         span:              &desc.dst,
         slot:              texture,
         row_length_texels: desc.row_length_texels,
@@ -319,12 +322,11 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
 }
 
 <* Resolve an indirect argument span: indirect usage, 4-byte offset alignment,
-   and count*arg_size within bounds. *>
+   count*arg_size within the span, and the span within its backing buffer. *>
 fn BufferSlot*? resolve_indirect_span(VkDeviceState* state, gpu::GpuSpan* span, usz arg_size, uint count) {
-    BufferSlot* slot = state.buffers.get(span.buffer)!;
+    BufferSlot* slot = resolve_span_slot(state, span, (usz)count * arg_size)!;
     if (!slot.usage.indirect) return gpu::INVALID_ARGUMENT~;
     if (span.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
-    if ((usz)count * arg_size > span.size) return gpu::INVALID_ARGUMENT~;
     return slot;
 }
 
