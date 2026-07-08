@@ -33,8 +33,8 @@ struct ReadbackTicket {
 }
 
 const usz MAX_MEMORY_HEAPS = 16;
-const usz ARENA_SIZE = 1 << 20;
-const usz PERSISTENT_ARENA_SIZE = 64 << 20;
+const usz DEFAULT_FRAME_ARENA_SIZE = 16 << 20;
+const usz DEFAULT_PERSISTENT_ARENA_SIZE = 64 << 20;
 const usz DEFAULT_STAGING_ARENA_SIZE = 32 << 20;
 const usz DEFAULT_READBACK_ARENA_SIZE = 8 << 20;
 

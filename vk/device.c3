@@ -221,7 +221,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     create_vk_allocator(state)!;
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
     create_frame_resources(state, desc)!;
-    create_persistent_arena(state)!;
+    create_persistent_arena(state, desc)!;
     state.recording_contexts.slots = mem::new_array(RecordingContextCell, gpu::MAX_RECORDING_CONTEXTS);
     RecordingContextState default_ctx;
     create_context_pools(state, &default_ctx)!;

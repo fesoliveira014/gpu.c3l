@@ -31,7 +31,7 @@ fn void frame_arena_alloc_and_reset() @test {
     assert((ulong)b.gpu == base_gpu + 128, "GPU address is base + aligned offset");
     assert((char*)b.cpu == base_cpu + 128, "CPU pointer is base + aligned offset");
 
-    fault full = @catch(gpu::alloc_frame_span(&device, gpu::ARENA_SIZE, 16));
+    fault full = @catch(gpu::alloc_frame_span(&device, gpu::DEFAULT_FRAME_ARENA_SIZE, 16));
     assert(full == gpu::ARENA_FULL, "over-allocation returns ARENA_FULL");
 
     gpu::end_frame(&device)!!;
@@ -64,4 +64,22 @@ fn void reset_before_retire_rejected() @test {
     // A retired slot resets fine.
     state.frame_arenas[0].frame_timeline_value = 0;
     assert(!@catch(gpu::vk::reset_frame_arena(state, 0)), "retired slot may be reset");
+}
+
+fn void custom_frame_arena_size_holds_larger_spans() @test {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .frame_arena_size  = 32 << 20,
+        .application_name  = "gpu_frame_arena_size_test",
+    };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::begin_frame(&device)!!;
+    // Well past the old 1 MiB default and the 16 MiB current default.
+    gpu::GpuSpan span = gpu::alloc_frame_span(&device, 20 << 20, 16)!!;
+    assert(span.size == 20 << 20, "oversized span allocates in a custom-sized arena");
+    gpu::end_frame(&device)!!;
 }

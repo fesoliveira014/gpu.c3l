@@ -28,6 +28,8 @@ struct DeviceDesc {
     uint               texture_capacity;
     usz                staging_arena_size;
     usz                readback_arena_size;
+    usz                frame_arena_size;
+    usz                persistent_arena_size;
     uint               frames_in_flight;
     // Warm-start blob from get_pipeline_cache_data; empty = cold. Only read
     // during create_device (the driver copies it).

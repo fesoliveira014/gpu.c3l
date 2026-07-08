@@ -47,11 +47,12 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
     vk::SemaphoreCreateInfo semaphore_info = vk::semaphore_create_info().set_next(&type_info);
     check(vk::create_semaphore(state.device, &semaphore_info, null, &state.frame_timeline))!;
 
+    usz frame_arena_size = desc.frame_arena_size == 0 ? gpu::DEFAULT_FRAME_ARENA_SIZE : desc.frame_arena_size;
     state.frame_arenas = mem::new_array(FrameArenaState, state.frames_in_flight);
     gpu::Device handle = { .backend = gpu::BackendKind.VULKAN, .vtable = &VK_VTABLE, .backend_state = (void*)state };
     for (uint i = 0; i < state.frames_in_flight; i++) {
         gpu::BufferDesc arena_desc = {
-            .size        = gpu::ARENA_SIZE,
+            .size        = frame_arena_size,
             .usage       = { .storage, .addressable, .indirect, .index },
             .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
             .debug_name  = "frame_arena",
@@ -178,10 +179,11 @@ fn void? vk_end_frame(gpu::Device* device) @private {
 
 <* Create the persistent arena: a large addressable buffer plus a VMA virtual
    block that suballocates it. *>
-fn void? create_persistent_arena(VkDeviceState* state) {
+fn void? create_persistent_arena(VkDeviceState* state, gpu::DeviceDesc* device_desc) {
+    usz arena_size = device_desc.persistent_arena_size == 0 ? gpu::DEFAULT_PERSISTENT_ARENA_SIZE : device_desc.persistent_arena_size;
     gpu::Device handle = { .backend = gpu::BackendKind.VULKAN, .vtable = &VK_VTABLE, .backend_state = (void*)state };
     gpu::BufferDesc desc = {
-        .size        = gpu::PERSISTENT_ARENA_SIZE,
+        .size        = arena_size,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
         .debug_name  = "persistent_arena",
@@ -190,7 +192,7 @@ fn void? create_persistent_arena(VkDeviceState* state) {
     mark_buffer_internal(state, buffer);
     gpu::GpuSpan span = vk_get_buffer_span(&handle, buffer)!;
 
-    vma::VirtualBlockCreateInfo block_info = { .size = (vk::DeviceSize)gpu::PERSISTENT_ARENA_SIZE };
+    vma::VirtualBlockCreateInfo block_info = { .size = (vk::DeviceSize)arena_size };
     vma::VirtualBlock block;
     check(vma::create_virtual_block(&block_info, &block))!;
 

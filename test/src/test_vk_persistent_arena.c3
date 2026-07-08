@@ -16,7 +16,7 @@ fn void persistent_alloc_free_stats() @test {
 
     gpu::PersistentArenaStats empty = gpu::get_persistent_stats(&device)!!;
     assert(empty.used_bytes == 0, "arena starts empty");
-    assert(empty.capacity_bytes == gpu::PERSISTENT_ARENA_SIZE, "capacity is the arena size");
+    assert(empty.capacity_bytes == gpu::DEFAULT_PERSISTENT_ARENA_SIZE, "capacity is the arena size");
 
     gpu::PersistentAllocDesc desc_a = {
         .size = 256, .align = 64, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "a",
@@ -63,4 +63,19 @@ fn void persistent_alloc_free_stats() @test {
     gpu::GpuSpan bogus = { .buffer = a.buffer, .offset = 999_999 };
     fault free_fault = @catch(gpu::free_persistent_span(&device, bogus));
     assert(free_fault == gpu::INVALID_HANDLE, "freeing a bogus span faults INVALID_HANDLE");
+}
+
+fn void custom_persistent_arena_size_reported() @test {
+    gpu::DeviceDesc desc = {
+        .backend               = gpu::BackendKind.VULKAN,
+        .enable_validation     = true,
+        .frames_in_flight      = 2,
+        .persistent_arena_size = 128 << 20,
+        .application_name      = "gpu_persistent_size_test",
+    };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::PersistentArenaStats stats = gpu::get_persistent_stats(&device)!!;
+    assert(stats.capacity_bytes == 128 << 20, "custom persistent capacity reported in stats");
 }
