@@ -98,12 +98,8 @@ fn void? end_frame(Device* device) {
     return device.vtable.end_frame(device);
 }
 
-// Request for a long-lived span from the persistent arena. `memory_kind` must
-// be PERSISTENT_UPLOAD; `align` 0 means no alignment requirement. The arena
-// is one backing buffer created with a fixed usage superset; `usage` is a
-// validated declaration of the bits this span needs, checked as a subset of
-// that superset (INVALID_ARGUMENT otherwise), not a per-range Vulkan
-// property. Empty usage is a valid storage-style default.
+// memory_kind must be PERSISTENT_UPLOAD; align 0 = no requirement; usage
+// must fit the arena superset (empty = storage-style default).
 struct PersistentAllocDesc {
     usz         size;
     usz         align;

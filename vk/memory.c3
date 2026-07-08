@@ -11,10 +11,8 @@ import std::collections::map;
 
 alias PersistentAllocMap = HashMap{usz, vma::VirtualAllocation};
 
-// Deliberate persistent-arena usage superset: the one backing buffer is
-// created with these bits, and every span's declared usage is validated as a
-// subset of it. `vertex` stays out (unimplemented interop bit); `shared_queues`
-// stays out (the arena is single-queue-consumed today).
+// vertex stays out (unimplemented interop); shared_queues stays out (the
+// arena is single-queue-consumed today).
 const gpu::BufferUsage PERSISTENT_ARENA_USAGE = {
     .transfer_src, .transfer_dst, .uniform, .storage, .addressable, .indirect, .index,
 };
