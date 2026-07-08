@@ -171,7 +171,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | submits, waits | driver reported device loss; unrecoverable |
-| `RESOURCE_IN_USE` | — (reserved) | not yet raised; frames-in-flight destroys are handled by deferred backend release instead (gpu.c3l#44). Reserved for future in-use checks, e.g. a live descriptor reference (gpu.c3l#51) |
+| `RESOURCE_IN_USE` | `destroy_texture` | a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first (gpu.c3l#81). Frames-in-flight destroys are unaffected — those are handled by deferred backend release instead (gpu.c3l#44) |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths | per-frame data outgrew the arena (sizing knobs: gpu.c3l#28) |
 | `SLOT_TABLE_FULL` | creates | handle table at capacity; textures scale via `DeviceDesc.texture_capacity` |
 | `DESCRIPTOR_HEAP_FULL` | `create_texture_descriptor`, `create_sampler` | capacity < live descriptors + same-frame retires (they recycle a frame later) |
@@ -819,6 +819,14 @@ sample). State-machine contracts: acquiring while an acquire is pending
 faults INVALID_RESOURCE_STATE; present enforces the PRESENT tracked layout;
 a failed resize parks the swapchain dormant (next acquire reports
 SWAPCHAIN_OUT_OF_DATE).
+
+`resize_swapchain` (and swapchain/device teardown) release the old wrapped
+swapchain textures directly, bypassing `destroy_texture` — so they never hit
+the `RESOURCE_IN_USE` check (§4 Faults). A `TextureIndex` descriptor created
+against a swapchain texture does **not** block a resize, and is not faulted
+or freed by it: the descriptor is left dangling once the backing image is
+gone. Destroy any descriptors on the current swapchain textures before
+calling `resize_swapchain`.
 
 Each acquired image couples to exactly one GRAPHICS `submit` before present:
 a second coupled submit or a present without a consumed submit faults
