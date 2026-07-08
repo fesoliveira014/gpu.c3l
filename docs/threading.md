@@ -89,3 +89,12 @@ they abort on first temp allocation.
 - A context is confined, not locked: two lists from one context may be
   recorded interleaved by the owning thread, never by two threads.
 - Command lists from different contexts may be mixed in one `SubmitDesc`.
+
+## Frame retirement across queues
+
+`end_frame`'s fence is a chain of queue-ordered empty submits: distinct
+compute/transfer queues used during the frame signal auxiliary timeline
+values first, and the graphics-side signal waits on them before signaling
+the frame value. A host-side wait on the frame value therefore covers every
+queue's frame work — arenas, command pools, descriptor retires, and readback
+tickets stay safe under any queue topology.

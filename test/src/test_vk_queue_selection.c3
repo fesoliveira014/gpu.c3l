@@ -134,3 +134,46 @@ fn void shared_queues_alone_is_invalid() @test {
     fault f = @catch(gpu::create_buffer(&device, &buf_desc));
     assert(f == gpu::INVALID_ARGUMENT, "usage with no Vulkan bits faults INVALID_ARGUMENT");
 }
+
+fn void pool_selection_follows_queue_family() @test {
+    vk::CommandPool[2] gfx  = { (vk::CommandPool)(uptr)0x10, (vk::CommandPool)(uptr)0x11 };
+    vk::CommandPool[2] comp = { (vk::CommandPool)(uptr)0x30, (vk::CommandPool)(uptr)0x31 };
+    vk::CommandPool[2] xfer = { (vk::CommandPool)(uptr)0x20, (vk::CommandPool)(uptr)0x21 };
+
+    vk::RecordingContextState aliased = {
+        .graphics_pools = gfx[..],
+        .transfer_pools = xfer[..],
+    };
+    aliased.compute_pools = aliased.graphics_pools;
+    assert(vk::pool_for(&aliased, gpu::QueueKind.COMPUTE, 0) == gfx[0], "aliased compute uses graphics pool");
+    assert(vk::pool_for(&aliased, gpu::QueueKind.TRANSFER, 1) == xfer[1], "transfer uses transfer pool");
+
+    vk::RecordingContextState distinct = {
+        .graphics_pools = gfx[..],
+        .compute_pools  = comp[..],
+        .transfer_pools = xfer[..],
+        .compute_pools_distinct = true,
+    };
+    assert(vk::pool_for(&distinct, gpu::QueueKind.COMPUTE, 0) == comp[0], "distinct compute uses compute pool");
+    assert(vk::pool_for(&distinct, gpu::QueueKind.GRAPHICS, 0) == gfx[0], "graphics unaffected");
+}
+
+fn void tri_queue_frame_retires_cleanly() @test {
+    gpu::Device device = make_queue_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    for (uint frame = 0; frame < 4; frame++) {
+        gpu::begin_frame(&device)!!;
+        gpu::CommandList[3] lists;
+        gpu::QueueKind[3] kinds = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE, gpu::QueueKind.TRANSFER };
+        for (uint i = 0; i < 3; i++) {
+            gpu::CommandList cmd = gpu::begin_commands(&device, kinds[i])!!;
+            gpu::end_commands(&device, &cmd)!!;
+            gpu::CommandList[1] one = { cmd };
+            gpu::SubmitDesc submit = { .command_lists = one[..] };
+            gpu::submit(&device, &submit)!!;
+        }
+        gpu::end_frame(&device)!!;
+    }
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}

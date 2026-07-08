@@ -164,6 +164,11 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
         queue_mutex.lock()!!;
         defer queue_mutex.unlock();
         check(vk::queue_submit2(queue_for(state, kind), 1, &submit, (vk::Fence)null))!;
+        if (state.frame_active) {
+            FrameArenaState* frame_slot = &state.frame_arenas[state.frame_index];
+            if (kind == gpu::QueueKind.COMPUTE && state.compute_queue_distinct) frame_slot.compute_used = true;
+            if (kind == gpu::QueueKind.TRANSFER && state.transfer_queue != state.graphics_queue) frame_slot.transfer_used = true;
+        }
         foreach (&cl : desc.command_lists) cl.state = gpu::CommandState.SUBMITTED;
     };
 }
