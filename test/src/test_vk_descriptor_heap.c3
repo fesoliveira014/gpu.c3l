@@ -111,6 +111,64 @@ fn void texture_descriptor_bad_view_rejected() @test {
     assert(view_fault == gpu::INVALID_ARGUMENT, "format-reinterpreting views fault INVALID_ARGUMENT");
 }
 
+fn void destroy_texture_with_live_descriptor_faults_and_recovers() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_texture(&device);
+
+    gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
+
+    fault in_use_fault = @catch(gpu::destroy_texture(&device, texture));
+    assert(in_use_fault == gpu::RESOURCE_IN_USE, "destroying a texture with a live descriptor faults RESOURCE_IN_USE");
+
+    gpu::TextureIndex second = gpu::create_texture_descriptor(&device, texture, null)!!;
+    assert(second.is_valid(), "handle stays valid and usable after the faulted destroy");
+    gpu::destroy_texture_descriptor(&device, second)!!;
+
+    gpu::destroy_texture_descriptor(&device, index)!!;
+    gpu::destroy_texture(&device, texture)!!;
+}
+
+fn void destroy_texture_retired_undrained_descriptor_succeeds() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_texture(&device);
+
+    gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::destroy_texture_descriptor(&device, index)!!;
+
+    gpu::destroy_texture(&device, texture)!!;
+}
+
+fn void destroy_texture_blocks_while_any_descriptor_live() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_texture(&device);
+
+    gpu::TextureIndex a = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureIndex b = gpu::create_texture_descriptor(&device, texture, null)!!;
+
+    gpu::destroy_texture_descriptor(&device, a)!!;
+    fault still_in_use = @catch(gpu::destroy_texture(&device, texture));
+    assert(still_in_use == gpu::RESOURCE_IN_USE, "one remaining live descriptor still blocks destroy_texture");
+
+    gpu::destroy_texture_descriptor(&device, b)!!;
+    gpu::destroy_texture(&device, texture)!!;
+}
+
+fn void destroy_texture_unaffected_by_unrelated_descriptor() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture_a = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, texture_a)!!;
+    gpu::TextureHandle texture_b = make_heap_texture(&device);
+
+    gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture_a, null)!!;
+    defer gpu::destroy_texture_descriptor(&device, index)!!;
+
+    gpu::destroy_texture(&device, texture_b)!!;
+}
+
 fn void sampler_round_trip_and_exhaustion() @test {
     gpu::Device device = make_heap_test_device(8, 2);
     defer gpu::destroy_device(&device)!!;
