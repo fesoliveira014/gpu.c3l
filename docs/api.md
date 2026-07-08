@@ -820,6 +820,14 @@ faults INVALID_RESOURCE_STATE; present enforces the PRESENT tracked layout;
 a failed resize parks the swapchain dormant (next acquire reports
 SWAPCHAIN_OUT_OF_DATE).
 
+Each acquired image couples to exactly one GRAPHICS `submit` before present:
+a second coupled submit or a present without a consumed submit faults
+INVALID_RESOURCE_STATE (a failed submit leaves the acquire retryable), and
+coupling a COMPUTE/TRANSFER submit faults INVALID_ARGUMENT. Wrapped swapchain
+textures carry only the usage bits the surface actually granted, so a
+transfer-src copy faults INVALID_ARGUMENT where TRANSFER_SRC was never
+supported.
+
 SDL helper functions should live in samples or an optional helper module, not in the core API.
 
 ## 11. Example: root-pointer compute

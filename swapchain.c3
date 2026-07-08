@@ -92,9 +92,10 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) 
     return device.vtable.acquire_next_image(device, swapchain);
 }
 
-<* Present the last acquired image. The image must be in the PRESENT tracked
-   layout (INVALID_RESOURCE_STATE otherwise). Faults SWAPCHAIN_OUT_OF_DATE
-   when the surface changed. *>
+<* Present the last acquired image. Requires the coupled GRAPHICS submit that
+   consumes the acquire to have run first (INVALID_RESOURCE_STATE otherwise)
+   and the image in the PRESENT tracked layout (INVALID_RESOURCE_STATE).
+   Faults SWAPCHAIN_OUT_OF_DATE when the surface changed. *>
 fn void? present(Device* device, PresentDesc* desc) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.present(device, desc);

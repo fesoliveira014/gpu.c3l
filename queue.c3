@@ -2,7 +2,8 @@ module gpu;
 
 // A non-zero `swapchain` couples this submit to the last acquire: rendering
 // waits the acquire semaphore, presentation waits this submit. One coupled
-// submit per acquire — the binary semaphores cannot be waited twice.
+// submit per acquire — a second faults INVALID_RESOURCE_STATE, and coupling
+// on a non-GRAPHICS queue faults INVALID_ARGUMENT.
 struct SubmitDesc {
     CommandList[]     command_lists;
     SemaphoreWait[]   waits;
