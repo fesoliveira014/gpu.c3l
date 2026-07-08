@@ -148,12 +148,12 @@ fn uint report_semaphore_leaks(VkDeviceState* state) {
     return count;
 }
 
-<* The device-owned default context is exempt. *>
+<* The device-owned default and helper contexts are exempt. *>
 fn uint report_context_leaks(VkDeviceState* state) {
     uint count = 0;
     if (state.recording_contexts.slots.ptr == null) return 0;
     foreach (i, &cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
-        if (!cell.used || (uint)i == state.default_context.index) continue;
+        if (!cell.used || (uint)i == state.default_context.index || (uint)i == state.helper_context.index) continue;
         io::eprintfn("gpu: leaked recording context (index %d)", i);
         count++;
     }

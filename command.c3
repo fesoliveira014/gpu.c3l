@@ -25,7 +25,8 @@ enum CommandState : int {
     SUBMITTED,
 }
 
-const uint MAX_RECORDING_CONTEXTS = 16;
+// Two slots are internal (default + helper contexts); 15 remain for users.
+const uint MAX_RECORDING_CONTEXTS = 17;
 
 // Distinct textures one list can carry a pending layout transition for
 // before recording faults INVALID_ARGUMENT.

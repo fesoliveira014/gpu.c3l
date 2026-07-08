@@ -57,7 +57,7 @@ fn void leak_reporters_count_leaks() @test {
     assert(vk::report_pipeline_leaks(state) == 1, "one leaked cache entry counted");
     assert(vk::report_shader_leaks(state) == 1, "one leaked shader counted");
     assert(vk::report_semaphore_leaks(state) == 1, "one leaked semaphore counted");
-    assert(vk::report_context_leaks(state) == 1, "one leaked context counted (default exempt)");
+    assert(vk::report_context_leaks(state) == 1, "one leaked context counted (default and helper exempt)");
 
     // Slot data feeding the report lines.
     vk::TextureSlot* tex_slot = &state.textures.slots[texture.index].value;

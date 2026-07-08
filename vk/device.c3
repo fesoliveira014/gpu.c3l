@@ -46,7 +46,10 @@ struct VkDeviceState {
     bool                       transfer_used_since_frame;
     // Off-frame submission not yet covered by an end_frame chain or teardown.
     Atomic{bool}               off_frame_pending;
-    // Lock order: transfer_mutex -> resource_mutex -> queue mutexes.
+    // Lock order: helper_record_mutex -> transfer_mutex -> resource_mutex ->
+    // queue mutexes. helper_record_mutex is outermost because the blocking
+    // helpers it wraps take transfer_mutex internally for their allocation.
+    Mutex                      helper_record_mutex;
     Mutex                      resource_mutex;
     Mutex                      transfer_mutex;
     Mutex                      graphics_queue_mutex;
@@ -60,6 +63,9 @@ struct VkDeviceState {
     PersistentArenaState       persistent_arena;
     RecordingContextTable      recording_contexts;
     gpu::RecordingContextHandle default_context;
+    // Reserved for the four blocking helpers; never touched by Tier-C
+    // recording, so it never races the default context's pool.
+    gpu::RecordingContextHandle helper_context;
     SemaphoreTable             semaphores;
     ShaderTable                shaders;
     PipelineTable              pipelines;
@@ -178,6 +184,7 @@ const gpu::BackendVTable VK_VTABLE = {
 fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     VkDeviceState* state = mem::new(VkDeviceState);
     defer catch destroy_state(state);
+    state.helper_record_mutex.init()!;
     state.resource_mutex.init()!;
     state.transfer_mutex.init()!;
     state.graphics_queue_mutex.init()!;
@@ -240,6 +247,9 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     RecordingContextState default_ctx;
     create_context_pools(state, &default_ctx)!;
     state.default_context = state.recording_contexts.alloc(default_ctx)!;
+    RecordingContextState helper_ctx;
+    create_context_pools(state, &helper_ctx)!;
+    state.helper_context = state.recording_contexts.alloc(helper_ctx)!;
     state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     state.shaders.slots    = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
     state.pipelines.slots  = mem::new_array(PipelineCell, gpu::MAX_PIPELINES);
@@ -359,6 +369,7 @@ fn void destroy_state(VkDeviceState* state) @private {
         vk::destroy_instance(state.instance, null);
         state.instance = (vk::Instance)null;
     }
+    if (state.helper_record_mutex.is_initialized())  (void)state.helper_record_mutex.destroy();
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
     if (state.transfer_mutex.is_initialized())       (void)state.transfer_mutex.destroy();
     if (state.graphics_queue_mutex.is_initialized()) (void)state.graphics_queue_mutex.destroy();

@@ -347,30 +347,35 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
     TimelineTag tag = { .kind = TimelineKind.HELPER, .value = helper_value };
 
     gpu::CommandList commands;
-    vk_begin_commands(
-        device:       device,
-        queue:        gpu::QueueKind.GRAPHICS,
-        ctx:          {},
-        out_commands: &commands,
-    )!;
-    cmd_upload_buffer_impl(
-        commands: &commands,
-        dst:      dst,
-        offset:   offset,
-        data:     data,
-        tag:      tag,
-    )!;
+    {
+        state.helper_record_mutex.lock()!!;
+        defer state.helper_record_mutex.unlock();
+        vk_begin_commands(
+            device:       device,
+            queue:        gpu::QueueKind.GRAPHICS,
+            ctx:          state.helper_context,
+            out_commands: &commands,
+        )!;
+        cmd_upload_buffer_impl(
+            commands: &commands,
+            dst:      dst,
+            offset:   offset,
+            data:     data,
+            tag:      tag,
+        )!;
 
-    gpu::BufferBarrier next_use = {
-        .buffer        = dst,
-        .offset        = offset,
-        .size          = data.len,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = next_stage,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = next_hazard,
-    };
-    vk_cmd_buffer_barrier(&commands, &next_use)!;
+        gpu::BufferBarrier next_use = {
+            .buffer        = dst,
+            .offset        = offset,
+            .size          = data.len,
+            .before_stage  = gpu::Stage.TRANSFER,
+            .after_stage   = next_stage,
+            .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+            .after_hazard  = next_hazard,
+        };
+        vk_cmd_buffer_barrier(&commands, &next_use)!;
+        vk_end_commands(device, &commands)!;
+    }
     return submit_and_wait(device, &commands);
 }
 
@@ -395,44 +400,49 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     if (data.len != expected) return gpu::INVALID_ARGUMENT~;
 
     gpu::CommandList commands;
-    vk_begin_commands(
-        device:       device,
-        queue:        gpu::QueueKind.GRAPHICS,
-        ctx:          {},
-        out_commands: &commands,
-    )!;
+    {
+        state.helper_record_mutex.lock()!!;
+        defer state.helper_record_mutex.unlock();
+        vk_begin_commands(
+            device:       device,
+            queue:        gpu::QueueKind.GRAPHICS,
+            ctx:          state.helper_context,
+            out_commands: &commands,
+        )!;
 
-    if (tracked == gpu::TextureLayout.UNDEFINED) {
-        gpu::TextureBarrier to_dst = {
+        if (tracked == gpu::TextureLayout.UNDEFINED) {
+            gpu::TextureBarrier to_dst = {
+                .texture       = dst,
+                .before_stage  = gpu::Stage.HOST,
+                .after_stage   = gpu::Stage.TRANSFER,
+                .before_hazard = gpu::Hazard.HOST_WRITE,
+                .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
+                .old_layout    = gpu::TextureLayout.UNDEFINED,
+                .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+            };
+            vk_cmd_texture_barrier(&commands, &to_dst)!;
+        }
+
+        gpu::TextureUploadDesc upload = { .texture = dst, .mip = mip };
+        cmd_upload_texture_impl(
+            commands: &commands,
+            desc:     &upload,
+            data:     data,
+            tag:      tag,
+        )!;
+
+        gpu::TextureBarrier next_use = {
             .texture       = dst,
-            .before_stage  = gpu::Stage.HOST,
-            .after_stage   = gpu::Stage.TRANSFER,
-            .before_hazard = gpu::Hazard.HOST_WRITE,
-            .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
-            .old_layout    = gpu::TextureLayout.UNDEFINED,
-            .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+            .before_stage  = gpu::Stage.TRANSFER,
+            .after_stage   = next_stage,
+            .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+            .after_hazard  = next_hazard,
+            .old_layout    = gpu::TextureLayout.TRANSFER_DST,
+            .new_layout    = next_layout,
         };
-        vk_cmd_texture_barrier(&commands, &to_dst)!;
+        vk_cmd_texture_barrier(&commands, &next_use)!;
+        vk_end_commands(device, &commands)!;
     }
-
-    gpu::TextureUploadDesc upload = { .texture = dst, .mip = mip };
-    cmd_upload_texture_impl(
-        commands: &commands,
-        desc:     &upload,
-        data:     data,
-        tag:      tag,
-    )!;
-
-    gpu::TextureBarrier next_use = {
-        .texture       = dst,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = next_stage,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = next_hazard,
-        .old_layout    = gpu::TextureLayout.TRANSFER_DST,
-        .new_layout    = next_layout,
-    };
-    vk_cmd_texture_barrier(&commands, &next_use)!;
     return submit_and_wait(device, &commands);
 }
 
@@ -456,43 +466,48 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     )!;
 
     gpu::CommandList commands;
-    vk_begin_commands(
-        device:       device,
-        queue:        gpu::QueueKind.GRAPHICS,
-        ctx:          {},
-        out_commands: &commands,
-    )!;
+    {
+        state.helper_record_mutex.lock()!!;
+        defer state.helper_record_mutex.unlock();
+        vk_begin_commands(
+            device:       device,
+            queue:        gpu::QueueKind.GRAPHICS,
+            ctx:          state.helper_context,
+            out_commands: &commands,
+        )!;
 
-    gpu::BufferBarrier from = {
-        .buffer        = src,
-        .offset        = offset,
-        .size          = out_data.len,
-        .before_stage  = from_stage,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = from_hazard,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-    };
-    vk_cmd_buffer_barrier(&commands, &from)!;
+        gpu::BufferBarrier from = {
+            .buffer        = src,
+            .offset        = offset,
+            .size          = out_data.len,
+            .before_stage  = from_stage,
+            .after_stage   = gpu::Stage.TRANSFER,
+            .before_hazard = from_hazard,
+            .after_hazard  = gpu::Hazard.TRANSFER_READ,
+        };
+        vk_cmd_buffer_barrier(&commands, &from)!;
 
-    gpu::BufferCopyDesc copy = {
-        .src        = src,
-        .dst        = readback.buffer,
-        .src_offset = offset,
-        .dst_offset = readback.offset,
-        .size       = out_data.len,
-    };
-    vk_cmd_copy_buffer(&commands, &copy)!;
+        gpu::BufferCopyDesc copy = {
+            .src        = src,
+            .dst        = readback.buffer,
+            .src_offset = offset,
+            .dst_offset = readback.offset,
+            .size       = out_data.len,
+        };
+        vk_cmd_copy_buffer(&commands, &copy)!;
 
-    gpu::BufferBarrier host_read = {
-        .buffer        = readback.buffer,
-        .offset        = readback.offset,
-        .size          = out_data.len,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.HOST_READ,
-    };
-    vk_cmd_buffer_barrier(&commands, &host_read)!;
+        gpu::BufferBarrier host_read = {
+            .buffer        = readback.buffer,
+            .offset        = readback.offset,
+            .size          = out_data.len,
+            .before_stage  = gpu::Stage.TRANSFER,
+            .after_stage   = gpu::Stage.HOST,
+            .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+            .after_hazard  = gpu::Hazard.HOST_READ,
+        };
+        vk_cmd_buffer_barrier(&commands, &host_read)!;
+        vk_end_commands(device, &commands)!;
+    }
 
     submit_and_wait(device, &commands)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
@@ -522,58 +537,63 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     )!;
 
     gpu::CommandList commands;
-    vk_begin_commands(
-        device:       device,
-        queue:        gpu::QueueKind.GRAPHICS,
-        ctx:          {},
-        out_commands: &commands,
-    )!;
+    {
+        state.helper_record_mutex.lock()!!;
+        defer state.helper_record_mutex.unlock();
+        vk_begin_commands(
+            device:       device,
+            queue:        gpu::QueueKind.GRAPHICS,
+            ctx:          state.helper_context,
+            out_commands: &commands,
+        )!;
 
-    gpu::TextureBarrier to_src = {
-        .texture       = src,
-        .before_stage  = from_stage,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = from_hazard,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = from_layout,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
-    };
-    vk_cmd_texture_barrier(&commands, &to_src)!;
+        gpu::TextureBarrier to_src = {
+            .texture       = src,
+            .before_stage  = from_stage,
+            .after_stage   = gpu::Stage.TRANSFER,
+            .before_hazard = from_hazard,
+            .after_hazard  = gpu::Hazard.TRANSFER_READ,
+            .old_layout    = from_layout,
+            .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        };
+        vk_cmd_texture_barrier(&commands, &to_src)!;
 
-    gpu::TextureBufferCopyDesc copy = { .texture = src, .dst = readback, .mip = mip };
-    vk_cmd_copy_texture_to_buffer(&commands, &copy)!;
+        gpu::TextureBufferCopyDesc copy = { .texture = src, .dst = readback, .mip = mip };
+        vk_cmd_copy_texture_to_buffer(&commands, &copy)!;
 
-    gpu::TextureBarrier restore = {
-        .texture       = src,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = from_stage,
-        .before_hazard = gpu::Hazard.TRANSFER_READ,
-        .after_hazard  = from_hazard,
-        .old_layout    = gpu::TextureLayout.TRANSFER_SRC,
-        .new_layout    = from_layout,
-    };
-    vk_cmd_texture_barrier(&commands, &restore)!;
+        gpu::TextureBarrier restore = {
+            .texture       = src,
+            .before_stage  = gpu::Stage.TRANSFER,
+            .after_stage   = from_stage,
+            .before_hazard = gpu::Hazard.TRANSFER_READ,
+            .after_hazard  = from_hazard,
+            .old_layout    = gpu::TextureLayout.TRANSFER_SRC,
+            .new_layout    = from_layout,
+        };
+        vk_cmd_texture_barrier(&commands, &restore)!;
 
-    gpu::BufferBarrier host_read = {
-        .buffer        = readback.buffer,
-        .offset        = readback.offset,
-        .size          = out_data.len,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.HOST_READ,
-    };
-    vk_cmd_buffer_barrier(&commands, &host_read)!;
+        gpu::BufferBarrier host_read = {
+            .buffer        = readback.buffer,
+            .offset        = readback.offset,
+            .size          = out_data.len,
+            .before_stage  = gpu::Stage.TRANSFER,
+            .after_stage   = gpu::Stage.HOST,
+            .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+            .after_hazard  = gpu::Hazard.HOST_READ,
+        };
+        vk_cmd_buffer_barrier(&commands, &host_read)!;
+        vk_end_commands(device, &commands)!;
+    }
 
     submit_and_wait(device, &commands)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
 }
 
-<* Ends recording, submits, blocks until queue idle. Touches no timeline —
-   the caller owns its tag's signaling. *>
+<* Submits an already-ended command list, blocks until queue idle. Touches
+   no timeline — the caller owns its tag's signaling. Runs after the caller
+   releases helper_record_mutex, so a successor records while this waits. *>
 fn void? submit_and_wait(gpu::Device* device, gpu::CommandList* commands) @private {
-    vk_end_commands(device, commands)!;
     gpu::CommandList[1] lists = { *commands };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     vk_submit(device, &submit)!;
