@@ -12,8 +12,10 @@ fn uint? resolve_descriptor_capacity(uint requested, uint default_capacity) {
     return capacity;
 }
 
-<* Register a texture in the shader-visible heap. The texture stays owned by
-   its TextureHandle. Ownership: release with destroy_texture_descriptor. *>
+<* Register a texture in the shader-visible heap; the texture must carry
+   sampled or storage usage (INVALID_ARGUMENT otherwise). The texture stays
+   owned by its TextureHandle. Ownership: release with
+   destroy_texture_descriptor. *>
 fn TextureIndex? create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.create_texture_descriptor(device, texture, view);

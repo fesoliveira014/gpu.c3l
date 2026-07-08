@@ -66,15 +66,17 @@ fn void texture_unsupported_desc_rejected() @test {
     fault cross_fault = @catch(gpu::create_texture(&device, &color_with_depth_usage));
     assert(cross_fault == gpu::INVALID_ARGUMENT, "depth_attach on a color format faults INVALID_ARGUMENT");
 
-    gpu::TextureDesc no_heap_usage = {
+    gpu::TextureDesc transfer_only = {
         .dimension = gpu::TextureDimension.TEX_2D,
         .width     = 16,
         .height    = 16,
         .format    = gpu::Format.RGBA8_UNORM,
         .usage     = { .transfer_dst },
     };
-    fault usage_fault = @catch(gpu::create_texture(&device, &no_heap_usage));
-    assert(usage_fault == gpu::INVALID_ARGUMENT, "non-heap usage faults INVALID_ARGUMENT");
+    gpu::TextureHandle staging_target = gpu::create_texture(&device, &transfer_only)!!;
+    fault descriptor_fault = @catch(gpu::create_texture_descriptor(&device, staging_target, null));
+    assert(descriptor_fault == gpu::INVALID_ARGUMENT, "descriptor on a non-shader-visible texture faults INVALID_ARGUMENT");
+    gpu::destroy_texture(&device, staging_target)!!;
 
     gpu::TextureDesc not_2d = {
         .dimension = gpu::TextureDimension.TEX_3D,
@@ -295,4 +297,45 @@ fn void unsupported_dimensions_and_formats_fault() @test {
     };
     fault f = @catch(gpu::create_texture(&device, &d24));
     assert(f == gpu::INVALID_ARGUMENT, "D24S8 faults INVALID_ARGUMENT");
+}
+
+fn void transfer_only_texture_round_trips() @test {
+    gpu::Device device = make_texture_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .transfer_src, .transfer_dst },
+    };
+    gpu::TextureHandle tex = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, tex)!!;
+
+    char[64] pixels;
+    for (uint i = 0; i < 64; i++) pixels[i] = (char)i;
+    gpu::upload_texture_data(
+        device:      &device,
+        dst:         tex,
+        mip:         0,
+        data:        pixels[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_WRITE,
+        next_layout: gpu::TextureLayout.TRANSFER_DST,
+    )!!;
+
+    char[64] readback;
+    gpu::readback_texture_data(
+        device:      &device,
+        src:         tex,
+        mip:         0,
+        out_data:    readback[..],
+        from_stage:  gpu::Stage.TRANSFER,
+        from_hazard: gpu::Hazard.TRANSFER_WRITE,
+        from_layout: gpu::TextureLayout.TRANSFER_DST,
+    )!!;
+    for (uint i = 0; i < 64; i++) {
+        assert(readback[i] == (char)i, "transfer-only texture round-trips bytes");
+    }
 }
