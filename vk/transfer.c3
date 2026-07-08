@@ -426,7 +426,9 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
 
 <* Blocking helpers act as mini-frames: after the idle-wait the timeline
    advances (host signal is truthful once the queue is drained), retiring
-   this call's transfer ranges and any pending dedicated buffers. *>
+   this call's transfer ranges and any pending dedicated buffers. The
+   increment and signal are serialized under transfer_mutex so concurrent
+   helpers can't land signals out of increment order. *>
 fn void? submit_and_wait(VkDeviceState* state, gpu::Device* device, gpu::CommandList* commands) @private {
     vk_end_commands(device, commands)!;
     gpu::CommandList[1] lists = { *commands };
@@ -434,6 +436,8 @@ fn void? submit_and_wait(VkDeviceState* state, gpu::Device* device, gpu::Command
     vk_submit(device, &submit)!;
     vk_wait_queue_idle(device, gpu::QueueKind.GRAPHICS)!;
 
+    state.transfer_mutex.lock()!!;
+    defer state.transfer_mutex.unlock();
     ulong helper_value = state.timeline_counter.add(1, AtomicOrdering.RELAXED) + 1;
     vk::SemaphoreSignalInfo signal_info = vk::semaphore_signal_info()
         .set_semaphore(state.frame_timeline)

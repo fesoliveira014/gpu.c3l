@@ -16,6 +16,7 @@ const char[*] THR_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 const uint THR_THREADS = 4;
 const uint THR_ITERS = 32;
 const uint THR_ELEMENTS = 64;
+const uint HAMMER_ITERS = 32;
 
 fn gpu::Device make_thr_device() {
     gpu::DeviceDesc desc = {
@@ -382,6 +383,67 @@ fn void concurrent_blocking_uploads() @test {
             from_hazard: gpu::Hazard.TRANSFER_READ,
         )!!;
         foreach (b : readback) assert(b == (char)(i + 1), "every concurrent upload landed intact");
+        gpu::destroy_buffer(&device, buffers[i])!!;
+    }
+}
+
+struct HammerArgs {
+    gpu::Device*      device;
+    gpu::BufferHandle buffer;
+    char              fill;
+}
+
+fn int upload_hammer_worker(void* arg) {
+    HammerArgs* args = (HammerArgs*)arg;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+    char[256] payload;
+    foreach (&b : payload) *b = args.fill;
+    for (uint i = 0; i < HAMMER_ITERS; i++) {
+        gpu::upload_buffer_data(
+            device:      args.device,
+            dst:         args.buffer,
+            offset:      0,
+            data:        payload[..],
+            next_stage:  gpu::Stage.TRANSFER,
+            next_hazard: gpu::Hazard.TRANSFER_READ,
+        )!!;
+    }
+    };
+    return 0;
+}
+
+<* Repeated blocking uploads per thread widen the race window between the
+   timeline increment and the host signal far beyond one call each. *>
+fn void concurrent_upload_hammer() @test {
+    gpu::Device device = make_thr_device();
+    defer gpu::destroy_device(&device)!!;
+
+    HammerArgs[THR_THREADS] args;
+    gpu::BufferHandle[THR_THREADS] buffers;
+    Thread[THR_THREADS] threads;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        gpu::BufferDesc desc = {
+            .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+        };
+        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+        args[i] = { .device = &device, .buffer = buffers[i], .fill = (char)(i + 1) };
+    }
+    for (uint i = 0; i < THR_THREADS; i++) {
+        threads[i].create(&upload_hammer_worker, &args[i])!!;
+    }
+    foreach (&t : threads) t.join()!!;
+
+    char[256] readback;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        gpu::readback_buffer_data(
+            device:      &device,
+            src:         buffers[i],
+            offset:      0,
+            out_data:    readback[..],
+            from_stage:  gpu::Stage.TRANSFER,
+            from_hazard: gpu::Hazard.TRANSFER_READ,
+        )!!;
+        foreach (b : readback) assert(b == (char)(i + 1), "the device survived and buffers stayed isolated");
         gpu::destroy_buffer(&device, buffers[i])!!;
     }
 }
