@@ -103,11 +103,8 @@ fn bool frame_arena_retired(VkDeviceState* state, FrameArenaState* slot) {
     return value >= slot.frame_timeline_value;
 }
 
-<* In-frame retires wait for the value end_frame will signal; so does an
-   off-frame retire while off_frame_pending holds, since that work has not
-   yet been covered by an end_frame chain or teardown. Outside both, the
-   current value makes reclaim immediate. Shared by the descriptor heap, the
-   transfer arenas, and dedicated staging buffers. *>
+<* In-frame and off-frame-pending retires wait for the next end_frame value;
+   outside both, reclaim is immediate. *>
 fn ulong retire_timeline_value(VkDeviceState* state) {
     ulong counter = state.timeline_counter.load(AtomicOrdering.RELAXED);
     return (state.frame_active || state.off_frame_pending.load(AtomicOrdering.RELAXED)) ? counter + 1 : counter;
@@ -196,15 +193,11 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
     return check(vk::queue_submit2(queue, 1, &submit, (vk::Fence)null));
 }
 
-<* The frame fence is a chain of queue-ordered empty submits: distinct
-   compute/transfer queues used since the last boundary — including any
-   off-frame submissions made before this begin_frame — first signal
-   auxiliary values, then the graphics signal waits on those and signals the
-   frame value — so the frame value implies every queue's work completed and
-   a host-side wait on it safely retires arenas, pools, descriptors, and
-   tickets regardless of queue topology. Off-frame graphics-queue submits
-   need no separate flag: this same signal runs on the graphics queue, so
-   Vulkan's per-queue submission order covers them for free. *>
+<* The frame fence is a chain of queue-ordered empty submits: compute/
+   transfer queues used since the last boundary (in-frame or off) signal aux
+   values the graphics signal waits on, so the frame value implies every
+   queue finished. Off-frame graphics submits need no flag — this signal is
+   queue-ordered behind them. *>
 fn void? vk_end_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;

@@ -98,10 +98,8 @@ fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
 <* Submit command lists to their queue via vkQueueSubmit2, waiting on and
    signaling the requested timeline values at their stages. Empty wait/signal/
    command arrays are left unset so the slice setters are never handed a
-   zero-length slice. Queue-used flags and the off-frame-pending marker are
-   set unconditionally (not just in-frame) so end_frame's cross-queue chain
-   and retire_timeline_value also cover submissions made outside a frame
-   bracket (gpu.c3l#80). *>
+   zero-length slice. Queue-used flags and the off-frame marker are set
+   unconditionally so retirement also covers off-frame submissions. *>
 fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;

@@ -60,16 +60,13 @@ fn void buffer_upload_readback_round_trip() @test {
     }
 }
 
-<* An unrelated blocking helper's completion must never retire a ticket
-   whose command list was never submitted (gpu.c3l#80): before the helper
-   timeline was split from the frame timeline, a blocking helper signaled
-   the exact value an unsubmitted ticket recorded moments earlier had been
-   tagged with, so poll/resolve reported it ready with stale bytes. *>
+<* An unrelated blocking helper's completion must never make an unsubmitted
+   ticket poll ready. *>
 fn void cmd_readback_ticket_not_ready_before_submit() @test {
     gpu::Device device = make_transfer_test_device();
     defer gpu::destroy_device(&device)!!;
 
-    // Settle the timeline on a known baseline before the deterministic part.
+    // Settle the timeline to a known baseline.
     gpu::begin_frame(&device)!!;
     gpu::end_frame(&device)!!;
 

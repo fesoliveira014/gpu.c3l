@@ -15,10 +15,8 @@ const usz TRANSFER_ALIGN = 16;
 // (signaling past a slow sibling would retire its in-flight ranges).
 const ulong HELPER_TURNSTILE_ROUND_NS = 5_000_000_000;
 
-// Which timeline retires a tagged range/entry: in-frame command-list paths
-// tag FRAME (frame_timeline), blocking helpers tag HELPER (helper_timeline) —
-// keeping the two disjoint is what stops one helper's completion from
-// retiring another helper's or an unsubmitted list's resources (gpu.c3l#80).
+// FRAME entries retire on frame_timeline, HELPER on helper_timeline;
+// disjoint, so a helper's completion never retires another call's resources.
 enum TimelineKind : int {
     FRAME,
     HELPER,
@@ -96,11 +94,8 @@ fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
     state.readback_arena.size = readback_size;
 }
 
-<* Both timelines are read once per drain call: entries in a single arena's
-   ring can carry either tag (a mid-frame blocking helper interleaves with
-   in-frame recordings), but the ring itself stays strict FIFO regardless of
-   tag — the head must retire before anything behind it can, since
-   virtual_head has to track a contiguous consumed prefix. *>
+<* A ring can mix tags (mid-frame helpers interleave with recordings) but
+   stays strict FIFO: the head retires before anything behind it. *>
 fn void drain_transfer_retire(VkDeviceState* state, TransferArenaState* arena) @private {
     if (arena.retire_count == 0) return;
     ulong frame_current = 0;
@@ -117,12 +112,9 @@ fn void drain_transfer_retire(VkDeviceState* state, TransferArenaState* arena) @
     }
 }
 
-<* Contiguous ring allocation over virtual offsets; the allocated range
-   retires against the tagged timeline's value, so a range holds until that
-   timeline actually advances past it (frame end or the covering helper's
-   turnstiled signal) — never a different call's advance. Faults ARENA_FULL
-   when the request cannot fit the live window (callers fall back to a
-   dedicated buffer). *>
+<* Contiguous ring allocation over virtual offsets; the range holds until
+   its tagged timeline passes it — never a different call's advance. Faults
+   ARENA_FULL when the request cannot fit (callers fall back to dedicated). *>
 fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, TimelineTag tag) @private {
     if (size > arena.size) return gpu::ARENA_FULL~;
     drain_transfer_retire(state, arena);
@@ -233,9 +225,7 @@ fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc)
     return (usz)width * height * layers * format_texel_size(slot.format);
 }
 
-<* Shared by the public Tier C recording entry point and the blocking upload
-   helper: the caller supplies the timeline tag its staging range retires
-   against. *>
+<* The caller supplies the timeline tag its staging range retires against. *>
 fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data, TimelineTag tag) @private {
     if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
@@ -317,10 +307,8 @@ fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDes
     );
 }
 
-<* Reserves this blocking helper's retirement value under transfer_mutex,
-   before any of its allocations tag a range with it — the reservation and
-   every allocation tagged from it therefore agree on the same value that
-   `signal_helper_timeline` will eventually signal (gpu.c3l#80). *>
+<* Reserved under transfer_mutex before any allocation tags a range, so
+   every tag agrees with the value signal_helper_timeline signals. *>
 fn ulong reserve_helper_value(VkDeviceState* state) @private {
     state.transfer_mutex.lock()!!;
     defer state.transfer_mutex.unlock();
@@ -328,11 +316,9 @@ fn ulong reserve_helper_value(VkDeviceState* state) @private {
     return state.helper_counter;
 }
 
-<* Turnstile: wait for `v - 1`, then signal `v`, so signals land in
-   reservation order. Mutex-free — vkSignalSemaphore is internally
-   synchronized and the wait-for-predecessor provides the ordering; a mutex
-   here would deadlock the predecessor out of its own signal. Callers `defer`
-   this on every exit path once `v` is reserved. *>
+<* Wait for `v - 1`, then signal `v`: signals land in reservation order.
+   Mutex-free — a mutex would deadlock the predecessor out of its own
+   signal. Callers defer this on every exit path once `v` is reserved. *>
 fn void? signal_helper_timeline(VkDeviceState* state, ulong v) @private {
     ulong prior = v - 1;
     ulong current = 0;
@@ -584,9 +570,8 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
 }
 
-<* Ends recording, submits, and blocks until the queue idles. Does not touch
-   any timeline: the caller has already reserved and tagged a helper value
-   (or is the FRAME path, retired by end_frame) and owns signaling it. *>
+<* Ends recording, submits, blocks until queue idle. Touches no timeline —
+   the caller owns its tag's signaling. *>
 fn void? submit_and_wait(gpu::Device* device, gpu::CommandList* commands) @private {
     vk_end_commands(device, commands)!;
     gpu::CommandList[1] lists = { *commands };
