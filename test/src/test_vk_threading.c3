@@ -257,6 +257,78 @@ fn void parallel_recording_across_contexts() @test {
     gpu::end_frame(&device)!!;
 }
 
+struct LayoutRecordArgs {
+    gpu::Device*                device;
+    gpu::RecordingContextHandle ctx;
+    gpu::TextureHandle          texture;
+    gpu::CommandList            list;
+}
+
+fn int layout_record_worker(void* arg) {
+    LayoutRecordArgs* args = (LayoutRecordArgs*)arg;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+    args.list = gpu::begin_commands(args.device, gpu::QueueKind.GRAPHICS, args.ctx)!!;
+    gpu::TextureBarrier to_dst = {
+        .texture       = args.texture,
+        .before_stage  = gpu::Stage.HOST,
+        .after_stage   = gpu::Stage.TRANSFER,
+        .before_hazard = gpu::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
+        .old_layout    = gpu::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+    };
+    gpu::cmd_texture_barrier(&args.list, &to_dst)!!;
+    gpu::end_commands(args.device, &args.list)!!;
+    };
+    return 0;
+}
+
+<* Each thread records a layout transition on its own recording context and
+   its own texture, then all lists submit together; per-list pending maps
+   must stay isolated across concurrent recorders. *>
+fn void parallel_recording_disjoint_texture_layouts() @test {
+    gpu::Device device = make_thr_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::RecordingContextHandle[THR_THREADS] contexts;
+    foreach (&ctx : contexts) *ctx = gpu::create_recording_context(&device)!!;
+    defer {
+        foreach (ctx : contexts) (void)gpu::destroy_recording_context(&device, ctx);
+    }
+
+    gpu::TextureHandle[THR_THREADS] textures;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        gpu::TextureDesc tex_desc = {
+            .dimension = gpu::TextureDimension.TEX_2D,
+            .width     = 4,
+            .height    = 4,
+            .format    = gpu::Format.RGBA8_UNORM,
+            .usage     = { .transfer_src, .transfer_dst },
+        };
+        textures[i] = gpu::create_texture(&device, &tex_desc)!!;
+    }
+    defer {
+        foreach (t : textures) (void)gpu::destroy_texture(&device, t);
+    }
+
+    gpu::begin_frame(&device)!!;
+    LayoutRecordArgs[THR_THREADS] args;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        args[i] = { .device = &device, .ctx = contexts[i], .texture = textures[i] };
+    }
+
+    Thread[THR_THREADS] threads;
+    for (uint i = 0; i < THR_THREADS; i++) threads[i].create(&layout_record_worker, &args[i])!!;
+    foreach (&t : threads) t.join()!!;
+
+    gpu::CommandList[THR_THREADS] lists;
+    for (uint i = 0; i < THR_THREADS; i++) lists[i] = args[i].list;
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_frame(&device)!!;
+}
+
 struct UploadArgs {
     gpu::Device*     device;
     gpu::BufferHandle buffer;

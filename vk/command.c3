@@ -275,7 +275,8 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
     BufferSlot* buffer = state.buffers.get(desc.src.buffer)!;
     if (!buffer.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
-    if (texture_layout(texture) != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
+    gpu::TextureLayout layout = effective_layout(commands, texture, desc.texture);
+    if (layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
         span:              &desc.src,
@@ -289,7 +290,7 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
         width:             desc.width,
         height:            desc.height,
     )!;
-    vk::cmd_copy_buffer_to_image((vk::CommandBuffer)commands.backend, buffer.buffer, texture.image, layout_to_vk(texture_layout(texture)), 1, &region);
+    vk::cmd_copy_buffer_to_image((vk::CommandBuffer)commands.backend, buffer.buffer, texture.image, layout_to_vk(layout), 1, &region);
 }
 
 fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureBufferCopyDesc* desc) @private {
@@ -299,7 +300,8 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
     BufferSlot* buffer = state.buffers.get(desc.dst.buffer)!;
     if (!buffer.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
-    if (texture_layout(texture) != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
+    gpu::TextureLayout layout = effective_layout(commands, texture, desc.texture);
+    if (layout != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
         span:              &desc.dst,
@@ -313,7 +315,7 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
         width:             desc.width,
         height:            desc.height,
     )!;
-    vk::cmd_copy_image_to_buffer((vk::CommandBuffer)commands.backend, texture.image, layout_to_vk(texture_layout(texture)), buffer.buffer, 1, &region);
+    vk::cmd_copy_image_to_buffer((vk::CommandBuffer)commands.backend, texture.image, layout_to_vk(layout), buffer.buffer, 1, &region);
 }
 
 <* Resolve an indirect argument span: indirect usage, 4-byte offset alignment,

@@ -67,6 +67,14 @@ passes. Under this discipline tracked-layout validation is exact and
 cross-texture parallel recording is data-race-free. Violating it degrades
 layout validation to best-effort (stale verdicts) — never memory unsafety.
 
+Texture-layout transitions are staged per list at record time (`old_layout`
+validates against the recording list's own pending transitions first, else
+the tracked layout) and only commit onto tracked state when the list
+submits, under the queue mutex, in submission order. A list that is recorded
+and never submitted has no effect on tracked state. Commit order is submit
+order, not cross-queue execution order — per-queue ownership of a texture
+stays the caller's responsibility (gpu.c3l#36).
+
 ## Visibility rules
 
 - Slot reads (`get` paths) are lock-free: tables never reallocate, and a
