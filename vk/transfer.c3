@@ -152,23 +152,34 @@ fn void drain_dedicated_transfers(VkDeviceState* state) @private {
     }
 }
 
-<* Span from the arena, or a dedicated one-shot buffer (destroyed once its
-   tagged timeline retires) when the arena cannot fit the request. *>
+<* Span from the arena, or a dedicated one-shot buffer when it cannot fit.
+   The fallback's creation runs outside transfer_mutex; only ring bookkeeping
+   is locked, and the full re-check destroys the fresh buffer. *>
 fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, gpu::BufferDesc* dedicated_desc, TimelineTag tag) @private {
-    state.transfer_mutex.lock()!!;
-    defer state.transfer_mutex.unlock();
-    drain_dedicated_transfers(state);
-    if (try span = transfer_arena_alloc(
-        state: state,
-        arena: arena,
-        size:  size,
-        align: align,
-        tag:   tag,
-    )) return span;
-    if (state.dedicated_staging.count == DEDICATED_RETIRE_CAP) return gpu::ARENA_FULL~;
+    {
+        state.transfer_mutex.lock()!!;
+        defer state.transfer_mutex.unlock();
+        drain_dedicated_transfers(state);
+        if (try span = transfer_arena_alloc(
+            state: state,
+            arena: arena,
+            size:  size,
+            align: align,
+            tag:   tag,
+        )) return span;
+        if (state.dedicated_staging.count == DEDICATED_RETIRE_CAP) return gpu::ARENA_FULL~;
+    }
 
     gpu::Device shim = device_shim(state);
     gpu::BufferHandle buffer = vk_create_buffer(&shim, dedicated_desc)!;
+
+    state.transfer_mutex.lock()!!;
+    drain_dedicated_transfers(state);
+    if (state.dedicated_staging.count == DEDICATED_RETIRE_CAP) {
+        state.transfer_mutex.unlock();
+        (void)vk_destroy_buffer(&shim, buffer);
+        return gpu::ARENA_FULL~;
+    }
     mark_buffer_internal(state, buffer);
     state.dedicated_staging.entries[(state.dedicated_staging.head + state.dedicated_staging.count) % DEDICATED_RETIRE_CAP] = {
         .buffer         = buffer,
@@ -176,6 +187,8 @@ fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena,
         .timeline_kind  = tag.kind,
     };
     state.dedicated_staging.count++;
+    state.dedicated_fallbacks++;
+    state.transfer_mutex.unlock();
     return vk_get_buffer_span(&shim, buffer);
 }
 
@@ -307,9 +320,10 @@ fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDes
     );
 }
 
-<* Reserved under transfer_mutex, inside the caller's helper_record_mutex
-   window, so reservation order matches recording order and every tag agrees
-   with the value signal_helper_timeline signals. *>
+<* Reserved under transfer_mutex, but the ordering guarantee comes from the
+   caller's helper_record_mutex window, not this lock: only one thread can
+   reserve-and-record at a time, so reservation order matches recording
+   order and every tag agrees with the value signal_helper_timeline signals. *>
 fn ulong reserve_helper_value(VkDeviceState* state) @private {
     state.transfer_mutex.lock()!!;
     defer state.transfer_mutex.unlock();
@@ -360,6 +374,12 @@ fn void? maybe_reset_helper_pool(VkDeviceState* state) @private {
 <* Cumulative helper-pool resets, whitebox-exposed for tests. *>
 fn ulong helper_pool_reset_count(VkDeviceState* state) {
     return state.helper_pool_resets;
+}
+
+<* Cumulative dedicated-fallback registrations (created-then-destroyed
+   full-path buffers are not counted), whitebox-exposed for tests. *>
+fn ulong dedicated_fallback_count(VkDeviceState* state) {
+    return state.dedicated_fallbacks;
 }
 
 fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz offset, char[] data, gpu::Stage next_stage, gpu::Hazard next_hazard) @private {
@@ -669,23 +689,29 @@ fn void unpin_ticket_range(TransferArenaState* arena, ulong range_end) @private 
 <* Ticket destination: pinned readback-arena range, or a dedicated buffer
    (destroyed at resolve) when the arena cannot fit the request. Tickets only
    come from Tier C recording (cmd_readback_buffer/cmd_readback_texture),
-   never from a blocking helper, so they always tag FRAME. *>
+   never from a blocking helper, so they always tag FRAME. The dedicated
+   buffer's VMA creation runs outside transfer_mutex, matching transfer_alloc
+   — a ticket's fallback owns its buffer directly (no shared retire ring), so
+   there is nothing to re-check on relock beyond the counter bump. *>
 fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
-    state.transfer_mutex.lock()!!;
-    defer state.transfer_mutex.unlock();
     TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
-    if (try alloc = ticket_arena_alloc(
-        state: state,
-        arena: &state.readback_arena,
-        size:  size,
-        tag:   tag,
-    )) {
-        return {
-            .span      = alloc.span,
-            .value     = (gpu::SemaphoreValue)tag.value,
-            .range_end = alloc.range_end,
-        };
+    {
+        state.transfer_mutex.lock()!!;
+        defer state.transfer_mutex.unlock();
+        if (try alloc = ticket_arena_alloc(
+            state: state,
+            arena: &state.readback_arena,
+            size:  size,
+            tag:   tag,
+        )) {
+            return {
+                .span      = alloc.span,
+                .value     = (gpu::SemaphoreValue)tag.value,
+                .range_end = alloc.range_end,
+            };
+        }
     }
+
     gpu::BufferDesc desc = {
         .size        = size,
         .usage       = { .transfer_dst },
@@ -694,8 +720,11 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
     };
     gpu::Device shim = device_shim(state);
     gpu::BufferHandle buffer = vk_create_buffer(&shim, &desc)!;
-    mark_buffer_internal(state, buffer);
     if (try span = vk_get_buffer_span(&shim, buffer)) {
+        state.transfer_mutex.lock()!!;
+        mark_buffer_internal(state, buffer);
+        state.dedicated_fallbacks++;
+        state.transfer_mutex.unlock();
         return {
             .span      = span,
             .value     = (gpu::SemaphoreValue)tag.value,
