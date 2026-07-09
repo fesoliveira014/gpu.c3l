@@ -103,19 +103,26 @@ they abort on first temp allocation.
 
 ## Frame retirement across queues
 
-`end_frame`'s fence is a chain of queue-ordered empty submits: distinct
-compute/transfer queues used since the last frame boundary — including any
-off-frame submissions made before this `begin_frame` — signal auxiliary
-timeline values first, and the graphics-side signal waits on them before
+Each distinct compute/transfer queue has its own auxiliary timeline
+(`aux_compute_timeline`, `aux_transfer_timeline`), signaled from that queue
+alone — monotonic by construction, since a single queue's submissions
+execute in submission order. `submit` piggybacks one internal aux signal
+(`ALL_COMMANDS`, per-queue counter) onto every user submit on a distinct
+compute or transfer queue; the counter and its last-signaled value update
+only after the submit succeeds, under the queue mutex already held, so a
+rejected submit never leaves anything waiting on a value that will never
+signal. `end_frame` issues a single empty submit: the graphics-side frame
+signal, which waits each used queue's latest recorded aux value before
 signaling the frame value. A host-side wait on the frame value therefore
 covers every queue's work — arenas, command pools, descriptor retires, and
-readback tickets stay safe under any queue topology. `submit` sets these
-per-queue used flags unconditionally, not just while a frame is active, so
-an off-frame submission on a distinct compute or transfer queue is still
-waited by the next `end_frame`'s chain (off-frame graphics-queue submits
-need no flag: the chain's own final signal already runs on that queue, and
-Vulkan's per-queue submission order covers them for free). See "Off-frame
-submissions" below for the destruction-side half of this contract.
+readback tickets stay safe under any queue topology, off-frame submissions
+included. `submit` sets the per-queue used flags unconditionally, not just
+while a frame is active, so an off-frame submission on a distinct compute or
+transfer queue is still waited by the next `end_frame`'s chain (off-frame
+graphics-queue submits need no flag: the frame signal already runs on that
+queue, and Vulkan's per-queue submission order covers them for free). See
+"Off-frame submissions" below for the destruction-side half of this
+contract.
 
 ## Helper timeline
 

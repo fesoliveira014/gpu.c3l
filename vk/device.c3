@@ -35,10 +35,15 @@ struct VkDeviceState {
     bool                       presentation_enabled;
     BufferTable                buffers;
     vk::Semaphore              frame_timeline;
-    // Auxiliary timeline for end_frame's cross-queue chain; keeps
-    // frame_timeline at exactly one signal per frame so retire_timeline_value
-    // stays correct.
-    vk::Semaphore              aux_timeline;
+    // Per-queue aux timelines piggybacked onto user submits; each signals
+    // from one queue only, so values are monotonic. counter/last_signaled
+    // mutate under that queue's mutex, last_signaled only after success.
+    vk::Semaphore              aux_compute_timeline;
+    vk::Semaphore              aux_transfer_timeline;
+    ulong                      aux_compute_counter;
+    ulong                      aux_compute_last_signaled;
+    ulong                      aux_transfer_counter;
+    ulong                      aux_transfer_last_signaled;
     // Blocking-helper completions signal here (turnstiled), never frame_timeline.
     vk::Semaphore              helper_timeline;
     Atomic{ulong}              timeline_counter;
@@ -91,6 +96,8 @@ struct VkDeviceState {
     // fold — never by a signaler, so it can never cover unfinished work.
     ulong                      signaled_shadow;
     DeferredStats              deferred_stats;
+    // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
+    SubmitStats                submit_stats;
     bool                       frame_active;
 }
 
