@@ -143,8 +143,8 @@ fn void wait_timeout_zero_on_unreached_value_faults() @test {
     assert(timeout_fault == gpu::WAIT_TIMEOUT, "timeout-0 wait on an unreached value faults WAIT_TIMEOUT");
 }
 
-// Lazy pool resets (gpu.c3l#91): begin_frame's reset loop only pays for
-// pools a context actually dirtied since that frame slot last reset.
+// Lazy pool resets: begin_frame's reset loop only pays for pools a context
+// actually dirtied since that frame slot last reset.
 
 fn void idle_context_pools_are_never_reset() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };

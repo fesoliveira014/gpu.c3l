@@ -10,8 +10,8 @@ import std::core::mem::allocators;
 
 // Advisory, not gating: Phase A times parallel Tier-C cmd_upload_buffer
 // across per-thread recording contexts at payload x staging-arena-size
-// combinations, some of which force the dedicated-fallback path this change
-// hoists out of transfer_mutex. Phase B times the blocking upload_buffer_data
+// combinations, some of which force the dedicated-fallback path hoisted
+// out of transfer_mutex. Phase B times the blocking upload_buffer_data
 // helper across thread counts; expect a near-flat line — it is queue-bound
 // (record-mutex + graphics-queue idle dominate), not lock-bound, so the hoist
 // buys it nothing. Lavapipe caveats: host mallocs understate real

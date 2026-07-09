@@ -30,7 +30,7 @@ faultdef
     // destroy the descriptor first. In-flight destroys defer instead.
     RESOURCE_IN_USE,
     // A frame/staging/readback arena ran out for this frame; raise the
-    // arena size or split the work (see gpu.c3l#28 for the sizing knobs).
+    // arena size in DeviceDesc or split the work.
     ARENA_FULL,
     // A handle table hit capacity (buffers, textures, pipelines, ...);
     // for textures the capacity is DeviceDesc.texture_capacity.

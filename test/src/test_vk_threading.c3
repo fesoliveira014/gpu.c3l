@@ -22,9 +22,9 @@ const uint HELPER_HAMMER_THREADS = 2;
 const uint HELPER_HAMMER_ITERS = 300;
 const usz HELPER_HAMMER_PAYLOAD = 128;
 // Zero-slack: one payload width, so the two helpers must actually contend
-// for staging space. Widened past this only while gpu.c3l#98's cross-thread
-// deferred-queue allocator gap was open; #98 pinned the queue's allocator to
-// the device, so this is the tightest sizing that stays safe.
+// for staging space. The deferred queue's allocator is pinned to the device,
+// so worker-thread destroys under this pressure are safe and this is the
+// tightest sizing that stays safe.
 const usz HELPER_HAMMER_TINY_STAGING = HELPER_HAMMER_PAYLOAD;
 
 const uint HELPER_RACE_ITERS = 100;
@@ -537,7 +537,7 @@ fn int helper_hammer_worker(void* arg) {
 
 <* Reuse-pressure coverage, not a guaranteed repro: per-thread varying
    patterns surface staging aliasing as byte mismatches. Full pressure now
-   that helpers record in isolation (gpu.c3l#94): a zero-slack arena and 300
+   that helpers record in isolation: a zero-slack arena and 300
    iterations, the parameters that used to reproduce the shared-command-pool
    race before helper recording was isolated onto its own context and mutex. *>
 // During sustained concurrent hammering some helper is always outstanding,
@@ -643,7 +643,7 @@ fn int growth_worker(void* arg) {
    nothing drains until the frame ends: all GROWTH_THREADS * GROWTH_PER_THREAD
    destroys land while the frame is open, crossing DEFERRED_QUEUE_INITIAL_CAP
    entirely from worker threads and forcing grow_deferred_queue off the main
-   thread (gpu.c3l#98). *>
+   thread. *>
 fn void deferred_queue_growth_from_worker_threads() @test {
     gpu::Device device = make_thr_device();
     defer gpu::destroy_device(&device)!!;
@@ -708,7 +708,7 @@ fn int helper_race_upload_worker(void* arg) {
 <* Proves helper recording no longer shares a pool with the default context:
    one thread hammers the blocking upload helper while the main thread
    records and submits its own lists on the default context, both
-   validation-clean under lavapipe (gpu.c3l#94). *>
+   validation-clean under lavapipe. *>
 fn void blocking_upload_races_default_context_recording() @test {
     gpu::Device device = make_thr_device();
     defer gpu::destroy_device(&device)!!;

@@ -4,8 +4,7 @@ import gpu::vk;
 
 // Backend dispatch vtable. Most fns take the owning Device* so they reach that
 // device's backend_state; the cmd_* recording entries instead take a
-// CommandList* (which carries its owning Device*). The table grows one entry
-// per milestone.
+// CommandList* (which carries its owning Device*).
 alias DestroyDeviceFn       = fn void (Device*);
 alias GetMemoryStatsFn      = fn MemoryStats? (Device*);
 alias BuildMemoryReportFn   = fn String? (Device*, bool detailed);
