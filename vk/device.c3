@@ -99,6 +99,19 @@ struct VkDeviceState {
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
     bool                       frame_active;
+    // begin_frame's reset-loop accounting for the current call; written
+    // only there, whitebox-exposed via pool_reset_stats.
+    uint                       pools_reset_last_frame;
+    uint                       pools_skipped_last_frame;
+    // Helper-path pool resets outside begin_frame; whitebox-exposed.
+    ulong                      helper_pool_resets;
+}
+
+<* Snapshot of begin_frame's reset-loop counters, exposed for whitebox
+   dirty-skip accounting in tests (deferred_queue_count precedent). *>
+struct PoolResetStats {
+    uint reset;
+    uint skipped;
 }
 
 struct CapsInputs {
@@ -120,6 +133,10 @@ fn void exit_tracked(VkDeviceState* state) {
 
 fn bool boundary_blocked(VkDeviceState* state) {
     return state.validation && state.inflight_calls.load(AtomicOrdering.RELAXED) != 0;
+}
+
+fn PoolResetStats pool_reset_stats(VkDeviceState* state) {
+    return { .reset = state.pools_reset_last_frame, .skipped = state.pools_skipped_last_frame };
 }
 
 // One static vtable shared by every Vulkan device.

@@ -32,6 +32,12 @@
       "type": "executable",
       "sources": [ "src/frame_signal_bench.c3" ]
     },
+    // Advisory begin_frame reset-loop timing; executable so it never gates
+    // CI. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
+    "context_reset_bench": {
+      "type": "executable",
+      "sources": [ "src/context_reset_bench.c3" ]
+    },
     // Vulkan bootstrap: the feature gate needs no ICD; the create/destroy test
     // needs one — pin lavapipe via VK_DRIVER_FILES when running this target.
     "vk_bootstrap": {

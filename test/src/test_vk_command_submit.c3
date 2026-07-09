@@ -143,6 +143,62 @@ fn void wait_timeout_zero_on_unreached_value_faults() @test {
     assert(timeout_fault == gpu::WAIT_TIMEOUT, "timeout-0 wait on an unreached value faults WAIT_TIMEOUT");
 }
 
+// Lazy pool resets (gpu.c3l#91): begin_frame's reset loop only pays for
+// pools a context actually dirtied since that frame slot last reset.
+
+fn void idle_context_pools_are_never_reset() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    // Never recorded on: covers the "idle context" scenario, plus the
+    // built-in default/helper contexts, which stay idle too.
+    gpu::RecordingContextHandle idle_ctx = gpu::create_recording_context(&device)!!;
+    defer (void)gpu::destroy_recording_context(&device, idle_ctx);
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    for (uint i = 0; i < 6; i++) {
+        gpu::begin_frame(&device)!!;
+        assert(vk::pool_reset_stats(state).reset == 0, "an idle context's pools are never reset");
+        gpu::end_frame(&device)!!;
+    }
+}
+
+fn void used_context_pool_resets_exactly_once_on_slot_wrap() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!!;
+    defer (void)gpu::destroy_recording_context(&device, ctx);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    gpu::begin_frame(&device)!!; // slot 1
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS, ctx)!!;
+    gpu::end_commands(&device, &cmd)!!;
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_frame(&device)!!;
+
+    gpu::begin_frame(&device)!!; // slot 0: never touched
+    assert(vk::pool_reset_stats(state).reset == 0, "the other slot was never dirtied, so nothing resets");
+    gpu::end_frame(&device)!!;
+
+    gpu::begin_frame(&device)!!; // slot 1 wraps back: the one dirtied pool resets
+    assert(vk::pool_reset_stats(state).reset == 1, "the recorded context's pool resets exactly once on its slot's wrap");
+    gpu::end_frame(&device)!!;
+
+    gpu::begin_frame(&device)!!; // slot 0 again: still clean
+    assert(vk::pool_reset_stats(state).reset == 0, "slot 0 stays clean");
+    gpu::end_frame(&device)!!;
+
+    gpu::begin_frame(&device)!!; // slot 1 again: the bit stays cleared, nothing new recorded
+    assert(vk::pool_reset_stats(state).reset == 0, "the dirty bit stays cleared until the context records again");
+    gpu::end_frame(&device)!!;
+}
+
 fn void wait_timeout_zero_on_reached_value_succeeds() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device device = gpu::create_device(&desc)!!;

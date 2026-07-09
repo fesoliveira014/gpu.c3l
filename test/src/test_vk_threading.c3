@@ -515,9 +515,13 @@ fn int helper_hammer_worker(void* arg) {
    that helpers record in isolation (gpu.c3l#94): a zero-slack arena and 300
    iterations, the parameters that used to reproduce the shared-command-pool
    race before helper recording was isolated onto its own context and mutex. *>
+// During sustained concurrent hammering some helper is always outstanding,
+// so the reset condition never fires mid-burst; this checks that the pool is
+// reclaimed the moment the burst ends and calls go sequential.
 fn void two_helper_tiny_arena_hammer() @test {
     gpu::Device device = make_thr_device_tiny_staging(HELPER_HAMMER_TINY_STAGING);
     defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
 
     HelperHammerArgs[HELPER_HAMMER_THREADS] args;
     gpu::BufferHandle[HELPER_HAMMER_THREADS] buffers;
@@ -537,7 +541,59 @@ fn void two_helper_tiny_arena_hammer() @test {
     foreach (&a : args) {
         assert(!a.mismatch, "each helper's readback pattern matched its own upload despite tiny-arena reuse pressure");
     }
+
+    ulong resets_before_drain = vk::helper_pool_reset_count(state);
+    char[HELPER_HAMMER_PAYLOAD] drain_payload;
+    foreach (&b : drain_payload) *b = (char)0xEE;
+    gpu::upload_buffer_data(
+        device:      &device,
+        dst:         buffers[0],
+        offset:      0,
+        data:        drain_payload[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+    )!!;
+    assert(vk::helper_pool_reset_count(state) > resets_before_drain,
+        "once concurrent hammering ends, the next sequential helper call reclaims the pool");
+
     for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) gpu::destroy_buffer(&device, buffers[i])!!;
+}
+
+const uint SEQUENTIAL_HELPER_CALLS = 20;
+
+<* Deterministic counterpart to the concurrent hammer above: with a single
+   thread, reservation order and helper_record_mutex acquisition order always
+   agree, so the condition holds on every call but the first — the pool
+   never grows past one live buffer. *>
+fn void sequential_helper_calls_bound_the_pool_to_one_buffer() @test {
+    gpu::Device device = make_thr_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::BufferDesc desc = {
+        .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    ulong resets_before = vk::helper_pool_reset_count(state);
+
+    char[HELPER_HAMMER_PAYLOAD] payload;
+    foreach (&b : payload) *b = (char)0xCD;
+    for (uint i = 0; i < SEQUENTIAL_HELPER_CALLS; i++) {
+        gpu::upload_buffer_data(
+            device:      &device,
+            dst:         buffer,
+            offset:      0,
+            data:        payload[..],
+            next_stage:  gpu::Stage.TRANSFER,
+            next_hazard: gpu::Hazard.TRANSFER_READ,
+        )!!;
+    }
+
+    ulong resets_delta = vk::helper_pool_reset_count(state) - resets_before;
+    assert(resets_delta == SEQUENTIAL_HELPER_CALLS - 1,
+        "every sequential call but the first resets the helper pool, holding it at one live buffer");
 }
 
 const uint GROWTH_THREADS = 4;

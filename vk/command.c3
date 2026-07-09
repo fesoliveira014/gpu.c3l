@@ -9,6 +9,13 @@ import std::core::mem;
 // twin of gpu::slots, same c3c 0.8.0 rationale as PipelineTable.
 const uint RECORDING_CONTEXT_FREE_NONE = 0;
 
+// Which of a context's pools hold unreset command buffers for a frame slot.
+bitstruct PoolDirtyMask : char {
+    bool graphics : 0;
+    bool compute  : 1;
+    bool transfer : 2;
+}
+
 struct RecordingContextState {
     vk::CommandPool[] graphics_pools;
     // Aliases graphics_pools when the compute queue shares the graphics
@@ -16,6 +23,8 @@ struct RecordingContextState {
     vk::CommandPool[] compute_pools;
     vk::CommandPool[] transfer_pools;
     bool              compute_pools_distinct;
+    // One mask per frame slot; begin_frame's reset loop reads and clears it.
+    PoolDirtyMask[]   pool_dirty;
 }
 
 struct RecordingContextCell {
@@ -74,6 +83,7 @@ fn void? create_context_pools(VkDeviceState* state, RecordingContextState* conte
     if (context.compute_pools_distinct) {
         context.compute_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
     }
+    context.pool_dirty = mem::new_array(PoolDirtyMask, state.frames_in_flight);
     for (uint i = 0; i < state.frames_in_flight; i++) {
         vk::CommandPoolCreateInfo gfx = vk::command_pool_create_info()
             .set_queue_family_index(state.graphics_family)
@@ -117,6 +127,10 @@ fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* conte
         mem::free(context.transfer_pools.ptr);
         context.transfer_pools = {};
     }
+    if (context.pool_dirty.ptr != null) {
+        mem::free(context.pool_dirty.ptr);
+        context.pool_dirty = {};
+    }
 }
 
 fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device) @private {
@@ -158,13 +172,36 @@ fn vk::CommandPool pool_for(RecordingContextState* context, gpu::QueueKind queue
     }
 }
 
+<* Marks the pool pool_for(queue, frame_index) would resolve to as dirty, so
+   begin_frame's reset loop knows to reset it. COMPUTE folds into the
+   graphics bit when the compute queue shares the graphics pool (mirrors
+   pool_for's own aliasing) — one store into the caller's tier-confined
+   cell, no locks: Tier C confines a context to one thread and begin_frame
+   only reads this under the phase rule's quiescence. *>
+fn void mark_pool_dirty(RecordingContextState* context, gpu::QueueKind queue, uint frame_index) @private {
+    switch (queue) {
+        case gpu::QueueKind.TRANSFER:
+            context.pool_dirty[frame_index].transfer = true;
+        case gpu::QueueKind.COMPUTE:
+            if (context.compute_pools_distinct) {
+                context.pool_dirty[frame_index].compute = true;
+            } else {
+                context.pool_dirty[frame_index].graphics = true;
+            }
+        default:
+            context.pool_dirty[frame_index].graphics = true;
+    }
+}
+
 fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::RecordingContextHandle ctx, gpu::CommandList* out_commands) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
     gpu::RecordingContextHandle resolved = ctx.is_valid() ? ctx : state.default_context;
     RecordingContextState* context = state.recording_contexts.get(resolved)!;
-    vk::CommandPool pool = pool_for(context, queue, state.frame_index);
+    uint frame_index = state.frame_index;
+    vk::CommandPool pool = pool_for(context, queue, frame_index);
+    mark_pool_dirty(context, queue, frame_index);
 
     vk::CommandBufferAllocateInfo alloc = vk::command_buffer_allocate_info()
         .set_command_pool(pool)
