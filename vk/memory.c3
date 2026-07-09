@@ -148,13 +148,36 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
     }
 
     reset_frame_arena(state, state.frame_index)!;
+    // Only pools dirtied since this slot last reset pay
+    // the driver call; idle contexts cost nothing per frame.
+    state.pools_reset_last_frame = 0;
+    state.pools_skipped_last_frame = 0;
     foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
         if (!cell.used) continue;
-        check(vk::reset_command_pool(state.device, cell.value.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
-        if (cell.value.compute_pools_distinct) {
-            check(vk::reset_command_pool(state.device, cell.value.compute_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+        PoolDirtyMask* dirty = &cell.value.pool_dirty[state.frame_index];
+        if (dirty.graphics) {
+            check(vk::reset_command_pool(state.device, cell.value.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+            dirty.graphics = false;
+            state.pools_reset_last_frame++;
+        } else {
+            state.pools_skipped_last_frame++;
         }
-        check(vk::reset_command_pool(state.device, cell.value.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+        if (cell.value.compute_pools_distinct) {
+            if (dirty.compute) {
+                check(vk::reset_command_pool(state.device, cell.value.compute_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+                dirty.compute = false;
+                state.pools_reset_last_frame++;
+            } else {
+                state.pools_skipped_last_frame++;
+            }
+        }
+        if (dirty.transfer) {
+            check(vk::reset_command_pool(state.device, cell.value.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+            dirty.transfer = false;
+            state.pools_reset_last_frame++;
+        } else {
+            state.pools_skipped_last_frame++;
+        }
     }
     state.allocator.set_current_frame_index(state.frame_index);
     state.frame_active = true;

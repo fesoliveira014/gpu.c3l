@@ -307,8 +307,9 @@ fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDes
     );
 }
 
-<* Reserved under transfer_mutex before any allocation tags a range, so
-   every tag agrees with the value signal_helper_timeline signals. *>
+<* Reserved under transfer_mutex, inside the caller's helper_record_mutex
+   window, so reservation order matches recording order and every tag agrees
+   with the value signal_helper_timeline signals. *>
 fn ulong reserve_helper_value(VkDeviceState* state) @private {
     state.transfer_mutex.lock()!!;
     defer state.transfer_mutex.unlock();
@@ -338,18 +339,44 @@ fn void? signal_helper_timeline(VkDeviceState* state, ulong v) @private {
     return check(vk::signal_semaphore(state.device, &signal_info));
 }
 
+<* Call under helper_record_mutex before this call reserves: every reserved
+   value signaled means no helper buffer is live anywhere (helpers end
+   recording before releasing the mutex and signal after queue idle). *>
+fn void? maybe_reset_helper_pool(VkDeviceState* state) @private {
+    RecordingContextState* context = state.recording_contexts.get(state.helper_context)!;
+    PoolDirtyMask* dirty = &context.pool_dirty[state.frame_index];
+    if (!dirty.graphics) return;
+    state.transfer_mutex.lock()!!;
+    ulong reserved = state.helper_counter;
+    state.transfer_mutex.unlock();
+    ulong current = 0;
+    vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current);
+    if (current != reserved) return;
+    check(vk::reset_command_pool(state.device, context.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+    dirty.graphics = false;
+    state.helper_pool_resets++;
+}
+
+<* Cumulative helper-pool resets, whitebox-exposed for tests. *>
+fn ulong helper_pool_reset_count(VkDeviceState* state) {
+    return state.helper_pool_resets;
+}
+
 fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz offset, char[] data, gpu::Stage next_stage, gpu::Hazard next_hazard) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    ulong helper_value = reserve_helper_value(state);
-    defer (void)signal_helper_timeline(state, helper_value);
-    TimelineTag tag = { .kind = TimelineKind.HELPER, .value = helper_value };
+    ulong helper_value = 0;
+    defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value);
+    TimelineTag tag = { .kind = TimelineKind.HELPER };
 
     gpu::CommandList commands;
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
+        maybe_reset_helper_pool(state)!;
+        helper_value = reserve_helper_value(state);
+        tag.value = helper_value;
         vk_begin_commands(
             device:       device,
             queue:        gpu::QueueKind.GRAPHICS,
@@ -383,9 +410,9 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    ulong helper_value = reserve_helper_value(state);
-    defer (void)signal_helper_timeline(state, helper_value);
-    TimelineTag tag = { .kind = TimelineKind.HELPER, .value = helper_value };
+    ulong helper_value = 0;
+    defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value);
+    TimelineTag tag = { .kind = TimelineKind.HELPER };
 
     TextureSlot* slot = state.textures.get(dst)!;
     gpu::TextureLayout tracked = texture_layout(slot);
@@ -403,6 +430,9 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
+        maybe_reset_helper_pool(state)!;
+        helper_value = reserve_helper_value(state);
+        tag.value = helper_value;
         vk_begin_commands(
             device:       device,
             queue:        gpu::QueueKind.GRAPHICS,
@@ -450,25 +480,28 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    ulong helper_value = reserve_helper_value(state);
-    defer (void)signal_helper_timeline(state, helper_value);
-    TimelineTag tag = { .kind = TimelineKind.HELPER, .value = helper_value };
+    ulong helper_value = 0;
+    defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value);
+    TimelineTag tag = { .kind = TimelineKind.HELPER };
 
     if (out_data.len == 0) return gpu::INVALID_ARGUMENT~;
     BufferSlot* src_slot = state.buffers.get(src)!;
     if (!gpu::range_fits(src_slot.size, offset, out_data.len)) return gpu::INVALID_ARGUMENT~;
 
-    gpu::GpuSpan readback = readback_alloc(
-        state: state,
-        size:  out_data.len,
-        align: TRANSFER_ALIGN,
-        tag:   tag,
-    )!;
-
     gpu::CommandList commands;
+    gpu::GpuSpan readback;
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
+        maybe_reset_helper_pool(state)!;
+        helper_value = reserve_helper_value(state);
+        tag.value = helper_value;
+        readback = readback_alloc(
+            state: state,
+            size:  out_data.len,
+            align: TRANSFER_ALIGN,
+            tag:   tag,
+        )!;
         vk_begin_commands(
             device:       device,
             queue:        gpu::QueueKind.GRAPHICS,
@@ -518,9 +551,9 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    ulong helper_value = reserve_helper_value(state);
-    defer (void)signal_helper_timeline(state, helper_value);
-    TimelineTag tag = { .kind = TimelineKind.HELPER, .value = helper_value };
+    ulong helper_value = 0;
+    defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value);
+    TimelineTag tag = { .kind = TimelineKind.HELPER };
 
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
     usz expected = texture_upload_bytes(state, &region)!;
@@ -529,17 +562,20 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     TextureSlot* slot = state.textures.get(src)!;
     usz align = format_texel_size(slot.format);
     if (align < 4) align = 4;
-    gpu::GpuSpan readback = readback_alloc(
-        state: state,
-        size:  out_data.len,
-        align: align,
-        tag:   tag,
-    )!;
-
     gpu::CommandList commands;
+    gpu::GpuSpan readback;
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
+        maybe_reset_helper_pool(state)!;
+        helper_value = reserve_helper_value(state);
+        tag.value = helper_value;
+        readback = readback_alloc(
+            state: state,
+            size:  out_data.len,
+            align: align,
+            tag:   tag,
+        )!;
         vk_begin_commands(
             device:       device,
             queue:        gpu::QueueKind.GRAPHICS,
