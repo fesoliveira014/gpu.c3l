@@ -85,7 +85,7 @@ fn void swapchain_requires_presentation() @test {
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "swapchain without enable_presentation faults UNSUPPORTED_FEATURE");
 }
 
-// Acquire-submit-present coupling lifecycle (#59). One state matrix per
+// Acquire-submit-present coupling lifecycle. One state matrix per
 // guard, covering every (pending, consumed[, kind]) combination the guard
 // distinguishes; the not-acquired/not-consumed rows also cover the states
 // build_swapchain's dormant path and vk_present's clear leave the slot in.

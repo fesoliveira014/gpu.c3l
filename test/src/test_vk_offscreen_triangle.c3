@@ -120,7 +120,7 @@ fn void offscreen_textured_triangle() @test {
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    // Flat-color pattern texture, uploaded through the M11 staging path.
+    // Flat-color pattern texture, uploaded through the staging path.
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
         .width     = 4,
