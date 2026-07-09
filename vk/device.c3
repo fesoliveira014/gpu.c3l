@@ -179,6 +179,7 @@ const gpu::BackendVTable VK_VTABLE = {
     .destroy_texture         = &vk_destroy_texture,
     .create_texture_descriptor  = &vk_create_texture_descriptor,
     .destroy_texture_descriptor = &vk_destroy_texture_descriptor,
+    .create_texture_descriptors = &vk_create_texture_descriptors,
     .create_sampler             = &vk_create_sampler,
     .destroy_sampler            = &vk_destroy_sampler,
     .create_shader           = &vk_create_shader,

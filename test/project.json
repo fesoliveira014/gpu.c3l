@@ -45,6 +45,14 @@
       "type": "executable",
       "sources": [ "src/resource_create_bench.c3" ]
     },
+    // Advisory texture-descriptor churn timing: singles vs batched(16) vs
+    // samplers across worker counts 1/2/4; executable so it never gates CI.
+    // Needs an ICD — pin lavapipe via VK_DRIVER_FILES. DB-mode phases run
+    // only with GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1.
+    "descriptor_churn_bench": {
+      "type": "executable",
+      "sources": [ "src/descriptor_churn_bench.c3" ]
+    },
     // Advisory dedicated-fallback hoist timing: Tier-C parallel uploads
     // across contexts plus the blocking-helper queue-bound baseline;
     // executable so it never gates CI. Needs an ICD — pin lavapipe via

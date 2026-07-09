@@ -27,6 +27,22 @@ fn void? destroy_texture_descriptor(Device* device, TextureIndex index) {
     return device.vtable.destroy_texture_descriptor(device, index);
 }
 
+<* One create_texture_descriptors input; a zero-initialized view is the
+   default view (same collapse as create_texture_descriptor's null view). *>
+struct TextureDescriptorDesc {
+    TextureHandle   texture;
+    TextureViewDesc view;
+}
+
+<* Batch-create texture descriptors; out_indices.len must equal descs.len
+   (INVALID_ARGUMENT otherwise), empty descs is a no-op. All-or-nothing: on
+   fault, out_indices is meaningless and nothing needs releasing. Ownership
+   on success: release each index with destroy_texture_descriptor. *>
+fn void? create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.create_texture_descriptors(device, descs, out_indices);
+}
+
 <* Samplers are pure heap entries; the descriptor is the resource.
    Ownership: release with destroy_sampler. *>
 fn SamplerIndex? create_sampler(Device* device, SamplerDesc* desc) {

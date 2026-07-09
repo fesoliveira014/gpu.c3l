@@ -87,6 +87,13 @@ struct DescriptorHeapState {
     usz                     sampler_descriptor_size;
 }
 
+const uint TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP = 64;
+
+struct PendingTextureWrite {
+    TextureSlot*  texture_slot;
+    vk::ImageView view;
+}
+
 fn void DescriptorRetireRing.push(&self, uint slot, ulong timeline_value) {
     uint tail = (self.head + self.count) % (uint)self.entries.len;
     self.entries[tail] = { .slot = slot, .timeline_value = timeline_value };
@@ -510,6 +517,137 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
 
     write_texture_descriptor(state, slot, texture_slot, image_view);
     return (gpu::TextureIndex){ .slot = (ushort)slot, .generation = cell.generation };
+}
+
+<* One batch item's validate+publish: mirrors vk_create_texture_descriptor's
+   per-item steps without its own drain or lock (the caller holds both once
+   for the whole batch). Records the pending write info the tail needs. *>
+fn void? publish_texture_descriptor_item(VkDeviceState* state, gpu::TextureDescriptorDesc* desc, gpu::TextureIndex* out_index, PendingTextureWrite* pending) @private {
+    DescriptorHeapState* heap = &state.heap;
+    TextureSlot* texture_slot = state.textures.get(desc.texture)!;
+    if (!texture_slot.usage.sampled && !texture_slot.usage.storage) return gpu::INVALID_ARGUMENT~;
+    vk::ImageView image_view = resolve_texture_view(state, texture_slot, &desc.view)!;
+
+    uint slot;
+    if (heap.texture_free_count > 0) {
+        slot = heap.texture_free[--heap.texture_free_count];
+    } else if (heap.texture_next_new < heap.texture_cells.len) {
+        slot = heap.texture_next_new++;
+    } else {
+        return gpu::DESCRIPTOR_HEAP_FULL~;
+    }
+
+    TextureDescriptorCell* cell = &heap.texture_cells[slot];
+    cell.owner = desc.texture;
+    cell.used = true;
+    cell.generation = bump_generation(cell.generation);
+
+    *out_index = { .slot = (ushort)slot, .generation = cell.generation };
+    *pending = { .texture_slot = texture_slot, .view = image_view };
+}
+
+<* Generation bump + used=false + free-list push per published item; no
+   retire-ring involvement — the cells never became visible. *>
+fn void rollback_texture_descriptors(DescriptorHeapState* heap, gpu::TextureIndex[] published) @private {
+    foreach (&index : published) {
+        TextureDescriptorCell* cell = &heap.texture_cells[index.slot];
+        cell.used = false;
+        cell.generation = bump_generation(cell.generation);
+        heap.texture_free[heap.texture_free_count++] = index.slot;
+    }
+}
+
+fn uint accumulate_texture_descriptor_write(DescriptorHeapState* heap, uint slot, TextureSlot* texture_slot, vk::ImageView view, vk::DescriptorImageInfo[] image_infos, vk::WriteDescriptorSet[] writes, uint write_count) @private {
+    vk::DescriptorImageInfo image_info = {
+        .image_view   = view,
+        .image_layout = texture_slot.usage.storage ? vk::ImageLayout.GENERAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+    };
+    if (texture_slot.usage.sampled) {
+        image_infos[write_count] = image_info;
+        writes[write_count] = vk::write_descriptor_set()
+            .set_dst_set(heap.descriptor_set)
+            .set_dst_binding(HEAP_BINDING_SAMPLED)
+            .set_dst_array_element(slot)
+            .set_descriptor_type(vk::DescriptorType.SAMPLED_IMAGE)
+            .set_image_info((&image_infos[write_count])[:1]);
+        write_count++;
+    }
+    if (texture_slot.usage.storage) {
+        image_infos[write_count] = image_info;
+        writes[write_count] = vk::write_descriptor_set()
+            .set_dst_set(heap.descriptor_set)
+            .set_dst_binding(HEAP_BINDING_STORAGE)
+            .set_dst_array_element(slot)
+            .set_descriptor_type(vk::DescriptorType.STORAGE_IMAGE)
+            .set_image_info((&image_infos[write_count])[:1]);
+        write_count++;
+    }
+    return write_count;
+}
+
+<* All-or-nothing: the pre-flight leaves the heap untouched, and descriptor
+   writes run only after every item publishes, so rollback never has to
+   unwrite one. *>
+fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescriptorDesc[] descs, gpu::TextureIndex[] out_indices) @private {
+    if (out_indices.len != descs.len) return gpu::INVALID_ARGUMENT~;
+    if (descs.len == 0) return;
+
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    DescriptorHeapState* heap = &state.heap;
+
+    drain_texture_retire(state);
+    uint headroom = heap.texture_free_count + (uint)heap.texture_cells.len - heap.texture_next_new;
+    if ((uint)descs.len > headroom) return gpu::DESCRIPTOR_HEAP_FULL~;
+
+    @pool() {
+        PendingTextureWrite[] pending = mem::talloc_array(PendingTextureWrite, descs.len);
+        for (uint i = 0; i < descs.len; i++) {
+            if (catch f = publish_texture_descriptor_item(state, &descs[i], &out_indices[i], &pending[i])) {
+                rollback_texture_descriptors(heap, out_indices[:i]);
+                return f~;
+            }
+        }
+
+        if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+            uint max_writes = (uint)descs.len * 2;
+            vk::WriteDescriptorSet[TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP] writes_stack;
+            vk::DescriptorImageInfo[TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP] image_infos_stack;
+            vk::WriteDescriptorSet[] writes = max_writes <= TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP
+                ? writes_stack[:max_writes]
+                : mem::talloc_array(vk::WriteDescriptorSet, max_writes);
+            vk::DescriptorImageInfo[] image_infos = max_writes <= TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP
+                ? image_infos_stack[:max_writes]
+                : mem::talloc_array(vk::DescriptorImageInfo, max_writes);
+
+            uint write_count = 0;
+            foreach (i, &item : pending) {
+                write_count = accumulate_texture_descriptor_write(
+                    heap:         heap,
+                    slot:         out_indices[i].slot,
+                    texture_slot: item.texture_slot,
+                    view:         item.view,
+                    image_infos:  image_infos,
+                    writes:       writes,
+                    write_count:  write_count,
+                );
+            }
+            if (write_count > 0) vk::update_descriptor_sets(state.device, write_count, &writes[0], 0, null);
+        } else {
+            foreach (i, &item : pending) {
+                write_texture_descriptor(state, out_indices[i].slot, item.texture_slot, item.view);
+            }
+        }
+    };
+}
+
+<* Whitebox: a copy of a texture-descriptor cell's bookkeeping state, for
+   rollback-invariant tests. *>
+fn TextureDescriptorCell texture_descriptor_cell(VkDeviceState* state, ushort slot) {
+    return state.heap.texture_cells[slot];
 }
 
 fn void? vk_destroy_texture_descriptor(gpu::Device* device, gpu::TextureIndex index) @private {
