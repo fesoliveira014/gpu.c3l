@@ -21,9 +21,11 @@ const uint HAMMER_ITERS = 32;
 const uint HELPER_HAMMER_THREADS = 2;
 const uint HELPER_HAMMER_ITERS = 300;
 const usz HELPER_HAMMER_PAYLOAD = 128;
-// Tightest arena that avoids the deferred-release queue's growth threshold
-// (its cross-thread-allocator gap is gpu.c3l#98, unrelated here).
-const usz HELPER_HAMMER_TINY_STAGING = (HELPER_HAMMER_THREADS + 1) * HELPER_HAMMER_PAYLOAD;
+// Zero-slack: one payload width, so the two helpers must actually contend
+// for staging space. Widened past this only while gpu.c3l#98's cross-thread
+// deferred-queue allocator gap was open; #98 pinned the queue's allocator to
+// the device, so this is the tightest sizing that stays safe.
+const usz HELPER_HAMMER_TINY_STAGING = HELPER_HAMMER_PAYLOAD;
 
 const uint HELPER_RACE_ITERS = 100;
 
@@ -536,6 +538,66 @@ fn void two_helper_tiny_arena_hammer() @test {
         assert(!a.mismatch, "each helper's readback pattern matched its own upload despite tiny-arena reuse pressure");
     }
     for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) gpu::destroy_buffer(&device, buffers[i])!!;
+}
+
+const uint GROWTH_THREADS = 4;
+const uint GROWTH_PER_THREAD = 24;
+
+struct GrowthArgs {
+    gpu::Device*             device;
+    gpu::BufferHandle[GROWTH_PER_THREAD] buffers;
+}
+
+fn int growth_worker(void* arg) {
+    GrowthArgs* args = (GrowthArgs*)arg;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+    foreach (buffer : args.buffers) {
+        gpu::destroy_buffer(args.device, buffer)!!;
+    }
+    };
+    return 0;
+}
+
+<* Held mid-frame, every destroy's retire value stays in the future, so
+   nothing drains until the frame ends: all GROWTH_THREADS * GROWTH_PER_THREAD
+   destroys land while the frame is open, crossing DEFERRED_QUEUE_INITIAL_CAP
+   entirely from worker threads and forcing grow_deferred_queue off the main
+   thread (gpu.c3l#98). *>
+fn void deferred_queue_growth_from_worker_threads() @test {
+    gpu::Device device = make_thr_device();
+    defer gpu::destroy_device(&device)!!;
+
+    GrowthArgs[GROWTH_THREADS] args;
+    for (uint t = 0; t < GROWTH_THREADS; t++) {
+        args[t].device = &device;
+        for (uint i = 0; i < GROWTH_PER_THREAD; i++) {
+            gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+            args[t].buffers[i] = gpu::create_buffer(&device, &desc)!!;
+        }
+    }
+
+    gpu::begin_frame(&device)!!;
+    Thread[GROWTH_THREADS] threads;
+    for (uint t = 0; t < GROWTH_THREADS; t++) {
+        threads[t].create(&growth_worker, &args[t])!!;
+    }
+    foreach (&t : threads) t.join()!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    uint pending = vk::deferred_queue_count(state);
+    assert(pending == GROWTH_THREADS * GROWTH_PER_THREAD, "every worker-thread destroy enqueued exactly one deferred entry");
+    assert(pending > vk::DEFERRED_QUEUE_INITIAL_CAP, "worker-thread destroys crossed the initial capacity, forcing cross-thread growth");
+    gpu::end_frame(&device)!!;
+
+    // frames_in_flight == 2: one more full cycle guarantees the drain
+    // observes the frame that covered the growth-storm destroys.
+    gpu::begin_frame(&device)!!;
+    gpu::end_frame(&device)!!;
+    gpu::begin_frame(&device)!!;
+    assert(vk::deferred_queue_count(state) == 0, "every deferred entry drains cleanly once the covering frame retires");
+    gpu::end_frame(&device)!!;
+
+    assert(vk::report_resource_leaks(state) == 0, "cross-thread queue growth leaves no leaked slots");
 }
 
 struct HelperRaceArgs {

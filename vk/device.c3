@@ -8,6 +8,9 @@ import std::atomic;
 import std::atomic::types;
 import std::thread;
 
+// Disambiguates from vma::Allocator: std::core::mem's host-memory interface.
+alias HostAllocator = std::core::mem::alloc::Allocator;
+
 // Per-device backend state, reached through Device.backend_state.
 struct VkDeviceState {
     vk::Instance               instance;
@@ -79,6 +82,9 @@ struct VkDeviceState {
     TransferArenaState         staging_arena;
     TransferArenaState         readback_arena;
     DedicatedRetireState       dedicated_staging;
+    // Thread-safe by construction (libc): deferred-queue growth may run on
+    // any destroying thread, outside any allocator's tracking scope.
+    HostAllocator               host_allocator;
     DeferredQueue              deferred;
     bool                       frame_active;
 }
@@ -184,6 +190,7 @@ const gpu::BackendVTable VK_VTABLE = {
 fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     VkDeviceState* state = mem::new(VkDeviceState);
     defer catch destroy_state(state);
+    state.host_allocator = &allocators::LIBC_ALLOCATOR;
     state.helper_record_mutex.init()!;
     state.resource_mutex.init()!;
     state.transfer_mutex.init()!;
@@ -255,7 +262,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.pipelines.slots  = mem::new_array(PipelineCell, gpu::MAX_PIPELINES);
     state.textures.slots   = mem::new_array(TextureCell, gpu::resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
     state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
-    state.deferred.entries = mem::new_array(DeferredEntry, DEFERRED_QUEUE_INITIAL_CAP);
+    state.deferred.entries = alloc::new_array(state.host_allocator, DeferredEntry, DEFERRED_QUEUE_INITIAL_CAP);
     create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
     create_pipeline_shared(state, desc.pipeline_cache_data)!;
