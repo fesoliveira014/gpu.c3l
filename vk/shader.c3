@@ -156,8 +156,6 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
     if (desc.spirv.len == 0 || desc.spirv.len % 4 != 0) return gpu::SHADER_INVALID~;
 
     ShaderSlot slot = { .stage = desc.stage };
@@ -189,8 +187,12 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
         name:          desc.debug_name,
     );
 
-    if (try handle = state.shaders.alloc(slot)) {
-        return handle;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        if (try handle = state.shaders.alloc(slot)) {
+            return handle;
+        }
     }
     vk::destroy_shader_module(state.device, slot.shader_module, null);
     return gpu::SLOT_TABLE_FULL~;

@@ -288,9 +288,16 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
                 object_handle: (ulong)images[i],
                 name:          slot.requested.debug_name,
             );
-            if (try handle = state.textures.alloc(texture)) {
-                slot.textures[i] = handle;
-            } else {
+            bool published = false;
+            {
+                state.resource_mutex.lock()!!;
+                defer state.resource_mutex.unlock();
+                if (try handle = state.textures.alloc(texture)) {
+                    slot.textures[i] = handle;
+                    published = true;
+                }
+            }
+            if (!published) {
                 vk::destroy_image_view(state.device, view, null);
                 return gpu::SLOT_TABLE_FULL~;
             }
@@ -318,7 +325,11 @@ fn void release_swapchain_images(VkDeviceState* state, SwapchainSlot* slot) @pri
         if (try texture = state.textures.get(slot.textures[i])) {
             vk::destroy_image_view(state.device, texture.default_view, null);
             destroy_cached_views(state, texture);
-            (void)state.textures.free(slot.textures[i]);
+            {
+                state.resource_mutex.lock()!!;
+                defer state.resource_mutex.unlock();
+                (void)state.textures.free(slot.textures[i]);
+            }
         }
         if (slot.present_semaphores[i] != null) {
             vk::destroy_semaphore(state.device, slot.present_semaphores[i], null);

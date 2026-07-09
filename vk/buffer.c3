@@ -109,8 +109,6 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
 
     if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
     // shared_queues maps to no Vulkan usage bit; a desc carrying only it
@@ -157,8 +155,12 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
         slot.gpu_base = (gpu::GpuAddress)address;
     }
 
-    if (try handle = state.buffers.alloc(slot)) {
-        return handle;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        if (try handle = state.buffers.alloc(slot)) {
+            return handle;
+        }
     }
     state.allocator.destroy_buffer(slot.buffer, slot.allocation);
     return gpu::SLOT_TABLE_FULL~;

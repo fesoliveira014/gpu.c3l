@@ -282,8 +282,6 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
     check_texture_desc(desc)!;
     uint mip_levels   = desc.mip_levels == 0 ? 1 : desc.mip_levels;
     uint array_layers = desc.array_layers == 0 ? 1 : desc.array_layers;
@@ -347,8 +345,12 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         return err~;
     }
 
-    if (try handle = state.textures.alloc(slot)) {
-        return handle;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        if (try handle = state.textures.alloc(slot)) {
+            return handle;
+        }
     }
     vk::destroy_image_view(state.device, slot.default_view, null);
     state.allocator.destroy_image(slot.image, slot.allocation);

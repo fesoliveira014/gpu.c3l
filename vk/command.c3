@@ -137,12 +137,18 @@ fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device)
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
     RecordingContextState context;
-    create_context_pools(state, &context)!;
-    if (try handle = state.recording_contexts.alloc(context)) {
-        return handle;
+    if (catch err = create_context_pools(state, &context)) {
+        destroy_context_pools(state, &context);
+        return err~;
+    }
+
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        if (try handle = state.recording_contexts.alloc(context)) {
+            return handle;
+        }
     }
     destroy_context_pools(state, &context);
     return gpu::SLOT_TABLE_FULL~;
