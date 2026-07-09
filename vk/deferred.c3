@@ -50,15 +50,15 @@ fn void free_deferred_entry(VkDeviceState* state, DeferredEntry* entry) @private
     }
 }
 
-<* Growth allocates on the destroying thread; the test TrackingAllocator
-   tolerates that only because storm tests drain immediately. *>
-fn void grow_deferred_queue(DeferredQueue* queue) @private {
+<* Caller must hold resource_mutex. *>
+fn void grow_deferred_queue(VkDeviceState* state) @private {
+    DeferredQueue* queue = &state.deferred;
     usz new_cap = queue.entries.len == 0 ? DEFERRED_QUEUE_INITIAL_CAP : queue.entries.len * 2;
-    DeferredEntry[] grown = mem::new_array(DeferredEntry, (sz)new_cap);
+    DeferredEntry[] grown = alloc::new_array(state.host_allocator, DeferredEntry, (sz)new_cap);
     for (uint i = 0; i < queue.count; i++) {
         grown[i] = queue.entries[(queue.head + i) % (uint)queue.entries.len];
     }
-    if (queue.entries.ptr != null) mem::free(queue.entries.ptr);
+    if (queue.entries.ptr != null) alloc::free(state.host_allocator, queue.entries.ptr);
     queue.entries = grown;
     queue.head = 0;
 }
@@ -66,7 +66,7 @@ fn void grow_deferred_queue(DeferredQueue* queue) @private {
 <* Caller must hold resource_mutex; also runs an opportunistic head-drain. *>
 fn void enqueue_deferred(VkDeviceState* state, DeferredKind kind, ulong timeline_value, void* object, vma::Allocation allocation) @private {
     DeferredQueue* queue = &state.deferred;
-    if (queue.count == queue.entries.len) grow_deferred_queue(queue);
+    if (queue.count == queue.entries.len) grow_deferred_queue(state);
     uint idx = (queue.head + queue.count) % (uint)queue.entries.len;
     queue.entries[idx] = { .kind = kind, .timeline_value = timeline_value, .object = object, .allocation = allocation };
     queue.count++;
@@ -101,7 +101,7 @@ fn void deferred_drain_all(VkDeviceState* state) @private {
 
 fn void destroy_deferred_queue(VkDeviceState* state) @private {
     if (state.deferred.entries.ptr != null) {
-        mem::free(state.deferred.entries.ptr);
+        alloc::free(state.host_allocator, state.deferred.entries.ptr);
         state.deferred.entries = {};
     }
 }
