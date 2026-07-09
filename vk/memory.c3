@@ -137,6 +137,8 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
+        // The host wait above proved the timeline reached this value.
+        if (slot.frame_timeline_value > state.signaled_shadow) state.signaled_shadow = slot.frame_timeline_value;
         deferred_drain(state);
     }
 

@@ -25,6 +25,10 @@ fn uint deferred_count(gpu::Device* device) {
     return vk::deferred_queue_count((vk::VkDeviceState*)device.backend_state);
 }
 
+fn vk::DeferredStats defer_stats(gpu::Device* device) {
+    return vk::deferred_stats((vk::VkDeviceState*)device.backend_state);
+}
+
 struct DeferRig {
     gpu::BufferHandle   io;
     gpu::TextureHandle  texture;
@@ -205,4 +209,67 @@ fn void off_frame_destroy_defers_release() @test {
     // No end_frame ever covers it; teardown must retire it validation-clean.
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
     assert(vk::report_resource_leaks(state) == 0, "off-frame destroy leaves no leaked slots at teardown");
+}
+
+const uint STORM_COUNT = 128;
+
+<* Every retire value stays in the future while the frame is open, so tier 1
+   (unsubmitted ⇒ unsignalable) must catch the whole storm without asking the
+   driver anything. *>
+fn void mid_frame_destroy_storm_issues_no_host_queries() @test {
+    gpu::Device device = make_defer_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::BufferHandle[STORM_COUNT] buffers;
+    for (uint i = 0; i < STORM_COUNT; i++) {
+        gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+    }
+
+    gpu::begin_frame(&device)!!;
+    vk::DeferredStats before = defer_stats(&device);
+    for (uint i = 0; i < STORM_COUNT; i++) {
+        gpu::destroy_buffer(&device, buffers[i])!!;
+    }
+    vk::DeferredStats after = defer_stats(&device);
+    assert(after.host_queries == before.host_queries, "tier 1 skips every mid-frame destroy: zero host timeline queries");
+    assert(after.pushed - before.pushed == STORM_COUNT, "every mid-frame destroy still enqueues a deferred entry");
+    assert(deferred_count(&device) == STORM_COUNT, "the storm's entries stay queued until the covering frame retires");
+    gpu::end_frame(&device)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::end_frame(&device)!!;
+    gpu::begin_frame(&device)!!;
+    assert(deferred_count(&device) == 0, "the storm drains once its covering frame retires");
+    gpu::end_frame(&device)!!;
+}
+
+<* Once every pushed entry retires through the ordinary tiered path (no
+   teardown sweep involved), the counters must reconcile exactly. *>
+fn void deferred_stats_reconcile_without_teardown() @test {
+    gpu::Device device = make_defer_test_device();
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    gpu::BufferHandle[16] buffers;
+    for (uint i = 0; i < 16; i++) {
+        gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+    }
+
+    gpu::begin_frame(&device)!!;
+    foreach (buffer : buffers) gpu::destroy_buffer(&device, buffer)!!;
+    gpu::end_frame(&device)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::end_frame(&device)!!;
+    gpu::begin_frame(&device)!!;
+    assert(deferred_count(&device) == 0, "every deferred entry retires within frames_in_flight cycles");
+    gpu::end_frame(&device)!!;
+
+    vk::DeferredStats stats = vk::deferred_stats(state);
+    assert(stats.pushed == 16, "every destroy pushed exactly one deferred entry");
+    assert(stats.pushed == stats.drained, "every pushed entry drains through the tiered path, with nothing left for teardown");
+    assert(stats.drain_calls > 0, "the tiered drain path ran");
+    assert(stats.host_queries <= stats.drain_calls, "host queries never exceed drain invocations");
 }

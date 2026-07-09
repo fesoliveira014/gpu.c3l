@@ -86,6 +86,11 @@ struct VkDeviceState {
     // any destroying thread, outside any allocator's tracking scope.
     HostAllocator               host_allocator;
     DeferredQueue              deferred;
+    // Consumer-side monotonic lower bound of the retired timeline; written
+    // only under resource_mutex, by a tier-3 query or begin_frame's post-wait
+    // fold — never by a signaler, so it can never cover unfinished work.
+    ulong                      signaled_shadow;
+    DeferredStats              deferred_stats;
     bool                       frame_active;
 }
 

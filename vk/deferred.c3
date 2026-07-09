@@ -4,6 +4,8 @@ import gpu;
 import vk;
 import vma;
 import std::core::mem;
+import std::atomic;
+import std::atomic::types;
 
 // Backend objects whose release must outlive in-flight frames. Growable FIFO
 // keyed by retire_timeline_value; push order is non-decreasing, so head-drain
@@ -31,6 +33,14 @@ struct DeferredQueue {
     DeferredEntry[] entries;
     uint            head;
     uint            count;
+}
+
+<* Drain accounting, whitebox-exposed via deferred_stats. *>
+struct DeferredStats {
+    ulong pushed;
+    ulong drained;
+    ulong drain_calls;
+    ulong host_queries;
 }
 
 fn void free_deferred_entry(VkDeviceState* state, DeferredEntry* entry) @private {
@@ -70,21 +80,36 @@ fn void enqueue_deferred(VkDeviceState* state, DeferredKind kind, ulong timeline
     uint idx = (queue.head + queue.count) % (uint)queue.entries.len;
     queue.entries[idx] = { .kind = kind, .timeline_value = timeline_value, .object = object, .allocation = allocation };
     queue.count++;
+    state.deferred_stats.pushed++;
     deferred_drain(state);
 }
 
-<* Caller must hold resource_mutex. *>
+<* Caller must hold resource_mutex. Cheapest tier first; tiers 2/3 free only
+   against proven-signaled bounds, tier 1 is a pure skip. *>
 fn void deferred_drain(VkDeviceState* state) @private {
     DeferredQueue* queue = &state.deferred;
+    state.deferred_stats.drain_calls++;
     if (queue.count == 0) return;
-    ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+
+    DeferredEntry* head = &queue.entries[queue.head];
+    ulong counter = state.timeline_counter.load(AtomicOrdering.RELAXED);
+    if (head.timeline_value > counter) return;
+
+    if (head.timeline_value > state.signaled_shadow) {
+        ulong queried = 0;
+        vk::get_semaphore_counter_value(state.device, state.frame_timeline, &queried);
+        state.deferred_stats.host_queries++;
+        if (queried > state.signaled_shadow) state.signaled_shadow = queried;
+    }
+
+    ulong bound = state.signaled_shadow;
     while (queue.count > 0) {
         DeferredEntry* entry = &queue.entries[queue.head];
-        if (entry.timeline_value > current) break;
+        if (entry.timeline_value > bound) break;
         free_deferred_entry(state, entry);
         queue.head = (queue.head + 1) % (uint)queue.entries.len;
         queue.count--;
+        state.deferred_stats.drained++;
     }
 }
 
@@ -96,6 +121,7 @@ fn void deferred_drain_all(VkDeviceState* state) @private {
         free_deferred_entry(state, entry);
         queue.head = (queue.head + 1) % (uint)queue.entries.len;
         queue.count--;
+        state.deferred_stats.drained++;
     }
 }
 
@@ -109,4 +135,9 @@ fn void destroy_deferred_queue(VkDeviceState* state) @private {
 <* Live entry count, exposed for whitebox drain accounting in tests. *>
 fn uint deferred_queue_count(VkDeviceState* state) {
     return state.deferred.count;
+}
+
+<* Snapshot of drain counters, exposed for whitebox accounting in tests. *>
+fn DeferredStats deferred_stats(VkDeviceState* state) {
+    return state.deferred_stats;
 }
