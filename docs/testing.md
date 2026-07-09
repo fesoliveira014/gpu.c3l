@@ -206,6 +206,43 @@ and the `libVulkanMemoryAllocator.a` static lib shipped under
 git submodule update --init --recursive
 ```
 
+Prerequisites on `windows-x64`:
+
+- MSVC (VS Build Tools) with the vcvars64 environment loaded — `cl`/`lib` for
+  the VMA build, and the CRT link paths for `c3c`. If `c3c` reports "Failed to
+  find the C runtime at link time" outside a developer shell, run
+  `c3c fetch-sdk windows` once.
+- A Vulkan SDK for `glslc` (the `vulkan-1.lib` import library ships with the
+  vendored `vk.c3l`; a system Vulkan loader/driver is needed to run).
+- The VMA static lib is not vendored for Windows — build it once into
+  `lib/vma.c3l/linked-libs/windows-x64/` with the pinned headers (SDK-bundled
+  VMA headers can predate the binding; the script's size probe gates this):
+
+```sh
+# from a git-bash shell with the vcvars64 environment
+git clone --depth 1 --branch v1.3.296 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/vh
+git clone --depth 1 --branch v3.3.0 https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git /tmp/vma
+mkdir -p /tmp/vma-inc/vma && cp /tmp/vma/include/vk_mem_alloc.h /tmp/vma-inc/vma/
+VULKAN_HEADERS=$(cygpath -w /tmp/vh) VMA_INCLUDE=$(cygpath -w /tmp/vma-inc) \
+    sh lib/vma.c3l/scripts/build-vma-windows.sh
+```
+
+Windows-specific notes:
+
+- `test/project.json` pins `"wincrt": "dynamic"`: `VulkanMemoryAllocator.lib`
+  is compiled `/MD`, and linking it against c3c's dynamic-debug default mixes
+  release and debug STL DLLs, which crashes in VMA's `std::mutex` when the two
+  runtimes drift apart. Do not override it back to a debug CRT.
+- Build the test SPIR-V once before any `vk_*` target:
+  `python scripts/build_shaders.py` (`.spv` files are not committed).
+- On machines with overlay layers registered (Steam, RTSS, Epic, RenderDoc),
+  run tests and benches with `VK_LOADER_LAYERS_DISABLE=~implicit~` for
+  deterministic results.
+- Two tests encode lavapipe-specific behavior and are expected to fail on real
+  GPUs: `cache_corrupt_blob_tolerated` (NVIDIA rejects corrupt cache blobs
+  with `VK_ERROR_UNKNOWN` instead of discarding them) and
+  `lavapipe_alias_and_caps` (asserts single-queue topology).
+
 Notes pinned during scaffolding (C3 0.8.0):
 
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
