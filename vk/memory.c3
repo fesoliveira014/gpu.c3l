@@ -52,7 +52,8 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
         .set_initial_value(0);
     vk::SemaphoreCreateInfo semaphore_info = vk::semaphore_create_info().set_next(&type_info);
     check(vk::create_semaphore(state.device, &semaphore_info, null, &state.frame_timeline))!;
-    check(vk::create_semaphore(state.device, &semaphore_info, null, &state.aux_timeline))!;
+    check(vk::create_semaphore(state.device, &semaphore_info, null, &state.aux_compute_timeline))!;
+    check(vk::create_semaphore(state.device, &semaphore_info, null, &state.aux_transfer_timeline))!;
     check(vk::create_semaphore(state.device, &semaphore_info, null, &state.helper_timeline))!;
 
     usz frame_arena_size = desc.frame_arena_size == 0 ? gpu::DEFAULT_FRAME_ARENA_SIZE : desc.frame_arena_size;
@@ -86,9 +87,13 @@ fn void destroy_frame_resources(VkDeviceState* state) @private {
         vk::destroy_semaphore(state.device, state.helper_timeline, null);
         state.helper_timeline = (vk::Semaphore)null;
     }
-    if (state.aux_timeline != null) {
-        vk::destroy_semaphore(state.device, state.aux_timeline, null);
-        state.aux_timeline = (vk::Semaphore)null;
+    if (state.aux_transfer_timeline != null) {
+        vk::destroy_semaphore(state.device, state.aux_transfer_timeline, null);
+        state.aux_transfer_timeline = (vk::Semaphore)null;
+    }
+    if (state.aux_compute_timeline != null) {
+        vk::destroy_semaphore(state.device, state.aux_compute_timeline, null);
+        state.aux_compute_timeline = (vk::Semaphore)null;
     }
     if (state.frame_timeline != null) {
         vk::destroy_semaphore(state.device, state.frame_timeline, null);
@@ -194,56 +199,39 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
     if (wait_infos.len > 0) submit = submit.set_wait_semaphore_infos(wait_infos);
     mutex.lock()!!;
     defer mutex.unlock();
-    return check(vk::queue_submit2(queue, 1, &submit, (vk::Fence)null));
+    check(vk::queue_submit2(queue, 1, &submit, (vk::Fence)null))!;
+    state.submit_stats.empty_signal_submits++;
 }
 
-<* The frame fence is a chain of queue-ordered empty submits: compute/
-   transfer queues used since the last boundary (in-frame or off) signal aux
-   values the graphics signal waits on, so the frame value implies every
-   queue finished. Off-frame graphics submits need no flag — this signal is
-   queue-ordered behind them. *>
+<* The frame fence is a single queue-ordered empty submit: compute/transfer
+   queues used since the last boundary (in-frame or off) piggyback an aux
+   signal onto their own user submits (vk_submit), and the graphics
+   frame-signal submit waits each used queue's latest recorded aux value, so
+   the frame value implies every queue finished. Off-frame graphics submits
+   need no flag — this signal is queue-ordered behind them. *>
 fn void? vk_end_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
     // frame_timeline receives exactly one signal per frame (counter + 1),
-    // preserving retire_timeline_value's mid-frame contract; the cross-queue
-    // chain runs on aux_timeline.
+    // preserving retire_timeline_value's mid-frame contract.
     ulong frame_value = state.timeline_counter.add(1, AtomicOrdering.RELAXED) + 1;
     slot.frame_timeline_value = frame_value;
 
     vk::SemaphoreSubmitInfo[2] waits;
     uint wait_count = 0;
-    ulong aux_value = frame_value * 2;
     if (state.compute_used_since_frame) {
-        submit_timeline_signal(
-            state:     state,
-            semaphore: state.aux_timeline,
-            queue:     state.compute_queue,
-            mutex:     &state.compute_queue_mutex,
-            value:     aux_value,
-        )!;
         waits[wait_count++] = vk::semaphore_submit_info()
-            .set_semaphore(state.aux_timeline)
-            .set_value(aux_value)
+            .set_semaphore(state.aux_compute_timeline)
+            .set_value(state.aux_compute_last_signaled)
             .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
-        aux_value++;
     }
     if (state.transfer_used_since_frame) {
-        Mutex* transfer_mutex = state.transfer_queue == state.graphics_queue ? &state.graphics_queue_mutex : &state.transfer_queue_mutex;
-        submit_timeline_signal(
-            state:     state,
-            semaphore: state.aux_timeline,
-            queue:     state.transfer_queue,
-            mutex:     transfer_mutex,
-            value:     aux_value,
-        )!;
         waits[wait_count++] = vk::semaphore_submit_info()
-            .set_semaphore(state.aux_timeline)
-            .set_value(aux_value)
+            .set_semaphore(state.aux_transfer_timeline)
+            .set_value(state.aux_transfer_last_signaled)
             .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
-        aux_value++;
     }
     state.compute_used_since_frame = false;
     state.transfer_used_since_frame = false;

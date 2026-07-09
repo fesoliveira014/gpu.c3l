@@ -16,6 +16,12 @@ struct QueueFamilies {
     bool async_compute;
 }
 
+<* Submit accounting, whitebox-exposed via submit_stats. *>
+struct SubmitStats {
+    ulong queue_submits;
+    ulong empty_signal_submits;
+}
+
 <* Compute tiers: a second queue in the main family when it has one, else a
    compute-capable non-graphics family, else the graphics queue itself. A
    transfer-only family is used for transfer when present. *>
@@ -99,7 +105,9 @@ fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
    signaling the requested timeline values at their stages. Empty wait/signal/
    command arrays are left unset so the slice setters are never handed a
    zero-length slice. Queue-used flags and the off-frame marker are set
-   unconditionally so retirement also covers off-frame submissions. *>
+   unconditionally so retirement also covers off-frame submissions. A submit
+   on a distinct compute/transfer queue also piggybacks one internal aux
+   signal, so end_frame needs no per-queue empty submit of its own. *>
 fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;
@@ -108,6 +116,9 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
         vk::SubmitInfo2 submit = vk::submit_info2();
 
         gpu::QueueKind kind = desc.command_lists.len > 0 ? desc.command_lists[0].queue : gpu::QueueKind.GRAPHICS;
+        bool piggyback_compute  = kind == gpu::QueueKind.COMPUTE && state.compute_queue_distinct;
+        bool piggyback_transfer = kind == gpu::QueueKind.TRANSFER && state.transfer_queue != state.graphics_queue;
+        bool piggyback = piggyback_compute || piggyback_transfer;
         if (desc.command_lists.len > 0) {
             vk::CommandBufferSubmitInfo[] cmds = mem::talloc_array(vk::CommandBufferSubmitInfo, desc.command_lists.len);
             foreach (i, &cl : desc.command_lists) {
@@ -144,7 +155,8 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
             submit = submit.set_wait_semaphore_infos(waits);
         }
 
-        usz signal_count = desc.signals.len + (swapchain != null ? 1 : 0);
+        usz signal_count = desc.signals.len + (swapchain != null ? 1 : 0) + (piggyback ? 1 : 0);
+        vk::SemaphoreSubmitInfo* aux_signal = null;
         if (signal_count > 0) {
             vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(vk::SemaphoreSubmitInfo, (sz)signal_count);
             foreach (i, s : desc.signals) {
@@ -154,10 +166,18 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
                     .set_value((ulong)s.value)
                     .set_stage_mask(stage_to_vk(s.stage));
             }
+            usz next_signal = desc.signals.len;
             if (swapchain != null) {
-                signals[desc.signals.len] = vk::semaphore_submit_info()
+                signals[next_signal++] = vk::semaphore_submit_info()
                     .set_semaphore(swapchain.present_semaphores[swapchain.pending_image])
                     .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            }
+            if (piggyback) {
+                vk::Semaphore aux_semaphore = piggyback_compute ? state.aux_compute_timeline : state.aux_transfer_timeline;
+                signals[next_signal] = vk::semaphore_submit_info()
+                    .set_semaphore(aux_semaphore)
+                    .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+                aux_signal = &signals[next_signal++];
             }
             submit = submit.set_signal_semaphore_infos(signals);
         }
@@ -165,12 +185,25 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
         Mutex* queue_mutex = queue_mutex_for(state, kind);
         queue_mutex.lock()!!;
         defer queue_mutex.unlock();
+        // The aux value is baked under the mutex so no concurrent submitter
+        // can double-signal it.
+        if (aux_signal != null) {
+            aux_signal.value = (piggyback_compute ? state.aux_compute_counter : state.aux_transfer_counter) + 1;
+        }
         check(vk::queue_submit2(queue_for(state, kind), 1, &submit, (vk::Fence)null))!;
-        // Only past this point did the queue accept the wait on the acquire
-        // semaphore; a rejected submit must leave the acquire retryable.
+        state.submit_stats.queue_submits++;
+        // A rejected submit records nothing below.
         if (swapchain != null) swapchain.acquire_consumed = true;
-        if (kind == gpu::QueueKind.COMPUTE && state.compute_queue_distinct) state.compute_used_since_frame = true;
-        if (kind == gpu::QueueKind.TRANSFER && state.transfer_queue != state.graphics_queue) state.transfer_used_since_frame = true;
+        if (piggyback_compute) {
+            state.aux_compute_counter++;
+            state.aux_compute_last_signaled = state.aux_compute_counter;
+            state.compute_used_since_frame = true;
+        }
+        if (piggyback_transfer) {
+            state.aux_transfer_counter++;
+            state.aux_transfer_last_signaled = state.aux_transfer_counter;
+            state.transfer_used_since_frame = true;
+        }
         if (!state.frame_active) state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
         // Commit each list's pending texture-layout transitions in submission
         // order, still under the queue mutex, now that the GPU work is queued.
@@ -187,4 +220,9 @@ fn void? vk_wait_queue_idle(gpu::Device* device, gpu::QueueKind queue) @private 
     queue_mutex.lock()!!;
     defer queue_mutex.unlock();
     check(vk::queue_wait_idle(queue_for(state, queue)))!;
+}
+
+<* Snapshot of submit counters, exposed for whitebox accounting in tests. *>
+fn SubmitStats submit_stats(VkDeviceState* state) {
+    return state.submit_stats;
 }
