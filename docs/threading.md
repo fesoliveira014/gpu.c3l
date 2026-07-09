@@ -36,7 +36,7 @@ library's own state, but results and validation verdicts are undefined.
 | `alloc_frame_span` | S | lock-free CAS bump |
 | `alloc_persistent_span` / `free_persistent_span` | S | VMA virtual blocks are not internally synchronized; the library locks them |
 | `create_recording_context` / `destroy_recording_context` | S | destroy requires the context's lists retired |
-| `upload_buffer_data` / `upload_texture_data` / `readback_buffer_data` / `readback_texture_data` | S | serialize on the queue mutex internally |
+| `upload_buffer_data` / `upload_texture_data` / `readback_buffer_data` / `readback_texture_data` | S | record on a dedicated internal context, serialized by helper_record_mutex; never share a pool with Tier-C recording |
 | `cmd_readback_buffer` / `cmd_readback_texture` | C | records into the caller's list |
 | `poll_readback` | S | lock-free |
 | `resolve_readback` | S | |
@@ -56,9 +56,12 @@ Tier S calls pay nothing.
 
 ## Lock order
 
-`transfer_mutex → resource_mutex → queue mutexes`, one direction only.
-Creation and destruction share a single `resource_mutex` (cold paths); the
-transfer arenas share `transfer_mutex`; each queue has its own mutex.
+`helper_record_mutex → transfer_mutex → resource_mutex → queue mutexes`, one
+direction only. Creation and destruction share a single `resource_mutex`
+(cold paths); the transfer arenas share `transfer_mutex`; each queue has its
+own mutex; `helper_record_mutex` spans a blocking helper's recording window
+(`begin_commands` through `end_commands`) and is outermost because that
+window takes `transfer_mutex` internally for its allocation.
 
 ## Single-recorder texture discipline
 

@@ -19,9 +19,13 @@ const uint THR_ELEMENTS = 64;
 const uint HAMMER_ITERS = 32;
 
 const uint HELPER_HAMMER_THREADS = 2;
-const uint HELPER_HAMMER_ITERS = 32;
-const usz HELPER_HAMMER_TINY_STAGING = 384;
+const uint HELPER_HAMMER_ITERS = 300;
 const usz HELPER_HAMMER_PAYLOAD = 128;
+// Tightest arena that avoids the deferred-release queue's growth threshold
+// (its cross-thread-allocator gap is gpu.c3l#98, unrelated here).
+const usz HELPER_HAMMER_TINY_STAGING = (HELPER_HAMMER_THREADS + 1) * HELPER_HAMMER_PAYLOAD;
+
+const uint HELPER_RACE_ITERS = 100;
 
 fn gpu::Device make_thr_device() {
     gpu::DeviceDesc desc = {
@@ -505,9 +509,10 @@ fn int helper_hammer_worker(void* arg) {
 }
 
 <* Reuse-pressure coverage, not a guaranteed repro: per-thread varying
-   patterns surface staging aliasing as byte mismatches. Parameters stay
-   below the threshold of the separate shared-command-pool race (gpu.c3l#94)
-   — crank them back up when that is fixed. *>
+   patterns surface staging aliasing as byte mismatches. Full pressure now
+   that helpers record in isolation (gpu.c3l#94): a zero-slack arena and 300
+   iterations, the parameters that used to reproduce the shared-command-pool
+   race before helper recording was isolated onto its own context and mutex. *>
 fn void two_helper_tiny_arena_hammer() @test {
     gpu::Device device = make_thr_device_tiny_staging(HELPER_HAMMER_TINY_STAGING);
     defer gpu::destroy_device(&device)!!;
@@ -531,6 +536,70 @@ fn void two_helper_tiny_arena_hammer() @test {
         assert(!a.mismatch, "each helper's readback pattern matched its own upload despite tiny-arena reuse pressure");
     }
     for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) gpu::destroy_buffer(&device, buffers[i])!!;
+}
+
+struct HelperRaceArgs {
+    gpu::Device*      device;
+    gpu::BufferHandle buffer;
+}
+
+fn int helper_race_upload_worker(void* arg) {
+    HelperRaceArgs* args = (HelperRaceArgs*)arg;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+    char[HELPER_HAMMER_PAYLOAD] payload;
+    foreach (&b : payload) *b = (char)0xAB;
+    for (uint i = 0; i < HELPER_RACE_ITERS; i++) {
+        gpu::upload_buffer_data(
+            device:      args.device,
+            dst:         args.buffer,
+            offset:      0,
+            data:        payload[..],
+            next_stage:  gpu::Stage.TRANSFER,
+            next_hazard: gpu::Hazard.TRANSFER_READ,
+        )!!;
+    }
+    };
+    return 0;
+}
+
+<* Proves helper recording no longer shares a pool with the default context:
+   one thread hammers the blocking upload helper while the main thread
+   records and submits its own lists on the default context, both
+   validation-clean under lavapipe (gpu.c3l#94). *>
+fn void blocking_upload_races_default_context_recording() @test {
+    gpu::Device device = make_thr_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::BufferDesc upload_desc = {
+        .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+    };
+    gpu::BufferHandle upload_buffer = gpu::create_buffer(&device, &upload_desc)!!;
+    defer gpu::destroy_buffer(&device, upload_buffer)!!;
+
+    gpu::BufferDesc copy_desc = {
+        .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+    };
+    gpu::BufferHandle copy_src = gpu::create_buffer(&device, &copy_desc)!!;
+    defer gpu::destroy_buffer(&device, copy_src)!!;
+    gpu::BufferHandle copy_dst = gpu::create_buffer(&device, &copy_desc)!!;
+    defer gpu::destroy_buffer(&device, copy_dst)!!;
+
+    HelperRaceArgs race_args = { .device = &device, .buffer = upload_buffer };
+    Thread uploader;
+    uploader.create(&helper_race_upload_worker, &race_args)!!;
+
+    gpu::BufferCopyDesc copy = { .src = copy_src, .dst = copy_dst, .src_offset = 0, .dst_offset = 0, .size = 256 };
+    for (uint i = 0; i < HELPER_RACE_ITERS; i++) {
+        gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::cmd_copy_buffer(&cmd, &copy)!!;
+        gpu::end_commands(&device, &cmd)!!;
+        gpu::CommandList[1] lists = { cmd };
+        gpu::SubmitDesc submit = { .command_lists = lists[..] };
+        gpu::submit(&device, &submit)!!;
+        gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    }
+
+    uploader.join()!!;
 }
 
 struct BoundaryArgs {

@@ -134,8 +134,8 @@ fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device)
     return gpu::SLOT_TABLE_FULL~;
 }
 
-<* The built-in default context cannot be destroyed; a context's command
-   lists must be retired first (device teardown sweeps leftovers). *>
+<* The built-in default and helper contexts cannot be destroyed; a context's
+   command lists must be retired first (device teardown sweeps leftovers). *>
 fn void? vk_destroy_recording_context(gpu::Device* device, gpu::RecordingContextHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
@@ -143,6 +143,7 @@ fn void? vk_destroy_recording_context(gpu::Device* device, gpu::RecordingContext
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     if ((ulong)handle == (ulong)state.default_context) return gpu::INVALID_ARGUMENT~;
+    if ((ulong)handle == (ulong)state.helper_context) return gpu::INVALID_ARGUMENT~;
     RecordingContextState* context = state.recording_contexts.get(handle)!;
     destroy_context_pools(state, context);
     state.recording_contexts.free(handle)!;
