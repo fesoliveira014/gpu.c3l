@@ -29,6 +29,15 @@ const usz HELPER_HAMMER_TINY_STAGING = HELPER_HAMMER_PAYLOAD;
 
 const uint HELPER_RACE_ITERS = 100;
 
+const uint FALLBACK_HAMMER_THREADS = 8;
+const uint FALLBACK_HAMMER_ITERS_PER_THREAD = 10;
+const usz FALLBACK_HAMMER_PAYLOAD = 256;
+// Smaller than any payload, so every upload misses the arena outright and
+// takes the dedicated-fallback path every time.
+const usz FALLBACK_HAMMER_TINY_STAGING = 16;
+
+const uint PARALLEL_UPLOAD_PAYLOAD = 256;
+
 fn gpu::Device make_thr_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -785,4 +794,172 @@ fn void boundary_violation_detected() @test {
     args.release.store(1, AtomicOrdering.RELAXED);
     worker.join()!!;
     assert(tripped, "a Tier S call in flight at begin_frame was detected");
+}
+
+struct FallbackHammerArgs {
+    gpu::Device*                device;
+    gpu::RecordingContextHandle ctx;
+    gpu::BufferHandle           dst;
+    uint                        succeeded;
+    uint                        faulted;
+    bool                        unexpected_fault;
+    gpu::CommandList            list;
+}
+
+fn int fallback_hammer_worker(void* arg) {
+    FallbackHammerArgs* args = (FallbackHammerArgs*)arg;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+    char[FALLBACK_HAMMER_PAYLOAD] payload;
+    foreach (&b : payload) *b = (char)0xAB;
+    args.list = gpu::begin_commands(args.device, gpu::QueueKind.GRAPHICS, args.ctx)!!;
+    for (uint i = 0; i < FALLBACK_HAMMER_ITERS_PER_THREAD; i++) {
+        if (catch err = gpu::cmd_upload_buffer(&args.list, args.dst, 0, payload[..])) {
+            if (err == gpu::ARENA_FULL) {
+                args.faulted++;
+            } else {
+                args.unexpected_fault = true;
+            }
+        } else {
+            args.succeeded++;
+        }
+    }
+    gpu::end_commands(args.device, &args.list)!!;
+    };
+    return 0;
+}
+
+<* Every upload exceeds the tiny arena outright, so every thread's every call
+   takes the dedicated-fallback path at once, racing the hoisted create's
+   unlock/relock window. The ring fills at DEDICATED_RETIRE_CAP; the
+   destroy-on-full path fires only when threads overlap in the unlocked
+   window, so its coverage here is probabilistic. *>
+fn void multi_thread_tiny_arena_fallback_hammer() @test {
+    gpu::Device device = make_thr_device_tiny_staging(FALLBACK_HAMMER_TINY_STAGING);
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    gpu::RecordingContextHandle[FALLBACK_HAMMER_THREADS] contexts;
+    foreach (&ctx : contexts) *ctx = gpu::create_recording_context(&device)!!;
+
+    gpu::BufferHandle[FALLBACK_HAMMER_THREADS] buffers;
+    for (uint i = 0; i < FALLBACK_HAMMER_THREADS; i++) {
+        gpu::BufferDesc desc = {
+            .size = FALLBACK_HAMMER_PAYLOAD, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+        };
+        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+    }
+
+    ulong fallbacks_before = vk::dedicated_fallback_count(state);
+
+    FallbackHammerArgs[FALLBACK_HAMMER_THREADS] args;
+    Thread[FALLBACK_HAMMER_THREADS] threads;
+    for (uint i = 0; i < FALLBACK_HAMMER_THREADS; i++) {
+        args[i] = { .device = &device, .ctx = contexts[i], .dst = buffers[i] };
+    }
+    for (uint i = 0; i < FALLBACK_HAMMER_THREADS; i++) {
+        threads[i].create(&fallback_hammer_worker, &args[i])!!;
+    }
+    foreach (&t : threads) t.join()!!;
+
+    uint total_succeeded = 0;
+    uint total_faulted = 0;
+    foreach (&a : args) {
+        assert(!a.unexpected_fault, "every fallback either registers or faults ARENA_FULL, nothing else");
+        total_succeeded += a.succeeded;
+        total_faulted += a.faulted;
+    }
+    uint total_attempts = FALLBACK_HAMMER_THREADS * FALLBACK_HAMMER_ITERS_PER_THREAD;
+    assert(total_succeeded == vk::DEDICATED_RETIRE_CAP,
+        "concurrent fallbacks register up to exactly the ring cap, no more, no fewer");
+    assert(total_faulted == total_attempts - vk::DEDICATED_RETIRE_CAP,
+        "every fallback past the cap faults ARENA_FULL on the relock re-check");
+
+    ulong fallbacks_after = vk::dedicated_fallback_count(state);
+    assert(fallbacks_after - fallbacks_before == vk::DEDICATED_RETIRE_CAP,
+        "the counter only advances for fallbacks that actually registered");
+
+    foreach (ctx : contexts) gpu::destroy_recording_context(&device, ctx)!!;
+    foreach (b : buffers) gpu::destroy_buffer(&device, b)!!;
+    assert(vk::report_resource_leaks(state) == 0,
+        "every fallback past the cap destroyed its fresh buffer instead of leaking it");
+}
+
+struct ParallelUploadArgs {
+    gpu::Device*                device;
+    gpu::RecordingContextHandle ctx;
+    gpu::BufferHandle           dst;
+    char                        fill;
+    gpu::CommandList            list;
+}
+
+fn int parallel_upload_worker(void* arg) {
+    ParallelUploadArgs* args = (ParallelUploadArgs*)arg;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+    char[PARALLEL_UPLOAD_PAYLOAD] payload;
+    foreach (&b : payload) *b = args.fill;
+    args.list = gpu::begin_commands(args.device, gpu::QueueKind.GRAPHICS, args.ctx)!!;
+    gpu::cmd_upload_buffer(&args.list, args.dst, 0, payload[..])!!;
+    gpu::BufferBarrier next_use = {
+        .buffer = args.dst, .offset = 0, .size = PARALLEL_UPLOAD_PAYLOAD,
+        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.TRANSFER,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.TRANSFER_READ,
+    };
+    gpu::cmd_buffer_barrier(&args.list, &next_use)!!;
+    gpu::end_commands(args.device, &args.list)!!;
+    };
+    return 0;
+}
+
+<* The coverage gap: parallel_recording_across_contexts exercises cmd_dispatch
+   and concurrent_blocking_uploads exercises the Tier S helper, but nothing
+   exercised Tier C cmd_upload_buffer recorded in parallel across contexts —
+   the shape that shares transfer_mutex with the hoisted fallback path. *>
+fn void parallel_tier_c_uploads_across_contexts() @test {
+    gpu::Device device = make_thr_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::RecordingContextHandle[THR_THREADS] contexts;
+    foreach (&ctx : contexts) *ctx = gpu::create_recording_context(&device)!!;
+    defer {
+        foreach (ctx : contexts) (void)gpu::destroy_recording_context(&device, ctx);
+    }
+
+    gpu::BufferHandle[THR_THREADS] buffers;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        gpu::BufferDesc desc = {
+            .size = PARALLEL_UPLOAD_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+        };
+        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+    }
+    defer {
+        foreach (b : buffers) (void)gpu::destroy_buffer(&device, b);
+    }
+
+    ParallelUploadArgs[THR_THREADS] args;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        args[i] = { .device = &device, .ctx = contexts[i], .dst = buffers[i], .fill = (char)(i + 1) };
+    }
+
+    Thread[THR_THREADS] threads;
+    for (uint i = 0; i < THR_THREADS; i++) threads[i].create(&parallel_upload_worker, &args[i])!!;
+    foreach (&t : threads) t.join()!!;
+
+    gpu::CommandList[THR_THREADS] lists;
+    for (uint i = 0; i < THR_THREADS; i++) lists[i] = args[i].list;
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+
+    char[PARALLEL_UPLOAD_PAYLOAD] readback;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        gpu::readback_buffer_data(
+            device:      &device,
+            src:         buffers[i],
+            offset:      0,
+            out_data:    readback[..],
+            from_stage:  gpu::Stage.TRANSFER,
+            from_hazard: gpu::Hazard.TRANSFER_READ,
+        )!!;
+        foreach (b : readback) assert(b == (char)(i + 1), "each context's parallel Tier-C upload landed intact and isolated");
+    }
 }

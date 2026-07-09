@@ -63,6 +63,14 @@ own mutex; `helper_record_mutex` spans a blocking helper's recording window
 (`begin_commands` through `end_commands`) and is outermost because that
 window takes `transfer_mutex` internally for its allocation.
 
+Dedicated-fallback staging/readback buffers (the arena ring miss path in
+`transfer_alloc`/`ticket_alloc`) create their VMA buffer without holding
+`transfer_mutex` — only the ring-capacity check and bookkeeping around it are
+locked — so a fallback's backend allocation never blocks concurrent arena
+allocations. A relock re-check covers the ring having filled during that
+unlocked window; on that fault the fresh buffer is destroyed before the
+call faults `ARENA_FULL`.
+
 ## Single-recorder texture discipline
 
 Within a frame, one thread owns a given texture's barriers and render

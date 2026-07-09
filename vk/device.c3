@@ -105,6 +105,9 @@ struct VkDeviceState {
     uint                       pools_skipped_last_frame;
     // Helper-path pool resets outside begin_frame; whitebox-exposed.
     ulong                      helper_pool_resets;
+    // Dedicated-fallback buffers created by transfer_alloc/ticket_alloc;
+    // mutated only under transfer_mutex, whitebox-exposed.
+    ulong                      dedicated_fallbacks;
 }
 
 <* Snapshot of begin_frame's reset-loop counters, exposed for whitebox
