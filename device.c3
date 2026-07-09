@@ -45,6 +45,7 @@ alias CreateTextureFn           = fn TextureHandle? (Device*, TextureDesc*);
 alias DestroyTextureFn          = fn void? (Device*, TextureHandle);
 alias CreateTextureDescriptorFn  = fn TextureIndex? (Device*, TextureHandle, TextureViewDesc*);
 alias DestroyTextureDescriptorFn = fn void? (Device*, TextureIndex);
+alias CreateTextureDescriptorsFn = fn void? (Device*, TextureDescriptorDesc[], TextureIndex[]);
 alias CreateSamplerFn            = fn SamplerIndex? (Device*, SamplerDesc*);
 alias DestroySamplerFn           = fn void? (Device*, SamplerIndex);
 alias CreateShaderFn          = fn ShaderHandle? (Device*, ShaderDesc*);
@@ -119,6 +120,7 @@ struct BackendVTable {
     DestroyTextureFn        destroy_texture;
     CreateTextureDescriptorFn  create_texture_descriptor;
     DestroyTextureDescriptorFn destroy_texture_descriptor;
+    CreateTextureDescriptorsFn create_texture_descriptors;
     CreateSamplerFn            create_sampler;
     DestroySamplerFn           destroy_sampler;
     CreateShaderFn          create_shader;
