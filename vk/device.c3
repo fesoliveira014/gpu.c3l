@@ -264,13 +264,14 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.helper_context = state.recording_contexts.alloc(helper_ctx)!;
     state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     state.shaders.slots    = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
-    state.pipelines.slots  = mem::new_array(PipelineCell, gpu::MAX_PIPELINES);
+    uint pipeline_capacity = gpu::resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
+    state.pipelines.slots  = mem::new_array(PipelineCell, pipeline_capacity);
     state.textures.slots   = mem::new_array(TextureCell, gpu::resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
     state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     state.deferred.entries = alloc::new_array(state.host_allocator, DeferredEntry, DEFERRED_QUEUE_INITIAL_CAP);
     create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
-    create_pipeline_shared(state, desc.pipeline_cache_data)!;
+    create_pipeline_shared(state, desc.pipeline_cache_data, pipeline_capacity)!;
     CapsInputs caps_inputs = {
         .indexing_supported = indexing_supported,
         .buffer_supported   = buffer_supported,
