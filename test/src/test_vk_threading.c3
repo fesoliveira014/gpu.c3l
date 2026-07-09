@@ -76,7 +76,23 @@ fn int creation_storm_worker(void* arg) {
         };
         gpu::TextureHandle texture = gpu::create_texture(args.device, &tex_desc)!!;
 
-        if (!buffer.is_valid() || !texture.is_valid()) args.failed = true;
+        gpu::ShaderDesc shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
+        gpu::ShaderHandle shader = gpu::create_shader(args.device, &shader_desc)!!;
+
+        gpu::SamplerDesc sampler_desc = {
+            .min_filter = gpu::Filter.NEAREST,
+            .mag_filter = gpu::Filter.NEAREST,
+            .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+            .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+            .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+        };
+        gpu::SamplerIndex sampler = gpu::create_sampler(args.device, &sampler_desc)!!;
+
+        if (!buffer.is_valid() || !texture.is_valid() || !shader.is_valid() || !sampler.is_valid()) {
+            args.failed = true;
+        }
+        gpu::destroy_sampler(args.device, sampler)!!;
+        gpu::destroy_shader(args.device, shader)!!;
         gpu::destroy_texture(args.device, texture)!!;
         gpu::destroy_buffer(args.device, buffer)!!;
     }

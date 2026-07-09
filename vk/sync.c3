@@ -184,8 +184,6 @@ fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::Semaphore
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
     vk::SemaphoreTypeCreateInfo type_info = vk::semaphore_type_create_info()
         .set_semaphore_type(vk::SemaphoreType.TIMELINE)
         .set_initial_value((ulong)desc.initial_value);
@@ -199,8 +197,12 @@ fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::Semaphore
         name:          desc.debug_name,
     );
 
-    if (try handle = state.semaphores.alloc({ .semaphore = semaphore })) {
-        return handle;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        if (try handle = state.semaphores.alloc({ .semaphore = semaphore })) {
+            return handle;
+        }
     }
     vk::destroy_semaphore(state.device, semaphore, null);
     return gpu::SLOT_TABLE_FULL~;

@@ -538,14 +538,9 @@ fn vk::SamplerAddressMode address_mode_to_vk(gpu::AddressMode mode) @private {
     }
 }
 
-fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
-    if (desc.anisotropy_enable && state.max_sampler_anisotropy <= 0) return gpu::UNSUPPORTED_FEATURE~;
-    // Vulkan requires 1.0 <= maxAnisotropy when enabled; enabling without a
-    // valid value is a caller error, not a default request.
-    if (desc.anisotropy_enable && desc.max_anisotropy < 1.0f) return gpu::INVALID_ARGUMENT~;
-    enter_tracked(state);
-    defer exit_tracked(state);
+<* Locked for its whole body; faults DESCRIPTOR_HEAP_FULL with `sampler`
+   untouched, so the caller destroys it unlocked. *>
+fn gpu::SamplerIndex? publish_sampler(VkDeviceState* state, vk::Sampler sampler) @private {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.heap;
@@ -559,6 +554,24 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
     } else {
         return gpu::DESCRIPTOR_HEAP_FULL~;
     }
+
+    SamplerDescriptorCell* cell = &heap.sampler_cells[slot];
+    cell.sampler = sampler;
+    cell.used = true;
+    cell.generation = bump_generation(cell.generation);
+
+    write_sampler_descriptor(state, slot, sampler);
+    return (gpu::SamplerIndex){ .slot = (ushort)slot, .generation = cell.generation };
+}
+
+fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (desc.anisotropy_enable && state.max_sampler_anisotropy <= 0) return gpu::UNSUPPORTED_FEATURE~;
+    // Vulkan requires 1.0 <= maxAnisotropy when enabled; enabling without a
+    // valid value is a caller error, not a default request.
+    if (desc.anisotropy_enable && desc.max_anisotropy < 1.0f) return gpu::INVALID_ARGUMENT~;
+    enter_tracked(state);
+    defer exit_tracked(state);
 
     vk::SamplerCreateInfo sampler_info = vk::sampler_create_info()
         .set_mag_filter(filter_to_vk(desc.mag_filter))
@@ -578,20 +591,13 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
         .set_max_lod(desc.max_lod);
 
     vk::Sampler sampler;
-    if (catch err = check(vk::create_sampler(state.device, &sampler_info, null, &sampler))) {
-        if (heap.sampler_free_count < heap.sampler_free.len) {
-            heap.sampler_free[heap.sampler_free_count++] = slot;
-        }
-        return err~;
+    check(vk::create_sampler(state.device, &sampler_info, null, &sampler))!;
+
+    if (try index = publish_sampler(state, sampler)) {
+        return index;
     }
-
-    SamplerDescriptorCell* cell = &heap.sampler_cells[slot];
-    cell.sampler = sampler;
-    cell.used = true;
-    cell.generation = bump_generation(cell.generation);
-
-    write_sampler_descriptor(state, slot, sampler);
-    return (gpu::SamplerIndex){ .slot = (ushort)slot, .generation = cell.generation };
+    vk::destroy_sampler(state.device, sampler, null);
+    return gpu::DESCRIPTOR_HEAP_FULL~;
 }
 
 fn void? vk_destroy_sampler(gpu::Device* device, gpu::SamplerIndex index) @private {
