@@ -235,6 +235,20 @@ fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) 
     return gpu::SLOT_TABLE_FULL~;
 }
 
+<* Spec-recommended pre-screen; the driver retry is the real safety net. *>
+fn bool cache_blob_compatible(VkDeviceState* state, char[] blob) @private {
+    if (blob.len == 0) return true;
+    if (blob.len < 32) return false;
+    uint header_len = *(uint*)blob.ptr;
+    uint header_version = *(uint*)&blob[4];
+    if (header_len != 32 || header_version != 1) return false;
+    vk::PhysicalDeviceProperties props;
+    vk::get_physical_device_properties(state.physical_device, &props);
+    if (*(uint*)&blob[8] != props.vendor_id) return false;
+    if (*(uint*)&blob[12] != props.device_id) return false;
+    return mem::equals(blob[16:16], (char[])props.pipeline_cache_uuid[0:16]);
+}
+
 <* Shared graphics layout, cache entry storage, and the driver VkPipelineCache.
    Requires the descriptor heap (set layout) to exist. *>
 fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data, uint capacity) {
@@ -255,11 +269,17 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         name:          "gpu_graphics_layout",
     );
 
-    // The driver validates the blob header and ignores incompatible data.
+    char[] cache_data = initial_cache_data;
+    if (!cache_blob_compatible(state, cache_data)) cache_data = {};
     vk::PipelineCacheCreateInfo cache_info = vk::pipeline_cache_create_info();
-    cache_info.initial_data_size = (sz)initial_cache_data.len;
-    cache_info.p_initial_data    = initial_cache_data.ptr;
-    check(vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache))!;
+    cache_info.initial_data_size = (sz)cache_data.len;
+    cache_info.p_initial_data    = cache_data.ptr;
+    if (vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache) != vk::Result.SUCCESS) {
+        // A warm-start blob is advisory: any driver rejection restarts empty.
+        cache_info.initial_data_size = 0;
+        cache_info.p_initial_data    = null;
+        check(vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache))!;
+    }
 
     state.pipeline_cache.entries = mem::new_array(PipelineCacheEntry, capacity);
     state.pipeline_cache.bucket_heads = mem::new_array(uint, next_pow2(capacity * 2));

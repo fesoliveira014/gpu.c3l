@@ -238,10 +238,6 @@ Windows-specific notes:
 - On machines with overlay layers registered (Steam, RTSS, Epic, RenderDoc),
   run tests and benches with `VK_LOADER_LAYERS_DISABLE=~implicit~` for
   deterministic results.
-- Two tests encode lavapipe-specific behavior and are expected to fail on real
-  GPUs: `cache_corrupt_blob_tolerated` (NVIDIA rejects corrupt cache blobs
-  with `VK_ERROR_UNKNOWN` instead of discarding them) and
-  `lavapipe_alias_and_caps` (asserts single-queue topology).
 
 Notes pinned during scaffolding (C3 0.8.0):
 
