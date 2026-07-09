@@ -1,6 +1,7 @@
 module gpu;
 
 const uint MAX_SHADERS           = 256;
+// Default DeviceDesc.pipeline_capacity when zero.
 const uint MAX_PIPELINES         = 256;
 const uint MAX_COLOR_ATTACHMENTS = 8;
 

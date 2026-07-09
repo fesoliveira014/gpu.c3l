@@ -25,8 +25,23 @@ fn gpu::Device make_cache_test_device() {
     return gpu::create_device(&desc)!!;
 }
 
+fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .pipeline_capacity = pipeline_capacity,
+        .application_name  = "gpu_pipeline_cache_capacity_test",
+    };
+    return gpu::create_device(&desc)!!;
+}
+
 fn uint cache_entry_count(gpu::Device* device) {
     return vk::pipeline_cache_entry_count((vk::VkDeviceState*)device.backend_state);
+}
+
+fn bool cache_index_consistent(gpu::Device* device) {
+    return vk::pipeline_cache_index_consistent((vk::VkDeviceState*)device.backend_state);
 }
 
 struct CacheShaders {
@@ -412,4 +427,80 @@ fn void alias_survives_peer_destroy() @test {
 
     gpu::destroy_pipeline(&device, survivor)!!;
     assert(cache_entry_count(&device) == 0, "entry released after the surviving alias is destroyed");
+}
+
+const uint CHURN_CAPACITY = 8;
+// Headroom above CHURN_CAPACITY: pipeline_capacity also sizes the handle slot
+// table, and an aliasing create needs a free slot even on a cache hit.
+const uint CHURN_DEVICE_CAPACITY = CHURN_CAPACITY + 2;
+const uint CHURN_ROUNDS = 4;
+
+fn void index_survives_create_alias_destroy_churn() @test {
+    gpu::Device device = make_cache_test_device_with_capacity(CHURN_DEVICE_CAPACITY);
+    defer gpu::destroy_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders(&device);
+    defer gpu::destroy_shader(&device, shaders.vert)!!;
+    defer gpu::destroy_shader(&device, shaders.frag)!!;
+
+    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    uint[CHURN_CAPACITY] teardown_order = { 3, 0, 7, 1, 6, 2, 5, 4 };
+
+    for (uint round = 0; round < CHURN_ROUNDS; round++) {
+        gpu::PipelineHandle[CHURN_CAPACITY] handles;
+        for (uint i = 0; i < CHURN_CAPACITY; i++) {
+            gpu::GraphicsPipelineDesc variant = base_graphics_desc(&shaders, formats[..]);
+            variant.raster.depth_bias_constant = (float)(round * CHURN_CAPACITY + i + 1);
+            handles[i] = gpu::create_graphics_pipeline(&device, &variant)!!;
+        }
+        assert(cache_index_consistent(&device), "index consistent once all distinct entries are inserted");
+        assert(cache_entry_count(&device) == CHURN_CAPACITY, "each round inserts exactly CHURN_CAPACITY distinct entries");
+
+        // Alias two live entries; the refcount>0 path must not touch the index.
+        gpu::GraphicsPipelineDesc alias_desc = base_graphics_desc(&shaders, formats[..]);
+        alias_desc.raster.depth_bias_constant = (float)(round * CHURN_CAPACITY + 0 + 1);
+        gpu::PipelineHandle alias_a = gpu::create_graphics_pipeline(&device, &alias_desc)!!;
+        alias_desc.raster.depth_bias_constant = (float)(round * CHURN_CAPACITY + 3 + 1);
+        gpu::PipelineHandle alias_b = gpu::create_graphics_pipeline(&device, &alias_desc)!!;
+        assert(cache_index_consistent(&device), "index consistent after aliasing existing entries");
+        assert(cache_entry_count(&device) == CHURN_CAPACITY, "aliasing does not grow the entry count");
+
+        gpu::destroy_pipeline(&device, alias_a)!!;
+        gpu::destroy_pipeline(&device, alias_b)!!;
+        assert(cache_index_consistent(&device), "index consistent after alias release");
+        assert(cache_entry_count(&device) == CHURN_CAPACITY, "peer entries survive alias release");
+
+        // Destroy the base handles out of order to recycle free-list slots
+        // through the index in a different pattern each round.
+        foreach (i : teardown_order) {
+            gpu::destroy_pipeline(&device, handles[i])!!;
+            assert(cache_index_consistent(&device), "index consistent mid-teardown");
+        }
+        assert(cache_entry_count(&device) == 0, "table empty after full teardown");
+    }
+}
+
+fn void small_pipeline_capacity_faults_at_limit() @test {
+    const uint CAPACITY = 3;
+    gpu::Device device = make_cache_test_device_with_capacity(CAPACITY);
+    defer gpu::destroy_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders(&device);
+    defer gpu::destroy_shader(&device, shaders.vert)!!;
+    defer gpu::destroy_shader(&device, shaders.frag)!!;
+
+    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::PipelineHandle[CAPACITY] handles;
+    for (uint i = 0; i < CAPACITY; i++) {
+        gpu::GraphicsPipelineDesc variant = base_graphics_desc(&shaders, formats[..]);
+        variant.raster.depth_bias_constant = (float)(i + 1);
+        handles[i] = gpu::create_graphics_pipeline(&device, &variant)!!;
+    }
+    assert(cache_entry_count(&device) == CAPACITY, "the small capacity fills exactly");
+    assert(cache_index_consistent(&device), "index consistent at capacity");
+
+    gpu::GraphicsPipelineDesc over_capacity = base_graphics_desc(&shaders, formats[..]);
+    over_capacity.raster.depth_bias_constant = (float)(CAPACITY + 1);
+    assert(@catch(gpu::create_graphics_pipeline(&device, &over_capacity)) == gpu::SLOT_TABLE_FULL,
+        "the distinct pipeline past the configured capacity faults SLOT_TABLE_FULL");
+
+    foreach (handle : handles) gpu::destroy_pipeline(&device, handle)!!;
 }

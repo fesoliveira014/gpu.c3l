@@ -50,13 +50,16 @@ struct PipelineCacheEntry {
     vk::PipelineLayout layout;
     uint               refcount;
     uint               next_free;
+    uint               next_in_bucket;
     bool               used;
 }
 
 struct PipelineCacheTable {
-    PipelineCacheEntry[] entries;
-    uint                 free_head;
-    uint                 next_new;
+    PipelineCacheEntry[]  entries;
+    // Pow2-sized, +1-encoded like next_free/next_in_bucket; 0 = empty bucket.
+    uint[]                bucket_heads;
+    uint                  free_head;
+    uint                  next_new;
 }
 
 struct ComputeLayoutEntry {
@@ -104,12 +107,42 @@ fn bool key_equals(PipelineKey* a, PipelineKey* b) @private {
     return mem::equals(((char*)a)[:PipelineKey::size], ((char*)b)[:PipelineKey::size]);
 }
 
-<* Index of the live entry matching hash+key, or PIPELINE_ENTRY_NONE. The hash
-   is a fast reject; equality is confirmed on the full key. *>
+fn uint bucket_for(ulong hash, uint bucket_count) @private {
+    return (uint)((hash ^ (hash >> 32)) & (ulong)(bucket_count - 1));
+}
+
+<* Sizes bucket_heads from the resolved pipeline capacity. *>
+fn uint next_pow2(uint value) @private {
+    if (value <= 1) return 1;
+    value--;
+    value |= value >> 1;
+    value |= value >> 2;
+    value |= value >> 4;
+    value |= value >> 8;
+    value |= value >> 16;
+    return value + 1;
+}
+
+fn void link_entry(PipelineCacheTable* cache, uint idx) @private {
+    uint bucket = bucket_for(cache.entries[idx].hash, (uint)cache.bucket_heads.len);
+    cache.entries[idx].next_in_bucket = cache.bucket_heads[bucket];
+    cache.bucket_heads[bucket] = idx + 1;
+}
+
+fn void unlink_entry(PipelineCacheTable* cache, uint idx) @private {
+    uint bucket = bucket_for(cache.entries[idx].hash, (uint)cache.bucket_heads.len);
+    uint* cur = &cache.bucket_heads[bucket];
+    while (*cur != idx + 1) cur = &cache.entries[*cur - 1].next_in_bucket;
+    *cur = cache.entries[idx].next_in_bucket;
+}
+
+<* Index of the live entry matching hash+key, or PIPELINE_ENTRY_NONE. *>
 fn uint find_entry(PipelineCacheTable* cache, ulong hash, PipelineKey* key) {
-    foreach (i, &entry : cache.entries[:cache.next_new]) {
-        if (!entry.used || entry.hash != hash) continue;
-        if (key_equals(&entry.key, key)) return (uint)i;
+    uint bucket = bucket_for(hash, (uint)cache.bucket_heads.len);
+    for (uint cur = cache.bucket_heads[bucket]; cur != 0; ) {
+        PipelineCacheEntry* entry = &cache.entries[cur - 1];
+        if (entry.hash == hash && key_equals(&entry.key, key)) return cur - 1;
+        cur = entry.next_in_bucket;
     }
     return PIPELINE_ENTRY_NONE;
 }
@@ -127,6 +160,7 @@ fn uint? insert_entry(PipelineCacheTable* cache, PipelineCacheEntry value) {
     cache.entries[idx] = value;
     cache.entries[idx].used = true;
     cache.entries[idx].refcount = 1;
+    link_entry(cache, idx);
     return idx;
 }
 
@@ -136,6 +170,7 @@ fn void release_entry(VkDeviceState* state, uint entry_index) {
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[entry_index];
     if (--entry.refcount > 0) return;
     enqueue_deferred(state, DeferredKind.PIPELINE, retire_timeline_value(state), (void*)entry.pipeline, (vma::Allocation)null);
+    unlink_entry(&state.pipeline_cache, entry_index);
     entry.used = false;
     entry.next_free = state.pipeline_cache.free_head;
     state.pipeline_cache.free_head = entry_index + 1;
@@ -148,6 +183,24 @@ fn uint pipeline_cache_entry_count(VkDeviceState* state) {
         if (entry.used) count++;
     }
     return count;
+}
+
+<* Whitebox check: every bucket-linked entry is used and hashes back to its
+   own bucket, and the total linked count matches the live entry count. *>
+fn bool pipeline_cache_index_consistent(VkDeviceState* state) {
+    PipelineCacheTable* cache = &state.pipeline_cache;
+    uint bucket_count = (uint)cache.bucket_heads.len;
+    uint linked = 0;
+    foreach (bucket, head : cache.bucket_heads) {
+        for (uint cur = head; cur != 0; ) {
+            PipelineCacheEntry* entry = &cache.entries[cur - 1];
+            if (!entry.used) return false;
+            if (bucket_for(entry.hash, bucket_count) != (uint)bucket) return false;
+            linked++;
+            cur = entry.next_in_bucket;
+        }
+    }
+    return linked == pipeline_cache_entry_count(state);
 }
 
 <* Compute layout for `push_size`, created on first use. All compute layouts
@@ -184,7 +237,7 @@ fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) 
 
 <* Shared graphics layout, cache entry storage, and the driver VkPipelineCache.
    Requires the descriptor heap (set layout) to exist. *>
-fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data) {
+fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data, uint capacity) {
     uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     vk::PushConstantRange range = {
         .stage_flags = (vk::ShaderStageFlags)push_stages,
@@ -208,7 +261,8 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data)
     cache_info.p_initial_data    = initial_cache_data.ptr;
     check(vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache))!;
 
-    state.pipeline_cache.entries = mem::new_array(PipelineCacheEntry, gpu::MAX_PIPELINES);
+    state.pipeline_cache.entries = mem::new_array(PipelineCacheEntry, capacity);
+    state.pipeline_cache.bucket_heads = mem::new_array(uint, next_pow2(capacity * 2));
 }
 
 fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
@@ -237,6 +291,10 @@ fn void destroy_pipeline_shared(VkDeviceState* state) {
         }
         mem::free(state.pipeline_cache.entries.ptr);
         state.pipeline_cache.entries = {};
+    }
+    if (state.pipeline_cache.bucket_heads.ptr != null) {
+        mem::free(state.pipeline_cache.bucket_heads.ptr);
+        state.pipeline_cache.bucket_heads = {};
     }
     foreach (&entry : state.compute_layouts[:COMPUTE_LAYOUT_CAP]) {
         if (entry.used) {
