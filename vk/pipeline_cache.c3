@@ -218,7 +218,7 @@ fn void? grow_compute_layout_cache(VkDeviceState* state) @private {
     usz new_capacity = cache.entries.len == 0 ? state.pipelines.slots.len : cache.entries.len * 2;
     if (new_capacity == 0) new_capacity = 1;
     if (new_capacity > max_capacity) new_capacity = max_capacity;
-    if (new_capacity <= cache.entries.len) return gpu::SLOT_TABLE_FULL~;
+    if (new_capacity <= cache.entries.len) return gpu::INVALID_ARGUMENT~;
 
     ComputeLayoutEntry[] grown = alloc::new_array(state.host_allocator, ComputeLayoutEntry, (sz)new_capacity);
     for (uint i = 0; i < cache.count; i++) grown[i] = cache.entries[i];

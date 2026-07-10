@@ -33,7 +33,6 @@ fn void device_create_destroy() @test {
         "reported push-constant limit matches the selected physical device"
     );
     assert(device.caps.max_push_constant_size >= gpu::RootPush::size, "push-constant limit contains RootPush");
-    assert(device.caps.max_push_constant_size % 4 == 0, "push-constant limit is four-byte aligned");
     gpu::destroy_device(&device)!!;
     assert(device.backend_state == null, "backend state cleared on destroy");
 }

@@ -522,11 +522,12 @@ fn void compute_push_constant_sizes_validate_before_vulkan() @test {
         "unaligned push-constant size faults INVALID_ARGUMENT");
 
     uint limit = device.caps.max_push_constant_size;
-    gpu::ComputePipelineDesc over_maximum = { .shader = comp, .push_constant_size = limit + 4 };
+    uint aligned_limit = limit - limit % 4;
+    gpu::ComputePipelineDesc over_maximum = { .shader = comp, .push_constant_size = aligned_limit + 4 };
     assert(@catch(gpu::create_compute_pipeline(&device, &over_maximum)) == gpu::INVALID_ARGUMENT,
         "size above the selected-device maximum faults INVALID_ARGUMENT");
 
-    gpu::ComputePipelineDesc maximum = { .shader = comp, .push_constant_size = limit };
+    gpu::ComputePipelineDesc maximum = { .shader = comp, .push_constant_size = aligned_limit };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &maximum)!!;
     gpu::destroy_pipeline(&device, pipeline)!!;
 }
