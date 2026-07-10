@@ -50,7 +50,7 @@ exists (else the limit is compile-time).
 | Live pipelines / shaders | 256 each (`pipeline.c3:3-4`) | — | `SLOT_TABLE_FULL` |
 | Live semaphores | 256 (`sync.c3:6`) | — | `SLOT_TABLE_FULL` |
 | Swapchains | 8 (`swapchain.c3:3`) | — | `SLOT_TABLE_FULL` |
-| Color attachments per pass | 8 (`pipeline.c3:5`) | — | `INVALID_ARGUMENT` |
+| Color attachments per pass | Lesser of 8 (`pipeline.c3:6`) and the selected device limit, reported by `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
 | Frame arena (per frame in flight) | 1 MiB (`memory.c3:36`) | — ([#28](https://github.com/fesoliveira014/gpu.c3l/issues/28)) | `ARENA_FULL` |
 | Persistent arena | 64 MiB (`memory.c3:37`) | — (#28) | `ARENA_FULL` |
 | Staging arena | 32 MiB default (`memory.c3:38`) | `staging_arena_size` | `ARENA_FULL` |

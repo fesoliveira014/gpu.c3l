@@ -656,6 +656,8 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .async_compute              = inputs.async_compute,
         .max_texture_descriptors    = inputs.texture_capacity,
         .max_sampler_descriptors    = inputs.sampler_capacity,
+        .max_color_attachments      = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS
+            ? props.limits.max_color_attachments : gpu::MAX_COLOR_ATTACHMENTS,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,

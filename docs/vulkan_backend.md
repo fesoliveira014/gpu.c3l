@@ -395,9 +395,11 @@ Use dynamic rendering.
 Render pass begin:
 
 ```text
-validate color/depth targets
+reject color counts above the library or selected-device limit
+validate every color handle, usage, mip/layer range, selected-mip extent, and layout
+validate the depth handle, usage, mip-zero extent, and layout
 transition only if caller explicitly requested via barrier before begin
-build rendering attachment infos
+resolve views and build attachment infos only after all targets validate
 vkCmdBeginRendering
 ```
 

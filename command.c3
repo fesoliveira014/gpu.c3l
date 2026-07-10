@@ -254,8 +254,10 @@ fn void? cmd_dispatch(CommandList* commands, PipelineHandle pipeline, GpuAddress
     return commands.device.vtable.cmd_dispatch(commands, pipeline, root, groups);
 }
 
-<* Begin dynamic rendering into the desc's color targets. Viewport and scissor
-   are set to the full pass dimensions. *>
+<* Begin dynamic rendering into the desc's targets. Every selected attachment
+   must cover the pass dimensions, and the color count must not exceed
+   DeviceCaps.max_color_attachments. Viewport and scissor cover the full
+   pass dimensions. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_begin_render_pass(commands, desc);
