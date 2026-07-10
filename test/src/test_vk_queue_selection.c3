@@ -68,6 +68,85 @@ fn vk::PhysicalDeviceCandidate candidate(uptr device, int score, bool suitable, 
     };
 }
 
+uint presentation_query_count;
+bool presentation_query_result;
+
+fn bool query_presentation_support(vk::PhysicalDevice physical_device, ZString extension) {
+    presentation_query_count++;
+    assert(extension == vk::SWAPCHAIN_EXTENSION, "selection queries the swapchain extension");
+    return presentation_query_result;
+}
+
+fn void presentation_requirement_is_conditional() @test {
+    presentation_query_count = 0;
+    presentation_query_result = false;
+    assert(vk::presentation_requirement_satisfied(
+        false,
+        fake_physical_device(0x80),
+        &query_presentation_support,
+    ),
+        "headless selection does not require swapchain support");
+    assert(presentation_query_count == 0,
+        "headless selection performs no swapchain extension query");
+
+    presentation_query_result = true;
+    assert(vk::presentation_requirement_satisfied(
+        true,
+        fake_physical_device(0x81),
+        &query_presentation_support,
+    ),
+        "presentation accepts swapchain-capable adapters");
+    presentation_query_result = false;
+    assert(!vk::presentation_requirement_satisfied(
+        true,
+        fake_physical_device(0x82),
+        &query_presentation_support,
+    ),
+        "presentation rejects adapters without swapchain support");
+    assert(presentation_query_count == 2,
+        "presentation selection queries each candidate once");
+}
+
+fn void presentation_skips_higher_score_headless_candidate_first() @test {
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(device: 0x90, score: 100, suitable: false),
+        candidate(device: 0x91, score: 50, suitable: true),
+    };
+    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
+    assert(selected.physical_device == fake_physical_device(0x91),
+        "lower-scored presentation-capable adapter wins");
+}
+
+fn void presentation_skips_higher_score_headless_candidate_second() @test {
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(device: 0x92, score: 50, suitable: true),
+        candidate(device: 0x93, score: 100, suitable: false),
+    };
+    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
+    assert(selected.physical_device == fake_physical_device(0x92),
+        "earlier presentation-capable adapter remains selected");
+}
+
+fn void presentation_faults_when_all_candidates_lack_swapchain() @test {
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(device: 0x94, score: 100, suitable: false),
+        candidate(device: 0x95, score: 50, suitable: false),
+    };
+    fault selection_fault = @catch(vk::choose_physical_device(candidates[..]));
+    assert(selection_fault == gpu::UNSUPPORTED_FEATURE,
+        "missing swapchain support faults unsupported feature");
+}
+
+fn void headless_selection_preserves_score_without_swapchain() @test {
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(device: 0x96, score: 50, suitable: true),
+        candidate(device: 0x97, score: 100, suitable: true),
+    };
+    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
+    assert(selected.physical_device == fake_physical_device(0x97),
+        "headless selection keeps the higher-scored adapter");
+}
+
 fn void unsuitable_high_score_falls_back_and_preserves_families() @test {
     vk::QueueFamilies fallback_families = {
         .graphics = 3,
