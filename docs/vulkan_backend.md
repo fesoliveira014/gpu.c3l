@@ -244,11 +244,12 @@ update-after-bind where needed
 
 The indexing layout contains `T` sampled images, `T` storage images, and `S`
 samplers, all visible to every stage. Before object creation the backend checks
-the exact aggregate `2T + S` against
-`maxPerStageUpdateAfterBindResources`. Its single update-after-bind pool repeats
-those counts and is checked against
-`maxUpdateAfterBindDescriptorsInAllPools`. Requests that exceed either aggregate
-or any per-type limit fail with `INVALID_ARGUMENT`; capacities are never clamped.
+the exact resource total `2T` against
+`maxPerStageUpdateAfterBindResources`; plain `SAMPLER` descriptors do not count
+toward that limit. Its single update-after-bind pool contains `2T + S`
+descriptors and is checked against `maxUpdateAfterBindDescriptorsInAllPools`.
+Requests that exceed either aggregate or any per-type limit fail with
+`INVALID_ARGUMENT`; capacities are never clamped.
 
 ### Descriptor buffer path
 
