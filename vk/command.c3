@@ -179,9 +179,12 @@ fn gpu::RecordingContextHandle? create_builtin_recording_context_with_ops(
 ) @private {
     RecordingContextState context;
     create_context_pools_with_ops(state, &context, ops)!;
-    if (try handle = state.recording_contexts.alloc(context)) return handle;
-    destroy_context_pools_with_ops(state, &context, ops);
-    return gpu::SLOT_TABLE_FULL~;
+    gpu::RecordingContextHandle? handle = state.recording_contexts.alloc(context);
+    if (catch err = handle) {
+        destroy_context_pools_with_ops(state, &context, ops);
+        return err~;
+    }
+    return handle;
 }
 
 fn gpu::RecordingContextHandle? create_builtin_recording_context(VkDeviceState* state) @private {
@@ -196,15 +199,17 @@ fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device)
     RecordingContextState context;
     create_context_pools(state, &context)!;
 
+    gpu::RecordingContextHandle? handle;
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
-        if (try handle = state.recording_contexts.alloc(context)) {
-            return handle;
-        }
+        handle = state.recording_contexts.alloc(context);
     }
-    destroy_context_pools(state, &context);
-    return gpu::SLOT_TABLE_FULL~;
+    if (catch err = handle) {
+        destroy_context_pools(state, &context);
+        return err~;
+    }
+    return handle;
 }
 
 <* The built-in default and helper contexts cannot be destroyed; a context's

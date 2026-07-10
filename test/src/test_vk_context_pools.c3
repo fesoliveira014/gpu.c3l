@@ -6,6 +6,10 @@ import vk;
 
 const uint CONTEXT_POOL_STAGE_CAP = 6;
 
+const uint FIXTURE_GRAPHICS_FAMILY = 3;
+const uint FIXTURE_COMPUTE_FAMILY = 5;
+const uint FIXTURE_TRANSFER_FAMILY = 7;
+
 struct ContextPoolFixture {
     uint fail_at;
     uint create_calls;
@@ -40,12 +44,12 @@ fn gpu::vk::ContextPoolOps context_pool_ops(ContextPoolFixture* fixture) {
 fn uint expected_pool_family(bool distinct, uint ordinal) {
     if (distinct) {
         switch (ordinal % 3) {
-            case 0: return 3;
-            case 1: return 5;
-            default: return 7;
+            case 0: return FIXTURE_GRAPHICS_FAMILY;
+            case 1: return FIXTURE_COMPUTE_FAMILY;
+            default: return FIXTURE_TRANSFER_FAMILY;
         }
     }
-    return ordinal % 2 == 0 ? 3 : 7;
+    return ordinal % 2 == 0 ? FIXTURE_GRAPHICS_FAMILY : FIXTURE_TRANSFER_FAMILY;
 }
 
 fn void assert_context_empty(gpu::vk::RecordingContextState* context) {
@@ -59,9 +63,9 @@ fn void assert_context_empty(gpu::vk::RecordingContextState* context) {
 fn void run_context_pool_failure(bool distinct, uint fail_at, uint stage_count) {
     gpu::vk::VkDeviceState state = {
         .frames_in_flight = 2,
-        .graphics_family = 3,
-        .compute_family = distinct ? 5 : 3,
-        .transfer_family = 7,
+        .graphics_family = FIXTURE_GRAPHICS_FAMILY,
+        .compute_family = distinct ? FIXTURE_COMPUTE_FAMILY : FIXTURE_GRAPHICS_FAMILY,
+        .transfer_family = FIXTURE_TRANSFER_FAMILY,
     };
     ContextPoolFixture fixture = { .fail_at = fail_at };
     gpu::vk::ContextPoolOps ops = context_pool_ops(&fixture);
@@ -87,9 +91,9 @@ fn void run_context_pool_failure(bool distinct, uint fail_at, uint stage_count) 
 fn void run_context_pool_success(bool distinct, uint stage_count) {
     gpu::vk::VkDeviceState state = {
         .frames_in_flight = 2,
-        .graphics_family = 3,
-        .compute_family = distinct ? 5 : 3,
-        .transfer_family = 7,
+        .graphics_family = FIXTURE_GRAPHICS_FAMILY,
+        .compute_family = distinct ? FIXTURE_COMPUTE_FAMILY : FIXTURE_GRAPHICS_FAMILY,
+        .transfer_family = FIXTURE_TRANSFER_FAMILY,
     };
     ContextPoolFixture fixture = { .fail_at = uint::max };
     gpu::vk::ContextPoolOps ops = context_pool_ops(&fixture);
@@ -137,9 +141,9 @@ fn void successful_context_pool_ownership_is_idempotent() @test {
 fn void built_in_context_insertion_failure_cleans_full_context() @test {
     gpu::vk::VkDeviceState state = {
         .frames_in_flight = 2,
-        .graphics_family = 3,
-        .compute_family = 3,
-        .transfer_family = 7,
+        .graphics_family = FIXTURE_GRAPHICS_FAMILY,
+        .compute_family = FIXTURE_GRAPHICS_FAMILY,
+        .transfer_family = FIXTURE_TRANSFER_FAMILY,
     };
     ContextPoolFixture fixture = { .fail_at = uint::max };
     gpu::vk::ContextPoolOps ops = context_pool_ops(&fixture);
