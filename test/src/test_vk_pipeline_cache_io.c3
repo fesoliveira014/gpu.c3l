@@ -139,6 +139,26 @@ fn void cache_corrupt_blob_tolerated() @test {
     run_cache_io_dispatch(&device_b, pipe_b);
 }
 
+fn void cache_foreign_uuid_blob_starts_empty() @test {
+    gpu::Device device_a = make_cache_io_device();
+    gpu::PipelineHandle pipe_a = build_cache_io_pipeline(&device_a);
+    char[] blob = export_cache_blob(&device_a);
+    defer mem::free(blob.ptr);
+    gpu::destroy_pipeline(&device_a, pipe_a)!!;
+    gpu::destroy_device(&device_a)!!;
+
+    // Flip the UUID bytes: a foreign-device blob must never break device
+    // creation, whichever layer drops it (pre-screen, retry, or the driver).
+    foreach (usz i, &b : blob) {
+        if (i >= 16 && i < 32) *b ^= (char)0xA5;
+    }
+    gpu::Device device_b = make_cache_io_device(blob);
+    defer gpu::destroy_device(&device_b)!!;
+    gpu::PipelineHandle pipe_b = build_cache_io_pipeline(&device_b);
+    defer gpu::destroy_pipeline(&device_b, pipe_b)!!;
+    run_cache_io_dispatch(&device_b, pipe_b);
+}
+
 fn void present_mode_query_requires_valid_swapchain() @test {
     gpu::Device device = make_cache_io_device();
     defer gpu::destroy_device(&device)!!;

@@ -63,11 +63,12 @@ fn gpu::Device make_queue_test_device() {
     return gpu::create_device(&desc)!!;
 }
 
-fn void lavapipe_alias_and_caps() @test {
+fn void queue_alias_matches_async_compute_cap() @test {
     gpu::Device device = make_queue_test_device();
     defer gpu::destroy_device(&device)!!;
-    // lavapipe: one family, one queue — the alias tier.
-    assert(!device.caps.async_compute, "single-queue device reports async_compute == false");
+    vk::VkDeviceState* s = (vk::VkDeviceState*)device.backend_state;
+    assert(s.compute_queue_distinct == device.caps.async_compute, "distinct flag mirrors the cap");
+    assert((s.compute_queue == s.graphics_queue) == !device.caps.async_compute, "alias iff no async compute");
 }
 
 fn void cross_queue_timeline_chain_validates() @test {
