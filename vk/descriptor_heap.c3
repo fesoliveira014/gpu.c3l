@@ -361,23 +361,27 @@ fn void drain_texture_retire(VkDeviceState* state) @private {
     }
 }
 
-fn void drain_sampler_retire(VkDeviceState* state) @private {
+<* Recycles ready ring slots under the caller's lock; the ready handles land
+   in `drained` for destruction after unlock. Returns the count. *>
+fn uint drain_sampler_retire(VkDeviceState* state, vk::Sampler[] drained) @private {
     DescriptorHeapState* heap = &state.heap;
-    if (heap.sampler_retire.count == 0) return;
+    if (heap.sampler_retire.count == 0) return 0;
     ulong current = 0;
     vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+    uint drained_count = 0;
     while (heap.sampler_retire.count > 0) {
         DescriptorRetireEntry* entry = &heap.sampler_retire.entries[heap.sampler_retire.head];
         if (entry.timeline_value > current) break;
         SamplerDescriptorCell* cell = &heap.sampler_cells[entry.slot];
         if (cell.sampler != null) {
-            vk::destroy_sampler(state.device, cell.sampler, null);
+            drained[drained_count++] = cell.sampler;
             cell.sampler = (vk::Sampler)null;
         }
         heap.sampler_free[heap.sampler_free_count++] = entry.slot;
         heap.sampler_retire.head = (heap.sampler_retire.head + 1) % (uint)heap.sampler_retire.entries.len;
         heap.sampler_retire.count--;
     }
+    return drained_count;
 }
 
 fn TextureDescriptorCell*? texture_cell_get(DescriptorHeapState* heap, gpu::TextureIndex index) @private {
@@ -676,30 +680,39 @@ fn vk::SamplerAddressMode address_mode_to_vk(gpu::AddressMode mode) @private {
     }
 }
 
-<* Locked for its whole body; faults DESCRIPTOR_HEAP_FULL with `sampler`
-   untouched, so the caller destroys it unlocked. *>
+<* Heap mutation runs under the lock; faults DESCRIPTOR_HEAP_FULL with
+   `sampler` untouched, so the caller destroys it unlocked. Drained retirees
+   are destroyed after unlock on every exit path. *>
 fn gpu::SamplerIndex? publish_sampler(VkDeviceState* state, vk::Sampler sampler) @private {
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.heap;
+    @pool() {
+        vk::Sampler[] drained = mem::talloc_array(vk::Sampler, heap.sampler_retire.entries.len);
+        uint drained_count = 0;
+        defer {
+            for (uint i = 0; i < drained_count; i++) vk::destroy_sampler(state.device, drained[i], null);
+        }
 
-    drain_sampler_retire(state);
-    uint slot;
-    if (heap.sampler_free_count > 0) {
-        slot = heap.sampler_free[--heap.sampler_free_count];
-    } else if (heap.sampler_next_new < heap.sampler_cells.len) {
-        slot = heap.sampler_next_new++;
-    } else {
-        return gpu::DESCRIPTOR_HEAP_FULL~;
-    }
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
 
-    SamplerDescriptorCell* cell = &heap.sampler_cells[slot];
-    cell.sampler = sampler;
-    cell.used = true;
-    cell.generation = bump_generation(cell.generation);
+        drained_count = drain_sampler_retire(state, drained);
+        uint slot;
+        if (heap.sampler_free_count > 0) {
+            slot = heap.sampler_free[--heap.sampler_free_count];
+        } else if (heap.sampler_next_new < heap.sampler_cells.len) {
+            slot = heap.sampler_next_new++;
+        } else {
+            return gpu::DESCRIPTOR_HEAP_FULL~;
+        }
 
-    write_sampler_descriptor(state, slot, sampler);
-    return (gpu::SamplerIndex){ .slot = (ushort)slot, .generation = cell.generation };
+        SamplerDescriptorCell* cell = &heap.sampler_cells[slot];
+        cell.sampler = sampler;
+        cell.used = true;
+        cell.generation = bump_generation(cell.generation);
+
+        write_sampler_descriptor(state, slot, sampler);
+        return (gpu::SamplerIndex){ .slot = (ushort)slot, .generation = cell.generation };
+    };
 }
 
 fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
