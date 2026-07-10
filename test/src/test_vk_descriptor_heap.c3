@@ -362,6 +362,8 @@ fn void heap_fits_limits_indexing_at_limit_fits() @test {
         .max_per_stage_sampled_images = 100,
         .max_per_stage_storage_images = 100,
         .max_per_stage_samplers       = 50,
+        .max_per_stage_resources      = 250,
+        .max_all_pools_descriptors    = 250,
     };
     bool fits = gpu::vk::heap_fits_limits(
         mode:         gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
@@ -372,6 +374,46 @@ fn void heap_fits_limits_indexing_at_limit_fits() @test {
     assert(fits, "texture and sampler capacities at the limit fit");
 }
 
+fn void heap_fits_limits_indexing_exceeds_per_stage_aggregate() @test {
+    gpu::vk::HeapLimits limits = {
+        .max_sampled_images           = 100,
+        .max_storage_images           = 100,
+        .max_samplers                 = 50,
+        .max_per_stage_sampled_images = 100,
+        .max_per_stage_storage_images = 100,
+        .max_per_stage_samplers       = 50,
+        .max_per_stage_resources      = 249,
+        .max_all_pools_descriptors    = 250,
+    };
+    bool fits = gpu::vk::heap_fits_limits(
+        mode:         gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
+        tex_capacity: 100,
+        smp_capacity: 50,
+        limits:       limits,
+    );
+    assert(!fits, "aggregate per-stage limit binds when all per-type limits fit");
+}
+
+fn void heap_fits_limits_indexing_exceeds_all_pools_aggregate() @test {
+    gpu::vk::HeapLimits limits = {
+        .max_sampled_images           = 100,
+        .max_storage_images           = 100,
+        .max_samplers                 = 50,
+        .max_per_stage_sampled_images = 100,
+        .max_per_stage_storage_images = 100,
+        .max_per_stage_samplers       = 50,
+        .max_per_stage_resources      = 250,
+        .max_all_pools_descriptors    = 249,
+    };
+    bool fits = gpu::vk::heap_fits_limits(
+        mode:         gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
+        tex_capacity: 100,
+        smp_capacity: 50,
+        limits:       limits,
+    );
+    assert(!fits, "aggregate all-pools limit binds when all per-type limits fit");
+}
+
 fn void heap_fits_limits_indexing_exceeds_sampled_images() @test {
     gpu::vk::HeapLimits limits = {
         .max_sampled_images = 99,
@@ -380,6 +422,8 @@ fn void heap_fits_limits_indexing_exceeds_sampled_images() @test {
         .max_per_stage_sampled_images = 100,
         .max_per_stage_storage_images = 100,
         .max_per_stage_samplers       = 50,
+        .max_per_stage_resources      = 250,
+        .max_all_pools_descriptors    = 250,
     };
     assert(!gpu::vk::heap_fits_limits(
         mode:         gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
@@ -398,6 +442,8 @@ fn void heap_fits_limits_indexing_exceeds_storage_images() @test {
         .max_per_stage_sampled_images = 100,
         .max_per_stage_storage_images = 100,
         .max_per_stage_samplers       = 50,
+        .max_per_stage_resources      = 250,
+        .max_all_pools_descriptors    = 250,
     };
     assert(!gpu::vk::heap_fits_limits(
         mode:         gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
@@ -416,6 +462,8 @@ fn void heap_fits_limits_indexing_exceeds_samplers() @test {
         .max_per_stage_sampled_images = 100,
         .max_per_stage_storage_images = 100,
         .max_per_stage_samplers       = 49,
+        .max_per_stage_resources      = 250,
+        .max_all_pools_descriptors    = 250,
     };
     assert(!gpu::vk::heap_fits_limits(
         mode:         gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
@@ -506,6 +554,8 @@ fn void heap_fits_limits_indexing_exceeds_per_stage() @test {
         .max_per_stage_sampled_images = 99,
         .max_per_stage_storage_images = 100,
         .max_per_stage_samplers       = 50,
+        .max_per_stage_resources      = 250,
+        .max_all_pools_descriptors    = 250,
     };
     bool fits = gpu::vk::heap_fits_limits(
         mode:         gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
@@ -540,6 +590,8 @@ fn void descriptor_heap_raised_capacity_creates() @test {
     gpu::Device device = make_heap_test_device(8192, 512);
     defer gpu::destroy_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
+    assert(device.caps.max_texture_descriptors == 8192, "caps report the created texture capacity");
+    assert(device.caps.max_sampler_descriptors == 512, "caps report the created sampler capacity");
     defer gpu::destroy_texture(&device, texture)!!;
 
     gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;

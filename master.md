@@ -393,6 +393,11 @@ DeviceDesc
     ZString application_name
 ```
 
+Descriptor-indexing capacity requests are exact, not hints. The backend counts
+the sampled-image and storage-image bindings separately, so the aggregate heap
+usage is `2 * texture_descriptor_capacity + sampler_descriptor_capacity`; device
+creation rejects requests that exceed any per-type or aggregate device limit.
+
 ### 6.2 Queues
 
 Queues are selected at device creation.

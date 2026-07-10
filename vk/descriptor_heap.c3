@@ -51,6 +51,8 @@ struct HeapLimits {
     uint           max_per_stage_sampled_images;
     uint           max_per_stage_storage_images;
     uint           max_per_stage_samplers;
+    uint           max_per_stage_resources;
+    uint           max_all_pools_descriptors;
     vk::DeviceSize max_resource_descriptor_buffer_range;
     vk::DeviceSize max_sampler_descriptor_buffer_range;
     vk::DeviceSize resource_descriptor_address_space_size;
@@ -110,6 +112,7 @@ fn ushort bump_generation(ushort generation) @private {
    bound quantity is the descriptor set's byte layout, not slot counts. *>
 fn bool heap_fits_limits(gpu::DescriptorHeapMode mode, uint tex_capacity, uint smp_capacity, HeapLimits limits) {
     if (mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+        ulong aggregate_descriptors = (ulong)tex_capacity * 2 + (ulong)smp_capacity;
         // Bindings use ALL stages, so per-stage limits bind alongside the
         // set-level ones.
         return tex_capacity <= limits.max_sampled_images
@@ -117,7 +120,9 @@ fn bool heap_fits_limits(gpu::DescriptorHeapMode mode, uint tex_capacity, uint s
             && tex_capacity <= limits.max_per_stage_sampled_images
             && tex_capacity <= limits.max_per_stage_storage_images
             && smp_capacity <= limits.max_samplers
-            && smp_capacity <= limits.max_per_stage_samplers;
+            && smp_capacity <= limits.max_per_stage_samplers
+            && aggregate_descriptors <= (ulong)limits.max_per_stage_resources
+            && aggregate_descriptors <= (ulong)limits.max_all_pools_descriptors;
     }
     // One buffer carries both usage bits, so it counts against each per-type
     // address space as well as the combined budget.
@@ -144,6 +149,8 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
             .max_per_stage_sampled_images = v12_props.max_per_stage_descriptor_update_after_bind_sampled_images,
             .max_per_stage_storage_images = v12_props.max_per_stage_descriptor_update_after_bind_storage_images,
             .max_per_stage_samplers       = v12_props.max_per_stage_descriptor_update_after_bind_samplers,
+            .max_per_stage_resources      = v12_props.max_per_stage_update_after_bind_resources,
+            .max_all_pools_descriptors    = v12_props.max_update_after_bind_descriptors_in_all_pools,
         };
         bool fits = heap_fits_limits(
             mode:         state.heap_mode,
@@ -152,11 +159,13 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
             limits:       limits,
         );
         if (!fits) {
+            ulong aggregate_descriptors = (ulong)tex_capacity * 2 + (ulong)smp_capacity;
             io::eprintfn(
-                "gpu: descriptor capacities (tex %d, smp %d) exceed a device update-after-bind limit (set %d/%d/%d, per-stage %d/%d/%d)",
-                tex_capacity, smp_capacity,
+                "gpu: descriptor capacities (tex %d, smp %d, aggregate %d) exceed a device update-after-bind limit (set %d/%d/%d, per-stage %d/%d/%d, aggregate %d/%d)",
+                tex_capacity, smp_capacity, aggregate_descriptors,
                 limits.max_sampled_images, limits.max_storage_images, limits.max_samplers,
-                limits.max_per_stage_sampled_images, limits.max_per_stage_storage_images, limits.max_per_stage_samplers);
+                limits.max_per_stage_sampled_images, limits.max_per_stage_storage_images, limits.max_per_stage_samplers,
+                limits.max_per_stage_resources, limits.max_all_pools_descriptors);
             return gpu::INVALID_ARGUMENT~;
         }
     }
