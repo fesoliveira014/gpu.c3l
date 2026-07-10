@@ -255,7 +255,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
         v13:  &features13,
     )!;
     state.draw_indirect_count = features12.draw_indirect_count != 0;
-    bool line_polygon_mode = select_line_polygon_mode(&features2.features);
+    bool line_polygon_mode = line_polygon_mode_supported(&features2.features);
 
     if (features2.features.sampler_anisotropy != 0) {
         vk::PhysicalDeviceProperties anisotropy_props;
@@ -437,7 +437,8 @@ fn void? check_required_features(vk::PhysicalDeviceFeatures* base, vk::PhysicalD
     if (v13.dynamic_rendering == 0)     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn bool select_line_polygon_mode(vk::PhysicalDeviceFeatures* base) {
+<* Optional non-solid polygon rasterization support. Pure. *>
+fn bool line_polygon_mode_supported(vk::PhysicalDeviceFeatures* base) {
     return base.fill_mode_non_solid != 0;
 }
 
