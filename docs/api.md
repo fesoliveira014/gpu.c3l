@@ -167,13 +167,13 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, sampler/aniso paths | validation layers not installed; presentation off; missing device feature |
 | `INVALID_ARGUMENT` | any create/upload/export; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | any handle-taking call, `cmd_*`, `end_commands`, `submit` | use after destroy (generation mismatch), never-live handle, consumed command-list alias, or abandoned command token after its frame-slot pool resets |
-| `INVALID_RESOURCE_STATE` | `cmd_texture_barrier`, readback helpers | `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
+| `INVALID_RESOURCE_STATE` | `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | recording context still owns a live command record, or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | submits, `wait_semaphore`/`begin_frame` on device loss | driver reported device loss; unrecoverable |
 | `RESOURCE_IN_USE` | `destroy_texture` | a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first (gpu.c3l#81). Frames-in-flight destroys — including a resource an off-frame `submit` referenced — are unaffected: those are handled by deferred backend release instead (gpu.c3l#44, gpu.c3l#80) |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths | per-frame data outgrew the arena (sizing knobs: gpu.c3l#28) |
-| `SLOT_TABLE_FULL` | creates | handle table at capacity; textures scale via `DeviceDesc.texture_capacity` |
+| `SLOT_TABLE_FULL` | creates, `begin_commands` | handle or command-record table at capacity; textures scale via `DeviceDesc.texture_capacity` |
 | `DESCRIPTOR_HEAP_FULL` | `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination or failed compiling |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |

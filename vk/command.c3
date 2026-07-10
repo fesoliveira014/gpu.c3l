@@ -395,9 +395,8 @@ fn BufferSlot*? resolve_indirect_span(VkDeviceState* state, gpu::GpuSpan* span, 
     return slot;
 }
 
-fn void? bind_compute_and_push(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, vk::CommandBuffer cb) @private {
-    CommandRecord* record = resolve_command(commands)!;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+fn void? bind_compute_and_push(VkDeviceState* state, CommandRecord* record, gpu::PipelineHandle handle, gpu::GpuAddress root) @private {
+    vk::CommandBuffer cb = record.command_buffer;
     PipelineSlot* slot = state.pipelines.get(handle)!;
     if ((ulong)handle != (ulong)record.last_pipeline) {
         vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
@@ -419,10 +418,10 @@ fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle,
     validate_pipeline_kind(state, handle, PipelineKind.COMPUTE)!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_compute_and_push(
-        commands: commands,
-        handle:   handle,
-        root:     root,
-        cb:       cb,
+        state:  state,
+        record: record,
+        handle: handle,
+        root:   root,
     )!;
     vk::cmd_dispatch(cb, groups.x, groups.y, groups.z);
 }
@@ -440,10 +439,10 @@ fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandl
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_compute_and_push(
-        commands: commands,
-        handle:   handle,
-        root:     root,
-        cb:       cb,
+        state:  state,
+        record: record,
+        handle: handle,
+        root:   root,
     )!;
     vk::cmd_dispatch_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset);
 }

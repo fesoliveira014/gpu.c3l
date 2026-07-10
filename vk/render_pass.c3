@@ -116,9 +116,8 @@ fn void replay_dynamic_state(vk::CommandBuffer cb, PipelineSlot* slot) @private 
 
 <* Aliases of one cache entry can carry different dynamic-state snapshots, so
    a handle change replays state even when the pipeline bind is skipped. *>
-fn void? bind_graphics_and_push(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::CommandBuffer cb) @private {
-    CommandRecord* record = resolve_command(commands)!;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+fn void? bind_graphics_and_push(VkDeviceState* state, CommandRecord* record, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root) @private {
+    vk::CommandBuffer cb = record.command_buffer;
     PipelineSlot* slot = state.pipelines.get(handle)!;
     if ((ulong)handle != (ulong)record.last_pipeline) {
         if (slot.entry != record.last_entry) {
@@ -140,7 +139,13 @@ fn void? vk_cmd_draw(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
     vk::CommandBuffer cb = record.command_buffer;
-    bind_graphics_and_push(commands, handle, vertex_root, fragment_root, cb)!;
+    bind_graphics_and_push(
+        state:         state,
+        record:        record,
+        handle:        handle,
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+    )!;
     vk::cmd_draw(cb, vertex_count, instance_count, 0, 0);
 }
 
@@ -158,7 +163,13 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
     )!;
 
     vk::CommandBuffer cb = record.command_buffer;
-    bind_graphics_and_push(commands, handle, vertex_root, fragment_root, cb)!;
+    bind_graphics_and_push(
+        state:         state,
+        record:        record,
+        handle:        handle,
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+    )!;
     vk::cmd_bind_index_buffer(cb, buffer.buffer, (vk::DeviceSize)index_span.offset,
         index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32);
     vk::cmd_draw_indexed(cb, index_count, instance_count, 0, 0, 0);
@@ -177,11 +188,11 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
-        commands:      commands,
+        state:         state,
+        record:        record,
         handle:        handle,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
-        cb:            cb,
     )!;
     vk::cmd_draw_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset, draw_count, gpu::DrawIndirectCommand::size);
 }
@@ -213,11 +224,11 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
-        commands:      commands,
+        state:         state,
+        record:        record,
         handle:        handle,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
-        cb:            cb,
     )!;
     bind_index_span(
         state:      state,
@@ -248,11 +259,11 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
-        commands:      commands,
+        state:         state,
+        record:        record,
         handle:        handle,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
-        cb:            cb,
     )!;
     bind_index_span(
         state:      state,

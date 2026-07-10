@@ -124,6 +124,31 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
+fn void command_generation_wraps_without_poisoning_slot() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::CommandList nearly_wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&device, &nearly_wrapped)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    state.commands.slots[nearly_wrapped.handle.index].generation = vk::COMMAND_GENERATION_MAX - 1;
+    nearly_wrapped.handle.generation = vk::COMMAND_GENERATION_MAX - 1;
+
+    gpu::CommandList[1] first_lists = { nearly_wrapped };
+    gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
+    gpu::submit(&device, &first_submit)!!;
+
+    gpu::CommandList wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    assert(wrapped.handle.index == nearly_wrapped.handle.index, "wrapped slot is reused");
+    assert(wrapped.handle.generation == 1, "command generation wraps to the first valid value");
+    gpu::end_commands(&device, &wrapped)!!;
+    gpu::CommandList[1] wrapped_lists = { wrapped };
+    gpu::SubmitDesc wrapped_submit = { .command_lists = wrapped_lists[..] };
+    gpu::submit(&device, &wrapped_submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}
+
 fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device device = gpu::create_device(&desc)!!;

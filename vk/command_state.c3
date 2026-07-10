@@ -5,6 +5,7 @@ import vk;
 import std::core::mem;
 
 const uint MAX_COMMAND_LISTS = 4096;
+const uint COMMAND_GENERATION_MAX = 0xFF_FFFF;
 const uint COMMAND_FREE_NONE = 0;
 const usz PENDING_LAYOUT_INITIAL_CAPACITY = 16;
 
@@ -47,6 +48,10 @@ struct CommandTable {
     uint          next_new;
 }
 
+fn uint next_command_generation(uint generation) {
+    return generation >= COMMAND_GENERATION_MAX ? 1 : generation + 1;
+}
+
 fn gpu::CommandListHandle? CommandTable.alloc(&self, CommandRecord value) {
     uint idx;
     if (self.free_head != COMMAND_FREE_NONE) {
@@ -59,7 +64,7 @@ fn gpu::CommandListHandle? CommandTable.alloc(&self, CommandRecord value) {
         return gpu::SLOT_TABLE_FULL~;
     }
     self.slots[idx].value = value;
-    self.slots[idx].generation++;
+    self.slots[idx].generation = next_command_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
     return (gpu::CommandListHandle){
         .index = idx,
@@ -79,7 +84,7 @@ fn void? CommandTable.free(&self, gpu::CommandListHandle handle) {
     uint idx = handle.index;
     self.slots[idx].value = {};
     self.slots[idx].used = false;
-    self.slots[idx].generation++;
+    self.slots[idx].generation = next_command_generation(self.slots[idx].generation);
     self.slots[idx].next_free = self.free_head;
     self.free_head = idx + 1;
 }
