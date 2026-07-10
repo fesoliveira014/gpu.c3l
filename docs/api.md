@@ -167,7 +167,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, sampler/aniso paths | validation layers not installed; presentation off; missing device feature |
 | `INVALID_ARGUMENT` | any create/upload/export; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value; mixed-queue-kind submit; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; a list already tracking `PENDING_LAYOUT_CAP` (16) distinct textures records a 17th; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | any handle-taking call | use after destroy (generation mismatch) or never-live handle |
-| `INVALID_RESOURCE_STATE` | `cmd_texture_barrier`, readback helpers | `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
+| `INVALID_RESOURCE_STATE` | `begin_frame`, `end_frame`, `alloc_frame_span`, `cmd_texture_barrier`, readback helpers | double begin; end or frame-span allocation while idle; `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | submits, `wait_semaphore`/`begin_frame` on device loss | driver reported device loss; unrecoverable |
@@ -199,11 +199,16 @@ MemoryKind.STAGING
 
 ### Frame spans
 
-Frame spans are transient and invalid after the frame arena resets.
+The frame lifecycle is strict:
 
 ```text
-alloc_frame_span(Device* device, usz size, usz align) -> GpuSpan?
+IDLE --begin_frame--> ACTIVE --end_frame--> IDLE
+alloc_frame_span(Device* device, usz size, usz align) -> GpuSpan?  // ACTIVE only
 ```
+
+Double begin, end while idle, and frame-span allocation while idle fault
+`INVALID_RESOURCE_STATE` before changing frame state. Frame spans are transient
+and invalid after their frame arena resets.
 
 Use cases:
 
