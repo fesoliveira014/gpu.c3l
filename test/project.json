@@ -120,6 +120,11 @@
       "type": "test",
       "sources": [ "src/test_vk_indirect_draw.c3", "src/indirect_abi.c3", "src/root_pointer_abi.c3", "src/offscreen_abi.c3" ]
     },
+    // Indexed-draw pixel equivalence; needs an ICD — pin lavapipe via VK_DRIVER_FILES.
+    "vk_indexed_draw": {
+      "type": "test",
+      "sources": [ "src/test_vk_indexed_draw.c3" ]
+    },
     "vk_depth": {
       "type": "test",
       "sources": [ "src/test_vk_depth_attachment.c3", "src/depth_abi.c3" ]
