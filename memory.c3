@@ -93,7 +93,8 @@ fn GpuSpan? alloc_frame_span(Device* device, usz size, usz align) {
     return device.vtable.alloc_frame_span(device, size, align);
 }
 
-<* End the current frame, recording its timeline value. *>
+<* End the current frame, recording its timeline value. If the signal submit
+   faults, frame-boundary state remains active and unchanged for retry. *>
 fn void? end_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.end_frame(device);

@@ -10,6 +10,7 @@ import std::atomic::types;
 import std::collections::map;
 
 alias PersistentAllocMap = HashMap{usz, vma::VirtualAllocation};
+alias QueueSubmit2Fn @private = fn vk::Result (vk::Queue, uint, vk::SubmitInfo2*, vk::Fence);
 
 // vertex stays out (unimplemented interop); shared_queues stays out (the
 // arena is single-queue-consumed today).
@@ -211,9 +212,13 @@ fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @
     }
 }
 
+fn vk::Result real_queue_submit2(vk::Queue queue, uint submit_count, vk::SubmitInfo2* submits, vk::Fence fence) @private {
+    return vk::queue_submit2(queue, submit_count, submits, fence);
+}
+
 <* Queue-ordered empty submit signaling `value` on `semaphore` after all
    prior work on `queue` completes. *>
-fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, vk::Queue queue, Mutex* mutex, ulong value, vk::SemaphoreSubmitInfo[] wait_infos = {}) @private {
+fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, vk::Queue queue, Mutex* mutex, ulong value, vk::SemaphoreSubmitInfo[] wait_infos, QueueSubmit2Fn submit_fn) @private {
     vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
         .set_semaphore(semaphore)
         .set_value(value)
@@ -222,7 +227,7 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
     if (wait_infos.len > 0) submit = submit.set_wait_semaphore_infos(wait_infos);
     mutex.lock()!!;
     defer mutex.unlock();
-    check(vk::queue_submit2(queue, 1, &submit, (vk::Fence)null))!;
+    check(submit_fn(queue, 1, &submit, (vk::Fence)null))!;
     state.submit_stats.empty_signal_submits++;
 }
 
@@ -232,15 +237,14 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
    frame-signal submit waits each used queue's latest recorded aux value, so
    the frame value implies every queue finished. Off-frame graphics submits
    need no flag — this signal is queue-ordered behind them. *>
-fn void? vk_end_frame(gpu::Device* device) @private {
+fn void? end_frame_with_submit(gpu::Device* device, QueueSubmit2Fn submit_fn) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
     // frame_timeline receives exactly one signal per frame (counter + 1),
     // preserving retire_timeline_value's mid-frame contract.
-    ulong frame_value = state.timeline_counter.add(1, AtomicOrdering.RELAXED) + 1;
-    slot.frame_timeline_value = frame_value;
+    ulong frame_value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1;
 
     vk::SemaphoreSubmitInfo[2] waits;
     uint wait_count = 0;
@@ -256,9 +260,6 @@ fn void? vk_end_frame(gpu::Device* device) @private {
             .set_value(state.aux_transfer_last_signaled)
             .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
     }
-    state.compute_used_since_frame = false;
-    state.transfer_used_since_frame = false;
-    state.off_frame_pending.store(false, AtomicOrdering.RELAXED);
 
     submit_timeline_signal(
         state:      state,
@@ -267,8 +268,19 @@ fn void? vk_end_frame(gpu::Device* device) @private {
         mutex:      &state.graphics_queue_mutex,
         value:      frame_value,
         wait_infos: waits[:wait_count],
+        submit_fn:  submit_fn,
     )!;
+
+    state.timeline_counter.store(frame_value, AtomicOrdering.RELAXED);
+    slot.frame_timeline_value = frame_value;
+    state.compute_used_since_frame = false;
+    state.transfer_used_since_frame = false;
+    state.off_frame_pending.store(false, AtomicOrdering.RELAXED);
     state.frame_active = false;
+}
+
+fn void? vk_end_frame(gpu::Device* device) @private {
+    return end_frame_with_submit(device, &real_queue_submit2);
 }
 
 <* Create the persistent arena: a large addressable buffer plus a VMA virtual
