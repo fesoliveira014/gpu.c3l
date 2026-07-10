@@ -56,6 +56,8 @@ struct DeviceCaps {
     bool descriptor_buffer;
     bool descriptor_indexing;
     bool async_compute;
+    // Optional non-solid triangle rasterization through PolygonMode.LINE.
+    bool line_polygon_mode;
     // Configured heap capacity (DeviceDesc.texture_descriptor_capacity), not
     // the device's hardware maximum — see create_device's limit rejection.
     uint max_texture_descriptors;

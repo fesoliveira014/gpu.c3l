@@ -153,3 +153,38 @@ fn void heap_mode_forced_resolution() @test {
     fault indexing_fault = @catch(gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, false, true));
     assert(indexing_fault == gpu::UNSUPPORTED_FEATURE, "forced indexing without support raises UNSUPPORTED_FEATURE");
 }
+
+fn void optional_line_polygon_feature_selection() @test {
+    vk::PhysicalDeviceFeatures unsupported;
+    assert(!gpu::vk::select_line_polygon_mode(&unsupported), "unset fillModeNonSolid selects no line polygon support");
+
+    vk::PhysicalDeviceFeatures supported;
+    supported.fill_mode_non_solid = vk::TRUE;
+    assert(gpu::vk::select_line_polygon_mode(&supported), "fillModeNonSolid selects line polygon support");
+
+    vk::PhysicalDeviceFeatures required_only = base_with_required();
+    vk::PhysicalDeviceVulkan11Features v11 = v11_with_required();
+    vk::PhysicalDeviceVulkan12Features v12 = vk::physical_device_vulkan12features()
+        .set_buffer_device_address(vk::TRUE)
+        .set_timeline_semaphore(vk::TRUE);
+    vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
+        .set_synchronization2(vk::TRUE)
+        .set_dynamic_rendering(vk::TRUE);
+    assert(!@catch(gpu::vk::check_required_features(
+        base: &required_only,
+        v11:  &v11,
+        v12:  &v12,
+        v13:  &v13,
+    )),
+        "missing optional fillModeNonSolid does not fail required feature selection"
+    );
+}
+
+fn void polygon_mode_optional_gate() @test {
+    assert(!@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.FILL, false)),
+        "FILL remains available without optional support");
+    assert(!@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.LINE, true)),
+        "LINE is available when optional support is enabled");
+    assert(@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.LINE, false)) == gpu::UNSUPPORTED_FEATURE,
+        "LINE without optional support faults UNSUPPORTED_FEATURE");
+}
