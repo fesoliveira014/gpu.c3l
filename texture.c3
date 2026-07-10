@@ -21,7 +21,7 @@ enum Format : int {
     RG32_FLOAT,
     RGBA32_FLOAT,
     D32_FLOAT,
-    // Declared for API stability; query support before use.
+    // Declared for API stability; current backend queries report unsupported.
     D24_UNORM_S8_UINT,
 }
 
@@ -189,7 +189,6 @@ fn bool texture_format_in_backend_profile(Format format) @private {
         case Format.RG32_FLOAT:
         case Format.RGBA32_FLOAT:
         case Format.D32_FLOAT:
-        case Format.D24_UNORM_S8_UINT:
             return true;
         default:
             return false;
@@ -201,15 +200,15 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
     if (desc.width == 0 || desc.height == 0 || desc.depth > 1) return false;
     if (texture_mip_levels(desc) > texture_full_mip_chain(desc.width, desc.height)) return false;
     if (!texture_format_in_backend_profile(desc.format)) return false;
+
     bool has_usage = desc.usage.sampled || desc.usage.storage || desc.usage.color_attach
         || desc.usage.depth_attach || desc.usage.transfer_src || desc.usage.transfer_dst;
     if (!has_usage) return false;
-    bool is_depth = desc.format == Format.D32_FLOAT
-        || desc.format == Format.D24_UNORM_S8_UINT;
+
+    bool is_depth = desc.format == Format.D32_FLOAT;
     if (is_depth && (desc.usage.color_attach || desc.usage.storage)) return false;
-    if (desc.format == Format.D24_UNORM_S8_UINT
-        && (desc.usage.transfer_src || desc.usage.transfer_dst)) return false;
     if (!is_depth && desc.usage.depth_attach) return false;
+
     return true;
 }
 

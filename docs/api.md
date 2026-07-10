@@ -300,7 +300,7 @@ R32_FLOAT
 RG32_FLOAT
 RGBA32_FLOAT
 D32_FLOAT
-D24_UNORM_S8_UINT   (adapter-dependent: query before creation)
+D24_UNORM_S8_UINT   (current backend profile reports unsupported)
 ```
 
 ### Texture descriptors
@@ -387,9 +387,9 @@ destroy_texture_descriptor(Device* device, TextureIndex index) -> void?
 create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) -> void?
 ```
 
-`get_texture_format_support` reports library-creatable support, not every raw Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling query used by creation, but the bits are independent; use `supports_texture_desc` for a usage combination. The backend profile masks every dimension except 2D and every sample count except one. Per-format usages, D24S8, and linear filtering remain adapter-dependent.
+`get_texture_format_support` reports library-creatable support, not every raw Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling query used by creation, but the bits are independent; use `supports_texture_desc` for a usage combination. The backend profile masks every dimension except 2D and every sample count except one. Per-format usages and linear filtering remain adapter-dependent; D24S8 reports empty support until the rendering path supports it end to end.
 
-`supports_texture_desc` checks the exact optimal-tiling format, combined usage (excluding the queue-sharing policy flag), normalized extent, mip and layer counts, and the required single-sample image properties without allocating. D24S8 transfer usages are masked because the copy API cannot select depth versus stencil aspects. A false result caused by malformed or backend-unsupported input corresponds to `INVALID_ARGUMENT` at creation; a structurally valid descriptor rejected by the adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion can still make creation fail after a true capability result.
+`supports_texture_desc` checks the exact optimal-tiling format, combined usage (excluding the queue-sharing policy flag), normalized extent, mip and layer counts, and the required single-sample image properties without allocating. A false result caused by malformed or backend-unsupported input corresponds to `INVALID_ARGUMENT` at creation; a structurally valid descriptor rejected by the adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion can still make creation fail after a true capability result.
 
 `TextureHandle` owns the image. `TextureIndex` is a descriptor heap entry used by shaders.
 

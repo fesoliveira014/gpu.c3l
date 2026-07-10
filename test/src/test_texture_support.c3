@@ -54,15 +54,15 @@ fn void texture_desc_profile_rejects_invalid_usage_roles() @test {
     assert(!texture_desc_valid(&desc), "color depth attachment is invalid");
 }
 
-fn void texture_desc_profile_accepts_optional_depth_format() @test {
+fn void texture_desc_profile_rejects_unsupported_formats() @test {
     TextureDesc desc = valid_texture_desc();
     desc.format = Format.UNDEFINED;
     assert(!texture_desc_valid(&desc), "undefined format is invalid");
     desc.format = Format.D24_UNORM_S8_UINT;
     desc.usage = { .depth_attach };
-    assert(texture_desc_valid(&desc), "D24S8 reaches adapter capability validation");
+    assert(!texture_desc_valid(&desc), "D24S8 is outside the end-to-end backend profile");
     desc.usage = { .color_attach };
-    assert(!texture_desc_valid(&desc), "D24S8 remains a depth format");
+    assert(!texture_desc_valid(&desc), "D24S8 color usage remains invalid");
     desc.usage = { .transfer_dst };
-    assert(!texture_desc_valid(&desc), "D24S8 transfer needs an aspect selector");
+    assert(!texture_desc_valid(&desc), "D24S8 transfer usage remains invalid");
 }

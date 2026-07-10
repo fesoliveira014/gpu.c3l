@@ -30,10 +30,9 @@ page doesn't explain it, that's a bug in this page — file an issue.
 - **2D, single-sample textures only.** `TEX_1D`/`TEX_3D`/`CUBE` and
   multisample counts remain outside the backend profile. Unsupported profile
   values preflight false and fault `INVALID_ARGUMENT` at creation.
-- **D24S8 texture support is adapter-dependent.** Query before creation and
-  choose a fallback when unsupported. D24S8 transfer usages stay masked because
-  copies cannot select depth versus stencil. Graphics pipelines remain D32-only, so
-  D24S8 is currently useful only outside the graphics depth-attachment path.
+- **D24S8 remains outside the backend profile.** Graphics pipelines and render
+  passes are D32-only, so capability queries report empty D24S8 support and
+  creation faults `INVALID_ARGUMENT`.
 - **Matrices are not a schema type.** The ABI DSL has no `mat4`; matrices
   travel as four `vec4` columns and are reassembled in the shader
   (`mat4(c0, c1, c2, c3)`). This keeps layout rules trivial (`docs/shader_abi.md`).
@@ -103,5 +102,5 @@ backend profile and the physical adapter:
 
 The required backend profile is currently 2D and single-sample. Per-format
 usages and filterability are optional adapter capabilities. The support summary
-therefore masks 1D, 3D, cube, and multisample counts. D24S8 is reported only
-when its exact texture usage is creatable on the selected adapter.
+therefore masks 1D, 3D, cube, multisample counts, and D24S8 until the
+rendering path supports it end to end.

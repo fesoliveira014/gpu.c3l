@@ -413,6 +413,11 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
 
     gpu::TextureFormatSupport d24_support =
         gpu::get_texture_format_support(&device, gpu::Format.D24_UNORM_S8_UINT)!!;
+    assert((uint)d24_support.features == 0
+        && (uint)d24_support.dimensions == 0
+        && (uint)d24_support.sample_counts == 0,
+        "D24S8 reports empty support until the rendering path supports it end to end");
+
     gpu::TextureDesc d24_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
         .width     = 4,
@@ -420,26 +425,11 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
         .format    = gpu::Format.D24_UNORM_S8_UINT,
         .usage     = { .depth_attach },
     };
-    bool d24_supported = gpu::supports_texture_desc(&device, &d24_desc)!!;
-    assert(d24_support.features.depth_attach == d24_supported,
-        "D24S8 summary matches exact depth-attachment support");
-    if (d24_supported) {
-        gpu::TextureHandle d24 = gpu::create_texture(&device, &d24_desc)!!;
-        gpu::destroy_texture(&device, d24)!!;
-    } else {
-        fault d24_fault = @catch(gpu::create_texture(&device, &d24_desc));
-        assert(d24_fault == gpu::UNSUPPORTED_FEATURE,
-            "adapter-rejected D24S8 faults UNSUPPORTED_FEATURE");
-    }
-    assert(!d24_support.features.transfer_src && !d24_support.features.transfer_dst,
-        "D24S8 transfers stay masked without a public aspect selector");
-    gpu::TextureDesc d24_transfer = d24_desc;
-    d24_transfer.usage = { .transfer_dst };
-    assert(!gpu::supports_texture_desc(&device, &d24_transfer)!!,
-        "D24S8 transfer descriptor preflights false");
-    fault d24_transfer_fault = @catch(gpu::create_texture(&device, &d24_transfer));
-    assert(d24_transfer_fault == gpu::INVALID_ARGUMENT,
-        "D24S8 transfer creation faults INVALID_ARGUMENT");
+    assert(!gpu::supports_texture_desc(&device, &d24_desc)!!,
+        "D24S8 exact descriptor preflights false");
+    fault d24_fault = @catch(gpu::create_texture(&device, &d24_desc));
+    assert(d24_fault == gpu::INVALID_ARGUMENT,
+        "D24S8 texture creation remains INVALID_ARGUMENT");
 
     gpu::TextureDesc invalid = {
         .dimension  = gpu::TextureDimension.TEX_2D,
