@@ -229,6 +229,16 @@ fn vk::AccessFlags2 hazard_to_vk_access(gpu::Hazard hazard) {
         case gpu::Hazard.DEPTH_WRITE:    return vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         case gpu::Hazard.INDIRECT_READ:  return vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT;
         case gpu::Hazard.PRESENT_READ:   return vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT;
+        case gpu::Hazard.NONE:           return vk::AccessFlagBits2.ACCESS_2_NONE;
+        case gpu::Hazard.SHADER_READ_WRITE:
+            return (vk::AccessFlags2)((ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
+                | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT);
+        case gpu::Hazard.COLOR_READ_WRITE:
+            return (vk::AccessFlags2)((ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT
+                | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+        case gpu::Hazard.DEPTH_READ_WRITE:
+            return (vk::AccessFlags2)((ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+                | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
         default:                         return vk::AccessFlagBits2.ACCESS_2_NONE;
     }
 }

@@ -92,15 +92,11 @@ fn void bindless_texture_write_then_sample() @test {
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
 
-    gpu::TextureBarrier to_general = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.GENERAL,
-    };
+    gpu::TextureBarrier to_general = gpu::texture_transition(
+        texture: texture,
+        before:  gpu::TextureUse.UNDEFINED,
+        after:   gpu::TextureUse.STORAGE_COMPUTE,
+    )!!;
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
     const uint GROUPS = (TEX_SIZE + 7) / 8;
@@ -111,15 +107,11 @@ fn void bindless_texture_write_then_sample() @test {
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
-    gpu::TextureBarrier write_to_sample = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
-        .old_layout    = gpu::TextureLayout.GENERAL,
-        .new_layout    = gpu::TextureLayout.GENERAL,
-    };
+    gpu::TextureBarrier write_to_sample = gpu::texture_transition(
+        texture: texture,
+        before:  gpu::TextureUse.STORAGE_COMPUTE,
+        after:   gpu::TextureUse.STORAGE_COMPUTE,
+    )!!;
     gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
 
     gpu::cmd_dispatch(
