@@ -53,6 +53,108 @@ fn void no_graphics_family_faults() @test {
     assert(f == gpu::UNSUPPORTED_FEATURE, "no graphics+compute family faults");
 }
 
+fn vk::PhysicalDevice fake_physical_device(uptr value) {
+    return (vk::PhysicalDevice)value;
+}
+
+fn vk::PhysicalDeviceCandidate candidate(uptr device, int score, bool suitable, vk::QueueFamilies families = {}) {
+    return {
+        .selection = {
+            .physical_device = fake_physical_device(device),
+            .families = families,
+        },
+        .score = score,
+        .suitable = suitable,
+    };
+}
+
+fn void unsuitable_high_score_falls_back_and_preserves_families() @test {
+    vk::QueueFamilies fallback_families = {
+        .graphics = 3,
+        .compute = 5,
+        .compute_index = 1,
+        .transfer = 7,
+        .async_compute = true,
+    };
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(0x10, 100, false),
+        candidate(
+            device: 0x20,
+            score: 50,
+            suitable: true,
+            families: fallback_families,
+        ),
+    };
+
+    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
+    assert(selected.physical_device == fake_physical_device(0x20), "lower-scored suitable adapter selected");
+    assert(selected.families.graphics == 3, "cached graphics family preserved");
+    assert(selected.families.compute == 5 && selected.families.compute_index == 1, "cached compute family preserved");
+    assert(
+        selected.families.transfer == 7 && selected.families.async_compute,
+        "cached transfer and async fields preserved"
+    );
+}
+
+fn void device_score_wins_without_async_bonus() @test {
+    vk::QueueFamilies alias_families = { .graphics = 1, .compute = 1, .transfer = 1 };
+    vk::QueueFamilies async_families = {
+        .graphics = 2,
+        .compute = 2,
+        .compute_index = 1,
+        .transfer = 2,
+        .async_compute = true,
+    };
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(
+            device: 0x30,
+            score: 100,
+            suitable: true,
+            families: alias_families,
+        ),
+        candidate(
+            device: 0x40,
+            score: 50,
+            suitable: true,
+            families: async_families,
+        ),
+    };
+
+    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
+    assert(
+        selected.physical_device == fake_physical_device(0x30),
+        "device score remains the only cross-adapter preference"
+    );
+    assert(!selected.families.async_compute, "async topology is not a score bonus");
+}
+
+fn void equal_device_scores_keep_first_candidate() @test {
+    vk::QueueFamilies first_families = { .graphics = 4, .compute = 4, .transfer = 4 };
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(
+            device: 0x50,
+            score: 50,
+            suitable: true,
+            families: first_families,
+        ),
+        candidate(0x60, 50, true),
+    };
+
+    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
+    assert(selected.physical_device == fake_physical_device(0x50), "equal scores preserve enumeration order");
+}
+
+fn void no_suitable_physical_device_faults() @test {
+    vk::PhysicalDeviceCandidate[2] unsuitable = {
+        candidate(0x70, 100, false),
+        candidate(0x80, 50, false),
+    };
+    fault empty_fault = @catch(vk::choose_physical_device({}));
+    fault unsuitable_fault = @catch(vk::choose_physical_device(unsuitable[..]));
+    assert(empty_fault == gpu::UNSUPPORTED_FEATURE, "empty candidate set faults unsupported");
+    assert(unsuitable_fault == gpu::UNSUPPORTED_FEATURE, "all-unsuitable candidate set faults unsupported");
+}
+
 fn gpu::Device make_queue_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
