@@ -204,9 +204,12 @@ fn void? check_texture_desc(gpu::TextureDesc* desc) @private {
 
 <* Resolve a view desc to an image view: null/zero desc (or the explicit full
    range) is the default view; anything else is normalized, validated, and
-   get-or-created in the slot's view cache. Cached views die with the texture.
+   get-or-created in the slot's view cache. `created`, when non-null, reports
+   whether this call published a new cache entry. Cached views die with the
+   texture.
    Format reinterpretation is out of scope. *>
-fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view) {
+fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view, bool* created) {
+    if (created != null) *created = false;
     if (view == null) return slot.default_view;
     if (view.format != gpu::Format.UNDEFINED && view.format != slot.format) return gpu::INVALID_ARGUMENT~;
     if (view.base_mip >= slot.mip_levels || view.base_layer >= slot.array_layers) return gpu::INVALID_ARGUMENT~;
@@ -254,6 +257,7 @@ fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, 
             .view_type   = view_type,
             .used        = true,
         };
+        if (created != null) *created = true;
         return image_view;
     }
     return gpu::SLOT_TABLE_FULL~;

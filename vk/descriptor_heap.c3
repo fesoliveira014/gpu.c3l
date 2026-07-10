@@ -502,7 +502,12 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
     // Descriptors only make sense for shader-visible textures; anything else
     // would return an index whose heap slots are never written.
     if (!texture_slot.usage.sampled && !texture_slot.usage.storage) return gpu::INVALID_ARGUMENT~;
-    vk::ImageView image_view = resolve_texture_view(state, texture_slot, view)!;
+    vk::ImageView image_view = resolve_texture_view(
+        state:   state,
+        slot:    texture_slot,
+        view:    view,
+        created: null,
+    )!;
 
     drain_texture_retire(state);
     uint slot;
@@ -530,7 +535,12 @@ fn void? publish_texture_descriptor_item(VkDeviceState* state, gpu::TextureDescr
     DescriptorHeapState* heap = &state.heap;
     TextureSlot* texture_slot = state.textures.get(desc.texture)!;
     if (!texture_slot.usage.sampled && !texture_slot.usage.storage) return gpu::INVALID_ARGUMENT~;
-    vk::ImageView image_view = resolve_texture_view(state, texture_slot, &desc.view)!;
+    vk::ImageView image_view = resolve_texture_view(
+        state:   state,
+        slot:    texture_slot,
+        view:    &desc.view,
+        created: null,
+    )!;
 
     uint slot;
     if (heap.texture_free_count > 0) {

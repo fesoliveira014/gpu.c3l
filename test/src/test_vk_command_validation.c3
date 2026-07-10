@@ -124,6 +124,18 @@ fn gpu::TextureHandle make_val_depth_target(gpu::Device* device, uint width, uin
     return gpu::create_texture(device, &desc)!!;
 }
 
+fn gpu::TextureHandle make_val_depth_target_mips(gpu::Device* device, uint width, uint height, uint mip_levels) {
+    gpu::TextureDesc desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = width,
+        .height     = height,
+        .mip_levels = mip_levels,
+        .format     = gpu::Format.D32_FLOAT,
+        .usage      = { .depth_attach },
+    };
+    return gpu::create_texture(device, &desc)!!;
+}
+
 fn void record_val_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle depth) {
     record_val_texture_transition(
         cmd:          cmd,
@@ -140,6 +152,16 @@ fn uint val_cached_view_count(gpu::Device* device, gpu::TextureHandle texture) {
     uint count = 0;
     foreach (&cached : slot.views) if (cached.used) count++;
     return count;
+}
+
+fn bool val_has_cached_view(gpu::Device* device, gpu::TextureHandle texture, uint base_mip, uint mip_count) {
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
+    foreach (&cached : slot.views) {
+        if (cached.used && cached.base_mip == base_mip && cached.mip_count == mip_count
+            && cached.base_layer == 0 && cached.layer_count == 1) return true;
+    }
+    return false;
 }
 
 // Never actually dispatched, so the shader's ABI content is unused.
@@ -872,12 +894,20 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     defer gpu::destroy_texture(&device, unbarriered)!!;
     gpu::TextureHandle depth = make_val_depth_target(&device, 8, 8);
     defer gpu::destroy_texture(&device, depth)!!;
+    gpu::TextureHandle mip_depth = make_val_depth_target_mips(
+        device:     &device,
+        width:      8,
+        height:     8,
+        mip_levels: 4,
+    );
+    defer gpu::destroy_texture(&device, mip_depth)!!;
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     record_val_target_to_attach(&cmd, large);
     record_val_target_to_attach(&cmd, small);
     record_val_depth_to_attach(&cmd, depth);
+    record_val_depth_to_attach(&cmd, mip_depth);
 
     gpu::ColorTargetDesc[1] large_color = { { .texture = large } };
     gpu::RenderPassDesc oversized = { .colors = large_color[..], .width = 17, .height = 16 };
@@ -920,6 +950,20 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &depth_oversized)) == gpu::INVALID_ARGUMENT,
         "render area wider than depth mip zero faults INVALID_ARGUMENT");
     assert(cmd.state == gpu::CommandState.RECORDING, "oversized depth target records no pass");
+
+    gpu::DepthTargetDesc mip_depth_target = { .texture = mip_depth };
+    uint mip_depth_cached_before = val_cached_view_count(&device, mip_depth);
+    gpu::RenderPassDesc mip_depth_pass = { .depth = &mip_depth_target, .width = 8, .height = 8 };
+    gpu::cmd_begin_render_pass(&cmd, &mip_depth_pass)!!;
+    assert(val_cached_view_count(&device, mip_depth) == mip_depth_cached_before + 1,
+        "multi-mip depth attachment resolves a single-mip cached view");
+    gpu::cmd_end_render_pass(&cmd)!!;
+    assert(val_has_cached_view(
+        device:    &device,
+        texture:   mip_depth,
+        base_mip:  0,
+        mip_count: 1,
+    ), "multi-mip depth attachment view selects exactly mip zero and layer zero");
 
     gpu::end_commands(&device, &cmd)!!;
     gpu::end_frame(&device)!!;
