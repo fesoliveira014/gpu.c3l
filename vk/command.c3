@@ -5,6 +5,9 @@ import vk;
 import std::thread;
 import std::core::mem;
 
+alias CreateContextPoolFn @private = fn vk::CommandPool? (void*, vk::Device, uint);
+alias DestroyContextPoolFn @private = fn void (void*, vk::Device, vk::CommandPool);
+
 // Concrete (non-generic) slot table for recording contexts. Monomorphized
 // twin of gpu::slots, same c3c 0.8.0 rationale as PipelineTable.
 const uint RECORDING_CONTEXT_FREE_NONE = 0;
@@ -14,6 +17,12 @@ bitstruct PoolDirtyMask : char {
     bool graphics : 0;
     bool compute  : 1;
     bool transfer : 2;
+}
+
+struct ContextPoolOps @private {
+    void*                user_data;
+    CreateContextPoolFn  create;
+    DestroyContextPoolFn destroy;
 }
 
 struct RecordingContextState {
@@ -73,56 +82,48 @@ fn void? RecordingContextTable.free(&self, gpu::RecordingContextHandle h) {
     self.free_head = idx + 1;
 }
 
-<* One command pool per queue family per frame-in-flight, owned by a
-   recording context (confined to one thread at a time). Command buffers are
-   freed by pool reset at frame retire. *>
-fn void? create_context_pools(VkDeviceState* state, RecordingContextState* context) {
-    context.graphics_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
-    context.transfer_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
-    context.compute_pools_distinct = state.compute_family != state.graphics_family;
-    if (context.compute_pools_distinct) {
-        context.compute_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
-    }
-    context.pool_dirty = mem::new_array(PoolDirtyMask, state.frames_in_flight);
-    for (uint i = 0; i < state.frames_in_flight; i++) {
-        vk::CommandPoolCreateInfo gfx = vk::command_pool_create_info()
-            .set_queue_family_index(state.graphics_family)
-            .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
-        check(vk::create_command_pool(state.device, &gfx, null, &context.graphics_pools[i]))!;
-
-        if (context.compute_pools_distinct) {
-            vk::CommandPoolCreateInfo comp = vk::command_pool_create_info()
-                .set_queue_family_index(state.compute_family)
-                .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
-            check(vk::create_command_pool(state.device, &comp, null, &context.compute_pools[i]))!;
-        }
-
-        vk::CommandPoolCreateInfo xfer = vk::command_pool_create_info()
-            .set_queue_family_index(state.transfer_family)
-            .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
-        check(vk::create_command_pool(state.device, &xfer, null, &context.transfer_pools[i]))!;
-    }
-    if (!context.compute_pools_distinct) context.compute_pools = context.graphics_pools;
+fn vk::CommandPool? create_context_pool_real(void* user_data, vk::Device device, uint family) @private {
+    vk::CommandPoolCreateInfo info = vk::command_pool_create_info()
+        .set_queue_family_index(family)
+        .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
+    vk::CommandPool pool;
+    check(vk::create_command_pool(device, &info, null, &pool))!;
+    return pool;
 }
 
-fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* context) {
+fn void destroy_context_pool_real(void* user_data, vk::Device device, vk::CommandPool pool) @private {
+    vk::destroy_command_pool(device, pool, null);
+}
+
+fn ContextPoolOps context_pool_ops_real() @private {
+    return {
+        .create = &create_context_pool_real,
+        .destroy = &destroy_context_pool_real,
+    };
+}
+
+fn void destroy_context_pools_with_ops(
+    VkDeviceState* state,
+    RecordingContextState* context,
+    ContextPoolOps* ops
+) @private {
     if (context.graphics_pools.ptr != null) {
         foreach (pool : context.graphics_pools) {
-            if (pool != null) vk::destroy_command_pool(state.device, pool, null);
+            if (pool != null) ops.destroy(ops.user_data, state.device, pool);
         }
         mem::free(context.graphics_pools.ptr);
         context.graphics_pools = {};
     }
     if (context.compute_pools_distinct && context.compute_pools.ptr != null) {
         foreach (pool : context.compute_pools) {
-            if (pool != null) vk::destroy_command_pool(state.device, pool, null);
+            if (pool != null) ops.destroy(ops.user_data, state.device, pool);
         }
         mem::free(context.compute_pools.ptr);
     }
     context.compute_pools = {};
     if (context.transfer_pools.ptr != null) {
         foreach (pool : context.transfer_pools) {
-            if (pool != null) vk::destroy_command_pool(state.device, pool, null);
+            if (pool != null) ops.destroy(ops.user_data, state.device, pool);
         }
         mem::free(context.transfer_pools.ptr);
         context.transfer_pools = {};
@@ -131,6 +132,61 @@ fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* conte
         mem::free(context.pool_dirty.ptr);
         context.pool_dirty = {};
     }
+    context.compute_pools_distinct = false;
+}
+
+<* One command pool per queue family per frame-in-flight, owned by a
+   recording context. Construction is all-or-nothing. *>
+fn void? create_context_pools_with_ops(
+    VkDeviceState* state,
+    RecordingContextState* context,
+    ContextPoolOps* ops
+) @private {
+    *context = {};
+    defer catch destroy_context_pools_with_ops(state, context, ops);
+
+    context.graphics_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+    context.transfer_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+    context.compute_pools_distinct = state.compute_family != state.graphics_family;
+    if (context.compute_pools_distinct) {
+        context.compute_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+    }
+    context.pool_dirty = mem::new_array(PoolDirtyMask, state.frames_in_flight);
+
+    for (uint i = 0; i < state.frames_in_flight; i++) {
+        context.graphics_pools[i] = ops.create(ops.user_data, state.device, state.graphics_family)!;
+        if (context.compute_pools_distinct) {
+            context.compute_pools[i] = ops.create(ops.user_data, state.device, state.compute_family)!;
+        }
+        context.transfer_pools[i] = ops.create(ops.user_data, state.device, state.transfer_family)!;
+    }
+    if (!context.compute_pools_distinct) context.compute_pools = context.graphics_pools;
+}
+
+fn void? create_context_pools(VkDeviceState* state, RecordingContextState* context) @private {
+    ContextPoolOps ops = context_pool_ops_real();
+    return create_context_pools_with_ops(state, context, &ops);
+}
+
+fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* context) @private {
+    ContextPoolOps ops = context_pool_ops_real();
+    destroy_context_pools_with_ops(state, context, &ops);
+}
+
+fn gpu::RecordingContextHandle? create_builtin_recording_context_with_ops(
+    VkDeviceState* state,
+    ContextPoolOps* ops
+) @private {
+    RecordingContextState context;
+    create_context_pools_with_ops(state, &context, ops)!;
+    if (try handle = state.recording_contexts.alloc(context)) return handle;
+    destroy_context_pools_with_ops(state, &context, ops);
+    return gpu::SLOT_TABLE_FULL~;
+}
+
+fn gpu::RecordingContextHandle? create_builtin_recording_context(VkDeviceState* state) @private {
+    ContextPoolOps ops = context_pool_ops_real();
+    return create_builtin_recording_context_with_ops(state, &ops);
 }
 
 fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device) @private {
@@ -138,10 +194,7 @@ fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device)
     enter_tracked(state);
     defer exit_tracked(state);
     RecordingContextState context;
-    if (catch err = create_context_pools(state, &context)) {
-        destroy_context_pools(state, &context);
-        return err~;
-    }
+    create_context_pools(state, &context)!;
 
     {
         state.resource_mutex.lock()!!;

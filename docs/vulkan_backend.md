@@ -332,6 +332,11 @@ one command pool per frame per queue family
 reset pools when frame retires
 ```
 
+Recording-context pool sets are constructed transactionally: ownership is
+published only after every per-frame graphics, optional distinct-compute, and
+transfer pool exists. Any create fault destroys all earlier pools and releases
+the host arrays. Shared-family compute aliases graphics only after success.
+
 Command list slot:
 
 ```text
