@@ -56,4 +56,7 @@ faultdef
     READBACK_NOT_READY,
     // A bounded host wait (wait_semaphore, begin_frame's arena wait) elapsed
     // before the timeline reached its target value; safe to retry.
-    WAIT_TIMEOUT;
+    WAIT_TIMEOUT,
+    // The backend returned an unclassified or internal failure. Inspect
+    // native diagnostics; this does not imply that the device was lost.
+    BACKEND_ERROR;

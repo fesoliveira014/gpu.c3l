@@ -64,7 +64,7 @@ fn vk::Instance? create_vk_instance(gpu::DeviceDesc* desc) {
             create_info = create_info.set_enabled_extension_names(extensions[:extension_count]);
         }
 
-        check(vk::create_instance(&create_info, null, &instance))!;
+        check_backend_create_result(vk::create_instance(&create_info, null, &instance))!;
     };
     return instance;
 }

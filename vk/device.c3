@@ -511,7 +511,7 @@ fn vk::PhysicalDevice? pick_physical_device(vk::Instance instance, gpu::DeviceDe
 
     @pool() {
         vk::PhysicalDevice[] devices = mem::talloc_array(vk::PhysicalDevice, (sz)count);
-        check(vk::enumerate_physical_devices(instance, &count, devices.ptr))!;
+        check_enumeration_result(vk::enumerate_physical_devices(instance, &count, devices.ptr))!;
 
         vk::PhysicalDevice best = (vk::PhysicalDevice)null;
         int best_score = -1;
@@ -620,7 +620,7 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @p
         device_info = device_info.set_enabled_extension_names(extensions[:extension_count]);
     }
 
-    check(vk::create_device(state.physical_device, &device_info, null, &state.device))!;
+    check_backend_create_result(vk::create_device(state.physical_device, &device_info, null, &state.device))!;
 }
 
 <* True if `physical_device` advertises the named device extension. *>

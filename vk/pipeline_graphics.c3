@@ -209,9 +209,9 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         }
 
         vk::Pipeline pipeline;
-        if (catch check(vk::create_graphics_pipelines(state.device, state.driver_cache, 1, &pipe_info, null, &pipeline))) {
-            return gpu::PIPELINE_CREATE_FAILED~;
-        }
+        check_pipeline_create_result(
+            vk::create_graphics_pipelines(state.device, state.driver_cache, 1, &pipe_info, null, &pipeline)
+        )!;
         set_object_name(
             state:         state,
             object_type:   vk::ObjectType.PIPELINE,

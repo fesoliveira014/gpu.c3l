@@ -20,7 +20,7 @@ fn void? create_vk_allocator(VkDeviceState* state) {
             .ext_memory_budget     = state.memory_budget_enabled,
         },
     };
-    check(vma::create_allocator(&info, &state.allocator))!;
+    check_backend_create_result(vma::create_allocator(&info, &state.allocator))!;
 }
 
 fn gpu::MemoryStats? vk_get_memory_stats(gpu::Device* device) @private {

@@ -8,8 +8,9 @@ import vk;
 // binding ships no API_VERSION_1_3 constant.
 const uint API_VERSION_1_3 = (1u << 22) | (3u << 12);
 
-<* Map a vk::Result to a gpu fault. SUCCESS is the only non-fault value. *>
-fn void? check(vk::Result result) {
+<* Map only context-free Vulkan results. Unknown results are backend errors,
+   never implicit device loss. *>
+fn void? check(vk::Result result) @private {
     switch (result) {
         case vk::Result.SUCCESS:
             return;
@@ -23,18 +24,131 @@ fn void? check(vk::Result result) {
         case vk::Result.ERROR_EXTENSION_NOT_PRESENT:
         case vk::Result.ERROR_LAYER_NOT_PRESENT:
             return gpu::UNSUPPORTED_FEATURE~;
+        default:
+            io::eprintfn("vk: unmapped VkResult %d", (int)result);
+            return gpu::BACKEND_ERROR~;
+    }
+}
+
+fn void? check_backend_create_result(vk::Result result) @private {
+    switch (result) {
         case vk::Result.ERROR_INCOMPATIBLE_DRIVER:
         case vk::Result.ERROR_INITIALIZATION_FAILED:
             return gpu::UNSUPPORTED_BACKEND~;
         default:
-            io::eprintfn("vk: unmapped VkResult %d", (int)result);
-            return gpu::DEVICE_LOST~;
+            return check(result);
+    }
+}
+
+fn void? check_surface_result(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.ERROR_SURFACE_LOST_KHR:
+            return gpu::SURFACE_LOST~;
+        case vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR:
+            return gpu::INVALID_RESOURCE_STATE~;
+        default:
+            return check(result);
+    }
+}
+
+fn void? check_surface_enumeration_result(vk::Result result) @private {
+    if (result == vk::Result.ERROR_SURFACE_LOST_KHR) return gpu::SURFACE_LOST~;
+    return check_enumeration_result(result);
+}
+
+fn void? check_swapchain_create_result(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.ERROR_SURFACE_LOST_KHR:
+            return gpu::SURFACE_LOST~;
+        case vk::Result.ERROR_OUT_OF_DATE_KHR:
+            return gpu::SWAPCHAIN_OUT_OF_DATE~;
+        case vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR:
+            return gpu::INVALID_RESOURCE_STATE~;
+        case vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
+            return gpu::UNSUPPORTED_FEATURE~;
+        default:
+            return check(result);
+    }
+}
+
+fn void? check_texture_create_result(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.ERROR_FORMAT_NOT_SUPPORTED:
+        case vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
+            return gpu::UNSUPPORTED_FEATURE~;
+        default:
+            return check(result);
+    }
+}
+
+fn void? check_shader_create_result(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.ERROR_INVALID_SHADER_NV:
+        case vk::Result.ERROR_VALIDATION_FAILED_EXT:
+            return gpu::SHADER_INVALID~;
+        default:
+            return check(result);
+    }
+}
+
+fn void? check_pipeline_create_result(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.SUCCESS:
+            return;
+        case vk::Result.ERROR_OUT_OF_HOST_MEMORY:
+        case vk::Result.ERROR_OUT_OF_DEVICE_MEMORY:
+        case vk::Result.ERROR_DEVICE_LOST:
+            return check(result);
+        default:
+            return gpu::PIPELINE_CREATE_FAILED~;
+    }
+}
+
+fn void? check_descriptor_pool_create_result(vk::Result result) @private {
+    if (result == vk::Result.ERROR_FRAGMENTATION) return gpu::DESCRIPTOR_HEAP_FULL~;
+    return check(result);
+}
+
+fn void? check_descriptor_allocate_result(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.ERROR_OUT_OF_POOL_MEMORY:
+        case vk::Result.ERROR_FRAGMENTED_POOL:
+            return gpu::DESCRIPTOR_HEAP_FULL~;
+        default:
+            return check(result);
+    }
+}
+
+fn void? check_pipeline_cache_data_result(vk::Result result) @private {
+    if (result == vk::Result.INCOMPLETE) return gpu::INVALID_ARGUMENT~;
+    return check(result);
+}
+
+fn void? check_virtual_allocate_result(vk::Result result) @private {
+    if (result == vk::Result.ERROR_OUT_OF_DEVICE_MEMORY) return gpu::ARENA_FULL~;
+    return check(result);
+}
+
+fn void? check_enumeration_result(vk::Result result) @private {
+    if (result == vk::Result.INCOMPLETE) return gpu::BACKEND_ERROR~;
+    return check(result);
+}
+
+fn bool pipeline_cache_blob_retryable(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.SUCCESS:
+        case vk::Result.ERROR_OUT_OF_HOST_MEMORY:
+        case vk::Result.ERROR_OUT_OF_DEVICE_MEMORY:
+        case vk::Result.ERROR_DEVICE_LOST:
+            return false;
+        default:
+            return true;
     }
 }
 
 <* For bounded host waits only: TIMEOUT faults WAIT_TIMEOUT, everything else
    delegates to check(). *>
-fn void? check_wait(vk::Result result) {
+fn void? check_wait(vk::Result result) @private {
     switch (result) {
         case vk::Result.TIMEOUT:
             return gpu::WAIT_TIMEOUT~;

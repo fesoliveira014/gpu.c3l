@@ -223,12 +223,25 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
             .set_flags(vk::DescriptorPoolCreateFlagBits.UPDATE_AFTER_BIND_BIT)
             .set_max_sets(1)
             .set_pool_sizes(pool_sizes[..]);
-        check(vk::create_descriptor_pool(state.device, &pool_info, null, &heap.descriptor_pool))!;
+        check_descriptor_pool_create_result(
+            vk::create_descriptor_pool(
+                device:            state.device,
+                p_create_info:     &pool_info,
+                p_allocator:       null,
+                p_descriptor_pool: &heap.descriptor_pool,
+            )
+        )!;
 
         vk::DescriptorSetAllocateInfo alloc_info = vk::descriptor_set_allocate_info()
             .set_descriptor_pool(heap.descriptor_pool)
             .set_set_layouts((&heap.set_layout)[:1]);
-        check(vk::allocate_descriptor_sets(state.device, &alloc_info, &heap.descriptor_set))!;
+        check_descriptor_allocate_result(
+            vk::allocate_descriptor_sets(
+                device:            state.device,
+                p_allocate_info:   &alloc_info,
+                p_descriptor_sets: &heap.descriptor_set,
+            )
+        )!;
     } else {
         create_descriptor_buffer(state)!;
     }
@@ -296,7 +309,7 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
 
     vk::BufferDeviceAddressInfo address_info = vk::buffer_device_address_info().set_buffer(heap.descriptor_buffer);
     heap.descriptor_buffer_gpu = vk::get_buffer_device_address(state.device, &address_info);
-    if (heap.descriptor_buffer_gpu == 0) return gpu::DEVICE_LOST~;
+    if (heap.descriptor_buffer_gpu == 0) return gpu::BACKEND_ERROR~;
 }
 
 <* Safe on a partial or zeroed heap; destroys live sampler objects, including

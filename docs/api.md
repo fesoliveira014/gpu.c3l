@@ -164,26 +164,27 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
-| `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, sampler/aniso paths | validation layers not installed; presentation off; missing device feature |
+| `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, texture creates, sampler/aniso paths | validation layers not installed; presentation off; missing device feature; unsupported image format or usage |
 | `INVALID_ARGUMENT` | any create/upload/export; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value; mixed-queue-kind submit; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; a list already tracking `PENDING_LAYOUT_CAP` (16) distinct textures records a 17th; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | any handle-taking call | use after destroy (generation mismatch) or never-live handle |
-| `INVALID_RESOURCE_STATE` | `cmd_texture_barrier`, readback helpers | `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
+| `INVALID_RESOURCE_STATE` | `create_swapchain`, `cmd_texture_barrier`, readback helpers | the native window is already bound to another Vulkan surface, or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
-| `DEVICE_LOST` | submits, `wait_semaphore`/`begin_frame` on device loss | driver reported device loss; unrecoverable |
+| `DEVICE_LOST` | any Vulkan-backed operation | Vulkan explicitly returned `VK_ERROR_DEVICE_LOST`; unrecoverable |
 | `RESOURCE_IN_USE` | `destroy_texture` | a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first (gpu.c3l#81). Frames-in-flight destroys — including a resource an off-frame `submit` referenced — are unaffected: those are handled by deferred backend release instead (gpu.c3l#44, gpu.c3l#80) |
-| `ARENA_FULL` | `alloc_frame_span`, staging/readback paths | per-frame data outgrew the arena (sizing knobs: gpu.c3l#28) |
+| `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block ran out of configured capacity (sizing knobs: gpu.c3l#28) |
 | `SLOT_TABLE_FULL` | creates | handle table at capacity; textures scale via `DeviceDesc.texture_capacity` |
-| `DESCRIPTOR_HEAP_FULL` | `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
-| `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination or failed compiling |
+| `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
+| `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
-| `SURFACE_LOST` | acquire/present | window/surface destroyed mid-frame |
-| `SWAPCHAIN_OUT_OF_DATE` | `acquire_next_image`, `present` | surface changed (resize); `resize_swapchain` and retry |
+| `SURFACE_LOST` | surface creation/query/enumeration, swapchain creation, acquire/present | native window or surface was destroyed or became unavailable |
+| `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | surface changed (resize); resize and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*` | call outside its required recording state |
 | `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |
 | `WAIT_TIMEOUT` | `wait_semaphore`, `begin_frame` | bounded host wait elapsed before the timeline reached its target value; safe to retry |
+| `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
-Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled.
+Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled. `DEVICE_LOST` is reserved for an explicit native device-loss result; an unmapped native result becomes `BACKEND_ERROR`.
 
 ## 5. Memory API
 

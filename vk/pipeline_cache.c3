@@ -274,8 +274,11 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
     vk::PipelineCacheCreateInfo cache_info = vk::pipeline_cache_create_info();
     cache_info.initial_data_size = (sz)cache_data.len;
     cache_info.p_initial_data    = cache_data.ptr;
-    if (vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache) != vk::Result.SUCCESS) {
-        // A warm-start blob is advisory: any driver rejection restarts empty.
+    vk::Result cache_result = vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache);
+    if (cache_result != vk::Result.SUCCESS) {
+        if (cache_data.len == 0 || !pipeline_cache_blob_retryable(cache_result)) {
+            check(cache_result)!;
+        }
         cache_info.initial_data_size = 0;
         cache_info.p_initial_data    = null;
         check(vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache))!;
@@ -298,7 +301,7 @@ fn usz? vk_get_pipeline_cache_data(gpu::Device* device, char[] out) @private {
     check(vk::get_pipeline_cache_data(state.device, state.driver_cache, &required, null))!;
     if ((usz)required > out.len) return gpu::INVALID_ARGUMENT~;
     sz written = required;
-    check(vk::get_pipeline_cache_data(state.device, state.driver_cache, &written, out.ptr))!;
+    check_pipeline_cache_data_result(vk::get_pipeline_cache_data(state.device, state.driver_cache, &written, out.ptr))!;
     return (usz)written;
 }
 
