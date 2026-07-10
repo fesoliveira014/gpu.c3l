@@ -177,7 +177,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | `DESCRIPTOR_HEAP_FULL` | `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination or failed compiling |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
-| `SURFACE_LOST` | acquire/present | platform surface is unavailable; destroy the swapchain and create a new one from fresh native handles |
+| `SURFACE_LOST` | swapchain create/resize/query, acquire, present | platform surface is unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*` | call outside its required recording state |
 | `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |

@@ -19,6 +19,8 @@ fn void? check(vk::Result result) {
             return gpu::OUT_OF_DEVICE_MEMORY~;
         case vk::Result.ERROR_DEVICE_LOST:
             return gpu::DEVICE_LOST~;
+        case vk::Result.ERROR_SURFACE_LOST_KHR:
+            return gpu::SURFACE_LOST~;
         case vk::Result.ERROR_FEATURE_NOT_PRESENT:
         case vk::Result.ERROR_EXTENSION_NOT_PRESENT:
         case vk::Result.ERROR_LAYER_NOT_PRESENT:

@@ -121,7 +121,7 @@ fn vk::PresentModeKHR select_present_mode(vk::PresentModeKHR[] available, gpu::P
 }
 
 <* Map acquire outcomes without touching swapchain state. Pure. *>
-fn void? map_acquire_result(vk::Result result) @private {
+fn void? map_acquire_result(vk::Result result) {
     switch (result) {
         case vk::Result.SUCCESS:
         case vk::Result.SUBOPTIMAL_KHR:
@@ -139,7 +139,7 @@ fn void? map_acquire_result(vk::Result result) @private {
 }
 
 <* Map present outcomes while preserving surface-recreation semantics. Pure. *>
-fn void? map_present_result(vk::Result result) @private {
+fn void? map_present_result(vk::Result result) {
     switch (result) {
         case vk::Result.SUCCESS:
         case vk::Result.SUBOPTIMAL_KHR:

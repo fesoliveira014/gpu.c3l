@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk @public;
+import gpu::vk;
 import vk;
 
 // Pure swapchain selection logic over synthetic capability lists, plus the
@@ -42,6 +42,11 @@ fn void present_mode_selection() @test {
         "unsupported immediate falls back to FIFO");
     assert(gpu::vk::select_present_mode(fifo_mailbox[..], gpu::PresentMode.FIFO) == vk::PresentModeKHR.FIFO_KHR,
         "FIFO requested is FIFO");
+}
+
+fn void common_surface_lost_result_mapping() @test {
+    fault surface_lost = @catch(gpu::vk::check(vk::Result.ERROR_SURFACE_LOST_KHR));
+    assert(surface_lost == gpu::SURFACE_LOST, "common mapper preserves surface loss");
 }
 
 fn void acquire_result_mapping() @test {
