@@ -47,6 +47,12 @@ struct TransferArenaState {
     uint              retire_count;
 }
 
+struct TransferArenaRange {
+    ulong virtual_start;
+    ulong virtual_end;
+    usz   physical_offset;
+}
+
 struct DedicatedStaging {
     gpu::BufferHandle buffer;
     ulong             timeline_value;
@@ -112,6 +118,51 @@ fn void drain_transfer_retire(VkDeviceState* state, TransferArenaState* arena) @
     }
 }
 
+fn TransferArenaRange? transfer_arena_range(
+    ulong virtual_head,
+    ulong virtual_tail,
+    uint retire_count,
+    usz capacity,
+    usz size,
+    usz align
+) {
+    if (capacity == 0 || size > capacity) return gpu::ARENA_FULL~;
+    if (!gpu::is_pow2(align)) return gpu::INVALID_ARGUMENT~;
+    if (retire_count == 0) {
+        virtual_head = 0;
+        virtual_tail = 0;
+    } else if (virtual_head > virtual_tail) {
+        return gpu::ARENA_FULL~;
+    }
+
+    ulong capacity_u = (ulong)capacity;
+    ulong size_u = (ulong)size;
+    ulong align_u = (ulong)align;
+    ulong remainder = virtual_tail & (align_u - 1);
+    ulong padding = remainder == 0 ? 0 : align_u - remainder;
+    if (padding > ulong::max - virtual_tail) return gpu::ARENA_FULL~;
+    ulong virtual_start = virtual_tail + padding;
+
+    usz physical_offset = (usz)(virtual_start % capacity_u);
+    if (size > capacity - physical_offset) {
+        ulong wrap_gap = capacity_u - (ulong)physical_offset;
+        if (wrap_gap > ulong::max - virtual_start) return gpu::ARENA_FULL~;
+        virtual_start += wrap_gap;
+        physical_offset = 0;
+    }
+
+    if (virtual_start < virtual_head) return gpu::ARENA_FULL~;
+    ulong live = virtual_start - virtual_head;
+    if (live > capacity_u) return gpu::ARENA_FULL~;
+    if (size_u > capacity_u - live) return gpu::ARENA_FULL~;
+    if (size_u > ulong::max - virtual_start) return gpu::ARENA_FULL~;
+    return {
+        .virtual_start   = virtual_start,
+        .virtual_end     = virtual_start + size_u,
+        .physical_offset = physical_offset,
+    };
+}
+
 <* Contiguous ring allocation over virtual offsets; the range holds until
    its tagged timeline passes it — never a different call's advance. Faults
    ARENA_FULL when the request cannot fit (callers fall back to dedicated). *>
@@ -120,19 +171,24 @@ fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* 
     drain_transfer_retire(state, arena);
     if (arena.retire_count == TRANSFER_RETIRE_CAP) return gpu::ARENA_FULL~;
 
-    ulong tail = gpu::align_up(arena.virtual_tail, align);
-    usz physical = (usz)(tail % arena.size);
-    if (physical + size > arena.size) tail += arena.size - physical;
-    if (tail + size - arena.virtual_head > arena.size) return gpu::ARENA_FULL~;
+    TransferArenaRange range = transfer_arena_range(
+        virtual_head: arena.virtual_head,
+        virtual_tail: arena.virtual_tail,
+        retire_count: arena.retire_count,
+        capacity:     arena.size,
+        size:         size,
+        align:        align,
+    )!;
 
     arena.retire[(arena.retire_head + arena.retire_count) % TRANSFER_RETIRE_CAP] = {
-        .virtual_end    = tail + size,
+        .virtual_end    = range.virtual_end,
         .timeline_value = tag.value,
         .timeline_kind  = tag.kind,
     };
+    if (arena.retire_count == 0) arena.virtual_head = 0;
     arena.retire_count++;
-    arena.virtual_tail = tail + size;
-    return arena.span.subspan((usz)(tail % arena.size), size);
+    arena.virtual_tail = range.virtual_end;
+    return arena.span.subspan(range.physical_offset, size);
 }
 
 fn void drain_dedicated_transfers(VkDeviceState* state) @private {
