@@ -27,6 +27,7 @@ fn void generic_result_mapping_is_truthful() @test {
 fn void backend_and_wsi_result_mapping_is_specific() @test {
     fault init = @catch(gpu::vk::check_backend_create_result(vk::Result.ERROR_INITIALIZATION_FAILED));
     fault driver = @catch(gpu::vk::check_backend_create_result(vk::Result.ERROR_INCOMPATIBLE_DRIVER));
+    fault physical_init = @catch(gpu::vk::check_physical_device_enumeration_result(vk::Result.ERROR_INITIALIZATION_FAILED));
     fault surface = @catch(gpu::vk::check_surface_result(vk::Result.ERROR_SURFACE_LOST_KHR));
     fault surface_window = @catch(gpu::vk::check_surface_result(vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR));
     fault surface_fill = @catch(gpu::vk::check_surface_enumeration_result(vk::Result.ERROR_SURFACE_LOST_KHR));
@@ -34,9 +35,12 @@ fn void backend_and_wsi_result_mapping_is_specific() @test {
     fault out_of_date = @catch(gpu::vk::check_swapchain_create_result(vk::Result.ERROR_OUT_OF_DATE_KHR));
     fault window_in_use = @catch(gpu::vk::check_swapchain_create_result(vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR));
     fault image_usage = @catch(gpu::vk::check_swapchain_create_result(vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR));
+    fault acquire_surface = @catch(gpu::vk::check_acquire_result(vk::Result.ERROR_SURFACE_LOST_KHR));
+    fault present_surface = @catch(gpu::vk::check_present_result(vk::Result.ERROR_SURFACE_LOST_KHR));
 
     assert(init == gpu::UNSUPPORTED_BACKEND, "backend initialization failure is bootstrap-specific");
     assert(driver == gpu::UNSUPPORTED_BACKEND, "incompatible driver is unsupported backend");
+    assert(physical_init == gpu::UNSUPPORTED_BACKEND, "physical-device initialization failure remains bootstrap-specific");
     assert(surface == gpu::SURFACE_LOST, "surface loss remains recoverable and distinct");
     assert(surface_window == gpu::INVALID_RESOURCE_STATE, "native surface ownership is a resource state");
     assert(surface_fill == gpu::SURFACE_LOST, "surface loss remains exact during enumeration");
@@ -44,6 +48,8 @@ fn void backend_and_wsi_result_mapping_is_specific() @test {
     assert(out_of_date == gpu::SWAPCHAIN_OUT_OF_DATE, "swapchain obsolescence remains distinct");
     assert(window_in_use == gpu::INVALID_RESOURCE_STATE, "native window ownership is a resource state");
     assert(image_usage == gpu::UNSUPPORTED_FEATURE, "unsupported swapchain image usage is a capability result");
+    assert(acquire_surface == gpu::SURFACE_LOST, "acquire preserves surface loss");
+    assert(present_surface == gpu::SURFACE_LOST, "present preserves surface loss");
 }
 
 fn void resource_result_mapping_is_specific() @test {

@@ -40,6 +40,11 @@ fn void? check_backend_create_result(vk::Result result) @private {
     }
 }
 
+fn void? check_physical_device_enumeration_result(vk::Result result) @private {
+    if (result == vk::Result.ERROR_INITIALIZATION_FAILED) return gpu::UNSUPPORTED_BACKEND~;
+    return check_enumeration_result(result);
+}
+
 fn void? check_surface_result(vk::Result result) @private {
     switch (result) {
         case vk::Result.ERROR_SURFACE_LOST_KHR:
@@ -66,6 +71,36 @@ fn void? check_swapchain_create_result(vk::Result result) @private {
             return gpu::INVALID_RESOURCE_STATE~;
         case vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
             return gpu::UNSUPPORTED_FEATURE~;
+        default:
+            return check(result);
+    }
+}
+
+fn void? check_acquire_result(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.SUCCESS:
+        case vk::Result.SUBOPTIMAL_KHR:
+            return;
+        case vk::Result.ERROR_SURFACE_LOST_KHR:
+            return gpu::SURFACE_LOST~;
+        case vk::Result.ERROR_OUT_OF_DATE_KHR:
+        case vk::Result.TIMEOUT:
+        case vk::Result.NOT_READY:
+            return gpu::SWAPCHAIN_OUT_OF_DATE~;
+        default:
+            return check(result);
+    }
+}
+
+fn void? check_present_result(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.SUCCESS:
+        case vk::Result.SUBOPTIMAL_KHR:
+            return;
+        case vk::Result.ERROR_SURFACE_LOST_KHR:
+            return gpu::SURFACE_LOST~;
+        case vk::Result.ERROR_OUT_OF_DATE_KHR:
+            return gpu::SWAPCHAIN_OUT_OF_DATE~;
         default:
             return check(result);
     }

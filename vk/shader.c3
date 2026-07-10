@@ -178,7 +178,12 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
         vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
             .set_code_size(desc.spirv.len)
             .set_code(code.ptr);
-        check_shader_create_result(vk::create_shader_module(state.device, &info, null, &slot.shader_module))!;
+        check_shader_create_result(vk::create_shader_module(
+            device:          state.device,
+            p_create_info:   &info,
+            p_allocator:     null,
+            p_shader_module: &slot.shader_module,
+        ))!;
     };
     set_object_name(
         state:         state,

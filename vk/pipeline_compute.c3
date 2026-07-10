@@ -111,7 +111,14 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
 
     vk::Pipeline pipeline;
     check_pipeline_create_result(
-        vk::create_compute_pipelines(state.device, state.driver_cache, 1, &pipe_info, null, &pipeline)
+        vk::create_compute_pipelines(
+            device:            state.device,
+            pipeline_cache:    state.driver_cache,
+            create_info_count: 1,
+            p_create_infos:    &pipe_info,
+            p_allocator:       null,
+            p_pipelines:       &pipeline,
+        )
     )!;
     set_object_name(
         state:         state,

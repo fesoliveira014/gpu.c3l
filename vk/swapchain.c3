@@ -510,18 +510,7 @@ fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::Swapchain
     vk::Semaphore acquire_semaphore = slot.acquire_semaphores[state.frame_index];
     uint image_index = 0;
     vk::Result result = vk::extensions.vk_acquire_next_image_khr(state.device, slot.swapchain, ACQUIRE_TIMEOUT_NS, acquire_semaphore, (vk::Fence)null, &image_index);
-    switch (result) {
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-        case vk::Result.TIMEOUT:
-        case vk::Result.NOT_READY:
-            return gpu::SWAPCHAIN_OUT_OF_DATE~;
-        case vk::Result.SUCCESS:
-        case vk::Result.SUBOPTIMAL_KHR:
-            break;
-        default:
-            check(result)!;
-    }
+    check_acquire_result(result)!;
 
     slot.acquire_pending = true;
     slot.acquire_consumed = false;
@@ -557,16 +546,7 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
     state.graphics_queue_mutex.lock()!!;
     defer state.graphics_queue_mutex.unlock();
     vk::Result result = vk::extensions.vk_queue_present_khr(state.graphics_queue, &info);
-    switch (result) {
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-            return gpu::SWAPCHAIN_OUT_OF_DATE~;
-        case vk::Result.SUCCESS:
-        case vk::Result.SUBOPTIMAL_KHR:
-            return;
-        default:
-            check(result)!;
-    }
+    return check_present_result(result);
 }
 
 fn gpu::PresentModeSupport? vk_get_present_mode_support(gpu::Device* device, gpu::SwapchainHandle handle) @private {
