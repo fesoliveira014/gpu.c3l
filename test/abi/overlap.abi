@@ -1,0 +1,14 @@
+abi overlap;
+
+const uint OVERLAP_WORKGROUP = 64;
+
+root OverlapComputeRoot {
+    GpuAddress data_gpu;
+    uint       elem_count;
+    uint       iters;
+}
+
+root OverlapFragRoot {
+    uint iters;
+    uint _pad0;
+}
