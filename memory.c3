@@ -78,8 +78,8 @@ fn bool range_fits(usz limit, usz offset, usz size) {
 
 <* Enter an idle frame: advance to the next frame-in-flight slot, wait for
    its arena to retire, and reset it. Faults INVALID_RESOURCE_STATE if a frame
-   is already active, or WAIT_TIMEOUT if the retire wait elapses first. Either
-   rejection is mutation-free and safe to retry. *>
+   is already active, or WAIT_TIMEOUT if the retire wait elapses first. These
+   lifecycle guard rejections are mutation-free and safe to retry. *>
 fn void? begin_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.begin_frame(device);

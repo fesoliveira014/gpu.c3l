@@ -31,11 +31,11 @@ struct FrameLifecycleSnapshot {
     bool  transfer_pool_dirty;
 }
 
-fn gpu::Device make_frame_lifecycle_device() {
+fn gpu::Device make_frame_lifecycle_device(uint frames_in_flight = 1) {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 1,
+        .frames_in_flight  = frames_in_flight,
         .application_name  = "gpu_frame_lifecycle_test",
     };
     return gpu::create_device(&desc)!!;
@@ -126,7 +126,6 @@ fn void end_before_begin_is_atomic() @test {
     state.transfer_used_since_frame = true;
     state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
 
-
     FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
     fault rejected = @catch(gpu::end_frame(&device));
     assert(rejected == gpu::INVALID_RESOURCE_STATE, "end before begin faults INVALID_RESOURCE_STATE");
@@ -168,6 +167,23 @@ fn void double_begin_single_slot_is_atomic() @test {
     assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
 
     context.pool_dirty[state.frame_index].graphics = false;
+    gpu::end_frame(&device)!!;
+}
+
+fn void double_begin_default_slots_is_atomic() @test {
+    gpu::Device device = make_frame_lifecycle_device(2);
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    gpu::begin_frame(&device)!!;
+    (void)gpu::alloc_frame_span(&device, 64, 16)!!;
+
+    FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
+    fault rejected = @catch(gpu::begin_frame(&device));
+    assert(rejected == gpu::INVALID_RESOURCE_STATE,
+        "double begin faults independently of frame-slot retirement");
+    assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
+
     gpu::end_frame(&device)!!;
 }
 
