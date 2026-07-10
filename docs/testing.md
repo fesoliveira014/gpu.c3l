@@ -38,7 +38,9 @@ handle pack/unpack
 generation mismatch
 invalid handle values
 range alignment
-GpuSpan offset math
+GpuSpan checked/unchecked offset math
+immediate-parent exact-fit, nested, zero-size, and out-of-parent slicing
+GPU-address, CPU-pointer, backing-offset, and requested-size overflow rejection
 arena bump allocation logic without Vulkan
 MemoryKind policy table completeness
 Format translation table completeness through pure tables if separated

@@ -272,6 +272,29 @@ usage: AUTO
 flags: HOST_ACCESS_SEQUENTIAL_WRITE, MAPPED
 ```
 
+### 5.6 `GpuSpan` slicing
+
+Use `checked_subspan` when partitioning a span:
+
+```c3
+GpuSpan vertices = packed.checked_subspan(0, vertex_bytes)!;
+GpuSpan indices = packed.checked_subspan(vertex_bytes, index_bytes)!;
+```
+
+Validation is relative to the immediate parent. A nested child therefore
+cannot escape an intermediate slice even when it would still fit the original
+backing buffer. Bounds use `size <= parent.size - offset` after validating
+the offset, avoiding `offset + size` overflow. Derived GPU, CPU, and backing
+offset additions are checked separately.
+
+`size == 0` creates an empty slice and is valid through the parent endpoint.
+It is not the whole-buffer convention used by selected barrier, fill, flush,
+and invalidate operations.
+
+`unchecked_subspan` is reserved for already-proven hot paths and tests that
+deliberately construct invalid spans. The deprecated `subspan` alias forwards
+to it only for source compatibility.
+
 ## 6. Buffer allocation
 
 Public descriptor:

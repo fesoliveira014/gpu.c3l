@@ -169,6 +169,20 @@ GpuSpan.gpu must be aligned for the intended shader layout.
 GpuSpan.buffer identifies the backing buffer for barriers/copies/debug.
 ```
 
+`GpuSpan` slicing is explicit:
+
+```text
+span.checked_subspan(offset, size)   -> GpuSpan?
+span.unchecked_subspan(offset, size) -> GpuSpan
+```
+
+`checked_subspan` returns `INVALID_ARGUMENT` if the requested exact-sized
+range escapes its immediate parent or if advancing the GPU address, non-null
+CPU pointer, or backing-buffer offset would overflow. A zero size is an empty
+slice, including at the parent endpoint; it does not mean “to end.”
+`unchecked_subspan` performs only the metadata additions. The historical
+`subspan` name remains as a deprecated unchecked alias for source migration.
+
 ## 4. Faults
 
 Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix. `faults.c3` documents each fault at its definition; the table below maps them to the operations that raise them.

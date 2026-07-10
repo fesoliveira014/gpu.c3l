@@ -132,7 +132,7 @@ fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* 
     };
     arena.retire_count++;
     arena.virtual_tail = tail + size;
-    return arena.span.subspan((usz)(tail % arena.size), size);
+    return arena.span.unchecked_subspan((usz)(tail % arena.size), size);
 }
 
 fn void drain_dedicated_transfers(VkDeviceState* state) @private {
