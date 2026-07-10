@@ -80,6 +80,32 @@ fn void texture_descriptor_exhaustion() @test {
     gpu::destroy_texture_descriptor(&device, b)!!;
 }
 
+fn void texture_descriptor_exhaustion_does_not_cache_failed_views() @test {
+    gpu::Device device = make_heap_test_device(1, 4);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureIndex occupied = gpu::create_texture_descriptor(&device, texture, null)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    assert(cached_texture_view_count(state, texture) == 0, "the fixture starts with an empty view cache");
+
+    for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
+        gpu::TextureViewDesc view = {
+            .base_mip    = i % 4,
+            .mip_count   = 1,
+            .base_layer  = i / 4,
+            .layer_count = 1,
+        };
+        fault full = @catch(gpu::create_texture_descriptor(&device, texture, &view));
+        assert(full == gpu::DESCRIPTOR_HEAP_FULL, "an exhausted heap rejects the descriptor");
+        assert(cached_texture_view_count(state, texture) == 0,
+            "a rejected descriptor leaves the texture view cache unchanged");
+    }
+
+    gpu::destroy_texture_descriptor(&device, occupied)!!;
+}
+
 fn void texture_descriptor_deferred_reuse() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer gpu::destroy_device(&device)!!;
@@ -330,6 +356,42 @@ fn void texture_descriptors_failed_batch_restores_full_view_capacity() @test {
         "all cache entries remain available after repeated failed batches");
 
     foreach (index : live) gpu::destroy_texture_descriptor(&device, index)!!;
+}
+
+fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureHandle stale_texture = make_heap_texture(&device);
+    gpu::destroy_texture(&device, stale_texture)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
+
+    gpu::TextureViewDesc first_view = {
+        .base_mip    = 0,
+        .mip_count   = 1,
+        .base_layer  = 0,
+        .layer_count = 1,
+    };
+    gpu::TextureViewDesc second_view = {
+        .base_mip    = 1,
+        .mip_count   = 1,
+        .base_layer  = 1,
+        .layer_count = 1,
+    };
+    gpu::TextureDescriptorDesc[3] descs = {
+        { .texture = texture, .view = first_view },
+        { .texture = texture, .view = second_view },
+        { .texture = stale_texture },
+    };
+    gpu::TextureIndex[3] indices;
+    fault batch_fault = @catch(gpu::create_texture_descriptors(&device, descs[..], indices[..]));
+    assert(batch_fault == gpu::INVALID_HANDLE, "a fault after two new views rejects the batch");
+    assert(cached_texture_view_count(state, texture) == 0,
+        "rollback removes every view created by the failed transaction");
+    assert(!slot.views[0].used && !slot.views[1].used,
+        "rollback restores both cache cells to their prior unused state");
 }
 
 fn void texture_descriptors_failed_batch_preserves_existing_and_duplicate_views() @test {
