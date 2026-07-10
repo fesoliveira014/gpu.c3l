@@ -148,6 +148,7 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
     }
 
     reset_frame_arena(state, state.frame_index)!;
+    release_commands_for_frame(state, state.frame_index);
     // Only pools dirtied since this slot last reset pay
     // the driver call; idle contexts cost nothing per frame.
     state.pools_reset_last_frame = 0;
