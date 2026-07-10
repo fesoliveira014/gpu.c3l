@@ -269,6 +269,16 @@ DescriptorSlot
 
 Initial policy should validate descriptor use in debug builds and report leaked descriptors at device destruction.
 
+Batch creation uses a prepare/commit transaction under the resource lock.
+Preparation validates every item and resolves its view without consuming
+descriptor slots, changing generations, draining ready retires, or writing
+outputs. It records only cache misses created by the transaction. If a later
+item faults, those Vulkan image views are destroyed exactly once and their full
+prior cache cells are restored; default, pre-existing, and duplicate views are
+untouched. After complete preparation, commit drains the ready retire prefix,
+allocates every descriptor, publishes outputs, and performs the existing heap
+writes.
+
 ## 11. Shader and pipeline implementation
 
 ### Shader modules
