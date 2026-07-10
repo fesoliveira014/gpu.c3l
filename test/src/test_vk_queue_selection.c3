@@ -96,6 +96,46 @@ fn void unsuitable_high_score_falls_back_and_preserves_families() @test {
     );
 }
 
+fn void higher_scored_suitable_candidate_replaces_first_and_preserves_families() @test {
+    vk::QueueFamilies first_families = { .graphics = 1, .compute = 1, .transfer = 1 };
+    vk::QueueFamilies higher_scored_families = {
+        .graphics = 3,
+        .compute = 5,
+        .compute_index = 1,
+        .transfer = 7,
+        .async_compute = true,
+    };
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(
+            device: 0x30,
+            score: 50,
+            suitable: true,
+            families: first_families,
+        ),
+        candidate(
+            device: 0x40,
+            score: 100,
+            suitable: true,
+            families: higher_scored_families,
+        ),
+    };
+
+    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
+    assert(
+        selected.physical_device == fake_physical_device(0x40),
+        "higher-scored suitable adapter replaces first"
+    );
+    assert(selected.families.graphics == 3, "replacement graphics family preserved");
+    assert(
+        selected.families.compute == 5 && selected.families.compute_index == 1,
+        "replacement compute family preserved"
+    );
+    assert(
+        selected.families.transfer == 7 && selected.families.async_compute,
+        "replacement transfer and async fields preserved"
+    );
+}
+
 fn void device_score_wins_without_async_bonus() @test {
     vk::QueueFamilies alias_families = { .graphics = 1, .compute = 1, .transfer = 1 };
     vk::QueueFamilies async_families = {
