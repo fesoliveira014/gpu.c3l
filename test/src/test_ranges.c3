@@ -67,7 +67,7 @@ fn void checked_subspan_bounds_and_nesting() @test {
     assert(overflowing_size == gpu::INVALID_ARGUMENT, "maximum size cannot wrap through validation");
 }
 
-fn void checked_subspan_zero_size_is_empty() @test {
+fn void checked_subspan_rejects_zero_size() @test {
     char[64] backing;
     GpuSpan span = {
         .gpu    = (GpuAddress)0x2000,
@@ -76,38 +76,31 @@ fn void checked_subspan_zero_size_is_empty() @test {
         .offset = 10,
     };
 
-    GpuSpan middle = span.checked_subspan(16, 0)!!;
-    GpuSpan endpoint = span.checked_subspan(64, 0)!!;
-
-    assert(middle.size == 0, "zero size remains an empty slice");
-    assert((ulong)middle.gpu == 0x2010, "empty slice advances GPU address");
-    assert(middle.cpu == (char*)&backing + 16, "empty slice advances CPU pointer");
-    assert(middle.offset == 26, "empty slice advances backing offset");
-    assert(endpoint.size == 0, "empty endpoint slice succeeds");
-    assert((ulong)endpoint.gpu == 0x2040, "endpoint slice advances to parent end");
-    assert(endpoint.cpu == (char*)&backing + 64, "endpoint CPU pointer advances to parent end");
-    assert(endpoint.offset == 74, "endpoint backing offset advances to parent end");
+    fault middle = @catch(span.checked_subspan(16, 0));
+    fault endpoint = @catch(span.checked_subspan(64, 0));
+    assert(middle == gpu::INVALID_ARGUMENT, "zero-size middle slice faults");
+    assert(endpoint == gpu::INVALID_ARGUMENT, "zero-size endpoint slice faults");
 }
 
 fn void checked_subspan_rejects_metadata_overflow() @test {
     GpuSpan gpu_overflow = {
         .gpu  = (GpuAddress)ulong::max,
-        .size = 1,
+        .size = 2,
     };
     GpuSpan offset_overflow = {
         .gpu    = (GpuAddress)1,
-        .size   = 1,
+        .size   = 2,
         .offset = usz::max,
     };
     GpuSpan cpu_overflow = {
         .gpu  = (GpuAddress)1,
         .cpu  = (void*)(uptr)uptr::max,
-        .size = 1,
+        .size = 2,
     };
 
-    fault gpu_fault = @catch(gpu_overflow.checked_subspan(1, 0));
-    fault offset_fault = @catch(offset_overflow.checked_subspan(1, 0));
-    fault cpu_fault = @catch(cpu_overflow.checked_subspan(1, 0));
+    fault gpu_fault = @catch(gpu_overflow.checked_subspan(1, 1));
+    fault offset_fault = @catch(offset_overflow.checked_subspan(1, 1));
+    fault cpu_fault = @catch(cpu_overflow.checked_subspan(1, 1));
 
     assert(gpu_fault == gpu::INVALID_ARGUMENT, "GPU address addition cannot wrap");
     assert(offset_fault == gpu::INVALID_ARGUMENT, "backing offset addition cannot wrap");

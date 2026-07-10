@@ -176,12 +176,11 @@ span.checked_subspan(offset, size)   -> GpuSpan?
 span.unchecked_subspan(offset, size) -> GpuSpan
 ```
 
-`checked_subspan` returns `INVALID_ARGUMENT` if the requested exact-sized
-range escapes its immediate parent or if advancing the GPU address, non-null
-CPU pointer, or backing-buffer offset would overflow. A zero size is an empty
-slice, including at the parent endpoint; it does not mean “to end.”
-`unchecked_subspan` performs only the metadata additions. The historical
-`subspan` name remains as a deprecated unchecked alias for source migration.
+`checked_subspan` returns `INVALID_ARGUMENT` for zero size, if the requested
+exact-sized range escapes its immediate parent, or if advancing the GPU
+address, non-null CPU pointer, or backing-buffer offset would overflow.
+`unchecked_subspan` performs only the metadata additions; callers must prove
+the range and derived metadata are valid before using it.
 
 ## 4. Faults
 
@@ -191,7 +190,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, `create_graphics_pipeline`, texture creates, sampler/aniso paths | validation layers not installed; presentation off; missing optional or required device feature; unsupported image format or usage |
-| `INVALID_ARGUMENT` | any create/upload/export; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value, or a subspan outside its parent/with overflowing metadata; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | any handle-taking call, `cmd_*`, `end_commands`, `submit` | use after destroy (generation mismatch), never-live handle, consumed command-list alias, or abandoned command token after its frame-slot pool resets |
 | `INVALID_RESOURCE_STATE` | `create_swapchain`, `begin_frame`, `end_frame`, `alloc_frame_span`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | the native window is already bound to another Vulkan surface; double begin; end or frame-span allocation while idle; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |

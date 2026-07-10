@@ -245,10 +245,11 @@ fn GpuSpan GpuSpan.unchecked_subspan(self, usz offset, usz size) {
     };
 }
 
-<* Derive an exact-sized sub-range within this immediate parent. Zero size is
-   an empty slice. Faults INVALID_ARGUMENT when the range escapes the parent or
-   any derived address/offset addition would overflow. *>
+<* Derive a non-empty exact-sized sub-range within this immediate parent.
+   Faults INVALID_ARGUMENT for zero size, a range that escapes the parent, or
+   any derived address/offset addition that would overflow. *>
 fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
+    if (size == 0) return INVALID_ARGUMENT~;
     if (!range_fits(self.size, offset, size)) return INVALID_ARGUMENT~;
 
     ulong gpu_address = (ulong)self.gpu;
@@ -257,11 +258,5 @@ fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
     if (self.cpu != null && (uptr)offset > uptr::max - (uptr)self.cpu) {
         return INVALID_ARGUMENT~;
     }
-    return self.unchecked_subspan(offset, size);
-}
-
-<* Deprecated compatibility alias for the historical unchecked operation. *>
-fn GpuSpan GpuSpan.subspan(self, usz offset, usz size)
-    @deprecated("use checked_subspan or unchecked_subspan") {
     return self.unchecked_subspan(offset, size);
 }

@@ -287,13 +287,11 @@ backing buffer. Bounds use `size <= parent.size - offset` after validating
 the offset, avoiding `offset + size` overflow. Derived GPU, CPU, and backing
 offset additions are checked separately.
 
-`size == 0` creates an empty slice and is valid through the parent endpoint.
-It is not the whole-buffer convention used by selected barrier, fill, flush,
-and invalidate operations.
+`size == 0` faults `INVALID_ARGUMENT`, matching the other public span
+producers and avoiding ambiguity with operations where zero means “to end.”
 
 `unchecked_subspan` is reserved for already-proven hot paths and tests that
-deliberately construct invalid spans. The deprecated `subspan` alias forwards
-to it only for source compatibility.
+deliberately construct invalid spans; no historical unchecked alias remains.
 
 ## 6. Buffer allocation
 
