@@ -60,6 +60,11 @@ def main():
             ROOT / "test" / "shaders" / "generated" / f"{name}_abi.glsl",
             [ROOT / "test" / "abi" / f"{name}.abi"])
 
+    gen(gen_bin, check, "gpu_bench",
+        ROOT / "test" / "src" / "overlap_abi.c3",
+        ROOT / "test" / "shaders" / "generated" / "overlap_abi.glsl",
+        [ROOT / "test" / "abi" / "overlap.abi"])
+
 
 if __name__ == "__main__":
     try:
