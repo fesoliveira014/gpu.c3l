@@ -116,12 +116,12 @@ fn vk::Result reject_frame_submit(vk::Queue queue, uint submit_count, vk::Submit
     return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 }
 
-
 fn vk::Result capture_retry_frame_submit(vk::Queue queue, uint submit_count, vk::SubmitInfo2* submits, vk::Fence fence) {
     assert(submit_count == 1, "retry injects one submit");
     vk::SubmitInfo2* submit = &submits[0];
     retried_frame_wait_count = submit.wait_semaphore_info_count;
     assert(retried_frame_wait_count == 2, "retry preserves both cross-queue waits");
+    // Zero the waits after capture: the fabricated aux values are never signaled and would hang teardown.
     for (uint i = 0; i < retried_frame_wait_count; i++) {
         retried_frame_wait_values[i] = submit.p_wait_semaphore_infos[i].value;
         retried_frame_wait_semaphores[i] = submit.p_wait_semaphore_infos[i].semaphore;
@@ -131,6 +131,7 @@ fn vk::Result capture_retry_frame_submit(vk::Queue queue, uint submit_count, vk:
     retried_frame_signal_value = submit.p_signal_semaphore_infos[0].value;
     return vk::queue_submit2(queue, submit_count, submits, fence);
 }
+
 fn void failed_end_frame_submit_preserves_retry_state() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer gpu::destroy_device(&device)!!;
