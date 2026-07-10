@@ -36,16 +36,6 @@ fn void texture_unsupported_desc_rejected() @test {
     gpu::Device device = make_texture_test_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::TextureDesc packed_depth = {
-        .dimension = gpu::TextureDimension.TEX_2D,
-        .width     = 16,
-        .height    = 16,
-        .format    = gpu::Format.D24_UNORM_S8_UINT,
-        .usage     = { .depth_attach },
-    };
-    fault packed_fault = @catch(gpu::create_texture(&device, &packed_depth));
-    assert(packed_fault == gpu::INVALID_ARGUMENT, "D24_UNORM_S8_UINT faults INVALID_ARGUMENT");
-
     gpu::TextureDesc depth_storage = {
         .dimension = gpu::TextureDimension.TEX_2D,
         .width     = 16,
@@ -271,7 +261,7 @@ fn void raised_texture_capacity_holds_more_than_default() @test {
     foreach (h : handles) gpu::destroy_texture(&device, h)!!;
 }
 
-fn void unsupported_dimensions_and_formats_fault() @test {
+fn void unsupported_dimensions_fault() @test {
     gpu::Device device = make_texture_test_device();
     defer gpu::destroy_device(&device)!!;
 
@@ -287,16 +277,6 @@ fn void unsupported_dimensions_and_formats_fault() @test {
         fault f = @catch(gpu::create_texture(&device, &desc));
         assert(f == gpu::INVALID_ARGUMENT, "unsupported dimension faults INVALID_ARGUMENT");
     }
-
-    gpu::TextureDesc d24 = {
-        .dimension = gpu::TextureDimension.TEX_2D,
-        .width     = 4,
-        .height    = 4,
-        .format    = gpu::Format.D24_UNORM_S8_UINT,
-        .usage     = { .depth_attach },
-    };
-    fault f = @catch(gpu::create_texture(&device, &d24));
-    assert(f == gpu::INVALID_ARGUMENT, "D24S8 faults INVALID_ARGUMENT");
 }
 
 fn void transfer_only_texture_round_trips() @test {
@@ -338,4 +318,154 @@ fn void transfer_only_texture_round_trips() @test {
     for (uint i = 0; i < 64; i++) {
         assert(readback[i] == (char)i, "transfer-only texture round-trips bytes");
     }
+}
+fn bool support_feature_for_usage(
+    gpu::TextureFormatSupport support,
+    gpu::TextureUsage usage,
+) {
+    if (usage.sampled) return support.features.sampled;
+    if (usage.storage) return support.features.storage;
+    if (usage.color_attach) return support.features.color_attach;
+    if (usage.depth_attach) return support.features.depth_attach;
+    if (usage.transfer_src) return support.features.transfer_src;
+    return support.features.transfer_dst;
+}
+
+fn void texture_capability_queries_match_creation() @test {
+    gpu::Device device = make_texture_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::Format[16] formats = {
+        gpu::Format.R8_UNORM,
+        gpu::Format.R8_UINT,
+        gpu::Format.RG8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA8_SRGB,
+        gpu::Format.BGRA8_UNORM,
+        gpu::Format.BGRA8_SRGB,
+        gpu::Format.R16_UINT,
+        gpu::Format.R16_FLOAT,
+        gpu::Format.RG16_FLOAT,
+        gpu::Format.RGBA16_FLOAT,
+        gpu::Format.R32_UINT,
+        gpu::Format.R32_FLOAT,
+        gpu::Format.RG32_FLOAT,
+        gpu::Format.RGBA32_FLOAT,
+        gpu::Format.D32_FLOAT,
+    };
+    gpu::TextureUsage[6] usages = {
+        { .sampled },
+        { .storage },
+        { .color_attach },
+        { .depth_attach },
+        { .transfer_src },
+        { .transfer_dst },
+    };
+
+    foreach (format : formats) {
+        gpu::TextureFormatSupport support = gpu::get_texture_format_support(&device, format)!!;
+        assert(support.dimensions.tex_2d, "creatable formats report 2D support");
+        assert(!support.dimensions.tex_1d && !support.dimensions.tex_3d
+            && !support.dimensions.cube, "unimplemented dimensions stay masked");
+        assert(support.sample_counts.one, "single-sample support is reported");
+        assert(!support.sample_counts.two && !support.sample_counts.four
+            && !support.sample_counts.eight && !support.sample_counts.sixteen
+            && !support.sample_counts.thirty_two && !support.sample_counts.sixty_four,
+            "unimplemented sample counts stay masked");
+
+        bool is_depth = format == gpu::Format.D32_FLOAT;
+        foreach (usage : usages) {
+            if (is_depth && (usage.storage || usage.color_attach)) continue;
+            if (!is_depth && usage.depth_attach) continue;
+
+            gpu::TextureDesc desc = {
+                .dimension = gpu::TextureDimension.TEX_2D,
+                .width     = 4,
+                .height    = 4,
+                .format    = format,
+                .usage     = usage,
+            };
+            bool supported = gpu::supports_texture_desc(&device, &desc)!!;
+            assert(support_feature_for_usage(support, usage) == supported,
+                "single-usage format summary matches exact descriptor support");
+            if (supported) {
+                gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+                gpu::destroy_texture(&device, texture)!!;
+            } else {
+                fault create_fault = @catch(gpu::create_texture(&device, &desc));
+                assert(create_fault == gpu::UNSUPPORTED_FEATURE,
+                    "adapter-rejected descriptor faults UNSUPPORTED_FEATURE");
+            }
+        }
+    }
+}
+
+fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
+    gpu::Device device = make_texture_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureFormatSupport undefined_support =
+        gpu::get_texture_format_support(&device, gpu::Format.UNDEFINED)!!;
+    assert((uint)undefined_support.features == 0
+        && (uint)undefined_support.dimensions == 0
+        && (uint)undefined_support.sample_counts == 0,
+        "undefined format reports empty support");
+
+    gpu::TextureFormatSupport d24_support =
+        gpu::get_texture_format_support(&device, gpu::Format.D24_UNORM_S8_UINT)!!;
+    gpu::TextureDesc d24_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.D24_UNORM_S8_UINT,
+        .usage     = { .depth_attach },
+    };
+    bool d24_supported = gpu::supports_texture_desc(&device, &d24_desc)!!;
+    assert(d24_support.features.depth_attach == d24_supported,
+        "D24S8 summary matches exact depth-attachment support");
+    if (d24_supported) {
+        gpu::TextureHandle d24 = gpu::create_texture(&device, &d24_desc)!!;
+        gpu::destroy_texture(&device, d24)!!;
+    } else {
+        fault d24_fault = @catch(gpu::create_texture(&device, &d24_desc));
+        assert(d24_fault == gpu::UNSUPPORTED_FEATURE,
+            "adapter-rejected D24S8 faults UNSUPPORTED_FEATURE");
+    }
+    assert(!d24_support.features.transfer_src && !d24_support.features.transfer_dst,
+        "D24S8 transfers stay masked without a public aspect selector");
+    gpu::TextureDesc d24_transfer = d24_desc;
+    d24_transfer.usage = { .transfer_dst };
+    assert(!gpu::supports_texture_desc(&device, &d24_transfer)!!,
+        "D24S8 transfer descriptor preflights false");
+    fault d24_transfer_fault = @catch(gpu::create_texture(&device, &d24_transfer));
+    assert(d24_transfer_fault == gpu::INVALID_ARGUMENT,
+        "D24S8 transfer creation faults INVALID_ARGUMENT");
+
+    gpu::TextureDesc invalid = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = 16,
+        .height     = 16,
+        .mip_levels = 6,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled },
+    };
+    assert(!gpu::supports_texture_desc(&device, &invalid)!!,
+        "deterministically invalid mip count preflights false");
+    fault invalid_fault = @catch(gpu::create_texture(&device, &invalid));
+    assert(invalid_fault == gpu::INVALID_ARGUMENT,
+        "deterministically invalid descriptor keeps INVALID_ARGUMENT");
+
+    gpu::TextureDesc beyond_adapter = {
+        .dimension    = gpu::TextureDimension.TEX_2D,
+        .width        = 1,
+        .height       = 1,
+        .array_layers = 4294967295,
+        .format       = gpu::Format.RGBA8_UNORM,
+        .usage        = { .sampled },
+    };
+    assert(!gpu::supports_texture_desc(&device, &beyond_adapter)!!,
+        "descriptor beyond adapter layer limits preflights false");
+    fault unsupported_fault = @catch(gpu::create_texture(&device, &beyond_adapter));
+    assert(unsupported_fault == gpu::UNSUPPORTED_FEATURE,
+        "adapter-limit rejection faults UNSUPPORTED_FEATURE before allocation");
 }

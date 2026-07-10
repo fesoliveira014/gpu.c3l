@@ -27,10 +27,13 @@ page doesn't explain it, that's a bug in this page — file an issue.
   `docs/getting_started.md`.
 - **C3 0.8.0 pinned.** The language is pre-1.0 and syntax moves between
   releases; the pin is deliberate and bumped explicitly.
-- **2D textures only, and no D24S8.** `TEX_1D`/`TEX_3D`/`CUBE` and
-  `D24_UNORM_S8_UINT` are declared for API stability but fault
-  `INVALID_ARGUMENT` at creation — the backend implements 2D images and
-  gates D24S8 out statically until a format-properties query exists.
+- **2D, single-sample textures only.** `TEX_1D`/`TEX_3D`/`CUBE` and
+  multisample counts remain outside the backend profile. Unsupported profile
+  values preflight false and fault `INVALID_ARGUMENT` at creation.
+- **D24S8 texture support is adapter-dependent.** Query before creation and
+  choose a fallback when unsupported. D24S8 transfer usages stay masked because
+  copies cannot select depth versus stencil. Graphics pipelines remain D32-only, so
+  D24S8 is currently useful only outside the graphics depth-attachment path.
 - **Matrices are not a schema type.** The ABI DSL has no `mat4`; matrices
   travel as four `vec4` columns and are reassembled in the shader
   (`mat4(c0, c1, c2, c3)`). This keeps layout rules trivial (`docs/shader_abi.md`).
@@ -86,3 +89,19 @@ Anything the device can answer at runtime lives in `DeviceCaps` (filled at
 feature booleans (`draw_indirect_count`, `descriptor_buffer`, …), and
 `get_present_mode_support` answers per-surface present modes. Prefer
 querying over hardcoding — the samples show the pattern.
+
+Texture format support is queried separately because it depends on both the
+backend profile and the physical adapter:
+
+- `get_texture_format_support(device, format)` reports individually
+  creatable optimal-tiling usages, linear filterability, backend dimensions,
+  and backend sample counts. Individual usage bits do not guarantee that a
+  combination is supported.
+- `supports_texture_desc(device, desc)` checks an exact descriptor,
+  including combined usages and adapter extent/mip/layer limits, without
+  allocating. Use it to preflight optional formats and adapt asset choices.
+
+The required backend profile is currently 2D and single-sample. Per-format
+usages and filterability are optional adapter capabilities. The support summary
+therefore masks 1D, 3D, cube, and multisample counts. D24S8 is reported only
+when its exact texture usage is creatable on the selected adapter.

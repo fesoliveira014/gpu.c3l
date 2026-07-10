@@ -32,7 +32,8 @@
       "type": "test",
       "sources": [
         "../src/test_handles.c3",
-        "../src/test_ranges.c3"
+        "../src/test_ranges.c3",
+        "../src/test_texture_support.c3"
       ]
     },
     "shader_abi": {

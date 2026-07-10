@@ -40,6 +40,8 @@ alias CmdTextureBarrierFn   = fn void? (CommandList*, TextureBarrier*);
 alias CreateSemaphoreFn     = fn SemaphoreHandle? (Device*, SemaphoreDesc*);
 alias DestroySemaphoreFn    = fn void? (Device*, SemaphoreHandle);
 alias WaitSemaphoreFn       = fn void? (Device*, SemaphoreHandle, SemaphoreValue, ulong);
+alias GetTextureFormatSupportFn = fn TextureFormatSupport? (Device*, Format);
+alias SupportsTextureDescFn     = fn bool? (Device*, TextureDesc*);
 alias CreateTextureFn           = fn TextureHandle? (Device*, TextureDesc*);
 alias DestroyTextureFn          = fn void? (Device*, TextureHandle);
 alias CreateTextureDescriptorFn  = fn TextureIndex? (Device*, TextureHandle, TextureViewDesc*);
@@ -115,6 +117,8 @@ struct BackendVTable {
     CreateSemaphoreFn       create_semaphore;
     DestroySemaphoreFn      destroy_semaphore;
     WaitSemaphoreFn         wait_semaphore;
+    GetTextureFormatSupportFn get_texture_format_support;
+    SupportsTextureDescFn     supports_texture_desc;
     CreateTextureFn         create_texture;
     DestroyTextureFn        destroy_texture;
     CreateTextureDescriptorFn  create_texture_descriptor;

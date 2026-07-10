@@ -164,7 +164,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
-| `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, sampler/aniso paths | validation layers not installed; presentation off; missing device feature |
+| `UNSUPPORTED_FEATURE` | `create_device`, `create_texture`, `create_swapchain`, sampler/aniso paths | validation layers not installed; presentation off; adapter rejects a valid texture descriptor; missing device feature |
 | `INVALID_ARGUMENT` | any create/upload/export; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value; mixed-queue-kind submit; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; a list already tracking `PENDING_LAYOUT_CAP` (16) distinct textures records a 17th; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | any handle-taking call | use after destroy (generation mismatch) or never-live handle |
 | `INVALID_RESOURCE_STATE` | `cmd_texture_barrier`, readback helpers | `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
@@ -300,7 +300,7 @@ R32_FLOAT
 RG32_FLOAT
 RGBA32_FLOAT
 D32_FLOAT
-D24_UNORM_S8_UINT   (backend-unsupported: creation faults INVALID_ARGUMENT)
+D24_UNORM_S8_UINT   (adapter-dependent: query before creation)
 ```
 
 ### Texture descriptors
@@ -315,12 +315,42 @@ bitstruct TextureUsage : uint
     bool depth_attach : 3
     bool transfer_src : 4
     bool transfer_dst : 5
+    bool shared_queues : 6
+
+TextureFormatFeatures
+    bool sampled
+    bool storage
+    bool color_attach
+    bool depth_attach
+    bool transfer_src
+    bool transfer_dst
+    bool linear_filter
+
+TextureDimensionSupport
+    bool tex_1d
+    bool tex_2d
+    bool tex_3d
+    bool cube
+
+TextureSampleCountSupport
+    bool one
+    bool two
+    bool four
+    bool eight
+    bool sixteen
+    bool thirty_two
+    bool sixty_four
+
+TextureFormatSupport
+    TextureFormatFeatures features
+    TextureDimensionSupport dimensions
+    TextureSampleCountSupport sample_counts
 
 TextureDimension
-    TEX_1D   (backend-unsupported — faults at creation)
-    TEX_2D
-    TEX_3D   (backend-unsupported — faults at creation)
-    CUBE     (backend-unsupported — faults at creation)
+    TEX_1D   (query false; creation faults INVALID_ARGUMENT)
+    TEX_2D   (current backend profile)
+    TEX_3D   (query false; creation faults INVALID_ARGUMENT)
+    CUBE     (query false; creation faults INVALID_ARGUMENT)
 
 TextureDesc
     TextureDimension dimension
@@ -348,12 +378,18 @@ TextureDescriptorDesc
 ### Texture functions
 
 ```text
+get_texture_format_support(Device* device, Format format) -> TextureFormatSupport?
+supports_texture_desc(Device* device, TextureDesc* desc) -> bool?
 create_texture(Device* device, TextureDesc* desc) -> TextureHandle?
 destroy_texture(Device* device, TextureHandle texture) -> void?
 create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) -> TextureIndex?
 destroy_texture_descriptor(Device* device, TextureIndex index) -> void?
 create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) -> void?
 ```
+
+`get_texture_format_support` reports library-creatable support, not every raw Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling query used by creation, but the bits are independent; use `supports_texture_desc` for a usage combination. The backend profile masks every dimension except 2D and every sample count except one. Per-format usages, D24S8, and linear filtering remain adapter-dependent.
+
+`supports_texture_desc` checks the exact optimal-tiling format, combined usage (excluding the queue-sharing policy flag), normalized extent, mip and layer counts, and the required single-sample image properties without allocating. D24S8 transfer usages are masked because the copy API cannot select depth versus stencil aspects. A false result caused by malformed or backend-unsupported input corresponds to `INVALID_ARGUMENT` at creation; a structurally valid descriptor rejected by the adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion can still make creation fail after a true capability result.
 
 `TextureHandle` owns the image. `TextureIndex` is a descriptor heap entry used by shaders.
 
