@@ -297,6 +297,10 @@ descriptor heap bindings match convention
 
 Compute pipeline creation:
 
+Before shader lookup, reject a push-constant size below `RootPush::size`, not
+divisible by four, or above `DeviceCaps.max_push_constant_size`. These public
+input faults return `INVALID_ARGUMENT` before any Vulkan call.
+
 ```text
 shader module
 pipeline layout with root pointer push constant
@@ -321,7 +325,14 @@ vk::Pipeline
 
 ### Pipeline cache
 
-Two layers. A descriptor-keyed dedup cache (`PipelineKey` over the immutable pipeline state; entries refcounted so identical descriptors alias one `vk::Pipeline`) sits in front of a driver `vk::PipelineCache`. The driver cache is created with `DeviceDesc.pipeline_cache_data` as initial data and exported via `get_pipeline_cache_size` / `get_pipeline_cache_data`.
+Two layers. A descriptor-keyed dedup cache (`PipelineKey` over immutable state,
+with refcounted aliases) sits in front of a driver `vk::PipelineCache`. The
+driver cache is created with `DeviceDesc.pipeline_cache_data` as initial data
+and exported through `get_pipeline_cache_size` / `get_pipeline_cache_data`.
+
+Compute pipeline layouts are shared per push-constant size in a packed
+device-owned cache. Host storage uses pipeline capacity as an initial hint and
+grows to the device's finite valid-size count.
 
 ## 12. Command buffers
 

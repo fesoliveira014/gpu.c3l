@@ -79,7 +79,7 @@ struct VkDeviceState {
     PipelineTable              pipelines;
     PipelineCacheTable         pipeline_cache;
     vk::PipelineLayout         graphics_layout;
-    ComputeLayoutEntry[COMPUTE_LAYOUT_CAP] compute_layouts;
+    ComputeLayoutCache         compute_layout_cache;
     vk::PipelineCache          driver_cache;
     TextureTable               textures;
     SwapchainTable             swapchains;
@@ -656,6 +656,7 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .async_compute              = inputs.async_compute,
         .max_texture_descriptors    = inputs.texture_capacity,
         .max_sampler_descriptors    = inputs.sampler_capacity,
+        .max_push_constant_size     = props.limits.max_push_constants_size,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,
