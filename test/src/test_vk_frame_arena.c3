@@ -4,8 +4,8 @@ import gpu;
 import gpu::vk @public;
 import vk;
 
-// Headless (lavapipe): frame upload arena bump allocation, reset across the
-// frame loop, ARENA_FULL, and the timeline-gated reset.
+// Pure range-boundary coverage plus headless (lavapipe) frame upload arena
+// bump allocation, reset, ARENA_FULL, and timeline-gated reset.
 
 fn void frame_arena_range_preserves_fault_taxonomy() @test {
     fault zero_size = @catch(gpu::vk::frame_arena_range(
@@ -33,10 +33,17 @@ fn void frame_arena_range_preserves_fault_taxonomy() @test {
         align: 1,
     ));
 
+    fault cursor_past_capacity = @catch(gpu::vk::frame_arena_range(
+        cursor: 257,
+        capacity: 256,
+        size: 1,
+        align: 1,
+    ));
     assert(zero_size == gpu::INVALID_ARGUMENT, "zero size remains invalid");
     assert(zero_align == gpu::INVALID_ARGUMENT, "zero alignment remains invalid");
     assert(bad_align == gpu::INVALID_ARGUMENT, "non-power-of-two alignment remains invalid");
     assert(huge_size == gpu::ARENA_FULL, "valid huge size exhausts the arena");
+    assert(cursor_past_capacity == gpu::ARENA_FULL, "cursor past capacity faults ARENA_FULL");
 }
 
 fn void frame_arena_range_handles_exact_end() @test {
