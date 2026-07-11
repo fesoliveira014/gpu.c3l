@@ -94,6 +94,7 @@ DeviceCaps
     bool async_compute
     uint max_texture_descriptors
     uint max_sampler_descriptors
+    uint max_push_constant_size
     usz min_uniform_alignment
     usz min_storage_alignment
     usz min_texel_buffer_alignment
@@ -437,7 +438,10 @@ ComputePipelineDesc
 create_compute_pipeline(Device* device, ComputePipelineDesc* desc) -> PipelineHandle?
 ```
 
-The first ABI requires at least an 8-byte push constant for the root pointer.
+The first ABI requires at least the 8-byte `RootPush` size. The requested size
+must be a multiple of four and no greater than
+`DeviceCaps.max_push_constant_size`, which reports the selected device's
+Vulkan `maxPushConstantsSize` limit.
 
 ### Graphics pipelines
 
