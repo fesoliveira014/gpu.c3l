@@ -103,15 +103,11 @@ fn gpu::GpuSpan write_color(gpu::Device* device, float[4] rgba) {
 }
 
 fn void record_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle depth) {
-    gpu::TextureBarrier to_attach = {
-        .texture       = depth,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.DEPTH_STENCIL,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.DEPTH_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.DEPTH_STENCIL,
-    };
+    gpu::TextureBarrier to_attach = gpu::texture_transition(
+        texture: depth,
+        before:  gpu::TextureUse.UNDEFINED,
+        after:   gpu::TextureUse.DEPTH_ATTACHMENT,
+    )!!;
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
 

@@ -33,6 +33,7 @@
       "sources": [
         "../src/test_handles.c3",
         "../src/test_ranges.c3",
+        "../src/test_texture_transition.c3",
         "../src/test_texture_support.c3"
       ]
     },

@@ -171,3 +171,23 @@ fn void polygon_mode_optional_gate() @test {
     assert(@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.LINE, false)) == gpu::UNSUPPORTED_FEATURE,
         "LINE without optional support faults UNSUPPORTED_FEATURE");
 }
+
+fn void combined_texture_hazards_map_to_both_access_bits() @test {
+    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.NONE) == 0,
+        "NONE maps to no Vulkan access");
+
+    ulong shader_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT;
+    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.SHADER_READ_WRITE) == shader_expected,
+        "shader read/write maps both access bits");
+
+    ulong color_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.COLOR_READ_WRITE) == color_expected,
+        "color read/write maps both access bits");
+
+    ulong depth_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.DEPTH_READ_WRITE) == depth_expected,
+        "depth read/write maps both access bits");
+}

@@ -36,10 +36,22 @@ Running example: every sample's `abi/` directory; flow documented in
 Goal: pixels from CPU to a sampled texture.
 
 ```c3
-// staging buffer (MemoryKind.STAGING) + one command list:
-// UNDEFINED → TRANSFER_DST barrier, copy, TRANSFER_DST → SHADER_READ barrier
+gpu::TextureBarrier to_dst = gpu::texture_transition(
+    texture: tex,
+    before:  gpu::TextureUse.UNDEFINED,
+    after:   gpu::TextureUse.TRANSFER_DESTINATION,
+)!;
+gpu::cmd_texture_barrier(&cmd, &to_dst)!;
+
 gpu::BufferTextureCopyDesc upload = { .src = staging_span, .texture = tex };
 gpu::cmd_copy_buffer_to_texture(&cmd, &upload)!;
+
+gpu::TextureBarrier to_sample = gpu::texture_transition(
+    texture: tex,
+    before:  gpu::TextureUse.TRANSFER_DESTINATION,
+    after:   gpu::TextureUse.SAMPLED_FRAGMENT,
+)!;
+gpu::cmd_texture_barrier(&cmd, &to_sample)!;
 ```
 
 Running example: `textured_cube` (single texture), `pbr_materials`

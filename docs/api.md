@@ -191,7 +191,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | `create_device`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation off; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value, or a subspan outside its parent/with overflowing metadata; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value, or a subspan outside its parent/with overflowing metadata; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | any handle-taking call, `cmd_*`, `end_commands`, `submit` | use after destroy (generation mismatch), never-live handle, consumed command-list alias, or abandoned command token after its frame-slot pool resets |
 | `INVALID_RESOURCE_STATE` | `create_swapchain`, `begin_frame`, `end_frame`, `alloc_frame_span`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | the native window is already bound to another Vulkan surface; double begin; end or frame-span allocation while idle; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
@@ -810,6 +810,10 @@ Hazard
     DEPTH_WRITE
     INDIRECT_READ
     PRESENT_READ
+    NONE
+    SHADER_READ_WRITE
+    COLOR_READ_WRITE
+    DEPTH_READ_WRITE
 
 BufferBarrier
     BufferHandle buffer
@@ -847,6 +851,37 @@ for the texture, else the tracked layout — or the barrier faults
 `INVALID_RESOURCE_STATE`. A recorded transition is staged on the list and
 only commits onto tracked state when the list submits; a list that never
 submits leaves tracked state untouched.
+
+For common whole-texture transitions, `TextureUse` maps resource intent to
+an exact synchronization tuple:
+
+| `TextureUse` | `Stage` | `Hazard` | `TextureLayout` |
+|---|---|---|---|
+| `UNDEFINED` | `HOST` | `NONE` | `UNDEFINED` |
+| `TRANSFER_DESTINATION` | `TRANSFER` | `TRANSFER_WRITE` | `TRANSFER_DST` |
+| `SAMPLED_COMPUTE` | `COMPUTE_SHADER` | `SHADER_READ` | `SHADER_READ` |
+| `SAMPLED_FRAGMENT` | `FRAGMENT_SHADER` | `SHADER_READ` | `SHADER_READ` |
+| `STORAGE_COMPUTE` | `COMPUTE_SHADER` | `SHADER_READ_WRITE` | `GENERAL` |
+| `COLOR_ATTACHMENT` | `COLOR_ATTACHMENT` | `COLOR_READ_WRITE` | `COLOR_ATTACHMENT` |
+| `DEPTH_ATTACHMENT` | `DEPTH_STENCIL` | `DEPTH_READ_WRITE` | `DEPTH_STENCIL` |
+| `PRESENT` | `PRESENT` | `PRESENT_READ` | `PRESENT` |
+
+```text
+texture_transition(TextureHandle texture, TextureUse before, TextureUse after)
+    -> TextureBarrier?
+```
+
+The constructor is pure: it does not inspect tracked layout, record a command,
+or insert synchronization. `UNDEFINED` is source-only and faults
+`INVALID_ARGUMENT` as `after`. Same-use barriers remain valid for explicit
+memory ordering. Presets intentionally cover only common cases; construct a
+raw `TextureBarrier` for transfer sources, other shader stages, read-only
+attachments, subresource-specific work, or any unusual tuple.
+
+The `UNDEFINED` preset's `HOST`/`NONE` source scope is only for first use or
+discard when no earlier GPU work still accesses the texture. Reinitializing a
+texture that an earlier submission may still read requires a raw barrier whose
+source stage and hazard cover that access.
 
 No command helper should silently insert barriers for a later use.
 
