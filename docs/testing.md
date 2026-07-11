@@ -367,6 +367,10 @@ invalid command state -> COMMAND_RECORDING_ERROR
 invalid descriptor index -> INVALID_HANDLE or DESCRIPTOR_HEAP_FULL as appropriate
 ```
 
+Pure Vulkan result-taxonomy tests cover generic fallback behavior,
+operation-specific mappings, fatal pipeline/cache fault preservation, partial
+enumeration, and bounded-wait timeout behavior without requiring a GPU.
+
 Tests should assert specific faults, not merely that some fault occurred.
 
 ## 15. Release verification checklist

@@ -354,6 +354,19 @@ Compute pipeline layouts are shared per push-constant size in a packed
 device-owned cache. Host storage uses pipeline capacity as an initial hint and
 grows to the device's finite valid-size count.
 
+### Result mapping
+
+The context-free Vulkan result mapper handles success, host/device allocation
+failures, explicit device loss, and missing features, extensions, or layers.
+Operations with additional result semantics use dedicated mappers: backend
+bootstrap, surface and swapchain work, texture and shader creation, pipeline
+creation, descriptor allocation, virtual-arena allocation, and enumeration.
+Unclassified native failures are logged and surface as `BACKEND_ERROR`; they
+must never be inferred as device loss.
+
+A rejected warm pipeline-cache blob may be retried with an empty cache. Host or
+device allocation failure and explicit device loss propagate without retry.
+
 ## 12. Command buffers
 
 Command pool policy:

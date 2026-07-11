@@ -120,39 +120,6 @@ fn vk::PresentModeKHR select_present_mode(vk::PresentModeKHR[] available, gpu::P
     return vk::PresentModeKHR.FIFO_KHR;
 }
 
-<* Map acquire outcomes without touching swapchain state. Pure. *>
-fn void? map_acquire_result(vk::Result result) {
-    switch (result) {
-        case vk::Result.SUCCESS:
-        case vk::Result.SUBOPTIMAL_KHR:
-            return;
-        case vk::Result.TIMEOUT:
-        case vk::Result.NOT_READY:
-            return gpu::WAIT_TIMEOUT~;
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
-            return gpu::SWAPCHAIN_OUT_OF_DATE~;
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-            return gpu::SURFACE_LOST~;
-        default:
-            return check(result);
-    }
-}
-
-<* Map present outcomes while preserving surface-recreation semantics. Pure. *>
-fn void? map_present_result(vk::Result result) {
-    switch (result) {
-        case vk::Result.SUCCESS:
-        case vk::Result.SUBOPTIMAL_KHR:
-            return;
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
-            return gpu::SWAPCHAIN_OUT_OF_DATE~;
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-            return gpu::SURFACE_LOST~;
-        default:
-            return check(result);
-    }
-}
-
 <* 0 = minimum + 1; a capability max of 0 means unbounded. Pure. *>
 fn uint clamp_image_count(uint requested, uint min_count, uint max_count) {
     uint count = requested == 0 ? min_count + 1 : requested;
@@ -207,7 +174,14 @@ fn vk::SurfaceKHR? create_platform_surface(VkDeviceState* state, gpu::SurfaceDes
                 .surface = surface.native_window,
             };
             if (vk::extensions.vk_create_wayland_surface_khr == null) return gpu::UNSUPPORTED_FEATURE~;
-            check(vk::extensions.vk_create_wayland_surface_khr(state.instance, &info, null, &vk_surface))!;
+            check_surface_result(
+                vk::extensions.vk_create_wayland_surface_khr(
+                    state.instance,
+                    &info,
+                    null,
+                    &vk_surface,
+                )
+            )!;
         case gpu::PlatformKind.X11:
             vk::XlibSurfaceCreateInfoKHR info = {
                 .s_type = vk::StructureType.XLIB_SURFACE_CREATE_INFO_KHR,
@@ -215,7 +189,14 @@ fn vk::SurfaceKHR? create_platform_surface(VkDeviceState* state, gpu::SurfaceDes
                 .window = (ulong)surface.native_window,
             };
             if (vk::extensions.vk_create_xlib_surface_khr == null) return gpu::UNSUPPORTED_FEATURE~;
-            check(vk::extensions.vk_create_xlib_surface_khr(state.instance, &info, null, &vk_surface))!;
+            check_surface_result(
+                vk::extensions.vk_create_xlib_surface_khr(
+                    state.instance,
+                    &info,
+                    null,
+                    &vk_surface,
+                )
+            )!;
         case gpu::PlatformKind.WIN32:
             vk::Win32SurfaceCreateInfoKHR info = {
                 .s_type    = vk::StructureType.WIN32_SURFACE_CREATE_INFO_KHR,
@@ -223,7 +204,14 @@ fn vk::SurfaceKHR? create_platform_surface(VkDeviceState* state, gpu::SurfaceDes
                 .hwnd      = surface.native_window,
             };
             if (vk::extensions.vk_create_win32surface_khr == null) return gpu::UNSUPPORTED_FEATURE~;
-            check(vk::extensions.vk_create_win32surface_khr(state.instance, &info, null, &vk_surface))!;
+            check_surface_result(
+                vk::extensions.vk_create_win32surface_khr(
+                    state.instance,
+                    &info,
+                    null,
+                    &vk_surface,
+                )
+            )!;
     }
     return vk_surface;
 }
@@ -233,7 +221,13 @@ fn vk::SurfaceKHR? create_platform_surface(VkDeviceState* state, gpu::SurfaceDes
    here. A zero clamped extent marks the slot dormant and creates nothing. *>
 fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, uint height, vk::SwapchainKHR old) @private {
     vk::SurfaceCapabilitiesKHR caps;
-    check(vk::extensions.vk_get_physical_device_surface_capabilities_khr(state.physical_device, slot.surface, &caps))!;
+    check_surface_result(
+        vk::extensions.vk_get_physical_device_surface_capabilities_khr(
+            state.physical_device,
+            slot.surface,
+            &caps,
+        )
+    )!;
 
     vk::Extent2D extent = clamp_extent(&caps, width, height);
     if (extent.width == 0 || extent.height == 0) {
@@ -244,16 +238,44 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
     }
 
     uint format_count = 0;
-    check(vk::extensions.vk_get_physical_device_surface_formats_khr(state.physical_device, slot.surface, &format_count, null))!;
+    check_surface_result(
+        vk::extensions.vk_get_physical_device_surface_formats_khr(
+            state.physical_device,
+            slot.surface,
+            &format_count,
+            null,
+        )
+    )!;
     uint mode_count = 0;
-    check(vk::extensions.vk_get_physical_device_surface_present_modes_khr(state.physical_device, slot.surface, &mode_count, null))!;
+    check_surface_result(
+        vk::extensions.vk_get_physical_device_surface_present_modes_khr(
+            state.physical_device,
+            slot.surface,
+            &mode_count,
+            null,
+        )
+    )!;
     if (format_count == 0 || mode_count == 0) return gpu::UNSUPPORTED_FEATURE~;
 
     @pool() {
         vk::SurfaceFormatKHR[] formats = mem::talloc_array(vk::SurfaceFormatKHR, (sz)format_count);
-        check(vk::extensions.vk_get_physical_device_surface_formats_khr(state.physical_device, slot.surface, &format_count, formats.ptr))!;
+        check_surface_enumeration_result(
+            vk::extensions.vk_get_physical_device_surface_formats_khr(
+                state.physical_device,
+                slot.surface,
+                &format_count,
+                formats.ptr,
+            )
+        )!;
         vk::PresentModeKHR[] modes = mem::talloc_array(vk::PresentModeKHR, (sz)mode_count);
-        check(vk::extensions.vk_get_physical_device_surface_present_modes_khr(state.physical_device, slot.surface, &mode_count, modes.ptr))!;
+        check_surface_enumeration_result(
+            vk::extensions.vk_get_physical_device_surface_present_modes_khr(
+                state.physical_device,
+                slot.surface,
+                &mode_count,
+                modes.ptr,
+            )
+        )!;
 
         gpu::Format format = select_surface_format(formats, slot.requested.preferred_format, slot.requested.srgb)!;
         vk::PresentModeKHR present_mode = select_present_mode(modes, slot.requested.present_mode);
@@ -280,13 +302,27 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
             .clipped            = vk::TRUE,
             .old_swapchain      = old,
         };
-        check(vk::extensions.vk_create_swapchain_khr(state.device, &create_info, null, &slot.swapchain))!;
+        check_swapchain_create_result(
+            vk::extensions.vk_create_swapchain_khr(
+                state.device,
+                &create_info,
+                null,
+                &slot.swapchain,
+            )
+        )!;
 
         uint got = 0;
         check(vk::extensions.vk_get_swapchain_images_khr(state.device, slot.swapchain, &got, null))!;
         if (got > MAX_SWAPCHAIN_IMAGES) return gpu::UNSUPPORTED_FEATURE~;
         vk::Image[MAX_SWAPCHAIN_IMAGES] images;
-        check(vk::extensions.vk_get_swapchain_images_khr(state.device, slot.swapchain, &got, &images[0]))!;
+        check_enumeration_result(
+            vk::extensions.vk_get_swapchain_images_khr(
+                state.device,
+                slot.swapchain,
+                &got,
+                &images[0],
+            )
+        )!;
 
         for (uint i = 0; i < got; i++) {
             vk::ImageViewCreateInfo view_info = vk::image_view_create_info()
@@ -381,7 +417,14 @@ fn gpu::SwapchainHandle? vk_create_swapchain(gpu::Device* device, gpu::SurfaceDe
     slot.surface = create_platform_surface(state, surface)!;
 
     uint supported = 0;
-    check(vk::extensions.vk_get_physical_device_surface_support_khr(state.physical_device, state.graphics_family, slot.surface, &supported))!;
+    check_surface_result(
+        vk::extensions.vk_get_physical_device_surface_support_khr(
+            state.physical_device,
+            state.graphics_family,
+            slot.surface,
+            &supported,
+        )
+    )!;
     if (supported == 0) return gpu::UNSUPPORTED_FEATURE~;
 
     slot.acquire_semaphores = mem::new_array(vk::Semaphore, state.frames_in_flight);
@@ -467,7 +510,7 @@ fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::Swapchain
     vk::Semaphore acquire_semaphore = slot.acquire_semaphores[state.frame_index];
     uint image_index = 0;
     vk::Result result = vk::extensions.vk_acquire_next_image_khr(state.device, slot.swapchain, ACQUIRE_TIMEOUT_NS, acquire_semaphore, (vk::Fence)null, &image_index);
-    map_acquire_result(result)!;
+    check_acquire_result(result)!;
 
     slot.acquire_pending = true;
     slot.acquire_consumed = false;
@@ -503,7 +546,7 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
     state.graphics_queue_mutex.lock()!!;
     defer state.graphics_queue_mutex.unlock();
     vk::Result result = vk::extensions.vk_queue_present_khr(state.graphics_queue, &info);
-    return map_present_result(result);
+    return check_present_result(result);
 }
 
 fn gpu::PresentModeSupport? vk_get_present_mode_support(gpu::Device* device, gpu::SwapchainHandle handle) @private {
@@ -511,13 +554,27 @@ fn gpu::PresentModeSupport? vk_get_present_mode_support(gpu::Device* device, gpu
     SwapchainSlot* slot = state.swapchains.get(handle)!;
 
     uint mode_count = 0;
-    check(vk::extensions.vk_get_physical_device_surface_present_modes_khr(state.physical_device, slot.surface, &mode_count, null))!;
+    check_surface_result(
+        vk::extensions.vk_get_physical_device_surface_present_modes_khr(
+            state.physical_device,
+            slot.surface,
+            &mode_count,
+            null,
+        )
+    )!;
     gpu::PresentModeSupport support;
     if (mode_count == 0) return support;
 
     @pool() {
         vk::PresentModeKHR[] modes = mem::talloc_array(vk::PresentModeKHR, (sz)mode_count);
-        check(vk::extensions.vk_get_physical_device_surface_present_modes_khr(state.physical_device, slot.surface, &mode_count, modes.ptr))!;
+        check_surface_enumeration_result(
+            vk::extensions.vk_get_physical_device_surface_present_modes_khr(
+                state.physical_device,
+                slot.surface,
+                &mode_count,
+                modes.ptr,
+            )
+        )!;
         foreach (mode : modes[:mode_count]) {
             switch (mode) {
                 case vk::PresentModeKHR.FIFO_KHR:      support.fifo = true;

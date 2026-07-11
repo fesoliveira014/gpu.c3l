@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
 
 // Pure swapchain selection logic over synthetic capability lists, plus the
@@ -50,14 +50,14 @@ fn void common_surface_lost_result_mapping() @test {
 }
 
 fn void acquire_result_mapping() @test {
-    gpu::vk::map_acquire_result(vk::Result.SUCCESS)!!;
-    gpu::vk::map_acquire_result(vk::Result.SUBOPTIMAL_KHR)!!;
+    gpu::vk::check_acquire_result(vk::Result.SUCCESS)!!;
+    gpu::vk::check_acquire_result(vk::Result.SUBOPTIMAL_KHR)!!;
 
-    fault timeout = @catch(gpu::vk::map_acquire_result(vk::Result.TIMEOUT));
-    fault not_ready = @catch(gpu::vk::map_acquire_result(vk::Result.NOT_READY));
-    fault out_of_date = @catch(gpu::vk::map_acquire_result(vk::Result.ERROR_OUT_OF_DATE_KHR));
-    fault surface_lost = @catch(gpu::vk::map_acquire_result(vk::Result.ERROR_SURFACE_LOST_KHR));
-    fault device_lost = @catch(gpu::vk::map_acquire_result(vk::Result.ERROR_DEVICE_LOST));
+    fault timeout = @catch(gpu::vk::check_acquire_result(vk::Result.TIMEOUT));
+    fault not_ready = @catch(gpu::vk::check_acquire_result(vk::Result.NOT_READY));
+    fault out_of_date = @catch(gpu::vk::check_acquire_result(vk::Result.ERROR_OUT_OF_DATE_KHR));
+    fault surface_lost = @catch(gpu::vk::check_acquire_result(vk::Result.ERROR_SURFACE_LOST_KHR));
+    fault device_lost = @catch(gpu::vk::check_acquire_result(vk::Result.ERROR_DEVICE_LOST));
 
     assert(timeout == gpu::WAIT_TIMEOUT, "acquire timeout is retryable");
     assert(not_ready == gpu::WAIT_TIMEOUT, "acquire not-ready is retryable");
@@ -67,12 +67,12 @@ fn void acquire_result_mapping() @test {
 }
 
 fn void present_result_mapping() @test {
-    gpu::vk::map_present_result(vk::Result.SUCCESS)!!;
-    gpu::vk::map_present_result(vk::Result.SUBOPTIMAL_KHR)!!;
+    gpu::vk::check_present_result(vk::Result.SUCCESS)!!;
+    gpu::vk::check_present_result(vk::Result.SUBOPTIMAL_KHR)!!;
 
-    fault out_of_date = @catch(gpu::vk::map_present_result(vk::Result.ERROR_OUT_OF_DATE_KHR));
-    fault surface_lost = @catch(gpu::vk::map_present_result(vk::Result.ERROR_SURFACE_LOST_KHR));
-    fault device_lost = @catch(gpu::vk::map_present_result(vk::Result.ERROR_DEVICE_LOST));
+    fault out_of_date = @catch(gpu::vk::check_present_result(vk::Result.ERROR_OUT_OF_DATE_KHR));
+    fault surface_lost = @catch(gpu::vk::check_present_result(vk::Result.ERROR_SURFACE_LOST_KHR));
+    fault device_lost = @catch(gpu::vk::check_present_result(vk::Result.ERROR_DEVICE_LOST));
 
     assert(out_of_date == gpu::SWAPCHAIN_OUT_OF_DATE, "out-of-date requires swapchain resize");
     assert(surface_lost == gpu::SURFACE_LOST, "surface loss requires surface recreation");

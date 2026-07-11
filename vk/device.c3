@@ -546,12 +546,12 @@ fn PhysicalDeviceSelection? choose_physical_device(PhysicalDeviceCandidate[] can
    highest-scored device with its already-resolved queue families. *>
 fn PhysicalDeviceSelection? pick_physical_device(vk::Instance instance, gpu::DeviceDesc* desc) {
     uint count = 0;
-    check(vk::enumerate_physical_devices(instance, &count, null))!;
+    check_physical_device_enumeration_result(vk::enumerate_physical_devices(instance, &count, null))!;
     if (count == 0) return gpu::UNSUPPORTED_FEATURE~;
 
     @pool() {
         vk::PhysicalDevice[] devices = mem::talloc_array(vk::PhysicalDevice, (sz)count);
-        check(vk::enumerate_physical_devices(instance, &count, devices.ptr))!;
+        check_physical_device_enumeration_result(vk::enumerate_physical_devices(instance, &count, devices.ptr))!;
         PhysicalDeviceCandidate[] candidates = mem::talloc_array(PhysicalDeviceCandidate, (sz)count);
 
         foreach (i, physical_device : devices[:count]) {
@@ -664,7 +664,12 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families, bo
         device_info = device_info.set_enabled_extension_names(extensions[:extension_count]);
     }
 
-    check(vk::create_device(state.physical_device, &device_info, null, &state.device))!;
+    check_backend_create_result(vk::create_device(
+        physical_device: state.physical_device,
+        p_create_info:   &device_info,
+        p_allocator:     null,
+        p_device:        &state.device,
+    ))!;
 }
 
 <* True if `physical_device` advertises the named device extension. *>

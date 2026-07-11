@@ -315,7 +315,15 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .array_layers   = array_layers,
     };
     vma::AllocationInfo allocation_info;
-    check(state.allocator.create_image(&image_info, &alloc_info, &slot.image, &slot.allocation, &allocation_info))!;
+    check_texture_create_result(
+        state.allocator.create_image(
+            image_info:     &image_info,
+            alloc_info:     &alloc_info,
+            out_image:      &slot.image,
+            out_allocation: &slot.allocation,
+            out_info:       &allocation_info,
+        )
+    )!;
     slot.allocation_size = (usz)allocation_info.size;
 
     copy_debug_name(&slot.debug_name[0], desc.debug_name);

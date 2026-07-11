@@ -150,7 +150,7 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
         vk::DeviceAddress address = vk::get_buffer_device_address(state.device, &address_info);
         if (address == 0) {
             state.allocator.destroy_buffer(slot.buffer, slot.allocation);
-            return gpu::DEVICE_LOST~;
+            return gpu::BACKEND_ERROR~;
         }
         slot.gpu_base = (gpu::GpuAddress)address;
     }

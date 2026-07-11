@@ -57,4 +57,7 @@ faultdef
     // A bounded host wait elapsed before its target, or image acquisition
     // reported transient unavailability. The operation is safe to retry
     // without changing the resource being waited on.
-    WAIT_TIMEOUT;
+    WAIT_TIMEOUT,
+    // The backend returned an unclassified or internal failure. Inspect
+    // native diagnostics; this does not imply that the device was lost.
+    BACKEND_ERROR;

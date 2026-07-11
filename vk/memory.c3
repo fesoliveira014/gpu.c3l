@@ -374,7 +374,7 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
     };
     vma::VirtualAllocation allocation;
     vk::DeviceSize offset;
-    check(arena.virtual_block.allocate(&create_info, &allocation, &offset))!;
+    check_virtual_allocate_result(arena.virtual_block.allocate(&create_info, &allocation, &offset))!;
 
     arena.live.set((usz)offset, allocation);
     return (gpu::GpuSpan){
