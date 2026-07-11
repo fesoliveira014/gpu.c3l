@@ -12,7 +12,7 @@ const char[*] U16V_FRAG_SPIRV = $embed("shaders/depth.frag.spv");
 const uint U16V_RT = 16;
 const usz U16V_BYTES = U16V_RT * U16V_RT * 4;
 const uint U16V_INDEX_COUNT = 6;
-const uint U16V_JUNK = 6;
+const uint U16V_OFFSET_ELEMENTS = 6;
 
 fn gpu::Device u16v_device() {
     gpu::DeviceDesc desc = {
@@ -136,26 +136,38 @@ fn void u16_and_u32_indexed_draws_match() @test {
     ushort[6] idx16 = { 0, 1, 2, 2, 1, 3 };
     uint[6] idx32 = { 0, 1, 2, 2, 1, 3 };
 
-    usz u16_bytes = (U16V_JUNK + 6) * 2;
-    gpu::BufferHandle ib16 = u16v_persistent(&device, u16_bytes, { .index });
+    gpu::BufferHandle ib16 = u16v_persistent(&device, U16V_INDEX_COUNT * 2, { .index });
     defer gpu::destroy_buffer(&device, ib16)!!;
     gpu::GpuSpan span16 = gpu::get_buffer_span(&device, ib16)!!;
-    ushort* p16 = (ushort*)span16.cpu;
-    for (uint i = 0; i < U16V_JUNK; i++) p16[i] = 0xFFFF;
-    for (uint i = 0; i < 6; i++) p16[U16V_JUNK + i] = idx16[i];
+    mem::copy(span16.cpu, &idx16, U16V_INDEX_COUNT * 2);
 
-    usz u32_bytes = (U16V_JUNK + 6) * 4;
-    gpu::BufferHandle ib32 = u16v_persistent(&device, u32_bytes, { .index });
+    gpu::BufferHandle ib32 = u16v_persistent(&device, U16V_INDEX_COUNT * 4, { .index });
     defer gpu::destroy_buffer(&device, ib32)!!;
     gpu::GpuSpan span32 = gpu::get_buffer_span(&device, ib32)!!;
-    uint* p32 = (uint*)span32.cpu;
-    for (uint i = 0; i < U16V_JUNK; i++) p32[i] = 0xFFFFFFFF;
-    for (uint i = 0; i < 6; i++) p32[U16V_JUNK + i] = idx32[i];
+    mem::copy(span32.cpu, &idx32, U16V_INDEX_COUNT * 4);
+
+    usz u16_off_bytes = (U16V_OFFSET_ELEMENTS + U16V_INDEX_COUNT) * 2;
+    gpu::BufferHandle ib16_off = u16v_persistent(&device, u16_off_bytes, { .index });
+    defer gpu::destroy_buffer(&device, ib16_off)!!;
+    gpu::GpuSpan span16_off = gpu::get_buffer_span(&device, ib16_off)!!;
+    ushort* p16_off = (ushort*)span16_off.cpu;
+    for (uint i = 0; i < U16V_OFFSET_ELEMENTS; i++) p16_off[i] = 0;
+    for (uint i = 0; i < U16V_INDEX_COUNT; i++) p16_off[U16V_OFFSET_ELEMENTS + i] = idx16[i];
+
+    usz u32_off_bytes = (U16V_OFFSET_ELEMENTS + U16V_INDEX_COUNT) * 4;
+    gpu::BufferHandle ib32_off = u16v_persistent(&device, u32_off_bytes, { .index });
+    defer gpu::destroy_buffer(&device, ib32_off)!!;
+    gpu::GpuSpan span32_off = gpu::get_buffer_span(&device, ib32_off)!!;
+    uint* p32_off = (uint*)span32_off.cpu;
+    for (uint i = 0; i < U16V_OFFSET_ELEMENTS; i++) p32_off[i] = 0;
+    for (uint i = 0; i < U16V_INDEX_COUNT; i++) p32_off[U16V_OFFSET_ELEMENTS + i] = idx32[i];
 
     gpu::flush_buffer(&device, vbuf, 0, 0)!!;
     gpu::flush_buffer(&device, cbuf, 0, 0)!!;
     gpu::flush_buffer(&device, ib16, 0, 0)!!;
     gpu::flush_buffer(&device, ib32, 0, 0)!!;
+    gpu::flush_buffer(&device, ib16_off, 0, 0)!!;
+    gpu::flush_buffer(&device, ib32_off, 0, 0)!!;
 
     gpu::BufferHandle rb = gpu::create_buffer(&device, &&(gpu::BufferDesc){ .size = U16V_BYTES * 4, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK })!!;
     defer gpu::destroy_buffer(&device, rb)!!;
@@ -166,12 +178,42 @@ fn void u16_and_u32_indexed_draws_match() @test {
     gpu::GpuSpan rb_u32_off = rb_all.checked_subspan(U16V_BYTES * 3, U16V_BYTES)!!;
 
     gpu::begin_frame(&device)!!;
-    gpu::GpuSpan span16_off = span16.checked_subspan(U16V_JUNK * 2, 12)!!;
-    gpu::GpuSpan span32_off = span32.checked_subspan(U16V_JUNK * 4, 24)!!;
-    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span16.checked_subspan(0, 12)!!, gpu::IndexType.U16, &rb_u16);
-    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span32.checked_subspan(0, 24)!!, gpu::IndexType.U32, &rb_u32);
-    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span16_off, gpu::IndexType.U16, &rb_u16_off);
-    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span32_off, gpu::IndexType.U32, &rb_u32_off);
+    u16v_draw(
+        device:     &device,
+        pipeline:   pipeline,
+        verts:      vspan.gpu,
+        color:      cspan.gpu,
+        index_span: span16.checked_subspan(0, 12)!!,
+        index_type: gpu::IndexType.U16,
+        rb_span:    &rb_u16,
+    );
+    u16v_draw(
+        device:     &device,
+        pipeline:   pipeline,
+        verts:      vspan.gpu,
+        color:      cspan.gpu,
+        index_span: span32.checked_subspan(0, 24)!!,
+        index_type: gpu::IndexType.U32,
+        rb_span:    &rb_u32,
+    );
+    u16v_draw(
+        device:     &device,
+        pipeline:   pipeline,
+        verts:      vspan.gpu,
+        color:      cspan.gpu,
+        index_span: span16_off.checked_subspan(U16V_OFFSET_ELEMENTS * 2, 12)!!,
+        index_type: gpu::IndexType.U16,
+        rb_span:    &rb_u16_off,
+    );
+    u16v_draw(
+        device:     &device,
+        pipeline:   pipeline,
+        verts:      vspan.gpu,
+        color:      cspan.gpu,
+        index_span: span32_off.checked_subspan(U16V_OFFSET_ELEMENTS * 4, 24)!!,
+        index_type: gpu::IndexType.U32,
+        rb_span:    &rb_u32_off,
+    );
     gpu::end_frame(&device)!!;
 
     char* a = (char*)rb_u16.cpu;
@@ -180,13 +222,22 @@ fn void u16_and_u32_indexed_draws_match() @test {
     char* d = (char*)rb_u32_off.cpu;
     uint diff_zero = 0;
     uint diff_off = 0;
-    uint lit = 0;
+    uint diff_u16_offsets = 0;
+    uint diff_u32_offsets = 0;
     for (usz i = 0; i < U16V_BYTES; i++) {
         if (a[i] != b[i]) diff_zero++;
         if (c[i] != d[i]) diff_off++;
-        if (b[i] != 0) lit++;
+        if (a[i] != c[i]) diff_u16_offsets++;
+        if (b[i] != d[i]) diff_u32_offsets++;
     }
-    assert(lit > 0, "the U32 baseline actually drew something");
+    usz center_green = ((U16V_RT / 2) * U16V_RT + U16V_RT / 2) * 4 + 1;
+    usz corner_green = 1;
+    assert(b[center_green] != 0, "the zero-offset U32 draw must cover the center pixel");
+    assert(b[corner_green] == 0, "the zero-offset U32 draw must leave the corner clear");
+    assert(d[center_green] != 0, "the nonzero-offset U32 draw must cover the center pixel");
+    assert(d[corner_green] == 0, "the nonzero-offset U32 draw must leave the corner clear");
     assert(diff_zero == 0, "U16 and U32 draws at offset 0 must match pixel-for-pixel");
     assert(diff_off == 0, "U16 and U32 draws at a nonzero index offset must match pixel-for-pixel");
+    assert(diff_u16_offsets == 0, "U16 draws at zero and nonzero offsets must match pixel-for-pixel");
+    assert(diff_u32_offsets == 0, "U32 draws at zero and nonzero offsets must match pixel-for-pixel");
 }
