@@ -355,30 +355,43 @@ last submit timeline value
 Frame lifecycle and flow:
 
 ```text
-IDLE --begin_frame--> ACTIVE --end_frame--> IDLE
+IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDLE
 
-begin_frame(device)              // valid only in IDLE
+begin_frame(device) -> token      // valid only in IDLE
     wait if frame slot is still in flight
     reset command pools
     reset frame upload arena
     set VMA current frame index
 
-alloc_frame_span(device, ...)    // valid only in ACTIVE
+alloc_frame_span(token, ...)     // current active generation only
 record work
 submit work
 
-end_frame(device)                // valid only in ACTIVE
+end_frame(token)                 // consumes only after success
     record frame timeline value
 ```
 
-Invalid lifecycle transitions fault `INVALID_RESOURCE_STATE` before changing
-the frame slot, arena, pools, retirement state, or queue submissions.
+The public `FrameToken` is an owner pointer plus a nonzero device-owned
+generation, no larger than 16 bytes. Copies alias one active generation.
+Successful end clears the passed copy and invalidates every alias through
+device-owned state. Failed end preserves the token and all prospective
+retirement state so the caller can retry. Invalid lifecycle transitions fault
+before changing the frame slot, arena, pools, retirement state, or queue
+submissions.
+
+`@with_frame` is a compile-time direct-call helper, not a runtime callback. It
+calls a named optional-returning worker and attempts end exactly once after the
+worker completes or faults. End faults take precedence and retain the caller's
+token for retry. This adds no heap allocation or per-frame indirect dispatch.
 
 Headless tests may skip swapchain-specific acquire/present steps.
 
 ## 8. Command model
 
 `begin_commands` takes an optional `RecordingContextHandle`. One context per worker thread (`create_recording_context` / `destroy_recording_context`) enables concurrent recording; see `docs/threading.md`.
+`end_commands(CommandList*)` derives the device from the owner-bearing token;
+callers do not repeat it. Defensive owner validation does not extend the
+one-live-device supported boundary.
 
 ### Compute
 

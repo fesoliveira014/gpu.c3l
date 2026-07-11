@@ -7,14 +7,20 @@ page doesn't explain it, that's a bug in this page — file an issue.
 ## 1. By design
 
 - **One live device per process.** Multi-device operation is not supported.
-  Resource handles, descriptor indices, GPU addresses/spans, command tokens,
-  and synchronization values are scoped to their sole creating device.
+  Resource handles, descriptor indices, GPU addresses/spans, frame tokens,
+  command tokens, and synchronization values are scoped to their sole creating
+  device.
   Passing them between devices is outside the contract. Table- and
   index-backed values without owner metadata can silently resolve a
   coincident slot and target the wrong resource; a safe fault is not
-  guaranteed. Owner-bearing command tokens have defensive checks. Supporting
-  multiple devices is deferred until a dedicated ownership/validation design
-  is approved.
+  guaranteed. Owner-bearing frame and command tokens have defensive checks,
+  but the library does not comprehensively validate cross-device use and those
+  checks do not establish multi-device support. Supporting multiple devices is
+  deferred until a dedicated ownership/validation design is approved.
+- **Frame-token aliases share one generation.** Copies may allocate until one
+  alias ends successfully. That end consumes the device generation, clears the
+  passed copy, and makes every other copy stale. A failed end preserves the
+  token for retry.
 
 - **No descriptor-set escape hatch.** The root-pointer model and the single
   bindless heap are the only binding paths. There is no API to create your

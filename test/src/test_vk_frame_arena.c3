@@ -234,6 +234,12 @@ fn void frame_span_allocation_requires_active_frame() @test {
     assert(stale_end == gpu::INVALID_HANDLE, "stale alias cannot end the next lifecycle");
 
     frame = gpu::begin_frame(&device)!!;
+    FrameLifecycleSnapshot next_active = frame_lifecycle_snapshot(state);
+    fault next_alloc = @catch(gpu::alloc_frame_span(&copy, 64, 16));
+    fault next_end = @catch(gpu::end_frame(&copy));
+    assert(next_alloc == gpu::INVALID_HANDLE, "stale alias cannot allocate in a later active frame");
+    assert(next_end == gpu::INVALID_HANDLE, "stale alias cannot end a later active frame");
+    assert_frame_lifecycle_unchanged(next_active, frame_lifecycle_snapshot(state));
     gpu::end_frame(&frame)!!;
 }
 
