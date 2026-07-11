@@ -28,18 +28,18 @@ fn void end_frame_issues_exactly_one_empty_submit() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::QueueKind[3] kinds = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE, gpu::QueueKind.TRANSFER };
     foreach (kind : kinds) {
         gpu::CommandList cmd = gpu::begin_commands(&device, kind)!!;
-        gpu::end_commands(&device, &cmd)!!;
+        gpu::end_commands(&cmd)!!;
         gpu::CommandList[1] one = { cmd };
         gpu::SubmitDesc submit = { .command_lists = one[..] };
         gpu::submit(&device, &submit)!!;
     }
 
     vk::SubmitStats before = stats_of(&device);
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
     vk::SubmitStats after = stats_of(&device);
     assert(after.empty_signal_submits - before.empty_signal_submits == 1, "a frame using every queue kind still ends with exactly one internal empty submit");
     assert(after.queue_submits == before.queue_submits, "end_frame's own signal is not counted as a user queue submit");
@@ -50,9 +50,9 @@ fn void graphics_only_frame_emits_one_empty_submit() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
 
@@ -62,7 +62,7 @@ fn void graphics_only_frame_emits_one_empty_submit() @test {
     assert(after_submit.queue_submits - before_submit.queue_submits == 1, "one user submit records one queue submit");
 
     vk::SubmitStats before_end = stats_of(&device);
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
     vk::SubmitStats after_end = stats_of(&device);
     assert(after_end.empty_signal_submits - before_end.empty_signal_submits == 1, "a graphics-only frame issues exactly one internal empty submit");
 }
@@ -74,7 +74,7 @@ fn void failed_submit_records_nothing_and_end_frame_stays_clean() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList unfinished = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandList[1] not_executable = { unfinished };
     gpu::SubmitDesc bad_submit = { .command_lists = not_executable[..] };
@@ -85,12 +85,12 @@ fn void failed_submit_records_nothing_and_end_frame_stays_clean() @test {
     vk::SubmitStats after = stats_of(&device);
     assert(after.queue_submits == before.queue_submits, "a rejected submit records no queue submit");
 
-    gpu::end_commands(&device, &unfinished)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_commands(&unfinished)!!;
+    gpu::end_frame(&frame)!!;
 
     // A clean cycle right after proves end_frame never waited a bogus value.
-    gpu::begin_frame(&device)!!;
-    gpu::end_frame(&device)!!;
+    frame = gpu::begin_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 }
 
 ulong rejected_frame_signal_value;
@@ -137,7 +137,7 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     defer gpu::destroy_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     state.compute_used_since_frame = true;
     state.transfer_used_since_frame = true;
     state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
@@ -156,7 +156,7 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     ulong shadow_before = state.signaled_shadow;
     vk::SubmitStats stats_before = stats_of(&device);
 
-    fault submit_fault = @catch(vk::end_frame_with_submit(&device, &reject_frame_submit));
+    fault submit_fault = @catch(vk::end_frame_with_submit(&frame, &reject_frame_submit));
     assert(submit_fault == gpu::OUT_OF_HOST_MEMORY, "injected frame submit faults OUT_OF_HOST_MEMORY");
     assert(rejected_frame_signal_value == counter_before + 1, "failed submit uses the prospective frame value");
     assert(rejected_frame_wait_count == 2, "failed submit preserves both cross-queue waits");
@@ -172,12 +172,13 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     assert(state.off_frame_pending.load(AtomicOrdering.RELAXED), "failed submit preserves off-frame marker");
     assert(state.frame_active, "failed submit keeps frame active");
     assert(state.aux_compute_counter == compute_counter_before && state.aux_compute_last_signaled == compute_signaled_before, "failed submit preserves compute timeline state");
+    assert(frame.device == &device && frame.generation == state.active_frame_generation, "failed submit retains the live frame token");
     assert(state.aux_transfer_counter == transfer_counter_before && state.aux_transfer_last_signaled == transfer_signaled_before, "failed submit preserves transfer timeline state");
     assert(state.signaled_shadow == shadow_before, "failed submit preserves signaled shadow");
     assert(stats_of(&device).empty_signal_submits == stats_before.empty_signal_submits, "failed submit records no empty signal");
     assert(stats_of(&device).queue_submits == stats_before.queue_submits, "failed frame signal records no user submit");
 
-    vk::end_frame_with_submit(&device, &capture_retry_frame_submit)!!;
+    vk::end_frame_with_submit(&frame, &capture_retry_frame_submit)!!;
     assert(retried_frame_signal_value == rejected_frame_signal_value, "retry reuses the prospective frame value");
     assert(retried_frame_wait_count == rejected_frame_wait_count, "retry reuses the wait count");
     assert(retried_frame_wait_values == rejected_frame_wait_values, "retry reuses the nonzero wait values");
@@ -187,6 +188,7 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     assert(!state.compute_used_since_frame && !state.transfer_used_since_frame, "retry clears queue-use flags");
     assert(!state.off_frame_pending.load(AtomicOrdering.RELAXED), "retry clears off-frame marker");
     assert(!state.frame_active, "retry ends the frame");
+    assert(frame.device == null && frame.generation == 0, "successful retry consumes the token");
     assert(stats_of(&device).empty_signal_submits == stats_before.empty_signal_submits + 1, "retry records one empty signal");
 }
 
@@ -198,7 +200,7 @@ fn void post_claim_fault_restores_executable_token() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SemaphoreSignal[1] bad_signals = {{
         .semaphore = gpu::SEMAPHORE_HANDLE_INVALID,

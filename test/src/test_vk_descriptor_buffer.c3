@@ -132,15 +132,15 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
-    gpu::GpuSpan write_root_span = gpu::alloc_frame_span(&device, WriteRoot::size, 16)!!;
+    gpu::GpuSpan write_root_span = gpu::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
     WriteRoot* write_root = (WriteRoot*)write_root_span.cpu;
     write_root.texture_index = tex_index;
     write_root.width         = TEX;
     write_root.height        = TEX;
 
-    gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!!;
+    gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
     sample_root.output_gpu    = gpu::get_buffer_address(&device, output)!!;
     sample_root.texture_index = tex_index;
@@ -191,7 +191,7 @@ fn void descriptor_buffer_write_then_sample() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -208,5 +208,5 @@ fn void descriptor_buffer_write_then_sample() @test {
             assert(quantize_unorm8(texel[2]) == (x ^ y), "blue channel matches on the buffer path");
         }
     }
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }

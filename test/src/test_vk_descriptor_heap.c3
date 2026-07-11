@@ -115,13 +115,13 @@ fn void texture_descriptor_deferred_reuse() @test {
     gpu::TextureIndex first = gpu::create_texture_descriptor(&device, texture, null)!!;
     ushort first_slot = first.slot;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::destroy_texture_descriptor(&device, first)!!;
 
     gpu::TextureIndex during = gpu::create_texture_descriptor(&device, texture, null)!!;
     assert(during.slot != first_slot, "slot is not reused while its frame is in flight");
 
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
     // The frame fence signals GPU-side; idle so the timeline has passed.
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 
@@ -452,9 +452,9 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
         occupied[i] = gpu::create_texture_descriptor(&device, texture, null)!!;
     }
     gpu::TextureIndex retired = occupied[0];
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::destroy_texture_descriptor(&device, retired)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::TextureHandle stale_texture = make_heap_texture(&device);

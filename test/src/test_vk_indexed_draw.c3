@@ -88,7 +88,7 @@ fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAdd
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(device, &submit)!!;
@@ -177,7 +177,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
     gpu::GpuSpan rb_u16_off = rb_all.checked_subspan(U16V_BYTES * 2, U16V_BYTES)!!;
     gpu::GpuSpan rb_u32_off = rb_all.checked_subspan(U16V_BYTES * 3, U16V_BYTES)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     u16v_draw(
         device:     &device,
         pipeline:   pipeline,
@@ -214,7 +214,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
         index_type: gpu::IndexType.U32,
         rb_span:    &rb_u32_off,
     );
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     char* a = (char*)rb_u16.cpu;
     char* b = (char*)rb_u32.cpu;

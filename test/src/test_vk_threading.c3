@@ -164,7 +164,7 @@ fn void same_descriptor_pipeline_race() @test {
 }
 
 struct SpanArgs {
-    gpu::Device* device;
+    gpu::FrameToken* frame;
     uint         seed;
     usz[THR_ITERS] offsets;
     usz[THR_ITERS] sizes;
@@ -175,7 +175,7 @@ fn int span_storm_worker(void* arg) {
     for (uint i = 0; i < THR_ITERS; i++) {
         usz size = (usz)(16 + (args.seed * 32 + i * 8) % 128);
         usz align = (usz)1 << (4 + (args.seed + i) % 3);
-        gpu::GpuSpan span = gpu::alloc_frame_span(args.device, size, align)!!;
+        gpu::GpuSpan span = gpu::alloc_frame_span(args.frame, size, align)!!;
         if (span.offset % align != 0) return 1;
         args.offsets[i] = span.offset;
         args.sizes[i] = size;
@@ -187,11 +187,11 @@ fn void frame_span_storm_disjoint() @test {
     gpu::Device device = make_thr_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     SpanArgs[THR_THREADS] args;
     Thread[THR_THREADS] threads;
     for (uint i = 0; i < THR_THREADS; i++) {
-        args[i].device = &device;
+        args[i].frame = &frame_token;
         args[i].seed = i;
         threads[i].create(&span_storm_worker, &args[i])!!;
     }
@@ -214,7 +214,7 @@ fn void frame_span_storm_disjoint() @test {
             }
         }
     }
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 struct RecordArgs {
@@ -247,7 +247,7 @@ fn int record_worker(void* arg) {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&args.list, &host_read)!!;
-    gpu::end_commands(args.device, &args.list)!!;
+    gpu::end_commands(&args.list)!!;
     };
     return 0;
 }
@@ -269,14 +269,14 @@ fn void parallel_recording_across_contexts() @test {
         foreach (ctx : contexts) (void)gpu::destroy_recording_context(&device, ctx);
     }
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     RecordArgs[THR_THREADS] args;
     for (uint i = 0; i < THR_THREADS; i++) {
         args[i].device = &device;
         args[i].ctx = contexts[i];
         args[i].pipeline = pipeline;
-        args[i].io_span = gpu::alloc_frame_span(&device, THR_ELEMENTS * 4 * 2, 16)!!;
-        args[i].root_span = gpu::alloc_frame_span(&device, ComputeRoot::size, 16)!!;
+        args[i].io_span = gpu::alloc_frame_span(&frame_token, THR_ELEMENTS * 4 * 2, 16)!!;
+        args[i].root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
         float* values = (float*)args[i].io_span.cpu;
         for (uint e = 0; e < THR_ELEMENTS; e++) values[e] = (float)(i * 1000 + e);
     }
@@ -302,7 +302,7 @@ fn void parallel_recording_across_contexts() @test {
                 "each thread's recorded dispatch produced its own results");
         }
     }
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 struct LayoutRecordArgs {
@@ -326,7 +326,7 @@ fn int layout_record_worker(void* arg) {
         .new_layout    = gpu::TextureLayout.TRANSFER_DST,
     };
     gpu::cmd_texture_barrier(&args.list, &to_dst)!!;
-    gpu::end_commands(args.device, &args.list)!!;
+    gpu::end_commands(&args.list)!!;
     };
     return 0;
 }
@@ -359,7 +359,7 @@ fn void parallel_recording_disjoint_texture_layouts() @test {
         foreach (t : textures) (void)gpu::destroy_texture(&device, t);
     }
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     LayoutRecordArgs[THR_THREADS] args;
     for (uint i = 0; i < THR_THREADS; i++) {
         args[i] = { .device = &device, .ctx = contexts[i], .texture = textures[i] };
@@ -374,7 +374,7 @@ fn void parallel_recording_disjoint_texture_layouts() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 struct UploadArgs {
@@ -698,7 +698,7 @@ fn void deferred_queue_growth_from_worker_threads() @test {
         }
     }
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     Thread[GROWTH_THREADS] threads;
     for (uint t = 0; t < GROWTH_THREADS; t++) {
         threads[t].create(&growth_worker, &args[t])!!;
@@ -709,15 +709,15 @@ fn void deferred_queue_growth_from_worker_threads() @test {
     uint pending = vk::deferred_queue_count(state);
     assert(pending == GROWTH_THREADS * GROWTH_PER_THREAD, "every worker-thread destroy enqueued exactly one deferred entry");
     assert(pending > vk::DEFERRED_QUEUE_INITIAL_CAP, "worker-thread destroys crossed the initial capacity, forcing cross-thread growth");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     // frames_in_flight == 2: one more full cycle guarantees the drain
     // observes the frame that covered the growth-storm destroys.
-    gpu::begin_frame(&device)!!;
-    gpu::end_frame(&device)!!;
-    gpu::begin_frame(&device)!!;
+    frame_token = gpu::begin_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
+    frame_token = gpu::begin_frame(&device)!!;
     assert(vk::deferred_queue_count(state) == 0, "every deferred entry drains cleanly once the covering frame retires");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     assert(vk::report_resource_leaks(state) == 0, "cross-thread queue growth leaves no leaked slots");
 }
@@ -776,7 +776,7 @@ fn void blocking_upload_races_default_context_recording() @test {
     for (uint i = 0; i < HELPER_RACE_ITERS; i++) {
         gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
         gpu::cmd_copy_buffer(&cmd, &copy)!!;
-        gpu::end_commands(&device, &cmd)!!;
+        gpu::end_commands(&cmd)!!;
         gpu::CommandList[1] lists = { cmd };
         gpu::SubmitDesc submit = { .command_lists = lists[..] };
         gpu::submit(&device, &submit)!!;
@@ -824,12 +824,16 @@ fn void boundary_violation_detected() @test {
     // in flight and fault rather than proceed.
     bool tripped = false;
     for (uint attempt = 0; attempt < 10_000 && !tripped; attempt++) {
-        if (catch err = gpu::begin_frame(&device)) {
+        gpu::FrameToken? frame_result = gpu::begin_frame(&device);
+        if (catch err = frame_result) {
             assert(err == gpu::INVALID_RESOURCE_STATE, "boundary violation faults INVALID_RESOURCE_STATE");
             tripped = true;
-        } else if (catch end_err = gpu::end_frame(&device)) {
-            assert(end_err == gpu::INVALID_RESOURCE_STATE, "boundary violation faults INVALID_RESOURCE_STATE");
-            tripped = true;
+        } else {
+            gpu::FrameToken frame_token = frame_result;
+            if (catch end_err = gpu::end_frame(&frame_token)) {
+                assert(end_err == gpu::INVALID_RESOURCE_STATE, "boundary violation faults INVALID_RESOURCE_STATE");
+                tripped = true;
+            }
         }
     }
     args.release.store(1, AtomicOrdering.RELAXED);
@@ -864,7 +868,7 @@ fn int fallback_hammer_worker(void* arg) {
             args.succeeded++;
         }
     }
-    gpu::end_commands(args.device, &args.list)!!;
+    gpu::end_commands(&args.list)!!;
     };
     return 0;
 }
@@ -952,7 +956,7 @@ fn int parallel_upload_worker(void* arg) {
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.TRANSFER_READ,
     };
     gpu::cmd_buffer_barrier(&args.list, &next_use)!!;
-    gpu::end_commands(args.device, &args.list)!!;
+    gpu::end_commands(&args.list)!!;
     };
     return 0;
 }

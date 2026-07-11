@@ -484,7 +484,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
             .after_hazard  = next_hazard,
         };
         vk_cmd_buffer_barrier(&commands, &next_use)!;
-        vk_end_commands(device, &commands)!;
+        vk_end_commands(&commands)!;
     }
     return submit_and_wait(device, &commands);
 }
@@ -554,7 +554,7 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
             .new_layout    = next_layout,
         };
         vk_cmd_texture_barrier(&commands, &next_use)!;
-        vk_end_commands(device, &commands)!;
+        vk_end_commands(&commands)!;
     }
     return submit_and_wait(device, &commands);
 }
@@ -622,7 +622,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
             .after_hazard  = gpu::Hazard.HOST_READ,
         };
         vk_cmd_buffer_barrier(&commands, &host_read)!;
-        vk_end_commands(device, &commands)!;
+        vk_end_commands(&commands)!;
     }
 
     submit_and_wait(device, &commands)!;
@@ -701,7 +701,7 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
             .after_hazard  = gpu::Hazard.HOST_READ,
         };
         vk_cmd_buffer_barrier(&commands, &host_read)!;
-        vk_end_commands(device, &commands)!;
+        vk_end_commands(&commands)!;
     }
 
     submit_and_wait(device, &commands)!;

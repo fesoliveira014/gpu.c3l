@@ -15,7 +15,9 @@ Pure CPU tests must run without Vulkan, VMA static library loading beyond compil
 The supported test matrix covers one live `Device` per process. Tests that
 create multiple devices exercise isolated defensive behavior (such as
 cross-device command-token rejection), but they do not establish multi-device
-resource ownership as a supported contract.
+resource ownership as a supported contract. Token-specific coverage stays
+same-device: generation, aliases, consumption, retry, and scoped-worker fault
+semantics.
 
 ## 2. Pure CPU tests
 
@@ -49,6 +51,8 @@ immediate-parent exact-fit, nested, zero-size, and out-of-parent slicing
 GPU-address, CPU-pointer, backing-offset, and requested-size overflow rejection
 texture descriptor normalization and backend-profile validation
 arena bump allocation logic without Vulkan
+FrameToken size, copy/consumption, scoped-worker fault propagation, end-fault
+precedence, retry-token retention, and begin-fault short circuit
 MemoryKind policy table completeness
 Format translation table completeness through pure tables if separated
 BarrierDesc validation
@@ -88,7 +92,9 @@ query memory budget and stats
 create addressable VMA-backed buffers
 retrieve non-zero GPU address
 map/flush/invalidate paths
-frame arena allocation and reset safety
+frame-token generation, stale-alias rejection, allocation, end retry, and reset safety
+scoped helper with one observed end attempt after successful and faulting named workers
+owner-derived command finalization
 format feature queries agree with adapter-backed texture creation
 persistent arena suballocation/free
 command list begin/end/submit

@@ -78,7 +78,7 @@ fn gpu::CommandList record_compute(gpu::Device* device, gpu::PipelineHandle pipe
     if (timestamps_ok) {
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT, pool, 1);
     }
-    gpu::end_commands(device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     return cmd;
 }
 
@@ -112,7 +112,7 @@ fn gpu::CommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pip
     if (timestamps_ok) {
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT, pool, 1);
     }
-    gpu::end_commands(device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     return cmd;
 }
 
@@ -250,7 +250,7 @@ fn int main() {
 
     // One startup transition: re-recording UNDEFINED->COLOR_ATTACHMENT per rep
     // would fault INVALID_RESOURCE_STATE under the pending-layout model.
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList transition_cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::TextureBarrier to_attach = {
         .texture = rt, .before_stage = gpu::Stage.HOST, .after_stage = gpu::Stage.COLOR_ATTACHMENT,
@@ -258,12 +258,12 @@ fn int main() {
         .old_layout = gpu::TextureLayout.UNDEFINED, .new_layout = gpu::TextureLayout.COLOR_ATTACHMENT,
     };
     gpu::cmd_texture_barrier(&transition_cmd, &to_attach)!!;
-    gpu::end_commands(&device, &transition_cmd)!!;
+    gpu::end_commands(&transition_cmd)!!;
     gpu::CommandList[1] transition_lists = { transition_cmd };
     gpu::SubmitDesc transition_submit = { .command_lists = transition_lists[..] };
     gpu::submit(&device, &transition_submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     // Solo baselines double as calibration: two proportional rounds nudge
     // iters toward TARGET_MS per workload.
@@ -274,7 +274,7 @@ fn int main() {
     for (uint round = 0; round < CALIBRATION_ROUNDS; round++) {
         comp_root.iters = comp_iters;
         gpu::flush_buffer(&device, comp_root_buffer, 0, 0)!!;
-        gpu::begin_frame(&device)!!;
+        frame_token = gpu::begin_frame(&device)!!;
         gpu::CommandList comp_cmd = record_compute(
             device:        &device,
             pipeline:      comp_pipeline,
@@ -295,18 +295,18 @@ fn int main() {
         } else {
             comp_ns = comp_wall_ns;
         }
-        gpu::end_frame(&device)!!;
+        gpu::end_frame(&frame_token)!!;
         double comp_scale = (TARGET_MS * 1.0e6) / comp_ns;
         double comp_next = (double)comp_iters * comp_scale;
         comp_next = comp_next < (double)MIN_ITERS ? (double)MIN_ITERS : comp_next;
         comp_next = comp_next > (double)MAX_ITERS ? (double)MAX_ITERS : comp_next;
         comp_iters = (uint)comp_next;
 
-        gpu::begin_frame(&device)!!;
-        gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, OverlapFragRoot::size, 16)!!;
+        frame_token = gpu::begin_frame(&device)!!;
+        gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
         OverlapFragRoot* frag_root = (OverlapFragRoot*)frag_span.cpu;
         frag_root.iters = frag_iters;
-        gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+        gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
         float* verts = (float*)vertex_span.cpu;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
@@ -344,7 +344,7 @@ fn int main() {
         } else {
             frag_ns = frag_wall_ns;
         }
-        gpu::end_frame(&device)!!;
+        gpu::end_frame(&frame_token)!!;
         double frag_scale = (TARGET_MS * 1.0e6) / frag_ns;
         double frag_next = (double)frag_iters * frag_scale;
         frag_next = frag_next < (double)MIN_ITERS ? (double)MIN_ITERS : frag_next;
@@ -369,12 +369,12 @@ fn int main() {
     ulong sem_g_counter = 0;
 
     for (uint rep = 0; rep < REPS; rep++) {
-        gpu::begin_frame(&device)!!;
+        frame_token = gpu::begin_frame(&device)!!;
 
-        gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, OverlapFragRoot::size, 16)!!;
+        gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
         OverlapFragRoot* frag_root = (OverlapFragRoot*)frag_span.cpu;
         frag_root.iters = frag_iters;
-        gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+        gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
         float* verts = (float*)vertex_span.cpu;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
@@ -525,7 +525,7 @@ fn int main() {
             rep, wall_a[rep] / 1.0e6, wall_b[rep] / 1.0e6, gfx_parts[rep] / 1.0e6, comp_parts[rep] / 1.0e6, intersection_ns / 1.0e6,
         );
 
-        gpu::end_frame(&device)!!;
+        gpu::end_frame(&frame_token)!!;
     }
 
     double[REPS] sum_parts;

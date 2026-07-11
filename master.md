@@ -365,6 +365,8 @@ The Vulkan backend should expose a neutral surface creation descriptor rather th
 `Device` owns backend state, queues, resource tables, descriptor heaps, frame arenas, and debug configuration.
 
 The supported runtime model permits at most one live `Device` per process.
+Frame tokens, command tokens, resource handles, descriptor indices, GPU
+addresses/spans, and synchronization values are scoped to that sole device.
 Multi-device operation is deferred until resource ownership and validation are
 designed explicitly; the current handle tables do not distinguish otherwise
 coincident handles from different devices.
@@ -426,7 +428,7 @@ Command lists are explicitly begun, recorded, ended, and submitted.
 
 ```text
 begin_commands(device, QueueKind, RecordingContextHandle ctx = {}) -> CommandList?
-end_commands(device, CommandList) -> void?
+end_commands(CommandList) -> void?
 submit(device, SubmitDesc) -> void?
 ```
 
@@ -534,12 +536,31 @@ The Vulkan backend maps those kinds to VMA allocation policies.
 Frame lifetime is a strict state machine:
 
 ```text
-IDLE --begin_frame--> ACTIVE --end_frame--> IDLE
+IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDLE
 ```
 
-Frame upload allocation is valid only in `ACTIVE`. Double begin, end while
-idle, and allocation while idle fault `INVALID_RESOURCE_STATE` without
-mutating arenas, command pools, retirement counters, or submissions.
+`begin_frame` returns a stack-only, owner-bearing `FrameToken` of at most 16
+bytes. `alloc_frame_span` and `end_frame` accept that token, making the active
+frame precondition visible at each call site. A copied token aliases the same
+active generation. Successful end clears the passed token and invalidates all
+aliases; failed end preserves the token and retirement state for retry.
+
+Double begin, end while idle, allocation while idle, and stale-token use fault
+without mutating arenas, command pools, retirement counters, or submissions.
+The token path adds no heap allocation, runtime callback, or per-frame indirect
+dispatch.
+
+Fallible frame work may use the direct-call helper:
+
+```c3
+gpu::FrameToken frame;
+gpu::@with_frame(&frame, &device, record_frame, &state)!;
+```
+
+`record_frame(FrameToken*, State*) -> void?` must be a named worker. The helper
+attempts end exactly once after worker success or fault. An end fault takes
+precedence and leaves `frame` live so the caller can retry `end_frame(&frame)`;
+otherwise the worker fault is returned.
 
 Used for:
 

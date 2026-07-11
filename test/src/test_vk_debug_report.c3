@@ -147,7 +147,7 @@ fn void labels_record_validation_clean() @test {
     gpu::TextureHandle target = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::cmd_begin_label(&cmd, "frame_setup")!!;
@@ -174,12 +174,12 @@ fn void labels_record_validation_clean() @test {
     gpu::cmd_end_label(&cmd)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     fault ended = @catch(gpu::cmd_begin_label(&cmd, "too_late"));
     assert(ended == gpu::INVALID_HANDLE, "labels on a consumed list fault INVALID_HANDLE");

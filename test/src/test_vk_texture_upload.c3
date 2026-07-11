@@ -108,9 +108,9 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
-    gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!!;
+    gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
     sample_root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
     sample_root.texture_index = tex_index;
@@ -181,7 +181,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -209,7 +209,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
         }
     }
 
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void storage_write_direct_readback() @test {
@@ -245,8 +245,8 @@ fn void storage_write_direct_readback() @test {
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pd)!!;
     defer gpu::destroy_pipeline(&device, write_pipe)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, WriteRoot::size, 16)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
     WriteRoot* root = (WriteRoot*)root_span.cpu;
     root.texture_index = tex_index;
     root.width         = UP_SIZE;
@@ -293,7 +293,7 @@ fn void storage_write_direct_readback() @test {
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -311,7 +311,7 @@ fn void storage_write_direct_readback() @test {
             assert(texel[3] == (char)255, "storage-written alpha reads back");
         }
     }
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void copy_validation_faults() @test {
@@ -337,7 +337,7 @@ fn void copy_validation_faults() @test {
     defer gpu::destroy_buffer(&device, staging)!!;
     gpu::GpuSpan span = gpu::get_buffer_span(&device, staging)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
 
     // Tracked layout is UNDEFINED, not TRANSFER_DST.
@@ -377,8 +377,8 @@ fn void copy_validation_faults() @test {
     fault usage_fault = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &no_src_usage));
     assert(usage_fault == gpu::INVALID_ARGUMENT, "texture without transfer_src faults INVALID_ARGUMENT on readback");
 
-    gpu::end_commands(&device, &cmd)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_commands(&cmd)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void mip_subset_view_sampled() @test {
@@ -448,8 +448,8 @@ fn void mip_subset_view_sampled() @test {
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* root = (SampleRoot*)root_span.cpu;
     root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
     root.texture_index = tex_index;
@@ -496,7 +496,7 @@ fn void mip_subset_view_sampled() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -506,7 +506,7 @@ fn void mip_subset_view_sampled() @test {
     float* sampled = (float*)out_span.cpu;
     assert(quantize_unorm8(sampled[0]) == 200, "mip-subset view samples mip 1, not mip 0");
     assert(quantize_unorm8(sampled[1]) == 210, "mip-subset view green matches mip 1");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void flush_invalidate_stale_handle_faults() @test {

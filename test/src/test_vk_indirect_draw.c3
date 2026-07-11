@@ -180,8 +180,8 @@ fn gpu::PipelineHandle make_cross_family_compute_pipeline(
     return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
 }
 
-fn gpu::GpuSpan alloc_cross_family_indirect_args(gpu::Device* device) {
-    gpu::GpuSpan span = gpu::alloc_frame_span(device, gpu::DispatchIndirectCommand::size, 16)!!;
+fn gpu::GpuSpan alloc_cross_family_indirect_args(gpu::FrameToken* frame) {
+    gpu::GpuSpan span = gpu::alloc_frame_span(frame, gpu::DispatchIndirectCommand::size, 16)!!;
     uint* words = (uint*)span.cpu;
     words[0] = 1;
     words[1] = 1;
@@ -189,8 +189,8 @@ fn gpu::GpuSpan alloc_cross_family_indirect_args(gpu::Device* device) {
     return span;
 }
 
-fn gpu::GpuSpan alloc_empty_compute_root(gpu::Device* device) {
-    gpu::GpuSpan span = gpu::alloc_frame_span(device, ComputeRoot::size, 16)!!;
+fn gpu::GpuSpan alloc_empty_compute_root(gpu::FrameToken* frame) {
+    gpu::GpuSpan span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
     ComputeRoot* root = (ComputeRoot*)span.cpu;
     *root = { .count = 0 };
     return span;
@@ -209,10 +209,10 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
     gpu::SemaphoreHandle semaphore = gpu::create_semaphore(&device, &semaphore_desc)!!;
     defer gpu::destroy_semaphore(&device, semaphore)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan args = alloc_cross_family_indirect_args(&device);
-    gpu::GpuSpan compute_root = alloc_empty_compute_root(&device);
-    gpu::GpuSpan graphics_root = alloc_empty_compute_root(&device);
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan args = alloc_cross_family_indirect_args(&frame_token);
+    gpu::GpuSpan compute_root = alloc_empty_compute_root(&frame_token);
+    gpu::GpuSpan graphics_root = alloc_empty_compute_root(&frame_token);
 
     gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
     gpu::cmd_dispatch_indirect(
@@ -221,7 +221,7 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
         root:     compute_root.gpu,
         args:     args,
     )!!;
-    gpu::end_commands(&device, &compute)!!;
+    gpu::end_commands(&compute)!!;
     gpu::CommandList[1] compute_lists = { compute };
     gpu::SemaphoreSignal[1] signals = {{
         .semaphore = semaphore,
@@ -241,7 +241,7 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
         root:     graphics_root.gpu,
         args:     args,
     )!!;
-    gpu::end_commands(&device, &graphics)!!;
+    gpu::end_commands(&graphics)!!;
     gpu::CommandList[1] graphics_lists = { graphics };
     gpu::SemaphoreWait[1] waits = {{
         .semaphore = semaphore,
@@ -253,7 +253,7 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
         .waits         = waits[..],
     };
     gpu::submit(&device, &graphics_submit)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
@@ -274,10 +274,10 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
     defer gpu::destroy_shader(&device, shader)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan compute_args = alloc_cross_family_indirect_args(&device);
+    gpu::FrameToken first_frame = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan compute_args = alloc_cross_family_indirect_args(&first_frame);
     assert(compute_args.offset == 0, "first slot use starts at offset zero");
-    gpu::GpuSpan compute_root = alloc_empty_compute_root(&device);
+    gpu::GpuSpan compute_root = alloc_empty_compute_root(&first_frame);
     gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
@@ -285,17 +285,17 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
         root:     compute_root.gpu,
         args:     compute_args,
     )!!;
-    gpu::end_commands(&device, &compute)!!;
+    gpu::end_commands(&compute)!!;
     gpu::CommandList[1] compute_lists = { compute };
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
     gpu::submit(&device, &compute_submit)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&first_frame)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan graphics_args = alloc_cross_family_indirect_args(&device);
+    gpu::FrameToken second_frame = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan graphics_args = alloc_cross_family_indirect_args(&second_frame);
     assert(graphics_args.buffer == compute_args.buffer, "retired slot reuses its backing buffer");
     assert(graphics_args.offset == 0, "retired slot reuses offset zero");
-    gpu::GpuSpan graphics_root = alloc_empty_compute_root(&device);
+    gpu::GpuSpan graphics_root = alloc_empty_compute_root(&second_frame);
     gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
@@ -303,11 +303,11 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
         root:     graphics_root.gpu,
         args:     graphics_args,
     )!!;
-    gpu::end_commands(&device, &graphics)!!;
+    gpu::end_commands(&graphics)!!;
     gpu::CommandList[1] graphics_lists = { graphics };
     gpu::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..] };
     gpu::submit(&device, &graphics_submit)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&second_frame)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
@@ -344,20 +344,20 @@ fn void compute_generated_indexed_indirect_draw() @test {
     defer gpu::destroy_buffer(&device, readback)!!;
     gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
-    gpu::GpuSpan scratch = gpu::alloc_frame_span(&device, 64, 16)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+    gpu::GpuSpan scratch = gpu::alloc_frame_span(&frame_token, 64, 16)!!;
+    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
     write_triangle_verts(&verts_span);
-    gpu::GpuSpan index_span = gpu::alloc_frame_span(&device, 3 * 4, 4)!!;
+    gpu::GpuSpan index_span = gpu::alloc_frame_span(&frame_token, 3 * 4, 4)!!;
     uint* indices = (uint*)index_span.cpu;
     indices[0] = 0; indices[1] = 1; indices[2] = 2;
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
     FragRoot* frag_root = (FragRoot*)frag_span.cpu;
     frag_root.texture_index = ctx.tex_index;
     frag_root.sampler_index = ctx.smp_index;
 
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, BuildRoot::size, 16)!!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, BuildRoot::size, 16)!!;
     BuildRoot* root = (BuildRoot*)root_span.cpu;
     root.indexed_args_gpu = args_span.gpu;
     root.plain_args_gpu   = scratch.gpu;
@@ -425,7 +425,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::cmd_end_render_pass(&cmd)!!;
     record_target_readback(&cmd, target, &rb_span);
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -434,7 +434,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     fault early = @catch(gpu::resolve_readback(&device, &ticket, (char[])((char*)&ticket)[:1]));
     assert(early == gpu::INVALID_ARGUMENT || early == gpu::READBACK_NOT_READY, "early resolve is rejected");
 
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
@@ -471,16 +471,16 @@ fn void plain_indirect_draw_from_frame_span() @test {
     defer gpu::destroy_buffer(&device, readback)!!;
     gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
     write_triangle_verts(&verts_span);
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
     FragRoot* frag_root = (FragRoot*)frag_span.cpu;
     frag_root.texture_index = ctx.tex_index;
     frag_root.sampler_index = ctx.smp_index;
 
     // Host-written args in a frame span: the arena carries indirect usage.
-    gpu::GpuSpan args_span = gpu::alloc_frame_span(&device, gpu::DrawIndirectCommand::size, 16)!!;
+    gpu::GpuSpan args_span = gpu::alloc_frame_span(&frame_token, gpu::DrawIndirectCommand::size, 16)!!;
     gpu::DrawIndirectCommand* args = (gpu::DrawIndirectCommand*)args_span.cpu;
     *args = { .vertex_count = 3, .instance_count = 1 };
 
@@ -502,7 +502,7 @@ fn void plain_indirect_draw_from_frame_span() @test {
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
     record_target_readback(&cmd, target, &rb_span);
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -511,7 +511,7 @@ fn void plain_indirect_draw_from_frame_span() @test {
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
     char* center = center_pixel(&rb_span);
     assert(center[0] == (char)255, "non-indexed indirect draw renders");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void indirect_dispatch_executes_gpu_counts() @test {
@@ -533,16 +533,16 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     defer gpu::destroy_pipeline(&device, double_pipeline)!!;
 
     const uint COUNT = 100;
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
-    gpu::GpuSpan io_span = gpu::alloc_frame_span(&device, COUNT * 4 * 2, 16)!!;
+    gpu::GpuSpan io_span = gpu::alloc_frame_span(&frame_token, COUNT * 4 * 2, 16)!!;
     float* values = (float*)io_span.cpu;
     for (uint i = 0; i < COUNT; i++) values[i] = (float)i;
 
-    gpu::GpuSpan scratch = gpu::alloc_frame_span(&device, 64, 16)!!;
+    gpu::GpuSpan scratch = gpu::alloc_frame_span(&frame_token, 64, 16)!!;
     gpu::GpuSpan dispatch_args = scratch.checked_subspan(16, gpu::DispatchIndirectCommand::size)!!;
 
-    gpu::GpuSpan build_root_span = gpu::alloc_frame_span(&device, BuildRoot::size, 16)!!;
+    gpu::GpuSpan build_root_span = gpu::alloc_frame_span(&frame_token, BuildRoot::size, 16)!!;
     BuildRoot* build_root = (BuildRoot*)build_root_span.cpu;
     build_root.indexed_args_gpu = scratch.gpu;
     build_root.plain_args_gpu   = scratch.gpu;
@@ -553,7 +553,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     build_root.dispatch_x       = (COUNT + 63) / 64;
     build_root.count_value      = 1;
 
-    gpu::GpuSpan double_root_span = gpu::alloc_frame_span(&device, ComputeRoot::size, 16)!!;
+    gpu::GpuSpan double_root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
     ComputeRoot* double_root = (ComputeRoot*)double_root_span.cpu;
     double_root.input_gpu  = io_span.gpu;
     double_root.output_gpu = (gpu::GpuAddress)((ulong)io_span.gpu + COUNT * 4);
@@ -588,7 +588,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -599,7 +599,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     for (uint i = 0; i < COUNT; i++) {
         assert(doubled[i] == (float)i * 2.0f, "indirect dispatch ran with GPU-written group counts");
     }
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void count_buffer_limits_draws() @test {
@@ -624,22 +624,22 @@ fn void count_buffer_limits_draws() @test {
     defer gpu::destroy_buffer(&device, rb_one)!!;
     gpu::GpuSpan rb_one_span = gpu::get_buffer_span(&device, rb_one)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
     write_triangle_verts(&verts_span);
-    gpu::GpuSpan index_span = gpu::alloc_frame_span(&device, 3 * 4, 4)!!;
+    gpu::GpuSpan index_span = gpu::alloc_frame_span(&frame_token, 3 * 4, 4)!!;
     uint* indices = (uint*)index_span.cpu;
     indices[0] = 0; indices[1] = 1; indices[2] = 2;
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
     FragRoot* frag_root = (FragRoot*)frag_span.cpu;
     frag_root.texture_index = ctx.tex_index;
     frag_root.sampler_index = ctx.smp_index;
 
-    gpu::GpuSpan args_span = gpu::alloc_frame_span(&device, gpu::DrawIndexedIndirectCommand::size, 16)!!;
+    gpu::GpuSpan args_span = gpu::alloc_frame_span(&frame_token, gpu::DrawIndexedIndirectCommand::size, 16)!!;
     gpu::DrawIndexedIndirectCommand* args = (gpu::DrawIndexedIndirectCommand*)args_span.cpu;
     *args = { .index_count = 3, .instance_count = 1 };
 
-    gpu::GpuSpan counts = gpu::alloc_frame_span(&device, 8, 4)!!;
+    gpu::GpuSpan counts = gpu::alloc_frame_span(&frame_token, 8, 4)!!;
     uint* count_values = (uint*)counts.cpu;
     count_values[0] = 0;
     count_values[1] = 1;
@@ -671,7 +671,7 @@ fn void count_buffer_limits_draws() @test {
         gpu::cmd_end_render_pass(&cmd)!!;
         record_target_readback(&cmd, targets[i], &rb_spans[i]);
     }
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -684,7 +684,7 @@ fn void count_buffer_limits_draws() @test {
     gpu::invalidate_buffer(&device, rb_one, 0, 0)!!;
     char* one_center = center_pixel(&rb_one_span);
     assert(one_center[0] == (char)255, "GPU count of one draws the triangle");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void ticket_hybrid_and_short_dest() @test {
@@ -707,7 +707,7 @@ fn void ticket_hybrid_and_short_dest() @test {
     for (usz i = 0; i < CHUNK; i++) src_bytes[i] = (char)(i % 251);
     gpu::flush_buffer(&device, src, 0, 0)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::ReadbackTicket[TICKETS] tickets;
     uint dedicated_count = 0;
@@ -722,11 +722,11 @@ fn void ticket_hybrid_and_short_dest() @test {
     }
     assert(dedicated_count > 0, "arena saturation falls back to dedicated tickets");
     assert(dedicated_count < TICKETS, "early tickets are arena-backed");
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 
     char[CHUNK] dest;
@@ -760,11 +760,11 @@ fn void indirect_argument_validation() @test {
     defer gpu::destroy_buffer(&device, plain)!!;
     gpu::GpuSpan plain_span = gpu::get_buffer_span(&device, plain)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
     write_triangle_verts(&verts_span);
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, 16, 16)!!;
-    gpu::GpuSpan args_span = gpu::alloc_frame_span(&device, 64, 16)!!;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
+    gpu::GpuSpan args_span = gpu::alloc_frame_span(&frame_token, 64, 16)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     record_target_to_attach(&cmd, target);
@@ -806,6 +806,6 @@ fn void indirect_argument_validation() @test {
     assert(overrun == gpu::INVALID_ARGUMENT, "draw_count past the span faults INVALID_ARGUMENT");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&device, &cmd)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_commands(&cmd)!!;
+    gpu::end_frame(&frame_token)!!;
 }

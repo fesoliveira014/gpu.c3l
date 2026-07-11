@@ -270,16 +270,16 @@ fn void cross_queue_timeline_chain_validates() @test {
     gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
     defer gpu::destroy_semaphore(&device, sem)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList compute_cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::end_commands(&device, &compute_cmd)!!;
+    gpu::end_commands(&compute_cmd)!!;
     gpu::CommandList[1] compute_lists = { compute_cmd };
     gpu::SemaphoreSignal[1] signals = {{ .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.COMPUTE_SHADER }};
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..], .signals = signals[..] };
     gpu::submit(&device, &compute_submit)!!;
 
     gpu::CommandList gfx_cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&device, &gfx_cmd)!!;
+    gpu::end_commands(&gfx_cmd)!!;
     gpu::CommandList[1] gfx_lists = { gfx_cmd };
     gpu::SemaphoreWait[1] waits = {{ .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.COMPUTE_SHADER }};
     gpu::SubmitDesc gfx_submit = { .command_lists = gfx_lists[..], .waits = waits[..] };
@@ -287,7 +287,7 @@ fn void cross_queue_timeline_chain_validates() @test {
 
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void shared_queues_noop_on_single_family() @test {
@@ -422,17 +422,17 @@ fn void tri_queue_frame_retires_cleanly() @test {
     defer gpu::destroy_device(&device)!!;
 
     for (uint frame = 0; frame < 4; frame++) {
-        gpu::begin_frame(&device)!!;
+        gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
         gpu::CommandList[3] lists;
         gpu::QueueKind[3] kinds = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE, gpu::QueueKind.TRANSFER };
         for (uint i = 0; i < 3; i++) {
             gpu::CommandList cmd = gpu::begin_commands(&device, kinds[i])!!;
-            gpu::end_commands(&device, &cmd)!!;
+            gpu::end_commands(&cmd)!!;
             gpu::CommandList[1] one = { cmd };
             gpu::SubmitDesc submit = { .command_lists = one[..] };
             gpu::submit(&device, &submit)!!;
         }
-        gpu::end_frame(&device)!!;
+        gpu::end_frame(&frame_token)!!;
     }
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }

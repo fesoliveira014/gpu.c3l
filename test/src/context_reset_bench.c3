@@ -22,7 +22,7 @@ fn void? record_and_submit_all(gpu::Device* device, gpu::RecordingContextHandle[
     for (uint c = 0; c < BENCH_USER_CONTEXTS; c++) {
         lists[c] = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS, (*contexts)[c])!;
         gpu::cmd_fill_buffer(&lists[c], target, c * BENCH_FILL_STRIDE, BENCH_FILL_STRIDE, c)!;
-        gpu::end_commands(device, &lists[c])!;
+        gpu::end_commands(&lists[c])!;
     }
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     return gpu::submit(device, &submit);
@@ -54,45 +54,45 @@ fn int main() {
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
 
     // Warm-up: let both frame slots pass once so phase timing starts clean.
-    gpu::begin_frame(&device)!!;
-    gpu::end_frame(&device)!!;
-    gpu::begin_frame(&device)!!;
-    gpu::end_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
+    frame_token = gpu::begin_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     long idle_elapsed_ns = 0;
     uint idle_reset_total = 0;
     uint idle_skipped_total = 0;
     for (uint i = 0; i < BENCH_IDLE_FRAMES; i++) {
         std::time::Clock mark = std::time::clock::now();
-        gpu::begin_frame(&device)!!;
+        frame_token = gpu::begin_frame(&device)!!;
         idle_elapsed_ns += (long)mark.to_now();
         vk::PoolResetStats stats = vk::pool_reset_stats(state);
         idle_reset_total += stats.reset;
         idle_skipped_total += stats.skipped;
-        gpu::end_frame(&device)!!;
+        gpu::end_frame(&frame_token)!!;
     }
     double idle_ns_per_frame = (double)idle_elapsed_ns / (double)BENCH_IDLE_FRAMES;
     io::printfn("phase 1 (idle, %d frames, %d idle user contexts): %.1f ns/begin_frame, resets=%d skips=%d",
         BENCH_IDLE_FRAMES, BENCH_USER_CONTEXTS, idle_ns_per_frame, idle_reset_total, idle_skipped_total);
 
     // Prime every context's pool dirty for the slot the timed loop starts on.
-    gpu::begin_frame(&device)!!;
+    frame_token = gpu::begin_frame(&device)!!;
     record_and_submit_all(&device, &contexts, target)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     long rec_elapsed_ns = 0;
     uint rec_reset_total = 0;
     uint rec_skipped_total = 0;
     for (uint i = 0; i < BENCH_RECORDING_FRAMES; i++) {
         std::time::Clock mark = std::time::clock::now();
-        gpu::begin_frame(&device)!!;
+        frame_token = gpu::begin_frame(&device)!!;
         rec_elapsed_ns += (long)mark.to_now();
         vk::PoolResetStats stats = vk::pool_reset_stats(state);
         rec_reset_total += stats.reset;
         rec_skipped_total += stats.skipped;
 
         record_and_submit_all(&device, &contexts, target)!!;
-        gpu::end_frame(&device)!!;
+        gpu::end_frame(&frame_token)!!;
     }
     double rec_ns_per_frame = (double)rec_elapsed_ns / (double)BENCH_RECORDING_FRAMES;
     io::printfn("phase 2 (all-recording, %d frames, %d contexts): %.1f ns/begin_frame, resets=%d skips=%d",

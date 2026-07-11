@@ -43,8 +43,8 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     float* in_data = (float*)in_span.cpu;
     for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
 
-    gpu::begin_frame(device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(device, ComputeRoot::size, 16)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(device)!!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
     ComputeRoot* root = (ComputeRoot*)root_span.cpu;
     root.input_gpu  = gpu::get_buffer_address(device, input)!!;
     root.output_gpu = gpu::get_buffer_address(device, output)!!;
@@ -63,7 +63,7 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &bar)!!;
-    gpu::end_commands(device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(device, &submit)!!;
@@ -72,7 +72,7 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     gpu::GpuSpan out_span = gpu::get_buffer_span(device, output)!!;
     float* out_data = (float*)out_span.cpu;
     for (uint i = 0; i < COUNT; i++) assert(out_data[i] == (float)i * 2.0, "warm pipeline computes correctly");
-    gpu::end_frame(device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn char[] export_cache_blob(gpu::Device* device) {

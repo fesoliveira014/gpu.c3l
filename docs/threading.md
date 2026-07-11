@@ -19,7 +19,7 @@ library's own state, but results and validation verdicts are undefined.
 | Entry point | Tier | Notes |
 |---|---|---|
 | `create_device` / `destroy_device` | E | |
-| `begin_frame` / `end_frame` | E | externally paired `IDLE -> ACTIVE -> IDLE`; quiescence required |
+| `begin_frame` / `end_frame` / `@with_frame` | E | token-paired `IDLE -> ACTIVE -> IDLE`; quiescence required; helper worker is a direct call |
 | `submit` / `present` | E | queue-mutex backed, so Tier S private submits interleave safely |
 | `wait_queue_idle` | E | queue-mutex backed |
 | `create_swapchain` / `destroy_swapchain` / `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; info is coherent only at Tier-E boundaries |
@@ -33,7 +33,7 @@ library's own state, but results and validation verdicts are undefined.
 | `create_compute_pipeline` / `create_graphics_pipeline` / `destroy_pipeline` | S | driver compiles run in parallel; a same-key race compiles twice, converges to one entry |
 | `create_semaphore` / `destroy_semaphore` | S | |
 | `wait_semaphore` | S | lock-free |
-| `alloc_frame_span` | S | lock-free CAS bump during an active frame only |
+| `alloc_frame_span` | S | lock-free CAS bump through a current `FrameToken`; token copies may be shared during the active generation |
 | `alloc_persistent_span` / `free_persistent_span` | S | VMA virtual blocks are not internally synchronized; the library locks them |
 | `create_recording_context` / `destroy_recording_context` | S | destroy requires the context's lists retired |
 | `upload_buffer_data` / `upload_texture_data` / `readback_buffer_data` / `readback_texture_data` | S | record on a dedicated internal context, serialized by helper_record_mutex; never share a pool with Tier-C recording |
@@ -48,17 +48,26 @@ library's own state, but results and validation verdicts are undefined.
 ## Phase rule
 
 No Tier S or Tier C call may be in flight across `begin_frame` / `end_frame`.
+The frame-owner thread begins and ends the token generation; workers may receive
+copies or the shared token pointer only after begin and must quiesce before end.
 With `enable_validation`, in-flight Tier S calls at the boundary fault
 `INVALID_RESOURCE_STATE`. An unsubmitted command record is reclaimed when its
 frame slot retires and its command pool resets; every alias of that token then
 faults `INVALID_HANDLE`. Without validation the phase rule is still contractual —
 Tier S calls pay nothing.
 
-Frame lifecycle errors are independent of validation: double begin, end while
-idle, and frame-span allocation while idle always fault
-`INVALID_RESOURCE_STATE` before mutating frame state. Off-frame `submit` and
-`present` remain allowed; they are retired by the next correctly paired frame
-or by device teardown, not by an unmatched `end_frame`.
+Frame lifecycle errors are independent of validation: double begin faults
+`INVALID_RESOURCE_STATE`; malformed, consumed, and stale frame tokens fault
+`INVALID_HANDLE`. Every rejection is mutation-free. A successful end consumes
+the device generation and all token aliases; a failed end retains the caller's
+token and boundary state for retry.
+
+`@with_frame(&frame, &device, named_worker, ...args)` is Tier E around the
+entire worker. It invokes the symbol directly, with no runtime callback or
+virtual dispatch, then attempts end exactly once even when the worker returns a
+fault through `!`. An end fault wins and leaves `frame` live for retry. Off-frame
+`submit` and `present` remain allowed; they are retired by the next correctly
+paired frame or by device teardown, not by an unmatched `end_frame`.
 
 ## Lock order
 

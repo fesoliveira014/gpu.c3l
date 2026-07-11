@@ -127,8 +127,11 @@ destroy_device(Device* device) -> void?
 ```
 
 The supported contract permits at most one live `Device` per process.
+Frame tokens, command tokens, resource handles, descriptor indices, GPU
+addresses/spans, and synchronization values are scoped to that sole device.
 Multi-device operation is deferred; the current handle and descriptor-index
-representations do not encode device ownership.
+representations do not encode device ownership, and defensive owner checks do
+not establish multi-device support.
 
 ### Handles
 
@@ -205,9 +208,9 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | `create_device`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation off; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
-| `INVALID_HANDLE` | any handle-taking call, `cmd_*`, `end_commands`, `submit` | use after destroy (generation mismatch), never-live handle, consumed command-list alias, or abandoned command token after its frame-slot pool resets |
-| `INVALID_RESOURCE_STATE` | `create_swapchain`, `begin_frame`, `end_frame`, `alloc_frame_span`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | the native window is already bound to another Vulkan surface; double begin; end or frame-span allocation while idle; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
+| `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed-queue-kind or cross-device command submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_HANDLE` | any handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame` | use after destroy (generation mismatch), never-live handle, consumed command-list alias, abandoned command token after its frame-slot pool resets, or a zero, malformed, consumed, or stale-generation `FrameToken` |
+| `INVALID_RESOURCE_STATE` | `create_swapchain`, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | the native window is already bound to another Vulkan surface; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan explicitly returned `VK_ERROR_DEVICE_LOST`; unrecoverable |
@@ -243,14 +246,50 @@ MemoryKind.STAGING
 The frame lifecycle is strict:
 
 ```text
-IDLE --begin_frame--> ACTIVE --end_frame--> IDLE
-alloc_frame_span(Device* device, usz size, usz align) -> GpuSpan?  // ACTIVE only
+IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDLE
+
+begin_frame(Device* device) -> FrameToken?
+alloc_frame_span(FrameToken* frame, usz size, usz align) -> GpuSpan?
+end_frame(FrameToken* frame) -> void?
 ```
 
-Double begin, end while idle, and frame-span allocation while idle fault
-`INVALID_RESOURCE_STATE` before changing frame state. Frame spans are transient
-and invalid after their frame arena resets.
-Their internal backing buffers are safe on the selected graphics and compute
+`FrameToken` is a stack-only owner-bearing token no larger than 16 bytes. A
+copy may allocate while its device-owned generation remains active. Successful
+end clears the passed token and invalidates every alias; a consumed, malformed,
+or stale token faults `INVALID_HANDLE`. Double begin faults
+`INVALID_RESOURCE_STATE`. Rejections change no frame or arena state.
+
+When end submission faults, `end_frame` returns the exact fault and preserves
+the token, active generation, frame slot, retirement state, queue-use flags,
+and prospective signal value. Retry with the same token; only a successful end
+consumes it. Frame spans are transient and invalid after their frame arena
+resets.
+
+For fallible frame work, use the compile-time direct-call helper:
+
+```c3
+fn void? render_frame(gpu::FrameToken* frame, RenderState* state) {
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
+    record_rendering(frame.device, state, root_span)!;
+}
+
+gpu::FrameToken frame;
+gpu::@with_frame(&frame, &device, render_frame, &state)!;
+```
+
+The worker must be a named optional-returning function whose first parameter is
+`FrameToken*`; additional state is passed as ordinary arguments. The worker
+must not end the frame itself; the helper owns the single end attempt. The
+helper clears caller-owned token storage, begins the frame, calls the worker
+directly, and attempts end exactly once after worker success or fault. Begin
+failure calls neither worker nor end. If only the worker faults, its fault is
+returned after end succeeds. If end faults, that exact fault takes precedence
+even when the worker also faulted, and caller-owned `frame` remains live for
+`end_frame(&frame)` retry. Callers needing both diagnostics should log the
+worker fault before returning it. The helper performs no heap allocation,
+runtime callback, virtual dispatch, or per-frame indirect call.
+
+Frame-arena backing buffers are safe on the selected graphics and compute
 families without a caller-supplied `shared_queues` flag. Concurrent sharing
 does not provide execution or memory ordering; callers must still record the
 required barriers and semaphore waits/signals.
@@ -323,7 +362,8 @@ current Stage/Hazard[/TextureLayout] and restore it), recorded
 `cmd_upload_buffer` / `cmd_upload_texture`, and the non-blocking ticket flow
 `cmd_readback_buffer`/`cmd_readback_texture` → `poll_readback` →
 `resolve_readback` (see docs/memory.md §12). Frame lifecycle is
-`begin_frame`/`end_frame` around each frame's work; memory introspection is
+`begin_frame`/`end_frame` around each frame's work (or `@with_frame` for
+fallible named-worker scopes); memory introspection is
 `get_memory_stats` / `build_memory_report` / `get_persistent_stats`.
 
 ## 6. Texture API
@@ -617,7 +657,7 @@ one thread at a time. Create one context per recording thread with
 
 ```text
 begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) -> CommandList?
-end_commands(Device* device, CommandList* commands) -> void?
+end_commands(CommandList* commands) -> void?
 submit(Device* device, SubmitDesc* desc) -> void?
 wait_queue_idle(Device* device, QueueKind queue) -> void?
 
@@ -1101,6 +1141,12 @@ struct RootArgs {
     uint _pad0, _pad1, _pad2;
 }
 
+struct ComputeWork {
+    gpu::Device*       device;
+    gpu::BufferHandle  input;
+    gpu::PipelineHandle pipeline;
+}
+
 fn void? run_compute() {
     gpu::DeviceDesc device_desc = {
         .backend = gpu::BackendKind.VULKAN,
@@ -1124,19 +1170,24 @@ fn void? run_compute() {
     gpu::BufferHandle input = gpu::create_buffer(&device, &input_desc)!;
     defer gpu::destroy_buffer(&device, input)!!;
 
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, RootArgs::size, RootArgs::alignment)!;
-    RootArgs* root = (RootArgs*)root_span.cpu;
-    root.input = gpu::get_buffer_address(&device, input)!;
-    root.count = 1024;
+    ComputeWork work = { .device = &device, .input = input, .pipeline = pipeline };
+    gpu::FrameToken frame;
+    gpu::@with_frame(&frame, &device, record_compute, &work)!;
+}
 
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!;
+fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
+    RootArgs* root = (RootArgs*)root_span.cpu;
+    root.input = gpu::get_buffer_address(work.device, work.input)!;
+    root.count = 1024;
+    gpu::CommandList commands = gpu::begin_commands(work.device, gpu::QueueKind.COMPUTE)!;
     gpu::cmd_dispatch(
         commands: &commands,
-        pipeline: pipeline,
+        pipeline: work.pipeline,
         root:     root_span.gpu,
         groups:   { 16, 1, 1 },
     )!;
-    gpu::end_commands(&device, &commands)!;
+    gpu::end_commands(&commands)!;
 }
 ```
 

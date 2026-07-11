@@ -134,7 +134,7 @@ fn void? reset_frame_arena(VkDeviceState* state, uint index) {
     slot.cursor.store(0, AtomicOrdering.RELAXED);
 }
 
-fn void? vk_begin_frame(gpu::Device* device) @private {
+fn void? vk_begin_frame(gpu::Device* device, gpu::FrameToken* out_frame) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     if (state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
@@ -194,7 +194,12 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
         }
     }
     state.allocator.set_current_frame_index(state.frame_index);
+    ulong generation = state.frame_generation + 1;
+    if (generation == 0) generation = 1;
+    state.frame_generation = generation;
+    state.active_frame_generation = generation;
     state.frame_active = true;
+    *out_frame = { .device = device, .generation = generation };
 }
 
 <* Resolve a bump range without forming an unchecked alignment or extent sum.
@@ -216,12 +221,20 @@ fn FrameArenaRange? frame_arena_range(usz cursor, usz capacity, usz size, usz al
     };
 }
 
+fn VkDeviceState*? resolve_frame_token(gpu::FrameToken* frame) @private {
+    if (frame == null || frame.device == null || frame.generation == 0) return gpu::INVALID_HANDLE~;
+    if (frame.device.backend_state == null) return gpu::INVALID_HANDLE~;
+    VkDeviceState* state = (VkDeviceState*)frame.device.backend_state;
+    if (!state.frame_active || state.active_frame_generation != frame.generation) return gpu::INVALID_HANDLE~;
+    return state;
+}
+
 <* Lock-free CAS bump: concurrent callers get disjoint, aligned spans. *>
-fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+fn gpu::GpuSpan? vk_alloc_frame_span(gpu::FrameToken* frame, usz size, usz align) @private {
+    VkDeviceState* state = resolve_frame_token(frame)!;
     enter_tracked(state);
     defer exit_tracked(state);
-    if (!state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
+    if (!state.frame_active || state.active_frame_generation != frame.generation) return gpu::INVALID_HANDLE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
     usz old = slot.cursor.load(AtomicOrdering.RELAXED);
@@ -278,9 +291,8 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
    frame-signal submit waits each used queue's latest recorded aux value, so
    the frame value implies every queue finished. Off-frame graphics submits
    need no flag — this signal is queue-ordered behind them. *>
-fn void? end_frame_with_submit(gpu::Device* device, QueueSubmit2Fn submit_fn) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
-    if (!state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
+fn void? end_frame_with_submit(gpu::FrameToken* frame, QueueSubmit2Fn submit_fn) @private {
+    VkDeviceState* state = resolve_frame_token(frame)!;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
@@ -319,10 +331,12 @@ fn void? end_frame_with_submit(gpu::Device* device, QueueSubmit2Fn submit_fn) @p
     state.transfer_used_since_frame = false;
     state.off_frame_pending.store(false, AtomicOrdering.RELAXED);
     state.frame_active = false;
+    state.active_frame_generation = 0;
+    *frame = {};
 }
 
-fn void? vk_end_frame(gpu::Device* device) @private {
-    return end_frame_with_submit(device, &real_queue_submit2);
+fn void? vk_end_frame(gpu::FrameToken* frame) @private {
+    return end_frame_with_submit(frame, &real_queue_submit2);
 }
 
 <* Create the persistent arena: a large addressable buffer plus a VMA virtual

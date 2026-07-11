@@ -149,7 +149,8 @@ gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!;
 ```
 
 Gotchas: benchmark with validation off (the layer serializes `vkCmd*`);
-`alloc_frame_span` is lock-free and safe from workers.
+`alloc_frame_span(&frame, ...)` is lock-free and safe from workers while the
+token generation is active. Quiesce every worker before ending the frame.
 Running example: `multithreaded_recording`.
 
 ## 9. Shadow mapping with compare samplers
@@ -239,7 +240,7 @@ Goal: right residency per access pattern.
 
 | Kind | For | Pattern |
 |---|---|---|
-| `FRAME_UPLOAD` | roots, per-frame constants | `alloc_frame_span`, valid one frame |
+| `FRAME_UPLOAD` | roots, per-frame constants | `alloc_frame_span(&frame, ...)`, valid for that token generation |
 | `PERSISTENT_UPLOAD` | tables the CPU rewrites | write + `flush_buffer` |
 | `DEVICE` | GPU-only working sets | upload via staging |
 | `STAGING` | transfer sources | `cmd_copy_buffer_to_texture` etc. |
@@ -247,3 +248,39 @@ Goal: right residency per access pattern.
 
 Running example: `memory_report` prints the arenas live; `docs/memory.md`
 has the full model.
+
+## 14. Pair fallible frame work
+
+Goal: observe worker and frame-end faults without leaving the frame active on
+an early `!`.
+
+```c3
+fn void? render_frame(gpu::FrameToken* frame, AppState* state) {
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
+    record_and_submit(state, root_span)!;
+}
+
+gpu::FrameToken frame;
+if (catch err = gpu::@with_frame(&frame, &device, render_frame, &state)) {
+    if (frame.device != null) {
+        gpu::end_frame(&frame)!;
+    }
+    return err~;
+}
+```
+
+The helper requires a named optional-returning worker and caller-owned token
+storage. It calls the worker directly, attempts end exactly once after worker
+success or fault, and performs no heap allocation or indirect dispatch. If end
+succeeds after a worker fault, the worker fault is returned. If end faults, its
+exact fault takes precedence and `frame` remains live for retry; the example
+above performs that retry before propagating the original helper fault. Log a
+worker fault inside the worker if both diagnostics must be retained.
+
+Prefer `@with_frame` for fallible work. Use explicit begin/end only for a
+deliberate recovery flow where the caller-owned token survives the whole flow,
+every work fault is caught before leaving the scope, and the end result is
+always observed.
+
+Use the existing `root_pointer_compute` and `hello_triangle_sdl` samples as the
+headless and windowed lifecycle references; no lifecycle-only sample is needed.

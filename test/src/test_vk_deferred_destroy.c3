@@ -72,8 +72,8 @@ fn DeferRig build_defer_rig(gpu::Device* device) {
 
 <* Submits without waiting, so the caller destroys resources the GPU may
    still be running against. *>
-fn void submit_defer_rig(gpu::Device* device, DeferRig* rig) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(device, ComputeRoot::size, 16)!!;
+fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* rig) {
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
     ComputeRoot* root = (ComputeRoot*)root_span.cpu;
     root.input_gpu  = gpu::get_buffer_address(device, rig.io)!!;
     root.output_gpu = root.input_gpu;
@@ -109,7 +109,7 @@ fn void submit_defer_rig(gpu::Device* device, DeferRig* rig) {
         .after_hazard  = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &buf_bar)!!;
-    gpu::end_commands(device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -119,25 +119,25 @@ fn void submit_defer_rig(gpu::Device* device, DeferRig* rig) {
 fn void destroy_after_submit_survives_frame_cycle() @test {
     gpu::Device device = make_defer_test_device();
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     DeferRig rig = build_defer_rig(&device);
-    submit_defer_rig(&device, &rig);
+    submit_defer_rig(&frame_token, &device, &rig);
 
     gpu::destroy_texture(&device, rig.texture)!!;
     gpu::destroy_buffer(&device, rig.io)!!;
     gpu::destroy_pipeline(&device, rig.pipeline)!!;
     gpu::destroy_shader(&device, rig.shader)!!;
     assert(deferred_count(&device) > 0, "destroy-after-submit enqueues backend objects rather than freeing them");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     // Two more cycles: frames_in_flight == 2, so the second begin_frame waits
     // on the value end_frame signaled right after the destroys, guaranteeing
     // the drain observes retirement.
-    gpu::begin_frame(&device)!!;
-    gpu::end_frame(&device)!!;
-    gpu::begin_frame(&device)!!;
+    frame_token = gpu::begin_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
+    frame_token = gpu::begin_frame(&device)!!;
     assert(deferred_count(&device) == 0, "every deferred entry retires within frames_in_flight cycles");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
     assert(vk::report_resource_leaks(state) == 0, "destroyed handles leave no leaked slots");
@@ -151,17 +151,17 @@ fn void deferred_queue_count_rises_then_drains() @test {
     gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     assert(deferred_count(&device) == 0, "queue starts empty");
     gpu::destroy_buffer(&device, buffer)!!;
     assert(deferred_count(&device) == 1, "a mid-frame destroy raises the enqueued count");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::end_frame(&device)!!;
-    gpu::begin_frame(&device)!!;
+    frame_token = gpu::begin_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
+    frame_token = gpu::begin_frame(&device)!!;
     assert(deferred_count(&device) == 0, "the entry drains once frames_in_flight cycles retire it");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void deferred_destroy_outside_frame_is_immediate() @test {
@@ -195,7 +195,7 @@ fn void off_frame_destroy_defers_release() @test {
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::BufferCopyDesc copy = { .src = src, .dst = dst, .src_offset = 0, .dst_offset = 0, .size = 256 };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -226,7 +226,7 @@ fn void mid_frame_destroy_storm_issues_no_host_queries() @test {
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
     }
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     vk::DeferredStats before = defer_stats(&device);
     for (uint i = 0; i < STORM_COUNT; i++) {
         gpu::destroy_buffer(&device, buffers[i])!!;
@@ -235,13 +235,13 @@ fn void mid_frame_destroy_storm_issues_no_host_queries() @test {
     assert(after.host_queries == before.host_queries, "tier 1 skips every mid-frame destroy: zero host timeline queries");
     assert(after.pushed - before.pushed == STORM_COUNT, "every mid-frame destroy still enqueues a deferred entry");
     assert(deferred_count(&device) == STORM_COUNT, "the storm's entries stay queued until the covering frame retires");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::end_frame(&device)!!;
-    gpu::begin_frame(&device)!!;
+    frame_token = gpu::begin_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
+    frame_token = gpu::begin_frame(&device)!!;
     assert(deferred_count(&device) == 0, "the storm drains once its covering frame retires");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 <* Once every pushed entry retires through the ordinary tiered path (no
@@ -257,15 +257,15 @@ fn void deferred_stats_reconcile_without_teardown() @test {
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
     }
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     foreach (buffer : buffers) gpu::destroy_buffer(&device, buffer)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::end_frame(&device)!!;
-    gpu::begin_frame(&device)!!;
+    frame_token = gpu::begin_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
+    frame_token = gpu::begin_frame(&device)!!;
     assert(deferred_count(&device) == 0, "every deferred entry retires within frames_in_flight cycles");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     vk::DeferredStats stats = vk::deferred_stats(state);
     assert(stats.pushed == 16, "every destroy pushed exactly one deferred entry");

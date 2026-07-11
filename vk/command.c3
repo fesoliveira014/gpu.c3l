@@ -303,8 +303,7 @@ fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::Recor
     return gpu::SLOT_TABLE_FULL~;
 }
 
-fn void? vk_end_commands(gpu::Device* device, gpu::CommandList* commands) @private {
-    if (commands.device != device) return gpu::INVALID_ARGUMENT~;
+fn void? vk_end_commands(gpu::CommandList* commands) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     check(vk::end_command_buffer(record.command_buffer))!;

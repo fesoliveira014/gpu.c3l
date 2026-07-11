@@ -112,7 +112,7 @@ fn void texture_barrier_transitions_layout() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::TextureBarrier to_general = {
@@ -140,13 +140,13 @@ fn void texture_barrier_transitions_layout() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &general_to_general)!!;
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void texture_multi_mip_create_destroy() @test {
@@ -186,7 +186,7 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::TextureBarrier to_general = {
         .texture       = texture,
@@ -198,13 +198,13 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
         .new_layout    = gpu::TextureLayout.GENERAL,
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void texture_barrier_stale_handle_rejected() @test {
@@ -221,7 +221,7 @@ fn void texture_barrier_stale_handle_rejected() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     gpu::destroy_texture(&device, texture)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::TextureBarrier barrier = {
@@ -232,8 +232,8 @@ fn void texture_barrier_stale_handle_rejected() @test {
     fault barrier_fault = @catch(gpu::cmd_texture_barrier(&cmd, &barrier));
     assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on a destroyed texture faults INVALID_HANDLE");
 
-    gpu::end_commands(&device, &cmd)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_commands(&cmd)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void raised_texture_capacity_holds_more_than_default() @test {

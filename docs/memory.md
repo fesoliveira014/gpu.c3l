@@ -422,13 +422,21 @@ Each frame-in-flight owns one or more VMA-backed buffers.
 Frame upload allocation is governed by a strict lifecycle:
 
 ```text
-IDLE --begin_frame--> ACTIVE --end_frame--> IDLE
+IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDLE
 ```
 
-`begin_frame` while active, `end_frame` while idle, and `alloc_frame_span`
-while idle fault `INVALID_RESOURCE_STATE` before changing frame state. This is
-particularly important with one frame in flight, where the next slot is the
-active slot itself.
+`begin_frame` returns a `FrameToken`; `alloc_frame_span` and `end_frame` require
+that token rather than a bare device pointer. A copied token may allocate while
+its generation remains active. Successful end clears the passed copy and makes
+every alias stale. Failed end leaves the token, generation, frame slot,
+retirement values, queue-use flags, and prospective signal value unchanged for
+retry.
+
+A malformed, consumed, or stale token faults `INVALID_HANDLE`. `begin_frame`
+while active faults `INVALID_RESOURCE_STATE` before changing frame state. This
+is particularly important with one frame in flight, where the next slot is the
+active slot itself. Tokens are stack-only, at most 16 bytes, and add no heap
+allocation or new atomic operation to the allocation path.
 
 ```text
 FrameArenaState
@@ -459,8 +467,8 @@ Allocation during `ACTIVE` is lock-free — the cursor is an atomic bumped with
 a CAS loop, so worker threads allocate concurrently (see docs/threading.md):
 
 ```text
-alloc_frame_span(size, align)
-    if frame is IDLE: return INVALID_RESOURCE_STATE
+alloc_frame_span(token, size, align)
+    if token is not the active generation: return INVALID_HANDLE
     retry:
     if cursor > arena.size: return ARENA_FULL
     remainder = cursor & (align - 1)

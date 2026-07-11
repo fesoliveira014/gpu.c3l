@@ -186,11 +186,10 @@ fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContext
     return commands;
 }
 
-<* Finish recording; the list becomes submittable exactly once. *>
-fn void? end_commands(Device* device, CommandList* commands) {
-    if (commands.device != device) return INVALID_ARGUMENT~;
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.end_commands(device, commands);
+<* Finish recording through the list's owner; it becomes submittable once. *>
+fn void? end_commands(CommandList* commands) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.end_commands(commands);
 }
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>

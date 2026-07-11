@@ -38,6 +38,12 @@ struct ReadbackTicket {
     ulong          range_end;
 }
 
+struct FrameToken {
+    Device* device;
+    ulong   generation;
+}
+$assert FrameToken::size <= 16;
+
 const usz MAX_MEMORY_HEAPS = 16;
 const usz DEFAULT_FRAME_ARENA_SIZE = 16 << 20;
 const usz DEFAULT_PERSISTENT_ARENA_SIZE = 64 << 20;
@@ -76,31 +82,44 @@ fn bool range_fits(usz limit, usz offset, usz size) {
     return size <= limit - offset;
 }
 
-<* Enter an idle frame: advance to the next frame-in-flight slot, wait for
-   its arena to retire, and reset it. Faults INVALID_RESOURCE_STATE if a frame
-   is already active, or WAIT_TIMEOUT if the retire wait elapses first. These
-   lifecycle guard rejections are mutation-free and safe to retry. *>
-fn void? begin_frame(Device* device) {
+<* Enter an idle frame. Double begin faults `INVALID_RESOURCE_STATE`; a retire
+   wait may fault `WAIT_TIMEOUT`. Those rejections leave lifecycle and arena
+   state unchanged. *>
+fn FrameToken? begin_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.begin_frame(device);
+    FrameToken frame;
+    device.vtable.begin_frame(device, &frame)!;
+    return frame;
 }
 
-<* Bump-allocate a span from the active frame's upload arena. Faults
-   INVALID_RESOURCE_STATE while idle. `size` must be nonzero and `align` a
-   nonzero power of two (INVALID_ARGUMENT otherwise). ARENA_FULL means the
-   aligned range cannot fit or be represented without overflow. The span is
-   valid until the arena is reset. *>
-fn GpuSpan? alloc_frame_span(Device* device, usz size, usz align) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.alloc_frame_span(device, size, align);
+<* `size` and power-of-two `align` must be nonzero (`INVALID_ARGUMENT`);
+   capacity faults `ARENA_FULL`, invalid or stale tokens `INVALID_HANDLE`.
+   Faults do not advance the arena; spans remain valid until its reset. *>
+fn GpuSpan? alloc_frame_span(FrameToken* frame, usz size, usz align) {
+    if (frame == null || frame.device == null || frame.generation == 0) return INVALID_HANDLE~;
+    if (frame.device.vtable == null) return INVALID_HANDLE~;
+    return frame.device.vtable.alloc_frame_span(frame, size, align);
 }
 
-<* End the active frame and record its timeline value. Faults
-   INVALID_RESOURCE_STATE while idle without submitting work. If the signal
-   submit faults, frame-boundary state remains active and unchanged for retry. *>
-fn void? end_frame(Device* device) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.end_frame(device);
+<* End the identified frame. Invalid, stale, or consumed tokens fault
+   `INVALID_HANDLE` without mutation; a failed end retains the token and
+   lifecycle state for retry. *>
+fn void? end_frame(FrameToken* frame) {
+    if (frame == null || frame.device == null || frame.generation == 0) return INVALID_HANDLE~;
+    if (frame.device.vtable == null) return INVALID_HANDLE~;
+    frame.device.vtable.end_frame(frame)!;
+    *frame = {};
+}
+
+<* Run `work` inside one frame. End faults take precedence and retain
+   `out_frame`; successful end clears it. *>
+macro void? @with_frame(FrameToken* out_frame, Device* device, #work, ...) {
+    *out_frame = {};
+    *out_frame = begin_frame(device)!;
+    fault work_fault = @catch(#work(out_frame, ...$vaarg));
+    fault end_fault = @catch(end_frame(out_frame));
+    if (end_fault) return end_fault~;
+    if (work_fault) return work_fault~;
 }
 
 // memory_kind must be PERSISTENT_UPLOAD; align 0 = no requirement; usage

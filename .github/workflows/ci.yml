@@ -90,8 +90,8 @@ jobs:
 
   docs-walkthrough:
     # Executes docs/getting_started.md verbatim (scripts/run_doc.py) on a bare
-    # runner: the walkthrough is its own regression test. Only the checkout of
-    # this repo and the private-phase clone shim below are outside the doc.
+    # runner: the walkthrough is its own regression test. Only the checkout,
+    # PR-local URL override, and private-phase clone shim are outside the doc.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -129,6 +129,7 @@ jobs:
       - name: Run the walkthrough
         run: |
           export VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
+          export GPU_C3L_URL="$GITHUB_WORKSPACE"
           python3 scripts/run_doc.py docs/getting_started.md --workspace /tmp/walkthrough
 
   windows:

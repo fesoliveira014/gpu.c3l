@@ -16,7 +16,7 @@ two ideas:
   library manages is the only set that exists.
 
 ```c3
-gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, DoublerRoot::size, 16)!;
+gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame, DoublerRoot::size, 16)!;
 DoublerRoot* root = (DoublerRoot*)root_span.cpu;
 root.input_gpu  = gpu::get_buffer_address(&device, input)!;
 root.output_gpu = gpu::get_buffer_address(&device, output)!;
