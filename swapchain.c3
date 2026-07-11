@@ -47,12 +47,25 @@ struct SwapchainDesc {
     ZString     debug_name;
 }
 
+<* Actual swapchain configuration selected by the backend. Dormant snapshots
+   use UNDEFINED format, zero extent/count, and FIFO as an ignored mode
+   sentinel. *>
+struct SwapchainInfo {
+    Format      format;
+    uint        width;
+    uint        height;
+    uint        image_count;
+    PresentMode present_mode;
+    bool        dormant;
+}
+
 // The texture handle is frame-transient: resize re-wraps images and stales
 // prior handles, so hold it for the current frame only.
 struct AcquiredImage {
     TextureHandle texture;
     uint          index;
     bool          suboptimal;
+    TextureLayout prior_layout;
 }
 
 <* Parameters for present; targets the swapchain's most recently acquired image. *>
@@ -81,6 +94,13 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.resize_swapchain(device, swapchain, width, height);
+}
+
+<* Actual format, extent, image count, and present mode selected for a
+   swapchain. Dormant swapchains return the dormant sentinel snapshot. *>
+fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) {
+    if (device.vtable == null) return INVALID_ARGUMENT~;
+    return device.vtable.get_swapchain_info(device, swapchain);
 }
 
 <* Acquire the next image. WAIT_TIMEOUT is transient: retry the same swapchain.

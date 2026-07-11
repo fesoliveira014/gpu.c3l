@@ -925,10 +925,19 @@ SwapchainDesc
     bool srgb
     ZString debug_name
 
+SwapchainInfo
+    Format format
+    uint width
+    uint height
+    uint image_count
+    PresentMode present_mode
+    bool dormant
+
 AcquiredImage
     TextureHandle texture   (frame-transient — resize stales it)
     uint index
     bool suboptimal
+    TextureLayout prior_layout
 
 PresentDesc
     SwapchainHandle swapchain
@@ -941,6 +950,7 @@ bitstruct PresentModeSupport : uint
 create_swapchain(Device* device, SurfaceDesc* surface, SwapchainDesc* desc) -> SwapchainHandle?
 destroy_swapchain(Device* device, SwapchainHandle swapchain) -> void?
 resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) -> void?
+get_swapchain_info(Device* device, SwapchainHandle swapchain) -> SwapchainInfo?
 acquire_next_image(Device* device, SwapchainHandle swapchain) -> AcquiredImage?
 present(Device* device, PresentDesc* desc) -> void?
 get_present_mode_support(Device* device, SwapchainHandle swapchain) -> PresentModeSupport?
@@ -961,6 +971,20 @@ WSI recovery is fault-specific:
 | `SWAPCHAIN_OUT_OF_DATE` | swapchain no longer matches the surface | call `resize_swapchain`, then retry |
 | `SURFACE_LOST` | platform surface is no longer usable | destroy the swapchain, refresh native surface handles as needed, and create a new swapchain |
 | acquired image with `suboptimal = true` | image is valid but presentation properties changed | finish the frame and resize when convenient |
+
+`get_swapchain_info` reports the selected format, clamped extent,
+driver-returned image count, and selected present mode (including FIFO
+fallback), not the requested values. Re-query after every successful
+`resize_swapchain`; if the format changed, rebuild format-dependent graphics
+pipelines. The snapshot is published coherently after a complete build. A
+zero extent or failed rebuild publishes the dormant sentinel:
+`format = UNDEFINED`, zero width/height/image count, `present_mode = FIFO`,
+and `dormant = true`. The handle remains valid and queryable while dormant.
+
+`AcquiredImage.prior_layout` is the image's committed tracked layout at
+acquire time. It is `UNDEFINED` for a newly wrapped image and `PRESENT` after
+that image's submitted present transition, so callers can use it directly as
+the first barrier's `old_layout` without a per-image seen table.
 
 `resize_swapchain` (and swapchain/device teardown) release the old wrapped
 swapchain textures directly, bypassing `destroy_texture` — so they never hit

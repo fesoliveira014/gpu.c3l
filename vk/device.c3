@@ -233,6 +233,7 @@ const gpu::BackendVTable VK_VTABLE = {
     .create_swapchain        = &vk_create_swapchain,
     .destroy_swapchain       = &vk_destroy_swapchain,
     .resize_swapchain        = &vk_resize_swapchain,
+    .get_swapchain_info      = &vk_get_swapchain_info,
     .acquire_next_image      = &vk_acquire_next_image,
     .present                 = &vk_present,
     .get_present_mode_support = &vk_get_present_mode_support,

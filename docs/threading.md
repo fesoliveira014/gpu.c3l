@@ -22,7 +22,7 @@ library's own state, but results and validation verdicts are undefined.
 | `begin_frame` / `end_frame` | E | externally paired `IDLE -> ACTIVE -> IDLE`; quiescence required |
 | `submit` / `present` | E | queue-mutex backed, so Tier S private submits interleave safely |
 | `wait_queue_idle` | E | queue-mutex backed |
-| `create_swapchain` / `destroy_swapchain` / `resize_swapchain` / `acquire_next_image` | E | per swapchain |
+| `create_swapchain` / `destroy_swapchain` / `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; info is coherent only at Tier-E boundaries |
 | `create_buffer` / `destroy_buffer` | S | |
 | `get_buffer_address` / `get_buffer_span` | S | lock-free read |
 | `flush_buffer` / `invalidate_buffer` | S | VMA is internally synchronized |

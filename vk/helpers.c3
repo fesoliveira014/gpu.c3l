@@ -257,3 +257,11 @@ fn vk::ImageLayout layout_to_vk(gpu::TextureLayout layout) {
         default:                                  return vk::ImageLayout.UNDEFINED;
     }
 }
+
+fn gpu::PresentMode present_mode_from_vk(vk::PresentModeKHR mode) {
+    switch (mode) {
+        case vk::PresentModeKHR.IMMEDIATE_KHR: return gpu::PresentMode.IMMEDIATE;
+        case vk::PresentModeKHR.MAILBOX_KHR:   return gpu::PresentMode.MAILBOX;
+        default:                               return gpu::PresentMode.FIFO;
+    }
+}

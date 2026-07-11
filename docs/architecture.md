@@ -437,6 +437,7 @@ Swapchain operations:
 
 ```text
 create_swapchain(device, SurfaceDesc, SwapchainDesc) -> SwapchainHandle?
+get_swapchain_info(device, swapchain) -> SwapchainInfo?
 acquire_next_image(device, swapchain) -> AcquiredImage?
 present(device, PresentDesc) -> void?
 get_present_mode_support(device, swapchain) -> PresentModeSupport?
@@ -446,6 +447,17 @@ replace the surface and swapchain on SURFACE_LOST
 ```
 
 `PresentModeSupport` is a bitstruct reporting fifo/immediate/mailbox availability for the swapchain's surface.
+
+`SwapchainInfo` is the coherent runtime snapshot: selected format, clamped
+extent, driver-returned image count, selected present mode, and dormant state.
+Successful creation/recreation publishes all fields together. A zero extent
+or failed rebuild publishes a queryable dormant sentinel with `UNDEFINED`
+format, zero extent/count, and FIFO as the inactive mode value. Consumers
+re-query after resize and rebuild format-dependent pipelines if needed.
+
+`AcquiredImage.prior_layout` comes from committed texture-layout state. New
+swapchain images report `UNDEFINED`; images that completed the normal
+transition/present cycle report `PRESENT`.
 
 Surface creation is platform-specific. The sample harness may provide helper functions that take `sdl::Window*`, but those helpers should live outside the core public API.
 

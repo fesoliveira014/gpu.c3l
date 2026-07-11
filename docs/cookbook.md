@@ -199,16 +199,39 @@ Blob usefulness is driver-dependent (lavapipe: header only); identical
 descriptors on one device always dedup in-library regardless.
 Running example: `pipeline_cache_timing`.
 
-## 12. Pick a present mode deliberately
+## 12. Query swapchain runtime state
 
-Goal: latency/tearing tradeoff as a runtime choice.
+Goal: build against the selected format and transition acquired images from
+their actual prior layout.
 
 ```c3
 gpu::PresentModeSupport support = gpu::get_present_mode_support(&device, swapchain)!;
 if (support.mailbox) { /* recreate swapchain with PresentMode.MAILBOX */ }
+
+gpu::SwapchainInfo info = gpu::get_swapchain_info(&device, swapchain)!;
+if (info.dormant) { /* wait for a non-zero resize */ }
+
+gpu::Format[1] color_formats = { info.format };
+
+gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
+gpu::TextureBarrier to_color = {
+    .texture       = acquired.texture,
+    .old_layout    = acquired.prior_layout,
+    .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+    .before_stage  = acquired.prior_layout == gpu::TextureLayout.PRESENT
+        ? gpu::Stage.PRESENT : gpu::Stage.HOST,
+    .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
+    .before_hazard = acquired.prior_layout == gpu::TextureLayout.PRESENT
+        ? gpu::Hazard.PRESENT_READ : gpu::Hazard.HOST_WRITE,
+    .after_hazard  = gpu::Hazard.COLOR_WRITE,
+};
 ```
 
-FIFO is always there; everything else is a query away.
+Re-query `SwapchainInfo` after resize, rebuild pipelines if `format` changed,
+and size any per-image data from `image_count`. `prior_layout` removes the
+fixed-size seen table normally used to distinguish first acquire from a
+previously presented image. FIFO is always available; other modes remain a
+support query away.
 Running example: `present_mode_explorer`.
 
 ## 13. Choose a memory kind

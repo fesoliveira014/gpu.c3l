@@ -494,10 +494,8 @@ vk::SurfaceKHR
 vk::SwapchainKHR
 vk::Image[]
 vk::ImageView[]
-Format format
-uint width
-uint height
-present mode
+SwapchainInfo info
+uint image_count
 ```
 
 Surface creation is platform-specific. SDL3 samples should create windows and provide native handles or use a sample helper that calls backend WSI functions.
@@ -508,6 +506,7 @@ Swapchain operations:
 create
 acquire
 present
+query runtime info
 query present-mode support
 resize on out-of-date/suboptimal; recreate the surface on surface-lost
 ```
@@ -523,6 +522,18 @@ WSI result mapping is explicit and pure-tested:
 | `ERROR_SURFACE_LOST_KHR` | `SURFACE_LOST` | replace the platform surface and swapchain |
 | acquire `SUBOPTIMAL_KHR` | valid image with `suboptimal = true` | finish the frame; resize when convenient |
 | present `SUBOPTIMAL_KHR` | success | current public API exposes no soft present result |
+
+Swapchain construction keeps selected format, clamped extent, actual image
+count returned by the driver, and selected present mode local until every
+image is wrapped. A completed build publishes one `SwapchainInfo` snapshot;
+a zero extent or failed rebuild publishes the dormant sentinel
+(`UNDEFINED`, zero extent/count, FIFO, dormant). Tier-E external
+synchronization prevents observation during publication.
+
+Acquire reads `AcquiredImage.prior_layout` from the wrapped texture's
+committed tracked layout. Resize creates new wrapped slots at `UNDEFINED`;
+submitted barriers commit later states through the normal texture-layout
+path, so swapchain code owns no parallel seen-state table.
 
 ## 17. Debug implementation
 
