@@ -3,7 +3,7 @@ module gpu;
 struct DiagnosticCapture {
     uint              calls;
     void*             user_data;
-    DebugMessage message;
+    DebugMessage      message;
 }
 
 fn void capture_diagnostic(DebugMessage* message, void* user_data) {
@@ -21,12 +21,12 @@ fn void diagnostic_dispatch_is_null_safe() @test {
 fn void diagnostic_dispatch_delivers_complete_message_once() @test {
     DiagnosticCapture capture = {};
     DebugMessage message = {
-        .severity   = DebugMessageSeverity.ERROR,
-        .category = { .public_contract, .validation },
-        .operation  = "create_buffer",
-        .has_fault  = true,
-        .public_fault = INVALID_ARGUMENT,
-        .resource = {
+        .severity             = DebugMessageSeverity.ERROR,
+        .category             = { .public_contract, .validation },
+        .operation            = "create_buffer",
+        .has_fault            = true,
+        .public_fault         = INVALID_ARGUMENT,
+        .resource             = {
             .kind                = DebugResourceKind.BUFFER,
             .has_public_identity = true,
             .index               = 17,
@@ -35,7 +35,7 @@ fn void diagnostic_dispatch_delivers_complete_message_once() @test {
         },
         .rejected_field       = "BufferDesc.size",
         .invariant            = "buffer size must be greater than zero",
-        .backend_text                 = "buffer size is zero",
+        .backend_text         = "buffer size is zero",
         .validation_id_name   = "VUID-test",
         .validation_id_number = 42,
     };
@@ -65,10 +65,10 @@ fn void diagnostic_dispatch_delivers_complete_message_once() @test {
 fn void diagnostic_dispatch_preserves_absent_fault() @test {
     DiagnosticCapture capture = {};
     DebugMessage message = {
-        .severity  = DebugMessageSeverity.WARNING,
-        .category = { .performance },
-        .operation = "submit",
-        .backend_text      = "backend warning",
+        .severity     = DebugMessageSeverity.WARNING,
+        .category     = { .performance },
+        .operation    = "submit",
+        .backend_text = "backend warning",
     };
 
     dispatch_debug_message(&capture_diagnostic, &capture, &message);
@@ -83,7 +83,7 @@ fn void invalid_backend_delivers_diagnostic_before_unchanged_fault() @test {
     DiagnosticCapture capture = {};
     BackendKind invalid_backend = bitcast(99, BackendKind);
     DeviceDesc desc = {
-        .backend              = invalid_backend,
+        .backend         = invalid_backend,
         .debug_callback  = &capture_diagnostic,
         .debug_user_data = &capture,
     };
@@ -110,7 +110,7 @@ fn void invalid_backend_fault_is_callback_independent() @test {
 
     DiagnosticCapture capture = {};
     DeviceDesc with_callback = {
-        .backend              = invalid_backend,
+        .backend         = invalid_backend,
         .debug_callback  = &capture_diagnostic,
         .debug_user_data = &capture,
     };

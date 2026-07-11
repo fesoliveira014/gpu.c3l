@@ -172,6 +172,51 @@ fn void vulkan_debug_message_routes_structured_fields() @test {
     assert(!capture.last.resource.has_public_identity, "native device handle does not become a public identity");
 }
 
+fn void vulkan_debug_message_prefers_named_resource_and_falls_back_to_kind() @test {
+    DebugCapture capture;
+    vk::VkDeviceState state = {
+        .debug_callback  = &capture_debug_message,
+        .debug_user_data = &capture,
+    };
+    vk::DebugUtilsObjectNameInfoEXT[2] objects = {
+        vk::debug_utils_object_name_info_ext(),
+        vk::debug_utils_object_name_info_ext(),
+    };
+    objects[0].object_type = vk::ObjectType.BUFFER;
+    objects[0].object_handle = 0x1234;
+    objects[1].object_type = vk::ObjectType.IMAGE;
+    objects[1].object_handle = 0x5678;
+    objects[1].p_object_name = (char*)"later_texture";
+    vk::DebugUtilsMessengerCallbackDataEXT data = vk::debug_utils_messenger_callback_data_ext();
+    data.p_message = (char*)"resource ordering";
+    data.object_count = 2;
+    data.p_objects = &objects[0];
+
+    vk::route_debug_message(
+        state:        &state,
+        severity:     (vk::DebugUtilsMessageSeverityFlagsEXT)vk::DebugUtilsMessageSeverityFlagBitsEXT.WARNING_BIT_EXT,
+        message_type: (vk::DebugUtilsMessageTypeFlagsEXT)vk::DebugUtilsMessageTypeFlagBitsEXT.VALIDATION_BIT_EXT,
+        data:         &data,
+    );
+
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.TEXTURE,
+        "later named object wins over an earlier unnamed mapped object");
+    assert(capture.last.resource.debug_name.str_view() == "later_texture",
+        "selected resource keeps the first useful name");
+
+    objects[1].p_object_name = null;
+    vk::route_debug_message(
+        state:        &state,
+        severity:     (vk::DebugUtilsMessageSeverityFlagsEXT)vk::DebugUtilsMessageSeverityFlagBitsEXT.WARNING_BIT_EXT,
+        message_type: (vk::DebugUtilsMessageTypeFlagsEXT)vk::DebugUtilsMessageTypeFlagBitsEXT.VALIDATION_BIT_EXT,
+        data:         &data,
+    );
+
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER,
+        "all-unnamed objects fall back to the first mapped kind");
+    assert(capture.last.resource.debug_name == null, "fallback resource has no invented name");
+}
+
 fn void vulkan_debug_message_handles_null_callback_data() @test {
     DebugCapture capture;
     vk::VkDeviceState state = {

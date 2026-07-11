@@ -27,10 +27,10 @@ enum DebugResourceKind : int {
 }
 
 bitstruct DebugMessageCategory : uint {
-    bool public_contract : 0;
-    bool backend         : 1;
-    bool validation      : 2;
-    bool performance     : 3;
+    bool public_contract   : 0;
+    bool backend           : 1;
+    bool validation        : 2;
+    bool performance       : 3;
     bool resource_lifetime : 4;
     bool general           : 5;
 }
@@ -61,6 +61,7 @@ struct DebugMessage {
     int                  validation_id_number;
 }
 
+<* Internal synchronous callback dispatch; null callbacks are ignored. *>
 fn void dispatch_debug_message(DebugMessageCallback callback, void* user_data, DebugMessage* message) {
     if (callback == null) return;
     callback(message, user_data);

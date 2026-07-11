@@ -63,17 +63,22 @@ fn gpu::DebugResourceKind debug_resource_kind(vk::ObjectType object_type) {
 }
 
 fn gpu::DebugResourceRef debug_resource(vk::DebugUtilsMessengerCallbackDataEXT* data) {
-    gpu::DebugResourceRef resource = {};
-    if (data == null || data.p_objects == null) return resource;
+    gpu::DebugResourceRef fallback = {};
+    if (data == null || data.p_objects == null) return fallback;
     for (uint i = 0; i < data.object_count; i++) {
         vk::DebugUtilsObjectNameInfoEXT* object = &data.p_objects[i];
         gpu::DebugResourceKind kind = debug_resource_kind(object.object_type);
-        if (kind == gpu::DebugResourceKind.NONE && object.p_object_name == null) continue;
-        resource.kind = kind;
-        resource.debug_name = (ZString)object.p_object_name;
-        return resource;
+        if (object.p_object_name != null) {
+            return {
+                .kind       = kind,
+                .debug_name = (ZString)object.p_object_name,
+            };
+        }
+        if (fallback.kind == gpu::DebugResourceKind.NONE && kind != gpu::DebugResourceKind.NONE) {
+            fallback.kind = kind;
+        }
     }
-    return resource;
+    return fallback;
 }
 
 fn uint route_debug_message(
@@ -121,8 +126,6 @@ fn vk::DebugUtilsMessengerCreateInfoEXT debug_messenger_create_info(VkDeviceStat
         .set_user_data(state);
 }
 
-<* Install the debug-utils messenger. Best-effort: a missing entry point or
-   create failure leaves messenger null and falls back to layer stderr. *>
 fn void report_debug_messenger_failure(VkDeviceState* state, ZString text) {
     if (state.debug_callback == null) {
         io::eprintfn("vk: %s; relying on layer stderr", text);
@@ -137,6 +140,8 @@ fn void report_debug_messenger_failure(VkDeviceState* state, ZString text) {
     gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
 }
 
+<* Install the debug-utils messenger. Best-effort: a missing entry point or
+   create failure leaves messenger null and falls back to layer stderr. *>
 fn void setup_debug_messenger(VkDeviceState* state) @private {
     vk::load_extensions(state.instance);
     if (vk::extensions.vk_create_debug_utils_messenger_ext == null) {
