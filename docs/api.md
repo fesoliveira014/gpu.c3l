@@ -837,6 +837,11 @@ memory ordering. Presets intentionally cover only common cases; construct a
 raw `TextureBarrier` for transfer sources, other shader stages, read-only
 attachments, subresource-specific work, or any unusual tuple.
 
+The `UNDEFINED` preset's `HOST`/`NONE` source scope is only for first use or
+discard when no earlier GPU work still accesses the texture. Reinitializing a
+texture that an earlier submission may still read requires a raw barrier whose
+source stage and hazard cover that access.
+
 No command helper should silently insert barriers for a later use.
 
 ### Debug labels and leak reporting
