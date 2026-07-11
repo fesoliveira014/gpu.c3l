@@ -627,9 +627,10 @@ apps) sets an off-frame-pending marker in addition to `begin_frame`/`end_frame`'
 referenced enqueues rather than freeing synchronously. `end_frame`'s
 cross-queue chain (§ frame retirement across queues, threading.md) waits
 every queue used since the last boundary — off-frame or in-frame — before
-clearing the marker; a frame-loop-free app that never calls `begin_frame`
-again holds its deferred entries until teardown, which is safe by
-construction (`deferred_drain_all` after `device_wait_idle`).
+clearing the marker. The prospective frame value, slot retirement, queue-use
+flags, and marker commit only after that signal submit succeeds, so a rejected
+submit leaves the boundary unchanged for retry. A frame-loop-free app that
+never calls `begin_frame` again holds deferred entries safely until teardown.
 
 ## 18. Defragmentation policy
 

@@ -146,6 +146,10 @@ queue, and Vulkan's per-queue submission order covers them for free). See
 "Off-frame submissions" below for the destruction-side half of this
 contract.
 
+`end_frame` builds its prospective frame value and wait chain without mutation,
+then commits retirement bookkeeping only after the graphics signal submit is
+accepted. A rejected signal leaves the active boundary exactly retryable.
+
 ## Helper timeline
 
 Blocking helpers (`upload_buffer_data`, `upload_texture_data`,

@@ -96,7 +96,8 @@ fn GpuSpan? alloc_frame_span(Device* device, usz size, usz align) {
 }
 
 <* End the active frame and record its timeline value. Faults
-   INVALID_RESOURCE_STATE while idle without submitting work. *>
+   INVALID_RESOURCE_STATE while idle without submitting work. If the signal
+   submit faults, frame-boundary state remains active and unchanged for retry. *>
 fn void? end_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.end_frame(device);
