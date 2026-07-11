@@ -32,6 +32,9 @@ fn void device_create_destroy() @test {
         "line polygon cap matches the selected physical device");
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(state.physical_device, &props);
+    uint expected_color_attachments = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS
+        ? props.limits.max_color_attachments : gpu::MAX_COLOR_ATTACHMENTS;
+    assert(device.caps.max_color_attachments == expected_color_attachments, "effective color attachment limit matches the selected device");
     assert(
         device.caps.max_push_constant_size == props.limits.max_push_constants_size,
         "reported push-constant limit matches the selected physical device"

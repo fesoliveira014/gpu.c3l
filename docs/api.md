@@ -95,6 +95,7 @@ DeviceCaps
     bool line_polygon_mode
     uint max_texture_descriptors
     uint max_sampler_descriptors
+    uint max_color_attachments
     uint max_push_constant_size
     usz min_uniform_alignment
     usz min_storage_alignment
@@ -636,8 +637,10 @@ A pass names at least one color target or a depth target; depth-only passes
 (the shadow-map shape) are valid. A depth target needs `depth_attach` usage
 and the `DEPTH_STENCIL` tracked layout. `D32_FLOAT` is the only supported
 depth format; pipelines name it in `GraphicsPipelineDesc.depth_format`.
-Attachment extents matching the pass dimensions are the caller's
-responsibility.
+Every selected color mip and the depth texture's mip zero must cover the pass
+dimensions; smaller compatible render areas are valid. The color count must
+not exceed `DeviceCaps.max_color_attachments`, which is the lesser of the
+library ceiling and the selected device's Vulkan limit.
 
 Depth clear values are explicit: a zero-initialized `ClearDepthStencil`
 clears depth to **0.0**, which fails every LESS-compare draw. The standard
