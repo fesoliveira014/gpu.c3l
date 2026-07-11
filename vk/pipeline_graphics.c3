@@ -70,6 +70,10 @@ fn vk::BlendOp blend_op_to_vk(gpu::BlendOp op) @private {
     }
 }
 
+fn void? check_polygon_mode_support(gpu::PolygonMode mode, bool line_supported) {
+    if (mode == gpu::PolygonMode.LINE && !line_supported) return gpu::UNSUPPORTED_FEATURE~;
+}
+
 <* Create-info structs are assigned directly rather than through by-value
    builder setters (c3c 0.8.0 codegen crash). *>
 fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::GraphicsPipelineDesc* desc) @private {
@@ -79,6 +83,7 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
     if (desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS) return gpu::INVALID_ARGUMENT~;
     if (desc.depth_format != gpu::Format.UNDEFINED && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
     if (desc.color_formats.len == 0 && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+    check_polygon_mode_support(desc.raster.polygon_mode, state.caps.line_polygon_mode)!;
     ShaderSlot* vertex_shader = state.shaders.get(desc.vertex_shader)!;
     ShaderSlot* fragment_shader = state.shaders.get(desc.fragment_shader)!;
     validate_shader_stage(vertex_shader, gpu::ShaderStage.VERTEX)!;

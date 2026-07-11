@@ -398,6 +398,17 @@ TextureSlot
 
 Each frame-in-flight owns one or more VMA-backed buffers.
 
+Frame upload allocation is governed by a strict lifecycle:
+
+```text
+IDLE --begin_frame--> ACTIVE --end_frame--> IDLE
+```
+
+`begin_frame` while active, `end_frame` while idle, and `alloc_frame_span`
+while idle fault `INVALID_RESOURCE_STATE` before changing frame state. This is
+particularly important with one frame in flight, where the next slot is the
+active slot itself.
+
 ```text
 FrameArenaState
     BufferHandle backing_buffer
@@ -414,15 +425,21 @@ flush; the same holds for the descriptor-buffer storage. STAGING, READBACK,
 and PERSISTENT_UPLOAD keep VMA's memory-type freedom and the explicit
 `flush_buffer`/`invalidate_buffer` contract.
 
-Allocation (lock-free — the cursor is an atomic bumped with a CAS loop, so
-worker threads allocate concurrently; see docs/threading.md):
+Allocation during `ACTIVE` is lock-free — the cursor is an atomic bumped with
+a CAS loop, so worker threads allocate concurrently (see docs/threading.md):
 
 ```text
 alloc_frame_span(size, align)
+    if frame is IDLE: return INVALID_RESOURCE_STATE
     retry:
-    aligned = align_up(cursor, align)
-    if aligned + size > arena.size: return ARENA_FULL
-    if !compare_exchange(cursor, aligned + size): goto retry
+    if cursor > arena.size: return ARENA_FULL
+    remainder = cursor & (align - 1)
+    padding = remainder == 0 ? 0 : align - remainder
+    if padding > arena.size - cursor: return ARENA_FULL
+    aligned = cursor + padding
+    if size > arena.size - aligned: return ARENA_FULL
+    next_cursor = aligned + size
+    if !compare_exchange(cursor, next_cursor): goto retry
     span = { gpu_base + aligned, cpu_base + aligned,
              backing_buffer, aligned, size, FRAME_UPLOAD }
 ```

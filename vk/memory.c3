@@ -41,6 +41,11 @@ struct FrameArenaState {
     ulong             frame_timeline_value;
 }
 
+struct FrameArenaRange @private {
+    usz offset;
+    usz next_cursor;
+}
+
 <* Create the frame timeline semaphore and one arena buffer per frame-in-flight.
    Arena buffers are real device buffers, so the device's buffer sweep frees
    them; only the host array and the semaphore are released here. *>
@@ -125,6 +130,7 @@ fn void? reset_frame_arena(VkDeviceState* state, uint index) {
 
 fn void? vk_begin_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     // WAIT_TIMEOUT must leave frame_index untouched so retry is clean.
     uint next_index = (state.frame_index + 1) % state.frames_in_flight;
@@ -149,6 +155,7 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
     }
 
     reset_frame_arena(state, state.frame_index)!;
+    release_commands_for_frame(state, state.frame_index);
     // Only pools dirtied since this slot last reset pay
     // the driver call; idle contexts cost nothing per frame.
     state.pools_reset_last_frame = 0;
@@ -184,27 +191,55 @@ fn void? vk_begin_frame(gpu::Device* device) @private {
     state.frame_active = true;
 }
 
+<* Resolve a bump range without forming an unchecked alignment or extent sum.
+   Pure. *>
+fn FrameArenaRange? frame_arena_range(usz cursor, usz capacity, usz size, usz align) @private {
+    if (!gpu::is_pow2(align) || size == 0) return gpu::INVALID_ARGUMENT~;
+    if (cursor > capacity) return gpu::ARENA_FULL~;
+
+    usz mask = align - 1;
+    usz remainder = cursor & mask;
+    usz padding = remainder == 0 ? 0 : align - remainder;
+    if (padding > capacity - cursor) return gpu::ARENA_FULL~;
+
+    usz offset = cursor + padding;
+    if (!gpu::range_fits(capacity, offset, size)) return gpu::ARENA_FULL~;
+    return {
+        .offset = offset,
+        .next_cursor = offset + size,
+    };
+}
+
 <* Lock-free CAS bump: concurrent callers get disjoint, aligned spans. *>
 fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
+    if (!state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
-    if (!gpu::is_pow2(align)) return gpu::INVALID_ARGUMENT~;
-    if (size == 0) return gpu::INVALID_ARGUMENT~;
 
     usz old = slot.cursor.load(AtomicOrdering.RELAXED);
     while (true) {
-        usz aligned = gpu::align_up(old, align);
-        if (aligned + size > slot.size) return gpu::ARENA_FULL~;
-        usz seen = mem::compare_exchange(&slot.cursor.data, old, aligned + size, AtomicOrdering.SEQ_CONSISTENT, AtomicOrdering.RELAXED);
+        FrameArenaRange range = frame_arena_range(
+            cursor: old,
+            capacity: slot.size,
+            size: size,
+            align: align,
+        )!;
+        usz seen = mem::compare_exchange(
+            &slot.cursor.data,
+            old,
+            range.next_cursor,
+            AtomicOrdering.SEQ_CONSISTENT,
+            AtomicOrdering.RELAXED,
+        );
         if (seen == old) {
             return {
-                .gpu    = (gpu::GpuAddress)((ulong)slot.gpu_base + aligned),
-                .cpu    = slot.cpu_base == null ? null : (char*)slot.cpu_base + aligned,
+                .gpu    = (gpu::GpuAddress)((ulong)slot.gpu_base + range.offset),
+                .cpu    = slot.cpu_base == null ? null : (char*)slot.cpu_base + range.offset,
                 .size   = size,
                 .buffer = slot.backing_buffer,
-                .offset = aligned,
+                .offset = range.offset,
                 .kind   = gpu::MemoryKind.FRAME_UPLOAD,
             };
         }
@@ -239,6 +274,7 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
    need no flag — this signal is queue-ordered behind them. *>
 fn void? end_frame_with_submit(gpu::Device* device, QueueSubmit2Fn submit_fn) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (!state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
