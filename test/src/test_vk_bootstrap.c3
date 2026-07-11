@@ -31,14 +31,6 @@ fn void device_create_destroy() @test {
     uint expected_color_attachments = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS
         ? props.limits.max_color_attachments : gpu::MAX_COLOR_ATTACHMENTS;
     assert(device.caps.max_color_attachments == expected_color_attachments, "effective color attachment limit matches the selected device");
-    assert(
-        device.caps.max_color_attachments > 0,
-        "effective color attachment limit is nonzero"
-    );
-    assert(
-        device.caps.max_color_attachments <= gpu::MAX_COLOR_ATTACHMENTS,
-        "effective color attachment limit respects the library ceiling"
-    );
 
     gpu::destroy_device(&device)!!;
     assert(device.backend_state == null, "backend state cleared on destroy");

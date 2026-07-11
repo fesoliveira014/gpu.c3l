@@ -104,12 +104,12 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
                 created: &created,
             )!;
             track_created_view(
-                slot:   color_slots[i],
-                view:   view,
+                slot:    color_slots[i],
+                view:    view,
                 created: created,
-                slots:  created_view_slots,
-                views:  created_views,
-                count:  &created_view_count,
+                slots:   created_view_slots,
+                views:   created_views,
+                count:   &created_view_count,
             );
 
             attachments[i] = vk::rendering_attachment_info();
