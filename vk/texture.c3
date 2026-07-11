@@ -170,7 +170,6 @@ fn bool? texture_desc_supported(VkDeviceState* state, gpu::TextureDesc* desc) @p
     );
     switch (result) {
         case vk::Result.ERROR_FORMAT_NOT_SUPPORTED:
-        case vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
             return false;
         case vk::Result.SUCCESS:
             break;

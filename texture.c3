@@ -153,6 +153,7 @@ struct SamplerDesc {
     CompareOp   compare;
     ZString     debug_name;
 }
+
 fn uint texture_mip_levels(TextureDesc* desc) @private {
     return desc.mip_levels == 0 ? 1 : desc.mip_levels;
 }

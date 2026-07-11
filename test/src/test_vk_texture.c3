@@ -319,6 +319,7 @@ fn void transfer_only_texture_round_trips() @test {
         assert(readback[i] == (char)i, "transfer-only texture round-trips bytes");
     }
 }
+
 fn bool support_feature_for_usage(
     gpu::TextureFormatSupport support,
     gpu::TextureUsage usage,
