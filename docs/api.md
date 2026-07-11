@@ -95,6 +95,7 @@ DeviceCaps
     bool line_polygon_mode
     uint max_texture_descriptors
     uint max_sampler_descriptors
+    uint max_color_attachments
     uint max_push_constant_size
     usz min_uniform_alignment
     usz min_storage_alignment
@@ -189,7 +190,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
-| `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, `create_graphics_pipeline`, texture creates, sampler/aniso paths | validation layers not installed; presentation off; missing optional or required device feature; unsupported image format or usage |
+| `UNSUPPORTED_FEATURE` | `create_device`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation off; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value, or a subspan outside its parent/with overflowing metadata; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | any handle-taking call, `cmd_*`, `end_commands`, `submit` | use after destroy (generation mismatch), never-live handle, consumed command-list alias, or abandoned command token after its frame-slot pool resets |
 | `INVALID_RESOURCE_STATE` | `create_swapchain`, `begin_frame`, `end_frame`, `alloc_frame_span`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | the native window is already bound to another Vulkan surface; double begin; end or frame-span allocation while idle; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
@@ -331,7 +332,7 @@ R32_FLOAT
 RG32_FLOAT
 RGBA32_FLOAT
 D32_FLOAT
-D24_UNORM_S8_UINT   (backend-unsupported: creation faults INVALID_ARGUMENT)
+D24_UNORM_S8_UINT   (current backend profile reports unsupported)
 ```
 
 ### Texture descriptors
@@ -346,12 +347,42 @@ bitstruct TextureUsage : uint
     bool depth_attach : 3
     bool transfer_src : 4
     bool transfer_dst : 5
+    bool shared_queues : 6
+
+TextureFormatFeatures
+    bool sampled
+    bool storage
+    bool color_attach
+    bool depth_attach
+    bool transfer_src
+    bool transfer_dst
+    bool linear_filter
+
+TextureDimensionSupport
+    bool tex_1d
+    bool tex_2d
+    bool tex_3d
+    bool cube
+
+TextureSampleCountSupport
+    bool one
+    bool two
+    bool four
+    bool eight
+    bool sixteen
+    bool thirty_two
+    bool sixty_four
+
+TextureFormatSupport
+    TextureFormatFeatures features
+    TextureDimensionSupport dimensions
+    TextureSampleCountSupport sample_counts
 
 TextureDimension
-    TEX_1D   (backend-unsupported — faults at creation)
-    TEX_2D
-    TEX_3D   (backend-unsupported — faults at creation)
-    CUBE     (backend-unsupported — faults at creation)
+    TEX_1D   (query false; creation faults INVALID_ARGUMENT)
+    TEX_2D   (current backend profile)
+    TEX_3D   (query false; creation faults INVALID_ARGUMENT)
+    CUBE     (query false; creation faults INVALID_ARGUMENT)
 
 TextureDesc
     TextureDimension dimension
@@ -379,6 +410,8 @@ TextureDescriptorDesc
 ### Texture functions
 
 ```text
+get_texture_format_support(Device* device, Format format) -> TextureFormatSupport?
+supports_texture_desc(Device* device, TextureDesc* desc) -> bool?
 create_texture(Device* device, TextureDesc* desc) -> TextureHandle?
 destroy_texture(Device* device, TextureHandle texture) -> void?
 create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) -> TextureIndex?
@@ -386,9 +419,15 @@ destroy_texture_descriptor(Device* device, TextureIndex index) -> void?
 create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) -> void?
 ```
 
+`get_texture_format_support` reports library-creatable support, not every raw Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling query used by creation, but the bits are independent; use `supports_texture_desc` for a usage combination. The backend profile masks every dimension except 2D and every sample count except one. Per-format usages and linear filtering remain adapter-dependent; D24S8 reports empty support until the rendering path supports it end to end.
+
+`supports_texture_desc` checks the exact optimal-tiling format, combined usage (excluding the queue-sharing policy flag), normalized extent, mip and layer counts, and the required single-sample image properties without allocating. A false result caused by malformed or backend-unsupported input corresponds to `INVALID_ARGUMENT` at creation; a structurally valid descriptor rejected by the adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion can still make creation fail after a true capability result.
+
 `TextureHandle` owns the image. `TextureIndex` is a descriptor heap entry used by shaders.
 
-`create_texture_descriptors` batch-creates N descriptors under one lock hold, ending in one accumulated descriptor-set update in indexing mode (buffer mode writes per-item, already a mapped-memory store). `out_indices.len` must equal `descs.len` (`INVALID_ARGUMENT` otherwise); an empty `descs` is a no-op success. A zero-initialized `TextureDescriptorDesc.view` collapses to the default view, same as a null `view` to `create_texture_descriptor`. All-or-nothing: a mid-batch fault rolls back every index already created in the batch — release each returned index individually with `destroy_texture_descriptor`.
+`create_texture_descriptors` batch-creates N descriptors under one lock hold, ending in one accumulated descriptor-set update in indexing mode (buffer mode writes per-item, already a mapped-memory store). `out_indices.len` must equal `descs.len` (`INVALID_ARGUMENT` otherwise); an empty `descs` is a no-op success. A zero-initialized `TextureDescriptorDesc.view` collapses to the default view, same as a null `view` to `create_texture_descriptor`.
+
+All-or-nothing: a fault leaves descriptor cells and generations, allocator/free-list state, texture view caches, Vulkan image-view ownership, and `out_indices` unchanged. Only a successful batch returns owned indices; release each with `destroy_texture_descriptor`.
 
 ## 7. Sampler API
 
@@ -634,8 +673,10 @@ A pass names at least one color target or a depth target; depth-only passes
 (the shadow-map shape) are valid. A depth target needs `depth_attach` usage
 and the `DEPTH_STENCIL` tracked layout. `D32_FLOAT` is the only supported
 depth format; pipelines name it in `GraphicsPipelineDesc.depth_format`.
-Attachment extents matching the pass dimensions are the caller's
-responsibility.
+Every selected color mip and the depth texture's mip zero must cover the pass
+dimensions; smaller compatible render areas are valid. The color count must
+not exceed `DeviceCaps.max_color_attachments`, which is the lesser of the
+library ceiling and the selected device's Vulkan limit.
 
 Depth clear values are explicit: a zero-initialized `ClearDepthStencil`
 clears depth to **0.0**, which fails every LESS-compare draw. The standard

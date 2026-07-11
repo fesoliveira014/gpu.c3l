@@ -537,6 +537,20 @@ resolved.
 
 The staging arena exists to upload large data without creating many short-lived buffers.
 
+The staging and readback arenas place ranges with monotonic virtual offsets and
+map them to physical offsets with `virtual_start % arena_size`. Placement is
+planned before retire state is changed: alignment padding, the physical wrap
+gap, live-window capacity, and `virtual_end` are each checked with
+subtraction-first bounds before any addition is formed. An unrepresentable
+range behaves as `ARENA_FULL`, so the existing dedicated-buffer fallback
+remains available.
+
+Live virtual offsets are never wrapped or rebased because `virtual_end` also
+identifies pinned readback-ticket ranges. When retirement leaves the queue
+empty, the next successful arena allocation normalizes the stale head and tail
+to zero; an outstanding pinned ticket keeps the queue nonempty and therefore
+prevents normalization.
+
 Upload flow:
 
 ```text

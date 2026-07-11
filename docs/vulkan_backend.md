@@ -119,6 +119,11 @@ pick_physical_device(instance, desc) -> PhysicalDeviceSelection?
 
 Each feature-compatible candidate's queue topology is resolved once during selection. The winning `PhysicalDeviceSelection` carries that cached `QueueFamilies` value into logical-device creation; queue topology remains a suitability filter rather than a scoring bonus.
 
+When `DeviceDesc.enable_presentation` is true, a candidate must advertise
+`VK_KHR_swapchain` before it is scored. This is only the device-level
+prerequisite: concrete-surface queue support, formats, and present modes remain
+validated by `create_swapchain` after the native surface exists.
+
 ## 6. Logical device creation
 
 Logical device creation builds a Vulkan feature chain.
@@ -289,6 +294,16 @@ DescriptorSlot
 
 Initial policy should validate descriptor use in debug builds and report leaked descriptors at device destruction.
 
+Batch creation uses a prepare/commit transaction under the resource lock.
+Preparation validates every item and resolves its view without consuming
+descriptor slots, changing generations, draining ready retires, or writing
+outputs. It records only cache misses created by the transaction. If a later
+item faults, those Vulkan image views are destroyed exactly once and their full
+prior cache cells are restored; default, pre-existing, and duplicate views are
+untouched. After complete preparation, commit drains the ready retire prefix,
+allocates every descriptor, publishes outputs, and performs the existing heap
+writes.
+
 ## 11. Shader and pipeline implementation
 
 ### Shader modules
@@ -454,9 +469,11 @@ Use dynamic rendering.
 Render pass begin:
 
 ```text
-validate color/depth targets
+reject color counts above the library or selected-device limit
+validate every color handle, usage, mip/layer range, selected-mip extent, and layout
+validate the depth handle, usage, mip-zero extent, and layout
 transition only if caller explicitly requested via barrier before begin
-build rendering attachment infos
+resolve views and build attachment infos only after all targets validate
 vkCmdBeginRendering
 ```
 
