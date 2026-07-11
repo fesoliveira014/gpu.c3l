@@ -18,7 +18,7 @@ For exact syntax/version questions, `c3-expert` wins; for idiom, `c3-style`; for
 
 ## Project state — read docs before writing code
 
-Architecture-first. The design docs are complete; almost no source exists yet (`gpu.c3i` stub + `manifest.json` only). **Before writing or changing source, read `master.md` and `docs/document_index.md`**, then the relevant doc:
+Architecture-first. The implementation lives under `gpu/`, with the public interface at `gpu/gpu.c3i` and the Vulkan backend under `gpu/vk/`. **Before writing or changing source, read `master.md` and `docs/document_index.md`**, then the relevant doc:
 
 - `docs/architecture.md` — module split, handle/ABI model
 - `docs/api.md` — public API shape
@@ -45,6 +45,6 @@ Architecture-first. The design docs are complete; almost no source exists yet (`
 
 ## Build & deps
 
-- Built with the `c3c` compiler (C3 0.8.0). `manifest.json` provides `gpu`; native libs live under `linked-libs/<target>/`. No build/test scripts exist yet.
+- Built with the `c3c` compiler (C3 0.8.0). `manifest.json` provides `gpu`; native libs live under `linked-libs/<target>/`. Verification projects live under `test/`, with generator and build helpers under `tools/` and `scripts/`.
 - Backend needs a Vulkan 1.3 loader + VMA. SDL3 is used only by the separate `gpu.c3l-samples` repository, not this library.
 - Primary dev target: `linux-x64` (then `windows-x64`).

@@ -460,7 +460,7 @@ Render without a window or swapchain.
 ### Deliverables
 
 ```text
-render_pass.c3
+gpu/command.c3
 gpu/vk/render_pass.c3
 gpu/vk/pipeline_graphics.c3
 samples/offscreen_triangle/shaders/*.glsl
