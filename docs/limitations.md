@@ -47,8 +47,10 @@ exists (else the limit is compile-time).
 | Sampler descriptors | 256 default (`descriptor_heap.c3:4`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Live textures | 1024 default, 65 536 max (`texture.c3:3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
 | Live buffers | 4096 (`buffer.c3:3`) | — | `SLOT_TABLE_FULL` |
-| Live pipelines / shaders | 256 each (`pipeline.c3:3-4`) | — | `SLOT_TABLE_FULL` |
+| Live pipelines / shaders | 256 each by default (`pipeline.c3:3-4`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
+| Compute push-constant range | Selected-device `maxPushConstantsSize`, reported by `DeviceCaps.max_push_constant_size` | — | `INVALID_ARGUMENT` |
 | Live semaphores | 256 (`sync.c3:6`) | — | `SLOT_TABLE_FULL` |
+| Live command records | 4096 (`command_state.c3:7`) | — | `SLOT_TABLE_FULL` |
 | Swapchains | 8 (`swapchain.c3:3`) | — | `SLOT_TABLE_FULL` |
 | Color attachments per pass | 8 (`pipeline.c3:5`) | — | `INVALID_ARGUMENT` |
 | Frame arena (per frame in flight) | 1 MiB (`memory.c3:36`) | — ([#28](https://github.com/fesoliveira014/gpu.c3l/issues/28)) | `ARENA_FULL` |
@@ -57,6 +59,14 @@ exists (else the limit is compile-time).
 | Readback arena | 8 MiB default (`memory.c3:39`) | `readback_arena_size` | `ARENA_FULL` |
 
 Two sizing rules that bite:
+- **Packed descriptor ceilings are not guaranteed hardware capacities.** On the
+  descriptor-indexing path, texture slots count once as sampled images and once
+  as storage images. Per-stage resource usage is `2 *
+  texture_descriptor_capacity`; plain samplers are excluded. All-pools usage is
+  `2 * texture_descriptor_capacity + sampler_descriptor_capacity`.
+  `create_device` returns `INVALID_ARGUMENT` rather than clamping when any
+  per-type, per-stage aggregate, or all-pools update-after-bind limit is
+  exceeded.
 
 - **Descriptor retires recycle a frame late.** A destroy inside frame N
   retires against N's timeline value and only drains on a later frame — a
@@ -65,6 +75,10 @@ Two sizing rules that bite:
 - **Frame-arena data is per frame in flight.** Every `alloc_frame_span`
   byte exists once per in-flight frame; large per-frame tables belong in
   persistent buffers you rewrite (see `deferred_shading`'s lights).
+- **Pending texture transitions grow with the command record.** There is no
+  16-texture recording cap; the backend starts at 16 entries and doubles the
+  host allocation as distinct textures are added. The allocation is released
+  when the token submits or its frame-slot pool resets.
 
 ## 3. Driver and environment quirks
 

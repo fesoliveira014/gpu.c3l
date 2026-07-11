@@ -432,9 +432,14 @@ a CAS loop, so worker threads allocate concurrently (see docs/threading.md):
 alloc_frame_span(size, align)
     if frame is IDLE: return INVALID_RESOURCE_STATE
     retry:
-    aligned = align_up(cursor, align)
-    if aligned + size > arena.size: return ARENA_FULL
-    if !compare_exchange(cursor, aligned + size): goto retry
+    if cursor > arena.size: return ARENA_FULL
+    remainder = cursor & (align - 1)
+    padding = remainder == 0 ? 0 : align - remainder
+    if padding > arena.size - cursor: return ARENA_FULL
+    aligned = cursor + padding
+    if size > arena.size - aligned: return ARENA_FULL
+    next_cursor = aligned + size
+    if !compare_exchange(cursor, next_cursor): goto retry
     span = { gpu_base + aligned, cpu_base + aligned,
              backing_buffer, aligned, size, FRAME_UPLOAD }
 ```

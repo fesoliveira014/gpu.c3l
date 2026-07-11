@@ -1,12 +1,111 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
 import std::atomic;
 
-// Headless (lavapipe): frame upload arena bump allocation, reset across the
-// frame loop, ARENA_FULL, and the timeline-gated reset.
+// Pure range-boundary coverage plus headless (lavapipe) frame upload arena
+// bump allocation, reset, ARENA_FULL, and timeline-gated reset.
+
+fn void frame_arena_range_preserves_fault_taxonomy() @test {
+    fault zero_size = @catch(gpu::vk::frame_arena_range(
+        cursor: 0,
+        capacity: 256,
+        size: 0,
+        align: 16,
+    ));
+    fault zero_align = @catch(gpu::vk::frame_arena_range(
+        cursor: 0,
+        capacity: 256,
+        size: 1,
+        align: 0,
+    ));
+    fault bad_align = @catch(gpu::vk::frame_arena_range(
+        cursor: 0,
+        capacity: 256,
+        size: 1,
+        align: 3,
+    ));
+    fault huge_size = @catch(gpu::vk::frame_arena_range(
+        cursor: 1,
+        capacity: 256,
+        size: usz::max,
+        align: 1,
+    ));
+
+    fault cursor_past_capacity = @catch(gpu::vk::frame_arena_range(
+        cursor: 257,
+        capacity: 256,
+        size: 1,
+        align: 1,
+    ));
+    assert(zero_size == gpu::INVALID_ARGUMENT, "zero size remains invalid");
+    assert(zero_align == gpu::INVALID_ARGUMENT, "zero alignment remains invalid");
+    assert(bad_align == gpu::INVALID_ARGUMENT, "non-power-of-two alignment remains invalid");
+    assert(huge_size == gpu::ARENA_FULL, "valid huge size exhausts the arena");
+    assert(cursor_past_capacity == gpu::ARENA_FULL, "cursor past capacity faults ARENA_FULL");
+}
+
+fn void frame_arena_range_handles_exact_end() @test {
+    gpu::vk::FrameArenaRange exact = gpu::vk::frame_arena_range(
+        cursor: 241,
+        capacity: 272,
+        size: 16,
+        align: 16,
+    )!!;
+    assert(exact.offset == 256, "padding resolves to the next aligned offset");
+    assert(exact.next_cursor == 272, "exact fit reaches the arena end");
+
+    fault one_over = @catch(gpu::vk::frame_arena_range(
+        cursor: 241,
+        capacity: 271,
+        size: 16,
+        align: 16,
+    ));
+    fault at_end = @catch(gpu::vk::frame_arena_range(
+        cursor: 256,
+        capacity: 256,
+        size: 1,
+        align: 1,
+    ));
+    assert(one_over == gpu::ARENA_FULL, "one-byte overflow faults ARENA_FULL");
+    assert(at_end == gpu::ARENA_FULL, "nonzero allocation at arena end faults ARENA_FULL");
+}
+
+fn void frame_arena_range_handles_max_boundaries() @test {
+    gpu::vk::FrameArenaRange high_exact = gpu::vk::frame_arena_range(
+        cursor: usz::max - 1,
+        capacity: usz::max,
+        size: 1,
+        align: 2,
+    )!!;
+    assert(high_exact.offset == usz::max - 1, "already-aligned high cursor is preserved");
+    assert(high_exact.next_cursor == usz::max, "representable exact fit reaches usz::max");
+
+    gpu::vk::FrameArenaRange full_exact = gpu::vk::frame_arena_range(
+        cursor: 0,
+        capacity: usz::max,
+        size: usz::max,
+        align: 1,
+    )!!;
+    assert(full_exact.offset == 0 && full_exact.next_cursor == usz::max, "maximum capacity exact fit remains valid");
+
+    fault align_overflow = @catch(gpu::vk::frame_arena_range(
+        cursor: usz::max,
+        capacity: usz::max,
+        size: 1,
+        align: 2,
+    ));
+    fault extent_overflow = @catch(gpu::vk::frame_arena_range(
+        cursor: usz::max - 1,
+        capacity: usz::max,
+        size: 2,
+        align: 2,
+    ));
+    assert(align_overflow == gpu::ARENA_FULL, "unrepresentable alignment faults ARENA_FULL");
+    assert(extent_overflow == gpu::ARENA_FULL, "unrepresentable extent faults ARENA_FULL");
+}
 
 struct FrameLifecycleSnapshot {
     uint  frame_index;

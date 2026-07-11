@@ -49,9 +49,9 @@ library's own state, but results and validation verdicts are undefined.
 
 No Tier S or Tier C call may be in flight across `begin_frame` / `end_frame`.
 With `enable_validation`, in-flight Tier S calls at the boundary fault
-`INVALID_RESOURCE_STATE`; a recording left open across the boundary surfaces
-through Vulkan validation (pool reset under an active command buffer).
-Without validation the rule is contract only — the boundary pays one branch,
+`INVALID_RESOURCE_STATE`. An unsubmitted command record is reclaimed when its
+frame slot retires and its command pool resets; every alias of that token then
+faults `INVALID_HANDLE`. Without validation the phase rule is still contractual —
 Tier S calls pay nothing.
 
 Frame lifecycle errors are independent of validation: double begin, end while
@@ -62,12 +62,17 @@ or by device teardown, not by an unmatched `end_frame`.
 
 ## Lock order
 
-`helper_record_mutex → transfer_mutex → resource_mutex → queue mutexes`, one
+`helper_record_mutex → transfer_mutex → resource_mutex → command_mutex`, one
 direction only. Creation and destruction share a single `resource_mutex`
-(cold paths); the transfer arenas share `transfer_mutex`; each queue has its
-own mutex; `helper_record_mutex` spans a blocking helper's recording window
+(cold paths); command-record allocation, submit claims, and reclamation share
+`command_mutex`; and the transfer arenas share `transfer_mutex`.
+`helper_record_mutex` spans a blocking helper's recording window
 (`begin_commands` through `end_commands`) and is outermost because that
 window takes `transfer_mutex` internally for its allocation.
+
+Each queue has its own mutex. Submit releases `command_mutex` before taking a
+queue mutex and releases the queue mutex before invalidating command tokens,
+so command-record and queue locks are never nested.
 
 Dedicated-fallback staging/readback buffers (the arena ring miss path in
 `transfer_alloc`/`ticket_alloc`) create their VMA buffer without holding
@@ -94,10 +99,13 @@ stays the caller's responsibility (gpu.c3l#36).
 
 ## Visibility rules
 
-- Slot reads (`get` paths) are lock-free: tables never reallocate, and a
-  handle reaches another thread only through your synchronization — that
-  hand-off is the happens-before edge. The same applies to passing a
-  `CommandList` from a recording thread to the submitting thread.
+- Resource slot reads (`get` paths) are lock-free: tables never reallocate, and
+  a handle reaches another thread only through your synchronization — that
+  hand-off is the happens-before edge.
+- Command records also live in a fixed table. The public `CommandList` is an
+  owner-bearing handle into that table; passing it from a recording thread to
+  the submitting thread is the required hand-off. Copies remain aliases and
+  must not be used concurrently.
 - Destruction must happen-after the last use of the handle on any thread.
 
 ## Worker-thread setup (C3)

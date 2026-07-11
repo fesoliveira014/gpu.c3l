@@ -92,3 +92,33 @@ fn void failed_submit_records_nothing_and_end_frame_stays_clean() @test {
     gpu::begin_frame(&device)!!;
     gpu::end_frame(&device)!!;
 }
+
+fn void post_claim_fault_restores_executable_token() @test {
+    gpu::Device device = make_submit_stats_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::CommandList cmd = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::end_commands(&device, &cmd)!!;
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SemaphoreSignal[1] bad_signals = {{
+        .semaphore = gpu::SEMAPHORE_HANDLE_INVALID,
+        .value = (gpu::SemaphoreValue)1,
+        .stage = gpu::Stage.TRANSFER,
+    }};
+    gpu::SubmitDesc bad = {
+        .command_lists = lists[..],
+        .signals = bad_signals[..],
+    };
+    ulong before = stats_of(&device).queue_submits;
+    assert(@catch(gpu::submit(&device, &bad)) == gpu::INVALID_HANDLE,
+        "post-claim semaphore validation faults INVALID_HANDLE");
+    assert(stats_of(&device).queue_submits == before,
+        "post-claim rejection reaches no Vulkan queue submit");
+
+    gpu::SubmitDesc good = { .command_lists = lists[..] };
+    gpu::submit(&device, &good)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}

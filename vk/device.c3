@@ -55,10 +55,12 @@ struct VkDeviceState {
     // Off-frame submission not yet covered by an end_frame chain or teardown.
     Atomic{bool}               off_frame_pending;
     // Lock order: helper_record_mutex -> transfer_mutex -> resource_mutex ->
-    // queue mutexes. helper_record_mutex is outermost because the blocking
-    // helpers it wraps take transfer_mutex internally for their allocation.
+    // command_mutex. Queue mutexes are never nested with command_mutex.
+    // helper_record_mutex is outermost because the blocking helpers it wraps
+    // take transfer_mutex internally for their allocation.
     Mutex                      helper_record_mutex;
     Mutex                      resource_mutex;
+    Mutex                      command_mutex;
     Mutex                      transfer_mutex;
     Mutex                      graphics_queue_mutex;
     Mutex                      compute_queue_mutex;
@@ -70,6 +72,7 @@ struct VkDeviceState {
     FrameArenaState[]          frame_arenas;
     PersistentArenaState       persistent_arena;
     RecordingContextTable      recording_contexts;
+    CommandTable               commands;
     gpu::RecordingContextHandle default_context;
     // Reserved for the four blocking helpers; never touched by Tier-C
     // recording, so it never races the default context's pool.
@@ -79,7 +82,7 @@ struct VkDeviceState {
     PipelineTable              pipelines;
     PipelineCacheTable         pipeline_cache;
     vk::PipelineLayout         graphics_layout;
-    ComputeLayoutEntry[COMPUTE_LAYOUT_CAP] compute_layouts;
+    ComputeLayoutCache         compute_layout_cache;
     vk::PipelineCache          driver_cache;
     TextureTable               textures;
     SwapchainTable             swapchains;
@@ -115,6 +118,17 @@ struct VkDeviceState {
 struct PoolResetStats {
     uint reset;
     uint skipped;
+}
+
+struct PhysicalDeviceSelection {
+    vk::PhysicalDevice physical_device;
+    QueueFamilies      families;
+}
+
+struct PhysicalDeviceCandidate {
+    PhysicalDeviceSelection selection;
+    int                     score;
+    bool                    suitable;
 }
 
 struct CapsInputs {
@@ -226,6 +240,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
     state.helper_record_mutex.init()!;
     state.resource_mutex.init()!;
+    state.command_mutex.init()!;
     state.transfer_mutex.init()!;
     state.graphics_queue_mutex.init()!;
     state.compute_queue_mutex.init()!;
@@ -240,7 +255,9 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     vk::load_extensions(state.instance);
     if (desc.enable_validation) setup_debug_messenger(state);
 
-    state.physical_device = pick_physical_device(state.instance, desc)!;
+    PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
+    state.physical_device = selection.physical_device;
+    QueueFamilies families = selection.families;
 
     vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
@@ -264,7 +281,6 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     bool buffer_supported   = heap_shared_features_supported(&features2.features, &features12) && query_descriptor_buffer_support(state.physical_device);
     state.heap_mode = resolve_heap_mode(desc.descriptor_heap_mode, indexing_supported, buffer_supported)!;
 
-    QueueFamilies families = select_queue_families(state.physical_device)!;
     state.graphics_family = families.graphics;
     state.compute_family  = families.compute;
     state.transfer_family = families.transfer;
@@ -284,6 +300,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     create_frame_resources(state, desc)!;
     create_persistent_arena(state, desc)!;
     state.recording_contexts.slots = mem::new_array(RecordingContextCell, gpu::MAX_RECORDING_CONTEXTS);
+    state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
     RecordingContextState default_ctx;
     create_context_pools(state, &default_ctx)!;
     state.default_context = state.recording_contexts.alloc(default_ctx)!;
@@ -382,6 +399,7 @@ fn void destroy_state(VkDeviceState* state) @private {
             mem::free(state.shaders.slots.ptr);
             state.shaders.slots = {};
         }
+        destroy_command_table(state);
         if (state.recording_contexts.slots.ptr != null) {
             foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
                 if (cell.used) destroy_context_pools(state, &cell.value);
@@ -412,6 +430,7 @@ fn void destroy_state(VkDeviceState* state) @private {
     }
     if (state.helper_record_mutex.is_initialized())  (void)state.helper_record_mutex.destroy();
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
+    if (state.command_mutex.is_initialized())        (void)state.command_mutex.destroy();
     if (state.transfer_mutex.is_initialized())       (void)state.transfer_mutex.destroy();
     if (state.graphics_queue_mutex.is_initialized()) (void)state.graphics_queue_mutex.destroy();
     if (state.compute_queue_mutex.is_initialized())  (void)state.compute_queue_mutex.destroy();
@@ -502,9 +521,26 @@ fn bool candidate_satisfies(vk::PhysicalDevice candidate, gpu::DeviceDesc* desc)
     return true;
 }
 
+<* Select the highest-scored suitable candidate, preserving enumeration order
+   for equal scores. Pure. *>
+fn PhysicalDeviceSelection? choose_physical_device(PhysicalDeviceCandidate[] candidates) {
+    PhysicalDeviceSelection best;
+    int best_score = -1;
+    bool found = false;
+    foreach (&candidate : candidates) {
+        if (!candidate.suitable || (found && candidate.score <= best_score)) continue;
+        best = candidate.selection;
+        best_score = candidate.score;
+        found = true;
+    }
+    if (!found) return gpu::UNSUPPORTED_FEATURE~;
+    return best;
+}
+
 <* Enumerate physical devices, drop candidates that cannot satisfy the desc
-   (API version, required features, heap mode), return the highest-scored. *>
-fn vk::PhysicalDevice? pick_physical_device(vk::Instance instance, gpu::DeviceDesc* desc) {
+   (API version, required features, heap mode, queue topology), and return the
+   highest-scored device with its already-resolved queue families. *>
+fn PhysicalDeviceSelection? pick_physical_device(vk::Instance instance, gpu::DeviceDesc* desc) {
     uint count = 0;
     check(vk::enumerate_physical_devices(instance, &count, null))!;
     if (count == 0) return gpu::UNSUPPORTED_FEATURE~;
@@ -512,21 +548,24 @@ fn vk::PhysicalDevice? pick_physical_device(vk::Instance instance, gpu::DeviceDe
     @pool() {
         vk::PhysicalDevice[] devices = mem::talloc_array(vk::PhysicalDevice, (sz)count);
         check(vk::enumerate_physical_devices(instance, &count, devices.ptr))!;
+        PhysicalDeviceCandidate[] candidates = mem::talloc_array(PhysicalDeviceCandidate, (sz)count);
 
-        vk::PhysicalDevice best = (vk::PhysicalDevice)null;
-        int best_score = -1;
-        foreach (candidate : devices) {
-            if (!candidate_satisfies(candidate, desc)) continue;
-            vk::PhysicalDeviceProperties props;
-            vk::get_physical_device_properties(candidate, &props);
-            int score = score_device((int)props.device_type);
-            if (score > best_score) {
-                best_score = score;
-                best = candidate;
+        foreach (i, physical_device : devices[:count]) {
+            PhysicalDeviceCandidate candidate = {
+                .selection = { .physical_device = physical_device },
+            };
+            if (candidate_satisfies(physical_device, desc)) {
+                if (try families = select_queue_families(physical_device)) {
+                    vk::PhysicalDeviceProperties props;
+                    vk::get_physical_device_properties(physical_device, &props);
+                    candidate.selection.families = families;
+                    candidate.score = score_device((int)props.device_type);
+                    candidate.suitable = true;
+                }
             }
+            candidates[i] = candidate;
         }
-        if (best == null) return gpu::UNSUPPORTED_FEATURE~;
-        return best;
+        return choose_physical_device(candidates[:count]);
     };
 }
 
@@ -656,6 +695,7 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .async_compute              = inputs.async_compute,
         .max_texture_descriptors    = inputs.texture_capacity,
         .max_sampler_descriptors    = inputs.sampler_capacity,
+        .max_push_constant_size     = props.limits.max_push_constants_size,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,

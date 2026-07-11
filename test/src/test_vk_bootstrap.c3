@@ -1,6 +1,8 @@
 module gpu_test;
 
 import gpu;
+import gpu::vk;
+import vk;
 
 // Headless device create/destroy. Needs a real Vulkan ICD at runtime; the test
 // target pins lavapipe via VK_DRIVER_FILES for deterministic CPU runs.
@@ -23,7 +25,14 @@ fn void device_create_destroy() @test {
     assert(device.caps.synchronization2, "synchronization2 cap true");
     assert(device.caps.dynamic_rendering, "dynamic_rendering cap true");
     assert(device.caps.timeline_semaphore, "timeline_semaphore cap true");
-
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::PhysicalDeviceProperties props;
+    vk::get_physical_device_properties(state.physical_device, &props);
+    assert(
+        device.caps.max_push_constant_size == props.limits.max_push_constants_size,
+        "reported push-constant limit matches the selected physical device"
+    );
+    assert(device.caps.max_push_constant_size >= gpu::RootPush::size, "push-constant limit contains RootPush");
     gpu::destroy_device(&device)!!;
     assert(device.backend_state == null, "backend state cleared on destroy");
 }

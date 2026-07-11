@@ -87,8 +87,9 @@ fn void? begin_frame(Device* device) {
 
 <* Bump-allocate a span from the active frame's upload arena. Faults
    INVALID_RESOURCE_STATE while idle. `size` must be nonzero and `align` a
-   nonzero power of two (INVALID_ARGUMENT otherwise); returns ARENA_FULL when
-   the arena is exhausted. The span is valid until the arena is reset. *>
+   nonzero power of two (INVALID_ARGUMENT otherwise). ARENA_FULL means the
+   aligned range cannot fit or be represented without overflow. The span is
+   valid until the arena is reset. *>
 fn GpuSpan? alloc_frame_span(Device* device, usz size, usz align) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.alloc_frame_span(device, size, align);

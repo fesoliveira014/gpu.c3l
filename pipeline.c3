@@ -120,7 +120,8 @@ struct BlendState {
    a push range of push_constant_size bytes. *>
 struct ComputePipelineDesc {
     ShaderHandle shader;
-    // At least the 8-byte root address (RootPush).
+    // At least RootPush::size, four-byte aligned, and no greater than
+    // DeviceCaps.max_push_constant_size.
     uint         push_constant_size;
     ZString      debug_name;
 }
