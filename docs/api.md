@@ -126,6 +126,10 @@ create_device(DeviceDesc* desc) -> Device?
 destroy_device(Device* device) -> void?
 ```
 
+The supported contract permits at most one live `Device` per process.
+Multi-device operation is deferred; the current handle and descriptor-index
+representations do not encode device ownership.
+
 ### Handles
 
 All handles are `bitstruct : ulong` (index | generation | reserved).
@@ -146,6 +150,16 @@ Invalid sentinels are module constants (`BUFFER_HANDLE_INVALID`, ...), all
 zero-valued; `handle.is_valid()` answers liveness.
 
 A valid handle packs slot index and generation. Public code should not inspect the packed representation.
+
+Handles, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
+command tokens, and synchronization values are runtime-only and scoped to the
+sole device that created them. Do not persist, serialize, reconstruct, or pass
+them across device or process lifetimes. Cross-device use is unsupported.
+Table- and index-backed values that do not carry an owner may alias a
+coincident live resource instead of returning `INVALID_HANDLE`.
+Owner-bearing `CommandList` tokens currently reject a foreign device with
+`INVALID_ARGUMENT`; that defensive check does not establish broader
+multi-device support.
 
 ### GPU addresses
 

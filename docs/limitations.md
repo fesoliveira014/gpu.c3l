@@ -6,6 +6,16 @@ page doesn't explain it, that's a bug in this page — file an issue.
 
 ## 1. By design
 
+- **One live device per process.** Multi-device operation is not supported.
+  Resource handles, descriptor indices, GPU addresses/spans, command tokens,
+  and synchronization values are scoped to their sole creating device.
+  Passing them between devices is outside the contract. Table- and
+  index-backed values without owner metadata can silently resolve a
+  coincident slot and target the wrong resource; a safe fault is not
+  guaranteed. Owner-bearing command tokens have defensive checks. Supporting
+  multiple devices is deferred until a dedicated ownership/validation design
+  is approved.
+
 - **No descriptor-set escape hatch.** The root-pointer model and the single
   bindless heap are the only binding paths. There is no API to create your
   own descriptor sets, set layouts, or push descriptors — that machinery is

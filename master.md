@@ -364,6 +364,11 @@ The Vulkan backend should expose a neutral surface creation descriptor rather th
 
 `Device` owns backend state, queues, resource tables, descriptor heaps, frame arenas, and debug configuration.
 
+The supported runtime model permits at most one live `Device` per process.
+Multi-device operation is deferred until resource ownership and validation are
+designed explicitly; the current handle tables do not distinguish otherwise
+coincident handles from different devices.
+
 Public fields should be minimal. Prefer opaque storage or a pointer to backend state.
 
 ```text
