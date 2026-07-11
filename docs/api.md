@@ -191,7 +191,7 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | `create_device`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation off; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value, pass-bounded rectangle, or a subspan outside its parent/with overflowing metadata; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | any handle-taking call, `cmd_*`, `end_commands`, `submit` | use after destroy (generation mismatch), never-live handle, consumed command-list alias, or abandoned command token after its frame-slot pool resets |
 | `INVALID_RESOURCE_STATE` | `create_swapchain`, `begin_frame`, `end_frame`, `alloc_frame_span`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | the native window is already bound to another Vulkan surface; double begin; end or frame-span allocation while idle; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
@@ -695,14 +695,14 @@ A conventional full-depth viewport must set `max_depth` explicitly because
 C3 aggregate literals zero omitted fields:
 
 ```c3
-gpu::Viewport viewport = {{
+gpu::Viewport viewport = {
     .x         = 0.0f,
     .y         = 0.0f,
     .width     = 640.0f,
     .height    = 480.0f,
     .min_depth = 0.0f,
     .max_depth = 1.0f,
-}};
+};
 gpu::cmd_set_viewport(&commands, &viewport)!!;
 ```
 
