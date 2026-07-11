@@ -80,7 +80,7 @@ fn uint used_queue_families(VkDeviceState* state, uint[] out_families) {
     return count;
 }
 
-<* Graphics and compute families that may consume frame-arena ranges. *>
+<* Selected graphics and compute families, graphics first and deduplicated. *>
 fn uint graphics_compute_queue_families(VkDeviceState* state, uint[] out_families) @private {
     uint count = 0;
     out_families[count++] = state.graphics_family;

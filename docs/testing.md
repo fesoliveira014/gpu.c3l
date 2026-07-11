@@ -224,6 +224,14 @@ Do not include milestone labels in test names.
 | Depth | depth attachment creation, depth-tested draw, readback. |
 | Indirect draw | compute-written draw args, indirect draw, readback. |
 
+Descriptor-buffer topology has deterministic create-info coverage for the
+same-family exclusive path and the distinct graphics/compute concurrent path,
+including ordered family values and transfer exclusion. The gated
+`GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1` regression uses one live `Device`, a
+`shared_queues` texture, and one descriptor across compute storage writes and
+fragment sampling with a timeline dependency. It reports the selected family
+indices; the gate remains necessary on drivers with unreliable descriptor-buffer image access.
+
 ## 9. Build commands
 
 The shipped library is a `manifest.json` package (module `gpu`); it has no

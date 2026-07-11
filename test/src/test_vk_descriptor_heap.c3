@@ -1,9 +1,46 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
+import vk;
 
 // Headless (lavapipe): descriptor heap slot bookkeeping through the public API.
+
+const uint DESCRIPTOR_BUFFER_USAGE = (uint)vk::BufferUsageFlagBits.RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT
+    | (uint)vk::BufferUsageFlagBits.SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
+    | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
+
+fn void descriptor_buffer_create_info_uses_exclusive_for_one_family() @test {
+    uint[1] family_storage = { 3 };
+
+    vk::BufferCreateInfo info = gpu::vk::make_descriptor_buffer_create_info(
+        4096,
+        family_storage[..],
+    );
+
+    assert(info.size == 4096, "descriptor-buffer layout size is preserved");
+    assert((uint)info.usage == DESCRIPTOR_BUFFER_USAGE, "descriptor-buffer usage remains exact");
+    assert(info.sharing_mode == vk::SharingMode.EXCLUSIVE, "one consumer family remains exclusive");
+    assert(info.queue_family_index_count == 0, "exclusive creation publishes no family count");
+    assert(info.p_queue_family_indices == null, "exclusive creation publishes no family pointer");
+}
+
+fn void descriptor_buffer_create_info_uses_only_graphics_and_compute_families() @test {
+    uint[2] family_storage = { 5, 2 };
+
+    vk::BufferCreateInfo info = gpu::vk::make_descriptor_buffer_create_info(
+        8192,
+        family_storage[..],
+    );
+
+    assert(info.size == 8192, "descriptor-buffer layout size is preserved");
+    assert((uint)info.usage == DESCRIPTOR_BUFFER_USAGE, "descriptor-buffer usage remains exact");
+    assert(info.sharing_mode == vk::SharingMode.CONCURRENT, "distinct consumers use concurrent sharing");
+    assert(info.queue_family_index_count == 2, "concurrent creation publishes exactly two families");
+    assert(info.p_queue_family_indices == &family_storage[0], "create info points into caller-owned storage");
+    assert(info.p_queue_family_indices[0] == 5, "graphics family remains first");
+    assert(info.p_queue_family_indices[1] == 2, "compute family remains second");
+}
 
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::DeviceDesc desc = {
