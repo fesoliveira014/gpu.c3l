@@ -109,9 +109,7 @@ fn uint debug_callback(
 }
 
 fn vk::DebugUtilsMessengerCreateInfoEXT debug_messenger_create_info(VkDeviceState* state) {
-    uint severity_flags = (uint)vk::DebugUtilsMessageSeverityFlagBitsEXT.VERBOSE_BIT_EXT
-                        | (uint)vk::DebugUtilsMessageSeverityFlagBitsEXT.INFO_BIT_EXT
-                        | (uint)vk::DebugUtilsMessageSeverityFlagBitsEXT.WARNING_BIT_EXT
+    uint severity_flags = (uint)vk::DebugUtilsMessageSeverityFlagBitsEXT.WARNING_BIT_EXT
                         | (uint)vk::DebugUtilsMessageSeverityFlagBitsEXT.ERROR_BIT_EXT;
     uint type_flags = (uint)vk::DebugUtilsMessageTypeFlagBitsEXT.GENERAL_BIT_EXT
                     | (uint)vk::DebugUtilsMessageTypeFlagBitsEXT.VALIDATION_BIT_EXT
