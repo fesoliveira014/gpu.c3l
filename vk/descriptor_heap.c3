@@ -347,11 +347,6 @@ fn void report_descriptor_leaks(VkDeviceState* state) {
     }
 }
 
-fn void drain_texture_retire(VkDeviceState* state) @private {
-    uint ready_count = count_ready_texture_retires(state) ?? 0;
-    drain_texture_retire_prefix(state, ready_count);
-}
-
 fn uint? count_ready_texture_retires(VkDeviceState* state) @private {
     DescriptorRetireRing* retire = &state.heap.texture_retire;
     if (retire.count == 0) return 0;
