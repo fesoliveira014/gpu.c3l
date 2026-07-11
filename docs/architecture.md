@@ -124,6 +124,17 @@ Device
 
 The pointer is opaque. Public code should not inspect it.
 
+gpu.c3l currently supports at most one live `Device` per process. Multiple
+devices require ownership information that the present resource handles and
+descriptor indices do not encode, so multi-device operation is deferred.
+
+All handles, indices, addresses, spans, command tokens, and synchronization
+values are scoped to this device and its runtime lifetime. Passing them to
+another device is unsupported. Table- and index-backed values without owner
+metadata may resolve a coincident resource rather than returning a fault.
+The owner-bearing `CommandList` token has a defensive cross-device rejection,
+but that isolated check does not make multi-device operation supported.
+
 ### Queues
 
 The API exposes queue kinds rather than raw queue handles:
