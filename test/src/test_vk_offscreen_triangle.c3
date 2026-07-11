@@ -8,6 +8,8 @@ import gpu;
 
 const char[*] OFFSCREEN_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
 const char[*] OFFSCREEN_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
+const char[*] DYNAMIC_RECT_VERT_SPIRV = $embed("shaders/depth.vert.spv");
+const char[*] DYNAMIC_RECT_FRAG_SPIRV = $embed("shaders/depth.frag.spv");
 
 const uint RT_SIZE = 32;
 const usz RT_BYTES = RT_SIZE * RT_SIZE * 4;
@@ -295,6 +297,149 @@ fn void offscreen_textured_triangle() @test {
     gpu::end_frame(&device)!!;
 }
 
+fn void dynamic_viewport_scissor_pixels() @test {
+    gpu::Device device = make_offscreen_test_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::ShaderDesc vert_desc = {
+        .stage = gpu::ShaderStage.VERTEX, .spirv = DYNAMIC_RECT_VERT_SPIRV[..], .entry_point = "main",
+    };
+    gpu::ShaderHandle vert = gpu::create_shader(&device, &vert_desc)!!;
+    defer gpu::destroy_shader(&device, vert)!!;
+    gpu::ShaderDesc frag_desc = {
+        .stage = gpu::ShaderStage.FRAGMENT, .spirv = DYNAMIC_RECT_FRAG_SPIRV[..], .entry_point = "main",
+    };
+    gpu::ShaderHandle frag = gpu::create_shader(&device, &frag_desc)!!;
+    defer gpu::destroy_shader(&device, frag)!!;
+    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::GraphicsPipelineDesc pipeline_desc = {
+        .vertex_shader   = vert,
+        .fragment_shader = frag,
+        .topology        = gpu::PrimitiveTopology.TRIANGLES,
+        .color_formats   = formats[..],
+    };
+    gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+
+    gpu::TextureHandle[3] targets;
+    for (uint i = 0; i < targets.len; i++) targets[i] = make_render_target(&device);
+    defer for (uint i = 0; i < targets.len; i++) gpu::destroy_texture(&device, targets[i])!!;
+
+    gpu::BufferDesc readback_desc = {
+        .size = RT_BYTES * targets.len,
+        .usage = { .transfer_dst },
+        .memory_kind = gpu::MemoryKind.READBACK,
+    };
+    gpu::BufferHandle readback = gpu::create_buffer(&device, &readback_desc)!!;
+    defer gpu::destroy_buffer(&device, readback)!!;
+    gpu::GpuSpan readback_all = gpu::get_buffer_span(&device, readback)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::GpuSpan vertices = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+    float[12] vertex_data = {
+        -1.0f, -1.0f, 0.0f, 0.0f,
+         3.0f, -1.0f, 0.0f, 0.0f,
+        -1.0f,  3.0f, 0.0f, 0.0f,
+    };
+    for (uint i = 0; i < vertex_data.len; i++) ((float*)vertices.cpu)[i] = vertex_data[i];
+
+    gpu::GpuSpan color = gpu::alloc_frame_span(&device, 16, 16)!!;
+    float[4] green = { 0.0f, 1.0f, 0.0f, 1.0f };
+    for (uint i = 0; i < green.len; i++) ((float*)color.cpu)[i] = green[i];
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    for (uint i = 0; i < targets.len; i++) {
+        gpu::TextureBarrier to_attach = {
+            .texture       = targets[i],
+            .before_stage  = gpu::Stage.HOST,
+            .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
+            .before_hazard = gpu::Hazard.HOST_WRITE,
+            .after_hazard  = gpu::Hazard.COLOR_WRITE,
+            .old_layout    = gpu::TextureLayout.UNDEFINED,
+            .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+        };
+        gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
+
+        gpu::ColorTargetDesc[1] colors = {{
+            .texture = targets[i],
+            .load_op = gpu::LoadOp.CLEAR,
+            .store_op = gpu::StoreOp.STORE,
+            .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
+        }};
+        gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
+        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        if (i == 0) {
+            gpu::Viewport viewport = {
+                .width = (float)RT_SIZE / 2.0f, .height = (float)RT_SIZE, .max_depth = 1.0f,
+            };
+            gpu::cmd_set_viewport(&cmd, &viewport)!!;
+            gpu::Viewport rejected = viewport;
+            rejected.width = (float)RT_SIZE + 1.0f;
+            assert(@catch(gpu::cmd_set_viewport(&cmd, &rejected)) == gpu::INVALID_ARGUMENT,
+                "a rejected viewport does not replace the valid viewport");
+        } else if (i == 1) {
+            gpu::ScissorRect scissor = {
+                .width = (int)RT_SIZE / 2, .height = (int)RT_SIZE,
+            };
+            gpu::cmd_set_scissor(&cmd, &scissor)!!;
+            gpu::ScissorRect rejected = scissor;
+            rejected.x = (int)RT_SIZE;
+            assert(@catch(gpu::cmd_set_scissor(&cmd, &rejected)) == gpu::INVALID_ARGUMENT,
+                "a rejected scissor does not replace the valid scissor");
+        }
+        gpu::cmd_draw(
+            commands:       &cmd,
+            pipeline:       pipeline,
+            vertex_root:    vertices.gpu,
+            fragment_root:  color.gpu,
+            vertex_count:   3,
+            instance_count: 1,
+        )!!;
+        gpu::cmd_end_render_pass(&cmd)!!;
+
+        gpu::TextureBarrier to_src = {
+            .texture       = targets[i],
+            .before_stage  = gpu::Stage.COLOR_ATTACHMENT,
+            .after_stage   = gpu::Stage.TRANSFER,
+            .before_hazard = gpu::Hazard.COLOR_WRITE,
+            .after_hazard  = gpu::Hazard.TRANSFER_READ,
+            .old_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        };
+        gpu::cmd_texture_barrier(&cmd, &to_src)!!;
+
+        gpu::GpuSpan region = readback_all.checked_subspan(RT_BYTES * i, RT_BYTES)!!;
+        gpu::TextureBufferCopyDesc copy = { .texture = targets[i], .dst = region };
+        gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
+        gpu::BufferBarrier host_read = {
+            .buffer = readback, .offset = region.offset, .size = region.size,
+            .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
+            .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+        };
+        gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
+    }
+
+    gpu::end_commands(&device, &cmd)!!;
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::invalidate_buffer(&device, readback, 0, 0)!!;
+
+    for (uint i = 0; i < 2; i++) {
+        char* pixels = (char*)readback_all.cpu + RT_BYTES * i;
+        usz left_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE / 4) * 4 + 1;
+        usz right_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE * 3 / 4) * 4 + 1;
+        assert(pixels[left_green] != 0, "the clipped draw covers the left half");
+        assert(pixels[right_green] == 0, "the clipped draw leaves the right half clear");
+    }
+    char* reset_pixels = (char*)readback_all.cpu + RT_BYTES * 2;
+    usz reset_right_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE * 3 / 4) * 4 + 1;
+    assert(reset_pixels[reset_right_green] != 0, "the next pass restores full viewport and scissor defaults");
+
+    gpu::end_frame(&device)!!;
+}
+
 fn void offscreen_render_to_mip() @test {
     gpu::Device device = make_offscreen_test_device();
     defer gpu::destroy_device(&device)!!;
@@ -405,6 +550,104 @@ fn void graphics_pipeline_depth_format_validation() @test {
     };
     assert(@catch(gpu::create_graphics_pipeline(&device, &no_attachments)) == gpu::INVALID_ARGUMENT,
         "zero color formats with no depth format faults INVALID_ARGUMENT");
+}
+
+fn void dynamic_viewport_scissor_validation() @test {
+    gpu::Device device = make_offscreen_test_device();
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle target = make_render_target(&device);
+    defer gpu::destroy_texture(&device, target)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+
+    gpu::Viewport full_viewport = {
+        .width     = (float)RT_SIZE,
+        .height    = (float)RT_SIZE,
+        .min_depth = 0.0f,
+        .max_depth = 1.0f,
+    };
+    gpu::ScissorRect full_scissor = {
+        .width  = (int)RT_SIZE,
+        .height = (int)RT_SIZE,
+    };
+    assert(@catch(gpu::cmd_set_viewport(&cmd, &full_viewport)) == gpu::COMMAND_RECORDING_ERROR,
+        "viewport outside a render pass faults COMMAND_RECORDING_ERROR");
+    assert(@catch(gpu::cmd_set_scissor(&cmd, &full_scissor)) == gpu::COMMAND_RECORDING_ERROR,
+        "scissor outside a render pass faults COMMAND_RECORDING_ERROR");
+
+    gpu::TextureBarrier to_attach = {
+        .texture       = target,
+        .before_stage  = gpu::Stage.HOST,
+        .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
+        .before_hazard = gpu::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::Hazard.COLOR_WRITE,
+        .old_layout    = gpu::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+    };
+    gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
+    gpu::ColorTargetDesc[1] colors = {{
+        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+
+    assert(@catch(gpu::cmd_set_viewport(&cmd, null)) == gpu::INVALID_ARGUMENT,
+        "null viewport faults INVALID_ARGUMENT");
+    assert(@catch(gpu::cmd_set_scissor(&cmd, null)) == gpu::INVALID_ARGUMENT,
+        "null scissor faults INVALID_ARGUMENT");
+
+    gpu::Viewport[13] invalid_viewports = {
+        { .x = float::nan, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .y = float::inf, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .width = float::nan, .height = 1.0f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = -float::inf, .max_depth = 1.0f },
+        { .width = 1.0f, .height = 1.0f, .min_depth = float::nan, .max_depth = 1.0f },
+        { .width = 1.0f, .height = 1.0f, .max_depth = float::inf },
+        { .x = -1.0f, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .width = 0.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = -1.0f, .max_depth = 1.0f },
+        { .x = (float)RT_SIZE - 1.0f, .width = 2.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .y = (float)RT_SIZE - 1.0f, .width = 1.0f, .height = 2.0f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = 1.0f, .min_depth = -0.1f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = 1.0f, .max_depth = 1.1f },
+    };
+    foreach (&viewport : invalid_viewports) {
+        assert(@catch(gpu::cmd_set_viewport(&cmd, viewport)) == gpu::INVALID_ARGUMENT,
+            "invalid viewport faults INVALID_ARGUMENT");
+    }
+
+    gpu::Viewport reversed_depth = full_viewport;
+    reversed_depth.min_depth = 1.0f;
+    reversed_depth.max_depth = 0.0f;
+    gpu::cmd_set_viewport(&cmd, &reversed_depth)!!;
+
+    gpu::ScissorRect[8] invalid_scissors = {
+        { .x = -1, .width = 1, .height = 1 },
+        { .y = -1, .width = 1, .height = 1 },
+        { .width = -1, .height = 1 },
+        { .width = 1, .height = -1 },
+        { .x = (int)RT_SIZE - 1, .width = 2, .height = 1 },
+        { .y = (int)RT_SIZE - 1, .width = 1, .height = 2 },
+        { .x = int::max, .width = 1, .height = 1 },
+        { .y = int::max, .width = 1, .height = 1 },
+    };
+    foreach (&scissor : invalid_scissors) {
+        assert(@catch(gpu::cmd_set_scissor(&cmd, scissor)) == gpu::INVALID_ARGUMENT,
+            "invalid scissor faults INVALID_ARGUMENT");
+    }
+
+    gpu::ScissorRect empty_scissor = {};
+    gpu::cmd_set_scissor(&cmd, &empty_scissor)!!;
+
+    gpu::cmd_end_render_pass(&cmd)!!;
+    assert(@catch(gpu::cmd_set_viewport(&cmd, &full_viewport)) == gpu::COMMAND_RECORDING_ERROR,
+        "viewport after a render pass faults COMMAND_RECORDING_ERROR");
+    assert(@catch(gpu::cmd_set_scissor(&cmd, &full_scissor)) == gpu::COMMAND_RECORDING_ERROR,
+        "scissor after a render pass faults COMMAND_RECORDING_ERROR");
+
+    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_frame(&device)!!;
 }
 
 fn void render_pass_state_machine() @test {

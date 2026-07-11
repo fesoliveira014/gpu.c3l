@@ -3,6 +3,7 @@ module gpu::vk;
 import gpu;
 import vk;
 import std::core::mem;
+import std::math;
 
 fn vk::AttachmentLoadOp load_op_to_vk(gpu::LoadOp op) @private {
     switch (op) {
@@ -126,13 +127,78 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
     vk::Rect2D scissor = { .offset = { .x = 0, .y = 0 }, .extent = { .width = desc.width, .height = desc.height } };
     vk::cmd_set_scissor(cb, 0, 1, &scissor);
 
+    record.active_render_width = desc.width;
+    record.active_render_height = desc.height;
     record.state = CommandState.RECORDING_RENDER_PASS;
+}
+
+fn void? vk_cmd_set_viewport(gpu::CommandList* commands, gpu::Viewport* viewport) @private {
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
+    if (viewport == null) return gpu::INVALID_ARGUMENT~;
+    if (!math::is_finite(viewport.x)
+        || !math::is_finite(viewport.y)
+        || !math::is_finite(viewport.width)
+        || !math::is_finite(viewport.height)
+        || !math::is_finite(viewport.min_depth)
+        || !math::is_finite(viewport.max_depth)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (viewport.x < 0.0f || viewport.y < 0.0f
+        || viewport.width <= 0.0f || viewport.height <= 0.0f) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    float right = viewport.x + viewport.width;
+    float bottom = viewport.y + viewport.height;
+    if (!math::is_finite(right) || !math::is_finite(bottom)
+        || right > (float)record.active_render_width
+        || bottom > (float)record.active_render_height) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (viewport.min_depth < 0.0f || viewport.min_depth > 1.0f
+        || viewport.max_depth < 0.0f || viewport.max_depth > 1.0f) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+
+    vk::Viewport vk_viewport = {
+        .x         = viewport.x,
+        .y         = viewport.y,
+        .width     = viewport.width,
+        .height    = viewport.height,
+        .min_depth = viewport.min_depth,
+        .max_depth = viewport.max_depth,
+    };
+    vk::cmd_set_viewport(record.command_buffer, 0, 1, &vk_viewport);
+}
+
+fn void? vk_cmd_set_scissor(gpu::CommandList* commands, gpu::ScissorRect* scissor) @private {
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
+    if (scissor == null) return gpu::INVALID_ARGUMENT~;
+    if (scissor.x < 0 || scissor.y < 0 || scissor.width < 0 || scissor.height < 0) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    long right = (long)scissor.x + (long)scissor.width;
+    long bottom = (long)scissor.y + (long)scissor.height;
+    if (right > int::max || bottom > int::max
+        || (ulong)right > (ulong)record.active_render_width
+        || (ulong)bottom > (ulong)record.active_render_height) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+
+    vk::Rect2D vk_scissor = {
+        .offset = { .x = scissor.x, .y = scissor.y },
+        .extent = { .width = (uint)scissor.width, .height = (uint)scissor.height },
+    };
+    vk::cmd_set_scissor(record.command_buffer, 0, 1, &vk_scissor);
 }
 
 fn void? vk_cmd_end_render_pass(gpu::CommandList* commands) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     vk::cmd_end_rendering(record.command_buffer);
+    record.active_render_width = 0;
+    record.active_render_height = 0;
     record.state = CommandState.RECORDING;
 }
 

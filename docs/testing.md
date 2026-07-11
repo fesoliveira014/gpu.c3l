@@ -91,6 +91,7 @@ copy upload -> readback
 root-pointer compute shader
 TextureIndex sampling in compute
 offscreen render target clear/draw/readback
+dynamic viewport/scissor validation, clipping pixels, pass reset, and pipeline-alias persistence
 ```
 
 ## 4. SDL3 windowed tests and samples
@@ -186,7 +187,7 @@ Do not include milestone labels in test names.
 | Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback. |
 | Compute | root pointer shader read/write, readback. |
 | Texture heap | descriptor allocation, sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback. |
+| Graphics | offscreen clear/draw/readback; dynamic viewport/scissor state, validation, clipping, pass reset, and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior layout; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start. |
 | Threading | per-thread recording contexts, parallel record, identical submit. |

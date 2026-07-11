@@ -381,10 +381,18 @@ The command binds the compute pipeline, pushes the root pointer, and dispatches.
 
 ```text
 cmd_begin_render_pass(command_list, render_pass_desc)
+cmd_set_viewport(command_list, viewport)
+cmd_set_scissor(command_list, scissor)
 cmd_draw(command_list, pipeline, vertex_root, fragment_root, vertex_count, instance_count)
 cmd_draw_indexed(command_list, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count, index_type = IndexType.U32)
 cmd_end_render_pass(command_list)
 ```
+
+Pass begin records full-pass viewport/scissor defaults. The public setters
+record one portable pass-bounded rectangle each; their state persists across
+pipeline binds until another setter or the next pass begin. Viewport/scissor
+remain outside pipeline keys and pipeline-state replay, so handle aliasing
+cannot overwrite caller-selected rectangles.
 
 Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex input is allowed for simple paths and compatibility, but it is not the preferred data model.
 
