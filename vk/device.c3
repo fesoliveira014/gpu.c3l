@@ -496,6 +496,7 @@ fn gpu::DescriptorHeapMode? resolve_heap_mode(gpu::DescriptorHeapMode requested,
     }
 }
 
+<* Pure conditional extension check; query is an injectable seam for selection tests. *>
 fn bool presentation_requirement_satisfied(
     bool required,
     vk::PhysicalDevice physical_device,

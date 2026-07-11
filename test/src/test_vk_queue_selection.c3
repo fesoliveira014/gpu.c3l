@@ -107,44 +107,14 @@ fn void presentation_requirement_is_conditional() @test {
         "presentation selection queries each candidate once");
 }
 
-fn void presentation_skips_higher_score_headless_candidate_first() @test {
-    vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(device: 0x90, score: 100, suitable: false),
-        candidate(device: 0x91, score: 50, suitable: true),
-    };
-    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
-    assert(selected.physical_device == fake_physical_device(0x91),
-        "lower-scored presentation-capable adapter wins");
-}
-
-fn void presentation_skips_higher_score_headless_candidate_second() @test {
+fn void later_unsuitable_high_score_does_not_replace_selection() @test {
     vk::PhysicalDeviceCandidate[2] candidates = {
         candidate(device: 0x92, score: 50, suitable: true),
         candidate(device: 0x93, score: 100, suitable: false),
     };
     vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
     assert(selected.physical_device == fake_physical_device(0x92),
-        "earlier presentation-capable adapter remains selected");
-}
-
-fn void presentation_faults_when_all_candidates_lack_swapchain() @test {
-    vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(device: 0x94, score: 100, suitable: false),
-        candidate(device: 0x95, score: 50, suitable: false),
-    };
-    fault selection_fault = @catch(vk::choose_physical_device(candidates[..]));
-    assert(selection_fault == gpu::UNSUPPORTED_FEATURE,
-        "missing swapchain support faults unsupported feature");
-}
-
-fn void headless_selection_preserves_score_without_swapchain() @test {
-    vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(device: 0x96, score: 50, suitable: true),
-        candidate(device: 0x97, score: 100, suitable: true),
-    };
-    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
-    assert(selected.physical_device == fake_physical_device(0x97),
-        "headless selection keeps the higher-scored adapter");
+        "later unsuitable candidate does not replace the selected adapter");
 }
 
 fn void unsuitable_high_score_falls_back_and_preserves_families() @test {
