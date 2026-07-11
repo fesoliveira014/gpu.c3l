@@ -303,12 +303,8 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     create_persistent_arena(state, desc)!;
     state.recording_contexts.slots = mem::new_array(RecordingContextCell, gpu::MAX_RECORDING_CONTEXTS);
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
-    RecordingContextState default_ctx;
-    create_context_pools(state, &default_ctx)!;
-    state.default_context = state.recording_contexts.alloc(default_ctx)!;
-    RecordingContextState helper_ctx;
-    create_context_pools(state, &helper_ctx)!;
-    state.helper_context = state.recording_contexts.alloc(helper_ctx)!;
+    state.default_context = create_builtin_recording_context(state)!;
+    state.helper_context = create_builtin_recording_context(state)!;
     state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     state.shaders.slots    = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
     uint pipeline_capacity = gpu::resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
