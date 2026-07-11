@@ -49,7 +49,7 @@ fn void descriptor_capacity_resolution() @test {
 
 // Concrete generation-checked slot table mirroring the backend's per-type
 // tables (the generic gpu::slots module was removed to avoid a c3c 0.8.0
-// codegen crash; see slot table comments in vk/*.c3).
+// codegen crash; see slot table comments in gpu/vk/*.c3).
 const uint FREE_NONE = 0;
 
 struct IntCell {

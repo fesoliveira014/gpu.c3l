@@ -431,7 +431,7 @@ fn int main() {
         );
         gpu::CommandList[1] a_graphics_lists = { a_graphics };
         // Stage.PRESENT is the only public all-commands wait spelling
-        // (STAGE_2_ALL_COMMANDS_BIT, vk/helpers.c3:60).
+        // (STAGE_2_ALL_COMMANDS_BIT, gpu/vk/helpers.c3:60).
         gpu::SemaphoreWait[1] a_graphics_waits = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)av, .stage = gpu::Stage.PRESENT }};
         gpu::SemaphoreSignal[1] a_graphics_signals = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)(av + 1), .stage = gpu::Stage.COLOR_ATTACHMENT }};
         gpu::SubmitDesc a_graphics_submit = { .command_lists = a_graphics_lists[..], .waits = a_graphics_waits[..], .signals = a_graphics_signals[..] };

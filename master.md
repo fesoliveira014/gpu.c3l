@@ -189,7 +189,7 @@ Vulkan still has image layouts, descriptor machinery, queue ownership, swapchain
 
 ## 4. C3 library structure
 
-`gpu.c3l` should use a library package layout rather than an executable project layout. Source files live at the library root and in module subdirectories. Tests and samples are consumer harnesses and should not be part of the shipped library manifest.
+`gpu.c3l` uses a library package layout rather than an executable project layout. Shipped source files live under the `gpu/` subtree. Tests and samples are consumer harnesses and are not part of the shipped library manifest.
 
 ```text
 gpu.c3l/
@@ -197,43 +197,48 @@ gpu.c3l/
 ├── README.md
 ├── LICENSE
 ├── CHANGELOG.md
-├── gpu.c3i
-├── gpu.c3
-├── types.c3
-├── faults.c3
-├── caps.c3
-├── device.c3
-├── queue.c3
-├── memory.c3
-├── buffer.c3
-├── texture.c3
-├── descriptor_heap.c3
-├── shader_abi.c3
-├── pipeline.c3
-├── command.c3
-├── sync.c3
-├── swapchain.c3
-├── vk/
-│   ├── backend.c3
-│   ├── instance.c3
+├── gpu/
+│   ├── gpu.c3i
+│   ├── gpu.c3
+│   ├── types.c3
+│   ├── faults.c3
+│   ├── caps.c3
 │   ├── device.c3
 │   ├── queue.c3
-│   ├── allocator.c3
 │   ├── memory.c3
 │   ├── buffer.c3
 │   ├── texture.c3
 │   ├── descriptor_heap.c3
-│   ├── shader.c3
-│   ├── pipeline_compute.c3
-│   ├── pipeline_graphics.c3
-│   ├── pipeline_cache.c3
+│   ├── shader_abi.c3
+│   ├── pipeline.c3
 │   ├── command.c3
 │   ├── sync.c3
-│   ├── render_pass.c3
 │   ├── swapchain.c3
-│   ├── transfer.c3
 │   ├── debug.c3
-│   └── helpers.c3
+│   └── vk/
+│       ├── backend.c3
+│       ├── instance.c3
+│       ├── device.c3
+│       ├── queue.c3
+│       ├── allocator.c3
+│       ├── memory.c3
+│       ├── buffer.c3
+│       ├── texture.c3
+│       ├── descriptor_heap.c3
+│       ├── shader.c3
+│       ├── pipeline_compute.c3
+│       ├── pipeline_graphics.c3
+│       ├── pipeline_cache.c3
+│       ├── command.c3
+│       ├── command_state.c3
+│       ├── sync.c3
+│       ├── render_pass.c3
+│       ├── swapchain.c3
+│       ├── transfer.c3
+│       ├── deferred.c3
+│       ├── debug.c3
+│       ├── helpers.c3
+│       └── validate.c3
 ├── include/
 │   └── shaders/              published shader-side ABI includes (consumer #includes these)
 │       ├── descriptor_heap.glsl
@@ -267,7 +272,7 @@ The shipped library manifest should provide `gpu` and depend on backend bindings
 {
   "provides": "gpu",
   "linklib-dir": "linked-libs",
-  "sources": [ "gpu.c3", "types.c3", "...", "vk/**" ],
+  "sources": [ "gpu/gpu.c3", "gpu/types.c3", "...", "gpu/vk/**" ],
   "targets": {
     "linux-x64": { "dependencies": [ "vk", "vma", "spvreflect" ] }
   }
@@ -305,21 +310,22 @@ All public types and functions live in `module gpu;`.
 Public files:
 
 ```text
-gpu.c3i                  public declarations and imports expected by consumers
-gpu.c3                   root module façade and convenience wrappers
-types.c3                 handles, aliases, common structs
-faults.c3                public fault definitions
-caps.c3                  DeviceDesc, DeviceCaps, backend/queue enums
-device.c3                Device, backend vtable, create/destroy
-queue.c3                 queues and submit descriptors
-memory.c3                GpuAddress, GpuSpan, arenas, memory kinds
-buffer.c3                BufferDesc and buffer API
-texture.c3               TextureDesc, views, texture descriptors
-pipeline.c3              shader and pipeline descriptors
-command.c3               command list functions
-sync.c3                  stages, hazards, barriers, semaphores
-command.c3 (render)      render target and render pass descriptors live here
-swapchain.c3             optional WSI abstraction
+gpu/gpu.c3i              public declarations and imports expected by consumers
+gpu/gpu.c3               root module façade and convenience wrappers
+gpu/types.c3             handles, aliases, common structs
+gpu/faults.c3            public fault definitions
+gpu/caps.c3              DeviceDesc, DeviceCaps, backend/queue enums
+gpu/device.c3            Device, backend vtable, create/destroy
+gpu/queue.c3             queues and submit descriptors
+gpu/memory.c3            GpuAddress, GpuSpan, arenas, memory kinds
+gpu/buffer.c3            BufferDesc and buffer API
+gpu/texture.c3           TextureDesc, views, texture descriptors
+gpu/pipeline.c3          shader and pipeline descriptors
+gpu/command.c3           command list functions
+gpu/sync.c3              stages, hazards, barriers, semaphores
+gpu/command.c3 (render)  render target and render pass descriptors live here
+gpu/swapchain.c3         optional WSI abstraction
+gpu/debug.c3             debug reports, object names, and leak statistics
 ```
 
 ### 5.2 Backend module `gpu::vk`

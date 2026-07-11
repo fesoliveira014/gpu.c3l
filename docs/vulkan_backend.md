@@ -17,33 +17,36 @@ import vma;
 import spvreflect;
 ```
 
-`spvreflect` is used by `vk/shader.c3` for SPIR-V reflection.
+`spvreflect` is used by `gpu/vk/shader.c3` for SPIR-V reflection.
 
 No `vk::` or `vma::` type should appear in public `gpu` API signatures.
 
 ## 2. Backend files
 
 ```text
-vk/backend.c3              loader/VMA link probes, backend availability
-vk/instance.c3             instance creation, validation layers, debug messenger
-vk/device.c3               physical device selection, logical device, feature chain
-vk/queue.c3                queue family selection, queue handles, submit
-vk/allocator.c3            vma::Allocator creation/destruction, stats
-vk/memory.c3               memory kind policy, arenas, virtual allocator
-vk/buffer.c3               VkBuffer + VMA allocation path
-vk/texture.c3              VkImage + VMA allocation, views, layout tracking
-vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
-vk/shader.c3               SPIR-V modules and reflection validation
-vk/pipeline_cache.c3       pipeline dedup cache and driver cache
-vk/pipeline_compute.c3     compute pipeline creation
-vk/pipeline_graphics.c3    graphics pipeline creation
-vk/command.c3              command buffers and command recording
-vk/transfer.c3             upload/readback helpers and staging arenas
-vk/sync.c3                 barriers, timeline semaphores
-vk/render_pass.c3          dynamic rendering
-vk/swapchain.c3            WSI and swapchain
-vk/debug.c3                debug names, leak reports
-vk/helpers.c3              enum and flag translation helpers
+gpu/vk/backend.c3              loader/VMA link probes, backend availability
+gpu/vk/instance.c3             instance creation, validation layers, debug messenger
+gpu/vk/device.c3               physical device selection, logical device, feature chain
+gpu/vk/queue.c3                queue family selection, queue handles, submit
+gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
+gpu/vk/memory.c3               memory kind policy, arenas, virtual allocator
+gpu/vk/buffer.c3               VkBuffer + VMA allocation path
+gpu/vk/texture.c3              VkImage + VMA allocation, views, layout tracking
+gpu/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
+gpu/vk/shader.c3               SPIR-V modules and reflection validation
+gpu/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
+gpu/vk/pipeline_compute.c3     compute pipeline creation
+gpu/vk/pipeline_graphics.c3    graphics pipeline creation
+gpu/vk/command.c3              recording contexts and command encoding
+gpu/vk/command_state.c3        command-list state and handle tracking
+gpu/vk/transfer.c3             upload/readback helpers and staging arenas
+gpu/vk/sync.c3                 barriers, timeline semaphores
+gpu/vk/render_pass.c3          dynamic rendering
+gpu/vk/swapchain.c3            WSI and swapchain
+gpu/vk/deferred.c3             retired backend-object destruction
+gpu/vk/debug.c3                debug names, leak reports
+gpu/vk/helpers.c3              enum and flag translation helpers
+gpu/vk/validate.c3             descriptor and command validation helpers
 ```
 
 ## 3. Required Vulkan features
@@ -68,7 +71,7 @@ default (AUTO): descriptor indexing
 opt-in: descriptor buffer (DescriptorHeapMode.DESCRIPTOR_BUFFER)
 ```
 
-`AUTO` prefers indexing: lavapipe (Mesa 25.0.7) miscompiles descriptor-buffer image access, so descriptor buffer is never auto-selected (`resolve_heap_mode` in `vk/device.c3`).
+`AUTO` prefers indexing: lavapipe (Mesa 25.0.7) miscompiles descriptor-buffer image access, so descriptor buffer is never auto-selected (`resolve_heap_mode` in `gpu/vk/device.c3`).
 
 Device creation should fail with `UNSUPPORTED_FEATURE` if required features are missing.
 
@@ -633,7 +636,7 @@ image: allocator.destroy_image(image, allocation)
 
 ## 19. Translation helpers
 
-All enum/flag conversion should live in `vk/helpers.c3`.
+All enum/flag conversion should live in `gpu/vk/helpers.c3`.
 
 Helpers:
 

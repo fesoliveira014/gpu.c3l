@@ -36,7 +36,7 @@ Manifest shape (shipped):
 {
   "provides": "gpu",
   "linklib-dir": "linked-libs",
-  "sources": [ "gpu.c3", "gpu.c3i", "types.c3", /* ...all root files... */ "vk/**" ],
+  "sources": [ "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/types.c3", /* ...all public files... */ "gpu/vk/**" ],
   "targets": {
     "linux-x64":   { "dependencies": [ "vk", "vma", "spvreflect" ] },
     "windows-x64": { "dependencies": [ "vk", "vma", "spvreflect" ] }

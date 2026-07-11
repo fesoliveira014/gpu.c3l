@@ -83,7 +83,7 @@ record = Table(root.table_gpu).items[gl_DrawID]
 
 Argument structs are part of the ABI and match Vulkan byte-for-byte —
 `DrawIndirectCommand` (16 B), `DrawIndexedIndirectCommand` (20 B),
-`DispatchIndirectCommand` (12 B) — declared on the C3 side in `command.c3`
+`DispatchIndirectCommand` (12 B) — declared on the C3 side in `gpu/command.c3`
 (size-asserted) and on the GLSL side as `extern struct` twins emitted into
 `include/shaders/generated/shader_abi.glsl` with identical field names. Compute
 shaders write them std430-tight; no padding exists in any of the three.
@@ -339,7 +339,7 @@ root          C3 struct; GLSL layout(buffer_reference, std430,
               buffer_reference_align = A) buffer block
 push          C3 struct; GLSL plain struct — the shader hand-writes the one
               binding line: layout(push_constant) uniform Push { RootPush pc; };
-extern struct C3 declaration already exists (e.g. command.c3); emits the GLSL
+extern struct C3 declaration already exists (e.g. gpu/command.c3); emits the GLSL
               twin plus C3 size/offset asserts against the existing type
 type X : uint user semantic type; C3 typedef, plain scalar in GLSL
 const         primitive constant on both sides (workgroup sizes etc.)
@@ -363,7 +363,7 @@ files on disk (the CI/test drift gate). No build-time trust elevation is
 required of consumers. Library outputs:
 
 ```text
-shader_abi.c3                              (library source, module gpu)
+gpu/shader_abi.c3                          (library source, module gpu)
 include/shaders/generated/shader_abi.glsl  (published shader-side include)
 ```
 

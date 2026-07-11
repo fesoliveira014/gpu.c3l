@@ -3,7 +3,7 @@ module gpu_test;
 import gpu;
 
 // Hand-computed std430 layouts for the generated ABI structs. The generated
-// shader_abi.c3 already carries compile-time asserts; these runtime checks
+// gpu/shader_abi.c3 already carries compile-time asserts; these runtime checks
 // pin the same values as an executable acceptance record.
 
 fn void root_push_layout() @test {

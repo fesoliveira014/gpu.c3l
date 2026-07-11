@@ -35,11 +35,11 @@ Only the Vulkan backend imports `vma`.
 Backend files that may import `vma`:
 
 ```text
-vk/allocator.c3
-vk/memory.c3
-vk/buffer.c3
-vk/texture.c3
-vk/debug.c3
+gpu/vk/allocator.c3
+gpu/vk/memory.c3
+gpu/vk/buffer.c3
+gpu/vk/texture.c3
+gpu/vk/debug.c3
 ```
 
 Public files must not import `vma`.
@@ -697,7 +697,7 @@ arena:readback
 
 ## 17. Deferred destruction
 
-`destroy_buffer`/`destroy_texture`/`destroy_pipeline`/`destroy_shader`/`destroy_semaphore` free the public handle immediately but cannot free the backend VMA buffer/image, image view, `vk::Pipeline`, shader module, or semaphore right away — a frame already submitted may still reference it. The backend queues those objects (`vk/deferred.c3`) keyed by `retire_timeline_value` (memory.c3, the same "safe after" value the descriptor heap and transfer arenas use) and frees each once the frame timeline reaches it. The queue drains on every `begin_frame` (after its wait) and opportunistically on every enqueue; teardown drains everything unconditionally once the device is idle. Destroying a resource never faults on the frames-in-flight window alone — see `RESOURCE_IN_USE` in `faults.c3`. `destroy_texture` does fault `RESOURCE_IN_USE` when a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first. Retired-but-undrained descriptors (destroyed, no frame boundary since) do not block, and device teardown stays lenient — `report_descriptor_leaks` reports leftovers instead of faulting.
+`destroy_buffer`/`destroy_texture`/`destroy_pipeline`/`destroy_shader`/`destroy_semaphore` free the public handle immediately but cannot free the backend VMA buffer/image, image view, `vk::Pipeline`, shader module, or semaphore right away — a frame already submitted may still reference it. The backend queues those objects (`gpu/vk/deferred.c3`) keyed by `retire_timeline_value` (gpu/memory.c3, the same "safe after" value the descriptor heap and transfer arenas use) and frees each once the frame timeline reaches it. The queue drains on every `begin_frame` (after its wait) and opportunistically on every enqueue; teardown drains everything unconditionally once the device is idle. Destroying a resource never faults on the frames-in-flight window alone — see `RESOURCE_IN_USE` in `gpu/faults.c3`. `destroy_texture` does fault `RESOURCE_IN_USE` when a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first. Retired-but-undrained descriptors (destroyed, no frame boundary since) do not block, and device teardown stays lenient — `report_descriptor_leaks` reports leftovers instead of faulting.
 
 `retire_timeline_value` also defers while off-frame work is pending: `submit`
 outside a frame bracket (threading.md Tier E, sanctioned for frame-loop-free

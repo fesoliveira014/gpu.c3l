@@ -313,9 +313,9 @@ Notes pinned during scaffolding (C3 0.8.0):
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
   a `project.json` key); dependencies are declared per-target and resolved by
   the consumer's search path.
-- `manifest.json` `sources` must list files explicitly — all 17 root source
-  files plus `vk/**`; a glob like `*.c3` is rejected and the default does not
-  recurse into `vk/`.
+- `manifest.json` `sources` must list files explicitly — all 17 public source
+  files under `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the default does not
+  recurse into `gpu/vk/`.
 
 ## 10. CI matrix
 

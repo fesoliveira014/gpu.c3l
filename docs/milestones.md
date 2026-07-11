@@ -48,10 +48,10 @@ Create a buildable `gpu.c3l` library package.
 
 ```text
 manifest.json
-gpu.c3i
-gpu.c3
-types.c3
-faults.c3
+gpu/gpu.c3i
+gpu/gpu.c3
+gpu/types.c3
+gpu/faults.c3
 README.md
 lib/vk.c3l
 lib/vma.c3l
@@ -85,16 +85,16 @@ Define stable public vocabulary and generation-checked handles.
 ### Deliverables
 
 ```text
-types.c3
-faults.c3
-caps.c3
-device.c3
-memory.c3
-buffer.c3
-texture.c3
-pipeline.c3
-command.c3
-sync.c3
+gpu/types.c3
+gpu/faults.c3
+gpu/caps.c3
+gpu/device.c3
+gpu/memory.c3
+gpu/buffer.c3
+gpu/texture.c3
+gpu/pipeline.c3
+gpu/command.c3
+gpu/sync.c3
 test/test_handles.c3
 test/test_ranges.c3
 ```
@@ -131,11 +131,11 @@ Create and destroy a Vulkan device with required features.
 ### Deliverables
 
 ```text
-vk/instance.c3
-vk/device.c3
-vk/queue.c3
-vk/debug.c3
-vk/helpers.c3
+gpu/vk/instance.c3
+gpu/vk/device.c3
+gpu/vk/queue.c3
+gpu/vk/debug.c3
+gpu/vk/helpers.c3
 test/test_vk_bootstrap.c3
 ```
 
@@ -170,8 +170,8 @@ Create the VMA allocator and route memory stats through it.
 ### Deliverables
 
 ```text
-vk/allocator.c3
-vk/memory.c3
+gpu/vk/allocator.c3
+gpu/vk/memory.c3
 docs/memory.md update
 test/test_vk_vma_allocator.c3
 ```
@@ -206,8 +206,8 @@ Create buffers through VMA and retrieve GPU addresses.
 ### Deliverables
 
 ```text
-vk/buffer.c3
-vk/memory.c3 updates
+gpu/vk/buffer.c3
+gpu/vk/memory.c3 updates
 test/test_vk_buffer_address.c3
 ```
 
@@ -242,9 +242,9 @@ Allocate transient root data from mapped addressable buffers.
 ### Deliverables
 
 ```text
-memory.c3 updates
-vk/memory.c3 updates
-shader_abi.c3
+gpu/memory.c3 updates
+gpu/vk/memory.c3 updates
+gpu/shader_abi.c3
 test/test_vk_frame_arena.c3
 ```
 
@@ -277,8 +277,8 @@ Support explicit allocate/free of long-lived GPU-addressable spans.
 ### Deliverables
 
 ```text
-vk/memory.c3 updates
-memory.c3 updates
+gpu/vk/memory.c3 updates
+gpu/memory.c3 updates
 test/test_vk_persistent_arena.c3
 ```
 
@@ -311,12 +311,12 @@ Record, submit, and synchronize work explicitly.
 ### Deliverables
 
 ```text
-queue.c3
-command.c3
-sync.c3
-vk/queue.c3
-vk/command.c3
-vk/sync.c3
+gpu/queue.c3
+gpu/command.c3
+gpu/sync.c3
+gpu/vk/queue.c3
+gpu/vk/command.c3
+gpu/vk/sync.c3
 test/test_vk_command_submit.c3
 ```
 
@@ -352,8 +352,8 @@ Prove the core shader ABI.
 ### Deliverables
 
 ```text
-vk/shader.c3
-vk/pipeline_compute.c3
+gpu/vk/shader.c3
+gpu/vk/pipeline_compute.c3
 samples/root_pointer_compute/shaders/root_pointer.comp.glsl
 test/test_vk_root_pointer_compute.c3
 samples/root_pointer_compute/
@@ -388,8 +388,8 @@ Expose TextureIndex and SamplerIndex to shaders.
 ### Deliverables
 
 ```text
-descriptor_heap.c3
-vk/descriptor_heap.c3
+gpu/descriptor_heap.c3
+gpu/vk/descriptor_heap.c3
 include/shaders/descriptor_heap.glsl
 test/test_vk_texture_heap.c3
 samples/bindless_texture_compute/
@@ -424,9 +424,9 @@ Create, upload, transition, and sample textures.
 ### Deliverables
 
 ```text
-texture.c3
-vk/texture.c3
-vk/command.c3 updates
+gpu/texture.c3
+gpu/vk/texture.c3
+gpu/vk/command.c3 updates
 test/test_vk_texture_upload.c3
 ```
 
@@ -461,8 +461,8 @@ Render without a window or swapchain.
 
 ```text
 render_pass.c3
-vk/render_pass.c3
-vk/pipeline_graphics.c3
+gpu/vk/render_pass.c3
+gpu/vk/pipeline_graphics.c3
 samples/offscreen_triangle/shaders/*.glsl
 test/test_vk_offscreen_triangle.c3
 samples/offscreen_triangle/
@@ -497,8 +497,8 @@ Add WSI and presentation through an SDL3 sample.
 ### Deliverables
 
 ```text
-swapchain.c3
-vk/swapchain.c3
+gpu/swapchain.c3
+gpu/vk/swapchain.c3
 samples/shared/sample_window_sdl.c3
 samples/hello_triangle_sdl/
 ```
@@ -534,9 +534,9 @@ Make resource setup ergonomic without hiding synchronization.
 ### Deliverables
 
 ```text
-memory.c3 updates
-vk/memory.c3 updates
-vk/command.c3 updates
+gpu/memory.c3 updates
+gpu/vk/memory.c3 updates
+gpu/vk/command.c3 updates
 test/test_vk_upload_readback.c3
 ```
 
@@ -570,8 +570,8 @@ Avoid unnecessary pipeline duplication.
 ### Deliverables
 
 ```text
-vk/pipeline_cache.c3
-vk/pipeline_graphics.c3 updates
+gpu/vk/pipeline_cache.c3
+gpu/vk/pipeline_graphics.c3 updates
 test/test_vk_pipeline_cache.c3
 ```
 
@@ -602,8 +602,8 @@ Support compute-generated draws and dispatches.
 ### Deliverables
 
 ```text
-command.c3 updates
-vk/command.c3 updates
+gpu/command.c3 updates
+gpu/vk/command.c3 updates
 samples/gpu_driven_draw_sdl/shaders/build_draws.comp.glsl
 samples/gpu_driven_draw_sdl/
 test/test_vk_indirect_draw.c3
@@ -639,9 +639,9 @@ Enable depth-tested rendering.
 ### Deliverables
 
 ```text
-texture.c3 updates
-render_pass handling in vk/render_pass.c3
-vk/pipeline_graphics.c3 and vk/pipeline_cache.c3 updates
+gpu/texture.c3 updates
+render_pass handling in gpu/vk/render_pass.c3
+gpu/vk/pipeline_graphics.c3 and gpu/vk/pipeline_cache.c3 updates
 test/test_vk_depth_attachment.c3
 ```
 
@@ -707,9 +707,9 @@ Make backend/resource problems visible.
 ### Deliverables
 
 ```text
-debug.c3
-vk/debug.c3
-vk/allocator.c3 updates
+gpu/debug.c3
+gpu/vk/debug.c3
+gpu/vk/allocator.c3 updates
 samples/memory_report/
 ```
 
@@ -744,7 +744,7 @@ Remove manual CPU/shader layout drift.
 
 ```text
 tools/gen_shader_abi/
-shader_abi.c3
+gpu/shader_abi.c3
 include/shaders/generated/shader_abi.glsl
 test/test_shader_abi_layout.c3
 ```
@@ -873,7 +873,7 @@ Real consumer documentation for the library — not just design docs.
 
 ```text
 docs/getting_started.md (install, vendor, first triangle/compute from zero)
-API reference generated or hand-written per public module (gpu.c3i surface)
+API reference generated or hand-written per public module (gpu/gpu.c3i surface)
 docs/limitations.md (what the model deliberately does not do; caps tables;
   known driver quirks — lavapipe descriptor-buffer, mesa-dist-win)
 docs/cookbook.md (task-oriented recipes: upload a texture, indirect draws,
@@ -885,7 +885,7 @@ samples repo cross-links (each recipe points at a running sample)
 ### Tasks
 
 ```text
-audit gpu.c3i doc-strings as the API-reference source of truth
+audit gpu/gpu.c3i doc-strings as the API-reference source of truth
 write getting-started against a fresh-machine walkthrough (linux + windows)
 document every public fault and when it fires
 document the shader ABI authoring flow for consumers end to end

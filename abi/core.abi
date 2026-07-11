@@ -12,7 +12,7 @@ push GraphicsRootPush {
 }
 
 // Indirect argument layouts, byte-identical to Vulkan's. The C3 declarations
-// live in command.c3 (public API); these entries generate the GLSL twins and
+// live in gpu/command.c3 (public API); these entries generate the GLSL twins and
 // the drift-detecting offset asserts.
 extern struct DrawIndirectCommand {
     uint vertex_count;
