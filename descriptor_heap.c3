@@ -35,9 +35,10 @@ struct TextureDescriptorDesc {
 }
 
 <* Batch-create texture descriptors; out_indices.len must equal descs.len
-   (INVALID_ARGUMENT otherwise), empty descs is a no-op. All-or-nothing: on
-   fault, out_indices is meaningless and nothing needs releasing. Ownership
-   on success: release each index with destroy_texture_descriptor. *>
+   (INVALID_ARGUMENT otherwise), empty descs is a no-op. All-or-nothing: a
+   fault leaves descriptor allocation, texture view caches, Vulkan view
+   ownership, and out_indices unchanged. Ownership on success: release each
+   index with destroy_texture_descriptor. *>
 fn void? create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.create_texture_descriptors(device, descs, out_indices);

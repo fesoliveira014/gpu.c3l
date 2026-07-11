@@ -390,14 +390,25 @@ fn void report_descriptor_leaks(VkDeviceState* state) {
     }
 }
 
-fn void drain_texture_retire(VkDeviceState* state) @private {
-    DescriptorHeapState* heap = &state.heap;
-    if (heap.texture_retire.count == 0) return;
+fn uint? count_ready_texture_retires(VkDeviceState* state) @private {
+    DescriptorRetireRing* retire = &state.heap.texture_retire;
+    if (retire.count == 0) return 0;
+
     ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
-    while (heap.texture_retire.count > 0) {
+    check(vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current))!;
+    uint ready = 0;
+    while (ready < retire.count) {
+        uint index = (retire.head + ready) % (uint)retire.entries.len;
+        if (retire.entries[index].timeline_value > current) break;
+        ready++;
+    }
+    return ready;
+}
+
+fn void drain_texture_retire_prefix(VkDeviceState* state, uint ready_count) @private {
+    DescriptorHeapState* heap = &state.heap;
+    for (uint i = 0; i < ready_count; i++) {
         DescriptorRetireEntry* entry = &heap.texture_retire.entries[heap.texture_retire.head];
-        if (entry.timeline_value > current) break;
         heap.texture_free[heap.texture_free_count++] = entry.slot;
         heap.texture_retire.head = (heap.texture_retire.head + 1) % (uint)heap.texture_retire.entries.len;
         heap.texture_retire.count--;
@@ -545,63 +556,61 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
     // Descriptors only make sense for shader-visible textures; anything else
     // would return an index whose heap slots are never written.
     if (!texture_slot.usage.sampled && !texture_slot.usage.storage) return gpu::INVALID_ARGUMENT~;
-    vk::ImageView image_view = resolve_texture_view(state, texture_slot, view)!;
 
-    drain_texture_retire(state);
+    uint ready_retires = count_ready_texture_retires(state) ?? 0;
+    uint headroom = heap.texture_free_count + ready_retires
+        + (uint)heap.texture_cells.len - heap.texture_next_new;
+    if (headroom == 0) return gpu::DESCRIPTOR_HEAP_FULL~;
+
+    CachedViewCreation creation;
+    vk::ImageView image_view = resolve_texture_view_tracked(
+        state:    state,
+        slot:     texture_slot,
+        view:     view,
+        creation: &creation,
+    )!;
+
+    drain_texture_retire_prefix(state, ready_retires);
+    gpu::TextureIndex index;
+    commit_texture_descriptor_item(
+        heap:      heap,
+        texture:   texture,
+        out_index: &index,
+    );
+    write_texture_descriptor(state, index.slot, texture_slot, image_view);
+    return index;
+}
+
+<* Validate and resolve one batch item without touching descriptor allocation
+   or output state. The caller owns any returned cache creation until commit. *>
+fn void? prepare_texture_descriptor_item(VkDeviceState* state, gpu::TextureDescriptorDesc* desc, PendingTextureWrite* pending, CachedViewCreation* creation) @private {
+    TextureSlot* texture_slot = state.textures.get(desc.texture)!;
+    if (!texture_slot.usage.sampled && !texture_slot.usage.storage) return gpu::INVALID_ARGUMENT~;
+    vk::ImageView image_view = resolve_texture_view_tracked(
+        state:    state,
+        slot:     texture_slot,
+        view:     &desc.view,
+        creation: creation,
+    )!;
+    *pending = { .texture_slot = texture_slot, .view = image_view };
+}
+
+<*
+ @require heap.texture_free_count > 0 || heap.texture_next_new < heap.texture_cells.len : "descriptor headroom"
+*>
+fn void commit_texture_descriptor_item(DescriptorHeapState* heap, gpu::TextureHandle texture, gpu::TextureIndex* out_index) @private {
     uint slot;
     if (heap.texture_free_count > 0) {
         slot = heap.texture_free[--heap.texture_free_count];
-    } else if (heap.texture_next_new < heap.texture_cells.len) {
-        slot = heap.texture_next_new++;
     } else {
-        return gpu::DESCRIPTOR_HEAP_FULL~;
+        slot = heap.texture_next_new++;
     }
 
     TextureDescriptorCell* cell = &heap.texture_cells[slot];
     cell.owner = texture;
     cell.used = true;
     cell.generation = bump_generation(cell.generation);
-
-    write_texture_descriptor(state, slot, texture_slot, image_view);
-    return (gpu::TextureIndex){ .slot = (ushort)slot, .generation = cell.generation };
-}
-
-<* One batch item's validate+publish: mirrors vk_create_texture_descriptor's
-   per-item steps without its own drain or lock (the caller holds both once
-   for the whole batch). Records the pending write info the tail needs. *>
-fn void? publish_texture_descriptor_item(VkDeviceState* state, gpu::TextureDescriptorDesc* desc, gpu::TextureIndex* out_index, PendingTextureWrite* pending) @private {
-    DescriptorHeapState* heap = &state.heap;
-    TextureSlot* texture_slot = state.textures.get(desc.texture)!;
-    if (!texture_slot.usage.sampled && !texture_slot.usage.storage) return gpu::INVALID_ARGUMENT~;
-    vk::ImageView image_view = resolve_texture_view(state, texture_slot, &desc.view)!;
-
-    uint slot;
-    if (heap.texture_free_count > 0) {
-        slot = heap.texture_free[--heap.texture_free_count];
-    } else if (heap.texture_next_new < heap.texture_cells.len) {
-        slot = heap.texture_next_new++;
-    } else {
-        return gpu::DESCRIPTOR_HEAP_FULL~;
-    }
-
-    TextureDescriptorCell* cell = &heap.texture_cells[slot];
-    cell.owner = desc.texture;
-    cell.used = true;
-    cell.generation = bump_generation(cell.generation);
-
     *out_index = { .slot = (ushort)slot, .generation = cell.generation };
-    *pending = { .texture_slot = texture_slot, .view = image_view };
-}
-
-<* Generation bump + used=false + free-list push per published item; no
-   retire-ring involvement — the cells never became visible. *>
-fn void rollback_texture_descriptors(DescriptorHeapState* heap, gpu::TextureIndex[] published) @private {
-    foreach (&index : published) {
-        TextureDescriptorCell* cell = &heap.texture_cells[index.slot];
-        cell.used = false;
-        cell.generation = bump_generation(cell.generation);
-        heap.texture_free[heap.texture_free_count++] = index.slot;
-    }
 }
 
 fn uint accumulate_texture_descriptor_write(DescriptorHeapState* heap, uint slot, TextureSlot* texture_slot, vk::ImageView view, vk::DescriptorImageInfo[] image_infos, vk::WriteDescriptorSet[] writes, uint write_count) @private {
@@ -632,9 +641,8 @@ fn uint accumulate_texture_descriptor_write(DescriptorHeapState* heap, uint slot
     return write_count;
 }
 
-<* All-or-nothing: the pre-flight leaves the heap untouched, and descriptor
-   writes run only after every item publishes, so rollback never has to
-   unwrite one. *>
+<* All validation and fallible view creation precedes descriptor mutation.
+   A preparation fault restores only views created by this transaction. *>
 fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescriptorDesc[] descs, gpu::TextureIndex[] out_indices) @private {
     if (out_indices.len != descs.len) return gpu::INVALID_ARGUMENT~;
     if (descs.len == 0) return;
@@ -646,17 +654,32 @@ fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescript
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.heap;
 
-    drain_texture_retire(state);
-    uint headroom = heap.texture_free_count + (uint)heap.texture_cells.len - heap.texture_next_new;
+    uint ready_retires = count_ready_texture_retires(state)!;
+    uint headroom = heap.texture_free_count + ready_retires
+        + (uint)heap.texture_cells.len - heap.texture_next_new;
     if ((uint)descs.len > headroom) return gpu::DESCRIPTOR_HEAP_FULL~;
 
     @pool() {
         PendingTextureWrite[] pending = mem::talloc_array(PendingTextureWrite, descs.len);
+        CachedViewCreation[] creations = mem::talloc_array(CachedViewCreation, descs.len);
+        uint creation_count = 0;
         for (uint i = 0; i < descs.len; i++) {
-            if (catch f = publish_texture_descriptor_item(state, &descs[i], &out_indices[i], &pending[i])) {
-                rollback_texture_descriptors(heap, out_indices[:i]);
+            CachedViewCreation creation;
+            if (catch f = prepare_texture_descriptor_item(
+                state:    state,
+                desc:     &descs[i],
+                pending:  &pending[i],
+                creation: &creation,
+            )) {
+                rollback_texture_view_creations(state, creations[:creation_count]);
                 return f~;
             }
+            if (creation.cell != null) creations[creation_count++] = creation;
+        }
+
+        drain_texture_retire_prefix(state, ready_retires);
+        for (uint i = 0; i < descs.len; i++) {
+            commit_texture_descriptor_item(heap, descs[i].texture, &out_indices[i]);
         }
 
         if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
@@ -689,12 +712,6 @@ fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescript
             }
         }
     };
-}
-
-<* Whitebox: a copy of a texture-descriptor cell's bookkeeping state, for
-   rollback-invariant tests. *>
-fn TextureDescriptorCell texture_descriptor_cell(VkDeviceState* state, ushort slot) {
-    return state.heap.texture_cells[slot];
 }
 
 fn void? vk_destroy_texture_descriptor(gpu::Device* device, gpu::TextureIndex index) @private {

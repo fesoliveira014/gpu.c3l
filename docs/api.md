@@ -375,7 +375,9 @@ create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, Textur
 
 `TextureHandle` owns the image. `TextureIndex` is a descriptor heap entry used by shaders.
 
-`create_texture_descriptors` batch-creates N descriptors under one lock hold, ending in one accumulated descriptor-set update in indexing mode (buffer mode writes per-item, already a mapped-memory store). `out_indices.len` must equal `descs.len` (`INVALID_ARGUMENT` otherwise); an empty `descs` is a no-op success. A zero-initialized `TextureDescriptorDesc.view` collapses to the default view, same as a null `view` to `create_texture_descriptor`. All-or-nothing: a mid-batch fault rolls back every index already created in the batch — release each returned index individually with `destroy_texture_descriptor`.
+`create_texture_descriptors` batch-creates N descriptors under one lock hold, ending in one accumulated descriptor-set update in indexing mode (buffer mode writes per-item, already a mapped-memory store). `out_indices.len` must equal `descs.len` (`INVALID_ARGUMENT` otherwise); an empty `descs` is a no-op success. A zero-initialized `TextureDescriptorDesc.view` collapses to the default view, same as a null `view` to `create_texture_descriptor`.
+
+All-or-nothing: a fault leaves descriptor cells and generations, allocator/free-list state, texture view caches, Vulkan image-view ownership, and `out_indices` unchanged. Only a successful batch returns owned indices; release each with `destroy_texture_descriptor`.
 
 ## 7. Sampler API
 
