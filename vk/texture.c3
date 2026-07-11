@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import std::thread;
 import vma;
@@ -123,6 +123,105 @@ fn vk::ImageUsageFlags texture_usage_to_vk(gpu::TextureUsage usage) @private {
     return (vk::ImageUsageFlags)flags;
 }
 
+fn gpu::TextureFormatSupport? vk_get_texture_format_support(
+    gpu::Device* device,
+    gpu::Format format,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+
+    gpu::TextureFormatSupport support;
+    if (format_to_vk(format) == vk::Format.UNDEFINED) return support;
+
+    support.features.sampled = format_supports_usage(state, format, { .sampled })!;
+    support.features.storage = format_supports_usage(state, format, { .storage })!;
+    support.features.color_attach = format_supports_usage(state, format, { .color_attach })!;
+    support.features.depth_attach = format_supports_usage(state, format, { .depth_attach })!;
+    support.features.transfer_src = format_supports_usage(state, format, { .transfer_src })!;
+    support.features.transfer_dst = format_supports_usage(state, format, { .transfer_dst })!;
+
+    if (support.features.sampled) {
+        vk::FormatProperties properties;
+        vk::get_physical_device_format_properties(
+            state.physical_device,
+            format_to_vk(format),
+            &properties,
+        );
+        uint features = (uint)properties.optimal_tiling_features;
+        support.features.linear_filter =
+            (features & (uint)vk::FormatFeatureFlagBits.SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
+    }
+
+    bool creatable = support.features.sampled || support.features.storage
+        || support.features.color_attach || support.features.depth_attach
+        || support.features.transfer_src || support.features.transfer_dst;
+    support.dimensions.tex_2d = creatable;
+    support.sample_counts.one = creatable;
+    return support;
+}
+
+fn bool? texture_desc_supported(VkDeviceState* state, gpu::TextureDesc* desc) @private {
+    vk::ImageUsageFlags usage = texture_usage_to_vk(desc.usage);
+    vk::ImageFormatProperties properties;
+    vk::Result result = vk::get_physical_device_image_format_properties(
+        state.physical_device,
+        format_to_vk(desc.format),
+        vk::ImageType.TYPE_2D,
+        vk::ImageTiling.OPTIMAL,
+        usage,
+        (vk::ImageCreateFlags)0,
+        &properties,
+    );
+    switch (result) {
+        case vk::Result.ERROR_FORMAT_NOT_SUPPORTED:
+            return false;
+        case vk::Result.SUCCESS:
+            break;
+        default:
+            check(result)!;
+    }
+
+    uint mip_levels = desc.mip_levels == 0 ? 1 : desc.mip_levels;
+    uint array_layers = desc.array_layers == 0 ? 1 : desc.array_layers;
+    uint depth = desc.depth == 0 ? 1 : desc.depth;
+    bool supports_sample_one = ((uint)properties.sample_counts
+        & (uint)vk::SampleCountFlagBits.COUNT_1_BIT) != 0;
+    return desc.width <= properties.max_extent.width
+        && desc.height <= properties.max_extent.height
+        && depth <= properties.max_extent.depth
+        && mip_levels <= properties.max_mip_levels
+        && array_layers <= properties.max_array_layers
+        && supports_sample_one;
+}
+
+fn bool? format_supports_usage(
+    VkDeviceState* state,
+    gpu::Format format,
+    gpu::TextureUsage usage,
+) @private {
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 1,
+        .height    = 1,
+        .format    = format,
+        .usage     = usage,
+    };
+    if (!gpu::texture_desc_valid(&desc)) return false;
+    return texture_desc_supported(state, &desc);
+}
+
+fn bool? vk_supports_texture_desc(
+    gpu::Device* device,
+    gpu::TextureDesc* desc,
+) @private {
+    if (!gpu::texture_desc_valid(desc)) return false;
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    return texture_desc_supported(state, desc);
+}
+
 fn usz format_texel_size(gpu::Format format) {
     switch (format) {
         case gpu::Format.R8_UNORM:          return 1;
@@ -160,16 +259,6 @@ fn MipExtent texture_mip_extent(TextureSlot* slot, uint mip) {
     };
 }
 
-fn uint full_mip_chain(uint width, uint height) @private {
-    uint levels = 1;
-    uint size = width > height ? width : height;
-    while (size > 1) {
-        size >>= 1;
-        levels++;
-    }
-    return levels;
-}
-
 fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     switch (format) {
         case gpu::Format.D32_FLOAT:
@@ -189,22 +278,6 @@ fn gpu::TextureLayout texture_layout(TextureSlot* slot) {
 
 fn void set_texture_layout(TextureSlot* slot, gpu::TextureLayout layout) {
     slot.current_layout.store((int)layout, AtomicOrdering.RELAXED);
-}
-
-<* Storage-image usage on depth formats is illegal Vulkan. D24_UNORM_S8_UINT
-   stays out: attachment support is not universal and no format-properties
-   query exists. *>
-fn void? check_texture_desc(gpu::TextureDesc* desc) @private {
-    if (desc.dimension != gpu::TextureDimension.TEX_2D) return gpu::INVALID_ARGUMENT~;
-    if (desc.width == 0 || desc.height == 0)            return gpu::INVALID_ARGUMENT~;
-    if (desc.depth > 1)                                 return gpu::INVALID_ARGUMENT~;
-    if (desc.mip_levels > full_mip_chain(desc.width, desc.height)) return gpu::INVALID_ARGUMENT~;
-    if (format_to_vk(desc.format) == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
-    if (desc.format == gpu::Format.D24_UNORM_S8_UINT) return gpu::INVALID_ARGUMENT~;
-    bool is_depth = desc.format == gpu::Format.D32_FLOAT;
-    if (is_depth && (desc.usage.color_attach || desc.usage.storage)) return gpu::INVALID_ARGUMENT~;
-    if (!is_depth && desc.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
-    // Transfer-only usage is valid; empty usage is rejected at create.
 }
 
 <* Resolve a view desc to an image view: null/zero desc (or the explicit full
@@ -307,9 +380,10 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    check_texture_desc(desc)!;
-    uint mip_levels   = desc.mip_levels == 0 ? 1 : desc.mip_levels;
-    uint array_layers = desc.array_layers == 0 ? 1 : desc.array_layers;
+    if (!gpu::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
+    if (!texture_desc_supported(state, desc)!) return gpu::UNSUPPORTED_FEATURE~;
+    uint mip_levels   = gpu::texture_mip_levels(desc);
+    uint array_layers = gpu::texture_array_layers(desc);
 
     vk::ImageCreateInfo image_info = vk::image_create_info()
         .set_image_type(vk::ImageType.TYPE_2D)
@@ -321,7 +395,6 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
         .set_initial_layout(vk::ImageLayout.UNDEFINED);
-    if ((uint)texture_usage_to_vk(desc.usage) == 0) return gpu::INVALID_ARGUMENT~;
     uint[MAX_QUEUE_FAMILIES] share_families;
     uint share_count = used_queue_families(state, share_families[..]);
     if (desc.usage.shared_queues && share_count >= 2) {
