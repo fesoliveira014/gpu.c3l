@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
 
 // Headless (lavapipe): descriptor heap slot bookkeeping through the public API.

@@ -283,20 +283,19 @@ sampled images
 storage images
 samplers
 ```
-The internal descriptor buffer uses `EXCLUSIVE` sharing when graphics and
-compute select the same queue family. When they select distinct families, it
-uses `CONCURRENT` sharing with exactly `[graphics_family, compute_family]` in
-that order. Transfer is excluded because transfer commands never bind or
-consume the descriptor heap.
+The internal descriptor buffer follows the graphics/compute sharing policy
+described for frame arenas above: one family remains `EXCLUSIVE`, while two
+families use `CONCURRENT` with the exact graphics-first list. Transfer is
+excluded because transfer commands never bind or consume the descriptor heap.
 
 This internal policy does not change ownership for public resources. A buffer
 or texture consumed by graphics and compute still requires `shared_queues`.
 The descriptor-indexing path remains unchanged. All descriptor tokens and the
-internal heap remain scoped to the library's
-single supported live `Device`; concurrent sharing does not add multi-device support.
+internal heap remain scoped to the library's single supported live `Device`;
+concurrent sharing does not add multi-device support.
 
-
-Public indices map to descriptor entries. Neither path changes the public API or shader material records.
+Public indices map to descriptor entries. Neither path changes the public API
+or shader material records.
 
 ### Descriptor slot policy
 

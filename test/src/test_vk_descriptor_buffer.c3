@@ -260,7 +260,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::SemaphoreDesc semaphore_desc = {};
     gpu::SemaphoreHandle dependency = gpu::create_semaphore(&device, &semaphore_desc)!!;
     defer gpu::destroy_semaphore(&device, dependency)!!;
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     gpu::CommandList compute_commands = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
     gpu::TextureBarrier to_general = {
@@ -412,7 +412,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         io::eprintfn("descriptor_buffer_compute_to_graphics: PASS distinct-family graphics=%d compute=%d",
             state.graphics_family, state.compute_family);
     }
-    gpu::end_frame(&frame)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void descriptor_buffer_write_then_sample() @test {
