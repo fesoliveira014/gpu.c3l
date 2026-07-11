@@ -73,8 +73,8 @@ Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
 
 ```
 gpu.c3l/
-├── *.c3               public module `gpu`
-├── vk/                Vulkan backend (module gpu::vk)
+├── gpu/               shipped library sources (module `gpu`)
+│   └── vk/            Vulkan backend (module `gpu::vk`)
 ├── lib/               vendored bindings: vk.c3l, vma.c3l, spvreflect.c3l
 ├── include/shaders/   GLSL includes consumed by shaders
 ├── tools/gen_shader_abi/

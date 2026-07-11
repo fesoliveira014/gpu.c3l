@@ -225,30 +225,30 @@ Backend files may import `vk` and `vma`. Samples may import `sdl`.
 Public files should be grouped by API area:
 
 ```text
-device.c3
-memory.c3
-buffer.c3
-texture.c3
-pipeline.c3
-command.c3
-sync.c3
-swapchain.c3
+gpu/device.c3
+gpu/memory.c3
+gpu/buffer.c3
+gpu/texture.c3
+gpu/pipeline.c3
+gpu/command.c3
+gpu/sync.c3
+gpu/swapchain.c3
 ```
 
 Backend implementation should mirror public areas:
 
 ```text
-vk/device.c3
-vk/memory.c3
-vk/buffer.c3
-vk/texture.c3
-vk/pipeline_compute.c3
-vk/pipeline_graphics.c3
-vk/command.c3
-vk/sync.c3
+gpu/vk/device.c3
+gpu/vk/memory.c3
+gpu/vk/buffer.c3
+gpu/vk/texture.c3
+gpu/vk/pipeline_compute.c3
+gpu/vk/pipeline_graphics.c3
+gpu/vk/command.c3
+gpu/vk/sync.c3
 ```
 
-Translation helpers belong in `vk/helpers.c3` and should not be duplicated.
+Translation helpers belong in `gpu/vk/helpers.c3` and should not be duplicated.
 
 ## 14. Shader style
 

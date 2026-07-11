@@ -1,6 +1,6 @@
 // gpu.c3l descriptor heap shader ABI.
 //
-// Set/binding convention (must match vk/descriptor_heap.c3):
+// Set/binding convention (must match gpu/vk/descriptor_heap.c3):
 //   set 0, binding 0  sampled images
 //   set 0, binding 1  storage images
 //   set 0, binding 2  samplers

@@ -202,7 +202,7 @@ the range and derived metadata are valid before using it.
 
 ## 4. Faults
 
-Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix. `faults.c3` documents each fault at its definition; the table below maps them to the operations that raise them.
+Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix. `gpu/faults.c3` documents each fault at its definition; the table below maps them to the operations that raise them.
 
 | Fault | Fired by | Typical cause |
 |---|---|---|

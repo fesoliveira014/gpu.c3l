@@ -41,29 +41,31 @@ The public API does not expose backend handles. A Vulkan backend can be replaced
 
 ## 3. Package structure
 
-`gpu.c3l` uses a C3 library package layout. Library source files live at package root and in submodule directories.
+`gpu.c3l` uses a C3 library package layout. Shipped library source files live under one `gpu/` subtree.
 
 ```text
 gpu.c3l/
 ├── manifest.json
-├── gpu.c3i
-├── gpu.c3
-├── types.c3
-├── faults.c3
-├── caps.c3
-├── device.c3
-├── queue.c3
-├── memory.c3
-├── buffer.c3
-├── texture.c3
-├── descriptor_heap.c3
-├── shader_abi.c3
-├── pipeline.c3
-├── command.c3
-├── sync.c3
-├── swapchain.c3
-├── vk/
-│   └── *.c3
+├── gpu/
+│   ├── gpu.c3i
+│   ├── gpu.c3
+│   ├── types.c3
+│   ├── faults.c3
+│   ├── caps.c3
+│   ├── device.c3
+│   ├── queue.c3
+│   ├── memory.c3
+│   ├── buffer.c3
+│   ├── texture.c3
+│   ├── descriptor_heap.c3
+│   ├── shader_abi.c3
+│   ├── pipeline.c3
+│   ├── command.c3
+│   ├── sync.c3
+│   ├── swapchain.c3
+│   ├── debug.c3
+│   └── vk/
+│       └── *.c3
 ├── include/
 │   └── shaders/        published shader-side ABI includes only (no application shaders)
 ├── test/
@@ -73,13 +75,13 @@ gpu.c3l/
 
 ### Library files
 
-Files at package root declare:
+Files under `gpu/` declare:
 
 ```c3
 module gpu;
 ```
 
-Backend files under `vk/` declare:
+Backend files under `gpu/vk/` declare:
 
 ```c3
 module gpu::vk;

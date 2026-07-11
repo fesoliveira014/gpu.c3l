@@ -65,20 +65,20 @@ exists (else the limit is compile-time).
 
 | Limit | Value | Knob | Fault when exceeded |
 |---|---|---|---|
-| Texture descriptors in the heap | 4096 default, 65 536 max (`descriptor_heap.c3:3`) | `texture_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
-| Sampler descriptors | 256 default (`descriptor_heap.c3:4`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
-| Live textures | 1024 default, 65 536 max (`texture.c3:3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
-| Live buffers | 4096 (`buffer.c3:3`) | — | `SLOT_TABLE_FULL` |
-| Live pipelines / shaders | 256 each by default (`pipeline.c3:3-4`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
+| Texture descriptors in the heap | 4096 default, 65 536 max (`gpu/descriptor_heap.c3:3`) | `texture_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Sampler descriptors | 256 default (`gpu/descriptor_heap.c3:4`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Live textures | 1024 default, 65 536 max (`gpu/texture.c3:3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
+| Live buffers | 4096 (`gpu/buffer.c3:3`) | — | `SLOT_TABLE_FULL` |
+| Live pipelines / shaders | 256 each by default (`gpu/pipeline.c3:3-4`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
 | Compute push-constant range | Selected-device `maxPushConstantsSize`, reported by `DeviceCaps.max_push_constant_size` | — | `INVALID_ARGUMENT` |
-| Live semaphores | 256 (`sync.c3:6`) | — | `SLOT_TABLE_FULL` |
-| Live command records | 4096 (`command_state.c3:7`) | — | `SLOT_TABLE_FULL` |
-| Swapchains | 8 (`swapchain.c3:3`) | — | `SLOT_TABLE_FULL` |
-| Color attachments per pass | Lesser of 8 (`pipeline.c3:6`) and the selected device limit, reported by `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
-| Frame arena (per frame in flight) | 1 MiB (`memory.c3:36`) | — ([#28](https://github.com/fesoliveira014/gpu.c3l/issues/28)) | `ARENA_FULL` |
-| Persistent arena | 64 MiB (`memory.c3:37`) | — (#28) | `ARENA_FULL` |
-| Staging arena | 32 MiB default (`memory.c3:38`) | `staging_arena_size` | `ARENA_FULL` |
-| Readback arena | 8 MiB default (`memory.c3:39`) | `readback_arena_size` | `ARENA_FULL` |
+| Live semaphores | 256 (`gpu/sync.c3:6`) | — | `SLOT_TABLE_FULL` |
+| Live command records | 4096 (`gpu/vk/command_state.c3:7`) | — | `SLOT_TABLE_FULL` |
+| Swapchains | 8 (`gpu/swapchain.c3:3`) | — | `SLOT_TABLE_FULL` |
+| Color attachments per pass | Lesser of 8 (`gpu/pipeline.c3:6`) and the selected device limit, reported by `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
+| Frame arena (per frame in flight) | 1 MiB (`gpu/memory.c3:36`) | — ([#28](https://github.com/fesoliveira014/gpu.c3l/issues/28)) | `ARENA_FULL` |
+| Persistent arena | 64 MiB (`gpu/memory.c3:37`) | — (#28) | `ARENA_FULL` |
+| Staging arena | 32 MiB default (`gpu/memory.c3:38`) | `staging_arena_size` | `ARENA_FULL` |
+| Readback arena | 8 MiB default (`gpu/memory.c3:39`) | `readback_arena_size` | `ARENA_FULL` |
 
 Two sizing rules that bite:
 - **Packed descriptor ceilings are not guaranteed hardware capacities.** On the
