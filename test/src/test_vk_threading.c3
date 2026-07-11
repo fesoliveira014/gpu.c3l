@@ -621,6 +621,47 @@ fn void sequential_helper_calls_bound_the_pool_to_one_buffer() @test {
         "every sequential call but the first resets the helper pool, holding it at one live buffer");
 }
 
+const uint HELPER_FAULT_ITERS = 32;
+
+fn void failed_helpers_reclaim_command_records_on_pool_reset() @test {
+    gpu::Device device = make_thr_device();
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    char[16] payload;
+    for (uint i = 0; i < HELPER_FAULT_ITERS; i++) {
+        fault invalid = @catch(gpu::upload_buffer_data(
+            device:      &device,
+            dst:         gpu::BUFFER_HANDLE_INVALID,
+            offset:      0,
+            data:        payload[..],
+            next_stage:  gpu::Stage.TRANSFER,
+            next_hazard: gpu::Hazard.TRANSFER_READ,
+        ));
+        assert(invalid == gpu::INVALID_HANDLE, "the helper faults after beginning its command list");
+    }
+
+    gpu::BufferDesc desc = {
+        .size = payload.len, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::upload_buffer_data(
+        device:      &device,
+        dst:         buffer,
+        offset:      0,
+        data:        payload[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+    )!!;
+
+    assert(state.commands.next_new == 1,
+        "failed helper lists reuse one command-table slot instead of leaking records");
+    foreach (&cell : state.commands.slots[:state.commands.next_new]) {
+        assert(!cell.used, "the successful helper leaves no command record live");
+    }
+}
+
 const uint GROWTH_THREADS = 4;
 const uint GROWTH_PER_THREAD = 24;
 
@@ -877,6 +918,12 @@ fn void multi_thread_tiny_arena_fallback_hammer() @test {
     ulong fallbacks_after = vk::dedicated_fallback_count(state);
     assert(fallbacks_after - fallbacks_before == vk::DEDICATED_RETIRE_CAP,
         "the counter only advances for fallbacks that actually registered");
+
+    gpu::CommandList[FALLBACK_HAMMER_THREADS] lists;
+    for (uint i = 0; i < FALLBACK_HAMMER_THREADS; i++) lists[i] = args[i].list;
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 
     foreach (ctx : contexts) gpu::destroy_recording_context(&device, ctx)!!;
     foreach (b : buffers) gpu::destroy_buffer(&device, b)!!;

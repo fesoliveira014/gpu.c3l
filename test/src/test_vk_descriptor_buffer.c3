@@ -49,9 +49,16 @@ fn void descriptor_buffer_device_and_heap() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    assert(index.is_valid(), "descriptor written into the descriptor buffer");
-    gpu::destroy_texture_descriptor(&device, index)!!;
+    gpu::TextureDescriptorDesc[2] batch = {
+        { .texture = texture },
+        { .texture = texture },
+    };
+    gpu::TextureIndex[2] indices;
+    gpu::create_texture_descriptors(&device, batch[..], indices[..])!!;
+    foreach (index : indices) {
+        assert(index.is_valid(), "batch descriptor written into the descriptor buffer");
+        gpu::destroy_texture_descriptor(&device, index)!!;
+    }
 
     gpu::SamplerDesc sampler_desc = {};
     gpu::SamplerIndex sampler = gpu::create_sampler(&device, &sampler_desc)!!;

@@ -69,31 +69,35 @@ fn usz align_up(usz value, usz align) => (value + align - 1) & ~(align - 1);
 <* True for nonzero powers of two — the only valid alignments. *>
 fn bool is_pow2(usz value) => value != 0 && (value & (value - 1)) == 0;
 
-<* Overflow-safe bounds check: offset + size must fit in limit. `size` 0 is
-   the caller's to-end convention and only checks the offset. *>
+<* Overflow-safe bounds check: offset + size must fit in limit. A zero size
+   only checks the offset; each caller defines what zero means. *>
 fn bool range_fits(usz limit, usz offset, usz size) {
     if (offset > limit) return false;
     return size <= limit - offset;
 }
 
-<* Begin the next frame: advance to the next frame-in-flight slot, wait for
-   its arena to retire, and reset it. Faults WAIT_TIMEOUT if the retire wait
-   elapses first — safe to retry. *>
+<* Enter an idle frame: advance to the next frame-in-flight slot, wait for
+   its arena to retire, and reset it. Faults INVALID_RESOURCE_STATE if a frame
+   is already active, or WAIT_TIMEOUT if the retire wait elapses first. These
+   lifecycle guard rejections are mutation-free and safe to retry. *>
 fn void? begin_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.begin_frame(device);
 }
 
-<* Bump-allocate a span from the current frame's upload arena. `size` must be
-   nonzero and `align` a nonzero power of two (INVALID_ARGUMENT otherwise);
-   returns ARENA_FULL when the arena is exhausted. The span is valid until the
-   arena is reset. *>
+<* Bump-allocate a span from the active frame's upload arena. Faults
+   INVALID_RESOURCE_STATE while idle. `size` must be nonzero and `align` a
+   nonzero power of two (INVALID_ARGUMENT otherwise). ARENA_FULL means the
+   aligned range cannot fit or be represented without overflow. The span is
+   valid until the arena is reset. *>
 fn GpuSpan? alloc_frame_span(Device* device, usz size, usz align) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.alloc_frame_span(device, size, align);
 }
 
-<* End the current frame, recording its timeline value. *>
+<* End the active frame and record its timeline value. Faults
+   INVALID_RESOURCE_STATE while idle without submitting work. If the signal
+   submit faults, frame-boundary state remains active and unchanged for retry. *>
 fn void? end_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.end_frame(device);
@@ -227,12 +231,10 @@ fn void? resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) {
     return device.vtable.resolve_readback(device, ticket, dest);
 }
 
-<* Derive a sub-range starting `offset` bytes into this span. The GPU address
-   and (when present) CPU pointer advance by `offset`; the backing buffer and
-   memory kind are inherited. Not bounds-checked against this span or its
-   backing buffer: a span that escapes either faults INVALID_ARGUMENT at the
-   command that consumes it, not here. *>
-fn GpuSpan GpuSpan.subspan(self, usz offset, usz size) {
+<* Derive a sub-range without bounds or overflow checks. Use only when the
+   caller has already proved the range, or deliberately needs an invalid span
+   for validation testing. *>
+fn GpuSpan GpuSpan.unchecked_subspan(self, usz offset, usz size) {
     return {
         .gpu    = (GpuAddress)((ulong)self.gpu + offset),
         .cpu    = self.cpu == null ? null : (char*)self.cpu + offset,
@@ -241,4 +243,20 @@ fn GpuSpan GpuSpan.subspan(self, usz offset, usz size) {
         .offset = self.offset + offset,
         .kind   = self.kind,
     };
+}
+
+<* Derive a non-empty exact-sized sub-range within this immediate parent.
+   Faults INVALID_ARGUMENT for zero size, a range that escapes the parent, or
+   any derived address/offset addition that would overflow. *>
+fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
+    if (size == 0) return INVALID_ARGUMENT~;
+    if (!range_fits(self.size, offset, size)) return INVALID_ARGUMENT~;
+
+    ulong gpu_address = (ulong)self.gpu;
+    if ((ulong)offset > ulong::max - gpu_address) return INVALID_ARGUMENT~;
+    if (offset > usz::max - self.offset) return INVALID_ARGUMENT~;
+    if (self.cpu != null && (uptr)offset > uptr::max - (uptr)self.cpu) {
+        return INVALID_ARGUMENT~;
+    }
+    return self.unchecked_subspan(offset, size);
 }

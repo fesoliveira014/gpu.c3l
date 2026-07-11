@@ -64,6 +64,13 @@ bitstruct RecordingContextHandle : ulong {
     uint reserved   : 56..63;
 }
 
+// Same packing as BufferHandle; identity for a device-owned command record.
+bitstruct CommandListHandle : ulong {
+    uint index      : 0..31;
+    uint generation : 32..55;
+    uint reserved   : 56..63;
+}
+
 // Shader-visible heap indices, packed slot(0..15) | generation(16..31).
 // Embedded in GPU records as 32-bit scalars; shaders mask with `& 0xFFFFu`.
 // A live index has generation >= 1, so raw 0 is INVALID.
@@ -86,6 +93,7 @@ const SemaphoreHandle SEMAPHORE_HANDLE_INVALID = {};
 const SwapchainHandle SWAPCHAIN_HANDLE_INVALID = {};
 const ShaderHandle SHADER_HANDLE_INVALID       = {};
 const RecordingContextHandle RECORDING_CONTEXT_HANDLE_INVALID = {};
+const CommandListHandle COMMAND_LIST_HANDLE_INVALID = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
@@ -104,6 +112,8 @@ fn bool SwapchainHandle.is_valid(self) => (ulong)self != 0;
 fn bool ShaderHandle.is_valid(self)    => (ulong)self != 0;
 <* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool RecordingContextHandle.is_valid(self) => (ulong)self != 0;
+<* True for a live command-list handle; the zero value is the invalid sentinel. *>
+fn bool CommandListHandle.is_valid(self) => (ulong)self != 0;
 
 <* True for a live heap index; the zero value is the invalid sentinel. *>
 fn bool TextureIndex.is_valid(self) => (uint)self != 0;

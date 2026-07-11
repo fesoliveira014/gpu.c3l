@@ -182,7 +182,9 @@ fn void labels_record_validation_clean() @test {
     gpu::end_frame(&device)!!;
 
     fault ended = @catch(gpu::cmd_begin_label(&cmd, "too_late"));
-    assert(ended == gpu::COMMAND_RECORDING_ERROR, "labels on an ended list fault COMMAND_RECORDING_ERROR");
+    assert(ended == gpu::INVALID_HANDLE, "labels on a consumed list fault INVALID_HANDLE");
+    fault end_stale = @catch(gpu::cmd_end_label(&cmd));
+    assert(end_stale == gpu::INVALID_HANDLE, "ending a label on a consumed list faults INVALID_HANDLE");
 }
 
 fn void destroy_reports_leaks_before_sweeping() @test {

@@ -374,7 +374,7 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     // Frame-arena buffers carry .index usage; a 2-byte offset still misaligns
     // the default U32 index type (needs 4-byte alignment).
     gpu::GpuSpan index_span = gpu::alloc_frame_span(&device, 16, 16)!!;
-    gpu::GpuSpan misaligned = index_span.subspan(2, 8);
+    gpu::GpuSpan misaligned = index_span.checked_subspan(2, 8)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     record_val_target_to_attach(&cmd, target);
@@ -550,7 +550,7 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
-    gpu::GpuSpan escaped = full_span.subspan(8, gpu::DispatchIndirectCommand::size);
+    gpu::GpuSpan escaped = full_span.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -576,7 +576,7 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
-    gpu::GpuSpan boundary = full_span.subspan(4, gpu::DispatchIndirectCommand::size);
+    gpu::GpuSpan boundary = full_span.checked_subspan(4, gpu::DispatchIndirectCommand::size)!!;
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -609,7 +609,7 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::BufferHandle count_buffer = gpu::create_buffer(&device, &count_desc)!!;
     defer gpu::destroy_buffer(&device, count_buffer)!!;
     gpu::GpuSpan full_count_span = gpu::get_buffer_span(&device, count_buffer)!!;
-    gpu::GpuSpan escaped_count = full_count_span.subspan(8, 4);
+    gpu::GpuSpan escaped_count = full_count_span.unchecked_subspan(8, 4);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -648,7 +648,7 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
     defer gpu::destroy_buffer(&device, index_buffer)!!;
     gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
-    gpu::GpuSpan escaped = full_index_span.subspan(16, 4);
+    gpu::GpuSpan escaped = full_index_span.unchecked_subspan(16, 4);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -685,7 +685,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
     defer gpu::destroy_buffer(&device, index_buffer)!!;
     gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
-    gpu::GpuSpan boundary = full_index_span.subspan(12, 4);
+    gpu::GpuSpan boundary = full_index_span.checked_subspan(12, 4)!!;
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -727,7 +727,7 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
-    gpu::GpuSpan escaped = full_span.subspan(32, 64);
+    gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
@@ -759,7 +759,7 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     gpu::BufferHandle dst_buffer = gpu::create_buffer(&device, &dst_desc)!!;
     defer gpu::destroy_buffer(&device, dst_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, dst_buffer)!!;
-    gpu::GpuSpan escaped = full_span.subspan(32, 64);
+    gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
@@ -791,7 +791,7 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
-    gpu::GpuSpan boundary = full_span.subspan(32, 64);
+    gpu::GpuSpan boundary = full_span.checked_subspan(32, 64)!!;
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
@@ -913,7 +913,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::RenderPassDesc oversized = { .colors = large_color[..], .width = 17, .height = 16 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &oversized)) == gpu::INVALID_ARGUMENT,
         "render area wider than mip zero faults INVALID_ARGUMENT");
-    assert(cmd.state == gpu::CommandState.RECORDING, "oversized color target records no pass");
+    assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "oversized color target records no pass");
 
     gpu::ColorTargetDesc[2] mixed_colors = {
         { .texture = large },
@@ -922,7 +922,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::RenderPassDesc mixed = { .colors = mixed_colors[..], .width = 16, .height = 16 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &mixed)) == gpu::INVALID_ARGUMENT,
         "one mixed-size attachment that cannot cover the pass faults INVALID_ARGUMENT");
-    assert(cmd.state == gpu::CommandState.RECORDING, "mixed-size rejection records no pass");
+    assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "mixed-size rejection records no pass");
 
     uint cached_before = val_cached_view_count(&device, large);
     gpu::ColorTargetDesc[2] invalid_later = {
@@ -934,7 +934,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         "invalid later mip range faults before its invalid layout");
     assert(val_cached_view_count(&device, large) == cached_before,
         "later validation failure creates no cached view for an earlier target");
-    assert(cmd.state == gpu::CommandState.RECORDING, "later attachment rejection records no pass");
+    assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "later attachment rejection records no pass");
 
     gpu::ColorTargetDesc[1] mip_color = { { .texture = large, .mip_level = 1 } };
     gpu::RenderPassDesc mip_oversized = { .colors = mip_color[..], .width = 9, .height = 8 };
@@ -949,7 +949,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::RenderPassDesc depth_oversized = { .depth = &depth_target, .width = 9, .height = 8 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &depth_oversized)) == gpu::INVALID_ARGUMENT,
         "render area wider than depth mip zero faults INVALID_ARGUMENT");
-    assert(cmd.state == gpu::CommandState.RECORDING, "oversized depth target records no pass");
+    assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "oversized depth target records no pass");
 
     gpu::DepthTargetDesc mip_depth_target = { .texture = mip_depth };
     uint mip_depth_cached_before = val_cached_view_count(&device, mip_depth);
@@ -981,7 +981,7 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::RenderPassDesc library_limit = { .colors = too_many[..], .width = 1, .height = 1 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &library_limit)) == gpu::INVALID_ARGUMENT,
         "color count above MAX_COLOR_ATTACHMENTS faults before invalid handle lookup");
-    assert(cmd.state == gpu::CommandState.RECORDING, "library-limit rejection records no pass");
+    assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "library-limit rejection records no pass");
 
     uint device_limit = state.caps.max_color_attachments;
     state.caps.max_color_attachments = 1;
@@ -989,7 +989,7 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::RenderPassDesc selected_limit = { .colors = device_excess[..], .width = 1, .height = 1 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &selected_limit)) == gpu::INVALID_ARGUMENT,
         "color count above selected device limit faults before invalid handle lookup");
-    assert(cmd.state == gpu::CommandState.RECORDING, "device-limit rejection records no pass");
+    assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "device-limit rejection records no pass");
     state.caps.max_color_attachments = device_limit;
 
     gpu::end_commands(&device, &cmd)!!;
@@ -1034,7 +1034,7 @@ fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
     assert(view_fault == gpu::SLOT_TABLE_FULL, "later saturated view cache faults SLOT_TABLE_FULL");
     assert(val_cached_view_count(&device, first) == first_cached_before,
         "later view resolution fault rolls back the earlier cached view");
-    assert(cmd.state == gpu::CommandState.RECORDING, "view resolution fault records no pass");
+    assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "view resolution fault records no pass");
 
     gpu::end_commands(&device, &cmd)!!;
     gpu::end_frame(&device)!!;

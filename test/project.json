@@ -57,13 +57,15 @@
       "type": "executable",
       "sources": [ "src/descriptor_churn_bench.c3" ]
     },
-    // Advisory dedicated-fallback hoist timing: Tier-C parallel uploads
-    // across contexts plus the blocking-helper queue-bound baseline;
-    // executable so it never gates CI. Needs an ICD — pin lavapipe via
-    // VK_DRIVER_FILES.
+    // Advisory upload observations across worker/payload/arena combinations;
+    // executable so timing never gates CI. Needs an ICD.
     "upload_throughput_bench": {
       "type": "executable",
-      "sources": [ "src/upload_throughput_bench.c3" ]
+      "sources": [ "src/upload_throughput_bench.c3", "src/upload_bench_observation.c3" ]
+    },
+    "upload_bench_observation": {
+      "type": "test",
+      "sources": [ "src/test_upload_bench_observation.c3", "src/upload_bench_observation.c3" ]
     },
     // Advisory async-compute/graphics overlap observation: chained vs
     // independent submission across queues, timestamp-pool-backed where
@@ -78,7 +80,7 @@
     // needs one — pin lavapipe via VK_DRIVER_FILES when running this target.
     "vk_bootstrap": {
       "type": "test",
-      "sources": [ "src/test_vk_features.c3", "src/test_vk_bootstrap.c3", "src/root_pointer_abi.c3", "src/test_vk_vma_allocator.c3", "src/test_vk_buffer.c3", "src/test_vk_frame_arena.c3", "src/test_vk_persistent_arena.c3" ]
+      "sources": [ "src/test_vk_features.c3", "src/test_vk_bootstrap.c3", "src/test_vk_result_mapping.c3", "src/test_vk_context_pools.c3", "src/root_pointer_abi.c3", "src/test_vk_vma_allocator.c3", "src/test_vk_buffer.c3", "src/test_vk_frame_arena.c3", "src/test_vk_persistent_arena.c3" ]
     },
     "vk_command": {
       "type": "test",
