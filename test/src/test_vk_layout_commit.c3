@@ -5,8 +5,7 @@ import gpu::vk;
 
 // Headless (lavapipe): texture layouts commit onto tracked state at submit,
 // not at record time — a dropped list must leave no trace, submitted lists
-// must commit in submission order, and a per-list pending map must not grow
-// unbounded.
+// must commit in submission order, and per-list pending state grows as needed.
 
 fn gpu::Device make_layout_device() {
     gpu::DeviceDesc desc = {
@@ -148,20 +147,20 @@ fn void same_list_barrier_then_copy_validates() @test {
     gpu::end_frame(&device)!!;
 }
 
-fn void pending_layout_overflow_faults() @test {
+fn void more_than_sixteen_pending_layouts_submit() @test {
     gpu::Device device = make_layout_device();
     defer gpu::destroy_device(&device)!!;
 
-    const uint OVERFLOW_COUNT = gpu::PENDING_LAYOUT_CAP + 1;
-    gpu::TextureHandle[OVERFLOW_COUNT] textures;
-    for (uint i = 0; i < OVERFLOW_COUNT; i++) textures[i] = make_layout_texture(&device);
+    const uint TEXTURE_COUNT = 17;
+    gpu::TextureHandle[TEXTURE_COUNT] textures;
+    for (uint i = 0; i < TEXTURE_COUNT; i++) textures[i] = make_layout_texture(&device);
     defer {
         foreach (t : textures) (void)gpu::destroy_texture(&device, t);
     }
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    for (uint i = 0; i < OVERFLOW_COUNT - 1; i++) {
+    for (uint i = 0; i < TEXTURE_COUNT; i++) {
         record_layout_barrier(
             cmd:        &cmd,
             tex:        textures[i],
@@ -169,19 +168,24 @@ fn void pending_layout_overflow_faults() @test {
             new_layout: gpu::TextureLayout.TRANSFER_DST,
         );
     }
-
-    gpu::TextureBarrier overflow_barrier = {
-        .texture       = textures[OVERFLOW_COUNT - 1],
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
-    };
-    fault overflow = @catch(gpu::cmd_texture_barrier(&cmd, &overflow_barrier));
-    assert(overflow == gpu::INVALID_ARGUMENT, "the (PENDING_LAYOUT_CAP + 1)th distinct texture in one list faults INVALID_ARGUMENT");
-
     gpu::end_commands(&device, &cmd)!!;
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+
+    gpu::CommandList verify = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    for (uint i = 0; i < TEXTURE_COUNT; i++) {
+        record_layout_barrier(
+            cmd:        &verify,
+            tex:        textures[i],
+            old_layout: gpu::TextureLayout.TRANSFER_DST,
+            new_layout: gpu::TextureLayout.SHADER_READ,
+        );
+    }
+    gpu::end_commands(&device, &verify)!!;
+    gpu::CommandList[1] verify_lists = { verify };
+    gpu::SubmitDesc verify_submit = { .command_lists = verify_lists[..] };
+    gpu::submit(&device, &verify_submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&device)!!;
 }

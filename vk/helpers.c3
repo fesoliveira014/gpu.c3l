@@ -20,6 +20,8 @@ fn void? check(vk::Result result) @private {
             return gpu::OUT_OF_DEVICE_MEMORY~;
         case vk::Result.ERROR_DEVICE_LOST:
             return gpu::DEVICE_LOST~;
+        case vk::Result.ERROR_SURFACE_LOST_KHR:
+            return gpu::SURFACE_LOST~;
         case vk::Result.ERROR_FEATURE_NOT_PRESENT:
         case vk::Result.ERROR_EXTENSION_NOT_PRESENT:
         case vk::Result.ERROR_LAYER_NOT_PRESENT:
@@ -83,9 +85,10 @@ fn void? check_acquire_result(vk::Result result) @private {
             return;
         case vk::Result.ERROR_SURFACE_LOST_KHR:
             return gpu::SURFACE_LOST~;
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
         case vk::Result.TIMEOUT:
         case vk::Result.NOT_READY:
+            return gpu::WAIT_TIMEOUT~;
+        case vk::Result.ERROR_OUT_OF_DATE_KHR:
             return gpu::SWAPCHAIN_OUT_OF_DATE~;
         default:
             return check(result);

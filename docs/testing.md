@@ -109,6 +109,11 @@ present mode selection
 frame pacing sanity
 ```
 
+The local `vk_swapchain` target pure-tests result translation for transient
+acquire, out-of-date, surface-lost, suboptimal, and delegated device-loss
+outcomes. Real surface loss and acquire starvation are not portable to force;
+exercise their caller recovery manually in the windowed sample repository.
+
 Windowed tests may be manual at first. Automated windowed tests can be added only when CI/window-system support is stable.
 
 ## 5. Sample project dependencies
@@ -169,11 +174,11 @@ Do not include milestone labels in test names.
 | Buffers | mapped buffer, device buffer, addressable buffer. |
 | Frame arena | allocation, alignment, overflow, reset safety. |
 | Persistent arena | allocate/free/reuse, virtual allocator stats. |
-| Commands | begin/end/submit, timeline signal/wait, invalid state. |
+| Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback. |
 | Compute | root pointer shader read/write, readback. |
 | Texture heap | descriptor allocation, sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback. |
-| Swapchain | SDL windowed present and resize. |
+| Swapchain | pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start. |
 | Threading | per-thread recording contexts, parallel record, identical submit. |
 | Debug report | leak report contents, debug names, command labels. |
@@ -354,7 +359,9 @@ Tests should cover specific faults:
 
 ```text
 invalid handle -> INVALID_HANDLE
-arena overflow -> ARENA_FULL
+arena exact-end fit -> success
+arena one-byte, alignment, or extent overflow -> ARENA_FULL
+zero allocation size or malformed alignment -> INVALID_ARGUMENT
 unsupported required feature -> UNSUPPORTED_FEATURE
 invalid command state -> COMMAND_RECORDING_ERROR
 invalid descriptor index -> INVALID_HANDLE or DESCRIPTOR_HEAP_FULL as appropriate

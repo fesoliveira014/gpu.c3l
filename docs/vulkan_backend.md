@@ -102,6 +102,7 @@ must support multiDrawIndirect
 must support shaderDrawParameters
 must support the heap non-uniform-indexing features
 must resolve a heap mode from the requested DescriptorHeapMode
+must expose a queue family supporting graphics and compute
 ```
 
 Scoring is by device type only (`score_device`):
@@ -113,10 +114,10 @@ discrete > integrated > virtual > cpu > other
 Device selection result:
 
 ```text
-pick_physical_device(instance, desc) -> vk::PhysicalDevice?
+pick_physical_device(instance, desc) -> PhysicalDeviceSelection?
 ```
 
-Queue families are resolved separately after selection (`vk/queue.c3`).
+Each feature-compatible candidate's queue topology is resolved once during selection. The winning `PhysicalDeviceSelection` carries that cached `QueueFamilies` value into logical-device creation; queue topology remains a suitability filter rather than a scoring bonus.
 
 ## 6. Logical device creation
 
@@ -140,6 +141,16 @@ shaderStorageImageWriteWithoutFormat
 ```
 
 `maintenance4` is always enabled.
+
+Optional base features are queried on the selected device and enabled only
+when advertised:
+
+```text
+fillModeNonSolid -> DeviceCaps.line_polygon_mode
+```
+
+`PolygonMode.LINE` faults `UNSUPPORTED_FEATURE` before shader or cache lookup
+when this cap is false. The feature is not a physical-device selection requirement.
 
 Heap-path-dependent features:
 
@@ -242,6 +253,15 @@ partially bound descriptors
 update-after-bind where needed
 ```
 
+The indexing layout contains `T` sampled images, `T` storage images, and `S`
+samplers, all visible to every stage. Before object creation the backend checks
+the exact resource total `2T` against
+`maxPerStageUpdateAfterBindResources`; plain `SAMPLER` descriptors do not count
+toward that limit. Its single update-after-bind pool contains `2T + S`
+descriptors and is checked against `maxUpdateAfterBindDescriptorsInAllPools`.
+Requests that exceed either aggregate or any per-type limit fail with
+`INVALID_ARGUMENT`; capacities are never clamped.
+
 ### Descriptor buffer path
 
 Opt-in via `DescriptorHeapMode.DESCRIPTOR_BUFFER`. `AUTO` never selects it: lavapipe (Mesa 25.0.7) miscompiles descriptor-buffer image access.
@@ -297,6 +317,10 @@ descriptor heap bindings match convention
 
 Compute pipeline creation:
 
+Before shader lookup, reject a push-constant size below `RootPush::size`, not
+divisible by four, or above `DeviceCaps.max_push_constant_size`. These public
+input faults return `INVALID_ARGUMENT` before any Vulkan call.
+
 ```text
 shader module
 pipeline layout with root pointer push constant
@@ -321,7 +345,14 @@ vk::Pipeline
 
 ### Pipeline cache
 
-Two layers. A descriptor-keyed dedup cache (`PipelineKey` over the immutable pipeline state; entries refcounted so identical descriptors alias one `vk::Pipeline`) sits in front of a driver `vk::PipelineCache`. The driver cache is created with `DeviceDesc.pipeline_cache_data` as initial data and exported via `get_pipeline_cache_size` / `get_pipeline_cache_data`.
+Two layers. A descriptor-keyed dedup cache (`PipelineKey` over immutable state,
+with refcounted aliases) sits in front of a driver `vk::PipelineCache`. The
+driver cache is created with `DeviceDesc.pipeline_cache_data` as initial data
+and exported through `get_pipeline_cache_size` / `get_pipeline_cache_data`.
+
+Compute pipeline layouts are shared per push-constant size in a packed
+device-owned cache. Host storage uses pipeline capacity as an initial hint and
+grows to the device's finite valid-size count.
 
 ### Result mapping
 
@@ -345,18 +376,33 @@ one command pool per frame per queue family
 reset pools when frame retires
 ```
 
-Command list slot:
+Recording-context pool sets are constructed transactionally: ownership is
+published only after every per-frame graphics, optional distinct-compute, and
+transfer pool exists. Any create fault destroys all earlier pools and releases
+the host arrays. Shared-family compute aliases graphics only after success.
+
+Public command token:
 
 ```text
-CommandListState
-    vk::CommandBuffer command_buffer
-    QueueKind queue
-    CommandState state
-    bool in_render_pass
-    uint frame_index
+CommandList
+    Device* device
+    CommandListHandle handle
 ```
 
-Begin/end/submit validate state transitions.
+The handle resolves through a fixed 4096-entry device table to a backend
+`CommandRecord` containing the `vk::CommandBuffer`, recording context, queue,
+frame-slot index, lifecycle state, last-bound pipeline cache, and a growable
+array of pending texture-layout transitions. The public token stays within two
+machine words; copying it creates an alias, not an independent recorder.
+
+Begin/end validate state transitions. Submit preflights a whole batch under the
+command-table mutex, rejects duplicate or foreign-owner tokens, and claims every
+record as `SUBMITTING` before constructing the Vulkan submission. A fault before
+`vkQueueSubmit2` succeeds restores claimed records to `EXECUTABLE`. Success commits layout
+transitions in submission order and frees the records, invalidating all aliases.
+Frame-slot pool reset reclaims any unsubmitted records before resetting their
+Vulkan command pool. A recording context cannot be destroyed while one of its
+records remains live.
 
 ## 13. Synchronization
 
@@ -446,10 +492,20 @@ create
 acquire
 present
 query present-mode support
-recreate on out-of-date/suboptimal
+resize on out-of-date/suboptimal; recreate the surface on surface-lost
 ```
 
 `vk_get_present_mode_support` queries the retained `vk::SurfaceKHR` for fifo/immediate/mailbox availability. At creation, `select_present_mode` falls back to FIFO silently when the requested mode is unavailable.
+
+WSI result mapping is explicit and pure-tested:
+
+| Vulkan result | Public outcome | State/recovery |
+|---|---|---|
+| acquire `TIMEOUT` / `NOT_READY` | `WAIT_TIMEOUT` | pending-acquire state stays unchanged; retry |
+| `ERROR_OUT_OF_DATE_KHR` | `SWAPCHAIN_OUT_OF_DATE` | resize the swapchain |
+| `ERROR_SURFACE_LOST_KHR` | `SURFACE_LOST` | replace the platform surface and swapchain |
+| acquire `SUBOPTIMAL_KHR` | valid image with `suboptimal = true` | finish the frame; resize when convenient |
+| present `SUBOPTIMAL_KHR` | success | current public API exposes no soft present result |
 
 ## 17. Debug implementation
 
