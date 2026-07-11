@@ -17,6 +17,14 @@ page doesn't explain it, that's a bug in this page — file an issue.
   but the library does not comprehensively validate cross-device use and those
   checks do not establish multi-device support. Supporting multiple devices is
   deferred until a dedicated ownership/validation design is approved.
+- **Debug callbacks are borrowed, synchronous, and non-reentrant.** Public and
+  backend messages run before the originating call returns; Vulkan may invoke
+  the callback concurrently on arbitrary threads. Payload pointers are valid
+  only during the callback. The callback must be nonblocking, synchronize its
+  own userdata, and must not call gpu.c3l because internal locks may be held.
+  Userdata lives through `destroy_device`; no callback occurs after it returns.
+  A null callback disables structured delivery without changing returned
+  faults. Per-device callback storage does not add multi-device support.
 - **Frame-token aliases share one generation.** Copies may allocate until one
   alias ends successfully. That end consumes the device generation, clears the
   passed copy, and makes every other copy stale. A failed end preserves the

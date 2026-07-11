@@ -81,6 +81,8 @@ DeviceDesc
     uint frames_in_flight
     char[] pipeline_cache_data            (warm-start blob; §8)
     ZString application_name
+    DebugMessageCallback debug_callback       (null = no structured delivery)
+    void* debug_user_data
 
 DeviceCaps
     bool buffer_device_address
@@ -1022,7 +1024,47 @@ source stage and hazard cover that access.
 
 No command helper should silently insert barriers for a later use.
 
-### Debug labels and leak reporting
+### Structured debug messages, labels, and leak reporting
+
+`DeviceDesc.debug_callback` optionally receives `DebugMessage` values for
+public-contract failures, backend failures, Vulkan validation/performance
+messages. A null callback disables structured delivery and never changes the
+value, fault, rollback, or resource state of
+the originating operation. The flat public fault remains authoritative;
+`has_fault` says whether `public_fault` accompanies the message.
+
+```text
+DebugMessage
+    DebugMessageSeverity severity
+    DebugMessageCategory category
+    ZString operation
+    bool has_fault
+    fault public_fault
+    DebugResourceRef resource       (public index/generation only when known)
+    ZString rejected_field
+    ZString invariant
+    ZString backend_text
+    ZString validation_id_name
+    int validation_id_number
+```
+
+Delivery is synchronous and allocation-free. The message and every referenced
+string are borrowed only until the callback returns; copy anything that must
+outlive the call. `debug_user_data` must remain valid from entry to
+`create_device` through the return of `destroy_device`, including teardown
+messages. No callback occurs after `destroy_device` returns.
+
+Public/backend messages run on the calling thread. Vulkan messages may arrive
+concurrently on arbitrary application or driver threads. The callback must be
+nonblocking and must not call gpu.c3l: delivery can occur while internal locks
+are held, and callbacks are neither serialized nor reentrant. See
+`docs/threading.md`.
+
+Validation IDs, numeric IDs, backend text, and the first useful object name
+are forwarded when Vulkan provides them. Native Vulkan handles and types are
+never exposed. Stored public debug names remain available when validation is
+disabled; `enable_debug_names` controls best-effort Vulkan object naming
+independently.
 
 ```text
 cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) -> void?

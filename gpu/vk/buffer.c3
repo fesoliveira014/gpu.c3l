@@ -173,6 +173,34 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
+    if (desc.size == 0) {
+        gpu::DebugMessage message = {
+            .severity       = gpu::DebugMessageSeverity.ERROR,
+            .category       = { .public_contract },
+            .operation      = "create_buffer",
+            .has_fault      = true,
+            .public_fault   = gpu::INVALID_ARGUMENT,
+            .resource       = { .kind = gpu::DebugResourceKind.BUFFER, .debug_name = desc.debug_name },
+            .rejected_field = "BufferDesc.size",
+            .invariant      = "must be greater than zero",
+        };
+        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if ((uint)buffer_usage_to_vk(desc.usage) == 0) {
+        gpu::DebugMessage message = {
+            .severity       = gpu::DebugMessageSeverity.ERROR,
+            .category       = { .public_contract },
+            .operation      = "create_buffer",
+            .has_fault      = true,
+            .public_fault   = gpu::INVALID_ARGUMENT,
+            .resource       = { .kind = gpu::DebugResourceKind.BUFFER, .debug_name = desc.debug_name },
+            .rejected_field = "BufferDesc.usage",
+            .invariant      = "must include at least one access flag",
+        };
+        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+        return gpu::INVALID_ARGUMENT~;
+    }
     if (!desc.usage.shared_queues) return vk_create_buffer_with_families(device, desc, {});
     uint[MAX_QUEUE_FAMILIES] families;
     uint count = used_queue_families(state, families[..]);

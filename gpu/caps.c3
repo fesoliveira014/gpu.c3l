@@ -24,24 +24,26 @@ enum DescriptorHeapMode : int {
 <* Creation parameters for create_device; a zero-initialized desc works — every
    zero field resolves to a backend default. *>
 struct DeviceDesc {
-    BackendKind        backend;
-    bool               enable_validation;
-    bool               enable_debug_names;
-    bool               enable_presentation;
-    DescriptorHeapMode descriptor_heap_mode;
-    uint               texture_descriptor_capacity;
-    uint               sampler_descriptor_capacity;
-    uint               texture_capacity;
-    uint               pipeline_capacity;
-    usz                staging_arena_size;
-    usz                readback_arena_size;
-    usz                frame_arena_size;
-    usz                persistent_arena_size;
-    uint               frames_in_flight;
+    BackendKind          backend;
+    bool                 enable_validation;
+    bool                 enable_debug_names;
+    bool                 enable_presentation;
+    DescriptorHeapMode   descriptor_heap_mode;
+    uint                 texture_descriptor_capacity;
+    uint                 sampler_descriptor_capacity;
+    uint                 texture_capacity;
+    uint                 pipeline_capacity;
+    usz                  staging_arena_size;
+    usz                  readback_arena_size;
+    usz                  frame_arena_size;
+    usz                  persistent_arena_size;
+    uint                 frames_in_flight;
     // Warm-start blob from get_pipeline_cache_data; empty = cold. Only read
     // during create_device (the driver copies it).
-    char[]             pipeline_cache_data;
-    ZString            application_name;
+    char[]               pipeline_cache_data;
+    ZString              application_name;
+    DebugMessageCallback debug_callback;
+    void*                debug_user_data;
 }
 
 <* Capabilities of the created device, filled by create_device into Device.caps;

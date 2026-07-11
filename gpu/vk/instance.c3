@@ -35,7 +35,7 @@ fn bool instance_supports_extension(ZString name) @private {
 <* Create the Vulkan instance at API 1.3. Validation enables the Khronos layer
    and debug-utils; presentation enables VK_KHR_surface plus the
    loader-supported platform surface extensions. *>
-fn vk::Instance? create_vk_instance(gpu::DeviceDesc* desc) {
+fn vk::Instance? create_vk_instance(gpu::DeviceDesc* desc, VkDeviceState* state) {
     vk::Instance instance;
     @pool() {
         vk::ApplicationInfo app = vk::application_info()
@@ -47,9 +47,21 @@ fn vk::Instance? create_vk_instance(gpu::DeviceDesc* desc) {
         ZString[1] layers = { VALIDATION_LAYER };
         ZString[MAX_INSTANCE_EXTENSIONS] extensions;
         uint extension_count = 0;
+        bool needs_debug_utils = desc.enable_validation
+            || desc.enable_debug_names
+            || desc.debug_callback != null;
+        bool has_debug_utils = needs_debug_utils
+            && instance_supports_extension(DEBUG_UTILS_EXTENSION);
+        vk::DebugUtilsMessengerCreateInfoEXT messenger_info;
         if (desc.enable_validation) {
-            extensions[extension_count++] = DEBUG_UTILS_EXTENSION;
             create_info = create_info.set_enabled_layer_names(layers[..]);
+            if (has_debug_utils) {
+                messenger_info = debug_messenger_create_info(state);
+                create_info = create_info.set_next(&messenger_info);
+            }
+        }
+        if (has_debug_utils) {
+            extensions[extension_count++] = DEBUG_UTILS_EXTENSION;
         }
         if (desc.enable_presentation) {
             if (!instance_supports_extension(SURFACE_EXTENSION)) return gpu::UNSUPPORTED_FEATURE~;

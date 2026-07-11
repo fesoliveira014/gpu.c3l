@@ -85,10 +85,33 @@ collect required instance extensions
 collect validation layer names when enabled
 create vk::Instance
 load extension entry points
-install debug utils messenger when enabled
+install a persistent debug-utils messenger for validation or callback routing
 ```
 
 The backend should support a headless path with no surface extensions and a windowed path with platform-specific surface extensions.
+
+`VK_EXT_debug_utils` is requested when validation, Vulkan debug names, or a
+structured callback needs it. `enable_debug_names` remains independent of
+`enable_validation`; missing debug-utils support makes native naming a
+best-effort no-op without discarding slot-owned public debug names.
+
+When validation or a structured callback requests Vulkan routing and the
+optional extension is available, the backend installs the persistent
+messenger. When validation is enabled, messenger create info is also chained
+through instance creation so bootstrap messages use the same route. The
+backend stores the callback and userdata before instance creation and
+retains them through messenger and instance destruction. Vulkan severity/type
+flags, message text,
+validation ID name/number, and the first useful named object are translated
+into `DebugMessage`; the native callback always returns `VK_FALSE`.
+
+Messages are forwarded synchronously from Vulkan and may be concurrent on
+arbitrary driver/application threads. Payloads are borrowed, no diagnostic
+allocation or queue is introduced, and callback reentry into gpu.c3l is
+prohibited. Native Vulkan object handles/types never cross the public boundary.
+When no callback is configured, validation output retains the stderr fallback.
+This state belongs to the sole supported live `Device`; it does not add
+multi-device support.
 
 ## 5. Physical device selection
 

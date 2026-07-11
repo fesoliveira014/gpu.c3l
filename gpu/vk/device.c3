@@ -29,6 +29,9 @@ struct VkDeviceState {
     vk::Queue                  transfer_queue;
     gpu::DeviceCaps            caps;
     bool                       validation;
+    bool                       debug_names;
+    gpu::DebugMessageCallback  debug_callback;
+    void*                      debug_user_data;
     bool                       memory_budget_enabled;
     bool                       draw_indirect_count;
     float                      max_sampler_anisotropy;
@@ -249,6 +252,9 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     VkDeviceState* state = mem::new(VkDeviceState);
     defer catch destroy_state(state);
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
+    state.debug_callback = desc.debug_callback;
+    state.debug_user_data = desc.debug_user_data;
+    state.debug_names = desc.enable_debug_names;
     state.helper_record_mutex.init()!;
     state.resource_mutex.init()!;
     state.command_mutex.init()!;
@@ -262,9 +268,9 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
 
     state.validation = desc.enable_validation;
     state.presentation_enabled = desc.enable_presentation;
-    state.instance = create_vk_instance(desc)!;
+    state.instance = create_vk_instance(desc, state)!;
     vk::load_extensions(state.instance);
-    if (desc.enable_validation) setup_debug_messenger(state);
+    if (state.validation || state.debug_callback != null) setup_debug_messenger(state);
 
     PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
     state.physical_device = selection.physical_device;
