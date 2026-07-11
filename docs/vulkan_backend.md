@@ -119,6 +119,11 @@ pick_physical_device(instance, desc) -> PhysicalDeviceSelection?
 
 Each feature-compatible candidate's queue topology is resolved once during selection. The winning `PhysicalDeviceSelection` carries that cached `QueueFamilies` value into logical-device creation; queue topology remains a suitability filter rather than a scoring bonus.
 
+When `DeviceDesc.enable_presentation` is true, a candidate must advertise
+`VK_KHR_swapchain` before it is scored. This is only the device-level
+prerequisite: concrete-surface queue support, formats, and present modes remain
+validated by `create_swapchain` after the native surface exists.
+
 ## 6. Logical device creation
 
 Logical device creation builds a Vulkan feature chain.

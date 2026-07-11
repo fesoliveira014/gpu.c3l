@@ -68,6 +68,55 @@ fn vk::PhysicalDeviceCandidate candidate(uptr device, int score, bool suitable, 
     };
 }
 
+uint presentation_query_count;
+bool presentation_query_result;
+
+fn bool query_presentation_support(vk::PhysicalDevice physical_device, ZString extension) {
+    presentation_query_count++;
+    assert(extension == vk::SWAPCHAIN_EXTENSION, "selection queries the swapchain extension");
+    return presentation_query_result;
+}
+
+fn void presentation_requirement_is_conditional() @test {
+    presentation_query_count = 0;
+    presentation_query_result = false;
+    assert(vk::presentation_requirement_satisfied(
+        false,
+        fake_physical_device(0x80),
+        &query_presentation_support,
+    ),
+        "headless selection does not require swapchain support");
+    assert(presentation_query_count == 0,
+        "headless selection performs no swapchain extension query");
+
+    presentation_query_result = true;
+    assert(vk::presentation_requirement_satisfied(
+        true,
+        fake_physical_device(0x81),
+        &query_presentation_support,
+    ),
+        "presentation accepts swapchain-capable adapters");
+    presentation_query_result = false;
+    assert(!vk::presentation_requirement_satisfied(
+        true,
+        fake_physical_device(0x82),
+        &query_presentation_support,
+    ),
+        "presentation rejects adapters without swapchain support");
+    assert(presentation_query_count == 2,
+        "presentation selection queries each candidate once");
+}
+
+fn void later_unsuitable_high_score_does_not_replace_selection() @test {
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(device: 0x92, score: 50, suitable: true),
+        candidate(device: 0x93, score: 100, suitable: false),
+    };
+    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
+    assert(selected.physical_device == fake_physical_device(0x92),
+        "later unsuitable candidate does not replace the selected adapter");
+}
+
 fn void unsuitable_high_score_falls_back_and_preserves_families() @test {
     vk::QueueFamilies fallback_families = {
         .graphics = 3,
