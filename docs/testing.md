@@ -54,6 +54,7 @@ Format translation table completeness through pure tables if separated
 BarrierDesc validation
 shader ABI sizeof/offset checks
 DescriptorHeap free-list reuse
+synthetic frame-arena graphics/compute sharing plans and exact buffer create-info mode/indices
 ```
 
 Pure CPU tests should be exhaustive where practical.
@@ -98,6 +99,23 @@ TextureIndex sampling in compute
 offscreen render target clear/draw/readback
 dynamic viewport/scissor validation, clipping pixels, pass reset, and pipeline-alias persistence
 ```
+
+Frame-arena queue-family regressions always pin aliased and distinct creation
+plans with synthetic topology tests. Validation-enabled same-range and retired-
+slot reuse cases run only when the selected graphics and compute family indices
+differ; single-family adapters report the cases as not applicable and do not
+count them as cross-family coverage.
+
+The C3 test harness captures passing-test output and has no skipped-test result,
+so the required topology audit enables output explicitly:
+
+```text
+c3c test vk_indirect --path test --test-filter frame_span_ --test-show-output
+```
+
+A `[PASS]` for a `when_available` test on a same-family adapter proves only that
+the topology guard completed. The accompanying `not applicable` message must be
+recorded separately; only a run without that message is cross-family evidence.
 
 ## 4. SDL3 windowed tests and samples
 

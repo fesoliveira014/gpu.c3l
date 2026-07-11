@@ -225,6 +225,11 @@ VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
 ```
 
 If address query returns zero, creation should fail.
+Public `BufferUsage.shared_queues` retains its graphics/compute/transfer family
+set. Internal frame arenas instead supply an exact graphics-first, deduplicated
+graphics/compute family list: one family keeps EXCLUSIVE creation with no index
+list, while two families select CONCURRENT with exactly those two indices.
+Transfer is excluded because frame arenas carry no transfer usage.
 
 ## 9. Texture implementation
 

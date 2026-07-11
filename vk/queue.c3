@@ -80,6 +80,14 @@ fn uint used_queue_families(VkDeviceState* state, uint[] out_families) {
     return count;
 }
 
+<* Graphics and compute families that may consume frame-arena ranges. *>
+fn uint graphics_compute_queue_families(VkDeviceState* state, uint[] out_families) @private {
+    uint count = 0;
+    out_families[count++] = state.graphics_family;
+    if (state.compute_family != state.graphics_family) out_families[count++] = state.compute_family;
+    return count;
+}
+
 fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
     switch (queue) {
         case gpu::QueueKind.TRANSFER: return state.transfer_queue;

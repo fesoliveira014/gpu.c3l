@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
 
 // Pure selection-tier units over synthetic family tables (no device), plus
@@ -325,6 +325,73 @@ fn void shared_queues_alone_is_invalid() @test {
     };
     fault f = @catch(gpu::create_buffer(&device, &buf_desc));
     assert(f == gpu::INVALID_ARGUMENT, "usage with no Vulkan bits faults INVALID_ARGUMENT");
+}
+
+fn void frame_arena_families_alias_without_transfer() @test {
+    vk::VkDeviceState state = {
+        .graphics_family = 4,
+        .compute_family  = 4,
+        .transfer_family = 7,
+    };
+    uint[2] families;
+    uint count = vk::graphics_compute_queue_families(&state, families[..]);
+    assert(count == 1, "aliased graphics and compute produce one family");
+    assert(families[0] == 4, "graphics family is first");
+}
+
+fn void frame_arena_families_are_graphics_compute_only() @test {
+    vk::VkDeviceState state = {
+        .graphics_family = 4,
+        .compute_family  = 5,
+        .transfer_family = 7,
+    };
+    uint[2] families;
+    uint count = vk::graphics_compute_queue_families(&state, families[..]);
+    assert(count == 2, "distinct graphics and compute produce two families");
+    assert(families[0] == 4, "graphics family is first");
+    assert(families[1] == 5, "compute family is second");
+}
+
+fn void frame_arena_create_info_is_exclusive_when_families_alias() @test {
+    gpu::BufferDesc desc = {
+        .size        = 256,
+        .usage       = { .storage, .addressable, .indirect, .index },
+        .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+    };
+    uint[1] families = { 4 };
+    vk::BufferCreateInfo info = vk::make_buffer_create_info(&desc, families[..])!!;
+    assert(info.sharing_mode == vk::SharingMode.EXCLUSIVE, "one family keeps exclusive sharing");
+    assert(info.queue_family_index_count == 0, "exclusive creation publishes no family count");
+    assert(info.p_queue_family_indices == null, "exclusive creation publishes no family pointer");
+}
+
+fn void frame_arena_create_info_uses_exact_distinct_families() @test {
+    gpu::BufferDesc desc = {
+        .size        = 256,
+        .usage       = { .storage, .addressable, .indirect, .index },
+        .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+    };
+    uint[2] families = { 4, 5 };
+    vk::BufferCreateInfo info = vk::make_buffer_create_info(&desc, families[..])!!;
+    assert(info.sharing_mode == vk::SharingMode.CONCURRENT, "two families use concurrent sharing");
+    assert(info.queue_family_index_count == 2, "concurrent creation publishes two families");
+    assert(info.p_queue_family_indices[0] == 4, "concurrent creation keeps graphics first");
+    assert(info.p_queue_family_indices[1] == 5, "concurrent creation keeps compute second");
+}
+
+fn void public_shared_families_keep_distinct_transfer() @test {
+    vk::VkDeviceState state = {
+        .graphics_family = 4,
+        .compute_family  = 5,
+        .transfer_family = 7,
+    };
+    uint[3] families;
+    uint count = vk::used_queue_families(&state, families[..]);
+    assert(count == 3, "public sharing keeps three distinct families");
+    assert(
+        families[0] == 4 && families[1] == 5 && families[2] == 7,
+        "public sharing keeps graphics, compute, and transfer order"
+    );
 }
 
 fn void pool_selection_follows_queue_family() @test {
