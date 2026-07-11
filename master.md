@@ -421,16 +421,25 @@ submit(device, SubmitDesc) -> void?
 The optional recording context enables concurrent recording from worker
 threads (one context per thread; see docs/threading.md).
 
-Command list states:
+The public `CommandList` is a two-word owner-bearing token. Its generation-
+checked handle resolves to a device-owned command record containing the Vulkan
+command buffer and all mutable recording state. Copies are aliases of the same
+record: a successful submission consumes every copy, while an unsubmitted token
+is invalidated when its frame-slot command pool resets.
+
+Backend-owned command record states:
 
 ```text
 RECORDING
 RECORDING_RENDER_PASS
 EXECUTABLE
+SUBMITTING
 SUBMITTED
 ```
 
-Invalid state transitions return faults.
+`submit` preflights and claims the whole batch before touching a Vulkan queue.
+A rejected batch restores every claimed record to `EXECUTABLE`; a successful
+batch commits pending texture layouts and invalidates every submitted token.
 
 Adjacent shipped surface not detailed here: pipeline-cache serialization
 (`get_pipeline_cache_size`/`get_pipeline_cache_data` +
@@ -697,7 +706,7 @@ Backend mapping:
 | `BufferHandle` | slot containing `vk::Buffer`, `vma::Allocation`, `vma::AllocationInfo`, address |
 | `TextureHandle` | slot containing `vk::Image`, `vma::Allocation`, `vk::ImageView`, layout |
 | `TextureIndex` | descriptor buffer entry or descriptor indexing array index |
-| `CommandList` | `vk::CommandBuffer` |
+| `CommandList` | owner-bearing token for a device-owned record containing `vk::CommandBuffer` and recording state |
 | `PipelineHandle` | `vk::Pipeline`, `vk::PipelineLayout`, shader metadata |
 | `SemaphoreHandle` | timeline `vk::Semaphore` |
 | `SwapchainHandle` | `vk::SwapchainKHR`, images, views, surface format |

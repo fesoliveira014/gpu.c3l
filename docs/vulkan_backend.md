@@ -332,18 +332,28 @@ one command pool per frame per queue family
 reset pools when frame retires
 ```
 
-Command list slot:
+Public command token:
 
 ```text
-CommandListState
-    vk::CommandBuffer command_buffer
-    QueueKind queue
-    CommandState state
-    bool in_render_pass
-    uint frame_index
+CommandList
+    Device* device
+    CommandListHandle handle
 ```
 
-Begin/end/submit validate state transitions.
+The handle resolves through a fixed 4096-entry device table to a backend
+`CommandRecord` containing the `vk::CommandBuffer`, recording context, queue,
+frame-slot index, lifecycle state, last-bound pipeline cache, and a growable
+array of pending texture-layout transitions. The public token stays within two
+machine words; copying it creates an alias, not an independent recorder.
+
+Begin/end validate state transitions. Submit preflights a whole batch under the
+command-table mutex, rejects duplicate or foreign-owner tokens, and claims every
+record as `SUBMITTING` before constructing the Vulkan submission. A fault before
+`vkQueueSubmit2` succeeds restores claimed records to `EXECUTABLE`. Success commits layout
+transitions in submission order and frees the records, invalidating all aliases.
+Frame-slot pool reset reclaims any unsubmitted records before resetting their
+Vulkan command pool. A recording context cannot be destroyed while one of its
+records remains live.
 
 ## 13. Synchronization
 

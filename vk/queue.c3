@@ -114,102 +114,180 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
 
     @pool() {
         vk::SubmitInfo2 submit = vk::submit_info2();
+        gpu::QueueKind kind = gpu::QueueKind.GRAPHICS;
+        CommandRecord*[] records;
+        bool claimed = false;
 
-        gpu::QueueKind kind = desc.command_lists.len > 0 ? desc.command_lists[0].queue : gpu::QueueKind.GRAPHICS;
-        bool piggyback_compute  = kind == gpu::QueueKind.COMPUTE && state.compute_queue_distinct;
-        bool piggyback_transfer = kind == gpu::QueueKind.TRANSFER && state.transfer_queue != state.graphics_queue;
-        bool piggyback = piggyback_compute || piggyback_transfer;
         if (desc.command_lists.len > 0) {
-            vk::CommandBufferSubmitInfo[] cmds = mem::talloc_array(vk::CommandBufferSubmitInfo, desc.command_lists.len);
-            foreach (i, &cl : desc.command_lists) {
-                if (cl.state != gpu::CommandState.EXECUTABLE) return gpu::COMMAND_RECORDING_ERROR~;
-                if (cl.queue != kind) return gpu::INVALID_ARGUMENT~;
-                cmds[i] = vk::command_buffer_submit_info().set_command_buffer((vk::CommandBuffer)cl.backend);
+            records = mem::talloc_array(CommandRecord*, (sz)desc.command_lists.len);
+            state.command_mutex.lock()!!;
+            {
+                defer state.command_mutex.unlock();
+                foreach (i, &token : desc.command_lists) {
+                    if (token.device != device) return gpu::INVALID_ARGUMENT~;
+                    for (sz j = 0; j < i; j++) {
+                        if ((ulong)desc.command_lists[j].handle == (ulong)token.handle) {
+                            return gpu::COMMAND_RECORDING_ERROR~;
+                        }
+                    }
+                    CommandRecord* record = state.commands.get(token.handle)!;
+                    if (record.state != CommandState.EXECUTABLE) return gpu::COMMAND_RECORDING_ERROR~;
+                    if (i == 0) {
+                        kind = record.queue;
+                    } else if (record.queue != kind) {
+                        return gpu::INVALID_ARGUMENT~;
+                    }
+                    records[i] = record;
+                }
+                foreach (record : records) record.state = CommandState.SUBMITTING;
+                claimed = true;
+            }
+
+            vk::CommandBufferSubmitInfo[] cmds = mem::talloc_array(
+                vk::CommandBufferSubmitInfo,
+                (sz)records.len,
+            );
+            foreach (i, record : records) {
+                cmds[i] = vk::command_buffer_submit_info()
+                    .set_command_buffer(record.command_buffer);
             }
             submit = submit.set_command_buffer_infos(cmds);
         }
 
-        // A named swapchain couples this submit to its pending acquire: wait
-        // the binary acquire semaphore, signal the image's present semaphore.
+        defer catch {
+            if (claimed) {
+                state.command_mutex.lock()!!;
+                defer state.command_mutex.unlock();
+                foreach (record : records) {
+                    if (record.state == CommandState.SUBMITTING) {
+                        record.state = CommandState.EXECUTABLE;
+                    }
+                }
+            }
+        }
+
+        bool piggyback_compute = kind == gpu::QueueKind.COMPUTE
+            && state.compute_queue_distinct;
+        bool piggyback_transfer = kind == gpu::QueueKind.TRANSFER
+            && state.transfer_queue != state.graphics_queue;
+        bool piggyback = piggyback_compute || piggyback_transfer;
+
         SwapchainSlot* swapchain = null;
         if (desc.swapchain.is_valid()) {
             swapchain = state.swapchains.get(desc.swapchain)!;
-            swapchain_submit_guard(swapchain.acquire_pending, swapchain.acquire_consumed, kind)!;
+            swapchain_submit_guard(
+                swapchain.acquire_pending,
+                swapchain.acquire_consumed,
+                kind,
+            )!;
         }
 
         usz wait_count = desc.waits.len + (swapchain != null ? 1 : 0);
         if (wait_count > 0) {
-            vk::SemaphoreSubmitInfo[] waits = mem::talloc_array(vk::SemaphoreSubmitInfo, (sz)wait_count);
-            foreach (i, w : desc.waits) {
-                SemaphoreSlot* slot = state.semaphores.get(w.semaphore)!;
+            vk::SemaphoreSubmitInfo[] waits = mem::talloc_array(
+                vk::SemaphoreSubmitInfo,
+                (sz)wait_count,
+            );
+            foreach (i, wait : desc.waits) {
+                SemaphoreSlot* slot = state.semaphores.get(wait.semaphore)!;
                 waits[i] = vk::semaphore_submit_info()
                     .set_semaphore(slot.semaphore)
-                    .set_value((ulong)w.value)
-                    .set_stage_mask(stage_to_vk(w.stage));
+                    .set_value((ulong)wait.value)
+                    .set_stage_mask(stage_to_vk(wait.stage));
             }
             if (swapchain != null) {
                 waits[desc.waits.len] = vk::semaphore_submit_info()
                     .set_semaphore(swapchain.pending_acquire_semaphore)
-                    .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+                    .set_stage_mask(
+                        vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    );
             }
             submit = submit.set_wait_semaphore_infos(waits);
         }
 
-        usz signal_count = desc.signals.len + (swapchain != null ? 1 : 0) + (piggyback ? 1 : 0);
+        usz signal_count = desc.signals.len
+            + (swapchain != null ? 1 : 0)
+            + (piggyback ? 1 : 0);
         vk::SemaphoreSubmitInfo* aux_signal = null;
         if (signal_count > 0) {
-            vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(vk::SemaphoreSubmitInfo, (sz)signal_count);
-            foreach (i, s : desc.signals) {
-                SemaphoreSlot* slot = state.semaphores.get(s.semaphore)!;
+            vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(
+                vk::SemaphoreSubmitInfo,
+                (sz)signal_count,
+            );
+            foreach (i, signal : desc.signals) {
+                SemaphoreSlot* slot = state.semaphores.get(signal.semaphore)!;
                 signals[i] = vk::semaphore_submit_info()
                     .set_semaphore(slot.semaphore)
-                    .set_value((ulong)s.value)
-                    .set_stage_mask(stage_to_vk(s.stage));
+                    .set_value((ulong)signal.value)
+                    .set_stage_mask(stage_to_vk(signal.stage));
             }
             usz next_signal = desc.signals.len;
             if (swapchain != null) {
                 signals[next_signal++] = vk::semaphore_submit_info()
-                    .set_semaphore(swapchain.present_semaphores[swapchain.pending_image])
-                    .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+                    .set_semaphore(
+                        swapchain.present_semaphores[swapchain.pending_image],
+                    )
+                    .set_stage_mask(
+                        vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    );
             }
             if (piggyback) {
-                vk::Semaphore aux_semaphore = piggyback_compute ? state.aux_compute_timeline : state.aux_transfer_timeline;
+                vk::Semaphore aux_semaphore = piggyback_compute
+                    ? state.aux_compute_timeline
+                    : state.aux_transfer_timeline;
                 signals[next_signal] = vk::semaphore_submit_info()
                     .set_semaphore(aux_semaphore)
-                    .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+                    .set_stage_mask(
+                        vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+                    );
                 aux_signal = &signals[next_signal++];
             }
             submit = submit.set_signal_semaphore_infos(signals);
         }
 
         Mutex* queue_mutex = queue_mutex_for(state, kind);
-        queue_mutex.lock()!!;
-        defer queue_mutex.unlock();
-        // The aux value is baked under the mutex so no concurrent submitter
-        // can double-signal it.
-        if (aux_signal != null) {
-            aux_signal.value = (piggyback_compute ? state.aux_compute_counter : state.aux_transfer_counter) + 1;
+        {
+            queue_mutex.lock()!!;
+            defer queue_mutex.unlock();
+            if (aux_signal != null) {
+                aux_signal.value = (piggyback_compute
+                    ? state.aux_compute_counter
+                    : state.aux_transfer_counter) + 1;
+            }
+            check(vk::queue_submit2(
+                queue_for(state, kind),
+                1,
+                &submit,
+                (vk::Fence)null,
+            ))!;
+            state.submit_stats.queue_submits++;
+            if (swapchain != null) swapchain.acquire_consumed = true;
+            if (piggyback_compute) {
+                state.aux_compute_counter++;
+                state.aux_compute_last_signaled = state.aux_compute_counter;
+                state.compute_used_since_frame = true;
+            }
+            if (piggyback_transfer) {
+                state.aux_transfer_counter++;
+                state.aux_transfer_last_signaled = state.aux_transfer_counter;
+                state.transfer_used_since_frame = true;
+            }
+            if (!state.frame_active) {
+                state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
+            }
+            foreach (record : records) {
+                commit_pending_layouts(state, record);
+                record.state = CommandState.SUBMITTED;
+            }
         }
-        check(vk::queue_submit2(queue_for(state, kind), 1, &submit, (vk::Fence)null))!;
-        state.submit_stats.queue_submits++;
-        // A rejected submit records nothing below.
-        if (swapchain != null) swapchain.acquire_consumed = true;
-        if (piggyback_compute) {
-            state.aux_compute_counter++;
-            state.aux_compute_last_signaled = state.aux_compute_counter;
-            state.compute_used_since_frame = true;
-        }
-        if (piggyback_transfer) {
-            state.aux_transfer_counter++;
-            state.aux_transfer_last_signaled = state.aux_transfer_counter;
-            state.transfer_used_since_frame = true;
-        }
-        if (!state.frame_active) state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
-        // Commit each list's pending texture-layout transitions in submission
-        // order, still under the queue mutex, now that the GPU work is queued.
-        foreach (&cl : desc.command_lists) {
-            commit_pending_layouts(state, cl);
-            cl.state = gpu::CommandState.SUBMITTED;
+
+        if (claimed) {
+            state.command_mutex.lock()!!;
+            defer state.command_mutex.unlock();
+            foreach (token : desc.command_lists) {
+                release_command(state, token.handle);
+            }
+            claimed = false;
         }
     };
 }

@@ -138,15 +138,23 @@ The backend maps those kinds to Vulkan queue families and queue handles.
 
 ### Command lists
 
-A command list is a transient recorder.
+A command list is a transient, owner-bearing token for a device-owned command
+record. The public token contains only its `Device*` and generation-checked handle;
+the Vulkan command buffer, bind cache, pending layouts, context, queue, frame slot,
+and lifecycle state remain backend-owned. Copies therefore alias one record.
 
 State transitions:
 
 ```text
-RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTED
+RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> consumed
 ```
 
-`begin_commands` returns a list in `RECORDING`. Render passes nest into `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes the list to `EXECUTABLE`; submission moves it to `SUBMITTED`. Invalid transitions return faults. Commands that require a render pass must fault if recorded outside one. Commands that cannot be recorded inside a render pass must fault if a render pass is active.
+`begin_commands` creates a record in `RECORDING`. Render passes nest into
+`RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes
+the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
+batch as `SUBMITTING`; a pre-queue fault restores it, while success invalidates
+every alias. Frame-slot pool reset also invalidates abandoned records. Invalid
+transitions return faults, and render-pass command constraints remain enforced.
 
 ### Buffers
 

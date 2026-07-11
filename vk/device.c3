@@ -55,10 +55,12 @@ struct VkDeviceState {
     // Off-frame submission not yet covered by an end_frame chain or teardown.
     Atomic{bool}               off_frame_pending;
     // Lock order: helper_record_mutex -> transfer_mutex -> resource_mutex ->
-    // queue mutexes. helper_record_mutex is outermost because the blocking
-    // helpers it wraps take transfer_mutex internally for their allocation.
+    // command_mutex. Queue mutexes are never nested with command_mutex.
+    // helper_record_mutex is outermost because the blocking helpers it wraps
+    // take transfer_mutex internally for their allocation.
     Mutex                      helper_record_mutex;
     Mutex                      resource_mutex;
+    Mutex                      command_mutex;
     Mutex                      transfer_mutex;
     Mutex                      graphics_queue_mutex;
     Mutex                      compute_queue_mutex;
@@ -70,6 +72,7 @@ struct VkDeviceState {
     FrameArenaState[]          frame_arenas;
     PersistentArenaState       persistent_arena;
     RecordingContextTable      recording_contexts;
+    CommandTable               commands;
     gpu::RecordingContextHandle default_context;
     // Reserved for the four blocking helpers; never touched by Tier-C
     // recording, so it never races the default context's pool.
@@ -226,6 +229,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
     state.helper_record_mutex.init()!;
     state.resource_mutex.init()!;
+    state.command_mutex.init()!;
     state.transfer_mutex.init()!;
     state.graphics_queue_mutex.init()!;
     state.compute_queue_mutex.init()!;
@@ -284,6 +288,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     create_frame_resources(state, desc)!;
     create_persistent_arena(state, desc)!;
     state.recording_contexts.slots = mem::new_array(RecordingContextCell, gpu::MAX_RECORDING_CONTEXTS);
+    state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
     RecordingContextState default_ctx;
     create_context_pools(state, &default_ctx)!;
     state.default_context = state.recording_contexts.alloc(default_ctx)!;
@@ -382,6 +387,7 @@ fn void destroy_state(VkDeviceState* state) @private {
             mem::free(state.shaders.slots.ptr);
             state.shaders.slots = {};
         }
+        destroy_command_table(state);
         if (state.recording_contexts.slots.ptr != null) {
             foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
                 if (cell.used) destroy_context_pools(state, &cell.value);
@@ -412,6 +418,7 @@ fn void destroy_state(VkDeviceState* state) @private {
     }
     if (state.helper_record_mutex.is_initialized())  (void)state.helper_record_mutex.destroy();
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
+    if (state.command_mutex.is_initialized())        (void)state.command_mutex.destroy();
     if (state.transfer_mutex.is_initialized())       (void)state.transfer_mutex.destroy();
     if (state.graphics_queue_mutex.is_initialized()) (void)state.graphics_queue_mutex.destroy();
     if (state.compute_queue_mutex.is_initialized())  (void)state.compute_queue_mutex.destroy();

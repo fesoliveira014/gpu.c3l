@@ -165,21 +165,21 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | `create_device`, `create_swapchain`, sampler/aniso paths | validation layers not installed; presentation off; missing device feature |
-| `INVALID_ARGUMENT` | any create/upload/export; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value; mixed-queue-kind submit; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; a list already tracking `PENDING_LAYOUT_CAP` (16) distinct textures records a 17th; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
-| `INVALID_HANDLE` | any handle-taking call | use after destroy (generation mismatch) or never-live handle |
-| `INVALID_RESOURCE_STATE` | `cmd_texture_barrier`, readback helpers | `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
+| `INVALID_ARGUMENT` | any create/upload/export; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); pipeline/shader creates; `cmd_texture_barrier`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value; mixed-queue-kind or cross-device command submission/finalization; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_HANDLE` | any handle-taking call, `cmd_*`, `end_commands`, `submit` | use after destroy (generation mismatch), never-live handle, consumed command-list alias, or abandoned command token after its frame-slot pool resets |
+| `INVALID_RESOURCE_STATE` | `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | recording context still owns a live command record, or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | submits, `wait_semaphore`/`begin_frame` on device loss | driver reported device loss; unrecoverable |
 | `RESOURCE_IN_USE` | `destroy_texture` | a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first (gpu.c3l#81). Frames-in-flight destroys — including a resource an off-frame `submit` referenced — are unaffected: those are handled by deferred backend release instead (gpu.c3l#44, gpu.c3l#80) |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths | per-frame data outgrew the arena (sizing knobs: gpu.c3l#28) |
-| `SLOT_TABLE_FULL` | creates | handle table at capacity; textures scale via `DeviceDesc.texture_capacity` |
+| `SLOT_TABLE_FULL` | creates, `begin_commands` | handle or command-record table at capacity; textures scale via `DeviceDesc.texture_capacity` |
 | `DESCRIPTOR_HEAP_FULL` | `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination or failed compiling |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
 | `SURFACE_LOST` | acquire/present | window/surface destroyed mid-frame |
 | `SWAPCHAIN_OUT_OF_DATE` | `acquire_next_image`, `present` | surface changed (resize); `resize_swapchain` and retry |
-| `COMMAND_RECORDING_ERROR` | `cmd_*` | call outside its required recording state |
+| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
 | `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |
 | `WAIT_TIMEOUT` | `wait_semaphore`, `begin_frame` | bounded host wait elapsed before the timeline reached its target value; safe to retry |
 
@@ -536,6 +536,15 @@ SubmitDesc
 create_semaphore / destroy_semaphore / wait_semaphore   (timeline; SemaphoreValue = distinct ulong)
 create_recording_context / destroy_recording_context    (one per worker thread; docs/threading.md)
 ```
+
+`CommandList` is a small owner-bearing token; mutable lifecycle, binding cache,
+pending texture layouts, and the backend command buffer are device-owned. Copies
+alias the same record. A successful `submit` consumes every alias, so later use
+faults `INVALID_HANDLE`. A submit batch is validated as a transaction: duplicate
+tokens fault `COMMAND_RECORDING_ERROR`, cross-device tokens fault
+`INVALID_ARGUMENT`, and failures before a successful Vulkan queue call leave all valid
+tokens executable. An unsubmitted token becomes stale when its frame-slot command
+pool resets.
 
 `QueueKind.COMPUTE` routes to a real compute queue when
 `DeviceCaps.async_compute` is true; resources used by both GRAPHICS and
