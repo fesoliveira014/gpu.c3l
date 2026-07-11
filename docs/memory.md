@@ -449,9 +449,11 @@ and PERSISTENT_UPLOAD keep VMA's memory-type freedom and the explicit
 Frame-arena backing buffers are created for exactly the selected graphics and
 compute families. When those family indices differ, the backend uses concurrent
 sharing; when they alias, the buffer remains exclusive even if transfer uses
-another family. Callers do not set `BufferUsage.shared_queues` for frame spans.
-This ownership policy does not replace barriers or semaphores: callers still
-order host writes and cross-queue GPU accesses explicitly.
+another family. Concurrent sharing is the correctness-first choice while frame
+spans expose no family intent; the explicit-transfer alternative remains
+deferred to gpu.c3l#36. Callers do not set `BufferUsage.shared_queues` for frame
+spans. This ownership policy does not replace barriers or semaphores: callers
+still order host writes and cross-queue GPU accesses explicitly.
 
 Allocation during `ACTIVE` is lock-free — the cursor is an atomic bumped with
 a CAS loop, so worker threads allocate concurrently (see docs/threading.md):
