@@ -37,3 +37,33 @@ fn void? validate_pipeline_kind(VkDeviceState* state, gpu::PipelineHandle handle
     PipelineSlot* slot = state.pipelines.get(handle)!;
     if (!pipeline_kind_matches(state, slot, kind)) return gpu::INVALID_ARGUMENT~;
 }
+
+<* The shader's compiled stage must match its pipeline role. *>
+fn void? validate_shader_stage(
+    VkDeviceState* state,
+    ShaderSlot* slot,
+    gpu::ShaderStage expected,
+    ZString operation,
+    ZString rejected_field,
+    gpu::ShaderHandle handle,
+) {
+    if (slot.stage == expected) return;
+    ZString invariant = expected == gpu::ShaderStage.COMPUTE
+        ? "shader stage must be COMPUTE"
+        : expected == gpu::ShaderStage.VERTEX
+            ? "shader stage must be VERTEX"
+            : "shader stage must be FRAGMENT";
+    return report_contract_failure(
+        state:               state,
+        operation:           operation,
+        public_fault:        gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.SHADER,
+        has_public_identity: true,
+        index:               handle.index,
+        generation:          handle.generation,
+        debug_name:          null,
+        rejected_field:      rejected_field,
+        invariant:           invariant,
+        backend_text:        null,
+    )~;
+}

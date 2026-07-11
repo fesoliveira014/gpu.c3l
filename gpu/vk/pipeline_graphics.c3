@@ -86,36 +86,22 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
     check_polygon_mode_support(desc.raster.polygon_mode, state.caps.line_polygon_mode)!;
     ShaderSlot* vertex_shader = state.shaders.get(desc.vertex_shader)!;
     ShaderSlot* fragment_shader = state.shaders.get(desc.fragment_shader)!;
-    if (vertex_shader.stage != gpu::ShaderStage.VERTEX) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_graphics_pipeline",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SHADER,
-            has_public_identity: true,
-            index:               desc.vertex_shader.index,
-            generation:          desc.vertex_shader.generation,
-            debug_name:          null,
-            rejected_field:      "GraphicsPipelineDesc.vertex_shader",
-            invariant:           "shader stage must be VERTEX",
-            backend_text:        null,
-        )~;
-    }
-    if (fragment_shader.stage != gpu::ShaderStage.FRAGMENT) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_graphics_pipeline",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SHADER,
-            has_public_identity: true,
-            index:               desc.fragment_shader.index,
-            generation:          desc.fragment_shader.generation,
-            debug_name:          null,
-            rejected_field:      "GraphicsPipelineDesc.fragment_shader",
-            invariant:           "shader stage must be FRAGMENT",
-            backend_text:        null,
-        )~;
-    }
+    validate_shader_stage(
+        state:          state,
+        slot:           vertex_shader,
+        expected:       gpu::ShaderStage.VERTEX,
+        operation:      "create_graphics_pipeline",
+        rejected_field: "GraphicsPipelineDesc.vertex_shader",
+        handle:         desc.vertex_shader,
+    )!;
+    validate_shader_stage(
+        state:          state,
+        slot:           fragment_shader,
+        expected:       gpu::ShaderStage.FRAGMENT,
+        operation:      "create_graphics_pipeline",
+        rejected_field: "GraphicsPipelineDesc.fragment_shader",
+        handle:         desc.fragment_shader,
+    )!;
 
     PipelineKey key = build_graphics_key(desc);
     ulong hash = hash_key(&key);

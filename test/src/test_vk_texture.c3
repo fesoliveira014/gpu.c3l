@@ -516,8 +516,8 @@ fn void invalid_texture_descriptor_diagnostic_preserves_fault() @test {
     TextureDiagnosticCapture capture = {
         .expected_operation      = "create_texture",
         .expected_debug_name     = "invalid_texture_desc",
-        .expected_rejected_field = "TextureDesc.width",
-        .expected_invariant      = "width must be greater than zero",
+        .expected_rejected_field = "TextureDesc",
+        .expected_invariant      = "descriptor must satisfy the texture creation contract",
     };
     gpu::Device device = make_texture_diagnostic_device(&capture);
     defer gpu::destroy_device(&device)!!;
@@ -541,8 +541,8 @@ fn void invalid_texture_descriptor_diagnostic_preserves_fault() @test {
     assert(capture.resource_kind == gpu::DebugResourceKind.TEXTURE, "resource kind is texture");
     assert(!capture.has_public_identity, "rejected creation has no public identity");
     assert(capture.debug_name_matches, "descriptor debug name is preserved");
-    assert(capture.rejected_field_matches, "rejected width field is identified");
-    assert(capture.invariant_matches, "width invariant is identified");
+    assert(capture.rejected_field_matches, "invalid descriptor is reported without re-deriving its field");
+    assert(capture.invariant_matches, "generic texture creation invariant is identified");
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
     state.debug_callback = null;

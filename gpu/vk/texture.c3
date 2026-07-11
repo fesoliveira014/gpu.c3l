@@ -381,10 +381,6 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     enter_tracked(state);
     defer exit_tracked(state);
     if (!gpu::texture_desc_valid(desc)) {
-        ZString rejected_field = desc.width == 0 ? "TextureDesc.width" : "TextureDesc";
-        ZString invariant = desc.width == 0
-            ? "width must be greater than zero"
-            : "descriptor must satisfy the texture creation contract";
         return report_contract_failure(
             state:               state,
             operation:           "create_texture",
@@ -394,8 +390,8 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
             index:               0,
             generation:          0,
             debug_name:          desc.debug_name,
-            rejected_field:      rejected_field,
-            invariant:           invariant,
+            rejected_field:      "TextureDesc",
+            invariant:           "descriptor must satisfy the texture creation contract",
             backend_text:        "texture descriptor validation failed",
         )~;
     }
