@@ -2,6 +2,68 @@ module gpu_test;
 
 import gpu;
 import gpu::vk @public;
+import vk;
+
+fn void staging_buffer_create_info_covers_selected_families() @test {
+    uint[3][3] topologies = {
+        { 3, 3, 3 },
+        { 5, 2, 5 },
+        { 7, 4, 1 },
+    };
+    uint[3] expected_counts = { 1, 2, 3 };
+    foreach (index, topology : topologies) {
+        vk::VkDeviceState state = {
+            .graphics_family = topology[0],
+            .compute_family  = topology[1],
+            .transfer_family = topology[2],
+        };
+        uint[3] families;
+        uint family_count = gpu::vk::used_queue_families(&state, families[..]);
+        gpu::BufferDesc desc = gpu::vk::staging_arena_desc(4096);
+        vk::BufferCreateInfo info = gpu::vk::make_buffer_create_info(&desc, families[:family_count])!!;
+        uint expected_count = expected_counts[index];
+        assert(family_count == expected_count, "selected family count is exact");
+        assert(info.size == 4096, "staging size is preserved");
+        assert((uint)info.usage == (uint)vk::BufferUsageFlagBits.TRANSFER_SRC_BIT,
+            "staging usage remains transfer source only");
+        assert(families[0] == topology[0], "graphics family remains first");
+        if (expected_count > 1) assert(families[1] == topology[1], "compute family remains second");
+        if (expected_count > 2) assert(families[2] == topology[2], "transfer family remains third");
+        if (expected_count == 1) {
+            assert(info.sharing_mode == vk::SharingMode.EXCLUSIVE, "one family stays exclusive");
+            assert(info.queue_family_index_count == 0 && info.p_queue_family_indices == null,
+                "exclusive creation publishes no family list");
+        } else {
+            assert(info.sharing_mode == vk::SharingMode.CONCURRENT, "distinct families use concurrent sharing");
+            assert(info.queue_family_index_count == expected_count, "concurrent family count is exact");
+            assert(info.p_queue_family_indices == &families[0], "create info points to caller storage");
+        }
+    }
+}
+
+fn void transfer_single_family_buffers_stay_exclusive() @test {
+    gpu::BufferDesc[2] descs = {
+        gpu::vk::readback_arena_desc(2048),
+        gpu::vk::staging_dedicated_desc(2048),
+    };
+    uint[2] expected_usage = {
+        (uint)vk::BufferUsageFlagBits.TRANSFER_DST_BIT,
+        (uint)vk::BufferUsageFlagBits.TRANSFER_SRC_BIT,
+    };
+    gpu::MemoryKind[2] expected_memory = {
+        gpu::MemoryKind.READBACK,
+        gpu::MemoryKind.STAGING,
+    };
+    foreach (index, &desc : descs) {
+        vk::BufferCreateInfo info = gpu::vk::make_buffer_create_info(desc, {})!!;
+        assert(!desc.usage.shared_queues, "single-family transfer descriptor does not request sharing");
+        assert((uint)info.usage == expected_usage[index], "single-family transfer usage remains exact");
+        assert(desc.memory_kind == expected_memory[index], "single-family transfer memory kind remains exact");
+        assert(info.sharing_mode == vk::SharingMode.EXCLUSIVE, "single-family transfer buffer stays exclusive");
+        assert(info.queue_family_index_count == 0 && info.p_queue_family_indices == null,
+            "single-family transfer buffer publishes no family list");
+    }
+}
 
 fn void transfer_range_places_aligned_extent() @test {
     gpu::vk::TransferArenaRange range = gpu::vk::transfer_arena_range(

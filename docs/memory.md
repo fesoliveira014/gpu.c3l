@@ -579,6 +579,18 @@ Upload flow:
 6. Staging span is recycled after submit timeline retires.
 ```
 
+The long-lived staging ring is `EXCLUSIVE` when graphics, compute, and
+transfer select one family. With multiple selected families it is
+`CONCURRENT` across the exact deduplicated order returned by the device
+topology: graphics, compute, then transfer. The readback ring remains
+exclusive because device copies overwrite its ranges before host-only reads;
+one-shot dedicated staging fallbacks also remain exclusive to their single
+consumer.
+
+Concurrent sharing removes queue-family ownership transfers only. Host
+flushes, barriers, submission ordering, queue completion, timeline retirement,
+and ring locking remain required. This policy assumes one live `Device`.
+
 ### 13.1 Which timeline retires a range
 
 Every staging range, dedicated staging buffer, and readback range carries a

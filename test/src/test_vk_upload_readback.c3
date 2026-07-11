@@ -1,7 +1,9 @@
 module gpu_test;
 
 import gpu;
+import gpu::vk;
 import std::core::mem;
+import std::io;
 
 // Headless (lavapipe): upload/readback helpers over the staging and readback
 // arenas. The compute shader from the heap tests consumes helper-uploaded data.
@@ -10,6 +12,13 @@ const char[*] UPLOAD_HEAP_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");
 
 const uint UR_TEX = 8;
 const usz UR_TEX_BYTES = UR_TEX * UR_TEX * 4;
+const usz STAGING_REUSE_BYTES = 64;
+
+struct StagingReuseFixture {
+    gpu::Device device;
+    gpu::BufferHandle[2] buffers;
+    gpu::GpuSpan[2] spans;
+}
 
 fn gpu::Device make_transfer_test_device(usz staging_size = 0) {
     gpu::DeviceDesc desc = {
@@ -20,6 +29,186 @@ fn gpu::Device make_transfer_test_device(usz staging_size = 0) {
         .application_name   = "gpu_upload_readback_test",
     };
     return gpu::create_device(&desc)!!;
+}
+
+fn StagingReuseFixture make_staging_reuse_fixture() {
+    StagingReuseFixture fixture;
+    fixture.device = make_transfer_test_device(staging_size: STAGING_REUSE_BYTES);
+    gpu::BufferDesc desc = { .size = STAGING_REUSE_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK };
+    for (uint i = 0; i < 2; i++) {
+        fixture.buffers[i] = gpu::create_buffer(&fixture.device, &desc)!!;
+        fixture.spans[i] = gpu::get_buffer_span(&fixture.device, fixture.buffers[i])!!;
+    }
+    return fixture;
+}
+
+fn void destroy_staging_reuse_fixture(StagingReuseFixture* fixture) {
+    gpu::destroy_buffer(&fixture.device, fixture.buffers[1])!!;
+    gpu::destroy_buffer(&fixture.device, fixture.buffers[0])!!;
+    gpu::destroy_device(&fixture.device)!!;
+}
+
+fn void fill_staging_payload(char[] payload, uint seed) {
+    foreach (i, &value : payload) *value = (char)(seed + i * 17);
+}
+
+fn void verify_staging_payload(StagingReuseFixture* fixture, uint index, char[] expected) {
+    gpu::invalidate_buffer(
+        device: &fixture.device,
+        buffer: fixture.buffers[index],
+        offset: 0,
+        size:   0,
+    )!!;
+    char* actual = (char*)fixture.spans[index].cpu;
+    foreach (i, value : expected) assert(actual[i] == value, "reused staging range preserves payload bytes");
+}
+
+fn void blocking_staging_upload(StagingReuseFixture* fixture, char[] payload) {
+    gpu::upload_buffer_data(
+        device:      &fixture.device,
+        dst:         fixture.buffers[0],
+        offset:      0,
+        data:        payload,
+        next_stage:  gpu::Stage.HOST,
+        next_hazard: gpu::Hazard.HOST_READ,
+    )!!;
+    verify_staging_payload(fixture, 0, payload);
+}
+
+<* Waits for frame retirement so the next upload can reuse physical offset zero. *>
+fn void recorded_staging_upload(StagingReuseFixture* fixture, gpu::QueueKind queue, uint index, char[] payload) {
+    gpu::FrameToken frame = gpu::begin_frame(&fixture.device)!!;
+    gpu::CommandList commands = gpu::begin_commands(&fixture.device, queue)!!;
+    gpu::cmd_upload_buffer(
+        commands: &commands,
+        dst:      fixture.buffers[index],
+        offset:   0,
+        data:     payload,
+    )!!;
+    gpu::BufferBarrier host_read = {
+        .buffer = fixture.buffers[index], .offset = 0, .size = payload.len,
+        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    };
+    gpu::cmd_buffer_barrier(&commands, &host_read)!!;
+    gpu::end_commands(&commands)!!;
+    gpu::CommandList[1] lists = { commands };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&fixture.device, &submit)!!;
+    gpu::wait_queue_idle(&fixture.device, queue)!!;
+    gpu::end_frame(&frame)!!;
+    gpu::wait_queue_idle(&fixture.device, gpu::QueueKind.GRAPHICS)!!;
+    verify_staging_payload(fixture, index, payload);
+}
+
+fn void run_blocking_to_recorded_reuse(StagingReuseFixture* fixture, gpu::QueueKind queue, uint first_seed, uint second_seed) {
+    char[STAGING_REUSE_BYTES] first_payload;
+    char[STAGING_REUSE_BYTES] second_payload;
+    fill_staging_payload(first_payload[..], first_seed);
+    fill_staging_payload(second_payload[..], second_seed);
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)fixture.device.backend_state;
+    ulong fallbacks = gpu::vk::dedicated_fallback_count(state);
+    blocking_staging_upload(fixture, first_payload[..]);
+    recorded_staging_upload(
+        fixture: fixture,
+        queue:   queue,
+        index:   1,
+        payload: second_payload[..],
+    );
+    assert(gpu::vk::dedicated_fallback_count(state) == fallbacks, "cross-family reuse stays on the staging ring");
+}
+
+fn void staging_range_reuse_blocking_graphics_to_recorded_compute() @test {
+    StagingReuseFixture fixture = make_staging_reuse_fixture();
+    defer destroy_staging_reuse_fixture(&fixture);
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)fixture.device.backend_state;
+    if (state.graphics_family == state.compute_family) {
+        io::eprintfn(
+            "staging_range_reuse_blocking_graphics_to_recorded_compute: N/A graphics=%d compute=%d transfer=%d",
+            state.graphics_family,
+            state.compute_family,
+            state.transfer_family,
+        );
+        return;
+    }
+    run_blocking_to_recorded_reuse(
+        fixture:    &fixture,
+        queue:      gpu::QueueKind.COMPUTE,
+        first_seed: 11,
+        second_seed: 97,
+    );
+    io::eprintfn(
+        "staging_range_reuse_blocking_graphics_to_recorded_compute: PASS graphics=%d compute=%d transfer=%d",
+        state.graphics_family,
+        state.compute_family,
+        state.transfer_family,
+    );
+}
+
+fn void staging_range_reuse_blocking_graphics_to_recorded_transfer() @test {
+    StagingReuseFixture fixture = make_staging_reuse_fixture();
+    defer destroy_staging_reuse_fixture(&fixture);
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)fixture.device.backend_state;
+    if (state.graphics_family == state.transfer_family) {
+        io::eprintfn(
+            "staging_range_reuse_blocking_graphics_to_recorded_transfer: N/A graphics=%d compute=%d transfer=%d",
+            state.graphics_family,
+            state.compute_family,
+            state.transfer_family,
+        );
+        return;
+    }
+    run_blocking_to_recorded_reuse(
+        fixture:    &fixture,
+        queue:      gpu::QueueKind.TRANSFER,
+        first_seed: 23,
+        second_seed: 131,
+    );
+    io::eprintfn(
+        "staging_range_reuse_blocking_graphics_to_recorded_transfer: PASS graphics=%d compute=%d transfer=%d",
+        state.graphics_family,
+        state.compute_family,
+        state.transfer_family,
+    );
+}
+
+fn void staging_range_reuse_recorded_compute_to_recorded_transfer() @test {
+    StagingReuseFixture fixture = make_staging_reuse_fixture();
+    defer destroy_staging_reuse_fixture(&fixture);
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)fixture.device.backend_state;
+    if (state.compute_family == state.transfer_family) {
+        io::eprintfn(
+            "staging_range_reuse_recorded_compute_to_recorded_transfer: N/A graphics=%d compute=%d transfer=%d",
+            state.graphics_family,
+            state.compute_family,
+            state.transfer_family,
+        );
+        return;
+    }
+    char[STAGING_REUSE_BYTES] first_payload;
+    char[STAGING_REUSE_BYTES] second_payload;
+    fill_staging_payload(first_payload[..], 41);
+    fill_staging_payload(second_payload[..], 173);
+    ulong fallbacks = gpu::vk::dedicated_fallback_count(state);
+    recorded_staging_upload(
+        fixture: &fixture,
+        queue:   gpu::QueueKind.COMPUTE,
+        index:   0,
+        payload: first_payload[..],
+    );
+    recorded_staging_upload(
+        fixture: &fixture,
+        queue:   gpu::QueueKind.TRANSFER,
+        index:   1,
+        payload: second_payload[..],
+    );
+    assert(gpu::vk::dedicated_fallback_count(state) == fallbacks, "recorded family switch stays on the staging ring");
+    io::eprintfn(
+        "staging_range_reuse_recorded_compute_to_recorded_transfer: PASS graphics=%d compute=%d transfer=%d",
+        state.graphics_family,
+        state.compute_family,
+        state.transfer_family,
+    );
 }
 
 fn void buffer_upload_readback_round_trip() @test {

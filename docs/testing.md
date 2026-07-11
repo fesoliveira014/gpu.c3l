@@ -123,6 +123,14 @@ A `[PASS]` for a `when_available` test on a same-family adapter proves only that
 the topology guard completed. The accompanying `not applicable` message must be
 recorded separately; only a run without that message is cross-family evidence.
 
+Staging-ring creation tests cover aliased, two-family, and tri-family topology,
+pinning ordered indices and exclusive/concurrent create info. Runtime reuse
+regressions cover GRAPHICS helper to recorded COMPUTE, GRAPHICS helper to
+recorded TRANSFER, and recorded COMPUTE to recorded TRANSFER. Each uses one
+live `Device`, exact physical range reuse, queue-local destinations, byte and
+fallback-count checks, and reports PASS only for distinct families; aliased
+topologies report N/A.
+
 ## 4. SDL3 windowed tests and samples
 
 SDL3 belongs to sample/test harnesses. The binding package dependency is `sdl3`; the import module is `sdl`.
