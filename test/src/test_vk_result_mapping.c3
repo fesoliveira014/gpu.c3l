@@ -4,6 +4,51 @@ import gpu;
 import gpu::vk @public;
 import vk;
 
+struct BackendResultCapture {
+    uint calls;
+    bool fields_match;
+}
+
+fn void capture_backend_result(gpu::DebugMessage* message, void* user_data) {
+    BackendResultCapture* capture = (BackendResultCapture*)user_data;
+    capture.calls++;
+    capture.fields_match = message.severity == gpu::DebugMessageSeverity.ERROR
+        && message.category.backend
+        && message.operation != null
+        && message.operation.str_view() == "wait_queue_idle"
+        && message.has_fault
+        && message.public_fault == gpu::BACKEND_ERROR
+        && message.backend_text != null
+        && message.backend_text.str_view() == "unmapped Vulkan result"
+        && message.validation_id_number == -999;
+}
+
+fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
+    BackendResultCapture capture;
+    gpu::vk::VkDeviceState configured = {
+        .debug_callback  = &capture_backend_result,
+        .debug_user_data = &capture,
+    };
+    fault configured_fault = @catch(gpu::vk::check_backend_result(
+        state:     &configured,
+        operation: "wait_queue_idle",
+        result:    (vk::Result)-999,
+    ));
+
+    assert(configured_fault == gpu::BACKEND_ERROR, "configured backend result remains BACKEND_ERROR");
+    assert(capture.calls == 1, "configured backend result dispatches exactly once");
+    assert(capture.fields_match, "callback observes operation, native code, backend text, and fault during delivery");
+
+    gpu::vk::VkDeviceState fallback = {};
+    fault fallback_fault = @catch(gpu::vk::check_backend_result(
+        state:     &fallback,
+        operation: "wait_queue_idle",
+        result:    (vk::Result)-999,
+    ));
+    assert(fallback_fault == configured_fault, "stderr fallback preserves exact fault parity");
+    assert(capture.calls == 1, "null callback does not dispatch a structured duplicate");
+}
+
 fn void generic_result_mapping_is_truthful() @test {
     gpu::vk::check(vk::Result.SUCCESS)!!;
 

@@ -105,15 +105,6 @@ fn gpu::ShaderStage? gpu_stage_from_spv(spvreflect::ShaderStage stage) @private 
     }
 }
 
-<* Fault INVALID_ARGUMENT when `entry_point` is absent from the module or its
-   reflected execution model disagrees with `stage`. *>
-fn void? check_entry_point_stage(spvreflect::ShaderModule* reflect_module, gpu::ShaderStage stage, ZString entry_point) @private {
-    spvreflect::EntryPoint* entry = reflect_module.get_entry_point(entry_point);
-    if (entry == null) return gpu::INVALID_ARGUMENT~;
-    gpu::ShaderStage entry_stage = gpu_stage_from_spv(entry.stage())!;
-    if (entry_stage != stage) return gpu::INVALID_ARGUMENT~;
-}
-
 <* Push blocks must fit the stage's root-push size; zero blocks are valid. *>
 fn void? check_push_constant_range(spvreflect::ShaderModule* reflect_module, gpu::ShaderStage stage) @private {
     usz expected_size = stage == gpu::ShaderStage.COMPUTE ? gpu::RootPush::size : gpu::GraphicsRootPush::size;
@@ -156,21 +147,136 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    if (desc.spirv.len == 0 || desc.spirv.len % 4 != 0) return gpu::SHADER_INVALID~;
+    if (desc.spirv.len == 0 || desc.spirv.len % 4 != 0) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_shader",
+            public_fault:        gpu::SHADER_INVALID,
+            resource_kind:       gpu::DebugResourceKind.SHADER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "ShaderDesc.spirv",
+            invariant:           "SPIR-V must be non-empty and four-byte sized",
+            backend_text:        null,
+        )~;
+    }
 
     ShaderSlot slot = { .stage = desc.stage };
-    copy_entry_point(&slot.entry_point[0], desc.entry_point)!;
+    if (catch err = copy_entry_point(&slot.entry_point[0], desc.entry_point)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_shader",
+            public_fault:        err,
+            resource_kind:       gpu::DebugResourceKind.SHADER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "ShaderDesc.entry_point",
+            invariant:           "entry point must fit the backend name capacity",
+            backend_text:        null,
+        )~;
+    }
 
     // ulong storage keeps the opaque reflect blob 8-byte aligned.
     ulong[spvreflect::SHADER_MODULE_SIZE / 8] module_storage;
     spvreflect::ShaderModule* reflect_module = (spvreflect::ShaderModule*)&module_storage;
     if (spvreflect::create_shader_module(desc.spirv.len, desc.spirv.ptr, reflect_module) != spvreflect::ReflectResult.RESULT_SUCCESS) {
-        return gpu::SHADER_INVALID~;
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_shader",
+            public_fault:        gpu::SHADER_INVALID,
+            resource_kind:       gpu::DebugResourceKind.SHADER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "ShaderDesc.spirv",
+            invariant:           "SPIR-V reflection must succeed",
+            backend_text:        null,
+        )~;
     }
     defer reflect_module.destroy();
-    check_heap_convention(reflect_module)!;
-    check_entry_point_stage(reflect_module, desc.stage, (ZString)&slot.entry_point[0])!;
-    check_push_constant_range(reflect_module, desc.stage)!;
+    if (catch err = check_heap_convention(reflect_module)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_shader",
+            public_fault:        err,
+            resource_kind:       gpu::DebugResourceKind.SHADER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "ShaderDesc.spirv",
+            invariant:           "descriptor bindings must match the gpu heap convention",
+            backend_text:        null,
+        )~;
+    }
+    spvreflect::EntryPoint* entry = reflect_module.get_entry_point((ZString)&slot.entry_point[0]);
+    if (entry == null) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_shader",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SHADER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "ShaderDesc.entry_point",
+            invariant:           "entry point must exist in SPIR-V module",
+            backend_text:        null,
+        )~;
+    }
+    gpu::ShaderStage? reflected_stage_optional = gpu_stage_from_spv(entry.stage());
+    if (catch reflected_fault = reflected_stage_optional) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_shader",
+            public_fault:        reflected_fault,
+            resource_kind:       gpu::DebugResourceKind.SHADER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "ShaderDesc.stage",
+            invariant:           "reflected execution model must be supported",
+            backend_text:        null,
+        )~;
+    }
+    gpu::ShaderStage reflected_stage = reflected_stage_optional;
+    if (reflected_stage != desc.stage) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_shader",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SHADER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "ShaderDesc.stage",
+            invariant:           "stage must match the reflected entry point",
+            backend_text:        null,
+        )~;
+    }
+    if (catch err = check_push_constant_range(reflect_module, desc.stage)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_shader",
+            public_fault:        err,
+            resource_kind:       gpu::DebugResourceKind.SHADER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "ShaderDesc.spirv",
+            invariant:           "push constants must fit the shader-stage root ABI",
+            backend_text:        null,
+        )~;
+    }
 
     @pool() {
         uint[] code = mem::talloc_array(uint, desc.spirv.len / 4);

@@ -5,6 +5,75 @@ import gpu::vk @public;
 import vk;
 import std::io;
 
+struct PersistentDiagnosticCapture {
+    uint                      calls;
+    gpu::DebugMessageSeverity severity;
+    gpu::DebugMessageCategory category;
+    bool                      has_fault;
+    fault                     public_fault;
+    gpu::DebugResourceKind    resource_kind;
+    bool                      has_public_identity;
+    uint                      resource_index;
+    uint                      resource_generation;
+    int                       validation_id_number;
+    char[64]                  operation;
+    char[64]                  resource_name;
+    char[64]                  rejected_field;
+    char[128]                 invariant;
+    char[128]                 backend_text;
+    char[64]                  validation_id_name;
+}
+
+fn void copy_persistent_diagnostic_text(char* destination, usz capacity, ZString source) {
+    usz index = 0;
+    if (source != null) {
+        while (index + 1 < capacity && source[index] != 0) {
+            destination[index] = source[index];
+            index++;
+        }
+    }
+    destination[index] = 0;
+}
+
+fn void capture_persistent_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    PersistentDiagnosticCapture* capture = (PersistentDiagnosticCapture*)user_data;
+    capture.calls++;
+    capture.severity = message.severity;
+    capture.category = message.category;
+    capture.has_fault = message.has_fault;
+    capture.public_fault = message.public_fault;
+    capture.resource_kind = message.resource.kind;
+    capture.has_public_identity = message.resource.has_public_identity;
+    capture.resource_index = message.resource.index;
+    capture.resource_generation = message.resource.generation;
+    capture.validation_id_number = message.validation_id_number;
+    copy_persistent_diagnostic_text(&capture.operation[0], 64, message.operation);
+    copy_persistent_diagnostic_text(&capture.resource_name[0], 64, message.resource.debug_name);
+    copy_persistent_diagnostic_text(&capture.rejected_field[0], 64, message.rejected_field);
+    copy_persistent_diagnostic_text(&capture.invariant[0], 128, message.invariant);
+    copy_persistent_diagnostic_text(&capture.backend_text[0], 128, message.backend_text);
+    copy_persistent_diagnostic_text(&capture.validation_id_name[0], 64, message.validation_id_name);
+}
+
+fn void assert_persistent_rejection(
+    PersistentDiagnosticCapture* capture,
+    uint before,
+    fault returned,
+    ZString field,
+    ZString invariant,
+    ZString debug_name,
+) {
+    assert(returned == gpu::INVALID_ARGUMENT, "persistent rejection keeps INVALID_ARGUMENT");
+    assert(capture.calls == before + 1, "persistent rejection emits exactly one diagnostic");
+    assert(((ZString)&capture.operation[0]).str_view() == "alloc_persistent_span", "persistent operation is exact");
+    assert(capture.has_fault && capture.public_fault == returned, "diagnostic fault matches return");
+    assert(capture.resource_kind == gpu::DebugResourceKind.PERSISTENT_SPAN, "persistent resource kind is exact");
+    assert(!capture.has_public_identity, "rejected allocation invents no identity");
+    assert(((ZString)&capture.resource_name[0]).str_view() == debug_name.str_view(), "persistent debug name is preserved");
+    assert(((ZString)&capture.rejected_field[0]).str_view() == field.str_view(), "persistent rejected field is exact");
+    assert(((ZString)&capture.invariant[0]).str_view() == invariant.str_view(), "persistent invariant is exact");
+}
+
 // Headless (lavapipe): persistent arena alloc/free/reuse, alignment, stable
 // addresses, stats, and usage honoring (index/indirect/transfer spans usable,
 // vertex-bit requests fault).
@@ -344,6 +413,96 @@ fn void persistent_alloc_free_stats() @test {
     gpu::GpuSpan bogus = { .buffer = a.buffer, .offset = 999_999 };
     fault free_fault = @catch(gpu::free_persistent_span(&device, bogus));
     assert(free_fault == gpu::INVALID_HANDLE, "freeing a bogus span faults INVALID_HANDLE");
+}
+
+fn void persistent_allocation_rejections_report_contract_context() @test {
+    PersistentDiagnosticCapture capture;
+    gpu::DeviceDesc device_desc = {
+        .backend = gpu::BackendKind.VULKAN, .debug_callback = &capture_persistent_diagnostic,
+        .debug_user_data = &capture, .frames_in_flight = 2,
+    };
+    gpu::Device device = gpu::create_device(&device_desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::PersistentAllocDesc bad_size = {
+        .size = 0, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "bad_size",
+    };
+    uint before = capture.calls;
+    fault size_fault = @catch(gpu::alloc_persistent_span(&device, &bad_size));
+    assert_persistent_rejection(
+        capture:  &capture,
+        before:   before,
+        returned: size_fault,
+        field:    "PersistentAllocDesc.size",
+        invariant: "must be greater than zero",
+        debug_name: "bad_size",
+    );
+
+    gpu::PersistentAllocDesc bad_align = {
+        .size = 64, .align = 3, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "bad_align",
+    };
+    before = capture.calls;
+    fault align_fault = @catch(gpu::alloc_persistent_span(&device, &bad_align));
+    assert_persistent_rejection(
+        capture:    &capture,
+        before:     before,
+        returned:   align_fault,
+        field:      "PersistentAllocDesc.align",
+        invariant:  "must be zero or a power of two",
+        debug_name: "bad_align",
+    );
+
+    gpu::PersistentAllocDesc bad_kind = {
+        .size = 64, .align = 16, .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "bad_kind",
+    };
+    before = capture.calls;
+    fault kind_fault = @catch(gpu::alloc_persistent_span(&device, &bad_kind));
+    assert_persistent_rejection(
+        capture:    &capture,
+        before:     before,
+        returned:   kind_fault,
+        field:      "PersistentAllocDesc.memory_kind",
+        invariant:  "must be PERSISTENT_UPLOAD",
+        debug_name: "bad_kind",
+    );
+
+    gpu::PersistentAllocDesc bad_usage = {
+        .size = 64, .align = 16, .usage = { .vertex },
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "bad_usage",
+    };
+    before = capture.calls;
+    fault usage_fault = @catch(gpu::alloc_persistent_span(&device, &bad_usage));
+    assert_persistent_rejection(
+        capture:    &capture,
+        before:     before,
+        returned:   usage_fault,
+        field:      "PersistentAllocDesc.usage",
+        invariant:  "contains unsupported persistent-arena flags",
+        debug_name: "bad_usage",
+    );
+}
+
+fn void persistent_diagnostic_callback_preserves_fault_parity() @test {
+    PersistentDiagnosticCapture capture;
+    gpu::DeviceDesc callback_desc = {
+        .backend = gpu::BackendKind.VULKAN, .debug_callback = &capture_persistent_diagnostic,
+        .debug_user_data = &capture, .frames_in_flight = 2,
+    };
+    gpu::Device callback_device = gpu::create_device(&callback_desc)!!;
+    gpu::PersistentAllocDesc rejected_desc = {
+        .size = 0, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+    };
+    uint before = capture.calls;
+    fault callback_fault = @catch(gpu::alloc_persistent_span(&callback_device, &rejected_desc));
+    assert(callback_fault == gpu::INVALID_ARGUMENT, "callback path keeps INVALID_ARGUMENT");
+    assert(capture.calls == before + 1, "callback path emits exactly once");
+    gpu::destroy_device(&callback_device)!!;
+
+    gpu::DeviceDesc plain_desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device plain_device = gpu::create_device(&plain_desc)!!;
+    fault plain_fault = @catch(gpu::alloc_persistent_span(&plain_device, &rejected_desc));
+    gpu::destroy_device(&plain_device)!!;
+    assert(plain_fault == callback_fault, "callback presence does not change persistent allocation fault");
 }
 
 fn void custom_persistent_arena_size_reported() @test {

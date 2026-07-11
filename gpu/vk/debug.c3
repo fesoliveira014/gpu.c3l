@@ -140,6 +140,70 @@ fn void report_debug_messenger_failure(VkDeviceState* state, ZString text) {
     gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
 }
 
+<* Emit exactly one public-contract ERROR when configured, return public_fault
+   unchanged, and permit delivery while internal locks are held. *>
+fn fault report_contract_failure(
+    VkDeviceState* state,
+    ZString operation,
+    fault public_fault,
+    gpu::DebugResourceKind resource_kind,
+    bool has_public_identity,
+    uint index,
+    uint generation,
+    ZString debug_name,
+    ZString rejected_field,
+    ZString invariant,
+    ZString backend_text,
+) {
+    gpu::DebugMessage message = {
+        .severity       = gpu::DebugMessageSeverity.ERROR,
+        .category       = { .public_contract },
+        .operation      = operation,
+        .has_fault      = true,
+        .public_fault   = public_fault,
+        .resource       = {
+            .kind                = resource_kind,
+            .has_public_identity = has_public_identity,
+            .index               = index,
+            .generation          = generation,
+            .debug_name          = debug_name,
+        },
+        .rejected_field = rejected_field,
+        .invariant      = invariant,
+        .backend_text   = backend_text,
+    };
+    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    return public_fault;
+}
+
+fn bool report_resource_lifetime(
+    VkDeviceState* state,
+    gpu::DebugResourceKind resource_kind,
+    bool has_public_identity,
+    uint index,
+    uint generation,
+    ZString debug_name,
+    ZString backend_text,
+) @private {
+    if (state.debug_callback == null) return false;
+    gpu::DebugMessage message = {
+        .severity  = gpu::DebugMessageSeverity.WARNING,
+        .category  = { .resource_lifetime },
+        .operation = "destroy_device",
+        .resource  = {
+            .kind                = resource_kind,
+            .has_public_identity = has_public_identity,
+            .index               = index,
+            .generation          = generation,
+            .debug_name          = debug_name,
+        },
+        .invariant    = "resource remains live at device destruction",
+        .backend_text = backend_text,
+    };
+    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    return true;
+}
+
 <* Install the debug-utils messenger. Best-effort: a missing entry point or
    create failure leaves messenger null and falls back to layer stderr. *>
 fn void setup_debug_messenger(VkDeviceState* state) @private {
@@ -193,8 +257,18 @@ fn uint report_buffer_leaks(VkDeviceState* state) {
     if (state.buffers.slots.ptr == null) return 0;
     foreach (i, &cell : state.buffers.slots[:state.buffers.next_new]) {
         if (!cell.used || cell.value.internal) continue;
-        io::eprintfn("gpu: leaked buffer '%s' (index %d, generation %d)",
-            slot_name(&cell.value.debug_name[0]), i, cell.generation);
+        ZString name = slot_name(&cell.value.debug_name[0]);
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          name,
+            backend_text:        "buffer remains live",
+        )) {
+            io::eprintfn("gpu: leaked buffer '%s' (index %d, generation %d)", name, i, cell.generation);
+        }
         count++;
     }
     return count;
@@ -205,8 +279,18 @@ fn uint report_texture_leaks(VkDeviceState* state) {
     if (state.textures.slots.ptr == null) return 0;
     foreach (i, &cell : state.textures.slots[:state.textures.next_new]) {
         if (!cell.used || cell.value.swapchain_owned) continue;
-        io::eprintfn("gpu: leaked texture '%s' (%d bytes)",
-            slot_name(&cell.value.debug_name[0]), cell.value.allocation_size);
+        ZString name = slot_name(&cell.value.debug_name[0]);
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          name,
+            backend_text:        "texture remains live",
+        )) {
+            io::eprintfn("gpu: leaked texture '%s' (%d bytes)", name, cell.value.allocation_size);
+        }
         count++;
     }
     return count;
@@ -217,7 +301,29 @@ fn uint report_pipeline_leaks(VkDeviceState* state) {
     if (state.pipeline_cache.entries.ptr == null) return 0;
     foreach (i, &entry : state.pipeline_cache.entries[:state.pipeline_cache.next_new]) {
         if (!entry.used) continue;
-        io::eprintfn("gpu: leaked pipeline cache entry %d (%d live aliases)", i, entry.refcount);
+        bool has_public_identity = false;
+        uint alias_index = 0;
+        uint alias_generation = 0;
+        if (state.pipelines.slots.ptr != null) {
+            foreach (j, &cell : state.pipelines.slots[:state.pipelines.next_new]) {
+                if (!cell.used || cell.value.entry != (uint)i) continue;
+                has_public_identity = true;
+                alias_index = (uint)j;
+                alias_generation = cell.generation;
+                break;
+            }
+        }
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.PIPELINE,
+            has_public_identity: has_public_identity,
+            index:               alias_index,
+            generation:          alias_generation,
+            debug_name:          null,
+            backend_text:        "pipeline cache entry retains live aliases",
+        )) {
+            io::eprintfn("gpu: leaked pipeline cache entry %d (%d live aliases)", i, entry.refcount);
+        }
         count++;
     }
     return count;
@@ -228,7 +334,17 @@ fn uint report_shader_leaks(VkDeviceState* state) {
     if (state.shaders.slots.ptr == null) return 0;
     foreach (i, &cell : state.shaders.slots[:state.shaders.next_new]) {
         if (!cell.used) continue;
-        io::eprintfn("gpu: leaked shader (index %d)", i);
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.SHADER,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          null,
+            backend_text:        "shader remains live",
+        )) {
+            io::eprintfn("gpu: leaked shader (index %d)", i);
+        }
         count++;
     }
     return count;
@@ -239,7 +355,17 @@ fn uint report_semaphore_leaks(VkDeviceState* state) {
     if (state.semaphores.slots.ptr == null) return 0;
     foreach (i, &cell : state.semaphores.slots[:state.semaphores.next_new]) {
         if (!cell.used) continue;
-        io::eprintfn("gpu: leaked semaphore (index %d)", i);
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.SEMAPHORE,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          null,
+            backend_text:        "semaphore remains live",
+        )) {
+            io::eprintfn("gpu: leaked semaphore (index %d)", i);
+        }
         count++;
     }
     return count;
@@ -251,7 +377,17 @@ fn uint report_context_leaks(VkDeviceState* state) {
     if (state.recording_contexts.slots.ptr == null) return 0;
     foreach (i, &cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
         if (!cell.used || (uint)i == state.default_context.index || (uint)i == state.helper_context.index) continue;
-        io::eprintfn("gpu: leaked recording context (index %d)", i);
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.RECORDING_CONTEXT,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          null,
+            backend_text:        "recording context remains live",
+        )) {
+            io::eprintfn("gpu: leaked recording context (index %d)", i);
+        }
         count++;
     }
     return count;
@@ -268,7 +404,17 @@ fn uint report_resource_leaks(VkDeviceState* state) {
         vma::Statistics stats;
         state.persistent_arena.virtual_block.get_statistics(&stats);
         if (stats.allocation_count > 0) {
-            io::eprintfn("gpu: %d persistent spans still allocated", stats.allocation_count);
+            if (!report_resource_lifetime(
+                state:               state,
+                resource_kind:       gpu::DebugResourceKind.PERSISTENT_SPAN,
+                has_public_identity: false,
+                index:               0,
+                generation:          0,
+                debug_name:          "persistent_arena",
+                backend_text:        "persistent spans remain allocated",
+            )) {
+                io::eprintfn("gpu: %d persistent spans still allocated", stats.allocation_count);
+            }
             count += (uint)stats.allocation_count;
         }
     }

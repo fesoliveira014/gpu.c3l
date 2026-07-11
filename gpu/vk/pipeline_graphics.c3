@@ -86,8 +86,22 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
     check_polygon_mode_support(desc.raster.polygon_mode, state.caps.line_polygon_mode)!;
     ShaderSlot* vertex_shader = state.shaders.get(desc.vertex_shader)!;
     ShaderSlot* fragment_shader = state.shaders.get(desc.fragment_shader)!;
-    validate_shader_stage(vertex_shader, gpu::ShaderStage.VERTEX)!;
-    validate_shader_stage(fragment_shader, gpu::ShaderStage.FRAGMENT)!;
+    validate_shader_stage(
+        state:          state,
+        slot:           vertex_shader,
+        expected:       gpu::ShaderStage.VERTEX,
+        operation:      "create_graphics_pipeline",
+        rejected_field: "GraphicsPipelineDesc.vertex_shader",
+        handle:         desc.vertex_shader,
+    )!;
+    validate_shader_stage(
+        state:          state,
+        slot:           fragment_shader,
+        expected:       gpu::ShaderStage.FRAGMENT,
+        operation:      "create_graphics_pipeline",
+        rejected_field: "GraphicsPipelineDesc.fragment_shader",
+        handle:         desc.fragment_shader,
+    )!;
 
     PipelineKey key = build_graphics_key(desc);
     ulong hash = hash_key(&key);

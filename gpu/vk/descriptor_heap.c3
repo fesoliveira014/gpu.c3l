@@ -394,14 +394,34 @@ fn void report_descriptor_leaks(VkDeviceState* state) {
     DescriptorHeapState* heap = &state.heap;
     if (heap.texture_cells.ptr != null) {
         foreach (i, &cell : heap.texture_cells[:heap.texture_next_new]) {
-            if (cell.used) {
+            if (!cell.used) continue;
+            if (!report_resource_lifetime(
+                state:               state,
+                resource_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+                has_public_identity: true,
+                index:               (uint)i,
+                generation:          (uint)cell.generation,
+                debug_name:          null,
+                backend_text:        "texture descriptor remains live",
+            )) {
                 io::eprintfn("gpu: leaked texture descriptor slot %d (owner texture index %d)", i, cell.owner.index);
             }
         }
     }
     if (heap.sampler_cells.ptr != null) {
         foreach (i, &cell : heap.sampler_cells[:heap.sampler_next_new]) {
-            if (cell.used) io::eprintfn("gpu: leaked sampler descriptor slot %d", i);
+            if (!cell.used) continue;
+            if (!report_resource_lifetime(
+                state:               state,
+                resource_kind:       gpu::DebugResourceKind.SAMPLER,
+                has_public_identity: true,
+                index:               (uint)i,
+                generation:          (uint)cell.generation,
+                debug_name:          null,
+                backend_text:        "sampler descriptor remains live",
+            )) {
+                io::eprintfn("gpu: leaked sampler descriptor slot %d", i);
+            }
         }
     }
 }

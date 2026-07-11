@@ -76,7 +76,14 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
         || desc.push_constant_size % 4 != 0
         || desc.push_constant_size > state.caps.max_push_constant_size) return gpu::INVALID_ARGUMENT~;
     ShaderSlot* shader = state.shaders.get(desc.shader)!;
-    validate_shader_stage(shader, gpu::ShaderStage.COMPUTE)!;
+    validate_shader_stage(
+        state:          state,
+        slot:           shader,
+        expected:       gpu::ShaderStage.COMPUTE,
+        operation:      "create_compute_pipeline",
+        rejected_field: "ComputePipelineDesc.shader",
+        handle:         desc.shader,
+    )!;
 
     PipelineKey key = build_compute_key(desc);
     ulong hash = hash_key(&key);

@@ -66,8 +66,36 @@ fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* b
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* slot = state.buffers.get(barrier.buffer)!;
     // size 0 is the whole-buffer convention, matching flush/invalidate/fill.
-    if (!gpu::range_fits(slot.size, barrier.offset, barrier.size)) return gpu::INVALID_ARGUMENT~;
-    if (barrier.size == 0 && barrier.offset >= slot.size) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::range_fits(slot.size, barrier.offset, barrier.size)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_buffer_barrier",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               barrier.buffer.index,
+            generation:          barrier.buffer.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "BufferBarrier.size",
+            invariant:           "offset and size must fit the buffer",
+            backend_text:        "buffer barrier range exceeds the buffer",
+        )~;
+    }
+    if (barrier.size == 0 && barrier.offset >= slot.size) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_buffer_barrier",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               barrier.buffer.index,
+            generation:          barrier.buffer.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "BufferBarrier.offset",
+            invariant:           "whole-buffer barrier offset must lie inside the buffer",
+            backend_text:        "whole-buffer barrier offset lies outside the buffer",
+        )~;
+    }
     vk::DeviceSize barrier_size = barrier.size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)barrier.size;
 
     vk::BufferMemoryBarrier2 bar = vk::buffer_memory_barrier2()
@@ -153,7 +181,21 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TextureSlot* slot = state.textures.get(barrier.texture)!;
-    if (barrier.old_layout != effective_layout(record, slot, barrier.texture)) return gpu::INVALID_RESOURCE_STATE~;
+    if (barrier.old_layout != effective_layout(record, slot, barrier.texture)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_texture_barrier",
+            public_fault:        gpu::INVALID_RESOURCE_STATE,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               barrier.texture.index,
+            generation:          barrier.texture.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "TextureBarrier.old_layout",
+            invariant:           "old_layout must match the command list effective layout",
+            backend_text:        "texture barrier old layout disagrees with tracked layout",
+        )~;
+    }
     // Track the transition before emitting its GPU-visible barrier so the
     // backend record always describes everything in the command buffer.
     record_pending_layout(

@@ -8,9 +8,7 @@ import vk;
 // binding ships no API_VERSION_1_3 constant.
 const uint API_VERSION_1_3 = (1u << 22) | (3u << 12);
 
-<* Map only context-free Vulkan results. Unknown results are backend errors,
-   never implicit device loss. *>
-fn void? check(vk::Result result) @private {
+fn void? map_result(vk::Result result, bool report_unmapped) @private {
     switch (result) {
         case vk::Result.SUCCESS:
             return;
@@ -27,9 +25,47 @@ fn void? check(vk::Result result) @private {
         case vk::Result.ERROR_LAYER_NOT_PRESENT:
             return gpu::UNSUPPORTED_FEATURE~;
         default:
-            io::eprintfn("vk: unmapped VkResult %d", (int)result);
+            if (report_unmapped) io::eprintfn("vk: unmapped VkResult %d", (int)result);
             return gpu::BACKEND_ERROR~;
     }
+}
+
+<* Map only context-free Vulkan results. Unknown results are backend errors,
+   never implicit device loss. *>
+fn void? check(vk::Result result) @private {
+    return map_result(result, true);
+}
+
+fn ZString backend_result_text(vk::Result result) @private {
+    switch (result) {
+        case vk::Result.ERROR_OUT_OF_HOST_MEMORY:   return "Vulkan host memory exhausted";
+        case vk::Result.ERROR_OUT_OF_DEVICE_MEMORY: return "Vulkan device memory exhausted";
+        case vk::Result.ERROR_DEVICE_LOST:          return "Vulkan device lost";
+        case vk::Result.ERROR_SURFACE_LOST_KHR:     return "Vulkan surface lost";
+        case vk::Result.ERROR_FEATURE_NOT_PRESENT:  return "Vulkan feature not present";
+        case vk::Result.ERROR_EXTENSION_NOT_PRESENT: return "Vulkan extension not present";
+        case vk::Result.ERROR_LAYER_NOT_PRESENT:    return "Vulkan layer not present";
+        default:                                    return "unmapped Vulkan result";
+    }
+}
+
+fn void? check_backend_result(VkDeviceState* state, ZString operation, vk::Result result) {
+    bool stderr_fallback = state == null || state.debug_callback == null;
+    fault public_fault = @catch(map_result(result, stderr_fallback));
+    if (!public_fault) return;
+    if (!stderr_fallback) {
+        gpu::DebugMessage message = {
+            .severity             = gpu::DebugMessageSeverity.ERROR,
+            .category             = { .backend },
+            .operation            = operation,
+            .has_fault            = true,
+            .public_fault         = public_fault,
+            .backend_text         = backend_result_text(result),
+            .validation_id_number = (int)result,
+        };
+        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    }
+    return public_fault~;
 }
 
 fn void? check_backend_create_result(vk::Result result) @private {

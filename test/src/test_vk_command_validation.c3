@@ -12,6 +12,57 @@ const char[*] VAL_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
 const uint VAL_RT = 16;
 
+struct SyncDiagnosticCapture {
+    uint                   calls;
+    bool                   has_fault;
+    fault                  public_fault;
+    bool                   public_contract;
+    gpu::DebugResourceKind resource_kind;
+    bool                   has_public_identity;
+    uint                   index;
+    uint                   generation;
+    ZString                expected_operation;
+    ZString                expected_debug_name;
+    ZString                expected_rejected_field;
+    ZString                expected_invariant;
+    bool                   operation_matches;
+    bool                   debug_name_matches;
+    bool                   rejected_field_matches;
+    bool                   invariant_matches;
+}
+
+fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    if (message.operation == null) return;
+    SyncDiagnosticCapture* capture = (SyncDiagnosticCapture*)user_data;
+    capture.calls++;
+    capture.has_fault = message.has_fault;
+    capture.public_fault = message.public_fault;
+    capture.public_contract = message.category.public_contract;
+    capture.resource_kind = message.resource.kind;
+    capture.has_public_identity = message.resource.has_public_identity;
+    capture.index = message.resource.index;
+    capture.generation = message.resource.generation;
+    capture.operation_matches = message.operation.str_view() == capture.expected_operation.str_view();
+    capture.debug_name_matches = message.resource.debug_name != null
+        && message.resource.debug_name.str_view() == capture.expected_debug_name.str_view();
+    capture.rejected_field_matches = message.rejected_field != null
+        && message.rejected_field.str_view() == capture.expected_rejected_field.str_view();
+    capture.invariant_matches = message.invariant != null
+        && message.invariant.str_view() == capture.expected_invariant.str_view();
+}
+
+fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
+    gpu::DeviceDesc desc = {
+        .backend              = gpu::BackendKind.VULKAN,
+        .enable_validation    = true,
+        .frames_in_flight     = 2,
+        .application_name     = "gpu_sync_diagnostic_test",
+        .debug_callback       = &capture_sync_diagnostic,
+        .debug_user_data      = capture,
+    };
+    return gpu::create_device(&desc)!!;
+}
+
 fn gpu::Device make_val_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -1038,4 +1089,84 @@ fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
 
     gpu::end_commands(&cmd)!!;
     gpu::end_frame(&frame_token)!!;
+}
+
+fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
+    SyncDiagnosticCapture capture = {
+        .expected_operation      = "cmd_buffer_barrier",
+        .expected_debug_name     = "barrier_diagnostic_buffer",
+        .expected_rejected_field = "BufferBarrier.size",
+        .expected_invariant      = "offset and size must fit the buffer",
+    };
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::BufferDesc desc = {
+        .size        = 64,
+        .usage       = { .storage, .addressable },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .debug_name  = "barrier_diagnostic_buffer",
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::BufferBarrier barrier = {
+        .buffer        = buffer,
+        .offset        = 48,
+        .size          = 32,
+        .before_stage  = gpu::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::Hazard.SHADER_READ,
+    };
+    fault with_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
+
+    assert(with_callback == gpu::INVALID_ARGUMENT, "barrier range keeps INVALID_ARGUMENT");
+    assert(capture.calls == 1, "barrier range emits exactly one diagnostic");
+    assert(capture.operation_matches, "operation is cmd_buffer_barrier");
+    assert(capture.has_fault && capture.public_fault == with_callback,
+        "diagnostic carries the unchanged barrier fault");
+    assert(capture.public_contract, "barrier range is a public-contract diagnostic");
+    assert(capture.resource_kind == gpu::DebugResourceKind.BUFFER, "resource kind is buffer");
+    assert(capture.has_public_identity, "live buffer identity is present");
+    assert(capture.index == buffer.index, "buffer index is preserved");
+    assert(capture.generation == buffer.generation, "buffer generation is preserved");
+    assert(capture.debug_name_matches, "buffer debug name is preserved");
+    assert(capture.rejected_field_matches, "barrier size field is identified");
+    assert(capture.invariant_matches, "barrier range invariant is identified");
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    state.debug_callback = null;
+    fault without_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
+    assert(without_callback == with_callback, "callback presence does not alter the barrier fault");
+    assert(capture.calls == 1, "null callback emits no additional diagnostic");
+
+    state.debug_callback = &capture_sync_diagnostic;
+    capture.expected_rejected_field = "BufferBarrier.offset";
+    capture.expected_invariant = "whole-buffer barrier offset must lie inside the buffer";
+    barrier.offset = 64;
+    barrier.size = 0;
+    fault whole_with_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
+
+    assert(whole_with_callback == gpu::INVALID_ARGUMENT, "whole-buffer offset keeps INVALID_ARGUMENT");
+    assert(capture.calls == 2, "whole-buffer offset emits exactly one diagnostic");
+    assert(capture.operation_matches, "whole-buffer operation is cmd_buffer_barrier");
+    assert(capture.has_fault && capture.public_fault == whole_with_callback,
+        "whole-buffer diagnostic carries the unchanged fault");
+    assert(capture.resource_kind == gpu::DebugResourceKind.BUFFER, "whole-buffer resource kind is buffer");
+    assert(capture.has_public_identity && capture.index == buffer.index && capture.generation == buffer.generation,
+        "whole-buffer diagnostic preserves buffer identity");
+    assert(capture.debug_name_matches, "whole-buffer diagnostic preserves the debug name");
+    assert(capture.rejected_field_matches, "whole-buffer offset field is identified");
+    assert(capture.invariant_matches, "whole-buffer offset invariant is identified");
+
+    state.debug_callback = null;
+    fault whole_without_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
+    assert(whole_without_callback == whole_with_callback, "whole-buffer callback presence does not alter the fault");
+    assert(capture.calls == 2, "whole-buffer null callback emits no duplicate");
+
+    gpu::end_commands(&commands)!!;
+    gpu::end_frame(&frame)!!;
 }
