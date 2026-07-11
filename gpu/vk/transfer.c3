@@ -302,9 +302,23 @@ fn gpu::GpuSpan? readback_alloc(VkDeviceState* state, usz size, usz align, Timel
 
 <* Byte size of a texture-upload region with the copy-desc 0-defaults
    resolved. The copy command re-validates independently. *>
-fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc) @private {
+fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc, ZString operation, ZString rejected_field) @private {
     TextureSlot* slot = state.textures.get(desc.texture)!;
-    if (desc.mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
+    if (desc.mip >= slot.mip_levels) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               desc.texture.index,
+            generation:          desc.texture.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      rejected_field,
+            invariant:           "mip must exist in the texture mip chain",
+            backend_text:        null,
+        )~;
+    }
     MipExtent extent = texture_mip_extent(slot, desc.mip);
     uint width  = desc.width == 0 ? extent.width : desc.width;
     uint height = desc.height == 0 ? extent.height : desc.height;
@@ -312,14 +326,62 @@ fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc)
     return (usz)width * height * layers * format_texel_size(slot.format);
 }
 
+fn BufferSlot*? validate_upload_buffer(VkDeviceState* state, gpu::BufferHandle dst, usz offset, char[] data, ZString operation) @private {
+    if (data.len == 0) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "data",
+            invariant:           "upload data must not be empty",
+            backend_text:        null,
+        )~;
+    }
+    BufferSlot* dst_slot = state.buffers.get(dst)!;
+    if (!dst_slot.usage.transfer_dst) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               dst.index,
+            generation:          dst.generation,
+            debug_name:          slot_name(&dst_slot.debug_name[0]),
+            rejected_field:      "BufferDesc.usage",
+            invariant:           "destination buffer must include transfer_dst",
+            backend_text:        null,
+        )~;
+    }
+    if (!gpu::range_fits(dst_slot.size, offset, data.len)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               dst.index,
+            generation:          dst.generation,
+            debug_name:          slot_name(&dst_slot.debug_name[0]),
+            rejected_field:      "offset/data",
+            invariant:           "upload range must fit the destination buffer",
+            backend_text:        null,
+        )~;
+    }
+    return dst_slot;
+}
+
 <* The caller supplies the timeline tag its staging range retires against. *>
-fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data, TimelineTag tag) @private {
+fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data, TimelineTag tag, ZString operation) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    if (data.len == 0) return gpu::INVALID_ARGUMENT~;
-    BufferSlot* dst_slot = state.buffers.get(dst)!;
-    if (!gpu::range_fits(dst_slot.size, offset, data.len)) return gpu::INVALID_ARGUMENT~;
+    validate_upload_buffer(state, dst, offset, data, operation)!;
 
     gpu::GpuSpan staging = staging_alloc(
         state: state,
@@ -349,17 +411,66 @@ fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst,
         offset:   offset,
         data:     data,
         tag:      tag,
+        operation: "cmd_upload_buffer",
     );
 }
 
-fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data, TimelineTag tag) @private {
+fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data, TimelineTag tag, ZString operation, ZString mip_field) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    usz expected = texture_upload_bytes(state, desc)!;
-    if (data.len != expected) return gpu::INVALID_ARGUMENT~;
-
     TextureSlot* slot = state.textures.get(desc.texture)!;
+    usz expected = texture_upload_bytes(
+        state:          state,
+        desc:           desc,
+        operation:      operation,
+        rejected_field: mip_field,
+    )!;
+    if (data.len != expected) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               desc.texture.index,
+            generation:          desc.texture.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "data",
+            invariant:           "data length must match the selected texture mip",
+            backend_text:        null,
+        )~;
+    }
+    if (!slot.usage.transfer_dst) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               desc.texture.index,
+            generation:          desc.texture.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "TextureDesc.usage",
+            invariant:           "destination texture must include transfer_dst",
+            backend_text:        null,
+        )~;
+    }
+    if (effective_layout(record, slot, desc.texture) != gpu::TextureLayout.TRANSFER_DST) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_RESOURCE_STATE,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               desc.texture.index,
+            generation:          desc.texture.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "TextureUploadDesc.texture",
+            invariant:           "destination texture must be in TRANSFER_DST layout",
+            backend_text:        null,
+        )~;
+    }
     usz align = format_texel_size(slot.format);
     if (align < 4) align = 4;
     gpu::GpuSpan staging = staging_alloc(
@@ -389,10 +500,12 @@ fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDes
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
     return cmd_upload_texture_impl(
-        commands: commands,
-        desc:     desc,
-        data:     data,
-        tag:      tag,
+        commands:  commands,
+        desc:      desc,
+        data:      data,
+        tag:       tag,
+        operation: "cmd_upload_texture",
+        mip_field: "TextureUploadDesc.mip",
     );
 }
 
@@ -463,6 +576,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
+    validate_upload_buffer(state, dst, offset, data, "upload_buffer_data")!;
     ulong helper_value = 0;
     defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value);
     TimelineTag tag = { .kind = TimelineKind.HELPER };
@@ -486,6 +600,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
             offset:   offset,
             data:     data,
             tag:      tag,
+            operation: "upload_buffer_data",
         )!;
 
         gpu::BufferBarrier next_use = {
@@ -515,13 +630,59 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     gpu::TextureLayout tracked = texture_layout(slot);
     if (tracked != gpu::TextureLayout.UNDEFINED
         && tracked != gpu::TextureLayout.TRANSFER_DST) {
-        return gpu::INVALID_RESOURCE_STATE~;
+        return report_contract_failure(
+            state:               state,
+            operation:           "upload_texture_data",
+            public_fault:        gpu::INVALID_RESOURCE_STATE,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               dst.index,
+            generation:          dst.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "dst",
+            invariant:           "destination texture must be UNDEFINED or TRANSFER_DST before upload",
+            backend_text:        null,
+        )~;
     }
     // Validate before recording: a fault after the entry barrier would leave
     // the tracked layout claiming a transition the GPU never ran.
     gpu::TextureUploadDesc probe = { .texture = dst, .mip = mip };
-    usz expected = texture_upload_bytes(state, &probe)!;
-    if (data.len != expected) return gpu::INVALID_ARGUMENT~;
+    usz expected = texture_upload_bytes(
+        state:          state,
+        desc:           &probe,
+        operation:      "upload_texture_data",
+        rejected_field: "mip",
+    )!;
+    if (data.len != expected) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "upload_texture_data",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               dst.index,
+            generation:          dst.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "data",
+            invariant:           "data length must match the selected texture mip",
+            backend_text:        null,
+        )~;
+    }
+    if (!slot.usage.transfer_dst) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "upload_texture_data",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               dst.index,
+            generation:          dst.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "TextureDesc.usage",
+            invariant:           "destination texture must include transfer_dst",
+            backend_text:        null,
+        )~;
+    }
 
     gpu::CommandList commands;
     {
@@ -552,10 +713,12 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
 
         gpu::TextureUploadDesc upload = { .texture = dst, .mip = mip };
         cmd_upload_texture_impl(
-            commands: &commands,
-            desc:     &upload,
-            data:     data,
-            tag:      tag,
+            commands:  &commands,
+            desc:      &upload,
+            data:      data,
+            tag:       tag,
+            operation: "upload_texture_data",
+            mip_field: "mip",
         )!;
 
         gpu::TextureBarrier next_use = {
@@ -581,9 +744,52 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value);
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
-    if (out_data.len == 0) return gpu::INVALID_ARGUMENT~;
+    if (out_data.len == 0) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "readback_buffer_data",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "out_data",
+            invariant:           "destination must not be empty",
+            backend_text:        null,
+        )~;
+    }
     BufferSlot* src_slot = state.buffers.get(src)!;
-    if (!gpu::range_fits(src_slot.size, offset, out_data.len)) return gpu::INVALID_ARGUMENT~;
+    if (!src_slot.usage.transfer_src) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "readback_buffer_data",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               src.index,
+            generation:          src.generation,
+            debug_name:          slot_name(&src_slot.debug_name[0]),
+            rejected_field:      "BufferDesc.usage",
+            invariant:           "source buffer must include transfer_src",
+            backend_text:        null,
+        )~;
+    }
+    if (!gpu::range_fits(src_slot.size, offset, out_data.len)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "readback_buffer_data",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               src.index,
+            generation:          src.generation,
+            debug_name:          slot_name(&src_slot.debug_name[0]),
+            rejected_field:      "offset/out_data",
+            invariant:           "readback range must fit the source buffer",
+            backend_text:        null,
+        )~;
+    }
 
     gpu::CommandList commands;
     gpu::GpuSpan readback;
@@ -653,10 +859,43 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
-    usz expected = texture_upload_bytes(state, &region)!;
-    if (out_data.len != expected) return gpu::INVALID_ARGUMENT~;
-
     TextureSlot* slot = state.textures.get(src)!;
+    usz expected = texture_upload_bytes(
+        state:          state,
+        desc:           &region,
+        operation:      "readback_texture_data",
+        rejected_field: "mip",
+    )!;
+    if (out_data.len != expected) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "readback_texture_data",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               src.index,
+            generation:          src.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "out_data",
+            invariant:           "destination length must match the selected texture mip",
+            backend_text:        null,
+        )~;
+    }
+    if (!slot.usage.transfer_src) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "readback_texture_data",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               src.index,
+            generation:          src.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "TextureDesc.usage",
+            invariant:           "source texture must include transfer_src",
+            backend_text:        null,
+        )~;
+    }
     usz align = format_texel_size(slot.format);
     if (align < 4) align = 4;
     gpu::CommandList commands;
@@ -829,9 +1068,52 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    if (size == 0) return gpu::INVALID_ARGUMENT~;
+    if (size == 0) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_readback_buffer",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "size",
+            invariant:           "readback size must be greater than zero",
+            backend_text:        null,
+        )~;
+    }
     BufferSlot* src_slot = state.buffers.get(src)!;
-    if (!gpu::range_fits(src_slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
+    if (!src_slot.usage.transfer_src) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_readback_buffer",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               src.index,
+            generation:          src.generation,
+            debug_name:          slot_name(&src_slot.debug_name[0]),
+            rejected_field:      "BufferDesc.usage",
+            invariant:           "source buffer must include transfer_src",
+            backend_text:        null,
+        )~;
+    }
+    if (!gpu::range_fits(src_slot.size, offset, size)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_readback_buffer",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               src.index,
+            generation:          src.generation,
+            debug_name:          slot_name(&src_slot.debug_name[0]),
+            rejected_field:      "offset/size",
+            invariant:           "readback range must fit the source buffer",
+            backend_text:        null,
+        )~;
+    }
 
     gpu::ReadbackTicket ticket = ticket_alloc(state, size)!;
     defer catch release_ticket(state, &ticket);
@@ -855,7 +1137,43 @@ fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu:
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
-    usz size = texture_upload_bytes(state, &region)!;
+    usz size = texture_upload_bytes(
+        state:          state,
+        desc:           &region,
+        operation:      "cmd_readback_texture",
+        rejected_field: "mip",
+    )!;
+    TextureSlot* slot = state.textures.get(src)!;
+    if (!slot.usage.transfer_src) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_readback_texture",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               src.index,
+            generation:          src.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "TextureDesc.usage",
+            invariant:           "source texture must include transfer_src",
+            backend_text:        null,
+        )~;
+    }
+    if (effective_layout(record, slot, src) != gpu::TextureLayout.TRANSFER_SRC) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_readback_texture",
+            public_fault:        gpu::INVALID_RESOURCE_STATE,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               src.index,
+            generation:          src.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "src",
+            invariant:           "source texture must be in TRANSFER_SRC layout",
+            backend_text:        null,
+        )~;
+    }
 
     gpu::ReadbackTicket ticket = ticket_alloc(state, size)!;
     defer catch release_ticket(state, &ticket);
@@ -895,11 +1213,53 @@ fn void? vk_resolve_readback(gpu::Device* device, gpu::ReadbackTicket* ticket, c
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    if ((ulong)ticket.value == 0) return gpu::INVALID_ARGUMENT~;
-    if (dest.len < ticket.span.size) return gpu::INVALID_ARGUMENT~;
+    if ((ulong)ticket.value == 0) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "resolve_readback",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "ticket.value",
+            invariant:           "ticket must be live and unresolved",
+            backend_text:        null,
+        )~;
+    }
+    if (dest.len < ticket.span.size) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "resolve_readback",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "dest",
+            invariant:           "destination must cover the complete ticket span",
+            backend_text:        null,
+        )~;
+    }
     ulong current = 0;
     vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
-    if (current < (ulong)ticket.value) return gpu::READBACK_NOT_READY~;
+    if (current < (ulong)ticket.value) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "resolve_readback",
+            public_fault:        gpu::READBACK_NOT_READY,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "ticket.value",
+            invariant:           "ticket timeline value must be signaled before resolve",
+            backend_text:        null,
+        )~;
+    }
 
     vk_invalidate_buffer(device, ticket.span.buffer, ticket.span.offset, ticket.span.size)!;
     mem::copy(dest.ptr, ticket.span.cpu, (sz)ticket.span.size);

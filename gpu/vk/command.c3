@@ -312,11 +312,39 @@ fn void? vk_end_commands(gpu::CommandList* commands) @private {
 
 fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* desc) @private {
     CommandRecord* record = resolve_command(commands)!;
-    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    if (record.state != CommandState.RECORDING) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_copy_buffer",
+            public_fault:        gpu::COMMAND_RECORDING_ERROR,
+            resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+            has_public_identity: true,
+            index:               commands.handle.index,
+            generation:          commands.handle.generation,
+            debug_name:          null,
+            rejected_field:      "CommandList.state",
+            invariant:           "command must be recording outside a render pass",
+            backend_text:        null,
+        )~;
+    }
     BufferSlot* src = state.buffers.get(desc.src)!;
     BufferSlot* dst = state.buffers.get(desc.dst)!;
-    if (!src.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
+    if (!src.usage.transfer_src) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_copy_buffer",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               desc.src.index,
+            generation:          desc.src.generation,
+            debug_name:          slot_name(&src.debug_name[0]),
+            rejected_field:      "BufferUsage.transfer_src",
+            invariant:           "source buffer must include transfer_src usage",
+            backend_text:        null,
+        )~;
+    }
     if (!dst.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
     if (!gpu::range_fits(src.size, desc.src_offset, desc.size)) return gpu::INVALID_ARGUMENT~;
@@ -344,7 +372,22 @@ fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer
     if (!slot.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     // Vulkan: offset and size must be 4-byte multiples; size 0 is the
     // whole-buffer convention (translated to WHOLE_SIZE below).
-    if (offset % 4 != 0 || size % 4 != 0) return gpu::INVALID_ARGUMENT~;
+    if (offset % 4 != 0 || size % 4 != 0) {
+        ZString rejected_field = offset % 4 != 0 ? "offset" : "size";
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_fill_buffer",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               buffer.index,
+            generation:          buffer.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      rejected_field,
+            invariant:           "offset and size must be 4-byte aligned",
+            backend_text:        null,
+        )~;
+    }
     if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
     if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize fill_size = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
@@ -445,8 +488,21 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
 
 <* Resolve an indirect argument span: indirect usage, 4-byte offset alignment,
    count*arg_size within the span, and the span within its backing buffer. *>
-fn BufferSlot*? resolve_indirect_span(VkDeviceState* state, gpu::GpuSpan* span, usz arg_size, uint count) {
-    BufferSlot* slot = resolve_span_slot(state, span, (usz)count * arg_size)!;
+fn BufferSlot*? resolve_indirect_span(
+    VkDeviceState* state,
+    gpu::GpuSpan* span,
+    usz arg_size,
+    uint count,
+    ZString operation = null,
+    ZString rejected_field = null,
+) {
+    BufferSlot* slot = resolve_span_slot(
+        state:          state,
+        span:           span,
+        required:       (usz)count * arg_size,
+        operation:      operation,
+        rejected_field: rejected_field,
+    )!;
     if (!slot.usage.indirect) return gpu::INVALID_ARGUMENT~;
     if (span.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
     return slot;
@@ -472,7 +528,12 @@ fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle,
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    validate_pipeline_kind(state, handle, PipelineKind.COMPUTE)!;
+    validate_pipeline_kind(
+        state:     state,
+        handle:    handle,
+        kind:      PipelineKind.COMPUTE,
+        operation: "cmd_dispatch",
+    )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_compute_and_push(
         state:  state,
@@ -487,12 +548,19 @@ fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandl
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    validate_pipeline_kind(state, handle, PipelineKind.COMPUTE)!;
+    validate_pipeline_kind(
+        state:     state,
+        handle:    handle,
+        kind:      PipelineKind.COMPUTE,
+        operation: "cmd_dispatch_indirect",
+    )!;
     BufferSlot* args_buffer = resolve_indirect_span(
-        state:    state,
-        span:     &args,
-        arg_size: gpu::DispatchIndirectCommand::size,
-        count:    1,
+        state:          state,
+        span:           &args,
+        arg_size:       gpu::DispatchIndirectCommand::size,
+        count:          1,
+        operation:      "cmd_dispatch_indirect",
+        rejected_field: "args",
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_compute_and_push(

@@ -43,8 +43,10 @@ fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
     capture.index = message.resource.index;
     capture.generation = message.resource.generation;
     capture.operation_matches = message.operation.str_view() == capture.expected_operation.str_view();
-    capture.debug_name_matches = message.resource.debug_name != null
-        && message.resource.debug_name.str_view() == capture.expected_debug_name.str_view();
+    capture.debug_name_matches = capture.expected_debug_name == null
+        ? message.resource.debug_name == null
+        : message.resource.debug_name != null
+            && message.resource.debug_name.str_view() == capture.expected_debug_name.str_view();
     capture.rejected_field_matches = message.rejected_field != null
         && message.rejected_field.str_view() == capture.expected_rejected_field.str_view();
     capture.invariant_matches = message.invariant != null
@@ -1167,6 +1169,338 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     assert(whole_without_callback == whole_with_callback, "whole-buffer callback presence does not alter the fault");
     assert(capture.calls == 2, "whole-buffer null callback emits no duplicate");
 
+    gpu::end_commands(&commands)!!;
+    gpu::end_frame(&frame)!!;
+}
+
+fn void reset_sync_diagnostic(
+    SyncDiagnosticCapture* capture,
+    ZString operation,
+    ZString debug_name,
+    ZString rejected_field,
+    ZString invariant,
+) {
+    capture.calls = 0;
+    capture.has_fault = false;
+    capture.public_fault = {};
+    capture.public_contract = false;
+    capture.resource_kind = {};
+    capture.has_public_identity = false;
+    capture.index = 0;
+    capture.generation = 0;
+    capture.expected_operation = operation;
+    capture.expected_debug_name = debug_name;
+    capture.expected_rejected_field = rejected_field;
+    capture.expected_invariant = invariant;
+    capture.operation_matches = false;
+    capture.debug_name_matches = false;
+    capture.rejected_field_matches = false;
+    capture.invariant_matches = false;
+}
+
+fn void assert_sync_contract_diagnostic(
+    SyncDiagnosticCapture* capture,
+    fault expected_fault,
+    gpu::DebugResourceKind resource_kind,
+    bool has_public_identity,
+    uint index,
+    uint generation,
+) {
+    assert(capture.calls == 1, "rejection emits exactly one diagnostic");
+    assert(capture.has_fault && capture.public_fault == expected_fault,
+        "diagnostic preserves the public fault");
+    assert(capture.public_contract, "rejection is a public-contract diagnostic");
+    assert(capture.resource_kind == resource_kind, "resource kind is exact");
+    assert(capture.has_public_identity == has_public_identity, "identity presence is exact");
+    assert(capture.index == index && capture.generation == generation, "resource identity is exact");
+    assert(capture.operation_matches, "operation is exact");
+    assert(capture.debug_name_matches, "debug name is compared during callback");
+    assert(capture.rejected_field_matches, "rejected field is exact");
+    assert(capture.invariant_matches, "invariant is exact");
+}
+
+fn void tranche_b_command_and_render_diagnostics() @test {
+    SyncDiagnosticCapture capture = {};
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    gpu::BufferDesc plain_desc = {
+        .size = 64, .usage = { .storage, .addressable },
+        .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "plain_buffer",
+    };
+    gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
+    defer gpu::destroy_buffer(&device, plain)!!;
+    gpu::BufferDesc dst_desc = {
+        .size = 64, .usage = { .transfer_dst },
+        .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "fill_buffer",
+    };
+    gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
+    defer gpu::destroy_buffer(&device, dst)!!;
+
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    gpu::BufferDesc args_desc = {
+        .size = 16, .usage = { .indirect },
+        .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "indirect_args",
+    };
+    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
+    defer gpu::destroy_buffer(&device, args_buffer)!!;
+    gpu::GpuSpan args_full = gpu::get_buffer_span(&device, args_buffer)!!;
+    gpu::GpuSpan escaped_args = args_full.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
+    gpu::TextureDesc usage_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width = 8, .height = 8, .format = gpu::Format.RGBA8_UNORM,
+        .usage = { .sampled }, .debug_name = "usage_target",
+    };
+    gpu::TextureHandle usage_target = gpu::create_texture(&device, &usage_desc)!!;
+    defer gpu::destroy_texture(&device, usage_target)!!;
+    gpu::TextureDesc color_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width = 8, .height = 8, .format = gpu::Format.RGBA8_UNORM,
+        .usage = { .color_attach }, .debug_name = "color_target",
+    };
+    gpu::TextureHandle color_target = gpu::create_texture(&device, &color_desc)!!;
+    defer gpu::destroy_texture(&device, color_target)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan root = gpu::alloc_frame_span(&frame, 16, 16)!!;
+    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+
+    gpu::BufferCopyDesc copy = { .src = plain, .dst = dst, .size = 16 };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer",
+        debug_name:     "plain_buffer",
+        rejected_field: "BufferUsage.transfer_src",
+        invariant:      "source buffer must include transfer_src usage",
+    );
+    fault copy_fault = @catch(gpu::cmd_copy_buffer(&commands, &copy));
+    assert(copy_fault == gpu::INVALID_ARGUMENT, "copy usage fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      copy_fault,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               plain.index,
+        generation:          plain.generation,
+    );
+    state.debug_callback = null;
+    assert(@catch(gpu::cmd_copy_buffer(&commands, &copy)) == copy_fault,
+        "copy usage fault is callback-independent");
+    state.debug_callback = &capture_sync_diagnostic;
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_fill_buffer",
+        debug_name:     "fill_buffer",
+        rejected_field: "offset",
+        invariant:      "offset and size must be 4-byte aligned",
+    );
+    fault fill_fault = @catch(gpu::cmd_fill_buffer(
+        commands: &commands,
+        buffer:   dst,
+        offset:   2,
+        size:     4,
+        value:    0,
+    ));
+    assert(fill_fault == gpu::INVALID_ARGUMENT, "fill alignment fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      fill_fault,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               dst.index,
+        generation:          dst.generation,
+    );
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_fill_buffer",
+        debug_name:     "fill_buffer",
+        rejected_field: "size",
+        invariant:      "offset and size must be 4-byte aligned",
+    );
+    fault fill_size_fault = @catch(gpu::cmd_fill_buffer(
+        commands: &commands,
+        buffer:   dst,
+        offset:   0,
+        size:     2,
+        value:    0,
+    ));
+    assert(fill_size_fault == gpu::INVALID_ARGUMENT, "fill size-only alignment fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      fill_size_fault,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               dst.index,
+        generation:          dst.generation,
+    );
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_dispatch",
+        debug_name:     null,
+        rejected_field: "pipeline",
+        invariant:      "pipeline kind must match the COMPUTE bind point",
+    );
+    fault pipeline_fault = @catch(gpu::cmd_dispatch(
+        commands:    &commands,
+        pipeline:    draw.graphics,
+        root:        root.gpu,
+        groups:      { 1, 1, 1 },
+    ));
+    assert(pipeline_fault == gpu::INVALID_ARGUMENT, "pipeline-kind fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      pipeline_fault,
+        resource_kind:       gpu::DebugResourceKind.PIPELINE,
+        has_public_identity: true,
+        index:               draw.graphics.index,
+        generation:          draw.graphics.generation,
+    );
+
+    gpu::ColorTargetDesc[1] usage_colors = {{ .texture = usage_target }};
+    gpu::RenderPassDesc usage_pass = { .colors = usage_colors[..], .width = 8, .height = 8 };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_dispatch_indirect",
+        debug_name:     "indirect_args",
+        rejected_field: "args",
+        invariant:      "span offset and size must fit the backing buffer",
+    );
+    fault span_fault = @catch(gpu::cmd_dispatch_indirect(
+        commands: &commands,
+        pipeline: compute.pipeline,
+        root:     root.gpu,
+        args:     escaped_args,
+    ));
+    assert(span_fault == gpu::INVALID_ARGUMENT, "shared span fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      span_fault,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               args_buffer.index,
+        generation:          args_buffer.generation,
+    );
+    state.debug_callback = null;
+    fault span_without_callback = @catch(gpu::cmd_dispatch_indirect(
+        commands: &commands,
+        pipeline: compute.pipeline,
+        root:     root.gpu,
+        args:     escaped_args,
+    ));
+    assert(span_without_callback == span_fault,
+        "shared span fault is callback-independent");
+    state.debug_callback = &capture_sync_diagnostic;
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_begin_render_pass",
+        debug_name:     "usage_target",
+        rejected_field: "TextureUsage.color_attach",
+        invariant:      "color attachment must include color_attach usage",
+    );
+    fault usage_fault = @catch(gpu::cmd_begin_render_pass(&commands, &usage_pass));
+    assert(usage_fault == gpu::INVALID_ARGUMENT, "attachment usage fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      usage_fault,
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        index:               usage_target.index,
+        generation:          usage_target.generation,
+    );
+
+    gpu::ColorTargetDesc[1] colors = {{ .texture = color_target }};
+    gpu::RenderPassDesc pass = { .colors = colors[..], .width = 8, .height = 8 };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_begin_render_pass",
+        debug_name:     "color_target",
+        rejected_field: "ColorTargetDesc.texture",
+        invariant:      "color attachment must be in COLOR_ATTACHMENT layout",
+    );
+    fault layout_fault = @catch(gpu::cmd_begin_render_pass(&commands, &pass));
+    assert(layout_fault == gpu::INVALID_RESOURCE_STATE, "attachment layout fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      layout_fault,
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        index:               color_target.index,
+        generation:          color_target.generation,
+    );
+    state.debug_callback = null;
+    assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass)) == layout_fault,
+        "attachment layout fault is callback-independent");
+    state.debug_callback = &capture_sync_diagnostic;
+
+    record_val_target_to_attach(&commands, color_target);
+    gpu::RenderPassDesc oversized = { .colors = colors[..], .width = 9, .height = 8 };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_begin_render_pass",
+        debug_name:     "color_target",
+        rejected_field: "RenderPassDesc.width",
+        invariant:      "render area must fit every color attachment mip",
+    );
+    fault extent_fault = @catch(gpu::cmd_begin_render_pass(&commands, &oversized));
+    assert(extent_fault == gpu::INVALID_ARGUMENT, "attachment extent fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      extent_fault,
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        index:               color_target.index,
+        generation:          color_target.generation,
+    );
+
+    gpu::RenderPassDesc too_tall = { .colors = colors[..], .width = 8, .height = 9 };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_begin_render_pass",
+        debug_name:     "color_target",
+        rejected_field: "RenderPassDesc.height",
+        invariant:      "render area must fit every color attachment mip",
+    );
+    fault height_fault = @catch(gpu::cmd_begin_render_pass(&commands, &too_tall));
+    assert(height_fault == gpu::INVALID_ARGUMENT, "attachment height-only extent fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      height_fault,
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        index:               color_target.index,
+        generation:          color_target.generation,
+    );
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer",
+        debug_name:     null,
+        rejected_field: "CommandList.state",
+        invariant:      "command must be recording outside a render pass",
+    );
+    fault state_fault = @catch(gpu::cmd_copy_buffer(&commands, &copy));
+    assert(state_fault == gpu::COMMAND_RECORDING_ERROR, "recording-state fault is unchanged");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      state_fault,
+        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        has_public_identity: true,
+        index:               commands.handle.index,
+        generation:          commands.handle.generation,
+    );
+    state.debug_callback = null;
+    assert(@catch(gpu::cmd_copy_buffer(&commands, &copy)) == state_fault,
+        "recording-state fault is callback-independent");
+    state.debug_callback = &capture_sync_diagnostic;
+
+    gpu::cmd_end_render_pass(&commands)!!;
     gpu::end_commands(&commands)!!;
     gpu::end_frame(&frame)!!;
 }

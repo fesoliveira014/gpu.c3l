@@ -1,12 +1,35 @@
 module gpu_test;
 
 import gpu;
+import gpu::vk @public;
 import std::core::mem;
 
 // Headless (lavapipe): driver pipeline-cache blob export/import. Correctness
 // only — blob content usefulness is driver-dependent, so no timing asserts.
 
 const char[*] CACHE_IO_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
+
+struct CacheDiagnosticCapture {
+    uint calls;
+    bool matched;
+}
+
+fn void capture_cache_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    CacheDiagnosticCapture* capture = (CacheDiagnosticCapture*)user_data;
+    capture.calls++;
+    capture.matched = message.severity == gpu::DebugMessageSeverity.ERROR
+        && message.category.public_contract
+        && message.has_fault
+        && message.public_fault == gpu::INVALID_ARGUMENT
+        && message.resource.kind == gpu::DebugResourceKind.DEVICE
+        && !message.resource.has_public_identity
+        && message.operation != null
+        && message.operation.str_view() == "get_pipeline_cache_data"
+        && message.rejected_field != null
+        && message.rejected_field.str_view() == "out"
+        && message.invariant != null
+        && message.invariant.str_view() == "output buffer must fit the pipeline cache data";
+}
 
 fn gpu::Device make_cache_io_device(char[] blob = {}) {
     gpu::DeviceDesc desc = {
@@ -114,9 +137,20 @@ fn void cache_export_undersized_buffer_faults() @test {
     gpu::PipelineHandle pipe = build_cache_io_pipeline(&device);
     defer gpu::destroy_pipeline(&device, pipe)!!;
 
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    CacheDiagnosticCapture capture;
+    state.debug_callback = &capture_cache_diagnostic;
+    state.debug_user_data = &capture;
     char[1] tiny;
     fault f = @catch(gpu::get_pipeline_cache_data(&device, tiny[..]));
     assert(f == gpu::INVALID_ARGUMENT, "undersized export buffer faults INVALID_ARGUMENT");
+    assert(capture.calls == 1 && capture.matched,
+        "undersized export emits one exact callback-time diagnostic");
+
+    state.debug_callback = null;
+    fault fallback = @catch(gpu::get_pipeline_cache_data(&device, tiny[..]));
+    assert(fallback == f, "null callback preserves pipeline-cache export fault parity");
+    assert(capture.calls == 1, "null callback emits no structured duplicate");
 }
 
 fn void cache_corrupt_blob_tolerated() @test {

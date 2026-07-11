@@ -313,15 +313,37 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
 fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     sz size = 0;
-    check(vk::get_pipeline_cache_data(state.device, state.driver_cache, &size, null))!;
+    check_backend_result(
+        state:     state,
+        operation: "get_pipeline_cache_size",
+        result:    vk::get_pipeline_cache_data(state.device, state.driver_cache, &size, null),
+    )!;
     return (usz)size;
 }
 
 fn usz? vk_get_pipeline_cache_data(gpu::Device* device, char[] out) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     sz required = 0;
-    check(vk::get_pipeline_cache_data(state.device, state.driver_cache, &required, null))!;
-    if ((usz)required > out.len) return gpu::INVALID_ARGUMENT~;
+    check_backend_result(
+        state:     state,
+        operation: "get_pipeline_cache_data",
+        result:    vk::get_pipeline_cache_data(state.device, state.driver_cache, &required, null),
+    )!;
+    if ((usz)required > out.len) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "get_pipeline_cache_data",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.DEVICE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "out",
+            invariant:           "output buffer must fit the pipeline cache data",
+            backend_text:        null,
+        )~;
+    }
     sz written = required;
     check_pipeline_cache_data_result(vk::get_pipeline_cache_data(state.device, state.driver_cache, &written, out.ptr))!;
     return (usz)written;

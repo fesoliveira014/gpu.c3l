@@ -6,10 +6,31 @@ import vk;
 <* Backing-buffer slot for `span`: the handle resolves, `required` bytes fit
    within the span itself, and the span's own offset/size fit the backing
    buffer. Usage and alignment checks stay with the caller. *>
-fn BufferSlot*? resolve_span_slot(VkDeviceState* state, gpu::GpuSpan* span, usz required) {
+fn BufferSlot*? resolve_span_slot(
+    VkDeviceState* state,
+    gpu::GpuSpan* span,
+    usz required,
+    ZString operation = null,
+    ZString rejected_field = null,
+) {
     BufferSlot* slot = state.buffers.get(span.buffer)!;
     if (required > span.size) return gpu::INVALID_ARGUMENT~;
-    if (!gpu::range_fits(slot.size, span.offset, span.size)) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::range_fits(slot.size, span.offset, span.size)) {
+        if (operation == null) return gpu::INVALID_ARGUMENT~;
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               span.buffer.index,
+            generation:          span.buffer.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      rejected_field,
+            invariant:           "span offset and size must fit the backing buffer",
+            backend_text:        null,
+        )~;
+    }
     return slot;
 }
 
@@ -33,9 +54,31 @@ fn bool pipeline_kind_matches(VkDeviceState* state, PipelineSlot* slot, Pipeline
 }
 
 <* The handle's pipeline must be of `kind`, else the command targets the wrong bind point. *>
-fn void? validate_pipeline_kind(VkDeviceState* state, gpu::PipelineHandle handle, PipelineKind kind) {
+fn void? validate_pipeline_kind(
+    VkDeviceState* state,
+    gpu::PipelineHandle handle,
+    PipelineKind kind,
+    ZString operation,
+) {
     PipelineSlot* slot = state.pipelines.get(handle)!;
-    if (!pipeline_kind_matches(state, slot, kind)) return gpu::INVALID_ARGUMENT~;
+    if (!pipeline_kind_matches(state, slot, kind)) {
+        ZString invariant = kind == PipelineKind.COMPUTE
+            ? "pipeline kind must match the COMPUTE bind point"
+            : "pipeline kind must match the GRAPHICS bind point";
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.PIPELINE,
+            has_public_identity: true,
+            index:               handle.index,
+            generation:          handle.generation,
+            debug_name:          null,
+            rejected_field:      "pipeline",
+            invariant:           invariant,
+            backend_text:        null,
+        )~;
+    }
 }
 
 <* The shader's compiled stage must match its pipeline role. *>

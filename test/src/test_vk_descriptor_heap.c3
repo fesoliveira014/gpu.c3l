@@ -10,6 +10,62 @@ const uint DESCRIPTOR_BUFFER_USAGE = (uint)vk::BufferUsageFlagBits.RESOURCE_DESC
     | (uint)vk::BufferUsageFlagBits.SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
     | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
 
+struct DescriptorDiagnosticCapture {
+    uint calls;
+    fault expected_fault;
+    gpu::DebugResourceKind expected_kind;
+    bool expected_identity;
+    uint expected_index;
+    uint expected_generation;
+    ZString expected_operation;
+    ZString expected_field;
+    ZString expected_invariant;
+    bool matched;
+}
+
+fn void capture_descriptor_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    DescriptorDiagnosticCapture* capture = (DescriptorDiagnosticCapture*)user_data;
+    capture.calls++;
+    capture.matched = message.severity == gpu::DebugMessageSeverity.ERROR
+        && message.category.public_contract
+        && message.has_fault
+        && message.public_fault == capture.expected_fault
+        && message.resource.kind == capture.expected_kind
+        && message.resource.has_public_identity == capture.expected_identity
+        && (!capture.expected_identity || (message.resource.index == capture.expected_index
+            && message.resource.generation == capture.expected_generation))
+        && message.operation != null
+        && message.operation.str_view() == capture.expected_operation.str_view()
+        && message.rejected_field != null
+        && message.rejected_field.str_view() == capture.expected_field.str_view()
+        && message.invariant != null
+        && message.invariant.str_view() == capture.expected_invariant.str_view();
+}
+
+fn void expect_descriptor_diagnostic(
+    DescriptorDiagnosticCapture* capture,
+    fault expected_fault,
+    gpu::DebugResourceKind expected_kind,
+    bool expected_identity,
+    uint expected_index,
+    uint expected_generation,
+    ZString expected_operation,
+    ZString expected_field,
+    ZString expected_invariant,
+) {
+    *capture = {
+        .calls = capture.calls,
+        .expected_fault = expected_fault,
+        .expected_kind = expected_kind,
+        .expected_identity = expected_identity,
+        .expected_index = expected_index,
+        .expected_generation = expected_generation,
+        .expected_operation = expected_operation,
+        .expected_field = expected_field,
+        .expected_invariant = expected_invariant,
+    };
+}
+
 fn void descriptor_buffer_create_info_uses_exclusive_for_one_family() @test {
     uint[1] family_storage = { 3 };
 
@@ -77,6 +133,105 @@ fn gpu::TextureHandle make_heap_view_texture(gpu::Device* device) {
         .usage        = { .sampled, .storage },
     };
     return gpu::create_texture(device, &desc)!!;
+}
+
+fn void descriptor_sampler_failures_report_context() @test {
+    gpu::Device device = make_heap_test_device(1, 1);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureHandle transfer = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, transfer)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    state.textures.slots[transfer.index].value.usage = { .transfer_dst };
+    DescriptorDiagnosticCapture capture;
+    state.debug_callback = &capture_descriptor_diagnostic;
+    state.debug_user_data = &capture;
+
+    gpu::TextureIndex descriptor = gpu::create_texture_descriptor(&device, texture, null)!!;
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::DESCRIPTOR_HEAP_FULL,
+        expected_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "create_texture_descriptor",
+        expected_field:      "DeviceDesc.texture_descriptor_capacity",
+        expected_invariant:  "must exceed live and retiring texture descriptors",
+    );
+    fault full = @catch(gpu::create_texture_descriptor(&device, texture, null));
+    assert(full == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 1 && capture.matched,
+        "descriptor capacity fault and diagnostic are exact");
+
+    gpu::destroy_texture_descriptor(&device, descriptor)!!;
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_HANDLE,
+        expected_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "destroy_texture_descriptor",
+        expected_field:      "index",
+        expected_invariant:  "descriptor index must identify a live generation",
+    );
+    fault stale = @catch(gpu::destroy_texture_descriptor(&device, descriptor));
+    assert(stale == gpu::INVALID_HANDLE && capture.calls == 2 && capture.matched,
+        "stale descriptor fault has kind without unvalidated identity");
+
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        expected_kind:       gpu::DebugResourceKind.TEXTURE,
+        expected_identity:   true,
+        expected_index:      transfer.index,
+        expected_generation: transfer.generation,
+        expected_operation:  "create_texture_descriptor",
+        expected_field:      "TextureDesc.usage",
+        expected_invariant:  "texture must have sampled or storage usage",
+    );
+    fault usage = @catch(gpu::create_texture_descriptor(&device, transfer, null));
+    assert(usage == gpu::INVALID_ARGUMENT && capture.calls == 3 && capture.matched,
+        "descriptor usage fault and texture identity are exact");
+
+    gpu::SamplerDesc sampler_desc = {};
+    gpu::SamplerIndex sampler = gpu::create_sampler(&device, &sampler_desc)!!;
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::DESCRIPTOR_HEAP_FULL,
+        expected_kind:       gpu::DebugResourceKind.SAMPLER,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "create_sampler",
+        expected_field:      "DeviceDesc.sampler_descriptor_capacity",
+        expected_invariant:  "must exceed live and retiring samplers",
+    );
+    fault sampler_full = @catch(gpu::create_sampler(&device, &sampler_desc));
+    assert(sampler_full == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 4 && capture.matched,
+        "sampler capacity fault and diagnostic are exact");
+
+    gpu::destroy_sampler(&device, sampler)!!;
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_HANDLE,
+        expected_kind:       gpu::DebugResourceKind.SAMPLER,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "destroy_sampler",
+        expected_field:      "index",
+        expected_invariant:  "sampler index must identify a live generation",
+    );
+    fault sampler_stale = @catch(gpu::destroy_sampler(&device, sampler));
+    assert(sampler_stale == gpu::INVALID_HANDLE && capture.calls == 5 && capture.matched,
+        "stale sampler fault has kind without unvalidated identity");
+
+    state.debug_callback = null;
+    fault fallback = @catch(gpu::destroy_sampler(&device, sampler));
+    assert(fallback == sampler_stale && capture.calls == 5,
+        "null callback preserves fault parity without a structured duplicate");
 }
 
 fn uint cached_texture_view_count(vk::VkDeviceState* state, gpu::TextureHandle texture) {
