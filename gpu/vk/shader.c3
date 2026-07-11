@@ -105,7 +105,6 @@ fn gpu::ShaderStage? gpu_stage_from_spv(spvreflect::ShaderStage stage) @private 
     }
 }
 
-
 <* Push blocks must fit the stage's root-push size; zero blocks are valid. *>
 fn void? check_push_constant_range(spvreflect::ShaderModule* reflect_module, gpu::ShaderStage stage) @private {
     usz expected_size = stage == gpu::ShaderStage.COMPUTE ? gpu::RootPush::size : gpu::GraphicsRootPush::size;
@@ -165,11 +164,11 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
     }
 
     ShaderSlot slot = { .stage = desc.stage };
-    if (catch copy_entry_point(&slot.entry_point[0], desc.entry_point)) {
+    if (catch err = copy_entry_point(&slot.entry_point[0], desc.entry_point)) {
         return report_contract_failure(
             state:               state,
             operation:           "create_shader",
-            public_fault:        gpu::INVALID_ARGUMENT,
+            public_fault:        err,
             resource_kind:       gpu::DebugResourceKind.SHADER,
             has_public_identity: false,
             index:               0,

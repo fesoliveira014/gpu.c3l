@@ -140,6 +140,8 @@ fn void report_debug_messenger_failure(VkDeviceState* state, ZString text) {
     gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
 }
 
+<* Emit exactly one public-contract ERROR when configured, return public_fault
+   unchanged, and permit delivery while internal locks are held. *>
 fn fault report_contract_failure(
     VkDeviceState* state,
     ZString operation,

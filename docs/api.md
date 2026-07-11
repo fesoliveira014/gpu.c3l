@@ -1063,9 +1063,12 @@ are held, and callbacks are neither serialized nor reentrant. See
 
 Validation IDs, numeric IDs, backend text, and the first useful object name
 are forwarded when Vulkan provides them. Native Vulkan handles and types are
-never exposed. Stored public debug names remain available when validation is
-disabled; `enable_debug_names` controls best-effort Vulkan object naming
-independently.
+never exposed. For validation-category messages, `validation_id_number` is the
+numeric validation ID; for backend-result messages, it carries the raw signed
+native result code.
+
+Stored public debug names remain available when validation is disabled;
+`enable_debug_names` controls best-effort Vulkan object naming independently.
 
 Representative tranche A public-contract coverage includes texture creation
 and tracked layout barriers, buffer-barrier ranges, persistent-span allocation,

@@ -81,7 +81,21 @@ fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* b
             backend_text:        "buffer barrier range exceeds the buffer",
         )~;
     }
-    if (barrier.size == 0 && barrier.offset >= slot.size) return gpu::INVALID_ARGUMENT~;
+    if (barrier.size == 0 && barrier.offset >= slot.size) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_buffer_barrier",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            has_public_identity: true,
+            index:               barrier.buffer.index,
+            generation:          barrier.buffer.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "BufferBarrier.offset",
+            invariant:           "whole-buffer barrier offset must lie inside the buffer",
+            backend_text:        "whole-buffer barrier offset lies outside the buffer",
+        )~;
+    }
     vk::DeviceSize barrier_size = barrier.size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)barrier.size;
 
     vk::BufferMemoryBarrier2 bar = vk::buffer_memory_barrier2()

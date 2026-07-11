@@ -393,8 +393,6 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
     if (desc.memory_kind != gpu::MemoryKind.PERSISTENT_UPLOAD) {
         return report_contract_failure(
             state:               state,
@@ -458,6 +456,8 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
             backend_text:        null,
         )~;
     }
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     PersistentArenaState* arena = &state.persistent_arena;
 
     vma::VirtualAllocationCreateInfo create_info = {

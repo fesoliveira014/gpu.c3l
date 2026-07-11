@@ -55,12 +55,13 @@ fn void? check_backend_result(VkDeviceState* state, ZString operation, vk::Resul
     if (!public_fault) return;
     if (!stderr_fallback) {
         gpu::DebugMessage message = {
-            .severity     = gpu::DebugMessageSeverity.ERROR,
-            .category     = { .backend },
-            .operation    = operation,
-            .has_fault    = true,
-            .public_fault = public_fault,
-            .backend_text = backend_result_text(result),
+            .severity             = gpu::DebugMessageSeverity.ERROR,
+            .category             = { .backend },
+            .operation            = operation,
+            .has_fault            = true,
+            .public_fault         = public_fault,
+            .backend_text         = backend_result_text(result),
+            .validation_id_number = (int)result,
         };
         gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     }

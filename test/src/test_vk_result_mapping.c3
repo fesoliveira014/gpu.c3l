@@ -19,7 +19,8 @@ fn void capture_backend_result(gpu::DebugMessage* message, void* user_data) {
         && message.has_fault
         && message.public_fault == gpu::BACKEND_ERROR
         && message.backend_text != null
-        && message.backend_text.str_view() == "unmapped Vulkan result";
+        && message.backend_text.str_view() == "unmapped Vulkan result"
+        && message.validation_id_number == -999;
 }
 
 fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
@@ -36,7 +37,7 @@ fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
 
     assert(configured_fault == gpu::BACKEND_ERROR, "configured backend result remains BACKEND_ERROR");
     assert(capture.calls == 1, "configured backend result dispatches exactly once");
-    assert(capture.fields_match, "callback observes operation, backend text, and fault during delivery");
+    assert(capture.fields_match, "callback observes operation, native code, backend text, and fault during delivery");
 
     gpu::vk::VkDeviceState fallback = {};
     fault fallback_fault = @catch(gpu::vk::check_backend_result(

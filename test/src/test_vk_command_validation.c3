@@ -1143,6 +1143,30 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     assert(without_callback == with_callback, "callback presence does not alter the barrier fault");
     assert(capture.calls == 1, "null callback emits no additional diagnostic");
 
+    state.debug_callback = &capture_sync_diagnostic;
+    capture.expected_rejected_field = "BufferBarrier.offset";
+    capture.expected_invariant = "whole-buffer barrier offset must lie inside the buffer";
+    barrier.offset = 64;
+    barrier.size = 0;
+    fault whole_with_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
+
+    assert(whole_with_callback == gpu::INVALID_ARGUMENT, "whole-buffer offset keeps INVALID_ARGUMENT");
+    assert(capture.calls == 2, "whole-buffer offset emits exactly one diagnostic");
+    assert(capture.operation_matches, "whole-buffer operation is cmd_buffer_barrier");
+    assert(capture.has_fault && capture.public_fault == whole_with_callback,
+        "whole-buffer diagnostic carries the unchanged fault");
+    assert(capture.resource_kind == gpu::DebugResourceKind.BUFFER, "whole-buffer resource kind is buffer");
+    assert(capture.has_public_identity && capture.index == buffer.index && capture.generation == buffer.generation,
+        "whole-buffer diagnostic preserves buffer identity");
+    assert(capture.debug_name_matches, "whole-buffer diagnostic preserves the debug name");
+    assert(capture.rejected_field_matches, "whole-buffer offset field is identified");
+    assert(capture.invariant_matches, "whole-buffer offset invariant is identified");
+
+    state.debug_callback = null;
+    fault whole_without_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
+    assert(whole_without_callback == whole_with_callback, "whole-buffer callback presence does not alter the fault");
+    assert(capture.calls == 2, "whole-buffer null callback emits no duplicate");
+
     gpu::end_commands(&commands)!!;
     gpu::end_frame(&frame)!!;
 }
