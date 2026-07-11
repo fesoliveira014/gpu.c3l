@@ -30,7 +30,13 @@ fn void device_create_destroy() @test {
     vk::get_physical_device_features(state.physical_device, &features);
     assert(device.caps.line_polygon_mode == (features.fill_mode_non_solid != 0),
         "line polygon cap matches the selected physical device");
-
+    vk::PhysicalDeviceProperties props;
+    vk::get_physical_device_properties(state.physical_device, &props);
+    assert(
+        device.caps.max_push_constant_size == props.limits.max_push_constants_size,
+        "reported push-constant limit matches the selected physical device"
+    );
+    assert(device.caps.max_push_constant_size >= gpu::RootPush::size, "push-constant limit contains RootPush");
     gpu::destroy_device(&device)!!;
     assert(device.backend_state == null, "backend state cleared on destroy");
 }

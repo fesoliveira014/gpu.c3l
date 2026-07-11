@@ -64,6 +64,8 @@ struct DeviceCaps {
     // Configured heap capacity (DeviceDesc.sampler_descriptor_capacity), not
     // the device's hardware maximum — see create_device's limit rejection.
     uint max_sampler_descriptors;
+    // Raw selected-device limit for one Vulkan push-constant range.
+    uint max_push_constant_size;
     usz  min_uniform_alignment;
     usz  min_storage_alignment;
     usz  min_texel_buffer_alignment;

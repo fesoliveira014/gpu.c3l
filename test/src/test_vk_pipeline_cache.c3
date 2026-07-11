@@ -191,6 +191,7 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
     assert(cache_entry_count(&device) == 2, "push size is part of the compute key");
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    assert(state.compute_layout_cache.count == 2, "duplicate push sizes reuse one layout entry");
     vk::PipelineLayout first_layout = state.pipelines.slots[first.index].value.layout;
     vk::PipelineLayout second_layout = state.pipelines.slots[second.index].value.layout;
     vk::PipelineLayout third_layout = state.pipelines.slots[third.index].value.layout;
@@ -536,4 +537,49 @@ fn void line_polygon_mode_respects_optional_feature() @test {
     line_polygon.raster.polygon_mode = gpu::PolygonMode.LINE;
     gpu::PipelineHandle line_pipeline = gpu::create_graphics_pipeline(&device, &line_polygon)!!;
     gpu::destroy_pipeline(&device, line_pipeline)!!;
+}
+
+fn void compute_push_constant_sizes_validate_before_vulkan() @test {
+    gpu::Device device = make_cache_test_device();
+    defer gpu::destroy_device(&device)!!;
+    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
+    defer gpu::destroy_shader(&device, comp)!!;
+
+    gpu::ComputePipelineDesc below_minimum = { .push_constant_size = 4 };
+    assert(@catch(gpu::create_compute_pipeline(&device, &below_minimum)) == gpu::INVALID_ARGUMENT,
+        "below-minimum size faults before invalid shader lookup");
+
+    gpu::ComputePipelineDesc unaligned = { .shader = comp, .push_constant_size = gpu::RootPush::size + 1 };
+    assert(@catch(gpu::create_compute_pipeline(&device, &unaligned)) == gpu::INVALID_ARGUMENT,
+        "unaligned push-constant size faults INVALID_ARGUMENT");
+
+    uint limit = device.caps.max_push_constant_size;
+    uint aligned_limit = limit - limit % 4;
+    gpu::ComputePipelineDesc over_maximum = { .shader = comp, .push_constant_size = aligned_limit + 4 };
+    assert(@catch(gpu::create_compute_pipeline(&device, &over_maximum)) == gpu::INVALID_ARGUMENT,
+        "size above the selected-device maximum faults INVALID_ARGUMENT");
+
+    gpu::ComputePipelineDesc maximum = { .shader = comp, .push_constant_size = aligned_limit };
+    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &maximum)!!;
+    gpu::destroy_pipeline(&device, pipeline)!!;
+}
+
+fn void compute_layout_cache_grows_beyond_pipeline_capacity_hint() @test {
+    gpu::Device device = make_cache_test_device_with_capacity(1);
+    defer gpu::destroy_device(&device)!!;
+    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
+    defer gpu::destroy_shader(&device, comp)!!;
+
+    uint[3] sizes = { 8, 12, 16 };
+    foreach (size : sizes) {
+        gpu::ComputePipelineDesc desc = { .shader = comp, .push_constant_size = size };
+        gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &desc)!!;
+        gpu::destroy_pipeline(&device, pipeline)!!;
+    }
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    assert(state.compute_layout_cache.count == sizes.len, "each distinct size has one cached layout");
+    assert(state.compute_layout_cache.entries.len >= sizes.len, "layout cache grows beyond the one-pipeline hint");
 }

@@ -178,22 +178,21 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     return count;
 }
 
-fn bool label_recording(gpu::CommandList* commands) @private {
-    return commands.state == gpu::CommandState.RECORDING
-        || commands.state == gpu::CommandState.RECORDING_RENDER_PASS;
-}
-
 fn void? vk_cmd_begin_label(gpu::CommandList* commands, ZString label, float[4] color) @private {
-    if (!label_recording(commands)) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING
+        && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (vk::extensions.vk_cmd_begin_debug_utils_label_ext == null) return;
     vk::DebugUtilsLabelEXT info = vk::debug_utils_label_ext();
     info.p_label_name = (char*)label;
     info.color = color;
-    vk::extensions.vk_cmd_begin_debug_utils_label_ext((vk::CommandBuffer)commands.backend, &info);
+    vk::extensions.vk_cmd_begin_debug_utils_label_ext(record.command_buffer, &info);
 }
 
 fn void? vk_cmd_end_label(gpu::CommandList* commands) @private {
-    if (!label_recording(commands)) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING
+        && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (vk::extensions.vk_cmd_end_debug_utils_label_ext == null) return;
-    vk::extensions.vk_cmd_end_debug_utils_label_ext((vk::CommandBuffer)commands.backend);
+    vk::extensions.vk_cmd_end_debug_utils_label_ext(record.command_buffer);
 }

@@ -76,24 +76,27 @@ fn bool range_fits(usz limit, usz offset, usz size) {
     return size <= limit - offset;
 }
 
-<* Begin the next frame: advance to the next frame-in-flight slot, wait for
-   its arena to retire, and reset it. Faults WAIT_TIMEOUT if the retire wait
-   elapses first — safe to retry. *>
+<* Enter an idle frame: advance to the next frame-in-flight slot, wait for
+   its arena to retire, and reset it. Faults INVALID_RESOURCE_STATE if a frame
+   is already active, or WAIT_TIMEOUT if the retire wait elapses first. These
+   lifecycle guard rejections are mutation-free and safe to retry. *>
 fn void? begin_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.begin_frame(device);
 }
 
-<* Bump-allocate a span from the current frame's upload arena. `size` must be
-   nonzero and `align` a nonzero power of two (INVALID_ARGUMENT otherwise);
-   returns ARENA_FULL when the arena is exhausted. The span is valid until the
-   arena is reset. *>
+<* Bump-allocate a span from the active frame's upload arena. Faults
+   INVALID_RESOURCE_STATE while idle. `size` must be nonzero and `align` a
+   nonzero power of two (INVALID_ARGUMENT otherwise). ARENA_FULL means the
+   aligned range cannot fit or be represented without overflow. The span is
+   valid until the arena is reset. *>
 fn GpuSpan? alloc_frame_span(Device* device, usz size, usz align) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.alloc_frame_span(device, size, align);
 }
 
-<* End the current frame, recording its timeline value. *>
+<* End the active frame and record its timeline value. Faults
+   INVALID_RESOURCE_STATE while idle without submitting work. *>
 fn void? end_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.end_frame(device);
