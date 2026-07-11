@@ -5,12 +5,13 @@ import gpu::vk @public;
 import vk;
 
 fn void staging_buffer_create_info_covers_selected_families() @test {
-    uint[3][3] topologies = {
+    uint[3][4] topologies = {
         { 3, 3, 3 },
         { 5, 2, 5 },
+        { 5, 2, 2 },
         { 7, 4, 1 },
     };
-    uint[3] expected_counts = { 1, 2, 3 };
+    uint[4] expected_counts = { 1, 2, 2, 3 };
     foreach (index, topology : topologies) {
         vk::VkDeviceState state = {
             .graphics_family = topology[0],
