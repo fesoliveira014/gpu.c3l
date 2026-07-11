@@ -900,7 +900,8 @@ has no pipeline work to wait for; it is not a useful semaphore wait or signal
 stage. Explicit `Stage.PRESENT` and `Hazard.PRESENT_READ` values remain the
 legacy broad spelling and map to all commands and memory read respectively.
 They are retained for raw-barrier and semaphore compatibility, not used by the
-`TextureUse.PRESENT` preset.
+`TextureUse.PRESENT` preset. The preset uses `COLOR_ATTACHMENT` with no access
+scope so its barriers chain with the WSI wait and signal stages.
 
 `TextureLayout` values: UNDEFINED, GENERAL, COLOR_ATTACHMENT, DEPTH_STENCIL,
 SHADER_READ, TRANSFER_SRC, TRANSFER_DST, PRESENT. `old_layout` must match the
@@ -922,7 +923,7 @@ an exact synchronization tuple:
 | `STORAGE_COMPUTE` | `COMPUTE_SHADER` | `SHADER_READ_WRITE` | `GENERAL` |
 | `COLOR_ATTACHMENT` | `COLOR_ATTACHMENT` | `COLOR_READ_WRITE` | `COLOR_ATTACHMENT` |
 | `DEPTH_ATTACHMENT` | `DEPTH_STENCIL` | `DEPTH_READ_WRITE` | `DEPTH_STENCIL` |
-| `PRESENT` | `NONE` | `NONE` | `PRESENT` |
+| `PRESENT` | `COLOR_ATTACHMENT` | `NONE` | `PRESENT` |
 
 ```text
 texture_transition(TextureHandle texture, TextureUse before, TextureUse after)
@@ -936,13 +937,11 @@ memory ordering. Presets intentionally cover only common cases; construct a
 raw `TextureBarrier` for transfer sources, other shader stages, read-only
 attachments, subresource-specific work, or any unusual tuple.
 
-At the presentation boundary, the preset produces exact asymmetric scopes by
-composition. `PRESENT -> COLOR_ATTACHMENT` uses `NONE`/`NONE` as its source
-and `COLOR_ATTACHMENT`/`COLOR_READ_WRITE` as its destination;
-`COLOR_ATTACHMENT -> PRESENT` uses those scopes in reverse. The empty side
-does not replace WSI synchronization: the acquire semaphore wait remains at
-color-attachment output, and the render-finished semaphore completes the
-handoff to presentation.
+At the presentation boundary, both barrier sides use `COLOR_ATTACHMENT` so
+they chain with the coupled submission's color-attachment-output semaphore
+wait and signal. Access remains asymmetric by composition:
+`PRESENT -> COLOR_ATTACHMENT` uses `NONE -> COLOR_READ_WRITE`, while
+`COLOR_ATTACHMENT -> PRESENT` uses `COLOR_READ_WRITE -> NONE`.
 
 The `UNDEFINED` preset's `HOST`/`NONE` source scope is only for first use or
 discard when no earlier GPU work still accesses the texture. Reinitializing a

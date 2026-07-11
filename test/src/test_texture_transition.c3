@@ -22,7 +22,7 @@ fn void texture_use_mappings_are_exact() @test {
         { gpu::TextureUse.STORAGE_COMPUTE,      gpu::Stage.COMPUTE_SHADER,   gpu::Hazard.SHADER_READ_WRITE, gpu::TextureLayout.GENERAL },
         { gpu::TextureUse.COLOR_ATTACHMENT,     gpu::Stage.COLOR_ATTACHMENT, gpu::Hazard.COLOR_READ_WRITE,  gpu::TextureLayout.COLOR_ATTACHMENT },
         { gpu::TextureUse.DEPTH_ATTACHMENT,     gpu::Stage.DEPTH_STENCIL,    gpu::Hazard.DEPTH_READ_WRITE,  gpu::TextureLayout.DEPTH_STENCIL },
-        { gpu::TextureUse.PRESENT,              gpu::Stage.NONE,             gpu::Hazard.NONE,              gpu::TextureLayout.PRESENT },
+        { gpu::TextureUse.PRESENT,              gpu::Stage.COLOR_ATTACHMENT, gpu::Hazard.NONE,              gpu::TextureLayout.PRESENT },
     };
     gpu::TextureHandle texture = transition_texture();
 
@@ -102,7 +102,7 @@ fn void presentation_transitions_have_narrow_scopes() @test {
         after:   gpu::TextureUse.COLOR_ATTACHMENT,
     )!!;
     assert(acquire.texture == texture, "acquire preserves the texture handle");
-    assert(acquire.before_stage == gpu::Stage.NONE, "acquire source stage is empty");
+    assert(acquire.before_stage == gpu::Stage.COLOR_ATTACHMENT, "acquire source stage matches the WSI wait");
     assert(acquire.after_stage == gpu::Stage.COLOR_ATTACHMENT, "acquire destination stage is color output");
     assert(acquire.before_hazard == gpu::Hazard.NONE, "acquire source access is empty");
     assert(acquire.after_hazard == gpu::Hazard.COLOR_READ_WRITE, "acquire destination access is color read/write");
@@ -116,7 +116,7 @@ fn void presentation_transitions_have_narrow_scopes() @test {
     )!!;
     assert(release.texture == texture, "release preserves the texture handle");
     assert(release.before_stage == gpu::Stage.COLOR_ATTACHMENT, "release source stage is color output");
-    assert(release.after_stage == gpu::Stage.NONE, "release destination stage is empty");
+    assert(release.after_stage == gpu::Stage.COLOR_ATTACHMENT, "release destination stage matches the WSI signal");
     assert(release.before_hazard == gpu::Hazard.COLOR_READ_WRITE, "release source access is color read/write");
     assert(release.after_hazard == gpu::Hazard.NONE, "release destination access is empty");
     assert(release.old_layout == gpu::TextureLayout.COLOR_ATTACHMENT, "release source layout is color attachment");

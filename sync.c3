@@ -153,7 +153,7 @@ fn void? resolve_texture_use(
             *hazard = Hazard.DEPTH_READ_WRITE;
             *layout = TextureLayout.DEPTH_STENCIL;
         case TextureUse.PRESENT:
-            *stage = Stage.NONE;
+            *stage = Stage.COLOR_ATTACHMENT;
             *hazard = Hazard.NONE;
             *layout = TextureLayout.PRESENT;
         default:
