@@ -440,7 +440,9 @@ create_swapchain(device, SurfaceDesc, SwapchainDesc) -> SwapchainHandle?
 acquire_next_image(device, swapchain) -> AcquiredImage?
 present(device, PresentDesc) -> void?
 get_present_mode_support(device, swapchain) -> PresentModeSupport?
-resize/recreate on SWAPCHAIN_OUT_OF_DATE
+retry unchanged on WAIT_TIMEOUT
+resize on SWAPCHAIN_OUT_OF_DATE
+replace the surface and swapchain on SURFACE_LOST
 ```
 
 `PresentModeSupport` is a bitstruct reporting fifo/immediate/mailbox availability for the swapchain's surface.

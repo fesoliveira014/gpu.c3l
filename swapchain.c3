@@ -83,19 +83,22 @@ fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width,
     return device.vtable.resize_swapchain(device, swapchain, width, height);
 }
 
-<* Acquire the next image. Faults SWAPCHAIN_OUT_OF_DATE when the swapchain
-   needs a resize and INVALID_RESOURCE_STATE while a prior acquire is still
-   pending; a true `suboptimal` is a soft signal to resize soon. The submit
-   that renders to the image must name the swapchain in its SubmitDesc. *>
+<* Acquire the next image. WAIT_TIMEOUT is transient: retry the same swapchain.
+   SWAPCHAIN_OUT_OF_DATE requires resize_swapchain; SURFACE_LOST requires
+   destroying the swapchain and creating another from fresh platform handles.
+   INVALID_RESOURCE_STATE means an acquire is already pending. A true
+   `suboptimal` image remains usable but is a soft signal to resize soon. The
+   rendering submit must name the swapchain in its SubmitDesc. *>
 fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.acquire_next_image(device, swapchain);
 }
 
 <* Present the last acquired image. Requires the coupled GRAPHICS submit that
-   consumes the acquire to have run first (INVALID_RESOURCE_STATE otherwise)
-   and the image in the PRESENT tracked layout (INVALID_RESOURCE_STATE).
-   Faults SWAPCHAIN_OUT_OF_DATE when the surface changed. *>
+   consumes the acquire to have run first and the image in the PRESENT tracked
+   layout (INVALID_RESOURCE_STATE otherwise). SWAPCHAIN_OUT_OF_DATE requires
+   resize_swapchain; SURFACE_LOST requires destroying the swapchain and
+   creating another from fresh platform handles. *>
 fn void? present(Device* device, PresentDesc* desc) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.present(device, desc);

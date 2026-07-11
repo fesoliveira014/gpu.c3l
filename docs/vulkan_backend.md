@@ -474,10 +474,20 @@ create
 acquire
 present
 query present-mode support
-recreate on out-of-date/suboptimal
+resize on out-of-date/suboptimal; recreate the surface on surface-lost
 ```
 
 `vk_get_present_mode_support` queries the retained `vk::SurfaceKHR` for fifo/immediate/mailbox availability. At creation, `select_present_mode` falls back to FIFO silently when the requested mode is unavailable.
+
+WSI result mapping is explicit and pure-tested:
+
+| Vulkan result | Public outcome | State/recovery |
+|---|---|---|
+| acquire `TIMEOUT` / `NOT_READY` | `WAIT_TIMEOUT` | pending-acquire state stays unchanged; retry |
+| `ERROR_OUT_OF_DATE_KHR` | `SWAPCHAIN_OUT_OF_DATE` | resize the swapchain |
+| `ERROR_SURFACE_LOST_KHR` | `SURFACE_LOST` | replace the platform surface and swapchain |
+| acquire `SUBOPTIMAL_KHR` | valid image with `suboptimal = true` | finish the frame; resize when convenient |
+| present `SUBOPTIMAL_KHR` | success | current public API exposes no soft present result |
 
 ## 17. Debug implementation
 

@@ -189,11 +189,11 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | `DESCRIPTOR_HEAP_FULL` | `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination or failed compiling |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
-| `SURFACE_LOST` | acquire/present | window/surface destroyed mid-frame |
-| `SWAPCHAIN_OUT_OF_DATE` | `acquire_next_image`, `present` | surface changed (resize); `resize_swapchain` and retry |
+| `SURFACE_LOST` | swapchain create/resize/query, acquire, present | platform surface is unavailable; destroy the swapchain and create a new one from fresh native handles |
+| `SWAPCHAIN_OUT_OF_DATE` | `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
 | `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |
-| `WAIT_TIMEOUT` | `wait_semaphore`, `begin_frame` | bounded host wait elapsed before the timeline reached its target value; safe to retry |
+| `WAIT_TIMEOUT` | `wait_semaphore`, `begin_frame`, `acquire_next_image` | bounded wait or transient image unavailability; retry without resizing |
 
 Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled.
 
@@ -862,6 +862,15 @@ sample). State-machine contracts: acquiring while an acquire is pending
 faults INVALID_RESOURCE_STATE; present enforces the PRESENT tracked layout;
 a failed resize parks the swapchain dormant (next acquire reports
 SWAPCHAIN_OUT_OF_DATE).
+
+WSI recovery is fault-specific:
+
+| Outcome | Meaning | Recovery |
+|---|---|---|
+| `WAIT_TIMEOUT` from acquire | no image was available during the bounded wait | retry acquire on the same swapchain; do not resize |
+| `SWAPCHAIN_OUT_OF_DATE` | swapchain no longer matches the surface | call `resize_swapchain`, then retry |
+| `SURFACE_LOST` | platform surface is no longer usable | destroy the swapchain, refresh native surface handles as needed, and create a new swapchain |
+| acquired image with `suboptimal = true` | image is valid but presentation properties changed | finish the frame and resize when convenient |
 
 `resize_swapchain` (and swapchain/device teardown) release the old wrapped
 swapchain textures directly, bypassing `destroy_texture` — so they never hit

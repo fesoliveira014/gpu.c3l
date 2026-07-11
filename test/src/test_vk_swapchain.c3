@@ -44,6 +44,41 @@ fn void present_mode_selection() @test {
         "FIFO requested is FIFO");
 }
 
+fn void common_surface_lost_result_mapping() @test {
+    fault surface_lost = @catch(gpu::vk::check(vk::Result.ERROR_SURFACE_LOST_KHR));
+    assert(surface_lost == gpu::SURFACE_LOST, "common mapper preserves surface loss");
+}
+
+fn void acquire_result_mapping() @test {
+    gpu::vk::map_acquire_result(vk::Result.SUCCESS)!!;
+    gpu::vk::map_acquire_result(vk::Result.SUBOPTIMAL_KHR)!!;
+
+    fault timeout = @catch(gpu::vk::map_acquire_result(vk::Result.TIMEOUT));
+    fault not_ready = @catch(gpu::vk::map_acquire_result(vk::Result.NOT_READY));
+    fault out_of_date = @catch(gpu::vk::map_acquire_result(vk::Result.ERROR_OUT_OF_DATE_KHR));
+    fault surface_lost = @catch(gpu::vk::map_acquire_result(vk::Result.ERROR_SURFACE_LOST_KHR));
+    fault device_lost = @catch(gpu::vk::map_acquire_result(vk::Result.ERROR_DEVICE_LOST));
+
+    assert(timeout == gpu::WAIT_TIMEOUT, "acquire timeout is retryable");
+    assert(not_ready == gpu::WAIT_TIMEOUT, "acquire not-ready is retryable");
+    assert(out_of_date == gpu::SWAPCHAIN_OUT_OF_DATE, "out-of-date requires swapchain resize");
+    assert(surface_lost == gpu::SURFACE_LOST, "surface loss remains distinct");
+    assert(device_lost == gpu::DEVICE_LOST, "unrelated results delegate to the common mapper");
+}
+
+fn void present_result_mapping() @test {
+    gpu::vk::map_present_result(vk::Result.SUCCESS)!!;
+    gpu::vk::map_present_result(vk::Result.SUBOPTIMAL_KHR)!!;
+
+    fault out_of_date = @catch(gpu::vk::map_present_result(vk::Result.ERROR_OUT_OF_DATE_KHR));
+    fault surface_lost = @catch(gpu::vk::map_present_result(vk::Result.ERROR_SURFACE_LOST_KHR));
+    fault device_lost = @catch(gpu::vk::map_present_result(vk::Result.ERROR_DEVICE_LOST));
+
+    assert(out_of_date == gpu::SWAPCHAIN_OUT_OF_DATE, "out-of-date requires swapchain resize");
+    assert(surface_lost == gpu::SURFACE_LOST, "surface loss requires surface recreation");
+    assert(device_lost == gpu::DEVICE_LOST, "unrelated results delegate to the common mapper");
+}
+
 fn void image_count_clamp() @test {
     assert(gpu::vk::clamp_image_count(0, 2, 8) == 3, "zero requests min + 1");
     assert(gpu::vk::clamp_image_count(1, 2, 8) == 2, "below min clamps up");
