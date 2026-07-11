@@ -183,7 +183,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
         pipeline:   pipeline,
         verts:      vspan.gpu,
         color:      cspan.gpu,
-        index_span: span16.checked_subspan(0, 12)!!,
+        index_span: span16.checked_subspan(0, U16V_INDEX_COUNT * 2)!!,
         index_type: gpu::IndexType.U16,
         rb_span:    &rb_u16,
     );
@@ -192,7 +192,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
         pipeline:   pipeline,
         verts:      vspan.gpu,
         color:      cspan.gpu,
-        index_span: span32.checked_subspan(0, 24)!!,
+        index_span: span32.checked_subspan(0, U16V_INDEX_COUNT * 4)!!,
         index_type: gpu::IndexType.U32,
         rb_span:    &rb_u32,
     );
@@ -201,7 +201,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
         pipeline:   pipeline,
         verts:      vspan.gpu,
         color:      cspan.gpu,
-        index_span: span16_off.checked_subspan(U16V_OFFSET_ELEMENTS * 2, 12)!!,
+        index_span: span16_off.checked_subspan(U16V_OFFSET_ELEMENTS * 2, U16V_INDEX_COUNT * 2)!!,
         index_type: gpu::IndexType.U16,
         rb_span:    &rb_u16_off,
     );
@@ -210,7 +210,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
         pipeline:   pipeline,
         verts:      vspan.gpu,
         color:      cspan.gpu,
-        index_span: span32_off.checked_subspan(U16V_OFFSET_ELEMENTS * 4, 24)!!,
+        index_span: span32_off.checked_subspan(U16V_OFFSET_ELEMENTS * 4, U16V_INDEX_COUNT * 4)!!,
         index_type: gpu::IndexType.U32,
         rb_span:    &rb_u32_off,
     );
