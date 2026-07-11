@@ -135,6 +135,7 @@ struct CapsInputs {
     bool indexing_supported;
     bool buffer_supported;
     bool async_compute;
+    bool line_polygon_mode;
     uint texture_capacity;
     uint sampler_capacity;
 }
@@ -271,6 +272,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
         v13:  &features13,
     )!;
     state.draw_indirect_count = features12.draw_indirect_count != 0;
+    bool line_polygon_mode = line_polygon_mode_supported(&features2.features);
 
     if (features2.features.sampler_anisotropy != 0) {
         vk::PhysicalDeviceProperties anisotropy_props;
@@ -285,7 +287,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.compute_family  = families.compute;
     state.transfer_family = families.transfer;
 
-    create_logical_device(state, &families)!;
+    create_logical_device(state, &families, line_polygon_mode)!;
     vk::get_device_queue(state.device, state.graphics_family, 0, &state.graphics_queue);
     state.compute_queue_distinct = families.async_compute;
     if (families.async_compute) {
@@ -321,6 +323,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
         .indexing_supported = indexing_supported,
         .buffer_supported   = buffer_supported,
         .async_compute      = state.compute_queue_distinct,
+        .line_polygon_mode  = line_polygon_mode,
         .texture_capacity   = state.texture_descriptor_capacity,
         .sampler_capacity   = state.sampler_descriptor_capacity,
     };
@@ -451,6 +454,11 @@ fn void? check_required_features(vk::PhysicalDeviceFeatures* base, vk::PhysicalD
     if (v12.timeline_semaphore == 0)    return gpu::UNSUPPORTED_FEATURE~;
     if (v13.synchronization2 == 0)      return gpu::UNSUPPORTED_FEATURE~;
     if (v13.dynamic_rendering == 0)     return gpu::UNSUPPORTED_FEATURE~;
+}
+
+<* Optional non-solid polygon rasterization support. Pure. *>
+fn bool line_polygon_mode_supported(vk::PhysicalDeviceFeatures* base) {
+    return base.fill_mode_non_solid != 0;
 }
 
 <* Features both descriptor paths need — SPIR-V capabilities emitted by the
@@ -585,7 +593,7 @@ fn int score_device(int device_type) @private {
    heap-path features follow state.heap_mode. Emits one queue create info per
    distinct family in use; the main family asks for a second queue when the
    compute tier lives there. *>
-fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @private {
+fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families, bool line_polygon_mode) @private {
     float[2] priorities = { 1.0, 1.0 };
     uint main_queue_count = families.async_compute && families.compute == families.graphics ? 2 : 1;
     vk::DeviceQueueCreateInfo[MAX_QUEUE_FAMILIES] queue_infos;
@@ -635,6 +643,7 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families) @p
         .set_next(&features12);
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
     features2.features.shader_int64 = vk::TRUE;
+    if (line_polygon_mode) features2.features.fill_mode_non_solid = vk::TRUE;
     if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;
     features2.features.shader_storage_image_read_without_format  = vk::TRUE;
@@ -693,6 +702,7 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .descriptor_buffer          = inputs.buffer_supported,
         .descriptor_indexing        = inputs.indexing_supported,
         .async_compute              = inputs.async_compute,
+        .line_polygon_mode          = inputs.line_polygon_mode,
         .max_texture_descriptors    = inputs.texture_capacity,
         .max_sampler_descriptors    = inputs.sampler_capacity,
         .max_push_constant_size     = props.limits.max_push_constants_size,

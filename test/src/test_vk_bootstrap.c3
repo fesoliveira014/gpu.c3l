@@ -26,6 +26,10 @@ fn void device_create_destroy() @test {
     assert(device.caps.dynamic_rendering, "dynamic_rendering cap true");
     assert(device.caps.timeline_semaphore, "timeline_semaphore cap true");
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::PhysicalDeviceFeatures features;
+    vk::get_physical_device_features(state.physical_device, &features);
+    assert(device.caps.line_polygon_mode == (features.fill_mode_non_solid != 0),
+        "line polygon cap matches the selected physical device");
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(state.physical_device, &props);
     assert(

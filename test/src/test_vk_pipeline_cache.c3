@@ -506,6 +506,39 @@ fn void small_pipeline_capacity_faults_at_limit() @test {
     foreach (handle : handles) gpu::destroy_pipeline(&device, handle)!!;
 }
 
+fn void line_polygon_mode_respects_optional_feature() @test {
+    gpu::Device device = make_cache_test_device();
+    defer gpu::destroy_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders(&device);
+    defer gpu::destroy_shader(&device, shaders.vert)!!;
+    defer gpu::destroy_shader(&device, shaders.frag)!!;
+    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    bool supported = state.caps.line_polygon_mode;
+
+    state.caps.line_polygon_mode = false;
+    gpu::GraphicsPipelineDesc unavailable = {
+        .raster        = { .polygon_mode = gpu::PolygonMode.LINE },
+        .color_formats = formats[..],
+    };
+    uint entries_before = cache_entry_count(&device);
+    assert(@catch(gpu::create_graphics_pipeline(&device, &unavailable)) == gpu::UNSUPPORTED_FEATURE,
+        "unsupported LINE faults before invalid shader lookup");
+    assert(cache_entry_count(&device) == entries_before, "unsupported LINE publishes no cache entry");
+    state.caps.line_polygon_mode = supported;
+
+    gpu::GraphicsPipelineDesc line_topology = base_graphics_desc(&shaders, formats[..]);
+    line_topology.topology = gpu::PrimitiveTopology.LINES;
+    gpu::PipelineHandle topology_pipeline = gpu::create_graphics_pipeline(&device, &line_topology)!!;
+    gpu::destroy_pipeline(&device, topology_pipeline)!!;
+
+    if (!supported) return;
+    gpu::GraphicsPipelineDesc line_polygon = base_graphics_desc(&shaders, formats[..]);
+    line_polygon.raster.polygon_mode = gpu::PolygonMode.LINE;
+    gpu::PipelineHandle line_pipeline = gpu::create_graphics_pipeline(&device, &line_polygon)!!;
+    gpu::destroy_pipeline(&device, line_pipeline)!!;
+}
+
 fn void compute_push_constant_sizes_validate_before_vulkan() @test {
     gpu::Device device = make_cache_test_device();
     defer gpu::destroy_device(&device)!!;

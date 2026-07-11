@@ -44,7 +44,8 @@ enum FrontFace : int {
     CLOCKWISE,
 }
 
-<* Triangle rasterization: filled or wireframe. *>
+<* Triangle rasterization: filled or wireframe. LINE requires
+   DeviceCaps.line_polygon_mode. *>
 enum PolygonMode : int {
     FILL,
     LINE,

@@ -142,6 +142,16 @@ shaderStorageImageWriteWithoutFormat
 
 `maintenance4` is always enabled.
 
+Optional base features are queried on the selected device and enabled only
+when advertised:
+
+```text
+fillModeNonSolid -> DeviceCaps.line_polygon_mode
+```
+
+`PolygonMode.LINE` faults `UNSUPPORTED_FEATURE` before shader or cache lookup
+when this cap is false. The feature is not a physical-device selection requirement.
+
 Heap-path-dependent features:
 
 ```text

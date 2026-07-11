@@ -22,6 +22,10 @@ page doesn't explain it, that's a bug in this page — file an issue.
   graphics alias — the flag is a no-op there. EXCLUSIVE cross-family
   ownership transfers are deliberately absent
   ([#36](https://github.com/fesoliveira014/gpu.c3l/issues/36)).
+- **Wireframe polygon rasterization is optional.** `DeviceCaps.line_polygon_mode`
+  reports whether `PolygonMode.LINE` is enabled. Unsupported adapters reject
+  it with `UNSUPPORTED_FEATURE`; filled rasterization and
+  `PrimitiveTopology.LINES` remain available.
 - **Vendored distribution.** There is no package registry; consumers vendor
   the repo (with its binding submodules) under `lib/`. See
   `docs/getting_started.md`.
