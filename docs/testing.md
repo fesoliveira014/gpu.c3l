@@ -112,6 +112,15 @@ slot reuse cases run only when the selected graphics and compute family indices
 differ; single-family adapters report the cases as not applicable and do not
 count them as cross-family coverage.
 
+Persistent-arena queue-family regressions deterministically pin aliased, two-
+family, and three-family creation plans, including exact ordered family metadata
+and the exclusive no-list path. Validation-enabled tests use one live `Device`
+to consume one persistent span across compute and graphics, then retire, free,
+and reallocate the same buffer, offset, and GPU address before cross-family
+reuse. Distinct-family runtime cases report PASS when exercised; same-family
+hardware reports N/A and is not counted as cross-family evidence. Multi-device
+support remains outside the test contract.
+
 The C3 test harness captures passing-test output and has no skipped-test result,
 so the required topology audit enables output explicitly:
 

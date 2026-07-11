@@ -12,10 +12,8 @@ import std::collections::map;
 alias PersistentAllocMap = HashMap{usz, vma::VirtualAllocation};
 alias QueueSubmit2Fn @private = fn vk::Result (vk::Queue, uint, vk::SubmitInfo2*, vk::Fence);
 
-// vertex stays out (unimplemented interop); shared_queues stays out (the
-// arena is single-queue-consumed today).
 const gpu::BufferUsage PERSISTENT_ARENA_USAGE = {
-    .transfer_src, .transfer_dst, .uniform, .storage, .addressable, .indirect, .index,
+    .transfer_src, .transfer_dst, .uniform, .storage, .addressable, .indirect, .index, .shared_queues,
 };
 
 // One persistent arena per device: a large addressable buffer suballocated by a
@@ -28,6 +26,12 @@ struct PersistentArenaState {
     void*              cpu_base;
     usz                size;
     PersistentAllocMap live;
+}
+
+struct PersistentArenaCreatePlan @private {
+    gpu::BufferDesc          desc;
+    uint[MAX_QUEUE_FAMILIES] families;
+    uint                     family_count;
 }
 
 // Per-frame upload arena: a mapped, addressable buffer bump-allocated within a
@@ -339,18 +343,30 @@ fn void? vk_end_frame(gpu::FrameToken* frame) @private {
     return end_frame_with_submit(frame, &real_queue_submit2);
 }
 
-<* Create the persistent arena: a large addressable buffer plus a VMA virtual
-   block that suballocates it. *>
-fn void? create_persistent_arena(VkDeviceState* state, gpu::DeviceDesc* device_desc) {
-    usz arena_size = device_desc.persistent_arena_size == 0 ? gpu::DEFAULT_PERSISTENT_ARENA_SIZE : device_desc.persistent_arena_size;
-    gpu::Device handle = { .backend = gpu::BackendKind.VULKAN, .vtable = &VK_VTABLE, .backend_state = (void*)state };
-    gpu::BufferDesc desc = {
+fn gpu::BufferDesc persistent_arena_desc(usz arena_size) @private {
+    return {
         .size        = arena_size,
         .usage       = PERSISTENT_ARENA_USAGE,
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
         .debug_name  = "persistent_arena",
     };
-    gpu::BufferHandle buffer = vk_create_buffer(&handle, &desc)!;
+}
+
+fn PersistentArenaCreatePlan persistent_arena_create_plan(VkDeviceState* state, usz arena_size) @private {
+    PersistentArenaCreatePlan plan = {
+        .desc = persistent_arena_desc(arena_size),
+    };
+    plan.family_count = used_queue_families(state, plan.families[..]);
+    return plan;
+}
+
+<* Create the persistent arena: a large addressable buffer plus a VMA virtual
+   block that suballocates it. *>
+fn void? create_persistent_arena(VkDeviceState* state, gpu::DeviceDesc* device_desc) {
+    usz arena_size = device_desc.persistent_arena_size == 0 ? gpu::DEFAULT_PERSISTENT_ARENA_SIZE : device_desc.persistent_arena_size;
+    gpu::Device handle = { .backend = gpu::BackendKind.VULKAN, .vtable = &VK_VTABLE, .backend_state = (void*)state };
+    PersistentArenaCreatePlan plan = persistent_arena_create_plan(state, arena_size);
+    gpu::BufferHandle buffer = vk_create_buffer_with_families(&handle, &plan.desc, plan.families[:plan.family_count])!;
     mark_buffer_internal(state, buffer);
     gpu::GpuSpan span = vk_get_buffer_span(&handle, buffer)!;
 

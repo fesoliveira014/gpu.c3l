@@ -494,11 +494,26 @@ cursor = 0
 Persistent arenas use VMA virtual allocator to suballocate ranges from large real buffers.
 
 The backing buffer is created once with a fixed usage superset (`transfer_src`,
-`transfer_dst`, `uniform`, `storage`, `addressable`, `indirect`, `index` —
-`vertex` and `shared_queues` are deliberately excluded). `PersistentAllocDesc.usage`
-is validated as a subset of that superset at allocation time (`INVALID_ARGUMENT`
-on unsupported bits) rather than applied per span; empty usage is a valid
-storage-style default.
+`transfer_dst`, `uniform`, `storage`, `addressable`, `indirect`, `index`, and
+`shared_queues`; `vertex` is deliberately excluded). It is shared automatically
+across the exact selected graphics, compute, and transfer families. Distinct
+families use concurrent sharing with the ordered deduplicated family list; when
+all three queues alias one family, the buffer remains exclusive with no family
+list.
+
+`PersistentAllocDesc.usage` is validated as a subset of that superset at
+allocation time (`INVALID_ARGUMENT` on unsupported bits) rather than applied per
+span. `shared_queues` is accepted as a no-op because sharing belongs to the
+backing buffer, and empty usage remains a valid storage-style default. Explicit
+buffers and textures still require their own `shared_queues` flag when consumed
+across distinct queue families.
+
+Concurrent sharing removes queue-family ownership transfers only. Callers must
+still flush host writes as required, record barriers, order submissions with
+semaphores, wait for completion, and keep each span live until all referencing
+work retires. `free_persistent_span` is valid only after that retirement. The
+arena and its spans remain scoped to the single supported live `Device`;
+multi-device support is outside the contract.
 
 ```text
 PersistentArenaState
@@ -523,7 +538,7 @@ Free flow:
 ```text
 1. Validate span belongs to arena.
 2. Find matching virtual allocation handle.
-3. Free virtual allocation.
+3. After every referencing GPU access retires, free virtual allocation.
 4. Mark span invalid in debug tracking.
 ```
 
