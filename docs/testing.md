@@ -25,6 +25,7 @@ Examples:
 ```text
 test_handles.c3
 test_ranges.c3
+test_texture_support.c3
 test_memory_policy.c3
 test_shader_abi_layout.c3
 test_descriptor_heap_slots.c3
@@ -41,6 +42,7 @@ range alignment
 GpuSpan checked/unchecked offset math
 immediate-parent exact-fit, nested, zero-size, and out-of-parent slicing
 GPU-address, CPU-pointer, backing-offset, and requested-size overflow rejection
+texture descriptor normalization and backend-profile validation
 arena bump allocation logic without Vulkan
 MemoryKind policy table completeness
 Format translation table completeness through pure tables if separated
@@ -64,6 +66,7 @@ test_vk_buffer.c3
 test_vk_frame_arena.c3
 test_vk_persistent_arena.c3
 test_vk_command_submit.c3
+test_vk_texture.c3 (adapter capability query/create consistency)
 test_vk_root_pointer_compute.c3
 test_vk_texture_heap.c3
 test_vk_texture_upload.c3
@@ -80,6 +83,7 @@ create addressable VMA-backed buffers
 retrieve non-zero GPU address
 map/flush/invalidate paths
 frame arena allocation and reset safety
+format feature queries agree with adapter-backed texture creation
 persistent arena suballocation/free
 command list begin/end/submit
 timeline semaphore signaling

@@ -10,6 +10,9 @@ import std::thread;
 
 // Disambiguates from vma::Allocator: std::core::mem's host-memory interface.
 alias HostAllocator = std::core::mem::alloc::Allocator;
+alias DeviceExtensionQuery = fn bool(vk::PhysicalDevice physical_device, ZString extension);
+
+const ZString SWAPCHAIN_EXTENSION = "VK_KHR_swapchain";
 
 // Per-device backend state, reached through Device.backend_state.
 struct VkDeviceState {
@@ -190,6 +193,8 @@ const gpu::BackendVTable VK_VTABLE = {
     .create_semaphore    = &vk_create_semaphore,
     .destroy_semaphore   = &vk_destroy_semaphore,
     .wait_semaphore      = &vk_wait_semaphore,
+    .get_texture_format_support = &vk_get_texture_format_support,
+    .supports_texture_desc      = &vk_supports_texture_desc,
     .create_texture          = &vk_create_texture,
     .destroy_texture         = &vk_destroy_texture,
     .create_texture_descriptor  = &vk_create_texture_descriptor,
@@ -494,6 +499,16 @@ fn gpu::DescriptorHeapMode? resolve_heap_mode(gpu::DescriptorHeapMode requested,
     }
 }
 
+<* Pure conditional extension check; query is an injectable seam for selection tests. *>
+fn bool presentation_requirement_satisfied(
+    bool required,
+    vk::PhysicalDevice physical_device,
+    DeviceExtensionQuery query = &device_supports_extension
+) {
+    if (!required) return true;
+    return query(physical_device, SWAPCHAIN_EXTENSION);
+}
+
 <* The feature struct is only chained once the extension is confirmed. *>
 fn bool query_descriptor_buffer_support(vk::PhysicalDevice physical_device) @private {
     if (!device_supports_extension(physical_device, "VK_EXT_descriptor_buffer")) return false;
@@ -523,6 +538,7 @@ fn bool candidate_satisfies(vk::PhysicalDevice candidate, gpu::DeviceDesc* desc)
     bool indexing = heap_indexing_supported(&features2.features, &features12);
     bool buffer   = heap_shared_features_supported(&features2.features, &features12) && query_descriptor_buffer_support(candidate);
     if (catch resolve_heap_mode(desc.descriptor_heap_mode, indexing, buffer)) return false;
+    if (!presentation_requirement_satisfied(desc.enable_presentation, candidate)) return false;
     return true;
 }
 
@@ -543,8 +559,9 @@ fn PhysicalDeviceSelection? choose_physical_device(PhysicalDeviceCandidate[] can
 }
 
 <* Enumerate physical devices, drop candidates that cannot satisfy the desc
-   (API version, required features, heap mode, queue topology), and return the
-   highest-scored device with its already-resolved queue families. *>
+   (API version, required features, heap mode, conditional presentation
+   capability, queue topology), and return the highest-scored device with its
+   already-resolved queue families. *>
 fn PhysicalDeviceSelection? pick_physical_device(vk::Instance instance, gpu::DeviceDesc* desc) {
     uint count = 0;
     check_physical_device_enumeration_result(vk::enumerate_physical_devices(instance, &count, null))!;
@@ -654,8 +671,8 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families, bo
         extensions[extension_count++] = "VK_EXT_descriptor_buffer";
     }
     if (state.presentation_enabled) {
-        if (!device_supports_extension(state.physical_device, "VK_KHR_swapchain")) return gpu::UNSUPPORTED_FEATURE~;
-        extensions[extension_count++] = "VK_KHR_swapchain";
+        if (!device_supports_extension(state.physical_device, SWAPCHAIN_EXTENSION)) return gpu::UNSUPPORTED_FEATURE~;
+        extensions[extension_count++] = SWAPCHAIN_EXTENSION;
     }
 
     vk::DeviceCreateInfo device_info = vk::device_create_info()
@@ -707,6 +724,8 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .line_polygon_mode          = inputs.line_polygon_mode,
         .max_texture_descriptors    = inputs.texture_capacity,
         .max_sampler_descriptors    = inputs.sampler_capacity,
+        .max_color_attachments      = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS
+            ? props.limits.max_color_attachments : gpu::MAX_COLOR_ATTACHMENTS,
         .max_push_constant_size     = props.limits.max_push_constants_size,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
