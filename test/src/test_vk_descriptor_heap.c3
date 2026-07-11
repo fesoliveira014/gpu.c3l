@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
 
 // Headless (lavapipe): descriptor heap slot bookkeeping through the public API.
@@ -11,11 +11,17 @@ const uint DESCRIPTOR_BUFFER_USAGE = (uint)vk::BufferUsageFlagBits.RESOURCE_DESC
     | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
 
 fn void descriptor_buffer_create_info_uses_exclusive_for_one_family() @test {
-    uint[1] family_storage = { 3 };
+    vk::VkDeviceState state = {
+        .graphics_family = 3,
+        .compute_family  = 3,
+        .transfer_family = 7,
+    };
+    uint[2] family_storage;
+    uint family_count = gpu::vk::graphics_compute_queue_families(&state, family_storage[..]);
 
     vk::BufferCreateInfo info = gpu::vk::make_descriptor_buffer_create_info(
         4096,
-        family_storage[..],
+        family_storage[:family_count],
     );
 
     assert(info.size == 4096, "descriptor-buffer layout size is preserved");
@@ -26,11 +32,17 @@ fn void descriptor_buffer_create_info_uses_exclusive_for_one_family() @test {
 }
 
 fn void descriptor_buffer_create_info_uses_only_graphics_and_compute_families() @test {
-    uint[2] family_storage = { 5, 2 };
+    vk::VkDeviceState state = {
+        .graphics_family = 5,
+        .compute_family  = 2,
+        .transfer_family = 11,
+    };
+    uint[2] family_storage;
+    uint family_count = gpu::vk::graphics_compute_queue_families(&state, family_storage[..]);
 
     vk::BufferCreateInfo info = gpu::vk::make_descriptor_buffer_create_info(
         8192,
-        family_storage[..],
+        family_storage[:family_count],
     );
 
     assert(info.size == 8192, "descriptor-buffer layout size is preserved");

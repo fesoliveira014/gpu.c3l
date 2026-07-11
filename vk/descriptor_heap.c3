@@ -281,7 +281,7 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
 fn vk::BufferCreateInfo make_descriptor_buffer_create_info(
     vk::DeviceSize layout_size,
     uint[] queue_families,
-) {
+) @private {
     uint usage = (uint)vk::BufferUsageFlagBits.RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT
         | (uint)vk::BufferUsageFlagBits.SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
         | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
