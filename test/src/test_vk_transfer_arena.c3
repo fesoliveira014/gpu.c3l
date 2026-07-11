@@ -130,6 +130,7 @@ fn void transfer_range_rejects_invalid_alignment() @test {
     ));
     assert(invalid == gpu::INVALID_ARGUMENT, "non-power-of-two alignment faults INVALID_ARGUMENT");
 }
+
 fn void transfer_range_rejects_zero_size() @test {
     fault invalid = @catch(gpu::vk::transfer_arena_range(
         virtual_head: 0,

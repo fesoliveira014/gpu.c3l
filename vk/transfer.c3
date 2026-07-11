@@ -127,7 +127,7 @@ fn TransferArenaRange? transfer_arena_range(
     usz capacity,
     usz size,
     usz align
-) {
+) @private {
     if (size == 0) return gpu::INVALID_ARGUMENT~;
     if (capacity == 0 || size > capacity) return gpu::ARENA_FULL~;
     if (!gpu::is_pow2(align)) return gpu::INVALID_ARGUMENT~;
