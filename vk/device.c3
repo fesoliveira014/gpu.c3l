@@ -120,6 +120,17 @@ struct PoolResetStats {
     uint skipped;
 }
 
+struct PhysicalDeviceSelection {
+    vk::PhysicalDevice physical_device;
+    QueueFamilies      families;
+}
+
+struct PhysicalDeviceCandidate {
+    PhysicalDeviceSelection selection;
+    int                     score;
+    bool                    suitable;
+}
+
 struct CapsInputs {
     bool indexing_supported;
     bool buffer_supported;
@@ -244,7 +255,9 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     vk::load_extensions(state.instance);
     if (desc.enable_validation) setup_debug_messenger(state);
 
-    state.physical_device = pick_physical_device(state.instance, desc)!;
+    PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
+    state.physical_device = selection.physical_device;
+    QueueFamilies families = selection.families;
 
     vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
@@ -268,7 +281,6 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     bool buffer_supported   = heap_shared_features_supported(&features2.features, &features12) && query_descriptor_buffer_support(state.physical_device);
     state.heap_mode = resolve_heap_mode(desc.descriptor_heap_mode, indexing_supported, buffer_supported)!;
 
-    QueueFamilies families = select_queue_families(state.physical_device)!;
     state.graphics_family = families.graphics;
     state.compute_family  = families.compute;
     state.transfer_family = families.transfer;
@@ -509,9 +521,26 @@ fn bool candidate_satisfies(vk::PhysicalDevice candidate, gpu::DeviceDesc* desc)
     return true;
 }
 
+<* Select the highest-scored suitable candidate, preserving enumeration order
+   for equal scores. Pure. *>
+fn PhysicalDeviceSelection? choose_physical_device(PhysicalDeviceCandidate[] candidates) {
+    PhysicalDeviceSelection best;
+    int best_score = -1;
+    bool found = false;
+    foreach (&candidate : candidates) {
+        if (!candidate.suitable || (found && candidate.score <= best_score)) continue;
+        best = candidate.selection;
+        best_score = candidate.score;
+        found = true;
+    }
+    if (!found) return gpu::UNSUPPORTED_FEATURE~;
+    return best;
+}
+
 <* Enumerate physical devices, drop candidates that cannot satisfy the desc
-   (API version, required features, heap mode), return the highest-scored. *>
-fn vk::PhysicalDevice? pick_physical_device(vk::Instance instance, gpu::DeviceDesc* desc) {
+   (API version, required features, heap mode, queue topology), and return the
+   highest-scored device with its already-resolved queue families. *>
+fn PhysicalDeviceSelection? pick_physical_device(vk::Instance instance, gpu::DeviceDesc* desc) {
     uint count = 0;
     check(vk::enumerate_physical_devices(instance, &count, null))!;
     if (count == 0) return gpu::UNSUPPORTED_FEATURE~;
@@ -519,21 +548,24 @@ fn vk::PhysicalDevice? pick_physical_device(vk::Instance instance, gpu::DeviceDe
     @pool() {
         vk::PhysicalDevice[] devices = mem::talloc_array(vk::PhysicalDevice, (sz)count);
         check(vk::enumerate_physical_devices(instance, &count, devices.ptr))!;
+        PhysicalDeviceCandidate[] candidates = mem::talloc_array(PhysicalDeviceCandidate, (sz)count);
 
-        vk::PhysicalDevice best = (vk::PhysicalDevice)null;
-        int best_score = -1;
-        foreach (candidate : devices) {
-            if (!candidate_satisfies(candidate, desc)) continue;
-            vk::PhysicalDeviceProperties props;
-            vk::get_physical_device_properties(candidate, &props);
-            int score = score_device((int)props.device_type);
-            if (score > best_score) {
-                best_score = score;
-                best = candidate;
+        foreach (i, physical_device : devices[:count]) {
+            PhysicalDeviceCandidate candidate = {
+                .selection = { .physical_device = physical_device },
+            };
+            if (candidate_satisfies(physical_device, desc)) {
+                if (try families = select_queue_families(physical_device)) {
+                    vk::PhysicalDeviceProperties props;
+                    vk::get_physical_device_properties(physical_device, &props);
+                    candidate.selection.families = families;
+                    candidate.score = score_device((int)props.device_type);
+                    candidate.suitable = true;
+                }
             }
+            candidates[i] = candidate;
         }
-        if (best == null) return gpu::UNSUPPORTED_FEATURE~;
-        return best;
+        return choose_physical_device(candidates[:count]);
     };
 }
 

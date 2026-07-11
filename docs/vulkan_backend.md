@@ -102,6 +102,7 @@ must support multiDrawIndirect
 must support shaderDrawParameters
 must support the heap non-uniform-indexing features
 must resolve a heap mode from the requested DescriptorHeapMode
+must expose a queue family supporting graphics and compute
 ```
 
 Scoring is by device type only (`score_device`):
@@ -113,10 +114,10 @@ discrete > integrated > virtual > cpu > other
 Device selection result:
 
 ```text
-pick_physical_device(instance, desc) -> vk::PhysicalDevice?
+pick_physical_device(instance, desc) -> PhysicalDeviceSelection?
 ```
 
-Queue families are resolved separately after selection (`vk/queue.c3`).
+Each feature-compatible candidate's queue topology is resolved once during selection. The winning `PhysicalDeviceSelection` carries that cached `QueueFamilies` value into logical-device creation; queue topology remains a suitability filter rather than a scoring bonus.
 
 ## 6. Logical device creation
 
