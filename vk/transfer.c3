@@ -215,6 +215,7 @@ fn void drain_dedicated_transfers(VkDeviceState* state) @private {
    The fallback's creation runs outside transfer_mutex; only ring bookkeeping
    is locked, and the full re-check destroys the fresh buffer. *>
 fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, gpu::BufferDesc* dedicated_desc, TimelineTag tag) @private {
+    if (size == 0 || !gpu::is_pow2(align)) return gpu::INVALID_ARGUMENT~;
     {
         state.transfer_mutex.lock()!!;
         defer state.transfer_mutex.unlock();
