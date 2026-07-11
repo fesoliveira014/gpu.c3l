@@ -110,8 +110,12 @@ arbitrary driver/application threads. Payloads are borrowed, no diagnostic
 allocation or queue is introduced, and callback reentry into gpu.c3l is
 prohibited. Native Vulkan object handles/types never cross the public boundary.
 When no callback is configured, validation output retains the stderr fallback.
-This state belongs to the sole supported live `Device`; it does not add
-multi-device support.
+Device teardown runs the public-resource leak scan when validation is enabled
+or a structured callback is active. Callback delivery uses
+`WARNING`/`resource_lifetime` messages with `destroy_device` operation and
+resource identity/name where available; validation without a callback keeps
+the stderr report. This state belongs to the sole supported live `Device`;
+it does not add multi-device support.
 
 ## 5. Physical device selection
 
@@ -444,6 +448,12 @@ bootstrap, surface and swapchain work, texture and shader creation, pipeline
 creation, descriptor allocation, virtual-arena allocation, and enumeration.
 Unclassified native failures are logged and surface as `BACKEND_ERROR`; they
 must never be inferred as device loss.
+
+Queue submission and `wait_queue_idle` use the state-aware result path.
+With a callback, failures preserve the mapped public fault and emit one backend
+diagnostic with the exact operation (`submit` or `wait_queue_idle`) and native
+result text. With a null callback, mapped results return their public faults
+silently; only unmapped results retain the stderr fallback.
 
 A rejected warm pipeline-cache blob may be retried with an empty cache. Host or
 device allocation failure and explicit device loss propagate without retry.

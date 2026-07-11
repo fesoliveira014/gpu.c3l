@@ -262,12 +262,16 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
                     ? state.aux_compute_counter
                     : state.aux_transfer_counter) + 1;
             }
-            check(vk::queue_submit2(
-                queue_for(state, kind),
-                1,
-                &submit,
-                (vk::Fence)null,
-            ))!;
+            check_backend_result(
+                state:     state,
+                operation: "submit",
+                result:    vk::queue_submit2(
+                    queue_for(state, kind),
+                    1,
+                    &submit,
+                    (vk::Fence)null,
+                ),
+            )!;
             state.submit_stats.queue_submits++;
             if (swapchain != null) swapchain.acquire_consumed = true;
             if (piggyback_compute) {
@@ -305,7 +309,11 @@ fn void? vk_wait_queue_idle(gpu::Device* device, gpu::QueueKind queue) @private 
     Mutex* queue_mutex = queue_mutex_for(state, queue);
     queue_mutex.lock()!!;
     defer queue_mutex.unlock();
-    check(vk::queue_wait_idle(queue_for(state, queue)))!;
+    check_backend_result(
+        state:     state,
+        operation: "wait_queue_idle",
+        result:    vk::queue_wait_idle(queue_for(state, queue)),
+    )!;
 }
 
 <* Snapshot of submit counters, exposed for whitebox accounting in tests. *>

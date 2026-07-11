@@ -48,6 +48,71 @@ fn void capture_debug_message(gpu::DebugMessage* message, void* user_data) {
     }
 }
 
+struct LeakCapture {
+    uint total;
+    uint buffers;
+    uint textures;
+    uint pipelines;
+    uint shaders;
+    uint semaphores;
+    uint contexts;
+    uint texture_descriptors;
+    uint samplers;
+    uint persistent_spans;
+    uint public_identities;
+    bool metadata_valid;
+    gpu::PipelineHandle expected_pipeline_a;
+    gpu::PipelineHandle expected_pipeline_b;
+    bool pipeline_identity_valid;
+    bool named_resources_valid;
+}
+
+fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
+    LeakCapture* capture = (LeakCapture*)user_data;
+    capture.total++;
+    bool operation_valid = message.operation != null && message.operation.str_view() == "destroy_device";
+    bool invariant_valid = message.invariant != null
+        && message.invariant.str_view() == "resource remains live at device destruction";
+    capture.metadata_valid = capture.metadata_valid
+        && message.severity == gpu::DebugMessageSeverity.WARNING
+        && message.category.resource_lifetime
+        && !message.has_fault
+        && operation_valid
+        && invariant_valid;
+    if (message.resource.has_public_identity) {
+        capture.public_identities++;
+        capture.metadata_valid = capture.metadata_valid
+            && message.resource.generation != 0;
+    }
+    switch (message.resource.kind) {
+        case gpu::DebugResourceKind.BUFFER:
+            capture.buffers++;
+            capture.named_resources_valid = capture.named_resources_valid
+                && message.resource.debug_name != null
+                && message.resource.debug_name.str_view() == "leaky_buffer";
+        case gpu::DebugResourceKind.TEXTURE:
+            capture.textures++;
+            capture.named_resources_valid = capture.named_resources_valid
+                && message.resource.debug_name != null
+                && message.resource.debug_name.str_view() == "leaky_texture";
+        case gpu::DebugResourceKind.PIPELINE:
+            capture.pipelines++;
+            bool first = message.resource.index == capture.expected_pipeline_a.index
+                && message.resource.generation == capture.expected_pipeline_a.generation;
+            bool second = message.resource.index == capture.expected_pipeline_b.index
+                && message.resource.generation == capture.expected_pipeline_b.generation;
+            capture.pipeline_identity_valid = message.resource.has_public_identity
+                && (first || second);
+        case gpu::DebugResourceKind.SHADER:             capture.shaders++;
+        case gpu::DebugResourceKind.SEMAPHORE:          capture.semaphores++;
+        case gpu::DebugResourceKind.RECORDING_CONTEXT:  capture.contexts++;
+        case gpu::DebugResourceKind.TEXTURE_DESCRIPTOR: capture.texture_descriptors++;
+        case gpu::DebugResourceKind.SAMPLER:            capture.samplers++;
+        case gpu::DebugResourceKind.PERSISTENT_SPAN:    capture.persistent_spans++;
+        default: capture.metadata_valid = false;
+    }
+}
+
 struct ConcurrentDebugCapture {
     Mutex mutex;
     uint  calls;
@@ -274,6 +339,40 @@ fn void zero_size_buffer_diagnostic_preserves_fault() @test {
     assert(capture.buffer_strings_match, "callback observes borrowed operation metadata and debug name while valid");
 }
 
+fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
+    DebugCapture capture;
+    vk::VkDeviceState state = {
+        .debug_callback  = &capture_debug_message,
+        .debug_user_data = &capture,
+    };
+
+    fault returned = vk::report_contract_failure(
+        state:               &state,
+        operation:           "create_buffer",
+        public_fault:        gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               7,
+        generation:          9,
+        debug_name:          "zero_buffer",
+        rejected_field:      "BufferDesc.size",
+        invariant:           "must be greater than zero",
+        backend_text:        null,
+    );
+
+    assert(returned == gpu::INVALID_ARGUMENT, "helper returns the unchanged public fault");
+    assert(capture.calls == 1, "helper dispatches exactly once");
+    assert(capture.last.has_fault && capture.last.public_fault == returned,
+        "structured message carries the returned fault");
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER,
+        "helper preserves resource kind");
+    assert(capture.last.resource.has_public_identity
+        && capture.last.resource.index == 7
+        && capture.last.resource.generation == 9,
+        "helper preserves public slot identity");
+    assert(capture.buffer_strings_match, "helper exposes borrowed contract strings only during callback delivery");
+}
+
 fn void debug_messenger_failure_routes_backend_warning() @test {
     DebugCapture capture;
     vk::VkDeviceState state = {
@@ -357,17 +456,52 @@ fn void leak_reporters_count_leaks() @test {
     gpu::SemaphoreHandle semaphore = gpu::create_semaphore(&device, &sem_desc)!!;
     gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!!;
 
+    gpu::TextureIndex texture_index = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::SamplerDesc sampler_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    gpu::SamplerIndex sampler = gpu::create_sampler(&device, &sampler_desc)!!;
+
+    LeakCapture capture = {
+        .metadata_valid        = true,
+        .named_resources_valid = true,
+        .expected_pipeline_a   = first_alias,
+        .expected_pipeline_b   = second_alias,
+    };
+    state.debug_callback = &capture_leak_message;
+    state.debug_user_data = &capture;
+
     assert(vk::report_buffer_leaks(state) == 1, "one leaked buffer counted");
     assert(vk::report_texture_leaks(state) == 1, "one leaked texture counted");
     assert(vk::report_pipeline_leaks(state) == 1, "one leaked cache entry counted");
     assert(vk::report_shader_leaks(state) == 1, "one leaked shader counted");
     assert(vk::report_semaphore_leaks(state) == 1, "one leaked semaphore counted");
     assert(vk::report_context_leaks(state) == 1, "one leaked context counted (default and helper exempt)");
+    vk::report_descriptor_leaks(state);
+
+    assert(capture.total == 8, "each live resource or descriptor emits exactly one structured warning");
+    assert(capture.buffers == 1 && capture.textures == 1 && capture.pipelines == 1,
+        "buffer, texture, and pipeline leak kinds are exact");
+    assert(capture.shaders == 1 && capture.semaphores == 1 && capture.contexts == 1,
+        "shader, semaphore, and context leak kinds are exact");
+    assert(capture.texture_descriptors == 1 && capture.samplers == 1,
+        "descriptor leak kinds are exact");
+    assert(capture.public_identities == 8,
+        "every slot-backed leak carries one public identity");
+    assert(capture.pipeline_identity_valid, "pipeline cache leak identifies one live public alias");
+    assert(capture.metadata_valid, "leak diagnostics are warning, resource-lifetime, faultless destroy-device messages");
+    assert(capture.named_resources_valid, "slot-owned buffer and texture names are observed during the callback");
 
     // Slot data feeding the report lines.
     vk::TextureSlot* tex_slot = &state.textures.slots[texture.index].value;
     assert(tex_slot.allocation_size > 0, "texture leak line carries the allocation size");
 
+    gpu::destroy_texture_descriptor(&device, texture_index)!!;
+    gpu::destroy_sampler(&device, sampler)!!;
     gpu::destroy_recording_context(&device, ctx)!!;
     gpu::destroy_semaphore(&device, semaphore)!!;
     gpu::destroy_pipeline(&device, first_alias)!!;
@@ -376,7 +510,21 @@ fn void leak_reporters_count_leaks() @test {
     gpu::destroy_texture(&device, texture)!!;
     gpu::destroy_buffer(&device, buffer)!!;
 
+    gpu::PersistentAllocDesc persistent_desc = {
+        .size        = 64,
+        .align       = 16,
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .debug_name  = "leaky_persistent_span",
+    };
+    gpu::GpuSpan persistent = gpu::alloc_persistent_span(&device, &persistent_desc)!!;
+    assert(vk::report_resource_leaks(state) == 1, "one persistent span leak counted");
+    assert(capture.total == 9 && capture.persistent_spans == 1,
+        "persistent allocation summary emits one structured warning");
+    assert(capture.metadata_valid, "persistent warning uses the same resource-lifetime contract");
+    gpu::free_persistent_span(&device, persistent)!!;
+
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
+    assert(capture.total == 9, "clean leak report emits nothing");
     gpu::destroy_device(&device)!!;
 }
 
@@ -504,4 +652,33 @@ fn void destroy_reports_leaks_before_sweeping() @test {
     // Teardown must print the canary's leak line (visible in test stderr)
     // and still destroy everything without faulting.
     gpu::destroy_device(&device)!!;
+}
+
+fn void callback_reports_leaks_without_validation() @test {
+    LeakCapture capture = {
+        .metadata_valid        = true,
+        .named_resources_valid = true,
+    };
+    gpu::DeviceDesc device_desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .debug_callback    = &capture_leak_message,
+        .debug_user_data   = &capture,
+        .frames_in_flight  = 2,
+        .application_name  = "gpu_callback_leak_test",
+    };
+    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::BufferDesc buffer_desc = {
+        .size        = 128,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .debug_name  = "leaky_buffer",
+    };
+    (void)gpu::create_buffer(&device, &buffer_desc)!!;
+
+    gpu::destroy_device(&device)!!;
+
+    assert(capture.total == 1 && capture.buffers == 1,
+        "callback receives one leaked-buffer warning without validation");
+    assert(capture.metadata_valid && capture.named_resources_valid,
+        "validation-disabled teardown preserves structured leak metadata");
 }

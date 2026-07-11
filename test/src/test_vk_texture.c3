@@ -5,6 +5,57 @@ import gpu::vk;
 
 // Headless (lavapipe): minimal texture lifecycle and whole-image barriers.
 
+struct TextureDiagnosticCapture {
+    uint                   calls;
+    bool                   has_fault;
+    fault                  public_fault;
+    bool                   public_contract;
+    gpu::DebugResourceKind resource_kind;
+    bool                   has_public_identity;
+    uint                   index;
+    uint                   generation;
+    ZString                expected_operation;
+    ZString                expected_debug_name;
+    ZString                expected_rejected_field;
+    ZString                expected_invariant;
+    bool                   operation_matches;
+    bool                   debug_name_matches;
+    bool                   rejected_field_matches;
+    bool                   invariant_matches;
+}
+
+fn void capture_texture_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    if (message.operation == null) return;
+    TextureDiagnosticCapture* capture = (TextureDiagnosticCapture*)user_data;
+    capture.calls++;
+    capture.has_fault = message.has_fault;
+    capture.public_fault = message.public_fault;
+    capture.public_contract = message.category.public_contract;
+    capture.resource_kind = message.resource.kind;
+    capture.has_public_identity = message.resource.has_public_identity;
+    capture.index = message.resource.index;
+    capture.generation = message.resource.generation;
+    capture.operation_matches = message.operation.str_view() == capture.expected_operation.str_view();
+    capture.debug_name_matches = message.resource.debug_name != null
+        && message.resource.debug_name.str_view() == capture.expected_debug_name.str_view();
+    capture.rejected_field_matches = message.rejected_field != null
+        && message.rejected_field.str_view() == capture.expected_rejected_field.str_view();
+    capture.invariant_matches = message.invariant != null
+        && message.invariant.str_view() == capture.expected_invariant.str_view();
+}
+
+fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture) {
+    gpu::DeviceDesc desc = {
+        .backend              = gpu::BackendKind.VULKAN,
+        .enable_validation    = true,
+        .frames_in_flight     = 2,
+        .application_name     = "gpu_texture_diagnostic_test",
+        .debug_callback       = &capture_texture_diagnostic,
+        .debug_user_data      = capture,
+    };
+    return gpu::create_device(&desc)!!;
+}
+
 fn gpu::Device make_texture_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -459,4 +510,142 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
     fault unsupported_fault = @catch(gpu::create_texture(&device, &beyond_adapter));
     assert(unsupported_fault == gpu::UNSUPPORTED_FEATURE,
         "adapter-limit rejection faults UNSUPPORTED_FEATURE before allocation");
+}
+
+fn void invalid_texture_descriptor_diagnostic_preserves_fault() @test {
+    TextureDiagnosticCapture capture = {
+        .expected_operation      = "create_texture",
+        .expected_debug_name     = "invalid_texture_desc",
+        .expected_rejected_field = "TextureDesc.width",
+        .expected_invariant      = "width must be greater than zero",
+    };
+    gpu::Device device = make_texture_diagnostic_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDesc invalid = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = 0,
+        .height     = 16,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled },
+        .debug_name = "invalid_texture_desc",
+    };
+    fault with_callback = @catch(gpu::create_texture(&device, &invalid));
+
+    assert(with_callback == gpu::INVALID_ARGUMENT, "invalid descriptor keeps INVALID_ARGUMENT");
+    assert(capture.calls == 1, "invalid descriptor emits exactly one diagnostic");
+    assert(capture.operation_matches, "operation is create_texture");
+    assert(capture.has_fault && capture.public_fault == with_callback,
+        "diagnostic carries the unchanged public fault");
+    assert(capture.public_contract, "invalid descriptor is a public-contract diagnostic");
+    assert(capture.resource_kind == gpu::DebugResourceKind.TEXTURE, "resource kind is texture");
+    assert(!capture.has_public_identity, "rejected creation has no public identity");
+    assert(capture.debug_name_matches, "descriptor debug name is preserved");
+    assert(capture.rejected_field_matches, "rejected width field is identified");
+    assert(capture.invariant_matches, "width invariant is identified");
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    state.debug_callback = null;
+    fault without_callback = @catch(gpu::create_texture(&device, &invalid));
+    assert(without_callback == with_callback, "callback presence does not alter the descriptor fault");
+    assert(capture.calls == 1, "null callback emits no additional diagnostic");
+}
+
+fn void unsupported_texture_capability_diagnostic_preserves_fault() @test {
+    TextureDiagnosticCapture capture = {
+        .expected_operation      = "create_texture",
+        .expected_debug_name     = "unsupported_texture_desc",
+        .expected_rejected_field = "TextureDesc",
+        .expected_invariant      = "descriptor must be supported by selected device capabilities",
+    };
+    gpu::Device device = make_texture_diagnostic_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDesc unsupported = {
+        .dimension    = gpu::TextureDimension.TEX_2D,
+        .width        = 1,
+        .height       = 1,
+        .array_layers = 4294967295,
+        .format       = gpu::Format.RGBA8_UNORM,
+        .usage        = { .sampled },
+        .debug_name   = "unsupported_texture_desc",
+    };
+    fault with_callback = @catch(gpu::create_texture(&device, &unsupported));
+
+    assert(with_callback == gpu::UNSUPPORTED_FEATURE, "adapter rejection keeps UNSUPPORTED_FEATURE");
+    assert(capture.calls == 1, "unsupported descriptor emits exactly one diagnostic");
+    assert(capture.operation_matches, "operation is create_texture");
+    assert(capture.has_fault && capture.public_fault == with_callback,
+        "diagnostic carries the unchanged capability fault");
+    assert(capture.public_contract, "adapter rejection is a public-contract diagnostic");
+    assert(capture.resource_kind == gpu::DebugResourceKind.TEXTURE, "resource kind is texture");
+    assert(!capture.has_public_identity, "rejected creation has no public identity");
+    assert(capture.debug_name_matches, "descriptor debug name is preserved");
+    assert(capture.rejected_field_matches, "capability rejection avoids guessing a limiting field");
+    assert(capture.invariant_matches, "generic capability invariant is accurate");
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    state.debug_callback = null;
+    fault without_callback = @catch(gpu::create_texture(&device, &unsupported));
+    assert(without_callback == with_callback, "callback presence does not alter the capability fault");
+    assert(capture.calls == 1, "null callback emits no additional diagnostic");
+}
+
+fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
+    TextureDiagnosticCapture capture = {
+        .expected_operation      = "cmd_texture_barrier",
+        .expected_debug_name     = "layout_diagnostic_texture",
+        .expected_rejected_field = "TextureBarrier.old_layout",
+        .expected_invariant      = "old_layout must match the command list effective layout",
+    };
+    gpu::Device device = make_texture_diagnostic_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDesc desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = 8,
+        .height     = 8,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .storage },
+        .debug_name = "layout_diagnostic_texture",
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::TextureBarrier barrier = {
+        .texture       = texture,
+        .before_stage  = gpu::Stage.HOST,
+        .after_stage   = gpu::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::Hazard.SHADER_WRITE,
+        .old_layout    = gpu::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::TextureLayout.GENERAL,
+    };
+    gpu::cmd_texture_barrier(&commands, &barrier)!!;
+    fault with_callback = @catch(gpu::cmd_texture_barrier(&commands, &barrier));
+
+    assert(with_callback == gpu::INVALID_RESOURCE_STATE, "layout mismatch keeps INVALID_RESOURCE_STATE");
+    assert(capture.calls == 1, "layout mismatch emits exactly one diagnostic");
+    assert(capture.operation_matches, "operation is cmd_texture_barrier");
+    assert(capture.has_fault && capture.public_fault == with_callback,
+        "diagnostic carries the unchanged layout fault");
+    assert(capture.public_contract, "layout mismatch is a public-contract diagnostic");
+    assert(capture.resource_kind == gpu::DebugResourceKind.TEXTURE, "resource kind is texture");
+    assert(capture.has_public_identity, "live texture identity is present");
+    assert(capture.index == texture.index, "texture index is preserved");
+    assert(capture.generation == texture.generation, "texture generation is preserved");
+    assert(capture.debug_name_matches, "texture debug name is preserved");
+    assert(capture.rejected_field_matches, "old_layout field is identified");
+    assert(capture.invariant_matches, "tracked-layout invariant is identified");
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    state.debug_callback = null;
+    fault without_callback = @catch(gpu::cmd_texture_barrier(&commands, &barrier));
+    assert(without_callback == with_callback, "callback presence does not alter the layout fault");
+    assert(capture.calls == 1, "null callback emits no additional diagnostic");
+
+    gpu::end_commands(&commands)!!;
+    gpu::end_frame(&frame)!!;
 }

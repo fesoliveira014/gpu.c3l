@@ -380,8 +380,40 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    if (!gpu::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
-    if (!texture_desc_supported(state, desc)!) return gpu::UNSUPPORTED_FEATURE~;
+    if (!gpu::texture_desc_valid(desc)) {
+        ZString rejected_field = desc.width == 0 ? "TextureDesc.width" : "TextureDesc";
+        ZString invariant = desc.width == 0
+            ? "width must be greater than zero"
+            : "descriptor must satisfy the texture creation contract";
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_texture",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      rejected_field,
+            invariant:           invariant,
+            backend_text:        "texture descriptor validation failed",
+        )~;
+    }
+    if (!texture_desc_supported(state, desc)!) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_texture",
+            public_fault:        gpu::UNSUPPORTED_FEATURE,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "TextureDesc",
+            invariant:           "descriptor must be supported by selected device capabilities",
+            backend_text:        "selected device does not support the texture descriptor",
+        )~;
+    }
     uint mip_levels   = gpu::texture_mip_levels(desc);
     uint array_layers = gpu::texture_array_layers(desc);
 

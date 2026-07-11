@@ -37,8 +37,3 @@ fn void? validate_pipeline_kind(VkDeviceState* state, gpu::PipelineHandle handle
     PipelineSlot* slot = state.pipelines.get(handle)!;
     if (!pipeline_kind_matches(state, slot, kind)) return gpu::INVALID_ARGUMENT~;
 }
-
-<* The shader's compiled stage must match what the pipeline create builds it into. *>
-fn void? validate_shader_stage(ShaderSlot* slot, gpu::ShaderStage expected) {
-    if (slot.stage != expected) return gpu::INVALID_ARGUMENT~;
-}

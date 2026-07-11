@@ -212,6 +212,17 @@ driver/ICD quirks, but release gates should prefer clean output.
 Structured-debug tests verify Vulkan severity/category mapping, validation ID
 name/number, backend text, named and null objects, `VK_FALSE`, and stderr
 fallback without deliberately introducing validation errors into clean targets.
+Representative tranche A public-contract coverage includes texture,
+synchronization, persistent-span, shader, and pipeline failures. It verifies
+unchanged faults and exactly-once callback parity. Backend-result coverage
+fabricates an unmapped `wait_queue_idle` result and asserts its operation,
+callback fields, fault, and stderr-fallback parity.
+Successful command tests exercise the actual `submit`
+and `wait_queue_idle` call sites without injecting a submit failure.
+
+Leak tests verify structured `resource_lifetime` delivery and identity/name
+metadata, stderr fallback without a callback, and callback-active reporting
+when `enable_validation = false`.
 Concurrency coverage uses a synchronized application-owned sink; callbacks are
 not assumed serialized or reentrant. The entire matrix still supports exactly
 one live `Device`; multi-device remains unsupported.
@@ -428,6 +439,9 @@ debug name
 allocation size
 creation frame if tracked
 ```
+
+The callback form carries the applicable subset as a borrowed
+`resource_lifetime` message; the stderr form remains the no-callback fallback.
 
 ## 14. Failure path tests
 

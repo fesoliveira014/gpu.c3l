@@ -368,7 +368,7 @@ fn void destroy_state(VkDeviceState* state) @private {
         deferred_drain_all(state);
         destroy_deferred_queue(state);
         // Leak reporting first: the sweeps below free the tables it reads.
-        if (state.validation) (void)report_resource_leaks(state);
+        if (state.validation || state.debug_callback != null) (void)report_resource_leaks(state);
         // Destroy any buffers the caller did not, so no VMA allocation leaks.
         if (state.allocator != null && state.buffers.slots.ptr != null) {
             foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {
@@ -387,7 +387,7 @@ fn void destroy_state(VkDeviceState* state) @private {
             mem::free(state.swapchains.slots.ptr);
             state.swapchains.slots = {};
         }
-        if (state.validation) report_descriptor_leaks(state);
+        if (state.validation || state.debug_callback != null) report_descriptor_leaks(state);
         destroy_descriptor_heap(state);
         // Destroy any textures the caller did not, so no image or view leaks.
         if (state.textures.slots.ptr != null) {
