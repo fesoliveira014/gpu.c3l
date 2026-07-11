@@ -210,6 +210,7 @@ fn vk::PipelineStageFlags2 stage_to_vk(gpu::Stage stage) {
                 | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT);
         case gpu::Stage.INDIRECT_COMMAND: return vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
         case gpu::Stage.PRESENT:          return vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT;
+        case gpu::Stage.NONE:             return vk::PipelineStageFlagBits2.STAGE_2_NONE;
         default:                          return vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT;
     }
 }

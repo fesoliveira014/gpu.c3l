@@ -191,3 +191,14 @@ fn void combined_texture_hazards_map_to_both_access_bits() @test {
     assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.DEPTH_READ_WRITE) == depth_expected,
         "depth read/write maps both access bits");
 }
+
+fn void presentation_scope_translations_are_exact() @test {
+    assert(gpu::vk::stage_to_vk(gpu::Stage.NONE) == vk::PipelineStageFlagBits2.STAGE_2_NONE,
+        "NONE maps to no Vulkan execution stage");
+    assert(gpu::vk::hazard_to_vk_access(gpu::Hazard.NONE) == vk::AccessFlagBits2.ACCESS_2_NONE,
+        "NONE maps to no Vulkan access");
+    assert(gpu::vk::stage_to_vk(gpu::Stage.PRESENT) == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        "legacy PRESENT keeps its broad execution stage");
+    assert(gpu::vk::hazard_to_vk_access(gpu::Hazard.PRESENT_READ) == vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT,
+        "legacy PRESENT_READ keeps its broad memory access");
+}

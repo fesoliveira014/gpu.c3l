@@ -16,6 +16,7 @@ enum Stage : int {
     DEPTH_STENCIL,
     INDIRECT_COMMAND,
     PRESENT,
+    NONE,
 }
 
 <* Memory access kind, paired with a Stage in barriers: before_* is the access
@@ -152,8 +153,8 @@ fn void? resolve_texture_use(
             *hazard = Hazard.DEPTH_READ_WRITE;
             *layout = TextureLayout.DEPTH_STENCIL;
         case TextureUse.PRESENT:
-            *stage = Stage.PRESENT;
-            *hazard = Hazard.PRESENT_READ;
+            *stage = Stage.COLOR_ATTACHMENT;
+            *hazard = Hazard.NONE;
             *layout = TextureLayout.PRESENT;
         default:
             return INVALID_ARGUMENT~;
