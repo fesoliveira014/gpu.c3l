@@ -129,6 +129,7 @@ fn void? reset_frame_arena(VkDeviceState* state, uint index) {
 
 fn void? vk_begin_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     // WAIT_TIMEOUT must leave frame_index untouched so retry is clean.
     uint next_index = (state.frame_index + 1) % state.frames_in_flight;
@@ -213,6 +214,7 @@ fn gpu::GpuSpan? vk_alloc_frame_span(gpu::Device* device, usz size, usz align) @
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
+    if (!state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
     usz old = slot.cursor.load(AtomicOrdering.RELAXED);
@@ -267,6 +269,7 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
    need no flag — this signal is queue-ordered behind them. *>
 fn void? vk_end_frame(gpu::Device* device) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (!state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
     if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 

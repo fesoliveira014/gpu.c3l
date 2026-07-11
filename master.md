@@ -526,6 +526,16 @@ The Vulkan backend maps those kinds to VMA allocation policies.
 
 ### 7.1 Frame upload memory
 
+Frame lifetime is a strict state machine:
+
+```text
+IDLE --begin_frame--> ACTIVE --end_frame--> IDLE
+```
+
+Frame upload allocation is valid only in `ACTIVE`. Double begin, end while
+idle, and allocation while idle fault `INVALID_RESOURCE_STATE` without
+mutating arenas, command pools, retirement counters, or submissions.
+
 Used for:
 
 ```text
@@ -543,7 +553,7 @@ VMA-backed buffer
 host-visible
 persistently mapped
 shader-device-address capable
-linear bump allocation
+linear bump allocation while a frame is active
 reset after frame timeline retires
 ```
 

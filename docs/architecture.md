@@ -341,21 +341,27 @@ deferred destruction list
 last submit timeline value
 ```
 
-Frame flow:
+Frame lifecycle and flow:
 
 ```text
-begin_frame(device)
+IDLE --begin_frame--> ACTIVE --end_frame--> IDLE
+
+begin_frame(device)              // valid only in IDLE
     wait if frame slot is still in flight
     reset command pools
     reset frame upload arena
     set VMA current frame index
 
+alloc_frame_span(device, ...)    // valid only in ACTIVE
 record work
 submit work
 
-end_frame(device)
+end_frame(device)                // valid only in ACTIVE
     record frame timeline value
 ```
+
+Invalid lifecycle transitions fault `INVALID_RESOURCE_STATE` before changing
+the frame slot, arena, pools, retirement state, or queue submissions.
 
 Headless tests may skip swapchain-specific acquire/present steps.
 
