@@ -185,3 +185,101 @@ fn void swapchain_image_usage_mapping() @test {
     assert(narrow.color_attach && !narrow.transfer_src && !narrow.storage && !narrow.sampled,
         "mapping only ever sets color_attach and transfer_src");
 }
+
+fn void selected_present_mode_mapping() @test {
+    assert(gpu::vk::present_mode_from_vk(vk::PresentModeKHR.FIFO_KHR) == gpu::PresentMode.FIFO,
+        "selected FIFO maps to public FIFO");
+    assert(gpu::vk::present_mode_from_vk(vk::PresentModeKHR.IMMEDIATE_KHR) == gpu::PresentMode.IMMEDIATE,
+        "selected immediate maps to public immediate");
+    assert(gpu::vk::present_mode_from_vk(vk::PresentModeKHR.MAILBOX_KHR) == gpu::PresentMode.MAILBOX,
+        "selected mailbox maps to public mailbox");
+}
+
+fn void swapchain_info_snapshots_are_coherent() @test {
+    vk::Extent2D first_extent = { .width = 640, .height = 480 };
+    gpu::SwapchainInfo first = gpu::vk::make_swapchain_info(
+        format:       gpu::Format.BGRA8_UNORM,
+        extent:       first_extent,
+        image_count:  3,
+        present_mode: vk::PresentModeKHR.FIFO_KHR,
+    );
+    assert(first.format == gpu::Format.BGRA8_UNORM, "snapshot reports selected format");
+    assert(first.width == 640 && first.height == 480, "snapshot reports clamped extent");
+    assert(first.image_count == 3, "snapshot reports driver-returned image count");
+    assert(first.present_mode == gpu::PresentMode.FIFO && !first.dormant,
+        "active snapshot reports selected mode and active state");
+
+    gpu::vk::SwapchainSlot slot = {
+        .info             = first,
+        .acquire_pending  = true,
+        .acquire_consumed = true,
+    };
+    vk::Extent2D resized_extent = { .width = 1280, .height = 720 };
+    gpu::SwapchainInfo resized = gpu::vk::make_swapchain_info(
+        format:       gpu::Format.RGBA8_SRGB,
+        extent:       resized_extent,
+        image_count:  4,
+        present_mode: vk::PresentModeKHR.MAILBOX_KHR,
+    );
+    gpu::vk::publish_active_swapchain_info(&slot, resized);
+    assert(slot.info.format == gpu::Format.RGBA8_SRGB, "replacement snapshot has only the new format");
+    assert(slot.info.width == 1280 && slot.info.height == 720 && slot.info.image_count == 4,
+        "replacement snapshot has only the new extent and count");
+    assert(slot.info.present_mode == gpu::PresentMode.MAILBOX && !slot.info.dormant,
+        "replacement snapshot has only the new mode and state");
+    assert(!slot.acquire_pending && !slot.acquire_consumed,
+        "active publication resets the acquire lifecycle");
+
+    slot.acquire_pending = true;
+    slot.acquire_consumed = true;
+    gpu::vk::publish_dormant_swapchain_info(&slot);
+    assert(slot.info.format == gpu::Format.UNDEFINED, "dormant publication clears the prior format");
+    assert(slot.info.width == 0 && slot.info.height == 0 && slot.info.image_count == 0,
+        "dormant publication clears the prior extent and image count");
+    assert(slot.info.present_mode == gpu::PresentMode.FIFO && slot.info.dormant,
+        "dormant publication uses the documented ignored mode sentinel");
+    assert(!slot.acquire_pending && !slot.acquire_consumed,
+        "dormant publication resets the acquire lifecycle");
+}
+
+fn void acquired_image_reports_committed_prior_layout() @test {
+    gpu::vk::TextureSlot texture;
+    gpu::TextureHandle handle = { .index = 2, .generation = 7 };
+
+    gpu::AcquiredImage first = gpu::vk::make_acquired_image(
+        texture:    &texture,
+        handle:     handle,
+        index:      1,
+        suboptimal: false,
+    );
+    assert(first.prior_layout == gpu::TextureLayout.UNDEFINED,
+        "newly wrapped image reports undefined prior layout");
+    assert((ulong)first.texture == (ulong)handle && first.index == 1 && !first.suboptimal,
+        "acquired-image construction preserves existing fields");
+
+    gpu::vk::set_texture_layout(&texture, gpu::TextureLayout.PRESENT);
+    gpu::AcquiredImage presented = gpu::vk::make_acquired_image(
+        texture:    &texture,
+        handle:     handle,
+        index:      1,
+        suboptimal: true,
+    );
+    assert(presented.prior_layout == gpu::TextureLayout.PRESENT,
+        "presented image reports committed present prior layout");
+    assert(presented.suboptimal, "acquired-image construction preserves suboptimal state");
+}
+
+fn void swapchain_info_query_rejects_invalid_handle() @test {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .application_name  = "gpu_swapchain_info_invalid_handle_test",
+    };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
+    fault query_fault = @catch(gpu::get_swapchain_info(&device, bogus));
+    assert(query_fault == gpu::INVALID_HANDLE, "query on a bogus swapchain faults INVALID_HANDLE");
+}

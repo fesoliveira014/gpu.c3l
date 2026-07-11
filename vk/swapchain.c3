@@ -14,15 +14,12 @@ const ulong ACQUIRE_TIMEOUT_NS = 1_000_000_000;
 struct SwapchainSlot {
     vk::SurfaceKHR      surface;
     vk::SwapchainKHR    swapchain;
-    gpu::Format         format;
-    uint                width;
-    uint                height;
     uint                image_count;
     gpu::TextureHandle[MAX_SWAPCHAIN_IMAGES] textures;
     vk::Semaphore[MAX_SWAPCHAIN_IMAGES]      present_semaphores;
     vk::Semaphore[]     acquire_semaphores;
     gpu::SwapchainDesc  requested;
-    bool                dormant;
+    gpu::SwapchainInfo  info;
     bool                acquire_pending;
     // Set once the pending acquire's coupled submit has consumed its binary
     // acquire semaphore; present requires this to avoid waiting it unsignaled.
@@ -164,6 +161,45 @@ fn gpu::TextureUsage swapchain_image_usage(uint granted_vk_usage) {
     return (gpu::TextureUsage){ .color_attach };
 }
 
+fn gpu::SwapchainInfo make_swapchain_info(gpu::Format format, vk::Extent2D extent, uint image_count, vk::PresentModeKHR present_mode) {
+    return {
+        .format       = format,
+        .width        = extent.width,
+        .height       = extent.height,
+        .image_count  = image_count,
+        .present_mode = present_mode_from_vk(present_mode),
+    };
+}
+
+fn gpu::SwapchainInfo dormant_swapchain_info() {
+    return {
+        .format       = gpu::Format.UNDEFINED,
+        .present_mode = gpu::PresentMode.FIFO,
+        .dormant      = true,
+    };
+}
+
+fn void publish_active_swapchain_info(SwapchainSlot* slot, gpu::SwapchainInfo info) {
+    slot.info = info;
+    slot.acquire_pending = false;
+    slot.acquire_consumed = false;
+}
+
+fn void publish_dormant_swapchain_info(SwapchainSlot* slot) {
+    slot.info = dormant_swapchain_info();
+    slot.acquire_pending = false;
+    slot.acquire_consumed = false;
+}
+
+fn gpu::AcquiredImage make_acquired_image(TextureSlot* texture, gpu::TextureHandle handle, uint index, bool suboptimal) {
+    return {
+        .texture      = handle,
+        .index        = index,
+        .suboptimal   = suboptimal,
+        .prior_layout = texture_layout(texture),
+    };
+}
+
 fn vk::SurfaceKHR? create_platform_surface(VkDeviceState* state, gpu::SurfaceDesc* surface) @private {
     vk::SurfaceKHR vk_surface;
     switch (surface.platform) {
@@ -231,9 +267,7 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
 
     vk::Extent2D extent = clamp_extent(&caps, width, height);
     if (extent.width == 0 || extent.height == 0) {
-        slot.dormant = true;
-        slot.acquire_pending = false;
-        slot.acquire_consumed = false;
+        publish_dormant_swapchain_info(slot);
         return;
     }
 
@@ -378,12 +412,15 @@ fn void? build_swapchain(VkDeviceState* state, SwapchainSlot* slot, uint width, 
             check(vk::create_semaphore(state.device, &semaphore_info, null, &slot.present_semaphores[i]))!;
         }
 
-        slot.format = format;
-        slot.width = extent.width;
-        slot.height = extent.height;
-        slot.dormant = false;
-        slot.acquire_pending = false;
-        slot.acquire_consumed = false;
+        publish_active_swapchain_info(
+            slot,
+            make_swapchain_info(
+                format:       format,
+                extent:       extent,
+                image_count:  slot.image_count,
+                present_mode: present_mode,
+            ),
+        );
     };
 }
 
@@ -492,17 +529,21 @@ fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, u
             vk::extensions.vk_destroy_swapchain_khr(state.device, slot.swapchain, null);
             slot.swapchain = (vk::SwapchainKHR)null;
         }
-        slot.dormant = true;
-        slot.acquire_pending = false;
-        slot.acquire_consumed = false;
+        publish_dormant_swapchain_info(slot);
         return build_fault~;
     }
+}
+
+fn gpu::SwapchainInfo? vk_get_swapchain_info(gpu::Device* device, gpu::SwapchainHandle handle) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    SwapchainSlot* slot = state.swapchains.get(handle)!;
+    return slot.info;
 }
 
 fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::SwapchainHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     SwapchainSlot* slot = state.swapchains.get(handle)!;
-    if (slot.dormant || slot.swapchain == null) return gpu::SWAPCHAIN_OUT_OF_DATE~;
+    if (slot.info.dormant || slot.swapchain == null) return gpu::SWAPCHAIN_OUT_OF_DATE~;
     // A pending acquire owns this frame's binary semaphore; acquiring again
     // would reuse it and orphan the pending image.
     if (slot.acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
@@ -516,11 +557,13 @@ fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::Swapchain
     slot.acquire_consumed = false;
     slot.pending_image = image_index;
     slot.pending_acquire_semaphore = acquire_semaphore;
-    return (gpu::AcquiredImage){
-        .texture    = slot.textures[image_index],
-        .index      = image_index,
-        .suboptimal = result == vk::Result.SUBOPTIMAL_KHR,
-    };
+    TextureSlot* texture = state.textures.get(slot.textures[image_index])!;
+    return make_acquired_image(
+        texture:    texture,
+        handle:     slot.textures[image_index],
+        index:      image_index,
+        suboptimal: result == vk::Result.SUBOPTIMAL_KHR,
+    );
 }
 
 fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {

@@ -105,8 +105,11 @@ SDL init/shutdown
 window creation/destruction
 Vulkan surface creation path
 swapchain creation
+runtime info: selected format/mode, clamped extent, actual image count
 image acquire/present
 resize and out-of-date recovery
+coherent info refresh and dormant sentinel after zero/failed resize
+UNDEFINED/PRESENT acquired-image prior layout without a seen table
 present mode selection
 frame pacing sanity
 ```
@@ -180,7 +183,7 @@ Do not include milestone labels in test names.
 | Compute | root pointer shader read/write, readback. |
 | Texture heap | descriptor allocation, sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback. |
-| Swapchain | pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
+| Swapchain | Runtime-info selection, dormant sentinel, acquired prior layout; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start. |
 | Threading | per-thread recording contexts, parallel record, identical submit. |
 | Debug report | leak report contents, debug names, command labels. |
@@ -385,7 +388,7 @@ headless Vulkan tests pass validation-clean
 root-pointer compute sample works
 bindless texture compute sample works
 offscreen graphics sample readback matches expected output
-SDL3 triangle sample presents and resizes
+SDL3 triangle sample queries the selected format/count, presents, and resizes without fixed image-state tables
 GPU-driven indirect draw sample works
 memory stats report plausible budgets
 leak reports are clean after all samples

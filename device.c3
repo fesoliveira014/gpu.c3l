@@ -78,6 +78,7 @@ alias ResolveReadbackFn       = fn void? (Device*, ReadbackTicket*, char[]);
 alias CreateSwapchainFn       = fn SwapchainHandle? (Device*, SurfaceDesc*, SwapchainDesc*);
 alias DestroySwapchainFn      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn       = fn void? (Device*, SwapchainHandle, uint, uint);
+alias GetSwapchainInfoFn      = fn SwapchainInfo? (Device*, SwapchainHandle);
 alias AcquireNextImageFn      = fn AcquiredImage? (Device*, SwapchainHandle);
 alias PresentFn               = fn void? (Device*, PresentDesc*);
 alias GetPresentModeSupportFn = fn PresentModeSupport? (Device*, SwapchainHandle);
@@ -153,6 +154,7 @@ struct BackendVTable {
     CreateSwapchainFn       create_swapchain;
     DestroySwapchainFn      destroy_swapchain;
     ResizeSwapchainFn       resize_swapchain;
+    GetSwapchainInfoFn      get_swapchain_info;
     AcquireNextImageFn      acquire_next_image;
     PresentFn               present;
     GetPresentModeSupportFn get_present_mode_support;
