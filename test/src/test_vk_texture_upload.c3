@@ -20,14 +20,6 @@ fn gpu::Device make_upload_test_device() {
     return gpu::create_device(&desc)!!;
 }
 
-fn gpu::GpuSpan subspan(gpu::GpuSpan span, usz offset, usz size) {
-    gpu::GpuSpan result = span;
-    result.offset += offset;
-    result.size = size;
-    result.cpu = span.cpu == null ? null : (char*)span.cpu + offset;
-    return result;
-}
-
 fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::Device device = make_upload_test_device();
     defer gpu::destroy_device(&device)!!;
@@ -140,13 +132,13 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
 
     gpu::BufferTextureCopyDesc mip0_copy = {
-        .src     = subspan(staging_span, 0, MIP0_BYTES),
+        .src     = staging_span.checked_subspan(0, MIP0_BYTES)!!,
         .texture = texture,
         .mip     = 0,
     };
     gpu::cmd_copy_buffer_to_texture(&cmd, &mip0_copy)!!;
     gpu::BufferTextureCopyDesc mip1_copy = {
-        .src     = subspan(staging_span, MIP0_BYTES, MIP1_BYTES),
+        .src     = staging_span.checked_subspan(MIP0_BYTES, MIP1_BYTES)!!,
         .texture = texture,
         .mip     = 1,
     };
@@ -376,11 +368,11 @@ fn void copy_validation_faults() @test {
     fault extent_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &past_extent));
     assert(extent_fault == gpu::INVALID_ARGUMENT, "region past the mip extent faults INVALID_ARGUMENT");
 
-    gpu::BufferTextureCopyDesc past_span = { .src = subspan(span, 0, MIP0_BYTES - 4), .texture = texture };
+    gpu::BufferTextureCopyDesc past_span = { .src = span.checked_subspan(0, MIP0_BYTES - 4)!!, .texture = texture };
     fault span_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &past_span));
     assert(span_fault == gpu::INVALID_ARGUMENT, "copy bytes past the span fault INVALID_ARGUMENT");
 
-    gpu::BufferTextureCopyDesc misaligned = { .src = subspan(span, 2, MIP0_BYTES - 2), .texture = texture };
+    gpu::BufferTextureCopyDesc misaligned = { .src = span.checked_subspan(2, MIP0_BYTES - 2)!!, .texture = texture };
     fault align_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &misaligned));
     assert(align_fault == gpu::INVALID_ARGUMENT, "misaligned span offset faults INVALID_ARGUMENT");
 
@@ -484,9 +476,11 @@ fn void mip_subset_view_sampled() @test {
         .new_layout    = gpu::TextureLayout.TRANSFER_DST,
     };
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
-    gpu::BufferTextureCopyDesc mip0_copy = { .src = subspan(staging_span, 0, MIP0_BYTES), .texture = texture, .mip = 0 };
+    gpu::GpuSpan mip0_span = staging_span.checked_subspan(0, MIP0_BYTES)!!;
+    gpu::BufferTextureCopyDesc mip0_copy = { .src = mip0_span, .texture = texture, .mip = 0 };
     gpu::cmd_copy_buffer_to_texture(&cmd, &mip0_copy)!!;
-    gpu::BufferTextureCopyDesc mip1_copy = { .src = subspan(staging_span, MIP0_BYTES, MIP1_BYTES), .texture = texture, .mip = 1 };
+    gpu::GpuSpan mip1_span = staging_span.checked_subspan(MIP0_BYTES, MIP1_BYTES)!!;
+    gpu::BufferTextureCopyDesc mip1_copy = { .src = mip1_span, .texture = texture, .mip = 1 };
     gpu::cmd_copy_buffer_to_texture(&cmd, &mip1_copy)!!;
     gpu::TextureBarrier to_read = {
         .texture       = texture,

@@ -1,11 +1,290 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
+import std::atomic;
 
-// Headless (lavapipe): frame upload arena bump allocation, reset across the
-// frame loop, ARENA_FULL, and the timeline-gated reset.
+// Pure range-boundary coverage plus headless (lavapipe) frame upload arena
+// bump allocation, reset, ARENA_FULL, and timeline-gated reset.
+
+fn void frame_arena_range_preserves_fault_taxonomy() @test {
+    fault zero_size = @catch(gpu::vk::frame_arena_range(
+        cursor: 0,
+        capacity: 256,
+        size: 0,
+        align: 16,
+    ));
+    fault zero_align = @catch(gpu::vk::frame_arena_range(
+        cursor: 0,
+        capacity: 256,
+        size: 1,
+        align: 0,
+    ));
+    fault bad_align = @catch(gpu::vk::frame_arena_range(
+        cursor: 0,
+        capacity: 256,
+        size: 1,
+        align: 3,
+    ));
+    fault huge_size = @catch(gpu::vk::frame_arena_range(
+        cursor: 1,
+        capacity: 256,
+        size: usz::max,
+        align: 1,
+    ));
+
+    fault cursor_past_capacity = @catch(gpu::vk::frame_arena_range(
+        cursor: 257,
+        capacity: 256,
+        size: 1,
+        align: 1,
+    ));
+    assert(zero_size == gpu::INVALID_ARGUMENT, "zero size remains invalid");
+    assert(zero_align == gpu::INVALID_ARGUMENT, "zero alignment remains invalid");
+    assert(bad_align == gpu::INVALID_ARGUMENT, "non-power-of-two alignment remains invalid");
+    assert(huge_size == gpu::ARENA_FULL, "valid huge size exhausts the arena");
+    assert(cursor_past_capacity == gpu::ARENA_FULL, "cursor past capacity faults ARENA_FULL");
+}
+
+fn void frame_arena_range_handles_exact_end() @test {
+    gpu::vk::FrameArenaRange exact = gpu::vk::frame_arena_range(
+        cursor: 241,
+        capacity: 272,
+        size: 16,
+        align: 16,
+    )!!;
+    assert(exact.offset == 256, "padding resolves to the next aligned offset");
+    assert(exact.next_cursor == 272, "exact fit reaches the arena end");
+
+    fault one_over = @catch(gpu::vk::frame_arena_range(
+        cursor: 241,
+        capacity: 271,
+        size: 16,
+        align: 16,
+    ));
+    fault at_end = @catch(gpu::vk::frame_arena_range(
+        cursor: 256,
+        capacity: 256,
+        size: 1,
+        align: 1,
+    ));
+    assert(one_over == gpu::ARENA_FULL, "one-byte overflow faults ARENA_FULL");
+    assert(at_end == gpu::ARENA_FULL, "nonzero allocation at arena end faults ARENA_FULL");
+}
+
+fn void frame_arena_range_handles_max_boundaries() @test {
+    gpu::vk::FrameArenaRange high_exact = gpu::vk::frame_arena_range(
+        cursor: usz::max - 1,
+        capacity: usz::max,
+        size: 1,
+        align: 2,
+    )!!;
+    assert(high_exact.offset == usz::max - 1, "already-aligned high cursor is preserved");
+    assert(high_exact.next_cursor == usz::max, "representable exact fit reaches usz::max");
+
+    gpu::vk::FrameArenaRange full_exact = gpu::vk::frame_arena_range(
+        cursor: 0,
+        capacity: usz::max,
+        size: usz::max,
+        align: 1,
+    )!!;
+    assert(full_exact.offset == 0 && full_exact.next_cursor == usz::max, "maximum capacity exact fit remains valid");
+
+    fault align_overflow = @catch(gpu::vk::frame_arena_range(
+        cursor: usz::max,
+        capacity: usz::max,
+        size: 1,
+        align: 2,
+    ));
+    fault extent_overflow = @catch(gpu::vk::frame_arena_range(
+        cursor: usz::max - 1,
+        capacity: usz::max,
+        size: 2,
+        align: 2,
+    ));
+    assert(align_overflow == gpu::ARENA_FULL, "unrepresentable alignment faults ARENA_FULL");
+    assert(extent_overflow == gpu::ARENA_FULL, "unrepresentable extent faults ARENA_FULL");
+}
+
+struct FrameLifecycleSnapshot {
+    uint  frame_index;
+    usz   cursor;
+    ulong slot_timeline_value;
+    ulong timeline_counter;
+    ulong signaled_shadow;
+    ulong aux_compute_counter;
+    ulong aux_compute_last_signaled;
+    ulong aux_transfer_counter;
+    ulong aux_transfer_last_signaled;
+    ulong queue_submits;
+    ulong empty_signal_submits;
+    uint  pools_reset;
+    uint  pools_skipped;
+    bool  frame_active;
+    bool  compute_used;
+    bool  transfer_used;
+    bool  off_frame_pending;
+    bool  graphics_pool_dirty;
+    bool  compute_pool_dirty;
+    bool  transfer_pool_dirty;
+}
+
+fn gpu::Device make_frame_lifecycle_device(uint frames_in_flight = 1) {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = frames_in_flight,
+        .application_name  = "gpu_frame_lifecycle_test",
+    };
+    return gpu::create_device(&desc)!!;
+}
+
+fn FrameLifecycleSnapshot frame_lifecycle_snapshot(vk::VkDeviceState* state) {
+    vk::FrameArenaState* arena = &state.frame_arenas[state.frame_index];
+    vk::RecordingContextState* context = state.recording_contexts.get(state.default_context)!!;
+    vk::PoolDirtyMask dirty = context.pool_dirty[state.frame_index];
+    vk::PoolResetStats pool_stats = vk::pool_reset_stats(state);
+    vk::SubmitStats submit_stats = vk::submit_stats(state);
+    return {
+        .frame_index                = state.frame_index,
+        .cursor                     = arena.cursor.load(AtomicOrdering.RELAXED),
+        .slot_timeline_value        = arena.frame_timeline_value,
+        .timeline_counter           = state.timeline_counter.load(AtomicOrdering.RELAXED),
+        .signaled_shadow            = state.signaled_shadow,
+        .aux_compute_counter        = state.aux_compute_counter,
+        .aux_compute_last_signaled  = state.aux_compute_last_signaled,
+        .aux_transfer_counter       = state.aux_transfer_counter,
+        .aux_transfer_last_signaled = state.aux_transfer_last_signaled,
+        .queue_submits              = submit_stats.queue_submits,
+        .empty_signal_submits       = submit_stats.empty_signal_submits,
+        .pools_reset                = pool_stats.reset,
+        .pools_skipped              = pool_stats.skipped,
+        .frame_active               = state.frame_active,
+        .compute_used               = state.compute_used_since_frame,
+        .transfer_used              = state.transfer_used_since_frame,
+        .off_frame_pending          = state.off_frame_pending.load(AtomicOrdering.RELAXED),
+        .graphics_pool_dirty        = dirty.graphics,
+        .compute_pool_dirty         = dirty.compute,
+        .transfer_pool_dirty        = dirty.transfer,
+    };
+}
+
+fn void assert_frame_lifecycle_unchanged(FrameLifecycleSnapshot before, FrameLifecycleSnapshot after) {
+    assert(after.frame_index == before.frame_index, "rejection preserves frame index");
+    assert(after.cursor == before.cursor, "rejection preserves arena cursor");
+    assert(after.slot_timeline_value == before.slot_timeline_value, "rejection preserves slot timeline value");
+    assert(after.timeline_counter == before.timeline_counter, "rejection preserves frame timeline counter");
+    assert(after.signaled_shadow == before.signaled_shadow, "rejection preserves retired timeline shadow");
+    assert(after.aux_compute_counter == before.aux_compute_counter, "rejection preserves compute counter");
+    assert(after.aux_compute_last_signaled == before.aux_compute_last_signaled, "rejection preserves compute signal");
+    assert(after.aux_transfer_counter == before.aux_transfer_counter, "rejection preserves transfer counter");
+    assert(after.aux_transfer_last_signaled == before.aux_transfer_last_signaled, "rejection preserves transfer signal");
+    assert(after.queue_submits == before.queue_submits, "rejection performs no user queue submit");
+    assert(after.empty_signal_submits == before.empty_signal_submits, "rejection performs no frame signal submit");
+    assert(after.pools_reset == before.pools_reset, "rejection preserves pool reset accounting");
+    assert(after.pools_skipped == before.pools_skipped, "rejection preserves pool skip accounting");
+    assert(after.frame_active == before.frame_active, "rejection preserves lifecycle state");
+    assert(after.compute_used == before.compute_used, "rejection preserves compute-used state");
+    assert(after.transfer_used == before.transfer_used, "rejection preserves transfer-used state");
+    assert(after.off_frame_pending == before.off_frame_pending, "rejection preserves off-frame state");
+    assert(after.graphics_pool_dirty == before.graphics_pool_dirty, "rejection preserves graphics-pool dirtiness");
+    assert(after.compute_pool_dirty == before.compute_pool_dirty, "rejection preserves compute-pool dirtiness");
+    assert(after.transfer_pool_dirty == before.transfer_pool_dirty, "rejection preserves transfer-pool dirtiness");
+}
+
+fn void frame_span_allocation_requires_active_frame() @test {
+    gpu::Device device = make_frame_lifecycle_device();
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    FrameLifecycleSnapshot before_begin = frame_lifecycle_snapshot(state);
+    fault before_fault = @catch(gpu::alloc_frame_span(&device, 64, 16));
+    assert(before_fault == gpu::INVALID_RESOURCE_STATE, "frame allocation before begin faults INVALID_RESOURCE_STATE");
+    assert_frame_lifecycle_unchanged(before_begin, frame_lifecycle_snapshot(state));
+
+    gpu::begin_frame(&device)!!;
+    gpu::GpuSpan span = gpu::alloc_frame_span(&device, 64, 16)!!;
+    assert(span.offset == 0, "active-frame allocation still succeeds");
+    gpu::end_frame(&device)!!;
+
+    FrameLifecycleSnapshot after_end = frame_lifecycle_snapshot(state);
+    fault after_fault = @catch(gpu::alloc_frame_span(&device, 64, 16));
+    assert(after_fault == gpu::INVALID_RESOURCE_STATE, "frame allocation after end faults INVALID_RESOURCE_STATE");
+    assert_frame_lifecycle_unchanged(after_end, frame_lifecycle_snapshot(state));
+
+    gpu::begin_frame(&device)!!;
+    gpu::end_frame(&device)!!;
+}
+
+fn void end_before_begin_is_atomic() @test {
+    gpu::Device device = make_frame_lifecycle_device();
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    state.compute_used_since_frame = true;
+    state.transfer_used_since_frame = true;
+    state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
+
+    FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
+    fault rejected = @catch(gpu::end_frame(&device));
+    assert(rejected == gpu::INVALID_RESOURCE_STATE, "end before begin faults INVALID_RESOURCE_STATE");
+    assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
+
+    gpu::begin_frame(&device)!!;
+    gpu::end_frame(&device)!!;
+}
+
+fn void double_end_is_atomic() @test {
+    gpu::Device device = make_frame_lifecycle_device();
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    gpu::begin_frame(&device)!!;
+    gpu::end_frame(&device)!!;
+    FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
+    fault rejected = @catch(gpu::end_frame(&device));
+    assert(rejected == gpu::INVALID_RESOURCE_STATE, "double end faults INVALID_RESOURCE_STATE");
+    assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
+
+    gpu::begin_frame(&device)!!;
+    gpu::end_frame(&device)!!;
+}
+
+fn void double_begin_single_slot_is_atomic() @test {
+    gpu::Device device = make_frame_lifecycle_device();
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    gpu::begin_frame(&device)!!;
+    (void)gpu::alloc_frame_span(&device, 64, 16)!!;
+    vk::RecordingContextState* context = state.recording_contexts.get(state.default_context)!!;
+    context.pool_dirty[state.frame_index].graphics = true;
+
+    FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
+    fault rejected = @catch(gpu::begin_frame(&device));
+    assert(rejected == gpu::INVALID_RESOURCE_STATE, "double begin faults INVALID_RESOURCE_STATE");
+    assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
+
+    context.pool_dirty[state.frame_index].graphics = false;
+    gpu::end_frame(&device)!!;
+}
+
+fn void double_begin_default_slots_is_atomic() @test {
+    gpu::Device device = make_frame_lifecycle_device(2);
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    gpu::begin_frame(&device)!!;
+    (void)gpu::alloc_frame_span(&device, 64, 16)!!;
+
+    FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
+    fault rejected = @catch(gpu::begin_frame(&device));
+    assert(rejected == gpu::INVALID_RESOURCE_STATE,
+        "double begin faults independently of frame-slot retirement");
+    assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
+
+    gpu::end_frame(&device)!!;
+}
 
 fn void frame_arena_alloc_and_reset() @test {
     gpu::DeviceDesc desc = {

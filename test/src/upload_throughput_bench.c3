@@ -2,21 +2,17 @@ module gpu_bench;
 
 import gpu;
 import gpu::vk;
+import vk;
 import std::io;
 import std::thread;
 import std::time;
 import std::core::mem;
 import std::core::mem::allocators;
 
-// Advisory, not gating: Phase A times parallel Tier-C cmd_upload_buffer
-// across per-thread recording contexts at payload x staging-arena-size
-// combinations, some of which force the dedicated-fallback path hoisted
-// out of transfer_mutex. Phase B times the blocking upload_buffer_data
-// helper across thread counts; expect a near-flat line — it is queue-bound
-// (record-mutex + graphics-queue idle dominate), not lock-bound, so the hoist
-// buys it nothing. Lavapipe caveats: host mallocs understate real
-// dedicated-create cost, and its instant queue completion understates how
-// queue-bound phase B really is on a discrete GPU.
+// Advisory, not gating: Phase A observes parallel Tier-C recording under
+// payload and staging-arena pressure. Phase B observes blocking-helper
+// throughput across worker counts. Results describe the selected adapter and
+// queue topology; timing and scaling are observations, never verdicts.
 
 const uint[3] UPLOAD_BENCH_THREAD_COUNTS = { 1, 2, 4 };
 const usz[3] UPLOAD_BENCH_PAYLOAD_SIZES = { 4 * 1024, 256 * 1024, 4 * 1024 * 1024 };
@@ -34,6 +30,27 @@ const uint UPLOAD_BENCH_WAVES = 10;
 const usz UPLOAD_BENCH_HELPER_PAYLOAD = 256 * 1024;
 const uint UPLOAD_BENCH_HELPER_ITERS_PER_THREAD = 40;
 
+struct UploadBenchObservation {
+    double uploads_per_second;
+    ulong  dedicated_fallback_count;
+    usz    staging_arena_size;
+}
+
+struct UploadPhaseAArgs {
+    gpu::Device*                device;
+    gpu::RecordingContextHandle ctx;
+    gpu::BufferHandle           dst;
+    usz                         payload_size;
+    uint                        iters;
+    gpu::CommandList            list;
+}
+
+struct UploadPhaseBArgs {
+    gpu::Device*      device;
+    gpu::BufferHandle dst;
+    uint              iters;
+}
+
 fn gpu::Device make_bench_device(usz staging_size) {
     gpu::DeviceDesc desc = {
         .backend            = gpu::BackendKind.VULKAN,
@@ -44,13 +61,45 @@ fn gpu::Device make_bench_device(usz staging_size) {
     return gpu::create_device(&desc)!!;
 }
 
-struct UploadPhaseAArgs {
-    gpu::Device*                device;
-    gpu::RecordingContextHandle ctx;
-    gpu::BufferHandle           dst;
-    usz                         payload_size;
-    uint                        iters;
-    gpu::CommandList            list;
+fn void print_upload_bench_context(gpu::vk::VkDeviceState* state) {
+    vk::PhysicalDeviceDriverProperties driver = vk::physical_device_driver_properties();
+    vk::PhysicalDeviceProperties2 properties = vk::physical_device_properties2().set_next(&driver);
+    vk::get_physical_device_properties2(state.physical_device, &properties);
+
+    ZString device_name = (ZString)&properties.properties.device_name[0];
+    ZString driver_name = (ZString)&driver.driver_name[0];
+    // Mirrors pick_queue_families: only a second queue in the graphics family uses index 1.
+    uint compute_index = state.compute_queue_distinct
+        && state.compute_family == state.graphics_family ? 1 : 0;
+    bool transfer_distinct = state.transfer_queue != state.graphics_queue;
+
+    io::printfn(
+        "adapter: name=\"%s\" type=%s driver=\"%s\" driver_id=%d",
+        device_name,
+        upload_device_type_name(properties.properties.device_type),
+        driver_name,
+        (uint)driver.driver_id,
+    );
+    io::printfn("heap: mode=%s", upload_heap_mode_name(state.heap_mode));
+    io::printfn(
+        "queues: graphics=%d:0 compute=%d:%d compute_distinct=%s transfer=%d:0 transfer_distinct=%s",
+        state.graphics_family,
+        state.compute_family,
+        compute_index,
+        state.compute_queue_distinct ? "true" : "false",
+        state.transfer_family,
+        transfer_distinct ? "true" : "false",
+    );
+    io::printfn(
+        "arenas: frame_bytes=%d persistent_bytes=%d staging_bytes=%d readback_bytes=%d",
+        state.frame_arenas[0].size,
+        state.persistent_arena.size,
+        state.staging_arena.size,
+        state.readback_arena.size,
+    );
+    if (upload_is_lavapipe_driver(driver.driver_id)) {
+        io::printfn("note: Mesa llvmpipe/lavapipe selected; measurements describe this software adapter only");
+    }
 }
 
 fn int upload_phase_a_worker(void* arg) {
@@ -72,10 +121,20 @@ fn int upload_phase_a_worker(void* arg) {
    parallel into its own context, then the main thread submits every list
    together, waits, and closes the frame — the boundary that actually
    retires FRAME-tagged arena ranges and dedicated buffers alike. *>
-fn void run_phase_a_combo(uint threads, usz payload_size, usz arena_size) {
+fn UploadBenchObservation run_phase_a_combo(
+    uint threads,
+    usz payload_size,
+    usz arena_size,
+    bool* context_printed
+) {
     gpu::Device device = make_bench_device(arena_size);
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+
+    if (!*context_printed) {
+        print_upload_bench_context(state);
+        *context_printed = true;
+    }
 
     gpu::RecordingContextHandle[UPLOAD_BENCH_MAX_THREADS] contexts;
     gpu::BufferHandle[UPLOAD_BENCH_MAX_THREADS] dsts;
@@ -87,7 +146,7 @@ fn void run_phase_a_combo(uint threads, usz payload_size, usz arena_size) {
         dsts[i] = gpu::create_buffer(&device, &desc)!!;
     }
 
-    ulong fallbacks_before = vk::dedicated_fallback_count(state);
+    ulong fallbacks_before = gpu::vk::dedicated_fallback_count(state);
     std::time::Clock start = std::time::clock::now();
 
     for (uint w = 0; w < UPLOAD_BENCH_WAVES; w++) {
@@ -109,35 +168,49 @@ fn void run_phase_a_combo(uint threads, usz payload_size, usz arena_size) {
     }
     long elapsed_ns = (long)start.to_now();
 
-    ulong fallbacks_after = vk::dedicated_fallback_count(state);
+    ulong fallbacks_after = gpu::vk::dedicated_fallback_count(state);
     uint total_ops = threads * UPLOAD_BENCH_WAVES * UPLOAD_BENCH_WAVE_SIZE;
     double uploads_per_sec = (double)total_ops / ((double)elapsed_ns / 1.0e9);
-    io::printfn(
-        "phase A threads=%d payload=%dK arena=%dK: %.0f uploads/s, fallbacks=%d",
-        threads, payload_size / 1024, arena_size / 1024, uploads_per_sec, fallbacks_after - fallbacks_before,
-    );
+    ulong fallback_count = fallbacks_after - fallbacks_before;
 
     for (uint i = 0; i < threads; i++) {
         (void)gpu::destroy_buffer(&device, dsts[i]);
         (void)gpu::destroy_recording_context(&device, contexts[i]);
     }
+    return {
+        .uploads_per_second       = uploads_per_sec,
+        .dedicated_fallback_count = fallback_count,
+        .staging_arena_size       = state.staging_arena.size,
+    };
 }
 
 fn void run_phase_a() {
-    io::printfn("-- phase A: parallel Tier-C cmd_upload_buffer across contexts --");
+    io::printfn("-- phase A hypothesis: observe parallel Tier-C recording under staging pressure --");
+    bool context_printed = false;
     foreach (arena_size : UPLOAD_BENCH_ARENA_SIZES) {
         foreach (payload_size : UPLOAD_BENCH_PAYLOAD_SIZES) {
+            double one_worker_rate = 0.0;
             foreach (threads : UPLOAD_BENCH_THREAD_COUNTS) {
-                run_phase_a_combo(threads, payload_size, arena_size);
+                UploadBenchObservation observation = run_phase_a_combo(
+                    threads:         threads,
+                    payload_size:    payload_size,
+                    arena_size:      arena_size,
+                    context_printed: &context_printed,
+                );
+                if (threads == 1) one_worker_rate = observation.uploads_per_second;
+                io::printfn(
+                    "phase=A workers=%d payload_kib=%d staging_bytes=%d uploads_per_sec=%.0f scaling_vs_1_worker=%.2f dedicated_fallback_count=%d dedicated_fallback_used=%s",
+                    threads,
+                    payload_size / 1024,
+                    observation.staging_arena_size,
+                    observation.uploads_per_second,
+                    upload_scaling_vs_one(observation.uploads_per_second, one_worker_rate),
+                    observation.dedicated_fallback_count,
+                    upload_dedicated_fallback_used(observation.dedicated_fallback_count) ? "true" : "false",
+                );
             }
         }
     }
-}
-
-struct UploadPhaseBArgs {
-    gpu::Device*       device;
-    gpu::BufferHandle  dst;
-    uint               iters;
 }
 
 fn int upload_phase_b_worker(void* arg) {
@@ -159,13 +232,13 @@ fn int upload_phase_b_worker(void* arg) {
     return 0;
 }
 
-<* Blocking upload_buffer_data at N threads. On real drivers the queue idle
-   dominates and the line flattens; lavapipe's instant queue lets it scale,
-   so read this phase with the printed caveat. *>
+<* Observe blocking upload_buffer_data across worker counts; serialization
+   and queue costs vary by adapter and topology. *>
 fn void run_phase_b() {
-    io::printfn("-- phase B: blocking upload_buffer_data (queue-bound; expect a near-flat uploads/s line across thread counts) --");
+    io::printfn("-- phase B hypothesis: observe blocking-helper throughput; serialization and queue costs vary by adapter/topology --");
     gpu::Device device = make_bench_device(0);
     defer gpu::destroy_device(&device)!!;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
 
     gpu::BufferHandle[UPLOAD_BENCH_MAX_THREADS] dsts;
     for (uint i = 0; i < UPLOAD_BENCH_MAX_THREADS; i++) {
@@ -178,12 +251,14 @@ fn void run_phase_b() {
         for (uint i = 0; i < UPLOAD_BENCH_MAX_THREADS; i++) (void)gpu::destroy_buffer(&device, dsts[i]);
     }
 
+    double one_worker_rate = 0.0;
     foreach (threads : UPLOAD_BENCH_THREAD_COUNTS) {
         UploadPhaseBArgs[UPLOAD_BENCH_MAX_THREADS] args;
         Thread[UPLOAD_BENCH_MAX_THREADS] threads_arr;
         for (uint i = 0; i < threads; i++) {
             args[i] = { .device = &device, .dst = dsts[i], .iters = UPLOAD_BENCH_HELPER_ITERS_PER_THREAD };
         }
+        ulong fallbacks_before = gpu::vk::dedicated_fallback_count(state);
         std::time::Clock start = std::time::clock::now();
         for (uint i = 0; i < threads; i++) threads_arr[i].create(&upload_phase_b_worker, &args[i])!!;
         for (uint i = 0; i < threads; i++) threads_arr[i].join()!!;
@@ -191,13 +266,37 @@ fn void run_phase_b() {
 
         uint total_ops = threads * UPLOAD_BENCH_HELPER_ITERS_PER_THREAD;
         double uploads_per_sec = (double)total_ops / ((double)elapsed_ns / 1.0e9);
-        io::printfn("phase B threads=%d payload=%dK: %.0f uploads/s",
-            threads, UPLOAD_BENCH_HELPER_PAYLOAD / 1024, uploads_per_sec);
+        if (threads == 1) one_worker_rate = uploads_per_sec;
+        ulong fallback_count = gpu::vk::dedicated_fallback_count(state) - fallbacks_before;
+        io::printfn(
+            "phase=B workers=%d payload_kib=%d staging_bytes=%d uploads_per_sec=%.0f scaling_vs_1_worker=%.2f dedicated_fallback_count=%d dedicated_fallback_used=%s",
+            threads,
+            UPLOAD_BENCH_HELPER_PAYLOAD / 1024,
+            state.staging_arena.size,
+            uploads_per_sec,
+            upload_scaling_vs_one(uploads_per_sec, one_worker_rate),
+            fallback_count,
+            upload_dedicated_fallback_used(fallback_count) ? "true" : "false",
+        );
     }
 }
 
 fn int main() {
-    io::printfn("gpu_upload_throughput_bench: lavapipe caveats -- host mallocs understate dedicated-create cost; instant queue completion understates how queue-bound phase B really is");
+    io::printfn(
+        "config: workers=[%d,%d,%d] phase_a_payload_kib=[%d,%d,%d] phase_a_staging_mib=[%d,%d] waves=%d uploads_per_wave=%d phase_b_payload_kib=%d phase_b_iters_per_worker=%d",
+        UPLOAD_BENCH_THREAD_COUNTS[0],
+        UPLOAD_BENCH_THREAD_COUNTS[1],
+        UPLOAD_BENCH_THREAD_COUNTS[2],
+        UPLOAD_BENCH_PAYLOAD_SIZES[0] / 1024,
+        UPLOAD_BENCH_PAYLOAD_SIZES[1] / 1024,
+        UPLOAD_BENCH_PAYLOAD_SIZES[2] / 1024,
+        UPLOAD_BENCH_ARENA_SIZES[0] >> 20,
+        UPLOAD_BENCH_ARENA_SIZES[1] >> 20,
+        UPLOAD_BENCH_WAVES,
+        UPLOAD_BENCH_WAVE_SIZE,
+        UPLOAD_BENCH_HELPER_PAYLOAD / 1024,
+        UPLOAD_BENCH_HELPER_ITERS_PER_THREAD,
+    );
     run_phase_a();
     run_phase_b();
     return 0;

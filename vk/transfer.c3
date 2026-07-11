@@ -191,7 +191,7 @@ fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* 
     if (arena.retire_count == 0) arena.virtual_head = 0;
     arena.retire_count++;
     arena.virtual_tail = range.virtual_end;
-    return arena.span.subspan(range.physical_offset, size);
+    return arena.span.unchecked_subspan(range.physical_offset, size);
 }
 
 fn void drain_dedicated_transfers(VkDeviceState* state) @private {
@@ -300,7 +300,8 @@ fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc)
 
 <* The caller supplies the timeline tag its staging range retires against. *>
 fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data, TimelineTag tag) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     if (data.len == 0) return gpu::INVALID_ARGUMENT~;
     BufferSlot* dst_slot = state.buffers.get(dst)!;
@@ -338,7 +339,8 @@ fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst,
 }
 
 fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data, TimelineTag tag) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     usz expected = texture_upload_bytes(state, desc)!;
     if (data.len != expected) return gpu::INVALID_ARGUMENT~;
@@ -426,6 +428,7 @@ fn void? maybe_reset_helper_pool(VkDeviceState* state) @private {
     ulong current = 0;
     vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current);
     if (current != reserved) return;
+    release_commands_for_context_frame(state, state.helper_context, state.frame_index);
     check(vk::reset_command_pool(state.device, context.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
     dirty.graphics = false;
     state.helper_pool_resets++;
@@ -809,7 +812,8 @@ fn void release_ticket(VkDeviceState* state, gpu::ReadbackTicket* ticket) @priva
 <* Record the copy plus the transfer→host barrier on the destination range;
    source-side ordering stays with the caller. *>
 fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::BufferHandle src, usz offset, usz size) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     if (size == 0) return gpu::INVALID_ARGUMENT~;
     BufferSlot* src_slot = state.buffers.get(src)!;
@@ -833,7 +837,8 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
 <* Full-mip texture variant; requires transfer_src usage and the TRANSFER_SRC
    tracked layout (caller's barriers on both sides). *>
 fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu::TextureHandle src, uint mip) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
     usz size = texture_upload_bytes(state, &region)!;

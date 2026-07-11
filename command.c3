@@ -16,21 +16,8 @@ enum StoreOp : int {
     DONT_CARE,
 }
 
-<* CommandList lifecycle: RECORDING from begin_commands, RECORDING_RENDER_PASS
-   inside a pass, EXECUTABLE after end_commands, SUBMITTED after submit. *>
-enum CommandState : int {
-    RECORDING,
-    RECORDING_RENDER_PASS,
-    EXECUTABLE,
-    SUBMITTED,
-}
-
 // Two slots are internal (default + helper contexts); 15 remain for users.
 const uint MAX_RECORDING_CONTEXTS = 17;
-
-// Distinct textures one list can carry a pending layout transition for
-// before recording faults INVALID_ARGUMENT.
-const uint PENDING_LAYOUT_CAP = 16;
 
 <* Unsigned 3-vector; dispatches take their workgroup counts as one. *>
 struct Vec3u {
@@ -107,32 +94,13 @@ struct RenderPassDesc {
     uint              height;
 }
 
-<* One texture's recorded-but-uncommitted layout transition: `first_old` is
-   the layout seen the first time this list touched the texture (the commit-
-   time drift check), `latest` is what record-time reads see. *>
-struct PendingLayout {
-    TextureHandle texture;
-    TextureLayout first_old;
-    TextureLayout latest;
-}
-
-// A recording session. Backend-opaque: the backend command buffer lives behind
-// `backend`. Carries its owning Device* so cmd_* reach the vtable without a
-// Device parameter.
+// A small recording token. Mutable lifecycle and backend state are device-owned;
+// the owner pointer keeps cmd_* dispatch source-compatible.
 struct CommandList {
-    Device*      device;
-    void*        backend;
-    QueueKind    queue;
-    CommandState state;
-    // Backend redundant-bind tracking; callers must not touch.
-    PipelineHandle last_pipeline;
-    uint           last_entry;
-    // Pending texture-layout transitions recorded on this list; replayed onto
-    // tracked state at submit, dropped if the list is never submitted.
-    // Callers must not touch.
-    PendingLayout[PENDING_LAYOUT_CAP] pending_layouts;
-    uint                              pending_layout_count;
+    Device*           device;
+    CommandListHandle handle;
 }
+$assert CommandList::size <= 16;
 
 <* Byte-range copy for cmd_copy_buffer; src and dst ranges must not overlap. *>
 struct BufferCopyDesc {
@@ -200,6 +168,7 @@ fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContext
 
 <* Finish recording; the list becomes submittable exactly once. *>
 fn void? end_commands(Device* device, CommandList* commands) {
+    if (commands.device != device) return INVALID_ARGUMENT~;
     if (device.vtable == null) return INVALID_ARGUMENT~;
     return device.vtable.end_commands(device, commands);
 }
@@ -254,8 +223,10 @@ fn void? cmd_dispatch(CommandList* commands, PipelineHandle pipeline, GpuAddress
     return commands.device.vtable.cmd_dispatch(commands, pipeline, root, groups);
 }
 
-<* Begin dynamic rendering into the desc's color targets. Viewport and scissor
-   are set to the full pass dimensions. *>
+<* Begin dynamic rendering into the desc's targets. Every selected attachment
+   must cover the pass dimensions, and the color count must not exceed
+   DeviceCaps.max_color_attachments. Viewport and scissor cover the full
+   pass dimensions. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_begin_render_pass(commands, desc);

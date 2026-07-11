@@ -12,7 +12,6 @@ import std::hash::fnv64a;
 // shared. Monomorphic table, same c3c 0.8.0 rationale as PipelineTable.
 
 const uint PIPELINE_ENTRY_NONE = uint::max;
-const uint COMPUTE_LAYOUT_CAP  = 32;
 
 enum PipelineKind : int {
     COMPUTE,
@@ -65,7 +64,11 @@ struct PipelineCacheTable {
 struct ComputeLayoutEntry {
     uint               push_size;
     vk::PipelineLayout layout;
-    bool               used;
+}
+
+struct ComputeLayoutCache {
+    ComputeLayoutEntry[] entries;
+    uint                 count;
 }
 
 fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
@@ -203,36 +206,55 @@ fn bool pipeline_cache_index_consistent(VkDeviceState* state) {
     return linked == pipeline_cache_entry_count(state);
 }
 
+fn usz compute_layout_size_count(VkDeviceState* state) @private {
+    return (usz)((state.caps.max_push_constant_size - gpu::RootPush::size) / 4 + 1);
+}
+
+<* Caller holds resource_mutex. Pipeline capacity is only the first-allocation
+   hint; geometric growth continues to the finite valid-size count. *>
+fn void? grow_compute_layout_cache(VkDeviceState* state) @private {
+    ComputeLayoutCache* cache = &state.compute_layout_cache;
+    usz max_capacity = compute_layout_size_count(state);
+    usz new_capacity = cache.entries.len == 0 ? state.pipelines.slots.len : cache.entries.len * 2;
+    if (new_capacity == 0) new_capacity = 1;
+    if (new_capacity > max_capacity) new_capacity = max_capacity;
+    if (new_capacity <= cache.entries.len) return gpu::INVALID_ARGUMENT~;
+
+    ComputeLayoutEntry[] grown = alloc::new_array(state.host_allocator, ComputeLayoutEntry, (sz)new_capacity);
+    for (uint i = 0; i < cache.count; i++) grown[i] = cache.entries[i];
+    if (cache.entries.ptr != null) alloc::free(state.host_allocator, cache.entries.ptr);
+    cache.entries = grown;
+}
+
 <* Compute layout for `push_size`, created on first use. All compute layouts
    share the global heap set-0 layout and differ only in push range size. *>
 fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    foreach (&entry : state.compute_layouts[:COMPUTE_LAYOUT_CAP]) {
-        if (entry.used && entry.push_size == push_size) return entry.layout;
+    ComputeLayoutCache* cache = &state.compute_layout_cache;
+    foreach (&entry : cache.entries[:cache.count]) {
+        if (entry.push_size == push_size) return entry.layout;
     }
-    foreach (&entry : state.compute_layouts[:COMPUTE_LAYOUT_CAP]) {
-        if (entry.used) continue;
-        vk::PushConstantRange range = {
-            .stage_flags = vk::ShaderStageFlagBits.COMPUTE_BIT,
-            .offset      = 0,
-            .size        = push_size,
-        };
-        vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
-            .set_set_layouts((&state.heap.set_layout)[:1])
-            .set_push_constant_ranges((&range)[:1]);
-        vk::PipelineLayout layout;
-        check(vk::create_pipeline_layout(state.device, &layout_info, null, &layout))!;
-        set_object_name(
-            state:         state,
-            object_type:   vk::ObjectType.PIPELINE_LAYOUT,
-            object_handle: (ulong)layout,
-            name:          "gpu_compute_layout",
-        );
-        *entry = { .push_size = push_size, .layout = layout, .used = true };
-        return layout;
-    }
-    return gpu::SLOT_TABLE_FULL~;
+    if (cache.count == cache.entries.len) grow_compute_layout_cache(state)!;
+
+    vk::PushConstantRange range = {
+        .stage_flags = vk::ShaderStageFlagBits.COMPUTE_BIT,
+        .offset      = 0,
+        .size        = push_size,
+    };
+    vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
+        .set_set_layouts((&state.heap.set_layout)[:1])
+        .set_push_constant_ranges((&range)[:1]);
+    vk::PipelineLayout layout;
+    check(vk::create_pipeline_layout(state.device, &layout_info, null, &layout))!;
+    set_object_name(
+        state:         state,
+        object_type:   vk::ObjectType.PIPELINE_LAYOUT,
+        object_handle: (ulong)layout,
+        name:          "gpu_compute_layout",
+    );
+    cache.entries[cache.count++] = { .push_size = push_size, .layout = layout };
+    return layout;
 }
 
 <* Spec-recommended pre-screen; the driver retry is the real safety net. *>
@@ -274,8 +296,11 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
     vk::PipelineCacheCreateInfo cache_info = vk::pipeline_cache_create_info();
     cache_info.initial_data_size = (sz)cache_data.len;
     cache_info.p_initial_data    = cache_data.ptr;
-    if (vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache) != vk::Result.SUCCESS) {
-        // A warm-start blob is advisory: any driver rejection restarts empty.
+    vk::Result cache_result = vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache);
+    if (cache_result != vk::Result.SUCCESS) {
+        if (cache_data.len == 0 || !pipeline_cache_blob_retryable(cache_result)) {
+            check(cache_result)!;
+        }
         cache_info.initial_data_size = 0;
         cache_info.p_initial_data    = null;
         check(vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache))!;
@@ -298,7 +323,7 @@ fn usz? vk_get_pipeline_cache_data(gpu::Device* device, char[] out) @private {
     check(vk::get_pipeline_cache_data(state.device, state.driver_cache, &required, null))!;
     if ((usz)required > out.len) return gpu::INVALID_ARGUMENT~;
     sz written = required;
-    check(vk::get_pipeline_cache_data(state.device, state.driver_cache, &written, out.ptr))!;
+    check_pipeline_cache_data_result(vk::get_pipeline_cache_data(state.device, state.driver_cache, &written, out.ptr))!;
     return (usz)written;
 }
 
@@ -316,12 +341,12 @@ fn void destroy_pipeline_shared(VkDeviceState* state) {
         mem::free(state.pipeline_cache.bucket_heads.ptr);
         state.pipeline_cache.bucket_heads = {};
     }
-    foreach (&entry : state.compute_layouts[:COMPUTE_LAYOUT_CAP]) {
-        if (entry.used) {
-            vk::destroy_pipeline_layout(state.device, entry.layout, null);
-            entry.used = false;
-        }
+    ComputeLayoutCache* layout_cache = &state.compute_layout_cache;
+    foreach (&entry : layout_cache.entries[:layout_cache.count]) {
+        vk::destroy_pipeline_layout(state.device, entry.layout, null);
     }
+    if (layout_cache.entries.ptr != null) alloc::free(state.host_allocator, layout_cache.entries.ptr);
+    *layout_cache = {};
     if (state.graphics_layout != null) {
         vk::destroy_pipeline_layout(state.device, state.graphics_layout, null);
         state.graphics_layout = (vk::PipelineLayout)null;
