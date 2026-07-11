@@ -106,6 +106,16 @@ Device
     void* backend_state
 ```
 
+Descriptor capacities are exact creation requests, not clampable upper bounds.
+For descriptor indexing, texture capacity contributes once to the sampled-image
+binding and once to the storage-image binding. Per-stage resource usage is
+`2 * texture_descriptor_capacity`; plain sampler descriptors do not count toward
+that limit. All-pools usage is `2 * texture_descriptor_capacity +
+sampler_descriptor_capacity`. `create_device` returns `INVALID_ARGUMENT` when a
+requested capacity exceeds a per-type or aggregate device limit. On success,
+`DeviceCaps.max_texture_descriptors` and
+`DeviceCaps.max_sampler_descriptors` report the capacities of the created heap.
+
 Creation:
 
 ```text

@@ -58,6 +58,14 @@ exists (else the limit is compile-time).
 | Readback arena | 8 MiB default (`memory.c3:39`) | `readback_arena_size` | `ARENA_FULL` |
 
 Two sizing rules that bite:
+- **Packed descriptor ceilings are not guaranteed hardware capacities.** On the
+  descriptor-indexing path, texture slots count once as sampled images and once
+  as storage images. Per-stage resource usage is `2 *
+  texture_descriptor_capacity`; plain samplers are excluded. All-pools usage is
+  `2 * texture_descriptor_capacity + sampler_descriptor_capacity`.
+  `create_device` returns `INVALID_ARGUMENT` rather than clamping when any
+  per-type, per-stage aggregate, or all-pools update-after-bind limit is
+  exceeded.
 
 - **Descriptor retires recycle a frame late.** A destroy inside frame N
   retires against N's timeline value and only drains on a later frame — a
