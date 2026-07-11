@@ -22,15 +22,15 @@ fn void run_phase(gpu::Device* device, BenchPhase* phase) {
     std::time::Clock start = std::time::clock::now();
 
     for (uint frame = 0; frame < BENCH_FRAME_COUNT; frame++) {
-        gpu::begin_frame(device)!!;
+        gpu::FrameToken frame_token = gpu::begin_frame(device)!!;
         foreach (kind : phase.kinds) {
             gpu::CommandList cmd = gpu::begin_commands(device, kind)!!;
-            gpu::end_commands(device, &cmd)!!;
+            gpu::end_commands(&cmd)!!;
             gpu::CommandList[1] one = { cmd };
             gpu::SubmitDesc submit = { .command_lists = one[..] };
             gpu::submit(device, &submit)!!;
         }
-        gpu::end_frame(device)!!;
+        gpu::end_frame(&frame_token)!!;
     }
 
     long elapsed_ns = (long)start.to_now();

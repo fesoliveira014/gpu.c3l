@@ -47,7 +47,7 @@ fn void copy_upload_to_readback() @test {
     gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
     defer gpu::destroy_semaphore(&device, sem)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
     gpu::BufferCopyDesc copy = { .src = upload, .dst = readback, .src_offset = 0, .dst_offset = 0, .size = 256 };
@@ -58,7 +58,7 @@ fn void copy_upload_to_readback() @test {
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &bar)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };
     gpu::SemaphoreSignal[1] sigs = { { .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.TRANSFER } };
@@ -75,7 +75,7 @@ fn void copy_upload_to_readback() @test {
     char* dst = (char*)rb_span.cpu;
     for (uint i = 0; i < 256; i++) assert(dst[i] == (char)i, "readback byte matches uploaded byte");
 
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 }
 
 fn void empty_command_list_submits() @test {
@@ -83,15 +83,15 @@ fn void empty_command_list_submits() @test {
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 }
 
 fn void copied_alias_cannot_resubmit_after_success() @test {
@@ -100,12 +100,12 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::CommandList original = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&device, &original)!!;
+    gpu::end_commands(&original)!!;
     gpu::CommandList[1] copied = { original };
     gpu::SubmitDesc first = { .command_lists = copied[..] };
     gpu::submit(&device, &first)!!;
     gpu::CommandList replacement = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&device, &replacement)!!;
+    gpu::end_commands(&replacement)!!;
     assert(replacement.handle.index == original.handle.index, "the freed command slot is reused");
     assert(replacement.handle.generation != original.handle.generation,
         "slot reuse advances the command generation");
@@ -130,7 +130,7 @@ fn void command_generation_wraps_without_poisoning_slot() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::CommandList nearly_wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&device, &nearly_wrapped)!!;
+    gpu::end_commands(&nearly_wrapped)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
     state.commands.slots[nearly_wrapped.handle.index].generation = vk::COMMAND_GENERATION_MAX - 1;
     nearly_wrapped.handle.generation = vk::COMMAND_GENERATION_MAX - 1;
@@ -142,7 +142,7 @@ fn void command_generation_wraps_without_poisoning_slot() @test {
     gpu::CommandList wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     assert(wrapped.handle.index == nearly_wrapped.handle.index, "wrapped slot is reused");
     assert(wrapped.handle.generation == 1, "command generation wraps to the first valid value");
-    gpu::end_commands(&device, &wrapped)!!;
+    gpu::end_commands(&wrapped)!!;
     gpu::CommandList[1] wrapped_lists = { wrapped };
     gpu::SubmitDesc wrapped_submit = { .command_lists = wrapped_lists[..] };
     gpu::submit(&device, &wrapped_submit)!!;
@@ -155,7 +155,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[2] duplicates = { cmd, cmd };
     gpu::SubmitDesc bad = { .command_lists = duplicates[..] };
     ulong before = command_submit_count(&device);
@@ -177,7 +177,7 @@ fn void cross_device_submit_rejects_and_owner_can_submit() @test {
     defer gpu::destroy_device(&other)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&owner, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&owner, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     ulong before = command_submit_count(&other);
@@ -189,37 +189,20 @@ fn void cross_device_submit_rejects_and_owner_can_submit() @test {
     gpu::wait_queue_idle(&owner, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void cross_device_end_commands_rejects_without_mutation() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device owner = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&owner)!!;
-    gpu::Device other = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&other)!!;
-
-    gpu::CommandList cmd = gpu::begin_commands(&owner, gpu::QueueKind.GRAPHICS)!!;
-    fault rejected = @catch(gpu::end_commands(&other, &cmd));
-    assert(rejected == gpu::INVALID_ARGUMENT, "another device cannot finalize the owner's command token");
-    gpu::end_commands(&owner, &cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&owner, &submit)!!;
-    gpu::wait_queue_idle(&owner, gpu::QueueKind.GRAPHICS)!!;
-}
-
 fn void abandoned_token_invalidates_when_pool_slot_resets() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 1 };
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList abandoned = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&device, &abandoned)!!;
-    gpu::end_frame(&device)!!;
-    gpu::begin_frame(&device)!!;
+    gpu::end_commands(&abandoned)!!;
+    gpu::end_frame(&frame)!!;
+    frame = gpu::begin_frame(&device)!!;
 
-    fault stale = @catch(gpu::end_commands(&device, &abandoned));
+    fault stale = @catch(gpu::end_commands(&abandoned));
     assert(stale == gpu::INVALID_HANDLE, "pool reset invalidates an abandoned command token");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 }
 
 fn void live_command_record_blocks_context_destruction() @test {
@@ -232,7 +215,7 @@ fn void live_command_record_blocks_context_destruction() @test {
     fault live = @catch(gpu::destroy_recording_context(&device, context));
     assert(live == gpu::INVALID_RESOURCE_STATE, "a context with a live command record cannot be destroyed");
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -245,9 +228,9 @@ fn void bad_command_state_rejected() @test {
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
 
     // Recording after end must be rejected.
     gpu::GlobalBarrier gb = {
@@ -256,7 +239,7 @@ fn void bad_command_state_rejected() @test {
     };
     fault rejected = @catch(gpu::cmd_global_barrier(&cmd, &gb));
     assert(rejected == gpu::COMMAND_RECORDING_ERROR, "recording after end returns COMMAND_RECORDING_ERROR");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 }
 
 fn void texture_barrier_faults() @test {
@@ -264,7 +247,7 @@ fn void texture_barrier_faults() @test {
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::TextureBarrier bar = {
         .texture = gpu::TEXTURE_HANDLE_INVALID,
@@ -274,8 +257,8 @@ fn void texture_barrier_faults() @test {
     };
     fault barrier_fault = @catch(gpu::cmd_texture_barrier(&cmd, &bar));
     assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on an invalid texture handle faults INVALID_HANDLE");
-    gpu::end_commands(&device, &cmd)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_commands(&cmd)!!;
+    gpu::end_frame(&frame)!!;
 }
 
 // vkWaitSemaphores with timeout 0 is a spec-guaranteed poll: it returns
@@ -314,9 +297,9 @@ fn void idle_context_pools_are_never_reset() @test {
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
     for (uint i = 0; i < 6; i++) {
-        gpu::begin_frame(&device)!!;
+        gpu::FrameToken frame = gpu::begin_frame(&device)!!;
         assert(vk::pool_reset_stats(state).reset == 0, "an idle context's pools are never reset");
-        gpu::end_frame(&device)!!;
+        gpu::end_frame(&frame)!!;
     }
 }
 
@@ -329,30 +312,30 @@ fn void used_context_pool_resets_exactly_once_on_slot_wrap() @test {
     defer (void)gpu::destroy_recording_context(&device, ctx);
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
 
-    gpu::begin_frame(&device)!!; // slot 1
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!; // slot 1
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS, ctx)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 
-    gpu::begin_frame(&device)!!; // slot 0: never touched
+    frame = gpu::begin_frame(&device)!!; // slot 0: never touched
     assert(vk::pool_reset_stats(state).reset == 0, "the other slot was never dirtied, so nothing resets");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 
-    gpu::begin_frame(&device)!!; // slot 1 wraps back: the one dirtied pool resets
+    frame = gpu::begin_frame(&device)!!; // slot 1 wraps back: the one dirtied pool resets
     assert(vk::pool_reset_stats(state).reset == 1, "the recorded context's pool resets exactly once on its slot's wrap");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 
-    gpu::begin_frame(&device)!!; // slot 0 again: still clean
+    frame = gpu::begin_frame(&device)!!; // slot 0 again: still clean
     assert(vk::pool_reset_stats(state).reset == 0, "slot 0 stays clean");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 
-    gpu::begin_frame(&device)!!; // slot 1 again: the bit stays cleared, nothing new recorded
+    frame = gpu::begin_frame(&device)!!; // slot 1 again: the bit stays cleared, nothing new recorded
     assert(vk::pool_reset_stats(state).reset == 0, "the dirty bit stays cleared until the context records again");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame)!!;
 }
 
 fn void wait_timeout_zero_on_reached_value_succeeds() @test {

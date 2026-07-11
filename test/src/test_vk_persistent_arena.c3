@@ -114,7 +114,7 @@ fn void transfer_usage_persistent_span_copies() @test {
     for (usz i = 0; i < 64; i++) src_bytes[i] = (char)(i % 251);
     gpu::flush_buffer(&device, src.buffer, src.offset, src.size)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::BufferCopyDesc copy = { .src = src.buffer, .dst = dst.buffer, .src_offset = src.offset, .dst_offset = dst.offset, .size = 64 };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
@@ -124,12 +124,12 @@ fn void transfer_usage_persistent_span_copies() @test {
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     gpu::invalidate_buffer(&device, dst.buffer, dst.offset, dst.size)!!;
     char* dst_bytes = (char*)dst.cpu;
@@ -181,7 +181,7 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     gpu::flush_buffer(&device, root_span.buffer, root_span.offset, root_span.size)!!;
     gpu::flush_buffer(&device, io.buffer, io.offset, io.size)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::cmd_dispatch_indirect(
         commands: &cmd,
@@ -195,12 +195,12 @@ fn void indirect_usage_persistent_span_dispatches() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     gpu::invalidate_buffer(&device, io.buffer, io.offset, io.size)!!;
     float* doubled = &values[COUNT];

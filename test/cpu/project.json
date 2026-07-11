@@ -34,7 +34,8 @@
         "../src/test_handles.c3",
         "../src/test_ranges.c3",
         "../src/test_texture_transition.c3",
-        "../src/test_texture_support.c3"
+        "../src/test_texture_support.c3",
+        "../src/test_frame_lifecycle_helper.c3"
       ]
     },
     "shader_abi": {

@@ -111,7 +111,7 @@ fn int upload_phase_a_worker(void* arg) {
         for (uint i = 0; i < args.iters; i++) {
             gpu::cmd_upload_buffer(&args.list, args.dst, 0, payload)!!;
         }
-        gpu::end_commands(args.device, &args.list)!!;
+        gpu::end_commands(&args.list)!!;
     };
     return 0;
 }
@@ -150,7 +150,7 @@ fn UploadBenchObservation run_phase_a_combo(
     std::time::Clock start = std::time::clock::now();
 
     for (uint w = 0; w < UPLOAD_BENCH_WAVES; w++) {
-        gpu::begin_frame(&device)!!;
+        gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
         UploadPhaseAArgs[UPLOAD_BENCH_MAX_THREADS] args;
         Thread[UPLOAD_BENCH_MAX_THREADS] threads_arr;
         for (uint i = 0; i < threads; i++) {
@@ -164,7 +164,7 @@ fn UploadBenchObservation run_phase_a_combo(
         gpu::SubmitDesc submit = { .command_lists = lists[:threads] };
         gpu::submit(&device, &submit)!!;
         gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-        gpu::end_frame(&device)!!;
+        gpu::end_frame(&frame_token)!!;
     }
     long elapsed_ns = (long)start.to_now();
 

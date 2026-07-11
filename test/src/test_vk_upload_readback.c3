@@ -67,8 +67,8 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
     defer gpu::destroy_device(&device)!!;
 
     // Settle the timeline to a known baseline.
-    gpu::begin_frame(&device)!!;
-    gpu::end_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     gpu::BufferDesc src_desc = {
         .size        = 256,
@@ -81,7 +81,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, src, 0, 256)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     // Deliberately never gpu::submit(&device, ...): the ticket's copy never runs.
 
     gpu::BufferDesc unrelated_desc = {
@@ -168,7 +168,7 @@ fn void staging_ring_reuses_across_frames() @test {
     char[1024] data;
     for (uint frame = 0; frame < 12; frame++) {
         for (uint i = 0; i < 1024; i++) data[i] = (char)(frame + i);
-        gpu::begin_frame(&device)!!;
+        gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
         gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
         gpu::cmd_upload_buffer(&cmd, buffer, 0, data[..])!!;
         gpu::BufferBarrier next_use = {
@@ -177,11 +177,11 @@ fn void staging_ring_reuses_across_frames() @test {
             .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
         };
         gpu::cmd_buffer_barrier(&cmd, &next_use)!!;
-        gpu::end_commands(&device, &cmd)!!;
+        gpu::end_commands(&cmd)!!;
         gpu::CommandList[1] lists = { cmd };
         gpu::SubmitDesc submit = { .command_lists = lists[..] };
         gpu::submit(&device, &submit)!!;
-        gpu::end_frame(&device)!!;
+        gpu::end_frame(&frame_token)!!;
     }
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
@@ -218,7 +218,7 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.TRANSFER_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &next_use)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -308,8 +308,8 @@ fn void texture_upload_helper_sampled() @test {
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pd)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&device, SampleRoot::size, 16)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* root = (SampleRoot*)root_span.cpu;
     root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
     root.texture_index = tex_index;
@@ -330,7 +330,7 @@ fn void texture_upload_helper_sampled() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -340,7 +340,7 @@ fn void texture_upload_helper_sampled() @test {
     float* sampled = (float*)out_span.cpu;
     assert(quantize_unorm8(sampled[1]) == 90, "sampled green matches helper upload");
     assert(quantize_unorm8(sampled[2]) == 160, "sampled blue matches helper upload");
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void texture_readback_helper_restores_layout() @test {
@@ -439,12 +439,12 @@ fn void upload_helper_validation_faults() @test {
     assert(bounds_fault == gpu::INVALID_ARGUMENT, "past-the-end upload faults INVALID_ARGUMENT");
 
     // cmd-level upload into a texture that is not TRANSFER_DST still faults.
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     char[UR_TEX_BYTES] full;
     gpu::TextureUploadDesc upload = { .texture = texture, .mip = 0 };
     fault layout_fault = @catch(gpu::cmd_upload_texture(&cmd, &upload, full[..]));
     assert(layout_fault == gpu::INVALID_RESOURCE_STATE, "cmd upload into UNDEFINED layout faults INVALID_RESOURCE_STATE");
-    gpu::end_commands(&device, &cmd)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_commands(&cmd)!!;
+    gpu::end_frame(&frame_token)!!;
 }

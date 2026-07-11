@@ -53,7 +53,7 @@ fn void offscreen_clear_works() @test {
     gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::TextureBarrier to_attach = {
@@ -99,7 +99,7 @@ fn void offscreen_clear_works() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -113,7 +113,7 @@ fn void offscreen_clear_works() @test {
         assert(pixels[i * 4 + 2] == (char)192, "cleared blue");
         assert(pixels[i * 4 + 3] == (char)255, "cleared alpha");
     }
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void offscreen_textured_triangle() @test {
@@ -183,10 +183,10 @@ fn void offscreen_textured_triangle() @test {
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     // Vertex data: xy = NDC position, zw = uv.
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
     float* verts = (float*)verts_span.cpu;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
@@ -195,7 +195,7 @@ fn void offscreen_textured_triangle() @test {
     };
     for (uint i = 0; i < 12; i++) verts[i] = vertex_data[i];
 
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
     FragRoot* frag_root = (FragRoot*)frag_span.cpu;
     frag_root.texture_index = tex_index;
     frag_root.sampler_index = smp_index;
@@ -275,7 +275,7 @@ fn void offscreen_textured_triangle() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -294,7 +294,7 @@ fn void offscreen_textured_triangle() @test {
     char* far_corner = &pixels[(RT_SIZE * RT_SIZE - 1) * 4];
     assert(far_corner[0] == (char)8, "opposite corner is the clear color");
 
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void dynamic_viewport_scissor_pixels() @test {
@@ -334,8 +334,8 @@ fn void dynamic_viewport_scissor_pixels() @test {
     defer gpu::destroy_buffer(&device, readback)!!;
     gpu::GpuSpan readback_all = gpu::get_buffer_span(&device, readback)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan vertices = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan vertices = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
     float[12] vertex_data = {
         -1.0f, -1.0f, 0.0f, 0.0f,
          3.0f, -1.0f, 0.0f, 0.0f,
@@ -343,7 +343,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
     };
     for (uint i = 0; i < vertex_data.len; i++) ((float*)vertices.cpu)[i] = vertex_data[i];
 
-    gpu::GpuSpan color = gpu::alloc_frame_span(&device, 16, 16)!!;
+    gpu::GpuSpan color = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
     float[4] green = { 0.0f, 1.0f, 0.0f, 1.0f };
     for (uint i = 0; i < green.len; i++) ((float*)color.cpu)[i] = green[i];
 
@@ -419,7 +419,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
         gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
     }
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -437,7 +437,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
     usz reset_right_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE * 3 / 4) * 4 + 1;
     assert(reset_pixels[reset_right_green] != 0, "the next pass restores full viewport and scissor defaults");
 
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void offscreen_render_to_mip() @test {
@@ -453,7 +453,7 @@ fn void offscreen_render_to_mip() @test {
     gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::TextureBarrier to_attach = {
@@ -499,7 +499,7 @@ fn void offscreen_render_to_mip() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -511,7 +511,7 @@ fn void offscreen_render_to_mip() @test {
         assert(pixels[i * 4] == (char)40 && pixels[i * 4 + 1] == (char)80 && pixels[i * 4 + 2] == (char)120,
             "mip 1 holds the rendered clear color");
     }
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void graphics_pipeline_depth_format_validation() @test {
@@ -558,7 +558,7 @@ fn void dynamic_viewport_scissor_validation() @test {
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::Viewport full_viewport = {
@@ -646,8 +646,8 @@ fn void dynamic_viewport_scissor_validation() @test {
     assert(@catch(gpu::cmd_set_scissor(&cmd, &full_scissor)) == gpu::COMMAND_RECORDING_ERROR,
         "scissor after a render pass faults COMMAND_RECORDING_ERROR");
 
-    gpu::end_commands(&device, &cmd)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_commands(&cmd)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void render_pass_state_machine() @test {
@@ -662,7 +662,7 @@ fn void render_pass_state_machine() @test {
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buf_desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 
     // Draw outside a pass.
@@ -707,10 +707,10 @@ fn void render_pass_state_machine() @test {
     assert(barrier_fault == gpu::COMMAND_RECORDING_ERROR, "texture barrier inside a render pass faults COMMAND_RECORDING_ERROR");
 
     // Unclosed pass rejected at end_commands.
-    fault end_fault = @catch(gpu::end_commands(&device, &cmd));
+    fault end_fault = @catch(gpu::end_commands(&cmd));
     assert(end_fault == gpu::COMMAND_RECORDING_ERROR, "ending a command list with an open render pass faults COMMAND_RECORDING_ERROR");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&device, &cmd)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_commands(&cmd)!!;
+    gpu::end_frame(&frame_token)!!;
 }

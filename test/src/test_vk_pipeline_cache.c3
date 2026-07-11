@@ -275,9 +275,9 @@ fn void cull_replay_renders_per_alias() @test {
     gpu::BufferHandle rb_reset = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, rb_reset)!!;
 
-    gpu::begin_frame(&device)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
+    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
     float* verts = (float*)verts_span.cpu;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
@@ -286,7 +286,7 @@ fn void cull_replay_renders_per_alias() @test {
     };
     for (uint i = 0; i < 12; i++) verts[i] = vertex_data[i];
 
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, FragRoot::size, 16)!!;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
     FragRoot* frag_root = (FragRoot*)frag_span.cpu;
     frag_root.texture_index = tex_index;
     frag_root.sampler_index = smp_index;
@@ -358,7 +358,7 @@ fn void cull_replay_renders_per_alias() @test {
         gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
     }
 
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
@@ -388,7 +388,7 @@ fn void cull_replay_renders_per_alias() @test {
     assert(reset_center[0] == (char)255 && reset_center[1] == (char)255 && reset_center[2] == (char)255,
         "the next pass restores full viewport and scissor defaults");
 
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
 
 fn void alias_survives_peer_destroy() @test {
@@ -414,9 +414,9 @@ fn void alias_survives_peer_destroy() @test {
     gpu::TextureHandle target = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&device, 3 * 16, 16)!!;
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&device, 16, 16)!!;
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::TextureBarrier to_attach = {
@@ -443,12 +443,12 @@ fn void alias_survives_peer_destroy() @test {
         instance_count: 1,
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 
     gpu::destroy_pipeline(&device, survivor)!!;
     assert(cache_entry_count(&device) == 0, "entry released after the surviving alias is destroyed");

@@ -72,6 +72,8 @@ struct VkDeviceState {
     Atomic{int}                inflight_calls;
     uint                       frames_in_flight;
     uint                       frame_index;
+    ulong                      frame_generation;
+    ulong                      active_frame_generation;
     FrameArenaState[]          frame_arenas;
     PersistentArenaState       persistent_arena;
     RecordingContextTable      recording_contexts;

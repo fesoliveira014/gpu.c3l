@@ -83,12 +83,12 @@ fn void range_and_alignment_validation() @test {
     fault f4 = @catch(gpu::invalidate_buffer(&device, buf, 0, 512));
     assert(f4 == gpu::INVALID_ARGUMENT, "oversized invalidate faults");
 
-    gpu::begin_frame(&device)!!;
-    fault f5 = @catch(gpu::alloc_frame_span(&device, 64, 0));
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    fault f5 = @catch(gpu::alloc_frame_span(&frame_token, 64, 0));
     assert(f5 == gpu::INVALID_ARGUMENT, "zero alignment faults");
-    fault f6 = @catch(gpu::alloc_frame_span(&device, 64, 3));
+    fault f6 = @catch(gpu::alloc_frame_span(&frame_token, 64, 3));
     assert(f6 == gpu::INVALID_ARGUMENT, "non-power-of-two alignment faults");
-    fault f7 = @catch(gpu::alloc_frame_span(&device, 0, 16));
+    fault f7 = @catch(gpu::alloc_frame_span(&frame_token, 0, 16));
     assert(f7 == gpu::INVALID_ARGUMENT, "zero-size span faults");
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -107,10 +107,10 @@ fn void range_and_alignment_validation() @test {
     gpu::cmd_copy_buffer(&cmd, &touching)!!;
     gpu::BufferCopyDesc disjoint = { .src = buf, .dst = buf, .src_offset = 0, .dst_offset = 128, .size = 64 };
     gpu::cmd_copy_buffer(&cmd, &disjoint)!!;
-    gpu::end_commands(&device, &cmd)!!;
+    gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&device)!!;
+    gpu::end_frame(&frame_token)!!;
 }
