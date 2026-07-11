@@ -57,13 +57,15 @@
       "type": "executable",
       "sources": [ "src/descriptor_churn_bench.c3" ]
     },
-    // Advisory dedicated-fallback hoist timing: Tier-C parallel uploads
-    // across contexts plus the blocking-helper queue-bound baseline;
-    // executable so it never gates CI. Needs an ICD — pin lavapipe via
-    // VK_DRIVER_FILES.
+    // Advisory upload observations across worker/payload/arena combinations;
+    // executable so timing never gates CI. Needs an ICD.
     "upload_throughput_bench": {
       "type": "executable",
-      "sources": [ "src/upload_throughput_bench.c3" ]
+      "sources": [ "src/upload_throughput_bench.c3", "src/upload_bench_observation.c3" ]
+    },
+    "upload_bench_observation": {
+      "type": "test",
+      "sources": [ "src/test_upload_bench_observation.c3", "src/upload_bench_observation.c3" ]
     },
     // Advisory async-compute/graphics overlap observation: chained vs
     // independent submission across queues, timestamp-pool-backed where
