@@ -384,7 +384,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     for (uint i = 0; i < COUNT; i++) values[i] = (float)i;
 
     gpu::GpuSpan scratch = gpu::alloc_frame_span(&device, 64, 16)!!;
-    gpu::GpuSpan dispatch_args = scratch.subspan(16, gpu::DispatchIndirectCommand::size);
+    gpu::GpuSpan dispatch_args = scratch.checked_subspan(16, gpu::DispatchIndirectCommand::size)!!;
 
     gpu::GpuSpan build_root_span = gpu::alloc_frame_span(&device, BuildRoot::size, 16)!!;
     BuildRoot* build_root = (BuildRoot*)build_root_span.cpu;
@@ -487,8 +487,8 @@ fn void count_buffer_limits_draws() @test {
     uint* count_values = (uint*)counts.cpu;
     count_values[0] = 0;
     count_values[1] = 1;
-    gpu::GpuSpan count_zero = counts.subspan(0, 4);
-    gpu::GpuSpan count_one = counts.subspan(4, 4);
+    gpu::GpuSpan count_zero = counts.checked_subspan(0, 4)!!;
+    gpu::GpuSpan count_one = counts.checked_subspan(4, 4)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::TextureHandle[2] targets = { target_zero, target_one };
@@ -628,7 +628,7 @@ fn void indirect_argument_validation() @test {
     ));
     assert(no_usage == gpu::INVALID_ARGUMENT, "args without indirect usage fault INVALID_ARGUMENT");
 
-    gpu::GpuSpan misaligned = args_span.subspan(2, 32);
+    gpu::GpuSpan misaligned = args_span.checked_subspan(2, 32)!!;
     fault align_fault = @catch(gpu::cmd_draw_indirect(
         commands:      &cmd,
         pipeline:      ctx.pipeline,

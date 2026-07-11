@@ -311,7 +311,7 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     // Frame-arena buffers carry .index usage; a 2-byte offset still misaligns
     // the default U32 index type (needs 4-byte alignment).
     gpu::GpuSpan index_span = gpu::alloc_frame_span(&device, 16, 16)!!;
-    gpu::GpuSpan misaligned = index_span.subspan(2, 8);
+    gpu::GpuSpan misaligned = index_span.checked_subspan(2, 8)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     record_val_target_to_attach(&cmd, target);
@@ -487,7 +487,7 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
-    gpu::GpuSpan escaped = full_span.subspan(8, gpu::DispatchIndirectCommand::size);
+    gpu::GpuSpan escaped = full_span.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -513,7 +513,7 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
-    gpu::GpuSpan boundary = full_span.subspan(4, gpu::DispatchIndirectCommand::size);
+    gpu::GpuSpan boundary = full_span.checked_subspan(4, gpu::DispatchIndirectCommand::size)!!;
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -546,7 +546,7 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::BufferHandle count_buffer = gpu::create_buffer(&device, &count_desc)!!;
     defer gpu::destroy_buffer(&device, count_buffer)!!;
     gpu::GpuSpan full_count_span = gpu::get_buffer_span(&device, count_buffer)!!;
-    gpu::GpuSpan escaped_count = full_count_span.subspan(8, 4);
+    gpu::GpuSpan escaped_count = full_count_span.unchecked_subspan(8, 4);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -585,7 +585,7 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
     defer gpu::destroy_buffer(&device, index_buffer)!!;
     gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
-    gpu::GpuSpan escaped = full_index_span.subspan(16, 4);
+    gpu::GpuSpan escaped = full_index_span.unchecked_subspan(16, 4);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -622,7 +622,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
     defer gpu::destroy_buffer(&device, index_buffer)!!;
     gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
-    gpu::GpuSpan boundary = full_index_span.subspan(12, 4);
+    gpu::GpuSpan boundary = full_index_span.checked_subspan(12, 4)!!;
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -664,7 +664,7 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
-    gpu::GpuSpan escaped = full_span.subspan(32, 64);
+    gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
@@ -696,7 +696,7 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     gpu::BufferHandle dst_buffer = gpu::create_buffer(&device, &dst_desc)!!;
     defer gpu::destroy_buffer(&device, dst_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, dst_buffer)!!;
-    gpu::GpuSpan escaped = full_span.subspan(32, 64);
+    gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
@@ -728,7 +728,7 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
-    gpu::GpuSpan boundary = full_span.subspan(32, 64);
+    gpu::GpuSpan boundary = full_span.checked_subspan(32, 64)!!;
 
     gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
