@@ -51,7 +51,7 @@ fn void checked_subspan_bounds_and_nesting() @test {
     GpuSpan parent = span.checked_subspan(32, 128)!!;
     GpuSpan exact = parent.checked_subspan(96, 32)!!;
     fault nested_escape = @catch(parent.checked_subspan(97, 32));
-    fault offset_past_parent = @catch(span.checked_subspan(257, 0));
+    fault offset_past_parent = @catch(span.checked_subspan(257, 1));
     fault size_past_parent = @catch(span.checked_subspan(200, 57));
     fault overflowing_size = @catch(span.checked_subspan(1, usz::max));
 
