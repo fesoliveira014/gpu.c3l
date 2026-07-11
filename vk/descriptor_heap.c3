@@ -277,6 +277,25 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
     }
 }
 
+<* The family slice must remain alive through Vulkan buffer creation. *>
+fn vk::BufferCreateInfo make_descriptor_buffer_create_info(
+    vk::DeviceSize layout_size,
+    uint[] queue_families,
+) {
+    uint usage = (uint)vk::BufferUsageFlagBits.RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT
+        | (uint)vk::BufferUsageFlagBits.SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
+        | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
+    vk::BufferCreateInfo info = vk::buffer_create_info()
+        .set_size(layout_size)
+        .set_usage((vk::BufferUsageFlags)usage);
+    if (queue_families.len >= 2) {
+        info = info
+            .set_sharing_mode(vk::SharingMode.CONCURRENT)
+            .set_queue_family_indices(queue_families);
+    }
+    return info;
+}
+
 <* Descriptor sizes, binding offsets, and total layout size come from the
    driver; descriptors are written straight into mapped memory. *>
 fn void? create_descriptor_buffer(VkDeviceState* state) @private {
@@ -320,12 +339,9 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
     vk::extensions.vk_get_descriptor_set_layout_binding_offset_ext(state.device, heap.set_layout, HEAP_BINDING_STORAGE, &heap.binding_offset_storage);
     vk::extensions.vk_get_descriptor_set_layout_binding_offset_ext(state.device, heap.set_layout, HEAP_BINDING_SAMPLERS, &heap.binding_offset_samplers);
 
-    uint usage = (uint)vk::BufferUsageFlagBits.RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT
-        | (uint)vk::BufferUsageFlagBits.SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
-        | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
-    vk::BufferCreateInfo buffer_info = vk::buffer_create_info()
-        .set_size(layout_size)
-        .set_usage((vk::BufferUsageFlags)usage);
+    uint[2] family_storage;
+    uint family_count = graphics_compute_queue_families(state, family_storage[..]);
+    vk::BufferCreateInfo buffer_info = make_descriptor_buffer_create_info(layout_size, family_storage[:family_count]);
     // Descriptor bytes are written mapped (vkGetDescriptorEXT) with no
     // flush hook — require coherent memory.
     vma::AllocationCreateInfo alloc_info = {
