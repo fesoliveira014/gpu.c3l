@@ -250,6 +250,10 @@ alloc_frame_span(Device* device, usz size, usz align) -> GpuSpan?  // ACTIVE onl
 Double begin, end while idle, and frame-span allocation while idle fault
 `INVALID_RESOURCE_STATE` before changing frame state. Frame spans are transient
 and invalid after their frame arena resets.
+Their internal backing buffers are safe on the selected graphics and compute
+families without a caller-supplied `shared_queues` flag. Concurrent sharing
+does not provide execution or memory ordering; callers must still record the
+required barriers and semaphore waits/signals.
 
 Use cases:
 
