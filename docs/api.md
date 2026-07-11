@@ -319,6 +319,20 @@ alloc_persistent_span(Device* device, PersistentAllocDesc* desc) -> GpuSpan?
 free_persistent_span(Device* device, GpuSpan span) -> void?
 ```
 
+Persistent backing is shared automatically across the exact selected graphics,
+compute, and transfer queue families, remaining exclusive when those queues
+alias one family. Per-span `usage.shared_queues` is accepted but does not change
+ownership because sharing is a backing-buffer property; spans expose no queue-
+family ownership API. Explicit buffers and textures consumed across distinct
+families still require their own `shared_queues` flag.
+
+Concurrent sharing does not provide visibility, execution ordering, completion,
+or lifetime management. Callers must retain the required flushes, barriers,
+semaphore dependencies, and completion waits, and may call
+`free_persistent_span` only after all work referencing the span retires. Spans
+remain intra-device under the one-live-`Device` contract; multi-device use is
+unsupported.
+
 ### Explicit buffers
 
 `BufferUsage` is a bitstruct of bool flags, composed by field-set

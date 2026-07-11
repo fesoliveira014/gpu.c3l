@@ -231,6 +231,16 @@ graphics/compute family list: one family keeps EXCLUSIVE creation with no index
 list, while two families select CONCURRENT with exactly those two indices.
 Transfer is excluded because frame arenas carry no transfer usage.
 
+The persistent arena supplies the exact ordered, deduplicated graphics,
+compute, and transfer family list because its backing supports all three access
+classes. One unique family keeps `EXCLUSIVE` creation with no index list; two or
+three unique families select `CONCURRENT` with exactly those indices. This is an
+internal backing-buffer policy: per-span `shared_queues` is an accepted no-op,
+while explicit buffers and textures still require the flag. Concurrent sharing
+does not replace barriers, semaphore ordering, completion waits, or retirement;
+a persistent span cannot be freed while GPU work may reference it. The policy
+uses one live `Device` and does not support multi-device ownership.
+
 ## 9. Texture implementation
 
 Creation flow:

@@ -1,12 +1,290 @@
 module gpu_test;
 
 import gpu;
+import gpu::vk @public;
+import vk;
+import std::io;
 
 // Headless (lavapipe): persistent arena alloc/free/reuse, alignment, stable
 // addresses, stats, and usage honoring (index/indirect/transfer spans usable,
 // vertex-bit requests fault).
 
 const char[*] PA_DOUBLE_SPIRV = $embed("shaders/root_pointer.comp.spv");
+
+fn gpu::PipelineHandle make_persistent_cross_family_pipeline(
+    gpu::Device* device,
+    gpu::ShaderHandle* out_shader,
+) {
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = PA_DOUBLE_SPIRV[..],
+        .entry_point = "main",
+    };
+    *out_shader = gpu::create_shader(device, &shader_desc)!!;
+    gpu::ComputePipelineDesc pipeline_desc = {
+        .shader             = *out_shader,
+        .push_constant_size = gpu::RootPush::size,
+    };
+    return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
+}
+
+fn gpu::GpuSpan alloc_persistent_indirect_args(gpu::Device* device) {
+    gpu::PersistentAllocDesc desc = {
+        .size        = gpu::DispatchIndirectCommand::size,
+        .align       = 4,
+        .usage       = { .indirect },
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .debug_name  = "persistent_cross_family_args",
+    };
+    gpu::GpuSpan span = gpu::alloc_persistent_span(device, &desc)!!;
+    gpu::DispatchIndirectCommand* args = (gpu::DispatchIndirectCommand*)span.cpu;
+    *args = { .x = 1, .y = 1, .z = 1 };
+    gpu::flush_buffer(device, span.buffer, span.offset, span.size)!!;
+    return span;
+}
+
+fn gpu::GpuSpan alloc_persistent_empty_root(gpu::FrameToken* frame) {
+    gpu::GpuSpan span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
+    ComputeRoot* root = (ComputeRoot*)span.cpu;
+    *root = { .count = 0 };
+    return span;
+}
+
+fn void persistent_span_crosses_compute_and_graphics_families_when_available() @test {
+    gpu::Device device = make_persistent_usage_device();
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    if (state.graphics_family == state.compute_family) {
+        io::eprintfn(
+            "persistent_span_crosses_compute_and_graphics: N/A graphics=%d compute=%d",
+            state.graphics_family,
+            state.compute_family,
+        );
+        return;
+    }
+
+    gpu::ShaderHandle shader;
+    gpu::PipelineHandle pipeline = make_persistent_cross_family_pipeline(&device, &shader);
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    defer gpu::destroy_shader(&device, shader)!!;
+    gpu::SemaphoreDesc semaphore_desc = { .debug_name = "persistent_cross_family" };
+    gpu::SemaphoreHandle semaphore = gpu::create_semaphore(&device, &semaphore_desc)!!;
+    defer gpu::destroy_semaphore(&device, semaphore)!!;
+    gpu::GpuSpan args = alloc_persistent_indirect_args(&device);
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan compute_root = alloc_persistent_empty_root(&frame);
+    gpu::GpuSpan graphics_root = alloc_persistent_empty_root(&frame);
+
+    gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::cmd_dispatch_indirect(
+        commands: &compute,
+        pipeline: pipeline,
+        root:     compute_root.gpu,
+        args:     args,
+    )!!;
+    gpu::end_commands(&compute)!!;
+    gpu::CommandList[1] compute_lists = { compute };
+    gpu::SemaphoreSignal[1] signals = {{
+        .semaphore = semaphore,
+        .value     = (gpu::SemaphoreValue)1,
+        .stage     = gpu::Stage.INDIRECT_COMMAND,
+    }};
+    gpu::SubmitDesc compute_submit = {
+        .command_lists = compute_lists[..],
+        .signals       = signals[..],
+    };
+    gpu::submit(&device, &compute_submit)!!;
+
+    gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::cmd_dispatch_indirect(
+        commands: &graphics,
+        pipeline: pipeline,
+        root:     graphics_root.gpu,
+        args:     args,
+    )!!;
+    gpu::end_commands(&graphics)!!;
+    gpu::CommandList[1] graphics_lists = { graphics };
+    gpu::SemaphoreWait[1] waits = {{
+        .semaphore = semaphore,
+        .value     = (gpu::SemaphoreValue)1,
+        .stage     = gpu::Stage.INDIRECT_COMMAND,
+    }};
+    gpu::SubmitDesc graphics_submit = {
+        .command_lists = graphics_lists[..],
+        .waits         = waits[..],
+    };
+    gpu::submit(&device, &graphics_submit)!!;
+    gpu::end_frame(&frame)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::free_persistent_span(&device, args)!!;
+    io::eprintfn(
+        "persistent_span_crosses_compute_and_graphics: PASS graphics=%d compute=%d",
+        state.graphics_family,
+        state.compute_family,
+    );
+}
+
+fn void persistent_span_reused_offset_switches_family_when_available() @test {
+    gpu::DeviceDesc desc = {
+        .backend               = gpu::BackendKind.VULKAN,
+        .enable_validation     = true,
+        .frames_in_flight      = 1,
+        .persistent_arena_size = gpu::DispatchIndirectCommand::size,
+        .application_name      = "persistent_reuse_cross_family",
+    };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    if (state.graphics_family == state.compute_family) {
+        io::eprintfn(
+            "persistent_span_reused_offset_switches_family: N/A graphics=%d compute=%d",
+            state.graphics_family,
+            state.compute_family,
+        );
+        return;
+    }
+
+    gpu::ShaderHandle shader;
+    gpu::PipelineHandle pipeline = make_persistent_cross_family_pipeline(&device, &shader);
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    defer gpu::destroy_shader(&device, shader)!!;
+
+    gpu::GpuSpan compute_args = alloc_persistent_indirect_args(&device);
+    assert(compute_args.offset == 0, "first persistent allocation uses offset zero");
+    gpu::BufferHandle backing = compute_args.buffer;
+    gpu::GpuAddress address = compute_args.gpu;
+    gpu::FrameToken compute_frame = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan compute_root = alloc_persistent_empty_root(&compute_frame);
+    gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::cmd_dispatch_indirect(
+        commands: &compute,
+        pipeline: pipeline,
+        root:     compute_root.gpu,
+        args:     compute_args,
+    )!!;
+    gpu::end_commands(&compute)!!;
+    gpu::CommandList[1] compute_lists = { compute };
+    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
+    gpu::submit(&device, &compute_submit)!!;
+    gpu::end_frame(&compute_frame)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::free_persistent_span(&device, compute_args)!!;
+
+    gpu::GpuSpan graphics_args = alloc_persistent_indirect_args(&device);
+    assert(graphics_args.buffer == backing, "reallocation keeps the persistent backing buffer");
+    assert(graphics_args.offset == 0, "retired persistent allocation reuses offset zero");
+    assert(graphics_args.gpu == address, "retired persistent allocation reuses its GPU address");
+    gpu::FrameToken graphics_frame = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan graphics_root = alloc_persistent_empty_root(&graphics_frame);
+    gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::cmd_dispatch_indirect(
+        commands: &graphics,
+        pipeline: pipeline,
+        root:     graphics_root.gpu,
+        args:     graphics_args,
+    )!!;
+    gpu::end_commands(&graphics)!!;
+    gpu::CommandList[1] graphics_lists = { graphics };
+    gpu::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..] };
+    gpu::submit(&device, &graphics_submit)!!;
+    gpu::end_frame(&graphics_frame)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::free_persistent_span(&device, graphics_args)!!;
+    io::eprintfn(
+        "persistent_span_reused_offset_switches_family: PASS graphics=%d compute=%d",
+        state.graphics_family,
+        state.compute_family,
+    );
+}
+
+fn void persistent_arena_desc_has_exact_backing_contract() @test {
+    vk::VkDeviceState state = {
+        .graphics_family = 4,
+        .compute_family  = 4,
+        .transfer_family = 4,
+    };
+    vk::PersistentArenaCreatePlan plan = vk::persistent_arena_create_plan(&state, 4096);
+    gpu::BufferUsage expected_usage = {
+        .transfer_src,
+        .transfer_dst,
+        .uniform,
+        .storage,
+        .addressable,
+        .indirect,
+        .index,
+        .shared_queues,
+    };
+
+    assert(plan.desc.size == 4096, "persistent arena descriptor keeps the requested size");
+    assert((uint)plan.desc.usage == (uint)expected_usage, "persistent arena descriptor uses the exact backing superset");
+    assert(plan.desc.memory_kind == gpu::MemoryKind.PERSISTENT_UPLOAD, "persistent arena descriptor uses persistent upload memory");
+    assert(plan.desc.debug_name == "persistent_arena", "persistent arena descriptor keeps its debug name");
+}
+
+fn void persistent_arena_create_info_is_exclusive_when_families_alias() @test {
+    vk::VkDeviceState state = {
+        .graphics_family = 4,
+        .compute_family  = 4,
+        .transfer_family = 4,
+    };
+    vk::PersistentArenaCreatePlan plan = vk::persistent_arena_create_plan(&state, 4096);
+    vk::BufferCreateInfo info = vk::make_buffer_create_info(&plan.desc, plan.families[:plan.family_count])!!;
+
+    assert(plan.family_count == 1, "aliased queues produce one persistent arena family");
+    assert(plan.families[0] == 4, "aliased persistent arena keeps the graphics family");
+    assert(info.sharing_mode == vk::SharingMode.EXCLUSIVE, "one family keeps persistent arena sharing exclusive");
+    assert(info.queue_family_index_count == 0, "exclusive persistent arena creation publishes no family count");
+    assert(info.p_queue_family_indices == null, "exclusive persistent arena creation publishes no family pointer");
+}
+
+fn void persistent_arena_create_info_uses_two_exact_families() @test {
+    uint[3][3] topologies = {
+        { 4, 5, 5 },
+        { 4, 4, 7 },
+        { 4, 5, 4 },
+    };
+    uint[3] expected_second = { 5, 7, 5 };
+    foreach (index, topology : topologies) {
+        vk::VkDeviceState state = {
+            .graphics_family = topology[0],
+            .compute_family  = topology[1],
+            .transfer_family = topology[2],
+        };
+        vk::PersistentArenaCreatePlan plan = vk::persistent_arena_create_plan(&state, 4096);
+        vk::BufferCreateInfo info = vk::make_buffer_create_info(&plan.desc, plan.families[:plan.family_count])!!;
+
+        assert(plan.family_count == 2, "two distinct queues produce two persistent arena families");
+        assert(plan.families[0] == 4, "two-family persistent arena keeps graphics first");
+        assert(plan.families[1] == expected_second[index], "two-family persistent arena keeps the exact second family");
+        assert(info.sharing_mode == vk::SharingMode.CONCURRENT, "two families use concurrent persistent arena sharing");
+        assert(info.queue_family_index_count == 2, "concurrent persistent arena creation publishes two families");
+        assert(info.p_queue_family_indices[0] == 4, "persistent arena keeps graphics first");
+        assert(info.p_queue_family_indices[1] == expected_second[index], "create info keeps the exact second family");
+    }
+}
+
+fn void persistent_arena_create_info_uses_three_exact_families() @test {
+    vk::VkDeviceState state = {
+        .graphics_family = 4,
+        .compute_family  = 5,
+        .transfer_family = 7,
+    };
+    vk::PersistentArenaCreatePlan plan = vk::persistent_arena_create_plan(&state, 4096);
+    vk::BufferCreateInfo info = vk::make_buffer_create_info(&plan.desc, plan.families[:plan.family_count])!!;
+
+    assert(plan.family_count == 3, "three distinct queues produce three persistent arena families");
+    assert(plan.families[0] == 4, "tri-family persistent arena keeps graphics first");
+    assert(plan.families[1] == 5, "tri-family persistent arena keeps compute second");
+    assert(plan.families[2] == 7, "tri-family persistent arena keeps transfer third");
+    assert(info.sharing_mode == vk::SharingMode.CONCURRENT, "three families use concurrent persistent arena sharing");
+    assert(info.queue_family_index_count == 3, "concurrent persistent arena creation publishes three families");
+    assert(info.p_queue_family_indices[0] == 4, "persistent arena keeps graphics first");
+    assert(info.p_queue_family_indices[1] == 5, "persistent arena keeps compute second");
+    assert(info.p_queue_family_indices[2] == 7, "persistent arena keeps transfer third");
+}
 
 fn void persistent_alloc_free_stats() @test {
     gpu::DeviceDesc desc = {
@@ -224,8 +502,8 @@ fn void unsupported_usage_persistent_span_faults() @test {
     gpu::PersistentAllocDesc shared_desc = {
         .size = 64, .align = 16, .usage = { .shared_queues }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
     };
-    fault shared_fault = @catch(gpu::alloc_persistent_span(&device, &shared_desc));
-    assert(shared_fault == gpu::INVALID_ARGUMENT, "shared_queues usage request faults INVALID_ARGUMENT");
+    gpu::GpuSpan shared_span = gpu::alloc_persistent_span(&device, &shared_desc)!!;
+    gpu::free_persistent_span(&device, shared_span)!!;
 
     // Empty usage stays valid (storage-style default).
     gpu::PersistentAllocDesc empty_desc = { .size = 64, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD };
