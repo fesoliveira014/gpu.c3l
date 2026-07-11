@@ -278,12 +278,13 @@ gpu::@with_frame(&frame, &device, render_frame, &state)!;
 ```
 
 The worker must be a named optional-returning function whose first parameter is
-`FrameToken*`; additional state is passed as ordinary arguments. The helper
-clears caller-owned token storage, begins the frame, calls the worker directly,
-and attempts end exactly once after worker success or fault. Begin failure calls
-neither worker nor end. If only the worker faults, its fault is returned after
-end succeeds. If end faults, that exact fault takes precedence even when the
-worker also faulted, and caller-owned `frame` remains live for
+`FrameToken*`; additional state is passed as ordinary arguments. The worker
+must not end the frame itself; the helper owns the single end attempt. The
+helper clears caller-owned token storage, begins the frame, calls the worker
+directly, and attempts end exactly once after worker success or fault. Begin
+failure calls neither worker nor end. If only the worker faults, its fault is
+returned after end succeeds. If end faults, that exact fault takes precedence
+even when the worker also faulted, and caller-owned `frame` remains live for
 `end_frame(&frame)` retry. Callers needing both diagnostics should log the
 worker fault before returning it. The helper performs no heap allocation,
 runtime callback, virtual dispatch, or per-frame indirect call.

@@ -243,6 +243,27 @@ fn void frame_span_allocation_requires_active_frame() @test {
     gpu::end_frame(&frame)!!;
 }
 
+fn void frame_generation_wraps_without_revalidating_stale_token() @test {
+    gpu::Device device = make_frame_lifecycle_device();
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    state.frame_generation = ulong::max;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    assert(frame.generation == 1, "frame generation wraps to the first valid value");
+    assert(state.active_frame_generation == 1, "wrapped generation becomes active");
+
+    gpu::FrameToken stale = { .device = &device, .generation = ulong::max };
+    FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
+    fault alloc_fault = @catch(gpu::alloc_frame_span(&stale, 64, 16));
+    fault end_fault = @catch(gpu::end_frame(&stale));
+    assert(alloc_fault == gpu::INVALID_HANDLE, "pre-wrap token cannot allocate in the wrapped frame");
+    assert(end_fault == gpu::INVALID_HANDLE, "pre-wrap token cannot end the wrapped frame");
+    assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
+
+    gpu::end_frame(&frame)!!;
+}
+
 fn void end_before_begin_is_atomic() @test {
     gpu::Device device = make_frame_lifecycle_device();
     defer gpu::destroy_device(&device)!!;

@@ -82,7 +82,9 @@ fn bool range_fits(usz limit, usz offset, usz size) {
     return size <= limit - offset;
 }
 
-<* Enter an idle frame and return its owner-bearing generation token. *>
+<* Enter an idle frame. Double begin faults `INVALID_RESOURCE_STATE`; a retire
+   wait may fault `WAIT_TIMEOUT`. Those rejections leave lifecycle and arena
+   state unchanged. *>
 fn FrameToken? begin_frame(Device* device) {
     if (device.vtable == null) return INVALID_ARGUMENT~;
     FrameToken frame;
@@ -90,14 +92,18 @@ fn FrameToken? begin_frame(Device* device) {
     return frame;
 }
 
-<* Bump-allocate from the frame identified by `frame`. *>
+<* `size` and power-of-two `align` must be nonzero (`INVALID_ARGUMENT`);
+   capacity faults `ARENA_FULL`, invalid or stale tokens `INVALID_HANDLE`.
+   Faults do not advance the arena; spans remain valid until its reset. *>
 fn GpuSpan? alloc_frame_span(FrameToken* frame, usz size, usz align) {
     if (frame == null || frame.device == null || frame.generation == 0) return INVALID_HANDLE~;
     if (frame.device.vtable == null) return INVALID_HANDLE~;
     return frame.device.vtable.alloc_frame_span(frame, size, align);
 }
 
-<* End the identified frame. A failed end retains the token for retry. *>
+<* End the identified frame. Invalid, stale, or consumed tokens fault
+   `INVALID_HANDLE` without mutation; a failed end retains the token and
+   lifecycle state for retry. *>
 fn void? end_frame(FrameToken* frame) {
     if (frame == null || frame.device == null || frame.generation == 0) return INVALID_HANDLE~;
     if (frame.device.vtable == null) return INVALID_HANDLE~;

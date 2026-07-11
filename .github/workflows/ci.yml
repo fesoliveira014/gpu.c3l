@@ -90,8 +90,8 @@ jobs:
 
   docs-walkthrough:
     # Executes docs/getting_started.md verbatim (scripts/run_doc.py) on a bare
-    # runner: the walkthrough is its own regression test. Only the checkout of
-    # this repo and the private-phase clone shim below are outside the doc.
+    # runner: the walkthrough is its own regression test. Only the checkout,
+    # PR-local URL override, and private-phase clone shim are outside the doc.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
