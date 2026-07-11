@@ -161,6 +161,7 @@ fn gpu::TextureUsage swapchain_image_usage(uint granted_vk_usage) {
     return (gpu::TextureUsage){ .color_attach };
 }
 
+<* Build an active runtime snapshot. Pure. *>
 fn gpu::SwapchainInfo make_swapchain_info(gpu::Format format, vk::Extent2D extent, uint image_count, vk::PresentModeKHR present_mode) {
     return {
         .format       = format,
@@ -171,6 +172,7 @@ fn gpu::SwapchainInfo make_swapchain_info(gpu::Format format, vk::Extent2D exten
     };
 }
 
+<* Build the queryable zero-extent sentinel. Pure. *>
 fn gpu::SwapchainInfo dormant_swapchain_info() {
     return {
         .format       = gpu::Format.UNDEFINED,
@@ -179,18 +181,21 @@ fn gpu::SwapchainInfo dormant_swapchain_info() {
     };
 }
 
+<* Publish an active snapshot and reset the acquire lifecycle. *>
 fn void publish_active_swapchain_info(SwapchainSlot* slot, gpu::SwapchainInfo info) {
     slot.info = info;
     slot.acquire_pending = false;
     slot.acquire_consumed = false;
 }
 
+<* Publish the dormant sentinel and reset the acquire lifecycle. *>
 fn void publish_dormant_swapchain_info(SwapchainSlot* slot) {
     slot.info = dormant_swapchain_info();
     slot.acquire_pending = false;
     slot.acquire_consumed = false;
 }
 
+<* Build the public acquire result from committed texture state. Pure. *>
 fn gpu::AcquiredImage make_acquired_image(TextureSlot* texture, gpu::TextureHandle handle, uint index, bool suboptimal) {
     return {
         .texture      = handle,
@@ -553,11 +558,11 @@ fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::Swapchain
     vk::Result result = vk::extensions.vk_acquire_next_image_khr(state.device, slot.swapchain, ACQUIRE_TIMEOUT_NS, acquire_semaphore, (vk::Fence)null, &image_index);
     check_acquire_result(result)!;
 
+    TextureSlot* texture = state.textures.get(slot.textures[image_index])!;
     slot.acquire_pending = true;
     slot.acquire_consumed = false;
     slot.pending_image = image_index;
     slot.pending_acquire_semaphore = acquire_semaphore;
-    TextureSlot* texture = state.textures.get(slot.textures[image_index])!;
     return make_acquired_image(
         texture:    texture,
         handle:     slot.textures[image_index],
