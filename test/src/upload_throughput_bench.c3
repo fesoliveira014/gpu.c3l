@@ -68,6 +68,7 @@ fn void print_upload_bench_context(gpu::vk::VkDeviceState* state) {
 
     ZString device_name = (ZString)&properties.properties.device_name[0];
     ZString driver_name = (ZString)&driver.driver_name[0];
+    // Mirrors pick_queue_families: only a second queue in the graphics family uses index 1.
     uint compute_index = state.compute_queue_distinct
         && state.compute_family == state.graphics_family ? 1 : 0;
     bool transfer_distinct = state.transfer_queue != state.graphics_queue;
@@ -100,7 +101,6 @@ fn void print_upload_bench_context(gpu::vk::VkDeviceState* state) {
         io::printfn("note: Mesa llvmpipe/lavapipe selected; measurements describe this software adapter only");
     }
 }
-
 
 fn int upload_phase_a_worker(void* arg) {
     UploadPhaseAArgs* args = (UploadPhaseAArgs*)arg;
@@ -212,7 +212,6 @@ fn void run_phase_a() {
         }
     }
 }
-
 
 fn int upload_phase_b_worker(void* arg) {
     UploadPhaseBArgs* args = (UploadPhaseBArgs*)arg;
