@@ -21,6 +21,11 @@ struct CachedView {
     bool              used;
 }
 
+struct CachedViewCreation {
+    CachedView* cell;
+    CachedView  previous;
+}
+
 struct TextureSlot {
     vk::Image          image;
     vma::Allocation    allocation;
@@ -279,7 +284,8 @@ fn void set_texture_layout(TextureSlot* slot, gpu::TextureLayout layout) {
    range) is the default view; anything else is normalized, validated, and
    get-or-created in the slot's view cache. Cached views die with the texture.
    Format reinterpretation is out of scope. *>
-fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view) {
+fn vk::ImageView? resolve_texture_view_tracked(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view, CachedViewCreation* creation) @private {
+    *creation = {};
     if (view == null) return slot.default_view;
     if (view.format != gpu::Format.UNDEFINED && view.format != slot.format) return gpu::INVALID_ARGUMENT~;
     if (view.base_mip >= slot.mip_levels || view.base_layer >= slot.array_layers) return gpu::INVALID_ARGUMENT~;
@@ -318,6 +324,8 @@ fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, 
             });
         vk::ImageView image_view;
         check(vk::create_image_view(state.device, &view_info, null, &image_view))!;
+        creation.cell = cached;
+        creation.previous = *cached;
         *cached = {
             .view        = image_view,
             .base_mip    = view.base_mip,
@@ -330,6 +338,23 @@ fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, 
         return image_view;
     }
     return gpu::SLOT_TABLE_FULL~;
+}
+
+fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view) {
+    CachedViewCreation creation;
+    return resolve_texture_view_tracked(
+        state:    state,
+        slot:     slot,
+        view:     view,
+        creation: &creation,
+    );
+}
+
+fn void rollback_texture_view_creations(VkDeviceState* state, CachedViewCreation[] creations) @private {
+    foreach (&creation : creations) {
+        vk::destroy_image_view(state.device, creation.cell.view, null);
+        *creation.cell = creation.previous;
+    }
 }
 
 fn void destroy_cached_views(VkDeviceState* state, TextureSlot* slot) {
@@ -388,7 +413,15 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .array_layers   = array_layers,
     };
     vma::AllocationInfo allocation_info;
-    check(state.allocator.create_image(&image_info, &alloc_info, &slot.image, &slot.allocation, &allocation_info))!;
+    check_texture_create_result(
+        state.allocator.create_image(
+            image_info:     &image_info,
+            alloc_info:     &alloc_info,
+            out_image:      &slot.image,
+            out_allocation: &slot.allocation,
+            out_info:       &allocation_info,
+        )
+    )!;
     slot.allocation_size = (usz)allocation_info.size;
 
     copy_debug_name(&slot.debug_name[0], desc.debug_name);

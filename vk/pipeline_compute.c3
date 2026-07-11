@@ -72,7 +72,9 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
-    if (desc.push_constant_size < gpu::RootPush::size) return gpu::INVALID_ARGUMENT~;
+    if (desc.push_constant_size < gpu::RootPush::size
+        || desc.push_constant_size % 4 != 0
+        || desc.push_constant_size > state.caps.max_push_constant_size) return gpu::INVALID_ARGUMENT~;
     ShaderSlot* shader = state.shaders.get(desc.shader)!;
     validate_shader_stage(shader, gpu::ShaderStage.COMPUTE)!;
 
@@ -110,9 +112,16 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     }
 
     vk::Pipeline pipeline;
-    if (catch check(vk::create_compute_pipelines(state.device, state.driver_cache, 1, &pipe_info, null, &pipeline))) {
-        return gpu::PIPELINE_CREATE_FAILED~;
-    }
+    check_pipeline_create_result(
+        vk::create_compute_pipelines(
+            device:            state.device,
+            pipeline_cache:    state.driver_cache,
+            create_info_count: 1,
+            p_create_infos:    &pipe_info,
+            p_allocator:       null,
+            p_pipelines:       &pipeline,
+        )
+    )!;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.PIPELINE,

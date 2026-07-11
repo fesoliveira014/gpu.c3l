@@ -19,7 +19,7 @@ library's own state, but results and validation verdicts are undefined.
 | Entry point | Tier | Notes |
 |---|---|---|
 | `create_device` / `destroy_device` | E | |
-| `begin_frame` / `end_frame` | E | quiescence required, see phase rule |
+| `begin_frame` / `end_frame` | E | externally paired `IDLE -> ACTIVE -> IDLE`; quiescence required |
 | `submit` / `present` | E | queue-mutex backed, so Tier S private submits interleave safely |
 | `wait_queue_idle` | E | queue-mutex backed |
 | `create_swapchain` / `destroy_swapchain` / `resize_swapchain` / `acquire_next_image` | E | per swapchain |
@@ -33,7 +33,7 @@ library's own state, but results and validation verdicts are undefined.
 | `create_compute_pipeline` / `create_graphics_pipeline` / `destroy_pipeline` | S | driver compiles run in parallel; a same-key race compiles twice, converges to one entry |
 | `create_semaphore` / `destroy_semaphore` | S | |
 | `wait_semaphore` | S | lock-free |
-| `alloc_frame_span` | S | lock-free CAS bump |
+| `alloc_frame_span` | S | lock-free CAS bump during an active frame only |
 | `alloc_persistent_span` / `free_persistent_span` | S | VMA virtual blocks are not internally synchronized; the library locks them |
 | `create_recording_context` / `destroy_recording_context` | S | destroy requires the context's lists retired |
 | `upload_buffer_data` / `upload_texture_data` / `readback_buffer_data` / `readback_texture_data` | S | record on a dedicated internal context, serialized by helper_record_mutex; never share a pool with Tier-C recording |
@@ -49,19 +49,30 @@ library's own state, but results and validation verdicts are undefined.
 
 No Tier S or Tier C call may be in flight across `begin_frame` / `end_frame`.
 With `enable_validation`, in-flight Tier S calls at the boundary fault
-`INVALID_RESOURCE_STATE`; a recording left open across the boundary surfaces
-through Vulkan validation (pool reset under an active command buffer).
-Without validation the rule is contract only — the boundary pays one branch,
+`INVALID_RESOURCE_STATE`. An unsubmitted command record is reclaimed when its
+frame slot retires and its command pool resets; every alias of that token then
+faults `INVALID_HANDLE`. Without validation the phase rule is still contractual —
 Tier S calls pay nothing.
+
+Frame lifecycle errors are independent of validation: double begin, end while
+idle, and frame-span allocation while idle always fault
+`INVALID_RESOURCE_STATE` before mutating frame state. Off-frame `submit` and
+`present` remain allowed; they are retired by the next correctly paired frame
+or by device teardown, not by an unmatched `end_frame`.
 
 ## Lock order
 
-`helper_record_mutex → transfer_mutex → resource_mutex → queue mutexes`, one
+`helper_record_mutex → transfer_mutex → resource_mutex → command_mutex`, one
 direction only. Creation and destruction share a single `resource_mutex`
-(cold paths); the transfer arenas share `transfer_mutex`; each queue has its
-own mutex; `helper_record_mutex` spans a blocking helper's recording window
+(cold paths); command-record allocation, submit claims, and reclamation share
+`command_mutex`; and the transfer arenas share `transfer_mutex`.
+`helper_record_mutex` spans a blocking helper's recording window
 (`begin_commands` through `end_commands`) and is outermost because that
 window takes `transfer_mutex` internally for its allocation.
+
+Each queue has its own mutex. Submit releases `command_mutex` before taking a
+queue mutex and releases the queue mutex before invalidating command tokens,
+so command-record and queue locks are never nested.
 
 Dedicated-fallback staging/readback buffers (the arena ring miss path in
 `transfer_alloc`/`ticket_alloc`) create their VMA buffer without holding
@@ -88,10 +99,13 @@ stays the caller's responsibility (gpu.c3l#36).
 
 ## Visibility rules
 
-- Slot reads (`get` paths) are lock-free: tables never reallocate, and a
-  handle reaches another thread only through your synchronization — that
-  hand-off is the happens-before edge. The same applies to passing a
-  `CommandList` from a recording thread to the submitting thread.
+- Resource slot reads (`get` paths) are lock-free: tables never reallocate, and
+  a handle reaches another thread only through your synchronization — that
+  hand-off is the happens-before edge.
+- Command records also live in a fixed table. The public `CommandList` is an
+  owner-bearing handle into that table; passing it from a recording thread to
+  the submitting thread is the required hand-off. Copies remain aliases and
+  must not be used concurrently.
 - Destruction must happen-after the last use of the handle on any thread.
 
 ## Worker-thread setup (C3)
@@ -131,6 +145,10 @@ graphics-queue submits need no flag: the frame signal already runs on that
 queue, and Vulkan's per-queue submission order covers them for free). See
 "Off-frame submissions" below for the destruction-side half of this
 contract.
+
+`end_frame` builds its prospective frame value and wait chain without mutation,
+then commits retirement bookkeeping only after the graphics signal submit is
+accepted. A rejected signal leaves the active boundary exactly retryable.
 
 ## Helper timeline
 

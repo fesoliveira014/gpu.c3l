@@ -160,16 +160,18 @@ fn void u16_and_u32_indexed_draws_match() @test {
     gpu::BufferHandle rb = gpu::create_buffer(&device, &&(gpu::BufferDesc){ .size = U16V_BYTES * 4, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK })!!;
     defer gpu::destroy_buffer(&device, rb)!!;
     gpu::GpuSpan rb_all = gpu::get_buffer_span(&device, rb)!!;
-    gpu::GpuSpan rb_u16 = rb_all.subspan(0, U16V_BYTES);
-    gpu::GpuSpan rb_u32 = rb_all.subspan(U16V_BYTES, U16V_BYTES);
-    gpu::GpuSpan rb_u16_off = rb_all.subspan(U16V_BYTES * 2, U16V_BYTES);
-    gpu::GpuSpan rb_u32_off = rb_all.subspan(U16V_BYTES * 3, U16V_BYTES);
+    gpu::GpuSpan rb_u16 = rb_all.checked_subspan(0, U16V_BYTES)!!;
+    gpu::GpuSpan rb_u32 = rb_all.checked_subspan(U16V_BYTES, U16V_BYTES)!!;
+    gpu::GpuSpan rb_u16_off = rb_all.checked_subspan(U16V_BYTES * 2, U16V_BYTES)!!;
+    gpu::GpuSpan rb_u32_off = rb_all.checked_subspan(U16V_BYTES * 3, U16V_BYTES)!!;
 
     gpu::begin_frame(&device)!!;
-    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span16.subspan(0, 12), gpu::IndexType.U16, &rb_u16);
-    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span32.subspan(0, 24), gpu::IndexType.U32, &rb_u32);
-    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span16.subspan(U16V_JUNK * 2, 12), gpu::IndexType.U16, &rb_u16_off);
-    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span32.subspan(U16V_JUNK * 4, 24), gpu::IndexType.U32, &rb_u32_off);
+    gpu::GpuSpan span16_off = span16.checked_subspan(U16V_JUNK * 2, 12)!!;
+    gpu::GpuSpan span32_off = span32.checked_subspan(U16V_JUNK * 4, 24)!!;
+    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span16.checked_subspan(0, 12)!!, gpu::IndexType.U16, &rb_u16);
+    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span32.checked_subspan(0, 24)!!, gpu::IndexType.U32, &rb_u32);
+    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span16_off, gpu::IndexType.U16, &rb_u16_off);
+    u16v_draw(&device, pipeline, vspan.gpu, cspan.gpu, span32_off, gpu::IndexType.U32, &rb_u32_off);
     gpu::end_frame(&device)!!;
 
     char* a = (char*)rb_u16.cpu;
