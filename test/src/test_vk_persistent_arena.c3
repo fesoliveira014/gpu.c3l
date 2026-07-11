@@ -43,7 +43,7 @@ fn gpu::GpuSpan alloc_persistent_indirect_args(gpu::Device* device) {
     return span;
 }
 
-fn gpu::GpuSpan alloc_persistent_empty_root(gpu::FrameToken* frame) {
+fn gpu::GpuSpan alloc_frame_empty_root(gpu::FrameToken* frame) {
     gpu::GpuSpan span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
     ComputeRoot* root = (ComputeRoot*)span.cpu;
     *root = { .count = 0 };
@@ -73,8 +73,8 @@ fn void persistent_span_crosses_compute_and_graphics_families_when_available() @
     gpu::GpuSpan args = alloc_persistent_indirect_args(&device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan compute_root = alloc_persistent_empty_root(&frame);
-    gpu::GpuSpan graphics_root = alloc_persistent_empty_root(&frame);
+    gpu::GpuSpan compute_root = alloc_frame_empty_root(&frame);
+    gpu::GpuSpan graphics_root = alloc_frame_empty_root(&frame);
 
     gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
     gpu::cmd_dispatch_indirect(
@@ -156,7 +156,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     gpu::BufferHandle backing = compute_args.buffer;
     gpu::GpuAddress address = compute_args.gpu;
     gpu::FrameToken compute_frame = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan compute_root = alloc_persistent_empty_root(&compute_frame);
+    gpu::GpuSpan compute_root = alloc_frame_empty_root(&compute_frame);
     gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
@@ -178,7 +178,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     assert(graphics_args.offset == 0, "retired persistent allocation reuses offset zero");
     assert(graphics_args.gpu == address, "retired persistent allocation reuses its GPU address");
     gpu::FrameToken graphics_frame = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan graphics_root = alloc_persistent_empty_root(&graphics_frame);
+    gpu::GpuSpan graphics_root = alloc_frame_empty_root(&graphics_frame);
     gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
