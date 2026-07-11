@@ -214,24 +214,22 @@ if (info.dormant) { /* wait for a non-zero resize */ }
 gpu::Format[1] color_formats = { info.format };
 
 gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
-gpu::TextureBarrier to_color = {
-    .texture       = acquired.texture,
-    .old_layout    = acquired.prior_layout,
-    .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
-    .before_stage  = acquired.prior_layout == gpu::TextureLayout.PRESENT
-        ? gpu::Stage.PRESENT : gpu::Stage.HOST,
-    .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
-    .before_hazard = acquired.prior_layout == gpu::TextureLayout.PRESENT
-        ? gpu::Hazard.PRESENT_READ : gpu::Hazard.HOST_WRITE,
-    .after_hazard  = gpu::Hazard.COLOR_WRITE,
-};
+gpu::TextureUse before = acquired.prior_layout == gpu::TextureLayout.PRESENT
+    ? gpu::TextureUse.PRESENT : gpu::TextureUse.UNDEFINED;
+gpu::TextureBarrier to_color = gpu::texture_transition(
+    acquired.texture,
+    before,
+    gpu::TextureUse.COLOR_ATTACHMENT,
+)!;
 ```
 
 Re-query `SwapchainInfo` after resize, rebuild pipelines if `format` changed,
 and size any per-image data from `image_count`. `prior_layout` removes the
 fixed-size seen table normally used to distinguish first acquire from a
 previously presented image. FIFO is always available; other modes remain a
-support query away.
+support query away. The coupled graphics submission waits on the image-
+available semaphore at color-attachment output; `TextureUse.PRESENT` supplies
+the empty presentation-facing barrier scope, not a replacement for that wait.
 Running example: `present_mode_explorer`.
 
 ## 13. Choose a memory kind

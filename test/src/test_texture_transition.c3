@@ -22,7 +22,7 @@ fn void texture_use_mappings_are_exact() @test {
         { gpu::TextureUse.STORAGE_COMPUTE,      gpu::Stage.COMPUTE_SHADER,   gpu::Hazard.SHADER_READ_WRITE, gpu::TextureLayout.GENERAL },
         { gpu::TextureUse.COLOR_ATTACHMENT,     gpu::Stage.COLOR_ATTACHMENT, gpu::Hazard.COLOR_READ_WRITE,  gpu::TextureLayout.COLOR_ATTACHMENT },
         { gpu::TextureUse.DEPTH_ATTACHMENT,     gpu::Stage.DEPTH_STENCIL,    gpu::Hazard.DEPTH_READ_WRITE,  gpu::TextureLayout.DEPTH_STENCIL },
-        { gpu::TextureUse.PRESENT,              gpu::Stage.PRESENT,          gpu::Hazard.PRESENT_READ,      gpu::TextureLayout.PRESENT },
+        { gpu::TextureUse.PRESENT,              gpu::Stage.NONE,             gpu::Hazard.NONE,              gpu::TextureLayout.PRESENT },
     };
     gpu::TextureHandle texture = transition_texture();
 
@@ -92,4 +92,33 @@ fn void storage_same_use_transition_keeps_combined_access() @test {
     assert(barrier.old_layout == gpu::TextureLayout.GENERAL
         && barrier.new_layout == gpu::TextureLayout.GENERAL,
         "same-use storage barrier preserves general layout");
+}
+
+fn void presentation_transitions_have_narrow_scopes() @test {
+    gpu::TextureHandle texture = transition_texture();
+    gpu::TextureBarrier acquire = gpu::texture_transition(
+        texture: texture,
+        before:  gpu::TextureUse.PRESENT,
+        after:   gpu::TextureUse.COLOR_ATTACHMENT,
+    )!!;
+    assert(acquire.texture == texture, "acquire preserves the texture handle");
+    assert(acquire.before_stage == gpu::Stage.NONE, "acquire source stage is empty");
+    assert(acquire.after_stage == gpu::Stage.COLOR_ATTACHMENT, "acquire destination stage is color output");
+    assert(acquire.before_hazard == gpu::Hazard.NONE, "acquire source access is empty");
+    assert(acquire.after_hazard == gpu::Hazard.COLOR_READ_WRITE, "acquire destination access is color read/write");
+    assert(acquire.old_layout == gpu::TextureLayout.PRESENT, "acquire source layout is present");
+    assert(acquire.new_layout == gpu::TextureLayout.COLOR_ATTACHMENT, "acquire destination layout is color attachment");
+
+    gpu::TextureBarrier release = gpu::texture_transition(
+        texture: texture,
+        before:  gpu::TextureUse.COLOR_ATTACHMENT,
+        after:   gpu::TextureUse.PRESENT,
+    )!!;
+    assert(release.texture == texture, "release preserves the texture handle");
+    assert(release.before_stage == gpu::Stage.COLOR_ATTACHMENT, "release source stage is color output");
+    assert(release.after_stage == gpu::Stage.NONE, "release destination stage is empty");
+    assert(release.before_hazard == gpu::Hazard.COLOR_READ_WRITE, "release source access is color read/write");
+    assert(release.after_hazard == gpu::Hazard.NONE, "release destination access is empty");
+    assert(release.old_layout == gpu::TextureLayout.COLOR_ATTACHMENT, "release source layout is color attachment");
+    assert(release.new_layout == gpu::TextureLayout.PRESENT, "release destination layout is present");
 }

@@ -456,6 +456,25 @@ cmd_global_barrier -> vk::MemoryBarrier2
 
 The backend must not insert hidden barriers for user-visible resource transitions except for unavoidable swapchain acquire/present transitions inside WSI helpers.
 
+`Stage.NONE` translates exactly to `VK_PIPELINE_STAGE_2_NONE`. The
+presentation preset uses an empty stage and access scope on its WSI-facing
+side, while explicit `Stage.PRESENT` and `Hazard.PRESENT_READ` retain their
+compatibility mappings to `VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT` and
+`VK_ACCESS_2_MEMORY_READ_BIT`.
+
+Presentation transitions use these exact synchronization2 scopes:
+
+| Transition | Source scope | Destination scope |
+|---|---|---|
+| `PRESENT -> COLOR_ATTACHMENT` | `VK_PIPELINE_STAGE_2_NONE`, `VK_ACCESS_2_NONE` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT \| VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT` |
+| `COLOR_ATTACHMENT -> PRESENT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT \| VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT` | `VK_PIPELINE_STAGE_2_NONE`, `VK_ACCESS_2_NONE` |
+
+These empty barrier scopes depend on WSI semaphore synchronization. The image-
+available semaphore wait remains at color-attachment output, and the render-
+finished semaphore carries the completed rendering operation to presentation.
+`Stage.NONE` is intended for empty barrier sides, not semaphore waits or
+signals.
+
 ## 14. Timeline semaphores
 
 Use timeline semaphores for:

@@ -846,6 +846,7 @@ Stage
     DEPTH_STENCIL
     INDIRECT_COMMAND
     PRESENT
+    NONE
 
 Hazard
     HOST_WRITE
@@ -894,6 +895,13 @@ cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) -> void?
 cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) -> void?
 ```
 
+`Stage.NONE` is an empty execution scope. Use it only for a barrier side that
+has no pipeline work to wait for; it is not a useful semaphore wait or signal
+stage. Explicit `Stage.PRESENT` and `Hazard.PRESENT_READ` values remain the
+legacy broad spelling and map to all commands and memory read respectively.
+They are retained for raw-barrier and semaphore compatibility, not used by the
+`TextureUse.PRESENT` preset.
+
 `TextureLayout` values: UNDEFINED, GENERAL, COLOR_ATTACHMENT, DEPTH_STENCIL,
 SHADER_READ, TRANSFER_SRC, TRANSFER_DST, PRESENT. `old_layout` must match the
 list's effective layout — its own pending transitions if it has recorded any
@@ -914,7 +922,7 @@ an exact synchronization tuple:
 | `STORAGE_COMPUTE` | `COMPUTE_SHADER` | `SHADER_READ_WRITE` | `GENERAL` |
 | `COLOR_ATTACHMENT` | `COLOR_ATTACHMENT` | `COLOR_READ_WRITE` | `COLOR_ATTACHMENT` |
 | `DEPTH_ATTACHMENT` | `DEPTH_STENCIL` | `DEPTH_READ_WRITE` | `DEPTH_STENCIL` |
-| `PRESENT` | `PRESENT` | `PRESENT_READ` | `PRESENT` |
+| `PRESENT` | `NONE` | `NONE` | `PRESENT` |
 
 ```text
 texture_transition(TextureHandle texture, TextureUse before, TextureUse after)
@@ -927,6 +935,14 @@ or insert synchronization. `UNDEFINED` is source-only and faults
 memory ordering. Presets intentionally cover only common cases; construct a
 raw `TextureBarrier` for transfer sources, other shader stages, read-only
 attachments, subresource-specific work, or any unusual tuple.
+
+At the presentation boundary, the preset produces exact asymmetric scopes by
+composition. `PRESENT -> COLOR_ATTACHMENT` uses `NONE`/`NONE` as its source
+and `COLOR_ATTACHMENT`/`COLOR_READ_WRITE` as its destination;
+`COLOR_ATTACHMENT -> PRESENT` uses those scopes in reverse. The empty side
+does not replace WSI synchronization: the acquire semaphore wait remains at
+color-attachment output, and the render-finished semaphore completes the
+handoff to presentation.
 
 The `UNDEFINED` preset's `HOST`/`NONE` source scope is only for first use or
 discard when no earlier GPU work still accesses the texture. Reinitializing a
