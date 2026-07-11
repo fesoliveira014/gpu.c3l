@@ -47,7 +47,7 @@ struct TransferArenaState {
     uint              retire_count;
 }
 
-struct TransferArenaRange {
+struct TransferArenaRange @private {
     ulong virtual_start;
     ulong virtual_end;
     usz   physical_offset;
@@ -118,6 +118,8 @@ fn void drain_transfer_retire(VkDeviceState* state, TransferArenaState* arena) @
     }
 }
 
+<* Pure range planning. Empty retire queues normalize cursors; malformed input
+   faults INVALID_ARGUMENT and exhausted or unrepresentable ranges fault ARENA_FULL. *>
 fn TransferArenaRange? transfer_arena_range(
     ulong virtual_head,
     ulong virtual_tail,
@@ -126,6 +128,7 @@ fn TransferArenaRange? transfer_arena_range(
     usz size,
     usz align
 ) {
+    if (size == 0) return gpu::INVALID_ARGUMENT~;
     if (capacity == 0 || size > capacity) return gpu::ARENA_FULL~;
     if (!gpu::is_pow2(align)) return gpu::INVALID_ARGUMENT~;
     if (retire_count == 0) {

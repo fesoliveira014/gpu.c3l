@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
 
 fn void transfer_range_places_aligned_extent() @test {
     gpu::vk::TransferArenaRange range = gpu::vk::transfer_arena_range(
@@ -129,4 +129,15 @@ fn void transfer_range_rejects_invalid_alignment() @test {
         align:        3,
     ));
     assert(invalid == gpu::INVALID_ARGUMENT, "non-power-of-two alignment faults INVALID_ARGUMENT");
+}
+fn void transfer_range_rejects_zero_size() @test {
+    fault invalid = @catch(gpu::vk::transfer_arena_range(
+        virtual_head: 0,
+        virtual_tail: 0,
+        retire_count: 0,
+        capacity:     64,
+        size:         0,
+        align:        1,
+    ));
+    assert(invalid == gpu::INVALID_ARGUMENT, "zero-size transfer ranges fault INVALID_ARGUMENT");
 }
