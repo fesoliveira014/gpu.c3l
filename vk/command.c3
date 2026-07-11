@@ -165,6 +165,7 @@ fn void? vk_destroy_recording_context(gpu::Device* device, gpu::RecordingContext
     if ((ulong)handle == (ulong)state.default_context) return gpu::INVALID_ARGUMENT~;
     if ((ulong)handle == (ulong)state.helper_context) return gpu::INVALID_ARGUMENT~;
     RecordingContextState* context = state.recording_contexts.get(handle)!;
+    if (context_has_live_commands(state, handle)) return gpu::INVALID_RESOURCE_STATE~;
     destroy_context_pools(state, context);
     state.recording_contexts.free(handle)!;
 }
@@ -220,24 +221,41 @@ fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::Recor
         .set_flags(vk::CommandBufferUsageFlagBits.ONE_TIME_SUBMIT_BIT);
     check(vk::begin_command_buffer(cmd, &begin))!;
 
-    *out_commands = (gpu::CommandList){
-        .device        = device,
-        .backend       = (void*)cmd,
-        .queue         = queue,
-        .state         = gpu::CommandState.RECORDING,
-        .last_pipeline = gpu::PIPELINE_HANDLE_INVALID,
-        .last_entry    = PIPELINE_ENTRY_NONE,
+    CommandRecord record = {
+        .command_buffer = cmd,
+        .context        = resolved,
+        .queue          = queue,
+        .frame_index    = frame_index,
+        .state          = CommandState.RECORDING,
+        .last_pipeline  = gpu::PIPELINE_HANDLE_INVALID,
+        .last_entry     = PIPELINE_ENTRY_NONE,
     };
+    {
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        if (try handle = state.commands.alloc(record)) {
+            *out_commands = {
+                .device = device,
+                .handle = handle,
+            };
+            return;
+        }
+    }
+    vk::free_command_buffers(state.device, pool, 1, &cmd);
+    return gpu::SLOT_TABLE_FULL~;
 }
 
 fn void? vk_end_commands(gpu::Device* device, gpu::CommandList* commands) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    check(vk::end_command_buffer((vk::CommandBuffer)commands.backend))!;
-    commands.state = gpu::CommandState.EXECUTABLE;
+    if (commands.device != device) return gpu::INVALID_ARGUMENT~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    check(vk::end_command_buffer(record.command_buffer))!;
+    record.state = CommandState.EXECUTABLE;
 }
 
 fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* desc) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* src = state.buffers.get(desc.src)!;
     BufferSlot* dst = state.buffers.get(desc.dst)!;
@@ -258,11 +276,12 @@ fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* des
         .dst_offset = (vk::DeviceSize)desc.dst_offset,
         .size       = (vk::DeviceSize)desc.size,
     };
-    vk::cmd_copy_buffer((vk::CommandBuffer)commands.backend, src.buffer, dst.buffer, 1, &region);
+    vk::cmd_copy_buffer(record.command_buffer, src.buffer, dst.buffer, 1, &region);
 }
 
 fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer, usz offset, usz size, uint value) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* slot = state.buffers.get(buffer)!;
     if (!slot.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
@@ -272,7 +291,7 @@ fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer
     if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
     if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize fill_size = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
-    vk::cmd_fill_buffer((vk::CommandBuffer)commands.backend, slot.buffer, (vk::DeviceSize)offset, fill_size, value);
+    vk::cmd_fill_buffer(record.command_buffer, slot.buffer, (vk::DeviceSize)offset, fill_size, value);
 }
 
 <* Validate a copy region against the texture, the mip's clamped extent,
@@ -314,13 +333,14 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(VkDeviceState* state, gpu::G
 }
 
 fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTextureCopyDesc* desc) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TextureSlot* texture = state.textures.get(desc.texture)!;
     BufferSlot* buffer = state.buffers.get(desc.src.buffer)!;
     if (!buffer.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
-    gpu::TextureLayout layout = effective_layout(commands, texture, desc.texture);
+    gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
     if (layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
@@ -336,17 +356,18 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
         width:             desc.width,
         height:            desc.height,
     )!;
-    vk::cmd_copy_buffer_to_image((vk::CommandBuffer)commands.backend, buffer.buffer, texture.image, layout_to_vk(layout), 1, &region);
+    vk::cmd_copy_buffer_to_image(record.command_buffer, buffer.buffer, texture.image, layout_to_vk(layout), 1, &region);
 }
 
 fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureBufferCopyDesc* desc) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TextureSlot* texture = state.textures.get(desc.texture)!;
     BufferSlot* buffer = state.buffers.get(desc.dst.buffer)!;
     if (!buffer.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
-    gpu::TextureLayout layout = effective_layout(commands, texture, desc.texture);
+    gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
     if (layout != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
@@ -362,7 +383,7 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
         width:             desc.width,
         height:            desc.height,
     )!;
-    vk::cmd_copy_image_to_buffer((vk::CommandBuffer)commands.backend, texture.image, layout_to_vk(layout), buffer.buffer, 1, &region);
+    vk::cmd_copy_image_to_buffer(record.command_buffer, texture.image, layout_to_vk(layout), buffer.buffer, 1, &region);
 }
 
 <* Resolve an indirect argument span: indirect usage, 4-byte offset alignment,
@@ -374,14 +395,14 @@ fn BufferSlot*? resolve_indirect_span(VkDeviceState* state, gpu::GpuSpan* span, 
     return slot;
 }
 
-fn void? bind_compute_and_push(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, vk::CommandBuffer cb) @private {
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+fn void? bind_compute_and_push(VkDeviceState* state, CommandRecord* record, gpu::PipelineHandle handle, gpu::GpuAddress root) @private {
+    vk::CommandBuffer cb = record.command_buffer;
     PipelineSlot* slot = state.pipelines.get(handle)!;
-    if ((ulong)handle != (ulong)commands.last_pipeline) {
+    if ((ulong)handle != (ulong)record.last_pipeline) {
         vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
         bind_descriptor_heap(state, cb, slot.layout, vk::PipelineBindPoint.COMPUTE);
-        commands.last_pipeline = handle;
-        commands.last_entry = slot.entry;
+        record.last_pipeline = handle;
+        record.last_entry = slot.entry;
     }
     gpu::RootPush push = { .root_gpu = root };
     vk::cmd_push_constants(cb, slot.layout, vk::ShaderStageFlagBits.COMPUTE_BIT, 0, gpu::RootPush::size, &push);
@@ -391,21 +412,23 @@ fn void? bind_compute_and_push(gpu::CommandList* commands, gpu::PipelineHandle h
    last bind; the heap otherwise rebinds because compute layouts differ in
    push-constant range, which breaks descriptor set compatibility. *>
 fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::Vec3u groups) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     validate_pipeline_kind(state, handle, PipelineKind.COMPUTE)!;
-    vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
+    vk::CommandBuffer cb = record.command_buffer;
     bind_compute_and_push(
-        commands: commands,
-        handle:   handle,
-        root:     root,
-        cb:       cb,
+        state:  state,
+        record: record,
+        handle: handle,
+        root:   root,
     )!;
     vk::cmd_dispatch(cb, groups.x, groups.y, groups.z);
 }
 
 fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::GpuSpan args) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     validate_pipeline_kind(state, handle, PipelineKind.COMPUTE)!;
     BufferSlot* args_buffer = resolve_indirect_span(
@@ -414,12 +437,12 @@ fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandl
         arg_size: gpu::DispatchIndirectCommand::size,
         count:    1,
     )!;
-    vk::CommandBuffer cb = (vk::CommandBuffer)commands.backend;
+    vk::CommandBuffer cb = record.command_buffer;
     bind_compute_and_push(
-        commands: commands,
-        handle:   handle,
-        root:     root,
-        cb:       cb,
+        state:  state,
+        record: record,
+        handle: handle,
+        root:   root,
     )!;
     vk::cmd_dispatch_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset);
 }

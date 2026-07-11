@@ -359,7 +359,9 @@ Tests should cover specific faults:
 
 ```text
 invalid handle -> INVALID_HANDLE
-arena overflow -> ARENA_FULL
+arena exact-end fit -> success
+arena one-byte, alignment, or extent overflow -> ARENA_FULL
+zero allocation size or malformed alignment -> INVALID_ARGUMENT
 unsupported required feature -> UNSUPPORTED_FEATURE
 invalid command state -> COMMAND_RECORDING_ERROR
 invalid descriptor index -> INVALID_HANDLE or DESCRIPTOR_HEAP_FULL as appropriate
