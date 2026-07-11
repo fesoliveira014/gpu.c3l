@@ -105,25 +105,28 @@ fn vma::AllocationCreateInfo memory_kind_to_vma(gpu::MemoryKind kind) @private {
     }
 }
 
-fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
-    enter_tracked(state);
-    defer exit_tracked(state);
-
+fn vk::BufferCreateInfo? make_buffer_create_info(gpu::BufferDesc* desc, uint[] queue_families) @private {
     if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
-    // shared_queues maps to no Vulkan usage bit; a desc carrying only it
-    // would emit usage == 0, which Vulkan forbids.
-    if ((uint)buffer_usage_to_vk(desc.usage) == 0) return gpu::INVALID_ARGUMENT~;
-    vk::BufferCreateInfo buffer_info = vk::buffer_create_info()
+    vk::BufferUsageFlags usage = buffer_usage_to_vk(desc.usage);
+    if ((uint)usage == 0) return gpu::INVALID_ARGUMENT~;
+    vk::BufferCreateInfo info = vk::buffer_create_info()
         .set_size((vk::DeviceSize)desc.size)
-        .set_usage(buffer_usage_to_vk(desc.usage));
-    uint[MAX_QUEUE_FAMILIES] share_families;
-    uint share_count = used_queue_families(state, share_families[..]);
-    if (desc.usage.shared_queues && share_count >= 2) {
-        buffer_info = buffer_info
+        .set_usage(usage);
+    if (queue_families.len >= 2) {
+        info = info
             .set_sharing_mode(vk::SharingMode.CONCURRENT)
-            .set_queue_family_indices(share_families[:share_count]);
+            .set_queue_family_indices(queue_families);
     }
+    return info;
+}
+
+fn gpu::BufferHandle? vk_create_buffer_with_families(
+    gpu::Device* device,
+    gpu::BufferDesc* desc,
+    uint[] queue_families,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    vk::BufferCreateInfo buffer_info = make_buffer_create_info(desc, queue_families)!;
     vma::AllocationCreateInfo alloc_info = memory_kind_to_vma(desc.memory_kind);
 
     BufferSlot slot = {
@@ -164,6 +167,16 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
     }
     state.allocator.destroy_buffer(slot.buffer, slot.allocation);
     return gpu::SLOT_TABLE_FULL~;
+}
+
+fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* desc) @private {
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    enter_tracked(state);
+    defer exit_tracked(state);
+    if (!desc.usage.shared_queues) return vk_create_buffer_with_families(device, desc, {});
+    uint[MAX_QUEUE_FAMILIES] families;
+    uint count = used_queue_families(state, families[..]);
+    return vk_create_buffer_with_families(device, desc, families[:count]);
 }
 
 <* Frees the handle now; buffer + allocation release is deferred until every

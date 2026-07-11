@@ -65,6 +65,8 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
     usz frame_arena_size = desc.frame_arena_size == 0 ? gpu::DEFAULT_FRAME_ARENA_SIZE : desc.frame_arena_size;
     state.frame_arenas = mem::new_array(FrameArenaState, state.frames_in_flight);
     gpu::Device handle = { .backend = gpu::BackendKind.VULKAN, .vtable = &VK_VTABLE, .backend_state = (void*)state };
+    uint[2] frame_families;
+    uint frame_family_count = graphics_compute_queue_families(state, frame_families[..]);
     for (uint i = 0; i < state.frames_in_flight; i++) {
         gpu::BufferDesc arena_desc = {
             .size        = frame_arena_size,
@@ -72,7 +74,11 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
             .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
             .debug_name  = "frame_arena",
         };
-        gpu::BufferHandle buffer = vk_create_buffer(&handle, &arena_desc)!;
+        gpu::BufferHandle buffer = vk_create_buffer_with_families(
+            &handle,
+            &arena_desc,
+            frame_families[:frame_family_count],
+        )!;
         mark_buffer_internal(state, buffer);
         gpu::GpuSpan span = vk_get_buffer_span(&handle, buffer)!;
         state.frame_arenas[i] = {

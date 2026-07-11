@@ -3,6 +3,7 @@ module gpu_test;
 import gpu;
 import gpu::vk;
 import vk;
+import std::io;
 
 // Headless (lavapipe): GPU-driven indirect execution and readback tickets.
 // A compute pass builds draw/dispatch arguments through the root-pointer ABI;
@@ -153,6 +154,161 @@ fn void record_target_readback(gpu::CommandList* cmd, gpu::TextureHandle target,
 fn char* center_pixel(gpu::GpuSpan* rb_span) {
     char* pixels = (char*)rb_span.cpu;
     return &pixels[(IND_RT / 2 * IND_RT + IND_RT / 2) * 4];
+}
+
+fn bool distinct_graphics_compute_families(gpu::Device* device, ZString test_name) {
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    if (state.graphics_family != state.compute_family) return true;
+    io::eprintfn("%s not applicable: graphics and compute share family %d", test_name, state.graphics_family);
+    return false;
+}
+
+fn gpu::PipelineHandle make_cross_family_compute_pipeline(
+    gpu::Device* device,
+    gpu::ShaderHandle* out_shader,
+) {
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = IND_DOUBLE_SPIRV[..],
+        .entry_point = "main",
+    };
+    *out_shader = gpu::create_shader(device, &shader_desc)!!;
+    gpu::ComputePipelineDesc pipeline_desc = {
+        .shader             = *out_shader,
+        .push_constant_size = gpu::RootPush::size,
+    };
+    return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
+}
+
+fn gpu::GpuSpan alloc_cross_family_indirect_args(gpu::FrameToken* frame) {
+    gpu::GpuSpan span = gpu::alloc_frame_span(frame, gpu::DispatchIndirectCommand::size, 16)!!;
+    uint* words = (uint*)span.cpu;
+    words[0] = 1;
+    words[1] = 1;
+    words[2] = 1;
+    return span;
+}
+
+fn gpu::GpuSpan alloc_empty_compute_root(gpu::FrameToken* frame) {
+    gpu::GpuSpan span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
+    ComputeRoot* root = (ComputeRoot*)span.cpu;
+    *root = { .count = 0 };
+    return span;
+}
+
+fn void frame_span_same_range_crosses_compute_and_graphics_families_when_available() @test {
+    gpu::Device device = make_ind_device();
+    defer gpu::destroy_device(&device)!!;
+    if (!distinct_graphics_compute_families(&device, "same-range frame span")) return;
+
+    gpu::ShaderHandle shader;
+    gpu::PipelineHandle pipeline = make_cross_family_compute_pipeline(&device, &shader);
+    defer gpu::destroy_shader(&device, shader)!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::SemaphoreDesc semaphore_desc = { .debug_name = "frame_arena_cross_family" };
+    gpu::SemaphoreHandle semaphore = gpu::create_semaphore(&device, &semaphore_desc)!!;
+    defer gpu::destroy_semaphore(&device, semaphore)!!;
+
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan args = alloc_cross_family_indirect_args(&frame_token);
+    gpu::GpuSpan compute_root = alloc_empty_compute_root(&frame_token);
+    gpu::GpuSpan graphics_root = alloc_empty_compute_root(&frame_token);
+
+    gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::cmd_dispatch_indirect(
+        commands: &compute,
+        pipeline: pipeline,
+        root:     compute_root.gpu,
+        args:     args,
+    )!!;
+    gpu::end_commands(&compute)!!;
+    gpu::CommandList[1] compute_lists = { compute };
+    gpu::SemaphoreSignal[1] signals = {{
+        .semaphore = semaphore,
+        .value     = (gpu::SemaphoreValue)1,
+        .stage     = gpu::Stage.INDIRECT_COMMAND,
+    }};
+    gpu::SubmitDesc compute_submit = {
+        .command_lists = compute_lists[..],
+        .signals       = signals[..],
+    };
+    gpu::submit(&device, &compute_submit)!!;
+
+    gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::cmd_dispatch_indirect(
+        commands: &graphics,
+        pipeline: pipeline,
+        root:     graphics_root.gpu,
+        args:     args,
+    )!!;
+    gpu::end_commands(&graphics)!!;
+    gpu::CommandList[1] graphics_lists = { graphics };
+    gpu::SemaphoreWait[1] waits = {{
+        .semaphore = semaphore,
+        .value     = (gpu::SemaphoreValue)1,
+        .stage     = gpu::Stage.INDIRECT_COMMAND,
+    }};
+    gpu::SubmitDesc graphics_submit = {
+        .command_lists = graphics_lists[..],
+        .waits         = waits[..],
+    };
+    gpu::submit(&device, &graphics_submit)!!;
+    gpu::end_frame(&frame_token)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 1,
+        .application_name  = "frame_arena_reuse_cross_family",
+    };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+    if (!distinct_graphics_compute_families(&device, "reused-offset frame span")) return;
+
+    gpu::ShaderHandle shader;
+    gpu::PipelineHandle pipeline = make_cross_family_compute_pipeline(&device, &shader);
+    defer gpu::destroy_shader(&device, shader)!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+
+    gpu::FrameToken first_frame = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan compute_args = alloc_cross_family_indirect_args(&first_frame);
+    assert(compute_args.offset == 0, "first slot use starts at offset zero");
+    gpu::GpuSpan compute_root = alloc_empty_compute_root(&first_frame);
+    gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::cmd_dispatch_indirect(
+        commands: &compute,
+        pipeline: pipeline,
+        root:     compute_root.gpu,
+        args:     compute_args,
+    )!!;
+    gpu::end_commands(&compute)!!;
+    gpu::CommandList[1] compute_lists = { compute };
+    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
+    gpu::submit(&device, &compute_submit)!!;
+    gpu::end_frame(&first_frame)!!;
+
+    gpu::FrameToken second_frame = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan graphics_args = alloc_cross_family_indirect_args(&second_frame);
+    assert(graphics_args.buffer == compute_args.buffer, "retired slot reuses its backing buffer");
+    assert(graphics_args.offset == 0, "retired slot reuses offset zero");
+    gpu::GpuSpan graphics_root = alloc_empty_compute_root(&second_frame);
+    gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::cmd_dispatch_indirect(
+        commands: &graphics,
+        pipeline: pipeline,
+        root:     graphics_root.gpu,
+        args:     graphics_args,
+    )!!;
+    gpu::end_commands(&graphics)!!;
+    gpu::CommandList[1] graphics_lists = { graphics };
+    gpu::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..] };
+    gpu::submit(&device, &graphics_submit)!!;
+    gpu::end_frame(&second_frame)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void compute_generated_indexed_indirect_draw() @test {

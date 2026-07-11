@@ -289,6 +289,11 @@ even when the worker also faulted, and caller-owned `frame` remains live for
 worker fault before returning it. The helper performs no heap allocation,
 runtime callback, virtual dispatch, or per-frame indirect call.
 
+Frame-arena backing buffers are safe on the selected graphics and compute
+families without a caller-supplied `shared_queues` flag. Concurrent sharing
+does not provide execution or memory ordering; callers must still record the
+required barriers and semaphore waits/signals.
+
 Use cases:
 
 ```text
