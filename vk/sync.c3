@@ -61,7 +61,8 @@ fn void? SemaphoreTable.free(&self, gpu::SemaphoreHandle h) {
 }
 
 fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* barrier) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     BufferSlot* slot = state.buffers.get(barrier.buffer)!;
     // size 0 is the whole-buffer convention, matching flush/invalidate/fill.
@@ -81,41 +82,45 @@ fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* b
         .set_size(barrier_size);
 
     vk::DependencyInfo dep = vk::dependency_info().set_buffer_memory_barriers((&bar)[:1]);
-    vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
+    vk::cmd_pipeline_barrier2(record.command_buffer, &dep);
 }
 
 fn void? vk_cmd_global_barrier(gpu::CommandList* commands, gpu::GlobalBarrier* barrier) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     vk::MemoryBarrier2 bar = vk::memory_barrier2()
         .set_src_stage_mask(stage_to_vk(barrier.before_stage))
         .set_src_access_mask(hazard_to_vk_access(barrier.before_hazard))
         .set_dst_stage_mask(stage_to_vk(barrier.after_stage))
         .set_dst_access_mask(hazard_to_vk_access(barrier.after_hazard));
     vk::DependencyInfo dep = vk::dependency_info().set_memory_barriers((&bar)[:1]);
-    vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
+    vk::cmd_pipeline_barrier2(record.command_buffer, &dep);
 }
 
 <* Record-time layout for `tex` on `list`: its own pending transition if it
    has recorded one, else the committed tracked layout. *>
-fn gpu::TextureLayout effective_layout(gpu::CommandList* list, TextureSlot* slot, gpu::TextureHandle tex) @private {
-    for (uint i = 0; i < list.pending_layout_count; i++) {
-        if ((ulong)list.pending_layouts[i].texture == (ulong)tex) return list.pending_layouts[i].latest;
+fn gpu::TextureLayout effective_layout(CommandRecord* record, TextureSlot* slot, gpu::TextureHandle tex) @private {
+    for (uint i = 0; i < record.pending_layout_count; i++) {
+        if ((ulong)record.pending_layouts[i].texture == (ulong)tex) return record.pending_layouts[i].latest;
     }
     return texture_layout(slot);
 }
 
-<* Record or update `list`'s pending transition for `tex`. Faults once
-   PENDING_LAYOUT_CAP distinct textures are tracked on one list. *>
-fn void? record_pending_layout(gpu::CommandList* list, gpu::TextureHandle tex, gpu::TextureLayout old_layout, gpu::TextureLayout new_layout) @private {
-    for (uint i = 0; i < list.pending_layout_count; i++) {
-        if ((ulong)list.pending_layouts[i].texture == (ulong)tex) {
-            list.pending_layouts[i].latest = new_layout;
+<* Record or update one texture's pending transition, growing as needed. *>
+fn void record_pending_layout(VkDeviceState* state, CommandRecord* record, gpu::TextureHandle tex, gpu::TextureLayout old_layout, gpu::TextureLayout new_layout) @private {
+    for (uint i = 0; i < record.pending_layout_count; i++) {
+        if ((ulong)record.pending_layouts[i].texture == (ulong)tex) {
+            record.pending_layouts[i].latest = new_layout;
             return;
         }
     }
-    if (list.pending_layout_count == gpu::PENDING_LAYOUT_CAP) return gpu::INVALID_ARGUMENT~;
-    list.pending_layouts[list.pending_layout_count] = { .texture = tex, .first_old = old_layout, .latest = new_layout };
-    list.pending_layout_count++;
+    ensure_pending_layout_capacity(state, record);
+    record.pending_layouts[record.pending_layout_count] = {
+        .texture = tex,
+        .first_old = old_layout,
+        .latest = new_layout,
+    };
+    record.pending_layout_count++;
 }
 
 <* Replay a submitted list's pending transitions onto tracked state, in
@@ -123,9 +128,9 @@ fn void? record_pending_layout(gpu::CommandList* list, gpu::TextureHandle tex, g
    Best-effort drift check: a mismatch against the layout seen at record time
    means a concurrent recorder raced this texture; only validation logs it,
    matching today's relaxed-atomic looseness. *>
-fn void commit_pending_layouts(VkDeviceState* state, gpu::CommandList* list) @private {
-    for (uint i = 0; i < list.pending_layout_count; i++) {
-        gpu::PendingLayout* entry = &list.pending_layouts[i];
+fn void commit_pending_layouts(VkDeviceState* state, CommandRecord* record) @private {
+    for (uint i = 0; i < record.pending_layout_count; i++) {
+        PendingLayout* entry = &record.pending_layouts[i];
         if (try slot = state.textures.get(entry.texture)) {
             if (state.validation && texture_layout(slot) != entry.first_old) {
                 io::eprintfn(
@@ -136,7 +141,7 @@ fn void commit_pending_layouts(VkDeviceState* state, gpu::CommandList* list) @pr
             set_texture_layout(slot, entry.latest);
         }
     }
-    list.pending_layout_count = 0;
+    record.pending_layout_count = 0;
 }
 
 <* Whole-image barrier; a barrier whose old_layout disagrees with the
@@ -144,19 +149,20 @@ fn void commit_pending_layouts(VkDeviceState* state, gpu::CommandList* list) @pr
    layout) faults INVALID_RESOURCE_STATE. The transition is recorded as
    pending, not committed until the list submits. *>
 fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier* barrier) @private {
-    if (commands.state != gpu::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TextureSlot* slot = state.textures.get(barrier.texture)!;
-    if (barrier.old_layout != effective_layout(commands, slot, barrier.texture)) return gpu::INVALID_RESOURCE_STATE~;
-    // Recorded before the GPU-visible barrier: an overflow fault must not
-    // leave a transition baked into the command buffer that our bookkeeping
-    // never tracked.
+    if (barrier.old_layout != effective_layout(record, slot, barrier.texture)) return gpu::INVALID_RESOURCE_STATE~;
+    // Track the transition before emitting its GPU-visible barrier so the
+    // backend record always describes everything in the command buffer.
     record_pending_layout(
-        list:       commands,
+        state:      state,
+        record:     record,
         tex:        barrier.texture,
         old_layout: barrier.old_layout,
         new_layout: barrier.new_layout,
-    )!;
+    );
 
     vk::ImageMemoryBarrier2 bar = vk::image_memory_barrier2()
         .set_src_stage_mask(stage_to_vk(barrier.before_stage))
@@ -177,7 +183,7 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
         });
 
     vk::DependencyInfo dep = vk::dependency_info().set_image_memory_barriers((&bar)[:1]);
-    vk::cmd_pipeline_barrier2((vk::CommandBuffer)commands.backend, &dep);
+    vk::cmd_pipeline_barrier2(record.command_buffer, &dep);
 }
 
 fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::SemaphoreDesc* desc) @private {

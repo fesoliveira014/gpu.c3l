@@ -44,7 +44,8 @@ enum FrontFace : int {
     CLOCKWISE,
 }
 
-<* Triangle rasterization: filled or wireframe. *>
+<* Triangle rasterization: filled or wireframe. LINE requires
+   DeviceCaps.line_polygon_mode. *>
 enum PolygonMode : int {
     FILL,
     LINE,
@@ -120,7 +121,8 @@ struct BlendState {
    a push range of push_constant_size bytes. *>
 struct ComputePipelineDesc {
     ShaderHandle shader;
-    // At least the 8-byte root address (RootPush).
+    // At least RootPush::size, four-byte aligned, and no greater than
+    // DeviceCaps.max_push_constant_size.
     uint         push_constant_size;
     ZString      debug_name;
 }

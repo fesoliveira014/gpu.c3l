@@ -138,15 +138,23 @@ The backend maps those kinds to Vulkan queue families and queue handles.
 
 ### Command lists
 
-A command list is a transient recorder.
+A command list is a transient, owner-bearing token for a device-owned command
+record. The public token contains only its `Device*` and generation-checked handle;
+the Vulkan command buffer, bind cache, pending layouts, context, queue, frame slot,
+and lifecycle state remain backend-owned. Copies therefore alias one record.
 
 State transitions:
 
 ```text
-RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTED
+RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> consumed
 ```
 
-`begin_commands` returns a list in `RECORDING`. Render passes nest into `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes the list to `EXECUTABLE`; submission moves it to `SUBMITTED`. Invalid transitions return faults. Commands that require a render pass must fault if recorded outside one. Commands that cannot be recorded inside a render pass must fault if a render pass is active.
+`begin_commands` creates a record in `RECORDING`. Render passes nest into
+`RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes
+the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
+batch as `SUBMITTING`; a pre-queue fault restores it, while success invalidates
+every alias. Frame-slot pool reset also invalidates abandoned records. Invalid
+transitions return faults, and render-pass command constraints remain enforced.
 
 ### Buffers
 
@@ -333,21 +341,27 @@ deferred destruction list
 last submit timeline value
 ```
 
-Frame flow:
+Frame lifecycle and flow:
 
 ```text
-begin_frame(device)
+IDLE --begin_frame--> ACTIVE --end_frame--> IDLE
+
+begin_frame(device)              // valid only in IDLE
     wait if frame slot is still in flight
     reset command pools
     reset frame upload arena
     set VMA current frame index
 
+alloc_frame_span(device, ...)    // valid only in ACTIVE
 record work
 submit work
 
-end_frame(device)
+end_frame(device)                // valid only in ACTIVE
     record frame timeline value
 ```
+
+Invalid lifecycle transitions fault `INVALID_RESOURCE_STATE` before changing
+the frame slot, arena, pools, retirement state, or queue submissions.
 
 Headless tests may skip swapchain-specific acquire/present steps.
 
@@ -426,7 +440,9 @@ create_swapchain(device, SurfaceDesc, SwapchainDesc) -> SwapchainHandle?
 acquire_next_image(device, swapchain) -> AcquiredImage?
 present(device, PresentDesc) -> void?
 get_present_mode_support(device, swapchain) -> PresentModeSupport?
-resize/recreate on SWAPCHAIN_OUT_OF_DATE
+retry unchanged on WAIT_TIMEOUT
+resize on SWAPCHAIN_OUT_OF_DATE
+replace the surface and swapchain on SURFACE_LOST
 ```
 
 `PresentModeSupport` is a bitstruct reporting fifo/immediate/mailbox availability for the swapchain's surface.

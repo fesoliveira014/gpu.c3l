@@ -153,3 +153,21 @@ fn void heap_mode_forced_resolution() @test {
     fault indexing_fault = @catch(gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, false, true));
     assert(indexing_fault == gpu::UNSUPPORTED_FEATURE, "forced indexing without support raises UNSUPPORTED_FEATURE");
 }
+
+fn void line_polygon_mode_feature_support() @test {
+    vk::PhysicalDeviceFeatures unsupported;
+    assert(!gpu::vk::line_polygon_mode_supported(&unsupported), "unset fillModeNonSolid reports no line polygon support");
+
+    vk::PhysicalDeviceFeatures supported;
+    supported.fill_mode_non_solid = vk::TRUE;
+    assert(gpu::vk::line_polygon_mode_supported(&supported), "fillModeNonSolid reports line polygon support");
+}
+
+fn void polygon_mode_optional_gate() @test {
+    assert(!@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.FILL, false)),
+        "FILL remains available without optional support");
+    assert(!@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.LINE, true)),
+        "LINE is available when optional support is enabled");
+    assert(@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.LINE, false)) == gpu::UNSUPPORTED_FEATURE,
+        "LINE without optional support faults UNSUPPORTED_FEATURE");
+}

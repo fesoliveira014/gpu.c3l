@@ -120,6 +120,39 @@ fn vk::PresentModeKHR select_present_mode(vk::PresentModeKHR[] available, gpu::P
     return vk::PresentModeKHR.FIFO_KHR;
 }
 
+<* Map acquire outcomes without touching swapchain state. Pure. *>
+fn void? map_acquire_result(vk::Result result) {
+    switch (result) {
+        case vk::Result.SUCCESS:
+        case vk::Result.SUBOPTIMAL_KHR:
+            return;
+        case vk::Result.TIMEOUT:
+        case vk::Result.NOT_READY:
+            return gpu::WAIT_TIMEOUT~;
+        case vk::Result.ERROR_OUT_OF_DATE_KHR:
+            return gpu::SWAPCHAIN_OUT_OF_DATE~;
+        case vk::Result.ERROR_SURFACE_LOST_KHR:
+            return gpu::SURFACE_LOST~;
+        default:
+            return check(result);
+    }
+}
+
+<* Map present outcomes while preserving surface-recreation semantics. Pure. *>
+fn void? map_present_result(vk::Result result) {
+    switch (result) {
+        case vk::Result.SUCCESS:
+        case vk::Result.SUBOPTIMAL_KHR:
+            return;
+        case vk::Result.ERROR_OUT_OF_DATE_KHR:
+            return gpu::SWAPCHAIN_OUT_OF_DATE~;
+        case vk::Result.ERROR_SURFACE_LOST_KHR:
+            return gpu::SURFACE_LOST~;
+        default:
+            return check(result);
+    }
+}
+
 <* 0 = minimum + 1; a capability max of 0 means unbounded. Pure. *>
 fn uint clamp_image_count(uint requested, uint min_count, uint max_count) {
     uint count = requested == 0 ? min_count + 1 : requested;
@@ -434,18 +467,7 @@ fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::Swapchain
     vk::Semaphore acquire_semaphore = slot.acquire_semaphores[state.frame_index];
     uint image_index = 0;
     vk::Result result = vk::extensions.vk_acquire_next_image_khr(state.device, slot.swapchain, ACQUIRE_TIMEOUT_NS, acquire_semaphore, (vk::Fence)null, &image_index);
-    switch (result) {
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-        case vk::Result.TIMEOUT:
-        case vk::Result.NOT_READY:
-            return gpu::SWAPCHAIN_OUT_OF_DATE~;
-        case vk::Result.SUCCESS:
-        case vk::Result.SUBOPTIMAL_KHR:
-            break;
-        default:
-            check(result)!;
-    }
+    map_acquire_result(result)!;
 
     slot.acquire_pending = true;
     slot.acquire_consumed = false;
@@ -481,16 +503,7 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
     state.graphics_queue_mutex.lock()!!;
     defer state.graphics_queue_mutex.unlock();
     vk::Result result = vk::extensions.vk_queue_present_khr(state.graphics_queue, &info);
-    switch (result) {
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-            return gpu::SWAPCHAIN_OUT_OF_DATE~;
-        case vk::Result.SUCCESS:
-        case vk::Result.SUBOPTIMAL_KHR:
-            return;
-        default:
-            check(result)!;
-    }
+    return map_present_result(result);
 }
 
 fn gpu::PresentModeSupport? vk_get_present_mode_support(gpu::Device* device, gpu::SwapchainHandle handle) @private {

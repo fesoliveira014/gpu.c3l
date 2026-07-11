@@ -7,6 +7,16 @@ import gpu::vk;
 // a readback buffer, submit signaling a timeline semaphore, wait, and verify the
 // bytes. Assumes host-coherent memory (non-coherent flush/invalidate is later).
 
+fn ulong command_submit_count(gpu::Device* device) {
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    return vk::submit_stats(state).queue_submits;
+}
+
+
+fn void command_list_is_small_owner_token() @test {
+    assert(gpu::CommandList::size <= 16, "CommandList stays within two machine words");
+}
+
 fn void copy_upload_to_readback() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -82,6 +92,152 @@ fn void empty_command_list_submits() @test {
     gpu::submit(&device, &submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&device)!!;
+}
+
+fn void copied_alias_cannot_resubmit_after_success() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::CommandList original = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&device, &original)!!;
+    gpu::CommandList[1] copied = { original };
+    gpu::SubmitDesc first = { .command_lists = copied[..] };
+    gpu::submit(&device, &first)!!;
+    gpu::CommandList replacement = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&device, &replacement)!!;
+    assert(replacement.handle.index == original.handle.index, "the freed command slot is reused");
+    assert(replacement.handle.generation != original.handle.generation,
+        "slot reuse advances the command generation");
+
+
+    ulong before = command_submit_count(&device);
+    gpu::CommandList[1] original_alias = { original };
+    gpu::SubmitDesc second = { .command_lists = original_alias[..] };
+    fault rejected = @catch(gpu::submit(&device, &second));
+    assert(rejected == gpu::INVALID_HANDLE, "a consumed alias faults INVALID_HANDLE");
+    assert(command_submit_count(&device) == before, "a consumed alias reaches no Vulkan queue submit");
+    gpu::CommandList[1] replacement_lists = { replacement };
+    gpu::SubmitDesc replacement_submit = { .command_lists = replacement_lists[..] };
+    gpu::submit(&device, &replacement_submit)!!;
+
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn void command_generation_wraps_without_poisoning_slot() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::CommandList nearly_wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&device, &nearly_wrapped)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    state.commands.slots[nearly_wrapped.handle.index].generation = vk::COMMAND_GENERATION_MAX - 1;
+    nearly_wrapped.handle.generation = vk::COMMAND_GENERATION_MAX - 1;
+
+    gpu::CommandList[1] first_lists = { nearly_wrapped };
+    gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
+    gpu::submit(&device, &first_submit)!!;
+
+    gpu::CommandList wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    assert(wrapped.handle.index == nearly_wrapped.handle.index, "wrapped slot is reused");
+    assert(wrapped.handle.generation == 1, "command generation wraps to the first valid value");
+    gpu::end_commands(&device, &wrapped)!!;
+    gpu::CommandList[1] wrapped_lists = { wrapped };
+    gpu::SubmitDesc wrapped_submit = { .command_lists = wrapped_lists[..] };
+    gpu::submit(&device, &wrapped_submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn void duplicate_token_batch_rejects_without_consuming() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&device, &cmd)!!;
+    gpu::CommandList[2] duplicates = { cmd, cmd };
+    gpu::SubmitDesc bad = { .command_lists = duplicates[..] };
+    ulong before = command_submit_count(&device);
+    fault rejected = @catch(gpu::submit(&device, &bad));
+    assert(rejected == gpu::COMMAND_RECORDING_ERROR, "duplicate tokens fault before submission");
+    assert(command_submit_count(&device) == before, "duplicate-token rejection records no queue submit");
+
+    gpu::CommandList[1] one = { cmd };
+    gpu::SubmitDesc good = { .command_lists = one[..] };
+    gpu::submit(&device, &good)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn void cross_device_submit_rejects_and_owner_can_submit() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device owner = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&owner)!!;
+    gpu::Device other = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&other)!!;
+
+    gpu::CommandList cmd = gpu::begin_commands(&owner, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&owner, &cmd)!!;
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    ulong before = command_submit_count(&other);
+    fault rejected = @catch(gpu::submit(&other, &submit));
+    assert(rejected == gpu::INVALID_ARGUMENT, "another device rejects the command token owner");
+    assert(command_submit_count(&other) == before, "cross-device rejection reaches no Vulkan queue submit");
+
+    gpu::submit(&owner, &submit)!!;
+    gpu::wait_queue_idle(&owner, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn void cross_device_end_commands_rejects_without_mutation() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device owner = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&owner)!!;
+    gpu::Device other = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&other)!!;
+
+    gpu::CommandList cmd = gpu::begin_commands(&owner, gpu::QueueKind.GRAPHICS)!!;
+    fault rejected = @catch(gpu::end_commands(&other, &cmd));
+    assert(rejected == gpu::INVALID_ARGUMENT, "another device cannot finalize the owner's command token");
+    gpu::end_commands(&owner, &cmd)!!;
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&owner, &submit)!!;
+    gpu::wait_queue_idle(&owner, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn void abandoned_token_invalidates_when_pool_slot_resets() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 1 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::begin_frame(&device)!!;
+    gpu::CommandList abandoned = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&device, &abandoned)!!;
+    gpu::end_frame(&device)!!;
+    gpu::begin_frame(&device)!!;
+
+    fault stale = @catch(gpu::end_commands(&device, &abandoned));
+    assert(stale == gpu::INVALID_HANDLE, "pool reset invalidates an abandoned command token");
+    gpu::end_frame(&device)!!;
+}
+
+fn void live_command_record_blocks_context_destruction() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+    gpu::RecordingContextHandle context = gpu::create_recording_context(&device)!!;
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS, context)!!;
+    fault live = @catch(gpu::destroy_recording_context(&device, context));
+    assert(live == gpu::INVALID_RESOURCE_STATE, "a context with a live command record cannot be destroyed");
+
+    gpu::end_commands(&device, &cmd)!!;
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::destroy_recording_context(&device, context)!!;
 }
 
 fn void bad_command_state_rejected() @test {

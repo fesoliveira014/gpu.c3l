@@ -54,6 +54,7 @@ faultdef
     // resolve_readback called before the ticket's timeline value was
     // reached; poll_readback first.
     READBACK_NOT_READY,
-    // A bounded host wait (wait_semaphore, begin_frame's arena wait) elapsed
-    // before the timeline reached its target value; safe to retry.
+    // A bounded host wait elapsed before its target, or image acquisition
+    // reported transient unavailability. The operation is safe to retry
+    // without changing the resource being waited on.
     WAIT_TIMEOUT;
