@@ -42,6 +42,8 @@ struct DeviceDesc {
     // during create_device (the driver copies it).
     char[]             pipeline_cache_data;
     ZString            application_name;
+    DebugMessageCallback debug_callback;
+    void*                debug_user_data;
 }
 
 <* Capabilities of the created device, filled by create_device into Device.caps;

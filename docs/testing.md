@@ -36,6 +36,7 @@ test_texture_support.c3
 test_memory_policy.c3
 test_shader_abi_layout.c3
 test_descriptor_heap_slots.c3
+test_diagnostics.c3
 test_barrier_desc_validation.c3
 ```
 
@@ -58,6 +59,9 @@ Format translation table completeness through pure tables if separated
 BarrierDesc validation
 shader ABI sizeof/offset checks
 DescriptorHeap free-list reuse
+null-safe, exactly-once structured debug dispatch and userdata preservation
+invalid-backend callback delivery with callback-enabled/disabled fault parity
+borrowed field and explicit absent-fault representation
 synthetic frame-arena graphics/compute sharing plans and exact buffer create-info mode/indices
 ```
 
@@ -202,7 +206,15 @@ zero leaked VMA allocations at device destruction
 zero leaked public resource handles at device destruction
 ```
 
-Validation warnings should be triaged. Some warnings may be documented as driver/ICD quirks, but release gates should prefer clean output.
+Validation warnings should be triaged. Some warnings may be documented as
+driver/ICD quirks, but release gates should prefer clean output.
+
+Structured-debug tests verify Vulkan severity/category mapping, validation ID
+name/number, backend text, named and null objects, `VK_FALSE`, and stderr
+fallback without deliberately introducing validation errors into clean targets.
+Concurrency coverage uses a synchronized application-owned sink; callbacks are
+not assumed serialized or reentrant. The entire matrix still supports exactly
+one live `Device`; multi-device remains unsupported.
 
 ## 7. Test naming
 
@@ -237,7 +249,7 @@ Do not include milestone labels in test names.
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior layout; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start. |
 | Threading | per-thread recording contexts, parallel record, identical submit. |
-| Debug report | leak report contents, debug names, command labels. |
+| Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
 | Depth | depth attachment creation, depth-tested draw, readback. |
 | Indirect draw | compute-written draw args, indirect draw, readback. |
 

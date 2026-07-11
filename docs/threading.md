@@ -124,10 +124,22 @@ paths allocate temporaries internally, so worker threads calling into the
 library must wrap their body in `@pool_init(...)` (see `std::core::mem`) or
 they abort on first temp allocation.
 
+## Debug callback discipline
+
+Public-contract and ordinary backend `DebugMessage` values are delivered
+synchronously on the calling thread. Vulkan debug-utils messages are delivered
+synchronously on the arbitrary application or driver thread chosen by Vulkan;
+multiple callbacks may run concurrently, with no cross-thread ordering or
+library serialization.
+
+The callback must be nonblocking and must not call gpu.c3l. Delivery can occur
+while internal resource or queue locks are held, so reentry may deadlock. Copy
+borrowed fields into application-owned synchronized storage and return. The
+callback and `debug_user_data` remain valid from `create_device` entry through
+`destroy_device` return; no callback occurs afterward.
+
 ## Miscellany
 
-- The validation messenger callback fires on arbitrary driver threads; the
-  library only writes to stderr from it.
 - A context is confined, not locked: two lists from one context may be
   recorded interleaved by the owning thread, never by two threads.
 - Command lists from different contexts may be mixed in one `SubmitDesc`.
