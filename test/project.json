@@ -12,10 +12,10 @@
   // crashes in VMA's std::mutex when the runtimes drift apart.
   "wincrt": "dynamic",
   "sources": [
-    "../gpu.c3", "../types.c3", "../faults.c3", "../device.c3", "../caps.c3",
-    "../memory.c3", "../buffer.c3", "../texture.c3", "../descriptor_heap.c3",
-    "../pipeline.c3", "../command.c3", "../sync.c3", "../queue.c3",
-    "../swapchain.c3", "../debug.c3", "../shader_abi.c3", "../vk/**"
+    "../gpu/gpu.c3", "../gpu/types.c3", "../gpu/faults.c3", "../gpu/device.c3", "../gpu/caps.c3",
+    "../gpu/memory.c3", "../gpu/buffer.c3", "../gpu/texture.c3", "../gpu/descriptor_heap.c3",
+    "../gpu/pipeline.c3", "../gpu/command.c3", "../gpu/sync.c3", "../gpu/queue.c3",
+    "../gpu/swapchain.c3", "../gpu/debug.c3", "../gpu/shader_abi.c3", "../gpu/vk/**"
   ],
   "output": "build",
   "targets": {
