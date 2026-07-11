@@ -129,6 +129,7 @@ jobs:
       - name: Run the walkthrough
         run: |
           export VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
+          export GPU_C3L_URL="$GITHUB_WORKSPACE"
           python3 scripts/run_doc.py docs/getting_started.md --workspace /tmp/walkthrough
 
   windows:
