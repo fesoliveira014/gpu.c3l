@@ -26,6 +26,26 @@ struct Vec3u {
     uint z;
 }
 
+<* One pass-bounded dynamic viewport. All fields must be finite; width and
+   height are positive, while both depth endpoints are in [0, 1]. Set
+   max_depth to 1.0f for the conventional full depth range. *>
+struct Viewport {
+    float x;
+    float y;
+    float width;
+    float height;
+    float min_depth;
+    float max_depth;
+}
+
+<* One pass-bounded dynamic scissor. Zero extent is a valid empty clip. *>
+struct ScissorRect {
+    int x;
+    int y;
+    int width;
+    int height;
+}
+
 // Indirect argument layouts, byte-identical to Vulkan's and shader-writable
 // (GLSL twins in include/shaders/generated/shader_abi.glsl).
 struct DrawIndirectCommand {
@@ -230,6 +250,20 @@ fn void? cmd_dispatch(CommandList* commands, PipelineHandle pipeline, GpuAddress
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
     return commands.device.vtable.cmd_begin_render_pass(commands, desc);
+}
+
+<* Set one pass-bounded dynamic viewport for subsequent draws. Requires an
+   active render pass; malformed values fault INVALID_ARGUMENT. *>
+fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_set_viewport(commands, viewport);
+}
+
+<* Set one pass-bounded dynamic scissor for subsequent draws. Requires an
+   active render pass; malformed values fault INVALID_ARGUMENT. *>
+fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
+    if (commands.device == null || commands.device.vtable == null) return INVALID_ARGUMENT~;
+    return commands.device.vtable.cmd_set_scissor(commands, scissor);
 }
 
 <* Counterpart of cmd_begin_render_pass. *>

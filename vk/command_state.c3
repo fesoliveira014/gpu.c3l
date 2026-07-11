@@ -29,6 +29,8 @@ struct CommandRecord {
     gpu::QueueKind               queue;
     uint                         frame_index;
     CommandState                 state;
+    uint                         active_render_width;
+    uint                         active_render_height;
     gpu::PipelineHandle          last_pipeline;
     uint                         last_entry;
     PendingLayout[]              pending_layouts;

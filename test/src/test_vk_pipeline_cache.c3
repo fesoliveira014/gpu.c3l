@@ -251,6 +251,8 @@ fn void cull_replay_renders_per_alias() @test {
     defer gpu::destroy_texture(&device, target_culled)!!;
     gpu::TextureHandle target_drawn = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, target_drawn)!!;
+    gpu::TextureHandle target_reset = gpu::create_texture(&device, &rt_desc)!!;
+    defer gpu::destroy_texture(&device, target_reset)!!;
 
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc no_cull_desc = base_graphics_desc(&shaders, formats[..]);
@@ -270,6 +272,8 @@ fn void cull_replay_renders_per_alias() @test {
     defer gpu::destroy_buffer(&device, rb_culled)!!;
     gpu::BufferHandle rb_drawn = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, rb_drawn)!!;
+    gpu::BufferHandle rb_reset = gpu::create_buffer(&device, &rb_desc)!!;
+    defer gpu::destroy_buffer(&device, rb_reset)!!;
 
     gpu::begin_frame(&device)!!;
 
@@ -289,10 +293,10 @@ fn void cull_replay_renders_per_alias() @test {
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
 
-    gpu::TextureHandle[2] targets = { target_culled, target_drawn };
-    gpu::PipelineHandle[2] pipelines = { culled, no_cull };
-    gpu::BufferHandle[2] readbacks = { rb_culled, rb_drawn };
-    for (uint i = 0; i < 2; i++) {
+    gpu::TextureHandle[3] targets = { target_culled, target_drawn, target_reset };
+    gpu::PipelineHandle[3] pipelines = { culled, no_cull, no_cull };
+    gpu::BufferHandle[3] readbacks = { rb_culled, rb_drawn, rb_reset };
+    for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
             .texture       = targets[i],
             .before_stage  = gpu::Stage.HOST,
@@ -312,6 +316,16 @@ fn void cull_replay_renders_per_alias() @test {
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
         gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        if (i == 1) {
+            gpu::Viewport viewport = {
+                .width = (float)CACHE_RT_SIZE / 2.0f, .height = (float)CACHE_RT_SIZE, .max_depth = 1.0f,
+            };
+            gpu::ScissorRect scissor = {
+                .width = (int)CACHE_RT_SIZE / 2, .height = (int)CACHE_RT_SIZE,
+            };
+            gpu::cmd_set_viewport(&cmd, &viewport)!!;
+            gpu::cmd_set_scissor(&cmd, &scissor)!!;
+        }
         gpu::cmd_draw(
             commands:       &cmd,
             pipeline:       pipelines[i],
@@ -360,9 +374,19 @@ fn void cull_replay_renders_per_alias() @test {
     gpu::invalidate_buffer(&device, rb_drawn, 0, 0)!!;
     gpu::GpuSpan drawn_span = gpu::get_buffer_span(&device, rb_drawn)!!;
     char* drawn_pixels = (char*)drawn_span.cpu;
-    char* drawn_center = &drawn_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
-    assert(drawn_center[0] == (char)255 && drawn_center[1] == (char)255 && drawn_center[2] == (char)255,
-        "cull-disabled alias of the same entry renders the triangle");
+    char* drawn_left = &drawn_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 4) * 4];
+    char* drawn_right = &drawn_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE * 3 / 4) * 4];
+    assert(drawn_left[0] == (char)255 && drawn_left[1] == (char)255 && drawn_left[2] == (char)255,
+        "pipeline alias switch preserves the explicit viewport and scissor on the left");
+    assert(drawn_right[0] == (char)8 && drawn_right[1] == (char)16 && drawn_right[2] == (char)32,
+        "pipeline alias switch preserves clipping on the right");
+
+    gpu::invalidate_buffer(&device, rb_reset, 0, 0)!!;
+    gpu::GpuSpan reset_span = gpu::get_buffer_span(&device, rb_reset)!!;
+    char* reset_pixels = (char*)reset_span.cpu;
+    char* reset_center = &reset_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
+    assert(reset_center[0] == (char)255 && reset_center[1] == (char)255 && reset_center[2] == (char)255,
+        "the next pass restores full viewport and scissor defaults");
 
     gpu::end_frame(&device)!!;
 }

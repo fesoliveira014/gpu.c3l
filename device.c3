@@ -58,6 +58,8 @@ alias GetPipelineCacheSizeFn  = fn usz? (Device*);
 alias GetPipelineCacheDataFn  = fn usz? (Device*, char[]);
 alias CmdDispatchFn           = fn void? (CommandList*, PipelineHandle, GpuAddress, Vec3u);
 alias CmdBeginRenderPassFn    = fn void? (CommandList*, RenderPassDesc*);
+alias CmdSetViewportFn        = fn void? (CommandList*, Viewport*);
+alias CmdSetScissorFn         = fn void? (CommandList*, ScissorRect*);
 alias CmdEndRenderPassFn      = fn void? (CommandList*);
 alias CmdDrawFn               = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuAddress, uint, uint);
 alias CmdDrawIndexedFn        = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuAddress, GpuSpan, uint, uint, IndexType);
@@ -136,6 +138,8 @@ struct BackendVTable {
     GetPipelineCacheDataFn  get_pipeline_cache_data;
     CmdDispatchFn           cmd_dispatch;
     CmdBeginRenderPassFn    cmd_begin_render_pass;
+    CmdSetViewportFn        cmd_set_viewport;
+    CmdSetScissorFn         cmd_set_scissor;
     CmdEndRenderPassFn      cmd_end_render_pass;
     CmdDrawFn               cmd_draw;
     CmdDrawIndexedFn        cmd_draw_indexed;

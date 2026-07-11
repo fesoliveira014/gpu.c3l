@@ -358,6 +358,20 @@ pipeline cache lookup
 vk::Pipeline
 ```
 
+Dynamic rendering begins with fixed-count `vkCmdSetViewport` and
+`vkCmdSetScissor` calls covering the full pass. Public overrides use those
+same Vulkan 1.3 core commands after library validation: finite viewport
+values, nonnegative/positive extents as appropriate, representable scissor
+endpoints, depth endpoints in `[0, 1]`, and rectangles bounded by the active
+pass. The command list carries the active pass extent only while
+`RECORDING_RENDER_PASS`.
+
+Viewport/scissor are deliberately absent from `PipelineKey`, `PipelineSlot`,
+and graphics dynamic-state replay. Pipeline binds replay raster/depth
+snapshots only, so an explicit rectangle remains active across a bind or
+cache-alias handle switch. Multi-viewport arrays, negative-height viewport
+flips, and off-pass overscan are not part of the portable public contract.
+
 ### Pipeline cache
 
 Two layers. A descriptor-keyed dedup cache (`PipelineKey` over immutable state,
