@@ -750,6 +750,7 @@ fn void upload_helper_validation_faults() @test {
     TransferDiagnosticCapture capture;
     gpu::Device device = make_transfer_test_device(capture: &capture);
     defer gpu::destroy_device(&device)!!;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -764,6 +765,7 @@ fn void upload_helper_validation_faults() @test {
 
     char[16] short_data;
     uint before = capture.calls;
+    ulong helper_before = state.helper_counter;
     fault len_fault = @catch(gpu::upload_texture_data(
         device:      &device,
         dst:         texture,
@@ -787,6 +789,34 @@ fn void upload_helper_validation_faults() @test {
         resource_generation: texture.generation,
         resource_name:       "helper_upload_texture",
     );
+    assert(state.helper_counter == helper_before, "invalid texture length reserves no helper value");
+
+    before = capture.calls;
+    helper_before = state.helper_counter;
+    fault mip_fault = @catch(gpu::upload_texture_data(
+        device:      &device,
+        dst:         texture,
+        mip:         1,
+        data:        short_data[..],
+        next_stage:  gpu::Stage.COMPUTE_SHADER,
+        next_hazard: gpu::Hazard.SHADER_READ,
+        next_layout: gpu::TextureLayout.SHADER_READ,
+    ));
+    assert(mip_fault == gpu::INVALID_ARGUMENT, "invalid bare mip faults INVALID_ARGUMENT");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            mip_fault,
+        operation:           "upload_texture_data",
+        rejected_field:      "mip",
+        invariant:           "mip must exist in the texture mip chain",
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        resource_index:      texture.index,
+        resource_generation: texture.generation,
+        resource_name:       "helper_upload_texture",
+    );
+    assert(state.helper_counter == helper_before, "invalid bare mip reserves no helper value");
 
     gpu::BufferDesc buf_desc = {
         .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "helper_upload_buffer",
@@ -795,7 +825,70 @@ fn void upload_helper_validation_faults() @test {
     defer gpu::destroy_buffer(&device, buffer)!!;
 
     char[128] too_big;
+    char[] empty_data = {};
     before = capture.calls;
+    helper_before = state.helper_counter;
+    fault empty_fault = @catch(gpu::upload_buffer_data(
+        device:      &device,
+        dst:         buffer,
+        offset:      0,
+        data:        empty_data,
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+    ));
+    assert(empty_fault == gpu::INVALID_ARGUMENT, "empty upload faults INVALID_ARGUMENT");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            empty_fault,
+        operation:           "upload_buffer_data",
+        rejected_field:      "data",
+        invariant:           "upload data must not be empty",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: false,
+        resource_index:      0,
+        resource_generation: 0,
+        resource_name:       null,
+    );
+    assert(state.helper_counter == helper_before, "empty upload reserves no helper value");
+
+    gpu::BufferDesc no_transfer_buffer_desc = {
+        .size        = 64,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .debug_name  = "no_transfer_upload_buffer",
+    };
+    gpu::BufferHandle no_transfer_buffer = gpu::create_buffer(&device, &no_transfer_buffer_desc)!!;
+    defer gpu::destroy_buffer(&device, no_transfer_buffer)!!;
+    char[8] small_upload;
+    before = capture.calls;
+    helper_before = state.helper_counter;
+    fault buffer_usage_fault = @catch(gpu::upload_buffer_data(
+        device:      &device,
+        dst:         no_transfer_buffer,
+        offset:      0,
+        data:        small_upload[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+    ));
+    assert(buffer_usage_fault == gpu::INVALID_ARGUMENT, "buffer without transfer_dst faults INVALID_ARGUMENT");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            buffer_usage_fault,
+        operation:           "upload_buffer_data",
+        rejected_field:      "BufferDesc.usage",
+        invariant:           "destination buffer must include transfer_dst",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      no_transfer_buffer.index,
+        resource_generation: no_transfer_buffer.generation,
+        resource_name:       "no_transfer_upload_buffer",
+    );
+    assert(state.helper_counter == helper_before, "invalid buffer usage reserves no helper value");
+
+    before = capture.calls;
+    helper_before = state.helper_counter;
     fault bounds_fault = @catch(gpu::upload_buffer_data(
         device:      &device,
         dst:         buffer,
@@ -817,6 +910,50 @@ fn void upload_helper_validation_faults() @test {
         resource_index:      buffer.index,
         resource_generation: buffer.generation,
         resource_name:       "helper_upload_buffer",
+    );
+    assert(state.helper_counter == helper_before, "invalid buffer range reserves no helper value");
+
+    gpu::TextureDesc no_transfer_desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = UR_TEX,
+        .height     = UR_TEX,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled },
+        .debug_name = "no_transfer_upload_texture",
+    };
+    gpu::TextureHandle no_transfer_texture = gpu::create_texture(&device, &no_transfer_desc)!!;
+    defer gpu::destroy_texture(&device, no_transfer_texture)!!;
+    char[UR_TEX_BYTES] full_upload;
+    before = capture.calls;
+    helper_before = state.helper_counter;
+    fault texture_usage_fault = @catch(gpu::upload_texture_data(
+        device:      &device,
+        dst:         no_transfer_texture,
+        mip:         0,
+        data:        full_upload[..],
+        next_stage:  gpu::Stage.COMPUTE_SHADER,
+        next_hazard: gpu::Hazard.SHADER_READ,
+        next_layout: gpu::TextureLayout.SHADER_READ,
+    ));
+    assert(texture_usage_fault == gpu::INVALID_ARGUMENT, "texture without transfer_dst faults INVALID_ARGUMENT");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            texture_usage_fault,
+        operation:           "upload_texture_data",
+        rejected_field:      "TextureDesc.usage",
+        invariant:           "destination texture must include transfer_dst",
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        resource_index:      no_transfer_texture.index,
+        resource_generation: no_transfer_texture.generation,
+        resource_name:       "no_transfer_upload_texture",
+    );
+    assert(state.helper_counter == helper_before, "invalid texture usage reserves no helper value");
+    gpu::vk::TextureSlot* no_transfer_slot = state.textures.get(no_transfer_texture)!!;
+    assert(
+        gpu::vk::texture_layout(no_transfer_slot) == gpu::TextureLayout.UNDEFINED,
+        "invalid texture usage preserves the tracked layout"
     );
 
     char[8] readback_dest;
@@ -849,6 +986,24 @@ fn void upload_helper_validation_faults() @test {
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     char[UR_TEX_BYTES] full;
     gpu::TextureUploadDesc upload = { .texture = texture, .mip = 0 };
+    gpu::TextureUploadDesc invalid_mip_upload = { .texture = texture, .mip = 1 };
+    before = capture.calls;
+    fault desc_mip_fault = @catch(gpu::cmd_upload_texture(&cmd, &invalid_mip_upload, full[..]));
+    assert(desc_mip_fault == gpu::INVALID_ARGUMENT, "invalid descriptor mip faults INVALID_ARGUMENT");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            desc_mip_fault,
+        operation:           "cmd_upload_texture",
+        rejected_field:      "TextureUploadDesc.mip",
+        invariant:           "mip must exist in the texture mip chain",
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        resource_index:      texture.index,
+        resource_generation: texture.generation,
+        resource_name:       "helper_upload_texture",
+    );
+
     before = capture.calls;
     fault layout_fault = @catch(gpu::cmd_upload_texture(&cmd, &upload, full[..]));
     assert(layout_fault == gpu::INVALID_RESOURCE_STATE, "cmd upload into UNDEFINED layout faults INVALID_RESOURCE_STATE");

@@ -302,7 +302,7 @@ fn gpu::GpuSpan? readback_alloc(VkDeviceState* state, usz size, usz align, Timel
 
 <* Byte size of a texture-upload region with the copy-desc 0-defaults
    resolved. The copy command re-validates independently. *>
-fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc, ZString operation) @private {
+fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc, ZString operation, ZString rejected_field) @private {
     TextureSlot* slot = state.textures.get(desc.texture)!;
     if (desc.mip >= slot.mip_levels) {
         return report_contract_failure(
@@ -314,7 +314,7 @@ fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc,
             index:               desc.texture.index,
             generation:          desc.texture.generation,
             debug_name:          slot_name(&slot.debug_name[0]),
-            rejected_field:      "TextureUploadDesc.mip",
+            rejected_field:      rejected_field,
             invariant:           "mip must exist in the texture mip chain",
             backend_text:        null,
         )~;
@@ -326,11 +326,7 @@ fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc,
     return (usz)width * height * layers * format_texel_size(slot.format);
 }
 
-<* The caller supplies the timeline tag its staging range retires against. *>
-fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data, TimelineTag tag, ZString operation) @private {
-    CommandRecord* record = resolve_command(commands)!;
-    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+fn BufferSlot*? validate_upload_buffer(VkDeviceState* state, gpu::BufferHandle dst, usz offset, char[] data, ZString operation) @private {
     if (data.len == 0) {
         return report_contract_failure(
             state:               state,
@@ -377,6 +373,15 @@ fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle ds
             backend_text:        null,
         )~;
     }
+    return dst_slot;
+}
+
+<* The caller supplies the timeline tag its staging range retires against. *>
+fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data, TimelineTag tag, ZString operation) @private {
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    validate_upload_buffer(state, dst, offset, data, operation)!;
 
     gpu::GpuSpan staging = staging_alloc(
         state: state,
@@ -410,12 +415,17 @@ fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst,
     );
 }
 
-fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data, TimelineTag tag, ZString operation) @private {
+fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data, TimelineTag tag, ZString operation, ZString mip_field) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TextureSlot* slot = state.textures.get(desc.texture)!;
-    usz expected = texture_upload_bytes(state, desc, operation)!;
+    usz expected = texture_upload_bytes(
+        state:          state,
+        desc:           desc,
+        operation:      operation,
+        rejected_field: mip_field,
+    )!;
     if (data.len != expected) {
         return report_contract_failure(
             state:               state,
@@ -490,11 +500,12 @@ fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDes
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
     return cmd_upload_texture_impl(
-        commands: commands,
-        desc:     desc,
-        data:     data,
-        tag:      tag,
+        commands:  commands,
+        desc:      desc,
+        data:      data,
+        tag:       tag,
         operation: "cmd_upload_texture",
+        mip_field: "TextureUploadDesc.mip",
     );
 }
 
@@ -565,6 +576,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
+    validate_upload_buffer(state, dst, offset, data, "upload_buffer_data")!;
     ulong helper_value = 0;
     defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value);
     TimelineTag tag = { .kind = TimelineKind.HELPER };
@@ -635,7 +647,12 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     // Validate before recording: a fault after the entry barrier would leave
     // the tracked layout claiming a transition the GPU never ran.
     gpu::TextureUploadDesc probe = { .texture = dst, .mip = mip };
-    usz expected = texture_upload_bytes(state, &probe, "upload_texture_data")!;
+    usz expected = texture_upload_bytes(
+        state:          state,
+        desc:           &probe,
+        operation:      "upload_texture_data",
+        rejected_field: "mip",
+    )!;
     if (data.len != expected) {
         return report_contract_failure(
             state:               state,
@@ -648,6 +665,21 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
             debug_name:          slot_name(&slot.debug_name[0]),
             rejected_field:      "data",
             invariant:           "data length must match the selected texture mip",
+            backend_text:        null,
+        )~;
+    }
+    if (!slot.usage.transfer_dst) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "upload_texture_data",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               dst.index,
+            generation:          dst.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      "TextureDesc.usage",
+            invariant:           "destination texture must include transfer_dst",
             backend_text:        null,
         )~;
     }
@@ -681,11 +713,12 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
 
         gpu::TextureUploadDesc upload = { .texture = dst, .mip = mip };
         cmd_upload_texture_impl(
-            commands: &commands,
-            desc:     &upload,
-            data:     data,
-            tag:      tag,
+            commands:  &commands,
+            desc:      &upload,
+            data:      data,
+            tag:       tag,
             operation: "upload_texture_data",
+            mip_field: "mip",
         )!;
 
         gpu::TextureBarrier next_use = {
@@ -827,7 +860,12 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
 
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
     TextureSlot* slot = state.textures.get(src)!;
-    usz expected = texture_upload_bytes(state, &region, "readback_texture_data")!;
+    usz expected = texture_upload_bytes(
+        state:          state,
+        desc:           &region,
+        operation:      "readback_texture_data",
+        rejected_field: "mip",
+    )!;
     if (out_data.len != expected) {
         return report_contract_failure(
             state:               state,
@@ -1099,7 +1137,12 @@ fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu:
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
-    usz size = texture_upload_bytes(state, &region, "cmd_readback_texture")!;
+    usz size = texture_upload_bytes(
+        state:          state,
+        desc:           &region,
+        operation:      "cmd_readback_texture",
+        rejected_field: "mip",
+    )!;
     TextureSlot* slot = state.textures.get(src)!;
     if (!slot.usage.transfer_src) {
         return report_contract_failure(
