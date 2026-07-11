@@ -46,11 +46,55 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
             foreach (i, &target : desc.colors) {
                 TextureSlot* slot = state.textures.get(target.texture)!;
                 color_slots[i] = slot;
-                if (!slot.usage.color_attach) return gpu::INVALID_ARGUMENT~;
+                if (!slot.usage.color_attach) {
+                    return report_contract_failure(
+                        state:               state,
+                        operation:           "cmd_begin_render_pass",
+                        public_fault:        gpu::INVALID_ARGUMENT,
+                        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+                        has_public_identity: true,
+                        index:               target.texture.index,
+                        generation:          target.texture.generation,
+                        debug_name:          slot_name(&slot.debug_name[0]),
+                        rejected_field:      "TextureUsage.color_attach",
+                        invariant:           "color attachment must include color_attach usage",
+                        backend_text:        null,
+                    )~;
+                }
                 if (target.mip_level >= slot.mip_levels || target.array_layer >= slot.array_layers) return gpu::INVALID_ARGUMENT~;
                 MipExtent extent = texture_mip_extent(slot, target.mip_level);
-                if (desc.width > extent.width || desc.height > extent.height) return gpu::INVALID_ARGUMENT~;
-                if (effective_layout(record, slot, target.texture) != gpu::TextureLayout.COLOR_ATTACHMENT) return gpu::INVALID_RESOURCE_STATE~;
+                if (desc.width > extent.width || desc.height > extent.height) {
+                    ZString rejected_field = desc.width > extent.width
+                        ? "RenderPassDesc.width" : "RenderPassDesc.height";
+                    return report_contract_failure(
+                        state:               state,
+                        operation:           "cmd_begin_render_pass",
+                        public_fault:        gpu::INVALID_ARGUMENT,
+                        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+                        has_public_identity: true,
+                        index:               target.texture.index,
+                        generation:          target.texture.generation,
+                        debug_name:          slot_name(&slot.debug_name[0]),
+                        rejected_field:      rejected_field,
+                        invariant:           "render area must fit every color attachment mip",
+                        backend_text:        null,
+                    )~;
+                }
+                if (effective_layout(record, slot, target.texture) != gpu::TextureLayout.COLOR_ATTACHMENT) {
+                    return report_contract_failure(
+                        state:               state,
+                        operation:           "cmd_begin_render_pass",
+                        public_fault:        gpu::INVALID_RESOURCE_STATE,
+                        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+                        has_public_identity: true,
+                        index:               target.texture.index,
+                        generation:          target.texture.generation,
+                        debug_name:          slot_name(&slot.debug_name[0]),
+                        rejected_field:      "ColorTargetDesc.texture",
+                        invariant:           "color attachment must be in COLOR_ATTACHMENT layout",
+                        backend_text:        null,
+                    )~;
+                }
             }
         }
 
@@ -236,7 +280,12 @@ fn void? vk_cmd_draw(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
+    validate_pipeline_kind(
+        state:     state,
+        handle:    handle,
+        kind:      PipelineKind.GRAPHICS,
+        operation: "cmd_draw",
+    )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
         state:         state,
@@ -252,7 +301,12 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
+    validate_pipeline_kind(
+        state:     state,
+        handle:    handle,
+        kind:      PipelineKind.GRAPHICS,
+        operation: "cmd_draw_indexed",
+    )!;
     usz index_size = index_element_size(index_type);
     BufferSlot* buffer = resolve_index_span(
         state:      state,
@@ -278,7 +332,12 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
+    validate_pipeline_kind(
+        state:     state,
+        handle:    handle,
+        kind:      PipelineKind.GRAPHICS,
+        operation: "cmd_draw_indirect",
+    )!;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:    state,
         span:     &args,
@@ -314,7 +373,12 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
+    validate_pipeline_kind(
+        state:     state,
+        handle:    handle,
+        kind:      PipelineKind.GRAPHICS,
+        operation: "cmd_draw_indexed_indirect",
+    )!;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:    state,
         span:     &args,
@@ -342,7 +406,12 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
-    validate_pipeline_kind(state, handle, PipelineKind.GRAPHICS)!;
+    validate_pipeline_kind(
+        state:     state,
+        handle:    handle,
+        kind:      PipelineKind.GRAPHICS,
+        operation: "cmd_draw_indexed_indirect_count",
+    )!;
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:    state,

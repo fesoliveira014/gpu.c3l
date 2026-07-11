@@ -1077,6 +1077,13 @@ Backend failures from queue submission and idle waits use the same callback
 with `operation = "submit"` or `"wait_queue_idle"`, the unchanged public
 fault, and the native result text.
 
+Representative tranche B1 coverage adds command-list state, copy/fill and
+render-attachment validation; upload and readback planning; descriptor and
+sampler operations; and pipeline-cache I/O. Resource identity is included only
+after the corresponding public handle has been resolved successfully. The B1
+set is representative rather than exhaustive; later coverage work audits the
+remaining command, descriptor, queue, and WSI rejection sites.
+
 ```text
 cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) -> void?
 cmd_end_label(CommandList* commands) -> void?

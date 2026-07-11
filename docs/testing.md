@@ -217,6 +217,12 @@ synchronization, persistent-span, shader, and pipeline failures. It verifies
 unchanged faults and exactly-once callback parity. Backend-result coverage
 fabricates an unmapped `wait_queue_idle` result and asserts its operation,
 callback fields, fault, and stderr-fallback parity.
+Representative tranche B1 coverage adds command-list state, copy/fill,
+render-attachment, upload/readback, descriptor/sampler, and pipeline-cache
+failures. It asserts exact operation and field context, unchanged fault
+identity, exactly-once delivery, and omission of public resource identity until
+handle resolution succeeds. B1 is not the completeness gate; remaining
+command/descriptor and queue/WSI sites are covered by subsequent tranches.
 Successful command tests exercise the actual `submit`
 and `wait_queue_idle` call sites without injecting a submit failure.
 

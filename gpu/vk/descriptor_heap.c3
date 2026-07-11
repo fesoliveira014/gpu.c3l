@@ -591,12 +591,40 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
     TextureSlot* texture_slot = state.textures.get(texture)!;
     // Descriptors only make sense for shader-visible textures; anything else
     // would return an index whose heap slots are never written.
-    if (!texture_slot.usage.sampled && !texture_slot.usage.storage) return gpu::INVALID_ARGUMENT~;
+    if (!texture_slot.usage.sampled && !texture_slot.usage.storage) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_texture_descriptor",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               texture.index,
+            generation:          texture.generation,
+            debug_name:          slot_name(&texture_slot.debug_name[0]),
+            rejected_field:      "TextureDesc.usage",
+            invariant:           "texture must have sampled or storage usage",
+            backend_text:        null,
+        )~;
+    }
 
     uint ready_retires = count_ready_texture_retires(state) ?? 0;
     uint headroom = heap.texture_free_count + ready_retires
         + (uint)heap.texture_cells.len - heap.texture_next_new;
-    if (headroom == 0) return gpu::DESCRIPTOR_HEAP_FULL~;
+    if (headroom == 0) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_texture_descriptor",
+            public_fault:        gpu::DESCRIPTOR_HEAP_FULL,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "DeviceDesc.texture_descriptor_capacity",
+            invariant:           "must exceed live and retiring texture descriptors",
+            backend_text:        null,
+        )~;
+    }
 
     CachedViewCreation creation;
     vk::ImageView image_view = resolve_texture_view_tracked(
@@ -756,7 +784,22 @@ fn void? vk_destroy_texture_descriptor(gpu::Device* device, gpu::TextureIndex in
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    TextureDescriptorCell* cell = texture_cell_get(&state.heap, index)!;
+    if (catch f = texture_cell_get(&state.heap, index)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "destroy_texture_descriptor",
+            public_fault:        f,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "index",
+            invariant:           "descriptor index must identify a live generation",
+            backend_text:        null,
+        )~;
+    }
+    TextureDescriptorCell* cell = texture_cell_get(&state.heap, index)!!;
     cell.used = false;
     cell.generation = bump_generation(cell.generation);
     state.heap.texture_retire.push((uint)index.slot, retire_timeline_value(state));
@@ -838,13 +881,29 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
         .set_max_lod(desc.max_lod);
 
     vk::Sampler sampler;
-    check(vk::create_sampler(state.device, &sampler_info, null, &sampler))!;
+    check_backend_result(
+        state:     state,
+        operation: "create_sampler",
+        result:    vk::create_sampler(state.device, &sampler_info, null, &sampler),
+    )!;
 
     if (try index = publish_sampler(state, sampler)) {
         return index;
     }
     vk::destroy_sampler(state.device, sampler, null);
-    return gpu::DESCRIPTOR_HEAP_FULL~;
+    return report_contract_failure(
+        state:               state,
+        operation:           "create_sampler",
+        public_fault:        gpu::DESCRIPTOR_HEAP_FULL,
+        resource_kind:       gpu::DebugResourceKind.SAMPLER,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+        debug_name:          null,
+        rejected_field:      "DeviceDesc.sampler_descriptor_capacity",
+        invariant:           "must exceed live and retiring samplers",
+        backend_text:        null,
+    )~;
 }
 
 fn void? vk_destroy_sampler(gpu::Device* device, gpu::SamplerIndex index) @private {
@@ -853,7 +912,22 @@ fn void? vk_destroy_sampler(gpu::Device* device, gpu::SamplerIndex index) @priva
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    SamplerDescriptorCell* cell = sampler_cell_get(&state.heap, index)!;
+    if (catch f = sampler_cell_get(&state.heap, index)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "destroy_sampler",
+            public_fault:        f,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "index",
+            invariant:           "sampler index must identify a live generation",
+            backend_text:        null,
+        )~;
+    }
+    SamplerDescriptorCell* cell = sampler_cell_get(&state.heap, index)!!;
     cell.used = false;
     cell.generation = bump_generation(cell.generation);
     state.heap.sampler_retire.push((uint)index.slot, retire_timeline_value(state));
