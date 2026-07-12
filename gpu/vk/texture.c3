@@ -280,11 +280,51 @@ fn void set_texture_layout(TextureSlot* slot, gpu::TextureLayout layout) {
     slot.current_layout.store((int)layout, AtomicOrdering.RELAXED);
 }
 
+fn void? check_texture_view_backend_result(
+    VkDeviceState* state,
+    ZString operation,
+    gpu::TextureHandle texture,
+    TextureSlot* slot,
+    vk::Result result,
+) {
+    if (operation == null) return check(result);
+    bool stderr_fallback = state.debug_callback == null;
+    fault public_fault = @catch(map_result(result, stderr_fallback));
+    if (!public_fault) return;
+    if (!stderr_fallback) {
+        gpu::DebugMessage message = {
+            .severity             = gpu::DebugMessageSeverity.ERROR,
+            .category             = { .backend },
+            .operation            = operation,
+            .has_fault            = true,
+            .public_fault         = public_fault,
+            .resource             = {
+                .kind                = gpu::DebugResourceKind.TEXTURE,
+                .has_public_identity = texture.is_valid(),
+                .index               = texture.index,
+                .generation          = texture.generation,
+                .debug_name          = slot_name(&slot.debug_name[0]),
+            },
+            .backend_text         = backend_result_text(result),
+            .validation_id_number = (int)result,
+        };
+        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    }
+    return public_fault~;
+}
+
 <* Resolve a view desc to an image view: null/zero desc (or the explicit full
    range) is the default view; anything else is normalized, validated, and
    get-or-created in the slot's view cache. Cached views die with the texture.
    Format reinterpretation is out of scope. *>
-fn vk::ImageView? resolve_texture_view_tracked(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view, CachedViewCreation* creation) @private {
+fn vk::ImageView? resolve_texture_view_tracked(
+    VkDeviceState* state,
+    TextureSlot* slot,
+    gpu::TextureHandle texture,
+    gpu::TextureViewDesc* view,
+    ZString operation,
+    CachedViewCreation* creation,
+) @private {
     *creation = {};
     if (view == null) return slot.default_view;
     if (view.format != gpu::Format.UNDEFINED && view.format != slot.format) return gpu::INVALID_ARGUMENT~;
@@ -323,7 +363,13 @@ fn vk::ImageView? resolve_texture_view_tracked(VkDeviceState* state, TextureSlot
                 .layer_count      = layer_count,
             });
         vk::ImageView image_view;
-        check(vk::create_image_view(state.device, &view_info, null, &image_view))!;
+        check_texture_view_backend_result(
+            state:     state,
+            operation: operation,
+            texture:   texture,
+            slot:      slot,
+            result:    vk::create_image_view(state.device, &view_info, null, &image_view),
+        )!;
         creation.cell = cached;
         creation.previous = *cached;
         *cached = {
@@ -337,16 +383,31 @@ fn vk::ImageView? resolve_texture_view_tracked(VkDeviceState* state, TextureSlot
         };
         return image_view;
     }
-    return gpu::SLOT_TABLE_FULL~;
+    if (operation == null) return gpu::SLOT_TABLE_FULL~;
+    return report_contract_failure(
+        state:               state,
+        operation:           operation,
+        public_fault:        gpu::SLOT_TABLE_FULL,
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        index:               texture.index,
+        generation:          texture.generation,
+        debug_name:          slot_name(&slot.debug_name[0]),
+        rejected_field:      "texture view cache",
+        invariant:           "texture must have free cached-view capacity",
+        backend_text:        null,
+    )~;
 }
 
 fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view) {
     CachedViewCreation creation;
     return resolve_texture_view_tracked(
-        state:    state,
-        slot:     slot,
-        view:     view,
-        creation: &creation,
+        state:     state,
+        slot:      slot,
+        texture:   {},
+        view:      view,
+        operation: null,
+        creation:  &creation,
     );
 }
 

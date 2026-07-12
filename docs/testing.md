@@ -229,6 +229,15 @@ failures. It asserts exact operation and field context, unchanged fault
 identity, exactly-once delivery, and omission of public resource identity until
 handle resolution succeeds. B1 is not the completeness gate; remaining
 command/descriptor and queue/WSI sites are covered by subsequent tranches.
+
+Descriptor/cache completeness coverage adds batch rollback after cached-view
+creation, stale and exhausted descriptor identities, retire-query results,
+image-view backend results, descriptor bootstrap failures, pipeline-cache
+INCOMPLETE, a compatible-header corrupt-blob integration, and a deterministic
+cache-create seam whose retryable first attempt and successful empty second
+attempt emit no terminal diagnostic. Pure range and lookup helpers remain
+fault-only; operation-aware result helpers own specialized backend mapping and
+emit exactly once with stable operation context.
 Successful command tests exercise the actual `submit`
 and `wait_queue_idle` call sites without injecting a submit failure.
 
