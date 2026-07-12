@@ -122,13 +122,7 @@ fn void? check_wait_backend_result(
     if (public_fault != gpu::WAIT_TIMEOUT) {
         return check_backend_result(state, operation, result);
     }
-    return report_specialized_backend_failure(
-        state:        state,
-        operation:    operation,
-        public_fault: public_fault,
-        backend_text: "Vulkan wait timed out",
-        result:       result,
-    );
+    return gpu::WAIT_TIMEOUT~;
 }
 
 fn void? check_virtual_allocate_backend_result(

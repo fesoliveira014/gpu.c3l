@@ -630,9 +630,7 @@ fn void frame_backend_result_helpers_report_without_fault_drift() @test {
         result:    vk::Result.TIMEOUT,
     ));
     assert(timeout == gpu::WAIT_TIMEOUT, "operation-aware wait keeps WAIT_TIMEOUT");
-    assert(capture.calls == before + 1, "wait timeout emits exactly once");
-    assert(capture.last.validation_id_number == (int)vk::Result.TIMEOUT,
-        "wait timeout carries the raw backend result");
+    assert(capture.calls == before, "expected wait timeout remains silent");
     before = capture.calls;
     fault mismatch = @catch(vk::report_unretired_frame(state));
     assert(mismatch == gpu::INVALID_RESOURCE_STATE,

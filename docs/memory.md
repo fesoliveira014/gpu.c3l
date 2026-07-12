@@ -440,9 +440,11 @@ allocation or new atomic operation to the allocation path.
 Retirement waits and counter queries complete before frame state is committed.
 A timeout or backend query failure therefore leaves the frame index, arena
 cursor, retirement counters, pool accounting, and output token unchanged.
-Structured diagnostics identify the public operation but do not represent a
-`FrameToken` as slot identity. Alignment validation precedes zero-size
-validation when both inputs are invalid.
+Expected retire-wait timeouts return `WAIT_TIMEOUT` silently for retry,
+matching other expected semaphore/fence timeout paths. Non-timeout backend
+failures emit a structured diagnostic identifying the public operation but do
+not represent a `FrameToken` as slot identity. Alignment validation
+precedes zero-size validation when both inputs are invalid.
 
 ```text
 FrameArenaState
