@@ -1341,17 +1341,17 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
     capture = {
         .calls              = capture.calls,
         .expected_fault     = gpu::DEVICE_LOST,
-        .expected_operation = "create_sampler",
+        .expected_operation = "create_texture_descriptors",
         .expected_text      = "Vulkan device lost",
         .expected_result    = (int)vk::Result.ERROR_DEVICE_LOST,
     };
-    fault sampler_retire = @catch(gpu::vk::check_descriptor_retire_backend_result(
+    fault batch_retire = @catch(gpu::vk::check_descriptor_retire_backend_result(
         state:     &state,
-        operation: "create_sampler",
+        operation: "create_texture_descriptors",
         result:    vk::Result.ERROR_DEVICE_LOST,
     ));
-    assert(sampler_retire == gpu::DEVICE_LOST && capture.calls == 4 && capture.matched,
-        "sampler-retire query reports its backend fault once");
+    assert(batch_retire == gpu::DEVICE_LOST && capture.calls == 4 && capture.matched,
+        "batch texture-retire query reports its backend fault once");
 
     gpu::TextureHandle texture = { .index = 7, .generation = 11 };
     vk::TextureSlot texture_slot;

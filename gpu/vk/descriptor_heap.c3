@@ -577,15 +577,11 @@ fn void drain_texture_retire_prefix(VkDeviceState* state, uint ready_count) @pri
 
 <* Recycles ready ring slots under the caller's lock; the ready handles land
    in `drained` for destruction after unlock. Returns the count. *>
-fn uint? drain_sampler_retire(VkDeviceState* state, vk::Sampler[] drained) @private {
+fn uint drain_sampler_retire(VkDeviceState* state, vk::Sampler[] drained) @private {
     DescriptorHeapState* heap = &state.heap;
     if (heap.sampler_retire.count == 0) return 0;
     ulong current = 0;
-    check_descriptor_retire_backend_result(
-        state:     state,
-        operation: "create_sampler",
-        result:    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current),
-    )!;
+    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
     uint drained_count = 0;
     while (heap.sampler_retire.count > 0) {
         DescriptorRetireEntry* entry = &heap.sampler_retire.entries[heap.sampler_retire.head];
@@ -1073,7 +1069,7 @@ fn gpu::SamplerIndex? publish_sampler(VkDeviceState* state, vk::Sampler sampler)
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
 
-        drained_count = drain_sampler_retire(state, drained)!;
+        drained_count = drain_sampler_retire(state, drained);
         uint slot;
         if (heap.sampler_free_count > 0) {
             slot = heap.sampler_free[--heap.sampler_free_count];
