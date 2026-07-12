@@ -11,6 +11,7 @@ import std::collections::map;
 
 alias PersistentAllocMap = HashMap{usz, vma::VirtualAllocation};
 alias QueueSubmit2Fn @private = fn vk::Result (vk::Queue, uint, vk::SubmitInfo2*, vk::Fence);
+alias FrameCounterQueryFn @private = fn vk::Result (vk::Device, vk::Semaphore, ulong*);
 
 const gpu::BufferUsage PERSISTENT_ARENA_USAGE = {
     .transfer_src, .transfer_dst, .uniform, .storage, .addressable, .indirect, .index, .shared_queues,
@@ -117,11 +118,63 @@ fn void destroy_frame_resources(VkDeviceState* state) @private {
     }
 }
 
-// True once the device timeline has reached the slot's recorded value.
-fn bool frame_arena_retired(VkDeviceState* state, FrameArenaState* slot) {
+fn vk::Result real_frame_counter_query(vk::Device device, vk::Semaphore semaphore, ulong* value) @private {
+    return vk::get_semaphore_counter_value(device, semaphore, value);
+}
+
+fn ulong? frame_timeline_value_with_query(
+    VkDeviceState* state,
+    ZString operation,
+    FrameCounterQueryFn query_fn,
+) @private {
     ulong value = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &value);
+    vk::Result result = query_fn(state.device, state.frame_timeline, &value);
+    if (operation == null) {
+        check(result)!;
+        return value;
+    }
+    check_backend_result(
+        state:     state,
+        operation: operation,
+        result:    result,
+    )!;
+    return value;
+}
+
+// True once the device timeline has reached the slot's recorded value.
+fn bool? frame_arena_retired_with_query(
+    VkDeviceState* state,
+    FrameArenaState* slot,
+    ZString operation,
+    FrameCounterQueryFn query_fn,
+) @private {
+    ulong value = frame_timeline_value_with_query(
+        state:     state,
+        operation: operation,
+        query_fn:  query_fn,
+    )!;
     return value >= slot.frame_timeline_value;
+}
+
+fn void? report_unretired_frame(VkDeviceState* state) @private {
+    if (state.debug_callback != null) {
+        gpu::DebugMessage message = {
+            .severity     = gpu::DebugMessageSeverity.ERROR,
+            .category     = { .backend },
+            .operation    = "begin_frame",
+            .has_fault    = true,
+            .public_fault = gpu::INVALID_RESOURCE_STATE,
+            .resource     = {
+                .kind                = gpu::DebugResourceKind.FRAME,
+                .has_public_identity = false,
+            },
+            .rejected_field = "Device.frame_state",
+            .invariant      = "the selected frame arena must be retired after its wait",
+            .backend_text   = "frame timeline remained below the waited retirement value",
+        };
+        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    }
+    return gpu::INVALID_RESOURCE_STATE~;
 }
 
 <* In-frame and off-frame-pending retires wait for the next end_frame value;
@@ -134,14 +187,49 @@ fn ulong retire_timeline_value(VkDeviceState* state) {
 <* Reset an arena slot's cursor. Rejects if the slot has not yet retired. *>
 fn void? reset_frame_arena(VkDeviceState* state, uint index) {
     FrameArenaState* slot = &state.frame_arenas[index];
-    if (!frame_arena_retired(state, slot)) return gpu::INVALID_RESOURCE_STATE~;
+    if (!frame_arena_retired_with_query(
+        state:     state,
+        slot:      slot,
+        operation: null,
+        query_fn:  &real_frame_counter_query,
+    )!) {
+        return gpu::INVALID_RESOURCE_STATE~;
+    }
     slot.cursor.store(0, AtomicOrdering.RELAXED);
 }
 
-fn void? vk_begin_frame(gpu::Device* device, gpu::FrameToken* out_frame) @private {
+fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* out_frame, FrameCounterQueryFn query_fn) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
-    if (state.frame_active) return gpu::INVALID_RESOURCE_STATE~;
-    if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
+    if (state.frame_active) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "begin_frame",
+            public_fault:        gpu::INVALID_RESOURCE_STATE,
+            resource_kind:       gpu::DebugResourceKind.FRAME,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "Device.frame_state",
+            invariant:           "no frame may already be active",
+            backend_text:        null,
+        )~;
+    }
+    if (boundary_blocked(state)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "begin_frame",
+            public_fault:        gpu::INVALID_RESOURCE_STATE,
+            resource_kind:       gpu::DebugResourceKind.FRAME,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "Device.frame_state",
+            invariant:           "no Tier S or Tier C call may cross a frame boundary",
+            backend_text:        null,
+        )~;
+    }
     // WAIT_TIMEOUT must leave frame_index untouched so retry is clean.
     uint next_index = (state.frame_index + 1) % state.frames_in_flight;
     FrameArenaState* slot = &state.frame_arenas[next_index];
@@ -152,19 +240,31 @@ fn void? vk_begin_frame(gpu::Device* device, gpu::FrameToken* out_frame) @privat
             .set_semaphore_count(1)
             .set_semaphores((&state.frame_timeline)[:1])
             .set_values((&wait_value)[:1]);
-        check_wait(vk::wait_semaphores(state.device, &wait_info, 1_000_000_000))!;
+        check_wait_backend_result(
+            state:     state,
+            operation: "begin_frame",
+            result:    vk::wait_semaphores(state.device, &wait_info, 1_000_000_000),
+        )!;
     }
-    state.frame_index = next_index;
 
+    if (!frame_arena_retired_with_query(
+        state:     state,
+        slot:      slot,
+        operation: "begin_frame",
+        query_fn:  query_fn,
+    )!) {
+        return report_unretired_frame(state);
+    }
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         // The host wait above proved the timeline reached this value.
         if (slot.frame_timeline_value > state.signaled_shadow) state.signaled_shadow = slot.frame_timeline_value;
         deferred_drain(state);
+        state.frame_index = next_index;
     }
 
-    reset_frame_arena(state, state.frame_index)!;
+    slot.cursor.store(0, AtomicOrdering.RELAXED);
     release_commands_for_frame(state, state.frame_index);
     // Only pools dirtied since this slot last reset pay
     // the driver call; idle contexts cost nothing per frame.
@@ -174,7 +274,11 @@ fn void? vk_begin_frame(gpu::Device* device, gpu::FrameToken* out_frame) @privat
         if (!cell.used) continue;
         PoolDirtyMask* dirty = &cell.value.pool_dirty[state.frame_index];
         if (dirty.graphics) {
-            check(vk::reset_command_pool(state.device, cell.value.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+            check_backend_result(
+                state:     state,
+                operation: "begin_frame",
+                result:    vk::reset_command_pool(state.device, cell.value.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0),
+            )!;
             dirty.graphics = false;
             state.pools_reset_last_frame++;
         } else {
@@ -182,7 +286,11 @@ fn void? vk_begin_frame(gpu::Device* device, gpu::FrameToken* out_frame) @privat
         }
         if (cell.value.compute_pools_distinct) {
             if (dirty.compute) {
-                check(vk::reset_command_pool(state.device, cell.value.compute_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+                check_backend_result(
+                    state:     state,
+                    operation: "begin_frame",
+                    result:    vk::reset_command_pool(state.device, cell.value.compute_pools[state.frame_index], (vk::CommandPoolResetFlags)0),
+                )!;
                 dirty.compute = false;
                 state.pools_reset_last_frame++;
             } else {
@@ -190,7 +298,11 @@ fn void? vk_begin_frame(gpu::Device* device, gpu::FrameToken* out_frame) @privat
             }
         }
         if (dirty.transfer) {
-            check(vk::reset_command_pool(state.device, cell.value.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0))!;
+            check_backend_result(
+                state:     state,
+                operation: "begin_frame",
+                result:    vk::reset_command_pool(state.device, cell.value.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0),
+            )!;
             dirty.transfer = false;
             state.pools_reset_last_frame++;
         } else {
@@ -225,30 +337,107 @@ fn FrameArenaRange? frame_arena_range(usz cursor, usz capacity, usz size, usz al
     };
 }
 
-fn VkDeviceState*? resolve_frame_token(gpu::FrameToken* frame) @private {
+fn void? vk_begin_frame(gpu::Device* device, gpu::FrameToken* out_frame) @private {
+    return begin_frame_with_counter_query(device, out_frame, &real_frame_counter_query);
+}
+
+fn VkDeviceState*? resolve_frame_token(gpu::FrameToken* frame, ZString operation) @private {
     if (frame == null || frame.device == null || frame.generation == 0) return gpu::INVALID_HANDLE~;
     if (frame.device.backend_state == null) return gpu::INVALID_HANDLE~;
     VkDeviceState* state = (VkDeviceState*)frame.device.backend_state;
-    if (!state.frame_active || state.active_frame_generation != frame.generation) return gpu::INVALID_HANDLE~;
+    if (!state.frame_active || state.active_frame_generation != frame.generation) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_HANDLE,
+            resource_kind:       gpu::DebugResourceKind.FRAME,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "FrameToken.generation",
+            invariant:           "must identify the active frame generation",
+            backend_text:        null,
+        )~;
+    }
     return state;
 }
 
 <* Lock-free CAS bump: concurrent callers get disjoint, aligned spans. *>
 fn gpu::GpuSpan? vk_alloc_frame_span(gpu::FrameToken* frame, usz size, usz align) @private {
-    VkDeviceState* state = resolve_frame_token(frame)!;
+    VkDeviceState* state = resolve_frame_token(frame, "alloc_frame_span")!;
     enter_tracked(state);
     defer exit_tracked(state);
-    if (!state.frame_active || state.active_frame_generation != frame.generation) return gpu::INVALID_HANDLE~;
+    if (!state.frame_active || state.active_frame_generation != frame.generation) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "alloc_frame_span",
+            public_fault:        gpu::INVALID_HANDLE,
+            resource_kind:       gpu::DebugResourceKind.FRAME,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "FrameToken.generation",
+            invariant:           "must remain the active frame generation",
+            backend_text:        null,
+        )~;
+    }
+    if (!gpu::is_pow2(align)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "alloc_frame_span",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.FRAME,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "align",
+            invariant:           "must be a nonzero power of two",
+            backend_text:        null,
+        )~;
+    }
+    if (size == 0) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "alloc_frame_span",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.FRAME,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "size",
+            invariant:           "must be greater than zero",
+            backend_text:        null,
+        )~;
+    }
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
     usz old = slot.cursor.load(AtomicOrdering.RELAXED);
     while (true) {
-        FrameArenaRange range = frame_arena_range(
+        FrameArenaRange? range = frame_arena_range(
             cursor: old,
             capacity: slot.size,
             size: size,
             align: align,
-        )!;
+        );
+        if (catch range_fault = range) {
+            return report_contract_failure(
+                state:               state,
+                operation:           "alloc_frame_span",
+                public_fault:        range_fault,
+                resource_kind:       gpu::DebugResourceKind.FRAME,
+                has_public_identity: false,
+                index:               0,
+                generation:          0,
+                debug_name:          null,
+                rejected_field:      "size",
+                invariant:           "the aligned allocation must fit the current frame arena",
+                backend_text:        null,
+            )~;
+        }
         usz seen = mem::compare_exchange(
             &slot.cursor.data,
             old,
@@ -285,7 +474,16 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
     if (wait_infos.len > 0) submit = submit.set_wait_semaphore_infos(wait_infos);
     mutex.lock()!!;
     defer mutex.unlock();
-    check(submit_fn(queue, 1, &submit, (vk::Fence)null))!;
+    check_backend_result(
+        state:     state,
+        operation: "end_frame",
+        result:    submit_fn(
+            queue,
+            1,
+            &submit,
+            (vk::Fence)null,
+        ),
+    )!;
     state.submit_stats.empty_signal_submits++;
 }
 
@@ -296,8 +494,22 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
    the frame value implies every queue finished. Off-frame graphics submits
    need no flag — this signal is queue-ordered behind them. *>
 fn void? end_frame_with_submit(gpu::FrameToken* frame, QueueSubmit2Fn submit_fn) @private {
-    VkDeviceState* state = resolve_frame_token(frame)!;
-    if (boundary_blocked(state)) return gpu::INVALID_RESOURCE_STATE~;
+    VkDeviceState* state = resolve_frame_token(frame, "end_frame")!;
+    if (boundary_blocked(state)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "end_frame",
+            public_fault:        gpu::INVALID_RESOURCE_STATE,
+            resource_kind:       gpu::DebugResourceKind.FRAME,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "Device.frame_state",
+            invariant:           "no Tier S or Tier C call may cross a frame boundary",
+            backend_text:        null,
+        )~;
+    }
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
     // frame_timeline receives exactly one signal per frame (counter + 1),
@@ -466,7 +678,11 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
     };
     vma::VirtualAllocation allocation;
     vk::DeviceSize offset;
-    check_virtual_allocate_result(arena.virtual_block.allocate(&create_info, &allocation, &offset))!;
+    check_virtual_allocate_backend_result(
+        state:     state,
+        operation: "alloc_persistent_span",
+        result:    arena.virtual_block.allocate(&create_info, &allocation, &offset),
+    )!;
 
     arena.live.set((usz)offset, allocation);
     return (gpu::GpuSpan){
@@ -486,14 +702,40 @@ fn void? vk_free_persistent_span(gpu::Device* device, gpu::GpuSpan span) @privat
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     PersistentArenaState* arena = &state.persistent_arena;
-    if ((ulong)span.buffer != (ulong)arena.backing_buffer) return gpu::INVALID_ARGUMENT~;
+    if ((ulong)span.buffer != (ulong)arena.backing_buffer) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "free_persistent_span",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.PERSISTENT_SPAN,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "GpuSpan.buffer",
+            invariant:           "must identify this device's persistent arena backing buffer",
+            backend_text:        null,
+        )~;
+    }
 
     if (try allocation = arena.live.get(span.offset)) {
         arena.virtual_block.free(allocation);
         arena.live.remove(span.offset)!;
         return;
     }
-    return gpu::INVALID_HANDLE~;
+    return report_contract_failure(
+        state:               state,
+        operation:           "free_persistent_span",
+        public_fault:        gpu::INVALID_HANDLE,
+        resource_kind:       gpu::DebugResourceKind.PERSISTENT_SPAN,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+        debug_name:          null,
+        rejected_field:      "GpuSpan.offset",
+        invariant:           "must identify a live persistent allocation",
+        backend_text:        null,
+    )~;
 }
 
 fn gpu::PersistentArenaStats? vk_get_persistent_stats(gpu::Device* device) @private {

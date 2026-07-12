@@ -106,6 +106,7 @@ fn void resource_result_mapping_is_specific() @test {
     fault pool_fragmentation = @catch(gpu::vk::check_descriptor_pool_create_result(vk::Result.ERROR_FRAGMENTATION));
     fault fragmented_pool = @catch(gpu::vk::check_descriptor_allocate_result(vk::Result.ERROR_FRAGMENTED_POOL));
     fault arena = @catch(gpu::vk::check_virtual_allocate_result(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY));
+    fault pure_arena = gpu::vk::virtual_allocate_result_fault(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY);
 
     assert(format == gpu::UNSUPPORTED_FEATURE, "unsupported image format is a capability result");
     assert(usage == gpu::UNSUPPORTED_FEATURE, "unsupported image usage is a capability result");
@@ -115,6 +116,7 @@ fn void resource_result_mapping_is_specific() @test {
     assert(pool_fragmentation == gpu::DESCRIPTOR_HEAP_FULL, "descriptor pool fragmentation is heap full");
     assert(fragmented_pool == gpu::DESCRIPTOR_HEAP_FULL, "fragmented descriptor allocation is heap full");
     assert(arena == gpu::ARENA_FULL, "virtual block exhaustion is arena full");
+    assert(pure_arena == arena, "legacy and context-aware virtual allocation share one taxonomy");
 }
 
 fn void pipeline_and_cache_result_mapping_preserves_fatal_faults() @test {
@@ -146,5 +148,9 @@ fn void pipeline_and_cache_result_mapping_preserves_fatal_faults() @test {
 
 fn void wait_timeout_mapping_stays_retryable() @test {
     fault timeout = @catch(gpu::vk::check_wait(vk::Result.TIMEOUT));
+    fault pure_timeout = gpu::vk::wait_result_fault(vk::Result.TIMEOUT);
+    fault pure_device_lost = gpu::vk::wait_result_fault(vk::Result.ERROR_DEVICE_LOST);
     assert(timeout == gpu::WAIT_TIMEOUT, "bounded wait timeout remains retryable");
+    assert(pure_timeout == timeout, "legacy and context-aware waits share one timeout taxonomy");
+    assert(pure_device_lost == gpu::DEVICE_LOST, "pure wait mapping preserves generic device loss");
 }

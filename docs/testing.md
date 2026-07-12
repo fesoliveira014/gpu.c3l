@@ -223,6 +223,14 @@ failures. It asserts exact operation and field context, unchanged fault
 identity, exactly-once delivery, and omission of public resource identity until
 handle resolution succeeds. B1 is not the completeness gate; remaining
 command/descriptor and queue/WSI sites are covered by subsequent tranches.
+
+Frame/persistent diagnostic tests inject retirement-query and end-signal
+backend failures, exercise real virtual-arena exhaustion, and cover double
+begin, boundary quiescence, alignment-before-size precedence, stale tokens,
+wrong backing buffers, and double free. They assert unchanged faults,
+exactly-once delivery, raw backend results, absent public identity, and
+mutation-free retry state. Pure range and direct reset helpers remain
+fault-only when no public operation context is supplied.
 Successful command tests exercise the actual `submit`
 and `wait_queue_idle` call sites without injecting a submit failure.
 

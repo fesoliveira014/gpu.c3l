@@ -437,6 +437,12 @@ while active faults `INVALID_RESOURCE_STATE` before changing frame state. This
 is particularly important with one frame in flight, where the next slot is the
 active slot itself. Tokens are stack-only, at most 16 bytes, and add no heap
 allocation or new atomic operation to the allocation path.
+Retirement waits and counter queries complete before frame state is committed.
+A timeout or backend query failure therefore leaves the frame index, arena
+cursor, retirement counters, pool accounting, and output token unchanged.
+Structured diagnostics identify the public operation but do not represent a
+`FrameToken` as slot identity. Alignment validation precedes zero-size
+validation when both inputs are invalid.
 
 ```text
 FrameArenaState
@@ -514,6 +520,11 @@ semaphores, wait for completion, and keep each span live until all referencing
 work retires. `free_persistent_span` is valid only after that retirement. The
 arena and its spans remain scoped to the single supported live `Device`;
 multi-device support is outside the contract.
+Persistent virtual-allocation exhaustion keeps the `ARENA_FULL` fault and
+reports the originating backend result. A free whose buffer is not the arena
+backing faults `INVALID_ARGUMENT`; an unknown or already-freed offset faults
+`INVALID_HANDLE`. Neither case claims public identity because persistent spans
+are value ranges, not generation-checked public slots.
 
 ```text
 PersistentArenaState
