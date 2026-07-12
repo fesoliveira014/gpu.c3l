@@ -7,6 +7,8 @@ import std::thread;
 import std::core::mem;
 import std::hash::fnv64a;
 
+alias PipelineCacheCreateFn @private = fn vk::Result (void*, vk::Device, vk::PipelineCacheCreateInfo*, vk::PipelineCache*);
+
 // Descriptor-keyed pipeline dedup cache: entries own the vk::Pipeline,
 // refcounted by the slots that alias them; layouts are device-owned and
 // shared. Monomorphic table, same c3c 0.8.0 rationale as PipelineTable.
@@ -69,6 +71,109 @@ struct ComputeLayoutEntry {
 struct ComputeLayoutCache {
     ComputeLayoutEntry[] entries;
     uint                 count;
+}
+
+struct PipelineCacheCreateOps @private {
+    void*                 user_data;
+    PipelineCacheCreateFn create;
+}
+
+fn fault report_pipeline_cache_backend_failure(
+    VkDeviceState* state,
+    ZString operation,
+    fault public_fault,
+    ZString backend_text,
+    int backend_result,
+) {
+    if (state.debug_callback != null) {
+        gpu::DebugMessage message = {
+            .severity             = gpu::DebugMessageSeverity.ERROR,
+            .category             = { .backend },
+            .operation            = operation,
+            .has_fault            = true,
+            .public_fault         = public_fault,
+            .backend_text         = backend_text,
+            .validation_id_number = backend_result,
+        };
+        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    }
+    return public_fault;
+}
+
+fn void? check_pipeline_cache_terminal_result(
+    VkDeviceState* state,
+    ZString operation,
+    vk::Result result,
+) {
+    return check_backend_result(state, operation, result);
+}
+
+fn void? check_pipeline_cache_data_backend_result(
+    VkDeviceState* state,
+    ZString operation,
+    vk::Result result,
+) {
+    if (result != vk::Result.INCOMPLETE) {
+        return check_pipeline_cache_terminal_result(state, operation, result);
+    }
+    return report_pipeline_cache_backend_failure(
+        state:          state,
+        operation:      operation,
+        public_fault:   gpu::INVALID_ARGUMENT,
+        backend_text:   "Vulkan returned incomplete pipeline cache data",
+        backend_result: (int)result,
+    )~;
+}
+
+fn vk::Result create_pipeline_cache_real(
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCacheCreateInfo* info,
+    vk::PipelineCache* out_cache,
+) @private {
+    return vk::create_pipeline_cache(device, info, null, out_cache);
+}
+
+fn PipelineCacheCreateOps pipeline_cache_create_ops_real() @private {
+    return { .create = &create_pipeline_cache_real };
+}
+
+fn void? create_driver_pipeline_cache_with_ops(
+    VkDeviceState* state,
+    char[] cache_data,
+    PipelineCacheCreateOps* ops,
+) @private {
+    vk::PipelineCacheCreateInfo cache_info = vk::pipeline_cache_create_info();
+    cache_info.initial_data_size = (sz)cache_data.len;
+    cache_info.p_initial_data    = cache_data.ptr;
+    vk::Result first_result = ops.create(
+        ops.user_data,
+        state.device,
+        &cache_info,
+        &state.driver_cache,
+    );
+    if (first_result == vk::Result.SUCCESS) return;
+    if (cache_data.len == 0 || !pipeline_cache_blob_retryable(first_result)) {
+        return check_pipeline_cache_terminal_result(state, "create_device", first_result);
+    }
+
+    cache_info.initial_data_size = 0;
+    cache_info.p_initial_data    = null;
+    return check_pipeline_cache_terminal_result(
+        state:     state,
+        operation: "create_device",
+        result:    ops.create(
+            ops.user_data,
+            state.device,
+            &cache_info,
+            &state.driver_cache,
+        ),
+    );
+}
+
+fn void? create_driver_pipeline_cache(VkDeviceState* state, char[] cache_data) @private {
+    PipelineCacheCreateOps ops = pipeline_cache_create_ops_real();
+    return create_driver_pipeline_cache_with_ops(state, cache_data, &ops);
 }
 
 fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
@@ -246,7 +351,11 @@ fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) 
         .set_set_layouts((&state.heap.set_layout)[:1])
         .set_push_constant_ranges((&range)[:1]);
     vk::PipelineLayout layout;
-    check(vk::create_pipeline_layout(state.device, &layout_info, null, &layout))!;
+    check_backend_result(
+        state:     state,
+        operation: "create_compute_pipeline",
+        result:    vk::create_pipeline_layout(state.device, &layout_info, null, &layout),
+    )!;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.PIPELINE_LAYOUT,
@@ -283,7 +392,11 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
     vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
         .set_set_layouts((&state.heap.set_layout)[:1])
         .set_push_constant_ranges((&range)[:1]);
-    check(vk::create_pipeline_layout(state.device, &layout_info, null, &state.graphics_layout))!;
+    check_backend_result(
+        state:     state,
+        operation: "create_device",
+        result:    vk::create_pipeline_layout(state.device, &layout_info, null, &state.graphics_layout),
+    )!;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.PIPELINE_LAYOUT,
@@ -293,18 +406,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
 
     char[] cache_data = initial_cache_data;
     if (!cache_blob_compatible(state, cache_data)) cache_data = {};
-    vk::PipelineCacheCreateInfo cache_info = vk::pipeline_cache_create_info();
-    cache_info.initial_data_size = (sz)cache_data.len;
-    cache_info.p_initial_data    = cache_data.ptr;
-    vk::Result cache_result = vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache);
-    if (cache_result != vk::Result.SUCCESS) {
-        if (cache_data.len == 0 || !pipeline_cache_blob_retryable(cache_result)) {
-            check(cache_result)!;
-        }
-        cache_info.initial_data_size = 0;
-        cache_info.p_initial_data    = null;
-        check(vk::create_pipeline_cache(state.device, &cache_info, null, &state.driver_cache))!;
-    }
+    create_driver_pipeline_cache(state, cache_data)!;
 
     state.pipeline_cache.entries = mem::new_array(PipelineCacheEntry, capacity);
     state.pipeline_cache.bucket_heads = mem::new_array(uint, next_pow2(capacity * 2));
@@ -345,7 +447,11 @@ fn usz? vk_get_pipeline_cache_data(gpu::Device* device, char[] out) @private {
         )~;
     }
     sz written = required;
-    check_pipeline_cache_data_result(vk::get_pipeline_cache_data(state.device, state.driver_cache, &written, out.ptr))!;
+    check_pipeline_cache_data_backend_result(
+        state:     state,
+        operation: "get_pipeline_cache_data",
+        result:    vk::get_pipeline_cache_data(state.device, state.driver_cache, &written, out.ptr),
+    )!;
     return (usz)written;
 }
 

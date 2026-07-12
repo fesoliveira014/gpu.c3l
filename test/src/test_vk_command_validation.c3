@@ -1067,6 +1067,16 @@ fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
     );
     defer gpu::destroy_texture(&device, saturated)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    SyncDiagnosticCapture capture;
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_begin_render_pass",
+        debug_name:     "(unnamed)",
+        rejected_field: "texture view cache",
+        invariant:      "texture must have free cached-view capacity",
+    );
+    state.debug_callback = &capture_sync_diagnostic;
+    state.debug_user_data = &capture;
     vk::TextureSlot* saturated_slot = &state.textures.slots[saturated.index].value;
     foreach (&cached : saturated_slot.views) cached.used = true;
 
@@ -1082,9 +1092,18 @@ fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
     };
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = 8, .height = 8 };
     fault view_fault = @catch(gpu::cmd_begin_render_pass(&cmd, &pass));
+    state.debug_callback = null;
     foreach (&cached : saturated_slot.views) cached.used = false;
 
     assert(view_fault == gpu::SLOT_TABLE_FULL, "later saturated view cache faults SLOT_TABLE_FULL");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      view_fault,
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        index:               saturated.index,
+        generation:          saturated.generation,
+    );
     assert(val_cached_view_count(&device, first) == first_cached_before,
         "later view resolution fault rolls back the earlier cached view");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "view resolution fault records no pass");

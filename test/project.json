@@ -112,7 +112,7 @@
     },
     "vk_swapchain": {
       "type": "test",
-      "sources": [ "src/test_vk_swapchain.c3" ]
+      "sources": [ "src/test_vk_swapchain.c3", "src/test_vk_wsi_diagnostics.c3" ]
     },
     "vk_pipeline_cache": {
       "type": "test",

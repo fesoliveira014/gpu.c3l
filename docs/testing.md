@@ -171,8 +171,14 @@ frame pacing sanity
 
 The local `vk_swapchain` target pure-tests result translation for transient
 acquire, out-of-date, surface-lost, suboptimal, and delegated device-loss
-outcomes. Real surface loss and acquire starvation are not portable to force;
-exercise their caller recovery manually in the windowed sample repository.
+outcomes. It also asserts exactly-once WSI diagnostics, silent expected/retryable
+outcomes, unresolved-handle identity absence, public-fault parity, and raw
+signed VkResult context through deterministic operation-aware seams. Real
+surface loss and acquire starvation are not portable to force; exercise their
+caller recovery manually in the windowed sample repository. The pure snapshot
+tests cover dormant publication and lifecycle reset. Native mid-rebuild cleanup
+cannot be injected portably in the headless target, so windowed resize/recovery
+remains its end-to-end verification boundary.
 
 Windowed tests may be manual at first. Automated windowed tests can be added only when CI/window-system support is stable.
 
@@ -231,6 +237,15 @@ wrong backing buffers, and double free. They assert unchanged faults,
 exactly-once delivery, raw backend results, absent public identity, and
 mutation-free retry state. Pure range and direct reset helpers remain
 fault-only when no public operation context is supplied.
+
+Descriptor/cache completeness coverage adds batch rollback after cached-view
+creation, stale and exhausted descriptor identities, retire-query results,
+image-view backend results, descriptor bootstrap failures, pipeline-cache
+INCOMPLETE, a compatible-header corrupt-blob integration, and a deterministic
+cache-create seam whose retryable first attempt and successful empty second
+attempt emit no terminal diagnostic. Pure range and lookup helpers remain
+fault-only; operation-aware result helpers own specialized backend mapping and
+emit exactly once with stable operation context.
 Successful command tests exercise the actual `submit`
 and `wait_queue_idle` call sites without injecting a submit failure.
 
