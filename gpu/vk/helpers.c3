@@ -8,6 +8,16 @@ import vk;
 // binding ships no API_VERSION_1_3 constant.
 const uint API_VERSION_1_3 = (1u << 22) | (3u << 12);
 
+enum WsiResultKind : int {
+    SURFACE,
+    SURFACE_ENUMERATION,
+    SWAPCHAIN_CREATE,
+    ENUMERATION,
+    ACQUIRE,
+    PRESENT,
+    COMMON,
+}
+
 fn void? map_result(vk::Result result, bool report_unmapped) @private {
     switch (result) {
         case vk::Result.SUCCESS:
@@ -83,66 +93,70 @@ fn void? check_physical_device_enumeration_result(vk::Result result) @private {
     return check_enumeration_result(result);
 }
 
-fn void? check_surface_result(vk::Result result) @private {
-    switch (result) {
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-            return gpu::SURFACE_LOST~;
-        case vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR:
-            return gpu::INVALID_RESOURCE_STATE~;
+fn void? map_wsi_result(WsiResultKind kind, vk::Result result, bool report_unmapped) @private {
+    switch (kind) {
+        case WsiResultKind.SURFACE:
+            switch (result) {
+                case vk::Result.ERROR_SURFACE_LOST_KHR:         return gpu::SURFACE_LOST~;
+                case vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR: return gpu::INVALID_RESOURCE_STATE~;
+                default:                                        return map_result(result, report_unmapped);
+            }
+        case WsiResultKind.SURFACE_ENUMERATION:
+            if (result == vk::Result.ERROR_SURFACE_LOST_KHR) return gpu::SURFACE_LOST~;
+            if (result == vk::Result.INCOMPLETE) return gpu::BACKEND_ERROR~;
+            return map_result(result, report_unmapped);
+        case WsiResultKind.SWAPCHAIN_CREATE:
+            switch (result) {
+                case vk::Result.ERROR_SURFACE_LOST_KHR:              return gpu::SURFACE_LOST~;
+                case vk::Result.ERROR_OUT_OF_DATE_KHR:               return gpu::SWAPCHAIN_OUT_OF_DATE~;
+                case vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR:      return gpu::INVALID_RESOURCE_STATE~;
+                case vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR: return gpu::UNSUPPORTED_FEATURE~;
+                default:                                             return map_result(result, report_unmapped);
+            }
+        case WsiResultKind.ENUMERATION:
+            if (result == vk::Result.INCOMPLETE) return gpu::BACKEND_ERROR~;
+            return map_result(result, report_unmapped);
+        case WsiResultKind.ACQUIRE:
+            switch (result) {
+                case vk::Result.SUCCESS:
+                case vk::Result.SUBOPTIMAL_KHR:         return;
+                case vk::Result.ERROR_SURFACE_LOST_KHR: return gpu::SURFACE_LOST~;
+                case vk::Result.TIMEOUT:
+                case vk::Result.NOT_READY:              return gpu::WAIT_TIMEOUT~;
+                case vk::Result.ERROR_OUT_OF_DATE_KHR:  return gpu::SWAPCHAIN_OUT_OF_DATE~;
+                default:                                return map_result(result, report_unmapped);
+            }
+        case WsiResultKind.PRESENT:
+            switch (result) {
+                case vk::Result.SUCCESS:
+                case vk::Result.SUBOPTIMAL_KHR:         return;
+                case vk::Result.ERROR_SURFACE_LOST_KHR: return gpu::SURFACE_LOST~;
+                case vk::Result.ERROR_OUT_OF_DATE_KHR:  return gpu::SWAPCHAIN_OUT_OF_DATE~;
+                default:                                return map_result(result, report_unmapped);
+            }
         default:
-            return check(result);
+            return map_result(result, report_unmapped);
     }
+}
+
+fn void? check_surface_result(vk::Result result) @private {
+    return map_wsi_result(WsiResultKind.SURFACE, result, true);
 }
 
 fn void? check_surface_enumeration_result(vk::Result result) @private {
-    if (result == vk::Result.ERROR_SURFACE_LOST_KHR) return gpu::SURFACE_LOST~;
-    return check_enumeration_result(result);
+    return map_wsi_result(WsiResultKind.SURFACE_ENUMERATION, result, true);
 }
 
 fn void? check_swapchain_create_result(vk::Result result) @private {
-    switch (result) {
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-            return gpu::SURFACE_LOST~;
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
-            return gpu::SWAPCHAIN_OUT_OF_DATE~;
-        case vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR:
-            return gpu::INVALID_RESOURCE_STATE~;
-        case vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
-            return gpu::UNSUPPORTED_FEATURE~;
-        default:
-            return check(result);
-    }
+    return map_wsi_result(WsiResultKind.SWAPCHAIN_CREATE, result, true);
 }
 
 fn void? check_acquire_result(vk::Result result) @private {
-    switch (result) {
-        case vk::Result.SUCCESS:
-        case vk::Result.SUBOPTIMAL_KHR:
-            return;
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-            return gpu::SURFACE_LOST~;
-        case vk::Result.TIMEOUT:
-        case vk::Result.NOT_READY:
-            return gpu::WAIT_TIMEOUT~;
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
-            return gpu::SWAPCHAIN_OUT_OF_DATE~;
-        default:
-            return check(result);
-    }
+    return map_wsi_result(WsiResultKind.ACQUIRE, result, true);
 }
 
 fn void? check_present_result(vk::Result result) @private {
-    switch (result) {
-        case vk::Result.SUCCESS:
-        case vk::Result.SUBOPTIMAL_KHR:
-            return;
-        case vk::Result.ERROR_SURFACE_LOST_KHR:
-            return gpu::SURFACE_LOST~;
-        case vk::Result.ERROR_OUT_OF_DATE_KHR:
-            return gpu::SWAPCHAIN_OUT_OF_DATE~;
-        default:
-            return check(result);
-    }
+    return map_wsi_result(WsiResultKind.PRESENT, result, true);
 }
 
 fn void? check_texture_create_result(vk::Result result) @private {
