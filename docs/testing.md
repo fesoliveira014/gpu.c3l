@@ -225,7 +225,7 @@ handle resolution succeeds. B1 is not the completeness gate; remaining
 command/descriptor and queue/WSI sites are covered by subsequent tranches.
 
 Descriptor/cache completeness coverage adds batch rollback after cached-view
-creation, stale and exhausted descriptor identities, sampler-retire queries,
+creation, stale and exhausted descriptor identities, retire-query results,
 image-view backend results, descriptor bootstrap failures, pipeline-cache
 INCOMPLETE, a compatible-header corrupt-blob integration, and a deterministic
 cache-create seam whose retryable first attempt and successful empty second
