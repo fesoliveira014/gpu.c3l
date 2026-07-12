@@ -8,13 +8,28 @@ import vk;
 // here; what stays testable is one-empty-submit-per-frame and rejected
 // submits recording nothing.
 
-fn gpu::Device make_submit_stats_test_device() {
+struct SubmitDiagnosticCapture {
+    uint              calls;
+    gpu::DebugMessage last;
+}
+
+fn void capture_submit_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    SubmitDiagnosticCapture* capture = (SubmitDiagnosticCapture*)user_data;
+    capture.calls++;
+    capture.last = *message;
+}
+
+fn gpu::Device make_submit_stats_test_device(SubmitDiagnosticCapture* capture = null) {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
         .application_name  = "gpu_submit_stats_test",
     };
+    if (capture != null) {
+        desc.debug_callback = &capture_submit_diagnostic;
+        desc.debug_user_data = capture;
+    }
     return gpu::create_device(&desc)!!;
 }
 
@@ -133,7 +148,8 @@ fn vk::Result capture_retry_frame_submit(vk::Queue queue, uint submit_count, vk:
 }
 
 fn void failed_end_frame_submit_preserves_retry_state() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    SubmitDiagnosticCapture capture;
+    gpu::Device device = make_submit_stats_test_device(&capture);
     defer gpu::destroy_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
 
@@ -156,10 +172,16 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     ulong shadow_before = state.signaled_shadow;
     vk::SubmitStats stats_before = stats_of(&device);
 
+    uint diagnostic_before = capture.calls;
     fault submit_fault = @catch(vk::end_frame_with_submit(&frame, &reject_frame_submit));
     assert(submit_fault == gpu::OUT_OF_HOST_MEMORY, "injected frame submit faults OUT_OF_HOST_MEMORY");
     assert(rejected_frame_signal_value == counter_before + 1, "failed submit uses the prospective frame value");
     assert(rejected_frame_wait_count == 2, "failed submit preserves both cross-queue waits");
+    assert(capture.calls == diagnostic_before + 1, "failed frame signal emits exactly once");
+    assert(capture.last.category.backend, "failed frame signal is a backend diagnostic");
+    assert(capture.last.has_fault && capture.last.public_fault == submit_fault,
+        "failed frame signal diagnostic preserves the returned fault");
+    assert(capture.last.operation.str_view() == "end_frame", "failed frame signal names end_frame");
     assert(rejected_frame_wait_values[0] == compute_signaled_before, "compute wait uses last signaled value");
     assert(rejected_frame_wait_semaphores[0] == state.aux_compute_timeline, "compute wait uses the compute timeline");
     assert(rejected_frame_wait_semaphores[1] == state.aux_transfer_timeline, "transfer wait uses the transfer timeline");

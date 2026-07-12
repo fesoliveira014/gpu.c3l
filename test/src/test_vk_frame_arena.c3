@@ -8,6 +8,75 @@ import std::atomic;
 // Pure range-boundary coverage plus headless (lavapipe) frame upload arena
 // bump allocation, reset, ARENA_FULL, and timeline-gated reset.
 
+struct FrameDiagnosticCapture {
+    uint              calls;
+    gpu::DebugMessage last;
+    char[48]          operation;
+    char[64]          rejected_field;
+    char[128]         invariant;
+}
+
+fn void copy_frame_diagnostic_text(char* destination, usz capacity, ZString source) {
+    usz index = 0;
+    if (source != null) {
+        while (index + 1 < capacity && source[index] != 0) {
+            destination[index] = source[index];
+            index++;
+        }
+    }
+    destination[index] = 0;
+}
+
+fn void capture_frame_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    FrameDiagnosticCapture* capture = (FrameDiagnosticCapture*)user_data;
+    capture.calls++;
+    capture.last = *message;
+    copy_frame_diagnostic_text(&capture.operation[0], 48, message.operation);
+    copy_frame_diagnostic_text(&capture.rejected_field[0], 64, message.rejected_field);
+    copy_frame_diagnostic_text(&capture.invariant[0], 128, message.invariant);
+}
+
+fn gpu::Device make_diagnostic_frame_device(FrameDiagnosticCapture* capture, uint frames_in_flight = 1) {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = frames_in_flight,
+        .debug_callback    = &capture_frame_diagnostic,
+        .debug_user_data   = capture,
+        .application_name  = "gpu_frame_diagnostic_test",
+    };
+    return gpu::create_device(&desc)!!;
+}
+
+fn void assert_frame_diagnostic(
+    FrameDiagnosticCapture* capture,
+    uint before,
+    fault returned,
+    ZString operation,
+    bool backend,
+    ZString field,
+) {
+    assert(capture.calls == before + 1, "frame rejection emits exactly once");
+    assert(capture.last.has_fault && capture.last.public_fault == returned,
+        "frame diagnostic preserves the returned fault");
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.FRAME,
+        "frame diagnostic identifies the frame resource kind");
+    assert(!capture.last.resource.has_public_identity,
+        "frame diagnostic invents no slot identity for a frame token");
+    assert(backend ? capture.last.category.backend : capture.last.category.public_contract,
+        "frame diagnostic category is exact");
+    assert(((ZString)&capture.operation[0]).str_view() == operation.str_view(),
+        "frame diagnostic operation is exact");
+    if (field != null) {
+        assert(((ZString)&capture.rejected_field[0]).str_view() == field.str_view(),
+            "frame diagnostic rejected field is exact");
+    }
+}
+
+fn vk::Result reject_frame_counter_query(vk::Device device, vk::Semaphore semaphore, ulong* value) {
+    return vk::Result.ERROR_DEVICE_LOST;
+}
+
 fn void frame_arena_range_preserves_fault_taxonomy() @test {
     fault zero_size = @catch(gpu::vk::frame_arena_range(
         cursor: 0,
@@ -436,4 +505,171 @@ fn void frame_upload_memory_is_coherent() @test {
     vk::MemoryPropertyFlags props = state.allocator.allocation_memory_properties(slot.allocation);
     assert(((uint)props & (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT) != 0,
         "frame-upload memory is host-coherent");
+}
+
+fn void frame_contract_rejections_report_exact_context() @test {
+    FrameDiagnosticCapture capture;
+    gpu::Device device = make_diagnostic_frame_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+
+    uint before = capture.calls;
+    fault rejected = @catch(gpu::begin_frame(&device));
+    assert(rejected == gpu::INVALID_RESOURCE_STATE, "double begin keeps its fault");
+    assert_frame_diagnostic(
+        capture:   &capture,
+        before:    before,
+        returned:  rejected,
+        operation: "begin_frame",
+        backend:   false,
+        field:     "Device.frame_state",
+    );
+
+    before = capture.calls;
+    rejected = @catch(gpu::alloc_frame_span(&frame, 0, 0));
+    assert(rejected == gpu::INVALID_ARGUMENT, "ambiguous allocation keeps INVALID_ARGUMENT");
+    assert_frame_diagnostic(
+        capture:   &capture,
+        before:    before,
+        returned:  rejected,
+        operation: "alloc_frame_span",
+        backend:   false,
+        field:     "align",
+    );
+
+    before = capture.calls;
+    rejected = @catch(gpu::alloc_frame_span(&frame, 0, 16));
+    assert_frame_diagnostic(
+        capture:   &capture,
+        before:    before,
+        returned:  rejected,
+        operation: "alloc_frame_span",
+        backend:   false,
+        field:     "size",
+    );
+
+    before = capture.calls;
+    rejected = @catch(gpu::alloc_frame_span(&frame, gpu::DEFAULT_FRAME_ARENA_SIZE + 1, 16));
+    assert(rejected == gpu::ARENA_FULL, "frame exhaustion keeps ARENA_FULL");
+    assert_frame_diagnostic(
+        capture:   &capture,
+        before:    before,
+        returned:  rejected,
+        operation: "alloc_frame_span",
+        backend:   false,
+        field:     "size",
+    );
+
+    gpu::FrameToken stale = frame;
+    gpu::end_frame(&frame)!!;
+    before = capture.calls;
+    rejected = @catch(gpu::alloc_frame_span(&stale, 16, 16));
+    assert(rejected == gpu::INVALID_HANDLE, "stale allocation keeps INVALID_HANDLE");
+    assert_frame_diagnostic(
+        capture:   &capture,
+        before:    before,
+        returned:  rejected,
+        operation: "alloc_frame_span",
+        backend:   false,
+        field:     "FrameToken.generation",
+    );
+
+    frame = gpu::begin_frame(&device)!!;
+    state.inflight_calls.add(1, AtomicOrdering.RELAXED);
+    before = capture.calls;
+    rejected = @catch(gpu::end_frame(&frame));
+    assert(rejected == gpu::INVALID_RESOURCE_STATE, "blocked end keeps INVALID_RESOURCE_STATE");
+    assert_frame_diagnostic(
+        capture:   &capture,
+        before:    before,
+        returned:  rejected,
+        operation: "end_frame",
+        backend:   false,
+        field:     "Device.frame_state",
+    );
+    assert(frame.device == &device && state.frame_active, "blocked end preserves the live frame");
+    state.inflight_calls.sub(1, AtomicOrdering.RELAXED);
+    gpu::end_frame(&frame)!!;
+
+    state.inflight_calls.add(1, AtomicOrdering.RELAXED);
+    before = capture.calls;
+    rejected = @catch(gpu::begin_frame(&device));
+    assert_frame_diagnostic(
+        capture:   &capture,
+        before:    before,
+        returned:  rejected,
+        operation: "begin_frame",
+        backend:   false,
+        field:     "Device.frame_state",
+    );
+    state.inflight_calls.sub(1, AtomicOrdering.RELAXED);
+}
+
+fn void frame_backend_result_helpers_report_without_fault_drift() @test {
+    FrameDiagnosticCapture capture;
+    gpu::Device device = make_diagnostic_frame_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+
+    uint before = capture.calls;
+    fault query_fault = @catch(vk::frame_timeline_value_with_query(
+        state:     state,
+        operation: "begin_frame",
+        query_fn:  &reject_frame_counter_query,
+    ));
+    assert(query_fault == gpu::DEVICE_LOST, "counter query keeps DEVICE_LOST");
+    assert(capture.calls == before + 1, "counter query emits exactly once");
+    assert(capture.last.category.backend, "counter query is a backend diagnostic");
+    assert(((ZString)&capture.operation[0]).str_view() == "begin_frame", "counter query names begin_frame");
+
+    before = capture.calls;
+    fault timeout = @catch(vk::check_wait_backend_result(
+        state:     state,
+        operation: "begin_frame",
+        result:    vk::Result.TIMEOUT,
+    ));
+    assert(timeout == gpu::WAIT_TIMEOUT, "operation-aware wait keeps WAIT_TIMEOUT");
+    assert(capture.calls == before, "expected wait timeout remains silent");
+    before = capture.calls;
+    fault mismatch = @catch(vk::report_unretired_frame(state));
+    assert(mismatch == gpu::INVALID_RESOURCE_STATE,
+        "successful-wait retirement mismatch keeps INVALID_RESOURCE_STATE");
+    assert(capture.calls == before + 1, "retirement mismatch emits exactly once");
+    assert(capture.last.category.backend, "retirement mismatch is backend/internal");
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.FRAME,
+        "retirement mismatch identifies frame context");
+    assert(!capture.last.resource.has_public_identity,
+        "retirement mismatch invents no public identity");
+    assert(((ZString)&capture.operation[0]).str_view() == "begin_frame",
+        "retirement mismatch names begin_frame");
+    assert(((ZString)&capture.rejected_field[0]).str_view() == "Device.frame_state",
+        "retirement mismatch identifies frame state");
+}
+
+fn void failed_frame_retirement_query_preserves_begin_state() @test {
+    FrameDiagnosticCapture capture;
+    gpu::Device device = make_diagnostic_frame_device(&capture, 2);
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    FrameLifecycleSnapshot before_state = frame_lifecycle_snapshot(state);
+    assert(state.frames_in_flight == 2 && state.frame_index == 0,
+        "retirement rollback test starts before a distinct next frame slot");
+    gpu::FrameToken frame;
+    uint before_calls = capture.calls;
+
+    fault query_fault = @catch(vk::begin_frame_with_counter_query(
+        device:    &device,
+        out_frame: &frame,
+        query_fn:  &reject_frame_counter_query,
+    ));
+
+    assert(query_fault == gpu::DEVICE_LOST, "begin retirement query keeps DEVICE_LOST");
+    assert(capture.calls == before_calls + 1, "begin retirement query emits exactly once");
+    assert(capture.last.category.backend, "begin retirement query is a backend diagnostic");
+    assert(((ZString)&capture.operation[0]).str_view() == "begin_frame",
+        "begin retirement query names begin_frame");
+    assert(frame.device == null && frame.generation == 0,
+        "failed retirement query issues no token");
+    assert_frame_lifecycle_unchanged(before_state, frame_lifecycle_snapshot(state));
 }

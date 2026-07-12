@@ -3,6 +3,7 @@ module gpu_test;
 import gpu;
 import gpu::vk @public;
 import std::core::mem;
+import vk;
 
 // Headless (lavapipe): driver pipeline-cache blob export/import. Correctness
 // only — blob content usefulness is driver-dependent, so no timing asserts.
@@ -12,6 +13,58 @@ const char[*] CACHE_IO_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 struct CacheDiagnosticCapture {
     uint calls;
     bool matched;
+}
+
+struct CacheBackendCapture {
+    uint calls;
+    uint terminal_calls;
+    fault expected_fault;
+    ZString expected_operation;
+    ZString expected_text;
+    int expected_result;
+    bool matched;
+}
+
+struct PipelineCacheCreateProbe {
+    uint attempts;
+    sz first_size;
+    sz second_size;
+}
+
+fn vk::Result scripted_pipeline_cache_create(
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCacheCreateInfo* info,
+    vk::PipelineCache* out_cache,
+) {
+    PipelineCacheCreateProbe* probe = (PipelineCacheCreateProbe*)user_data;
+    probe.attempts++;
+    if (probe.attempts == 1) {
+        probe.first_size = info.initial_data_size;
+        return vk::Result.ERROR_UNKNOWN;
+    }
+    probe.second_size = info.initial_data_size;
+    *out_cache = (vk::PipelineCache)(void*)1;
+    return vk::Result.SUCCESS;
+}
+
+fn void capture_cache_backend_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    CacheBackendCapture* capture = (CacheBackendCapture*)user_data;
+    capture.calls++;
+    if (message.category.backend
+        && message.has_fault
+        && message.operation != null
+        && message.operation.str_view() == "create_device") capture.terminal_calls++;
+    capture.matched = message.severity == gpu::DebugMessageSeverity.ERROR
+        && message.category.backend
+        && message.has_fault
+        && message.public_fault == capture.expected_fault
+        && message.operation != null
+        && message.operation.str_view() == capture.expected_operation.str_view()
+        && message.backend_text != null
+        && message.backend_text.str_view() == capture.expected_text.str_view()
+        && message.validation_id_number == capture.expected_result
+        && !message.resource.has_public_identity;
 }
 
 fn void capture_cache_diagnostic(gpu::DebugMessage* message, void* user_data) {
@@ -31,12 +84,14 @@ fn void capture_cache_diagnostic(gpu::DebugMessage* message, void* user_data) {
         && message.invariant.str_view() == "output buffer must fit the pipeline cache data";
 }
 
-fn gpu::Device make_cache_io_device(char[] blob = {}) {
+fn gpu::Device make_cache_io_device(char[] blob = {}, CacheBackendCapture* capture = null) {
     gpu::DeviceDesc desc = {
         .backend             = gpu::BackendKind.VULKAN,
         .enable_validation   = true,
         .frames_in_flight    = 2,
         .pipeline_cache_data = blob,
+        .debug_callback      = capture == null ? null : &capture_cache_backend_diagnostic,
+        .debug_user_data     = capture,
         .application_name    = "gpu_pipeline_cache_io_test",
     };
     return gpu::create_device(&desc)!!;
@@ -158,15 +213,22 @@ fn void cache_corrupt_blob_tolerated() @test {
     gpu::PipelineHandle pipe_a = build_cache_io_pipeline(&device_a);
     char[] blob = export_cache_blob(&device_a);
     defer mem::free(blob.ptr);
-    gpu::destroy_pipeline(&device_a, pipe_a)!!;
-    gpu::destroy_device(&device_a)!!;
 
     // Flip bytes past the 32-byte header: the driver must reject or absorb
     // the payload; either way pipelines must still build and run.
     foreach (usz i, &b : blob) {
         if (i >= 32) *b ^= (char)0xA5;
     }
-    gpu::Device device_b = make_cache_io_device(blob);
+    vk::VkDeviceState* state_a = (vk::VkDeviceState*)device_a.backend_state;
+    assert(gpu::vk::cache_blob_compatible(state_a, blob),
+        "corrupt payload retains a compatible header and reaches the driver retry path");
+    gpu::destroy_pipeline(&device_a, pipe_a)!!;
+    gpu::destroy_device(&device_a)!!;
+
+    CacheBackendCapture retry_capture;
+    gpu::Device device_b = make_cache_io_device(blob, &retry_capture);
+    assert(retry_capture.terminal_calls == 0,
+        "a successful empty-cache retry emits no terminal diagnostic for the rejected blob");
     defer gpu::destroy_device(&device_b)!!;
     gpu::PipelineHandle pipe_b = build_cache_io_pipeline(&device_b);
     defer gpu::destroy_pipeline(&device_b, pipe_b)!!;
@@ -200,4 +262,81 @@ fn void present_mode_query_requires_valid_swapchain() @test {
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
     fault f = @catch(gpu::get_present_mode_support(&device, bogus));
     assert(f == gpu::INVALID_HANDLE, "query on a bogus swapchain faults INVALID_HANDLE");
+}
+
+fn void pipeline_cache_retry_seam_is_exact_and_silent_on_success() @test {
+    vk::VkDeviceState state;
+    CacheBackendCapture capture;
+    state.debug_callback = &capture_cache_backend_diagnostic;
+    state.debug_user_data = &capture;
+    PipelineCacheCreateProbe probe;
+    gpu::vk::PipelineCacheCreateOps ops = {
+        .user_data = &probe,
+        .create    = &scripted_pipeline_cache_create,
+    };
+    char[4] compatible_blob = { 1, 2, 3, 4 };
+
+    gpu::vk::create_driver_pipeline_cache_with_ops(
+        state:      &state,
+        cache_data: compatible_blob[..],
+        ops:        &ops,
+    )!!;
+
+    assert(probe.attempts == 2, "retry seam performs exactly two cache-create attempts");
+    assert(probe.first_size == compatible_blob.len, "first attempt receives the compatible blob");
+    assert(probe.second_size == 0, "retry attempt receives an empty cache payload");
+    assert(state.driver_cache != null, "successful retry publishes the created cache");
+    assert(capture.terminal_calls == 0, "retryable first failure and successful retry emit no terminal diagnostic");
+}
+
+fn void pipeline_cache_terminal_results_emit_once_and_preserve_faults() @test {
+    vk::VkDeviceState state;
+    CacheBackendCapture capture;
+    state.debug_callback = &capture_cache_backend_diagnostic;
+    state.debug_user_data = &capture;
+
+    capture = {
+        .expected_fault     = gpu::INVALID_ARGUMENT,
+        .expected_operation = "get_pipeline_cache_data",
+        .expected_text      = "Vulkan returned incomplete pipeline cache data",
+        .expected_result    = (int)vk::Result.INCOMPLETE,
+    };
+    fault incomplete = @catch(gpu::vk::check_pipeline_cache_data_backend_result(
+        state:     &state,
+        operation: "get_pipeline_cache_data",
+        result:    vk::Result.INCOMPLETE,
+    ));
+    assert(incomplete == gpu::INVALID_ARGUMENT && capture.calls == 1 && capture.matched,
+        "pipeline-cache INCOMPLETE result reports once without changing its fault");
+
+    capture = {
+        .calls              = capture.calls,
+        .expected_fault     = gpu::OUT_OF_HOST_MEMORY,
+        .expected_operation = "create_device",
+        .expected_text      = "Vulkan host memory exhausted",
+        .expected_result    = (int)vk::Result.ERROR_OUT_OF_HOST_MEMORY,
+    };
+    fault terminal = @catch(gpu::vk::check_pipeline_cache_terminal_result(
+        state:     &state,
+        operation: "create_device",
+        result:    vk::Result.ERROR_OUT_OF_HOST_MEMORY,
+    ));
+    assert(terminal == gpu::OUT_OF_HOST_MEMORY && capture.calls == 2 && capture.matched,
+        "pipeline-cache terminal result uses operation-aware backend routing");
+
+    gpu::vk::check_pipeline_cache_terminal_result(
+        state:     &state,
+        operation: "create_device",
+        result:    vk::Result.SUCCESS,
+    )!!;
+    assert(capture.calls == 2, "successful retry completion emits no diagnostic");
+
+    state.debug_callback = null;
+    fault fallback = @catch(gpu::vk::check_pipeline_cache_data_backend_result(
+        state:     &state,
+        operation: "get_pipeline_cache_data",
+        result:    vk::Result.INCOMPLETE,
+    ));
+    assert(fallback == incomplete && capture.calls == 2,
+        "null callback preserves cache-data fault without a duplicate");
 }

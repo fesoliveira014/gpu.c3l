@@ -1084,6 +1084,14 @@ after the corresponding public handle has been resolved successfully. The B1
 set is representative rather than exhaustive; later coverage work audits the
 remaining command, descriptor, queue, and WSI rejection sites.
 
+Frame and persistent-memory coverage reports double-begin and quiescence
+violations, stale frame tokens, invalid alignment before zero size, arena
+exhaustion, non-timeout frame-wait failures and retirement queries,
+end-frame signal failures, persistent virtual-allocation exhaustion, and
+invalid or repeated frees. Expected/retryable frame-wait `WAIT_TIMEOUT` outcomes remain
+silent; other diagnostics preserve `ARENA_FULL` and retry state and never
+claim public identity for frame tokens or persistent spans.
+
 ```text
 cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) -> void?
 cmd_end_label(CommandList* commands) -> void?
