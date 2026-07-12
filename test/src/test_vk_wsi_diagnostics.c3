@@ -52,24 +52,31 @@ fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
         .debug_user_data = &capture,
     };
     gpu::vk::WsiDiagnosticContext context = {
-        .state      = &state,
-        .operation  = "acquire_next_image",
-        .debug_name = "main_swapchain",
+        .state               = &state,
+        .operation           = "acquire_next_image",
+        .has_public_identity = true,
+        .index               = 2,
+        .generation          = 9,
+        .debug_name          = "main_swapchain",
     };
 
     fault result_fault = @catch(gpu::vk::check_wsi_backend_result(
         context: &context,
         kind:    gpu::vk::WsiResultKind.ACQUIRE,
-        result:  vk::Result.TIMEOUT,
+        result:  vk::Result.ERROR_OUT_OF_DATE_KHR,
     ));
 
-    assert(result_fault == gpu::WAIT_TIMEOUT, "acquire timeout mapping is unchanged");
+    assert(result_fault == gpu::SWAPCHAIN_OUT_OF_DATE, "native out-of-date mapping is unchanged");
     assert(capture.calls == 1, "WSI backend failure emits exactly once");
     assert(capture.last.category.backend, "WSI native result is a backend diagnostic");
     assert(capture.last.operation.str_view() == "acquire_next_image", "WSI result keeps operation context");
-    assert(capture.last.validation_id_number == (int)vk::Result.TIMEOUT, "WSI result keeps raw VkResult");
-    assert(capture.last.backend_text.str_view() == "Vulkan image acquire timed out", "WSI result has stable text");
-    assert(!capture.last.resource.has_public_identity, "unresolved WSI result has no public identity");
+    assert(capture.last.validation_id_number == (int)vk::Result.ERROR_OUT_OF_DATE_KHR,
+        "WSI result keeps raw VkResult");
+    assert(capture.last.backend_text.str_view() == "Vulkan swapchain is out of date",
+        "WSI result has stable text");
+    assert(capture.last.resource.has_public_identity, "resolved WSI result has public identity");
+    assert(capture.last.resource.index == 2 && capture.last.resource.generation == 9,
+        "resolved WSI result keeps exact identity");
 }
 
 fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
@@ -185,6 +192,31 @@ fn void expect_wsi_result(
         "backend WSI result has no rejected caller field");
 }
 
+fn void expect_silent_wsi_result(vk::Result result) {
+    WsiDiagnosticCapture capture;
+    gpu::vk::VkDeviceState state = {
+        .debug_callback  = &capture_wsi_diagnostic,
+        .debug_user_data = &capture,
+    };
+    gpu::vk::WsiDiagnosticContext context = {
+        .state               = &state,
+        .operation           = "acquire_next_image",
+        .has_public_identity = true,
+        .index               = 2,
+        .generation          = 9,
+        .debug_name          = "resolved_swapchain",
+    };
+
+    fault actual = @catch(gpu::vk::check_wsi_backend_result(
+        context: &context,
+        kind:    gpu::vk::WsiResultKind.ACQUIRE,
+        result:  result,
+    ));
+
+    assert(actual == gpu::WAIT_TIMEOUT, "retryable acquire result preserves WAIT_TIMEOUT");
+    assert(capture.calls == 0, "retryable acquire result emits no diagnostic");
+}
+
 fn void all_specialized_wsi_results_use_one_mapping_seam() @test {
     expect_wsi_result(
         kind:      gpu::vk::WsiResultKind.SURFACE,
@@ -222,18 +254,8 @@ fn void all_specialized_wsi_results_use_one_mapping_seam() @test {
         expected:  gpu::BACKEND_ERROR,
         operation: "create_swapchain",
     );
-    expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.ACQUIRE,
-        result:    vk::Result.TIMEOUT,
-        expected:  gpu::WAIT_TIMEOUT,
-        operation: "acquire_next_image",
-    );
-    expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.ACQUIRE,
-        result:    vk::Result.NOT_READY,
-        expected:  gpu::WAIT_TIMEOUT,
-        operation: "acquire_next_image",
-    );
+    expect_silent_wsi_result(vk::Result.TIMEOUT);
+    expect_silent_wsi_result(vk::Result.NOT_READY);
     expect_wsi_result(
         kind:      gpu::vk::WsiResultKind.ACQUIRE,
         result:    vk::Result.ERROR_OUT_OF_DATE_KHR,
@@ -300,8 +322,7 @@ fn void wsi_lifecycle_and_layout_diagnostics_are_contract_failures() @test {
 
     assert(@catch(gpu::vk::check_swapchain_acquire_lifecycle(&context, &slot)) == gpu::SWAPCHAIN_OUT_OF_DATE,
         "dormant acquire preserves OUT_OF_DATE");
-    assert(capture.calls == 1 && capture.last.category.public_contract,
-        "dormant acquire reports one contract diagnostic");
+    assert(capture.calls == 0, "dormant acquire emits no diagnostic");
 
     capture = {};
     slot.info.dormant = false;

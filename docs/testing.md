@@ -171,8 +171,14 @@ frame pacing sanity
 
 The local `vk_swapchain` target pure-tests result translation for transient
 acquire, out-of-date, surface-lost, suboptimal, and delegated device-loss
-outcomes. It also asserts exactly-once WSI diagnostics, unresolved-handle identity absence, public-fault parity, and raw signed VkResult context through deterministic operation-aware seams. Real surface loss and acquire starvation are not portable to force;
-exercise their caller recovery manually in the windowed sample repository. The pure snapshot tests cover dormant publication and lifecycle reset. Native mid-rebuild cleanup cannot be injected portably in the headless target, so windowed resize/recovery remains its end-to-end verification boundary.
+outcomes. It also asserts exactly-once WSI diagnostics, silent expected/retryable
+outcomes, unresolved-handle identity absence, public-fault parity, and raw
+signed VkResult context through deterministic operation-aware seams. Real
+surface loss and acquire starvation are not portable to force; exercise their
+caller recovery manually in the windowed sample repository. The pure snapshot
+tests cover dormant publication and lifecycle reset. Native mid-rebuild cleanup
+cannot be injected portably in the headless target, so windowed resize/recovery
+remains its end-to-end verification boundary.
 
 Windowed tests may be manual at first. Automated windowed tests can be added only when CI/window-system support is stable.
 

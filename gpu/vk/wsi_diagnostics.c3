@@ -81,6 +81,10 @@ fn void? check_wsi_backend_result(
     bool stderr_fallback = context.state == null || context.state.debug_callback == null;
     fault public_fault = @catch(map_wsi_result(kind, result, stderr_fallback));
     if (!public_fault) return;
+    if (kind == WsiResultKind.ACQUIRE
+        && (result == vk::Result.TIMEOUT || result == vk::Result.NOT_READY)) {
+        return public_fault~;
+    }
     if (!stderr_fallback) {
         return report_wsi_backend_failure(
             context:      context,
@@ -133,12 +137,7 @@ fn void? check_swapchain_acquire_lifecycle(
     SwapchainSlot* slot,
 ) {
     if (slot.info.dormant || slot.swapchain == null) {
-        return report_wsi_contract(
-            context:        context,
-            public_fault:   gpu::SWAPCHAIN_OUT_OF_DATE,
-            rejected_field: "SwapchainInfo.dormant",
-            invariant:      "swapchain must be active before image acquire",
-        )~;
+        return gpu::SWAPCHAIN_OUT_OF_DATE~;
     }
     if (slot.acquire_pending) {
         return report_wsi_contract(
