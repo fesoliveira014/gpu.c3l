@@ -93,7 +93,7 @@ fn void? check_physical_device_enumeration_result(vk::Result result) @private {
     return check_enumeration_result(result);
 }
 
-fn void? map_wsi_result(WsiResultKind kind, vk::Result result, bool report_unmapped) {
+fn void? map_wsi_result(WsiResultKind kind, vk::Result result, bool report_unmapped) @private {
     switch (kind) {
         case WsiResultKind.SURFACE:
             switch (result) {
