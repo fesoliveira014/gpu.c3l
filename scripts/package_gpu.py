@@ -67,6 +67,21 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def canonical_text_bytes(path: Path) -> bytes:
+    try:
+        return path.read_text(encoding="utf-8").encode("utf-8")
+    except (OSError, UnicodeError) as error:
+        raise PackageError(f"cannot read text input {path}: {error}") from error
+
+
+def sha256_text(path: Path) -> str:
+    return sha256_bytes(canonical_text_bytes(path))
+
+
+def canonical_shell_command(path: Path) -> list[str]:
+    return ["sh", "-c", canonical_text_bytes(path).decode("utf-8"), str(path)]
+
+
 def normalize_relative(path: str) -> str:
     if not isinstance(path, str) or not path or "\\" in path:
         raise PackageError(f"noncanonical relative path: {path!r}")
@@ -181,12 +196,13 @@ def git_commit(path: Path) -> str:
     return commit
 
 
-def hash_mappings(root: Path, mappings: Iterable[dict]) -> list[dict]:
+def hash_mappings(root: Path, mappings: Iterable[dict], text: bool = False) -> list[dict]:
+    hash_file = sha256_text if text else sha256
     return [
         {
             "source": mapping["source"],
             "destination": mapping["destination"],
-            "sha256": sha256(root / mapping["source"]),
+            "sha256": hash_file(root / mapping["source"]),
         }
         for mapping in sorted(mappings, key=lambda item: item["destination"])
     ]
@@ -204,11 +220,11 @@ def build_lock(root: Path, recipe: dict | None = None) -> dict:
         committed_native[target] = hash_mappings(root, target_recipe.get("native", []))
     build = recipe["windows-vma-build"]
     build_inputs = {
-        key: {"path": build[key], "sha256": sha256(root / build[key])}
+        key: {"path": build[key], "sha256": sha256_text(root / build[key])}
         for key in ("build-script", "size-probe-source", "wrapper-source")
     }
     tool_inputs = [
-        {"path": path, "sha256": sha256(root / path)}
+        {"path": path, "sha256": sha256_text(root / path)}
         for path in sorted(recipe.get("tool-inputs", []))
     ]
     return {
@@ -217,9 +233,9 @@ def build_lock(root: Path, recipe: dict | None = None) -> dict:
         "recipe-sha256": sha256_bytes(canonical_json_bytes(recipe)),
         "tool-inputs": tool_inputs,
         "bindings": bindings,
-        "sources": hash_mappings(root, recipe["sources"]),
-        "assets": hash_mappings(root, recipe["assets"]),
-        "licenses": hash_mappings(root, recipe["licenses"]),
+        "sources": hash_mappings(root, recipe["sources"], text=True),
+        "assets": hash_mappings(root, recipe["assets"], text=True),
+        "licenses": hash_mappings(root, recipe["licenses"], text=True),
         "committed-native": committed_native,
         "windows-vma": {
             "upstream-commit": build["upstream-commit"],
@@ -439,10 +455,13 @@ def runtime_manifest(recipe: dict, target: str) -> dict:
     }
 
 
-def copy_mapping(root: Path, bundle: Path, mapping: dict) -> None:
+def copy_mapping(root: Path, bundle: Path, mapping: dict, text: bool = False) -> None:
     destination = bundle.joinpath(*PurePosixPath(mapping["destination"]).parts)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(root / mapping["source"], destination)
+    if text:
+        destination.write_bytes(canonical_text_bytes(root / mapping["source"]))
+    else:
+        shutil.copy2(root / mapping["source"], destination)
 
 
 def payload_entries(bundle: Path) -> list[dict]:
@@ -597,7 +616,7 @@ def build_windows_vma(root: Path, recipe: dict) -> Path:
     if not (os.environ.get("VULKAN_HEADERS") or os.environ.get("VULKAN_SDK")):
         raise PackageError("VULKAN_HEADERS or VULKAN_SDK is required for Windows VMA")
     script = root / recipe["windows-vma-build"]["build-script"]
-    result = subprocess.run(["sh", str(script)], cwd=root, check=False)
+    result = subprocess.run(canonical_shell_command(script), cwd=root, check=False)
     if result.returncode != 0:
         raise PackageError("locked Windows VMA build failed")
     archive = root / recipe["targets"]["windows-x64"]["generated-native"]["source"]
@@ -680,7 +699,9 @@ def assemble(
     backup = output.with_name(output.name + ".previous")
     try:
         bundle.mkdir()
-        for mapping in recipe["sources"] + recipe["assets"] + recipe["licenses"] + target_recipe.get("native", []):
+        for mapping in recipe["sources"] + recipe["assets"] + recipe["licenses"]:
+            copy_mapping(root, bundle, mapping, text=True)
+        for mapping in target_recipe.get("native", []):
             copy_mapping(root, bundle, mapping)
         if generated:
             copy_mapping(root, bundle, generated)
@@ -689,7 +710,7 @@ def assemble(
         write_canonical_json(bundle / "runtime.json", runtime_manifest(recipe, target))
         tools = bundle / "tools"
         tools.mkdir()
-        shutil.copy2(root / "packaging" / "runtime.py", tools / "runtime.py")
+        (tools / "runtime.py").write_bytes(canonical_text_bytes(root / "packaging" / "runtime.py"))
         payload = payload_entries(bundle)
         artifact = {
             "format": 1,

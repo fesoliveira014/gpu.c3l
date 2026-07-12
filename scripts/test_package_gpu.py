@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from subprocess import CompletedProcess
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +98,66 @@ class PackageToolTests(unittest.TestCase):
         changed["bindings"]["vk"]["commit"] = "0" * 40
         with self.assertRaisesRegex(self.tool.PackageError, "lock differs"):
             self.tool.check_lock(ROOT, lock=changed)
+
+    def test_text_inputs_are_checkout_line_ending_independent(self) -> None:
+        mapping = {"source": "source.c3", "destination": "gpu/source.c3"}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            lf_root = temp / "lf"
+            crlf_root = temp / "crlf"
+            lf_root.mkdir()
+            crlf_root.mkdir()
+            (lf_root / "source.c3").write_bytes(b"module gpu;\nfn void example() {}\n")
+            (crlf_root / "source.c3").write_bytes(b"module gpu;\r\nfn void example() {}\r\n")
+
+            lf_lock = self.tool.hash_mappings(lf_root, [mapping], text=True)
+            crlf_lock = self.tool.hash_mappings(crlf_root, [mapping], text=True)
+            self.assertEqual(lf_lock, crlf_lock)
+
+            bundle = temp / "bundle"
+            self.tool.copy_mapping(crlf_root, bundle, mapping, text=True)
+            self.assertEqual(
+                b"module gpu;\nfn void example() {}\n",
+                (bundle / "gpu" / "source.c3").read_bytes(),
+            )
+
+    def test_build_windows_vma_executes_canonical_crlf_script(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "repo"
+            recipe = self.tool.load_json(ROOT / "packaging" / "package.json")
+            script = root / recipe["windows-vma-build"]["build-script"]
+            script.parent.mkdir(parents=True)
+            script.write_bytes(
+                b"#!/usr/bin/env sh\r\n"
+                b"set -eu\r\n"
+                b'ROOT="$(cd "$(dirname "$0")/.." && pwd)"\r\n'
+                b'printf "%s" "$ROOT" > "$ROOT/root.txt"\r\n'
+            )
+            archive = root / recipe["targets"]["windows-x64"]["generated-native"]["source"]
+            archive.parent.mkdir(parents=True)
+            archive.write_bytes(b"archive")
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append((command, kwargs))
+                return CompletedProcess(command, 0, "", "")
+
+            with (
+                mock.patch.object(self.tool, "verify_vma_header"),
+                mock.patch.object(self.tool, "inspect_vma_directives"),
+                mock.patch.object(self.tool.subprocess, "run", side_effect=run),
+                mock.patch.dict(self.tool.os.environ, {"VULKAN_HEADERS": "sdk"}),
+            ):
+                result = self.tool.build_windows_vma(root, recipe)
+
+            self.assertEqual(archive, result)
+            self.assertEqual(1, len(calls))
+            command, kwargs = calls[0]
+            self.assertEqual(["sh", "-c"], command[:2])
+            self.assertNotIn("\r", command[2])
+            self.assertIn('dirname "$0"', command[2])
+            self.assertEqual(str(script), command[3])
+            self.assertEqual(root, kwargs["cwd"])
 
     def test_lock_covers_recipe_link_metadata(self) -> None:
         lock = self.tool.load_json(ROOT / "packaging" / "package-lock.json")
