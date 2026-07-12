@@ -172,6 +172,7 @@ fn void? check_descriptor_retire_backend_result(
     if (operation == null) return check(result);
     return check_backend_result(state, operation, result);
 }
+
 fn ushort bump_generation(ushort generation) @private {
     uint next = ((uint)generation + 1) & 0xFFFF;
     return next == 0 ? (ushort)1 : (ushort)next;
@@ -785,6 +786,7 @@ fn vk::ImageView? resolve_descriptor_texture_view(
     }
     return resolved;
 }
+
 fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::TextureHandle texture, gpu::TextureViewDesc* view) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);

@@ -1277,6 +1277,7 @@ fn void texture_descriptor_view_cache_exhaustion_reports_distinct_context() @tes
     state.debug_callback = null;
     foreach (index : live) gpu::destroy_texture_descriptor(&device, index)!!;
 }
+
 fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @test {
     vk::VkDeviceState state;
     DescriptorBackendCapture capture;

@@ -175,6 +175,7 @@ fn void? create_driver_pipeline_cache(VkDeviceState* state, char[] cache_data) @
     PipelineCacheCreateOps ops = pipeline_cache_create_ops_real();
     return create_driver_pipeline_cache_with_ops(state, cache_data, &ops);
 }
+
 fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
     PipelineKey key;
     key.kind               = (int)PipelineKind.GRAPHICS;
@@ -350,7 +351,7 @@ fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) 
         .set_set_layouts((&state.heap.set_layout)[:1])
         .set_push_constant_ranges((&range)[:1]);
     vk::PipelineLayout layout;
-    check_pipeline_cache_terminal_result(
+    check_backend_result(
         state:     state,
         operation: "create_compute_pipeline",
         result:    vk::create_pipeline_layout(state.device, &layout_info, null, &layout),
@@ -391,7 +392,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
     vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
         .set_set_layouts((&state.heap.set_layout)[:1])
         .set_push_constant_ranges((&range)[:1]);
-    check_pipeline_cache_terminal_result(
+    check_backend_result(
         state:     state,
         operation: "create_device",
         result:    vk::create_pipeline_layout(state.device, &layout_info, null, &state.graphics_layout),

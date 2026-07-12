@@ -312,6 +312,7 @@ fn void? check_texture_view_backend_result(
     }
     return public_fault~;
 }
+
 <* Resolve a view desc to an image view: null/zero desc (or the explicit full
    range) is the default view; anything else is normalized, validated, and
    get-or-created in the slot's view cache. Cached views die with the texture.

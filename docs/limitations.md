@@ -30,9 +30,7 @@ page doesn't explain it, that's a bug in this page — file an issue.
   output. Descriptor/cache diagnostics are emitted by device-owned operation
   boundaries; pure lookup, range, and context-free result helpers remain
   fault-only to prevent duplicate or context-free messages. Per-device callback
-  storage does not add multi-device support. Multi-device operation remains
-  unsupported; the
-  one-live-`Device` limit still applies.
+  storage does not add multi-device support: the one-live-`Device` limit still applies.
 - **Frame-token aliases share one generation.** Copies may allocate until one
   alias ends successfully. That end consumes the device generation, clears the
   passed copy, and makes every other copy stale. A failed end preserves the

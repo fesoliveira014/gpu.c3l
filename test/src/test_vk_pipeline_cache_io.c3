@@ -47,6 +47,7 @@ fn vk::Result scripted_pipeline_cache_create(
     *out_cache = (vk::PipelineCache)(void*)1;
     return vk::Result.SUCCESS;
 }
+
 fn void capture_cache_backend_diagnostic(gpu::DebugMessage* message, void* user_data) {
     CacheBackendCapture* capture = (CacheBackendCapture*)user_data;
     capture.calls++;
@@ -287,6 +288,7 @@ fn void pipeline_cache_retry_seam_is_exact_and_silent_on_success() @test {
     assert(state.driver_cache != null, "successful retry publishes the created cache");
     assert(capture.terminal_calls == 0, "retryable first failure and successful retry emit no terminal diagnostic");
 }
+
 fn void pipeline_cache_terminal_results_emit_once_and_preserve_faults() @test {
     vk::VkDeviceState state;
     CacheBackendCapture capture;

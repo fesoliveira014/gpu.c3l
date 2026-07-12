@@ -22,7 +22,6 @@ fn vk::AttachmentStoreOp store_op_to_vk(gpu::StoreOp op) @private {
     }
 }
 
-fn ZString render_pass_view_operation() => "cmd_begin_render_pass";
 <* Begin dynamic rendering. Attachments must sit in their attachment layouts,
    have matching usage, and cover the pass dimensions. Color views honor the
    target's mip/layer; the depth view uses mip zero. *>
@@ -122,7 +121,7 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
                 slot:      color_slots[i],
                 texture:   target.texture,
                 view:      &view_desc,
-                operation: render_pass_view_operation(),
+                operation: "cmd_begin_render_pass",
                 creation:  &creation,
             )!;
             if (creation.cell != null) creations[creation_count++] = creation;
@@ -149,7 +148,7 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
                 slot:      depth_slot,
                 texture:   desc.depth.texture,
                 view:      &depth_view_desc,
-                operation: render_pass_view_operation(),
+                operation: "cmd_begin_render_pass",
                 creation:  &depth_creation,
             )!;
             if (depth_creation.cell != null) creations[creation_count++] = depth_creation;

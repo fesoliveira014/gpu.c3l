@@ -229,9 +229,9 @@ creation, stale and exhausted descriptor identities, sampler-retire queries,
 image-view backend results, descriptor bootstrap failures, pipeline-cache
 INCOMPLETE, a compatible-header corrupt-blob integration, and a deterministic
 cache-create seam whose retryable first attempt and successful empty second
-attempt emit no terminal diagnostic. Pure range, lookup, and result-mapping
-helpers remain fault-only; the device-owned operation that has stable operation,
-field, and resolved-resource context emits exactly once.
+attempt emit no terminal diagnostic. Pure range and lookup helpers remain
+fault-only; operation-aware result helpers own specialized backend mapping and
+emit exactly once with stable operation context.
 Successful command tests exercise the actual `submit`
 and `wait_queue_idle` call sites without injecting a submit failure.
 
