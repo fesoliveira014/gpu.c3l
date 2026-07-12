@@ -357,7 +357,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
 
 fn void vk_destroy_device(gpu::Device* device) @private {
     destroy_state((VkDeviceState*)device.backend_state);
-    device.backend_state = null;
+    *device = {};
 }
 
 <* Reverse-order teardown; safe on a partial or zeroed state. *>

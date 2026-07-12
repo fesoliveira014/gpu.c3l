@@ -54,8 +54,8 @@ Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
 
 | Target | State |
 |---|---|
-| linux-x64 | CI: full test suite + 17 samples, validation-clean on lavapipe |
-| windows-x64 | CI: same suite on windows-2022 (lavapipe via mesa-dist-win) |
+| linux-x64 | Full library test suite, validation-clean on lavapipe |
+| windows-x64 | Build and CPU gates; advisory Vulkan sweep with mesa-dist-win |
 
 ## Start here
 
@@ -63,7 +63,7 @@ Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
   running GPU compute program; the walkthrough is executed by CI, so it
   cannot rot.
 - **[gpu.c3l-samples](https://github.com/fesoliveira014/gpu.c3l-samples)** —
-  17 runnable samples: triangle → textured cube → GPU-driven culling →
+  18 runnable samples: triangle → textured cube → GPU-driven culling →
   shadow mapping → deferred shading → PBR → stress/perf harnesses.
 - **[docs/document_index.md](docs/document_index.md)** — map of the full
   documentation set (architecture, API, memory model, shader ABI, backend,

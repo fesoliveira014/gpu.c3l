@@ -6,6 +6,7 @@ import std::thread;
 import vma;
 import std::io;
 import std::core::mem;
+import std::math;
 
 // Heap binding convention (set 0), mirrored by include/shaders/descriptor_heap.glsl.
 const uint HEAP_SET = 0;
@@ -1091,6 +1092,81 @@ fn gpu::SamplerIndex? publish_sampler(VkDeviceState* state, vk::Sampler sampler)
 
 fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (!math::is_finite(desc.mip_lod_bias)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_sampler",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "SamplerDesc.mip_lod_bias",
+            invariant:           "must be finite",
+            backend_text:        null,
+        )~;
+    }
+    if (!math::is_finite(desc.min_lod)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_sampler",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "SamplerDesc.min_lod",
+            invariant:           "must be finite",
+            backend_text:        null,
+        )~;
+    }
+    if (!math::is_finite(desc.max_lod)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_sampler",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "SamplerDesc.max_lod",
+            invariant:           "must be finite",
+            backend_text:        null,
+        )~;
+    }
+    if (desc.min_lod > desc.max_lod) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_sampler",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "SamplerDesc.min_lod",
+            invariant:           "must not exceed SamplerDesc.max_lod",
+            backend_text:        null,
+        )~;
+    }
+    if (desc.anisotropy_enable && !math::is_finite(desc.max_anisotropy)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_sampler",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "SamplerDesc.max_anisotropy",
+            invariant:           "must be finite when anisotropy is enabled",
+            backend_text:        null,
+        )~;
+    }
     if (desc.anisotropy_enable && state.max_sampler_anisotropy <= 0) {
         return report_contract_failure(
             state:               state,

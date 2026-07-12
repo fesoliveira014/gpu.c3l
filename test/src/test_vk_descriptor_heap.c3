@@ -380,6 +380,21 @@ fn void texture_descriptor_bad_view_rejected() @test {
     assert(view_fault == gpu::INVALID_ARGUMENT, "format-reinterpreting views fault INVALID_ARGUMENT");
 }
 
+fn void texture_descriptor_overflowing_view_range_rejected() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    gpu::TextureViewDesc mip_overflow = { .base_mip = 1, .mip_count = uint::max };
+    fault mip_fault = @catch(gpu::create_texture_descriptor(&device, texture, &mip_overflow));
+    assert(mip_fault == gpu::INVALID_ARGUMENT, "overflowing mip range faults INVALID_ARGUMENT");
+
+    gpu::TextureViewDesc layer_overflow = { .base_layer = 1, .layer_count = uint::max };
+    fault layer_fault = @catch(gpu::create_texture_descriptor(&device, texture, &layer_overflow));
+    assert(layer_fault == gpu::INVALID_ARGUMENT, "overflowing layer range faults INVALID_ARGUMENT");
+}
+
 fn void destroy_texture_with_live_descriptor_faults_and_recovers() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer gpu::destroy_device(&device)!!;
@@ -807,6 +822,31 @@ fn void sampler_round_trip_and_exhaustion() @test {
     assert(stale_fault == gpu::INVALID_HANDLE, "destroying a stale sampler index faults INVALID_HANDLE");
 
     gpu::destroy_sampler(&device, b)!!;
+}
+
+fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
+    gpu::Device device = make_heap_test_device(8, 8);
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::SamplerDesc nan_bias = { .mip_lod_bias = float::nan };
+    fault bias_fault = @catch(gpu::create_sampler(&device, &nan_bias));
+    assert(bias_fault == gpu::INVALID_ARGUMENT, "non-finite mip bias faults INVALID_ARGUMENT");
+
+    gpu::SamplerDesc nan_lod = { .min_lod = float::nan };
+    fault lod_fault = @catch(gpu::create_sampler(&device, &nan_lod));
+    assert(lod_fault == gpu::INVALID_ARGUMENT, "non-finite LOD range faults INVALID_ARGUMENT");
+
+    gpu::SamplerDesc nan_max_lod = { .max_lod = float::nan };
+    fault max_lod_fault = @catch(gpu::create_sampler(&device, &nan_max_lod));
+    assert(max_lod_fault == gpu::INVALID_ARGUMENT, "non-finite maximum LOD faults INVALID_ARGUMENT");
+
+    gpu::SamplerDesc reversed_lod = { .min_lod = 2.0f, .max_lod = 1.0f };
+    fault reversed_fault = @catch(gpu::create_sampler(&device, &reversed_lod));
+    assert(reversed_fault == gpu::INVALID_ARGUMENT, "reversed LOD range faults INVALID_ARGUMENT");
+
+    gpu::SamplerDesc nan_anisotropy = { .anisotropy_enable = true, .max_anisotropy = float::nan };
+    fault anisotropy_fault = @catch(gpu::create_sampler(&device, &nan_anisotropy));
+    assert(anisotropy_fault == gpu::INVALID_ARGUMENT, "non-finite anisotropy faults INVALID_ARGUMENT");
 }
 
 fn void leaked_descriptors_survive_teardown() @test {

@@ -4,9 +4,7 @@ import gpu;
 import vk;
 import std::thread;
 
-// Concrete (non-generic) slot table for pipelines. Mirrors gpu::slots but
-// monomorphized to sidestep a c3c 0.8.0 codegen crash tied to generic-module
-// instantiation of the slot table (fixed in the 0.8.2 RC; revert on upgrade).
+// Concrete slot table avoids a c3c 0.8.0 generic-instantiation codegen failure.
 const uint PIPELINE_FREE_NONE = 0;
 
 struct PipelineSlot {

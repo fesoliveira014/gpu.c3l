@@ -104,7 +104,7 @@ the tracked layout) and only commit onto tracked state when the list
 submits, under the queue mutex, in submission order. A list that is recorded
 and never submitted has no effect on tracked state. Commit order is submit
 order, not cross-queue execution order — per-queue ownership of a texture
-stays the caller's responsibility (gpu.c3l#36).
+stays the caller's responsibility.
 
 ## Visibility rules
 

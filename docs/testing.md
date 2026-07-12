@@ -269,11 +269,11 @@ test_vk_create_addressable_buffer
 test_vk_root_pointer_compute
 ```
 
-Do not include milestone labels in test names.
+Do not include development phase labels in test names.
 
-## 8. Required test categories by milestone
+## 8. Required coverage
 
-| Milestone area | Required tests |
+| Area | Required tests |
 |---|---|
 | Handles | pack/unpack, invalid handle, generation mismatch. |
 | Memory policy | memory kind translation, alignment, range validation. |
@@ -360,7 +360,7 @@ Windows-specific notes:
   run tests and benches with `VK_LOADER_LAYERS_DISABLE=~implicit~` for
   deterministic results.
 
-Notes pinned during scaffolding (C3 0.8.0):
+C3 0.8.0 constraints:
 
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
   a `project.json` key); dependencies are declared per-target and resolved by

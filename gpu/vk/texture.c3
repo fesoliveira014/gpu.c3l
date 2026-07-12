@@ -332,8 +332,8 @@ fn vk::ImageView? resolve_texture_view_tracked(
 
     uint mip_count   = view.mip_count == 0 ? slot.mip_levels - view.base_mip : view.mip_count;
     uint layer_count = view.layer_count == 0 ? slot.array_layers - view.base_layer : view.layer_count;
-    if (view.base_mip + mip_count > slot.mip_levels)       return gpu::INVALID_ARGUMENT~;
-    if (view.base_layer + layer_count > slot.array_layers) return gpu::INVALID_ARGUMENT~;
+    if (mip_count > slot.mip_levels - view.base_mip)       return gpu::INVALID_ARGUMENT~;
+    if (layer_count > slot.array_layers - view.base_layer) return gpu::INVALID_ARGUMENT~;
 
     vk::ImageViewType view_type = layer_count > 1 ? vk::ImageViewType.TYPE_2D_ARRAY : vk::ImageViewType.TYPE_2D;
     bool full_range = view.base_mip == 0 && mip_count == slot.mip_levels
