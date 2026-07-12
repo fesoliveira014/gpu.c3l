@@ -1163,6 +1163,8 @@ faults INVALID_RESOURCE_STATE; present enforces the PRESENT tracked layout;
 a failed resize parks the swapchain dormant (next acquire reports
 SWAPCHAIN_OUT_OF_DATE).
 
+Configured diagnostics preserve the public WSI operation and fault, report exact lifecycle or descriptor context, and include the raw signed VkResult for native failures. Handle identity is present only after a live swapchain resolves. This remains an intra-device facility under the one-live-Device contract; multi-device is unsupported.
+
 WSI recovery is fault-specific:
 
 | Outcome | Meaning | Recovery |

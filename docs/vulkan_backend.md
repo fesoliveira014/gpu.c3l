@@ -453,7 +453,7 @@ Queue submission and `wait_queue_idle` use the state-aware result path.
 With a callback, failures preserve the mapped public fault and emit one backend
 diagnostic with the exact operation (`submit` or `wait_queue_idle`) and native
 result text. With a null callback, mapped results return their public faults
-silently; only unmapped results retain the stderr fallback.
+silently; only unmapped results retain the stderr fallback. Surface creation/query, swapchain creation/enumeration, acquire, present, resize/destroy idle waits, and present-mode queries use the same operation-aware rule while preserving their specialized WSI fault mappings and the raw signed VkResult. A swapchain identity is attached only after its handle resolves.
 
 A rejected warm pipeline-cache blob may be retried with an empty cache. Host or
 device allocation failure and explicit device loss propagate without retry.
