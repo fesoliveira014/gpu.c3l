@@ -669,3 +669,83 @@ fn void unsupported_usage_persistent_span_faults() @test {
     gpu::GpuSpan empty_span = gpu::alloc_persistent_span(&device, &empty_desc)!!;
     gpu::free_persistent_span(&device, empty_span)!!;
 }
+
+fn void persistent_free_rejections_report_exact_context() @test {
+    PersistentDiagnosticCapture capture;
+    gpu::DeviceDesc device_desc = {
+        .backend          = gpu::BackendKind.VULKAN,
+        .debug_callback   = &capture_persistent_diagnostic,
+        .debug_user_data  = &capture,
+        .frames_in_flight = 2,
+    };
+    gpu::Device device = gpu::create_device(&device_desc)!!;
+    defer gpu::destroy_device(&device)!!;
+    gpu::PersistentAllocDesc alloc_desc = {
+        .size        = 64,
+        .align       = 16,
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+    };
+    gpu::GpuSpan span = gpu::alloc_persistent_span(&device, &alloc_desc)!!;
+
+    gpu::GpuSpan wrong_buffer = span;
+    wrong_buffer.buffer = gpu::BUFFER_HANDLE_INVALID;
+    uint before = capture.calls;
+    fault wrong_fault = @catch(gpu::free_persistent_span(&device, wrong_buffer));
+    assert(wrong_fault == gpu::INVALID_ARGUMENT, "wrong persistent backing keeps INVALID_ARGUMENT");
+    assert(capture.calls == before + 1, "wrong persistent backing emits exactly once");
+    assert(capture.has_fault && capture.public_fault == wrong_fault, "wrong backing diagnostic keeps its fault");
+    assert(capture.resource_kind == gpu::DebugResourceKind.PERSISTENT_SPAN,
+        "wrong backing diagnostic identifies a persistent span");
+    assert(!capture.has_public_identity, "wrong backing diagnostic invents no identity");
+    assert(((ZString)&capture.operation[0]).str_view() == "free_persistent_span",
+        "wrong backing diagnostic names free_persistent_span");
+    assert(((ZString)&capture.rejected_field[0]).str_view() == "GpuSpan.buffer",
+        "wrong backing diagnostic identifies GpuSpan.buffer");
+
+    gpu::free_persistent_span(&device, span)!!;
+    before = capture.calls;
+    fault double_free = @catch(gpu::free_persistent_span(&device, span));
+    assert(double_free == gpu::INVALID_HANDLE, "double persistent free keeps INVALID_HANDLE");
+    assert(capture.calls == before + 1, "double persistent free emits exactly once");
+    assert(capture.has_fault && capture.public_fault == double_free, "double-free diagnostic keeps its fault");
+    assert(!capture.has_public_identity, "double-free diagnostic invents no identity");
+    assert(((ZString)&capture.rejected_field[0]).str_view() == "GpuSpan.offset",
+        "double-free diagnostic identifies GpuSpan.offset");
+}
+
+fn void persistent_capacity_failure_reports_backend_result() @test {
+    PersistentDiagnosticCapture capture;
+    gpu::DeviceDesc device_desc = {
+        .backend               = gpu::BackendKind.VULKAN,
+        .persistent_arena_size = 64,
+        .debug_callback        = &capture_persistent_diagnostic,
+        .debug_user_data       = &capture,
+        .frames_in_flight      = 2,
+    };
+    gpu::Device device = gpu::create_device(&device_desc)!!;
+    defer gpu::destroy_device(&device)!!;
+    gpu::PersistentAllocDesc full_desc = {
+        .size        = 64,
+        .align       = 1,
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+    };
+    gpu::GpuSpan full = gpu::alloc_persistent_span(&device, &full_desc)!!;
+    defer gpu::free_persistent_span(&device, full)!!;
+    gpu::PersistentAllocDesc overflow_desc = {
+        .size        = 1,
+        .align       = 1,
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+    };
+
+    uint before = capture.calls;
+    fault full_fault = @catch(gpu::alloc_persistent_span(&device, &overflow_desc));
+    assert(full_fault == gpu::ARENA_FULL, "persistent capacity keeps ARENA_FULL");
+    assert(capture.calls == before + 1, "persistent capacity emits exactly once");
+    assert(capture.category.backend, "persistent capacity is a backend diagnostic");
+    assert(capture.has_fault && capture.public_fault == full_fault,
+        "persistent capacity diagnostic keeps its fault");
+    assert(((ZString)&capture.operation[0]).str_view() == "alloc_persistent_span",
+        "persistent capacity diagnostic names alloc_persistent_span");
+    assert(capture.validation_id_number == (int)vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
+        "persistent capacity carries the raw backend result");
+}

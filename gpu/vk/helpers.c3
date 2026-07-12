@@ -78,6 +78,72 @@ fn void? check_backend_result(VkDeviceState* state, ZString operation, vk::Resul
     return public_fault~;
 }
 
+fn void? report_specialized_backend_failure(
+    VkDeviceState* state,
+    ZString operation,
+    fault public_fault,
+    ZString backend_text,
+    vk::Result result,
+) {
+    if (state.debug_callback != null) {
+        gpu::DebugMessage message = {
+            .severity             = gpu::DebugMessageSeverity.ERROR,
+            .category             = { .backend },
+            .operation            = operation,
+            .has_fault            = true,
+            .public_fault         = public_fault,
+            .backend_text         = backend_text,
+            .validation_id_number = (int)result,
+        };
+        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    }
+    return public_fault~;
+}
+
+fn fault wait_result_fault(vk::Result result) {
+    if (result == vk::Result.TIMEOUT) return gpu::WAIT_TIMEOUT;
+    return @catch(map_result(result, false));
+}
+
+fn fault virtual_allocate_result_fault(vk::Result result) {
+    if (result == vk::Result.ERROR_OUT_OF_DEVICE_MEMORY) {
+        return gpu::ARENA_FULL;
+    }
+    return @catch(map_result(result, false));
+}
+
+fn void? check_wait_backend_result(
+    VkDeviceState* state,
+    ZString operation,
+    vk::Result result,
+) {
+    fault public_fault = wait_result_fault(result);
+    if (!public_fault) return;
+    if (public_fault != gpu::WAIT_TIMEOUT) {
+        return check_backend_result(state, operation, result);
+    }
+    return gpu::WAIT_TIMEOUT~;
+}
+
+fn void? check_virtual_allocate_backend_result(
+    VkDeviceState* state,
+    ZString operation,
+    vk::Result result,
+) {
+    fault public_fault = virtual_allocate_result_fault(result);
+    if (!public_fault) return;
+    if (public_fault != gpu::ARENA_FULL) {
+        return check_backend_result(state, operation, result);
+    }
+    return report_specialized_backend_failure(
+        state:        state,
+        operation:    operation,
+        public_fault: public_fault,
+        backend_text: "persistent arena exhausted",
+        result:       result,
+    );
+}
+
 fn void? check_backend_create_result(vk::Result result) @private {
     switch (result) {
         case vk::Result.ERROR_INCOMPATIBLE_DRIVER:
@@ -213,7 +279,9 @@ fn void? check_pipeline_cache_data_result(vk::Result result) @private {
 }
 
 fn void? check_virtual_allocate_result(vk::Result result) @private {
-    if (result == vk::Result.ERROR_OUT_OF_DEVICE_MEMORY) return gpu::ARENA_FULL~;
+    fault public_fault = virtual_allocate_result_fault(result);
+    if (!public_fault) return;
+    if (public_fault == gpu::ARENA_FULL) return public_fault~;
     return check(result);
 }
 
@@ -237,12 +305,10 @@ fn bool pipeline_cache_blob_retryable(vk::Result result) @private {
 <* For bounded host waits only: TIMEOUT faults WAIT_TIMEOUT, everything else
    delegates to check(). *>
 fn void? check_wait(vk::Result result) @private {
-    switch (result) {
-        case vk::Result.TIMEOUT:
-            return gpu::WAIT_TIMEOUT~;
-        default:
-            return check(result);
-    }
+    fault public_fault = wait_result_fault(result);
+    if (!public_fault) return;
+    if (public_fault == gpu::WAIT_TIMEOUT) return public_fault~;
+    return check(result);
 }
 
 <* Pure translation of a public execution stage to a synchronization2 stage
