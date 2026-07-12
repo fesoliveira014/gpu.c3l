@@ -2,6 +2,7 @@ module gpu_test;
 
 import gpu;
 import gpu::vk;
+import vk;
 import std::core::mem;
 import std::io;
 
@@ -30,6 +31,7 @@ struct TransferDiagnosticCapture {
     char[128]                 invariant;
     char[128]                 backend_text;
     char[64]                  validation_id_name;
+    int                       validation_id_number;
 }
 
 struct StagingReuseFixture {
@@ -66,6 +68,7 @@ fn void capture_transfer_diagnostic(gpu::DebugMessage* message, void* user_data)
     copy_transfer_diagnostic_text(&capture.invariant[0], 128, message.invariant);
     copy_transfer_diagnostic_text(&capture.backend_text[0], 128, message.backend_text);
     copy_transfer_diagnostic_text(&capture.validation_id_name[0], 64, message.validation_id_name);
+    capture.validation_id_number = message.validation_id_number;
 }
 
 fn void assert_transfer_rejection(
@@ -333,6 +336,420 @@ fn void buffer_upload_readback_round_trip() @test {
     for (uint i = 0; i < 4096; i++) {
         assert(out[i] == (char)(i * 7), "device-memory round trip preserves bytes");
     }
+}
+
+fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
+    TransferDiagnosticCapture capture;
+    gpu::Device device = make_transfer_test_device(capture: &capture);
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::BufferDesc buffer_desc = {
+        .size        = 64,
+        .usage       = { .transfer_src, .transfer_dst },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+
+    char[16] data;
+    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&commands)!!;
+    uint before = capture.calls;
+    fault command_state = @catch(gpu::cmd_upload_buffer(&commands, buffer, 0, data[..]));
+    assert(command_state == gpu::COMMAND_RECORDING_ERROR, "ended upload command keeps COMMAND_RECORDING_ERROR");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            command_state,
+        operation:           "cmd_upload_buffer",
+        rejected_field:      "CommandList.state",
+        invariant:           "command must be recording outside a render pass",
+        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        has_public_identity: true,
+        resource_index:      commands.handle.index,
+        resource_generation: commands.handle.generation,
+        resource_name:       null,
+    );
+
+    gpu::CommandList lookup_commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::BufferHandle missing = { .index = gpu::MAX_BUFFERS, .generation = 1 };
+    before = capture.calls;
+    fault invalid_buffer = @catch(gpu::cmd_upload_buffer(&lookup_commands, missing, 0, data[..]));
+    assert(invalid_buffer == gpu::INVALID_HANDLE, "missing upload buffer keeps INVALID_HANDLE");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            invalid_buffer,
+        operation:           "cmd_upload_buffer",
+        rejected_field:      "dst",
+        invariant:           "destination buffer handle must resolve to a live resource",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: false,
+        resource_index:      0,
+        resource_generation: 0,
+        resource_name:       null,
+    );
+}
+
+fn void stale_transfer_command_owners_report_without_identity() @test {
+    TransferDiagnosticCapture capture;
+    gpu::Device device = make_transfer_test_device(capture: &capture);
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::CommandList stale = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&stale)!!;
+    gpu::CommandList[1] lists = { stale };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+
+    char[4] data;
+    gpu::TextureUploadDesc texture_upload;
+    uint before = capture.calls;
+    fault upload_buffer = @catch(gpu::cmd_upload_buffer(&stale, {}, 0, data[..]));
+    assert(upload_buffer == gpu::INVALID_HANDLE, "stale buffer upload keeps INVALID_HANDLE");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            upload_buffer,
+        operation:           "cmd_upload_buffer",
+        rejected_field:      "CommandList.handle",
+        invariant:           "command list handle must identify a live command list",
+        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        has_public_identity: false,
+        resource_index:      0,
+        resource_generation: 0,
+        resource_name:       null,
+    );
+
+    before = capture.calls;
+    fault upload_texture = @catch(gpu::cmd_upload_texture(&stale, &texture_upload, data[..]));
+    assert(upload_texture == gpu::INVALID_HANDLE, "stale texture upload keeps INVALID_HANDLE");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            upload_texture,
+        operation:           "cmd_upload_texture",
+        rejected_field:      "CommandList.handle",
+        invariant:           "command list handle must identify a live command list",
+        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        has_public_identity: false,
+        resource_index:      0,
+        resource_generation: 0,
+        resource_name:       null,
+    );
+
+    before = capture.calls;
+    fault readback_buffer = @catch(gpu::cmd_readback_buffer(&stale, {}, 0, 4));
+    assert(readback_buffer == gpu::INVALID_HANDLE, "stale buffer readback keeps INVALID_HANDLE");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            readback_buffer,
+        operation:           "cmd_readback_buffer",
+        rejected_field:      "CommandList.handle",
+        invariant:           "command list handle must identify a live command list",
+        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        has_public_identity: false,
+        resource_index:      0,
+        resource_generation: 0,
+        resource_name:       null,
+    );
+
+    before = capture.calls;
+    fault readback_texture = @catch(gpu::cmd_readback_texture(&stale, {}, 0));
+    assert(readback_texture == gpu::INVALID_HANDLE, "stale texture readback keeps INVALID_HANDLE");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            readback_texture,
+        operation:           "cmd_readback_texture",
+        rejected_field:      "CommandList.handle",
+        invariant:           "command list handle must identify a live command list",
+        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        has_public_identity: false,
+        resource_index:      0,
+        resource_generation: 0,
+        resource_name:       null,
+    );
+}
+
+fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test {
+    TransferDiagnosticCapture capture;
+    gpu::Device device = make_transfer_test_device(capture: &capture);
+    defer gpu::destroy_device(&device)!!;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+
+    uint before = capture.calls;
+    fault cleanup_fault = @catch(gpu::vk::check_helper_backend_result(
+        state:           state,
+        operation:       "upload_buffer_data",
+        result:          vk::Result.ERROR_DEVICE_LOST,
+        fault_is_public: false,
+    ));
+    assert(cleanup_fault == gpu::DEVICE_LOST, "cleanup result mapping keeps DEVICE_LOST");
+    assert(capture.calls == before + 1, "cleanup backend failure emits exactly once");
+    assert(capture.category.backend, "cleanup result is a backend diagnostic");
+    assert(!capture.has_fault, "swallowed cleanup diagnostic omits a public fault");
+    assert(((ZString)&capture.operation[0]).str_view() == "upload_buffer_data", "cleanup operation is public owner");
+    assert(((ZString)&capture.backend_text[0]).str_view() == "Vulkan device lost", "cleanup diagnostic preserves backend text");
+    assert(capture.validation_id_number == (int)vk::Result.ERROR_DEVICE_LOST, "cleanup diagnostic preserves backend result");
+
+    before = capture.calls;
+    fault reset_fault = @catch(gpu::vk::check_helper_backend_result(
+        state:           state,
+        operation:       "readback_texture_data",
+        result:          vk::Result.ERROR_DEVICE_LOST,
+        fault_is_public: true,
+    ));
+    assert(reset_fault == gpu::DEVICE_LOST, "propagated reset result keeps DEVICE_LOST");
+    assert(capture.calls == before + 1, "propagated backend failure emits exactly once");
+    assert(capture.category.backend, "propagated result is a backend diagnostic");
+    assert(capture.has_fault && capture.public_fault == reset_fault, "propagated result carries matching public fault");
+    assert(((ZString)&capture.operation[0]).str_view() == "readback_texture_data", "reset operation is public owner");
+    assert(((ZString)&capture.backend_text[0]).str_view() == "Vulkan device lost", "propagated diagnostic preserves backend text");
+    assert(capture.validation_id_number == (int)vk::Result.ERROR_DEVICE_LOST, "propagated diagnostic preserves backend result");
+}
+
+fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
+    TransferDiagnosticCapture capture;
+    gpu::Device device = make_transfer_test_device(
+        staging_size:  64,
+        readback_size: 64,
+        capture:       &capture,
+    );
+    defer gpu::destroy_device(&device)!!;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+
+    gpu::BufferDesc buffer_desc = {
+        .size        = 128,
+        .usage       = { .transfer_src, .transfer_dst },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .debug_name  = "exhaustion_buffer",
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::TextureDesc texture_desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = 2,
+        .height     = 2,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .transfer_src, .transfer_dst },
+        .debug_name = "exhaustion_texture",
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    usz staging_size = state.staging_arena.size;
+    uint dedicated_count = state.dedicated_staging.count;
+    state.staging_arena.size = 1;
+    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
+
+    char[16] data;
+    uint before = capture.calls;
+    fault staging_full = @catch(gpu::cmd_upload_buffer(&commands, buffer, 0, data[..]));
+    state.staging_arena.size = staging_size;
+    state.dedicated_staging.count = dedicated_count;
+    assert(staging_full == gpu::ARENA_FULL, "staging exhaustion keeps ARENA_FULL");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            staging_full,
+        operation:           "cmd_upload_buffer",
+        rejected_field:      "data",
+        invariant:           "staging capacity must be available for the upload",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      buffer.index,
+        resource_generation: buffer.generation,
+        resource_name:       "exhaustion_buffer",
+    );
+    gpu::TextureBarrier to_dst = {
+        .texture       = texture,
+        .before_stage  = gpu::Stage.HOST,
+        .after_stage   = gpu::Stage.TRANSFER,
+        .before_hazard = gpu::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
+        .old_layout    = gpu::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+    };
+    gpu::cmd_texture_barrier(&commands, &to_dst)!!;
+    state.staging_arena.size = 1;
+    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
+    gpu::TextureUploadDesc upload = { .texture = texture };
+    before = capture.calls;
+    fault texture_staging_full = @catch(gpu::cmd_upload_texture(&commands, &upload, data[..]));
+    state.staging_arena.size = staging_size;
+    state.dedicated_staging.count = dedicated_count;
+    assert(texture_staging_full == gpu::ARENA_FULL, "texture staging exhaustion keeps ARENA_FULL");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            texture_staging_full,
+        operation:           "cmd_upload_texture",
+        rejected_field:      "data",
+        invariant:           "staging capacity must be available for the upload",
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        resource_index:      texture.index,
+        resource_generation: texture.generation,
+        resource_name:       "exhaustion_texture",
+    );
+
+    state.staging_arena.size = 1;
+    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
+    before = capture.calls;
+    fault helper_buffer_full = @catch(gpu::upload_buffer_data(
+        device:      &device,
+        dst:         buffer,
+        offset:      0,
+        data:        data[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+    ));
+    state.staging_arena.size = staging_size;
+    state.dedicated_staging.count = dedicated_count;
+    assert(helper_buffer_full == gpu::ARENA_FULL, "blocking buffer upload exhaustion keeps ARENA_FULL");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            helper_buffer_full,
+        operation:           "upload_buffer_data",
+        rejected_field:      "data",
+        invariant:           "staging capacity must be available for the upload",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      buffer.index,
+        resource_generation: buffer.generation,
+        resource_name:       "exhaustion_buffer",
+    );
+
+    state.staging_arena.size = 1;
+    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
+    before = capture.calls;
+    fault helper_texture_full = @catch(gpu::upload_texture_data(
+        device:      &device,
+        dst:         texture,
+        mip:         0,
+        data:        data[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_layout: gpu::TextureLayout.TRANSFER_DST,
+    ));
+    state.staging_arena.size = staging_size;
+    state.dedicated_staging.count = dedicated_count;
+    assert(helper_texture_full == gpu::ARENA_FULL, "blocking texture upload exhaustion keeps ARENA_FULL");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            helper_texture_full,
+        operation:           "upload_texture_data",
+        rejected_field:      "data",
+        invariant:           "staging capacity must be available for the upload",
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        resource_index:      texture.index,
+        resource_generation: texture.generation,
+        resource_name:       "exhaustion_texture",
+    );
+
+    gpu::TextureBarrier to_src = {
+        .texture       = texture,
+        .before_stage  = gpu::Stage.TRANSFER,
+        .after_stage   = gpu::Stage.TRANSFER,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+        .after_hazard  = gpu::Hazard.TRANSFER_READ,
+        .old_layout    = gpu::TextureLayout.TRANSFER_DST,
+        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+    };
+    gpu::cmd_texture_barrier(&commands, &to_src)!!;
+    usz texture_readback_size = state.readback_arena.size;
+    uint texture_next_new = state.buffers.next_new;
+    uint texture_free_head = state.buffers.free_head;
+    state.readback_arena.size = 1;
+    state.buffers.next_new = (uint)state.buffers.slots.len;
+    state.buffers.free_head = 0;
+    before = capture.calls;
+    fault texture_ticket_full = @catch(gpu::cmd_readback_texture(&commands, texture, 0));
+    state.readback_arena.size = texture_readback_size;
+    state.buffers.next_new = texture_next_new;
+    state.buffers.free_head = texture_free_head;
+    assert(texture_ticket_full == gpu::SLOT_TABLE_FULL, "texture ticket exhaustion keeps SLOT_TABLE_FULL");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            texture_ticket_full,
+        operation:           "cmd_readback_texture",
+        rejected_field:      "mip",
+        invariant:           "readback capacity must be available for the ticket",
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        resource_index:      texture.index,
+        resource_generation: texture.generation,
+        resource_name:       "exhaustion_texture",
+    );
+
+    usz blocking_readback_size = state.readback_arena.size;
+    dedicated_count = state.dedicated_staging.count;
+    state.readback_arena.size = 1;
+    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
+    char[16] out_data;
+    before = capture.calls;
+    fault readback_full = @catch(gpu::readback_buffer_data(
+        device:      &device,
+        src:         buffer,
+        offset:      0,
+        out_data:    out_data[..],
+        from_stage:  gpu::Stage.TRANSFER,
+        from_hazard: gpu::Hazard.TRANSFER_READ,
+    ));
+    state.readback_arena.size = blocking_readback_size;
+    state.dedicated_staging.count = dedicated_count;
+    assert(readback_full == gpu::ARENA_FULL, "blocking readback exhaustion keeps ARENA_FULL");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            readback_full,
+        operation:           "readback_buffer_data",
+        rejected_field:      "out_data",
+        invariant:           "readback capacity must be available for the destination",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      buffer.index,
+        resource_generation: buffer.generation,
+        resource_name:       "exhaustion_buffer",
+    );
+    usz readback_size = state.readback_arena.size;
+    uint next_new = state.buffers.next_new;
+    uint free_head = state.buffers.free_head;
+    state.readback_arena.size = 1;
+    state.buffers.next_new = (uint)state.buffers.slots.len;
+    state.buffers.free_head = 0;
+    before = capture.calls;
+    fault ticket_full = @catch(gpu::cmd_readback_buffer(&commands, buffer, 0, 16));
+    state.readback_arena.size = readback_size;
+    state.buffers.next_new = next_new;
+    state.buffers.free_head = free_head;
+    assert(ticket_full == gpu::SLOT_TABLE_FULL, "ticket fallback exhaustion keeps SLOT_TABLE_FULL");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            ticket_full,
+        operation:           "cmd_readback_buffer",
+        rejected_field:      "size",
+        invariant:           "readback capacity must be available for the ticket",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      buffer.index,
+        resource_generation: buffer.generation,
+        resource_name:       "exhaustion_buffer",
+    );
 }
 
 <* An unrelated blocking helper's completion must never make an unsubmitted
