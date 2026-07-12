@@ -31,6 +31,7 @@ struct TransferDiagnosticCapture {
     char[128]                 invariant;
     char[128]                 backend_text;
     char[64]                  validation_id_name;
+    int                       validation_id_number;
 }
 
 struct StagingReuseFixture {
@@ -67,6 +68,7 @@ fn void capture_transfer_diagnostic(gpu::DebugMessage* message, void* user_data)
     copy_transfer_diagnostic_text(&capture.invariant[0], 128, message.invariant);
     copy_transfer_diagnostic_text(&capture.backend_text[0], 128, message.backend_text);
     copy_transfer_diagnostic_text(&capture.validation_id_name[0], 64, message.validation_id_name);
+    capture.validation_id_number = message.validation_id_number;
 }
 
 fn void assert_transfer_rejection(
@@ -490,6 +492,8 @@ fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test
     assert(capture.category.backend, "cleanup result is a backend diagnostic");
     assert(!capture.has_fault, "swallowed cleanup diagnostic omits a public fault");
     assert(((ZString)&capture.operation[0]).str_view() == "upload_buffer_data", "cleanup operation is public owner");
+    assert(((ZString)&capture.backend_text[0]).str_view() == "Vulkan device lost", "cleanup diagnostic preserves backend text");
+    assert(capture.validation_id_number == (int)vk::Result.ERROR_DEVICE_LOST, "cleanup diagnostic preserves backend result");
 
     before = capture.calls;
     fault reset_fault = @catch(gpu::vk::check_helper_backend_result(
@@ -503,6 +507,8 @@ fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test
     assert(capture.category.backend, "propagated result is a backend diagnostic");
     assert(capture.has_fault && capture.public_fault == reset_fault, "propagated result carries matching public fault");
     assert(((ZString)&capture.operation[0]).str_view() == "readback_texture_data", "reset operation is public owner");
+    assert(((ZString)&capture.backend_text[0]).str_view() == "Vulkan device lost", "propagated diagnostic preserves backend text");
+    assert(capture.validation_id_number == (int)vk::Result.ERROR_DEVICE_LOST, "propagated diagnostic preserves backend result");
 }
 
 fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
@@ -593,6 +599,65 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         resource_name:       "exhaustion_texture",
     );
 
+    state.staging_arena.size = 1;
+    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
+    before = capture.calls;
+    fault helper_buffer_full = @catch(gpu::upload_buffer_data(
+        device:      &device,
+        dst:         buffer,
+        offset:      0,
+        data:        data[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+    ));
+    state.staging_arena.size = staging_size;
+    state.dedicated_staging.count = dedicated_count;
+    assert(helper_buffer_full == gpu::ARENA_FULL, "blocking buffer upload exhaustion keeps ARENA_FULL");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            helper_buffer_full,
+        operation:           "upload_buffer_data",
+        rejected_field:      "data",
+        invariant:           "staging capacity must be available for the upload",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      buffer.index,
+        resource_generation: buffer.generation,
+        resource_name:       "exhaustion_buffer",
+    );
+
+    state.staging_arena.size = 1;
+    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
+    before = capture.calls;
+    fault helper_texture_full = @catch(gpu::upload_texture_data(
+        device:      &device,
+        dst:         texture,
+        mip:         0,
+        data:        data[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_layout: gpu::TextureLayout.TRANSFER_DST,
+    ));
+    state.staging_arena.size = staging_size;
+    state.dedicated_staging.count = dedicated_count;
+    assert(helper_texture_full == gpu::ARENA_FULL, "blocking texture upload exhaustion keeps ARENA_FULL");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            helper_texture_full,
+        operation:           "upload_texture_data",
+        rejected_field:      "data",
+        invariant:           "staging capacity must be available for the upload",
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        resource_index:      texture.index,
+        resource_generation: texture.generation,
+        resource_name:       "exhaustion_texture",
+    );
+
     gpu::TextureBarrier to_src = {
         .texture       = texture,
         .before_stage  = gpu::Stage.TRANSFER,
@@ -620,7 +685,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         before:              before,
         returned:            texture_ticket_full,
         operation:           "cmd_readback_texture",
-        rejected_field:      "readback ticket",
+        rejected_field:      "mip",
         invariant:           "readback capacity must be available for the ticket",
         resource_kind:       gpu::DebugResourceKind.TEXTURE,
         has_public_identity: true,
@@ -677,7 +742,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         before:              before,
         returned:            ticket_full,
         operation:           "cmd_readback_buffer",
-        rejected_field:      "readback ticket",
+        rejected_field:      "size",
         invariant:           "readback capacity must be available for the ticket",
         resource_kind:       gpu::DebugResourceKind.BUFFER,
         has_public_identity: true,

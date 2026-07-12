@@ -1395,7 +1395,7 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
             index:               src.index,
             generation:          src.generation,
             debug_name:          slot_name(&src_slot.debug_name[0]),
-            rejected_field:      "readback ticket",
+            rejected_field:      "size",
             invariant:           "readback capacity must be available for the ticket",
             backend_text:        null,
         )~;
@@ -1491,7 +1491,7 @@ fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu:
             index:               src.index,
             generation:          src.generation,
             debug_name:          slot_name(&slot.debug_name[0]),
-            rejected_field:      "readback ticket",
+            rejected_field:      "mip",
             invariant:           "readback capacity must be available for the ticket",
             backend_text:        null,
         )~;
