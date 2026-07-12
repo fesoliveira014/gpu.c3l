@@ -1,0 +1,121 @@
+{
+  "format": 1,
+  "c3-version": "0.8.0",
+  "tool-inputs": [
+    "packaging/runtime.py",
+    "scripts/package_gpu.py"
+  ],
+  "bindings": {
+    "spvreflect": { "path": "lib/spvreflect.c3l", "production-suffixes": [ ".c3", ".c3i" ] },
+    "vk": { "path": "lib/vk.c3l", "production-suffixes": [ ".c3", ".c3i" ] },
+    "vma": { "path": "lib/vma.c3l", "production-suffixes": [ ".c3", ".c3i" ] }
+  },
+  "sources": [
+    { "source": "gpu/buffer.c3", "destination": "gpu/buffer.c3" },
+    { "source": "gpu/caps.c3", "destination": "gpu/caps.c3" },
+    { "source": "gpu/command.c3", "destination": "gpu/command.c3" },
+    { "source": "gpu/debug.c3", "destination": "gpu/debug.c3" },
+    { "source": "gpu/descriptor_heap.c3", "destination": "gpu/descriptor_heap.c3" },
+    { "source": "gpu/device.c3", "destination": "gpu/device.c3" },
+    { "source": "gpu/faults.c3", "destination": "gpu/faults.c3" },
+    { "source": "gpu/gpu.c3", "destination": "gpu/gpu.c3" },
+    { "source": "gpu/gpu.c3i", "destination": "gpu/gpu.c3i" },
+    { "source": "gpu/memory.c3", "destination": "gpu/memory.c3" },
+    { "source": "gpu/pipeline.c3", "destination": "gpu/pipeline.c3" },
+    { "source": "gpu/queue.c3", "destination": "gpu/queue.c3" },
+    { "source": "gpu/shader_abi.c3", "destination": "gpu/shader_abi.c3" },
+    { "source": "gpu/swapchain.c3", "destination": "gpu/swapchain.c3" },
+    { "source": "gpu/sync.c3", "destination": "gpu/sync.c3" },
+    { "source": "gpu/texture.c3", "destination": "gpu/texture.c3" },
+    { "source": "gpu/types.c3", "destination": "gpu/types.c3" },
+    { "source": "gpu/vk/allocator.c3", "destination": "gpu/vk/allocator.c3" },
+    { "source": "gpu/vk/backend.c3", "destination": "gpu/vk/backend.c3" },
+    { "source": "gpu/vk/buffer.c3", "destination": "gpu/vk/buffer.c3" },
+    { "source": "gpu/vk/command.c3", "destination": "gpu/vk/command.c3" },
+    { "source": "gpu/vk/command_state.c3", "destination": "gpu/vk/command_state.c3" },
+    { "source": "gpu/vk/debug.c3", "destination": "gpu/vk/debug.c3" },
+    { "source": "gpu/vk/deferred.c3", "destination": "gpu/vk/deferred.c3" },
+    { "source": "gpu/vk/descriptor_heap.c3", "destination": "gpu/vk/descriptor_heap.c3" },
+    { "source": "gpu/vk/device.c3", "destination": "gpu/vk/device.c3" },
+    { "source": "gpu/vk/helpers.c3", "destination": "gpu/vk/helpers.c3" },
+    { "source": "gpu/vk/instance.c3", "destination": "gpu/vk/instance.c3" },
+    { "source": "gpu/vk/memory.c3", "destination": "gpu/vk/memory.c3" },
+    { "source": "gpu/vk/pipeline_cache.c3", "destination": "gpu/vk/pipeline_cache.c3" },
+    { "source": "gpu/vk/pipeline_compute.c3", "destination": "gpu/vk/pipeline_compute.c3" },
+    { "source": "gpu/vk/pipeline_graphics.c3", "destination": "gpu/vk/pipeline_graphics.c3" },
+    { "source": "gpu/vk/queue.c3", "destination": "gpu/vk/queue.c3" },
+    { "source": "gpu/vk/render_pass.c3", "destination": "gpu/vk/render_pass.c3" },
+    { "source": "gpu/vk/shader.c3", "destination": "gpu/vk/shader.c3" },
+    { "source": "gpu/vk/swapchain.c3", "destination": "gpu/vk/swapchain.c3" },
+    { "source": "gpu/vk/sync.c3", "destination": "gpu/vk/sync.c3" },
+    { "source": "gpu/vk/texture.c3", "destination": "gpu/vk/texture.c3" },
+    { "source": "gpu/vk/transfer.c3", "destination": "gpu/vk/transfer.c3" },
+    { "source": "gpu/vk/validate.c3", "destination": "gpu/vk/validate.c3" },
+    { "source": "gpu/vk/wsi_diagnostics.c3", "destination": "gpu/vk/wsi_diagnostics.c3" },
+    { "source": "lib/vk.c3l/builders_core.c3", "destination": "bindings/vk/builders_core.c3" },
+    { "source": "lib/vk.c3l/builders_ext.c3", "destination": "bindings/vk/builders_ext.c3" },
+    { "source": "lib/vk.c3l/commands.c3", "destination": "bindings/vk/commands.c3" },
+    { "source": "lib/vk.c3l/extra.c3", "destination": "bindings/vk/extra.c3" },
+    { "source": "lib/vk.c3l/vk.c3", "destination": "bindings/vk/vk.c3" },
+    { "source": "lib/vma.c3l/vma.c3", "destination": "bindings/vma/vma.c3" },
+    { "source": "lib/vma.c3l/vma.c3i", "destination": "bindings/vma/vma.c3i" },
+    { "source": "lib/vma.c3l/vma_check.c3", "destination": "bindings/vma/vma_check.c3" },
+    { "source": "lib/spvreflect.c3l/spvreflect.c3", "destination": "bindings/spvreflect/spvreflect.c3" }
+  ],
+  "assets": [
+    { "source": "include/shaders/descriptor_heap.glsl", "destination": "include/shaders/descriptor_heap.glsl" },
+    { "source": "include/shaders/generated/shader_abi.glsl", "destination": "include/shaders/generated/shader_abi.glsl" }
+  ],
+  "licenses": [
+    { "source": "LICENSE", "destination": "licenses/gpu/LICENSE" },
+    { "source": "lib/vk.c3l/LICENSE", "destination": "licenses/vk/LICENSE" },
+    { "source": "lib/vma.c3l/LICENSE", "destination": "licenses/vma/LICENSE" },
+    { "source": "lib/spvreflect.c3l/LICENSE", "destination": "licenses/spvreflect/LICENSE" },
+    { "source": "lib/spvreflect.c3l/LICENSE.spirv-reflect.apache-2.0", "destination": "licenses/spvreflect/LICENSE.spirv-reflect.apache-2.0" },
+    { "source": "lib/spvreflect.c3l/NOTICE", "destination": "licenses/spvreflect/NOTICE" }
+  ],
+  "targets": {
+    "linux-x64": {
+      "linked-libraries": [ ":libvulkan.so.1", "VulkanMemoryAllocator", "spvreflect", "stdc++" ],
+      "native": [
+        { "source": "lib/vma.c3l/linked-libs/linux-x64/libVulkanMemoryAllocator.a", "destination": "linked-libs/linux-x64/libVulkanMemoryAllocator.a" },
+        { "source": "lib/spvreflect.c3l/linux/libspvreflect.a", "destination": "linked-libs/linux-x64/libspvreflect.a" }
+      ],
+      "runtime": {
+        "package-owned-runtime-files": [],
+        "system-prerequisites": [
+          { "name": "Vulkan loader", "discovery": "libvulkan.so.1" },
+          { "name": "C++ runtime", "discovery": "libstdc++.so.6" }
+        ]
+      }
+    },
+    "windows-x64": {
+      "linked-libraries": [ "vulkan-1", "VulkanMemoryAllocator", "spvreflect" ],
+      "native": [
+        { "source": "lib/vk.c3l/windows/vulkan-1.lib", "destination": "linked-libs/windows-x64/vulkan-1.lib" },
+        { "source": "lib/spvreflect.c3l/windows/spvreflect.lib", "destination": "linked-libs/windows-x64/spvreflect.lib" }
+      ],
+      "generated-native": {
+        "source": "lib/vma.c3l/linked-libs/windows-x64/VulkanMemoryAllocator.lib",
+        "destination": "linked-libs/windows-x64/VulkanMemoryAllocator.lib"
+      },
+      "runtime": {
+        "package-owned-runtime-files": [],
+        "system-prerequisites": [
+          { "name": "Vulkan loader", "discovery": "vulkan-1.dll" },
+          { "name": "Microsoft Visual C++ dynamic release runtime", "discovery": "declarative-only" }
+        ]
+      }
+    }
+  },
+  "windows-vma-build": {
+    "upstream-commit": "1d8f600fd424278486eade7ed3e877c99f0846b1",
+    "upstream-header-sha256": "90ce12fc4a2466235a09ae02905dd0c13aee80c1bbf11b331ab61230c2ceb112",
+    "vulkan-sdk-version": "1.3.290.0",
+    "wrapper-source": "lib/vma.c3l/scripts/vma_impl.cpp",
+    "size-probe-source": "lib/vma.c3l/scripts/vma_size_probe.cpp",
+    "build-script": "lib/vma.c3l/scripts/build-vma-windows.sh",
+    "required-directive": "DEFAULTLIB:MSVCRT",
+    "forbidden-directives": [ "DEFAULTLIB:LIBCMT", "DEFAULTLIB:LIBCMTD", "DEFAULTLIB:MSVCRTD" ]
+  }
+}

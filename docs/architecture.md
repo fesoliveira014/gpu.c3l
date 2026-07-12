@@ -41,7 +41,15 @@ The public API does not expose backend handles. A Vulkan backend can be replaced
 
 ## 3. Package structure
 
-`gpu.c3l` uses a C3 library package layout. Shipped library source files live under one `gpu/` subtree.
+The repository is the development tree. Its root `manifest.json` and
+`test/project.json` keep the backend bindings as separate packages under
+`lib/` so contributors can test and update them independently.
+
+Supported consumers use a generated, target-scoped package instead. The
+package provides only `gpu`, contains the complete `gpu`, `vk`, `vma`, and
+`spvreflect` source closure under one manifest, and owns the target's native
+link metadata. Backend modules remain implementation details even though their
+sources are compiled from the same package.
 
 ```text
 gpu.c3l/
@@ -72,6 +80,14 @@ gpu.c3l/
 ├── tools/
 └── docs/
 ```
+
+`scripts/package_gpu.py` assembles `dist/<target>/gpu.c3l` from an explicit
+allowlist. The package lock binds the C3 version, submodule commits, source,
+public shader-ABI asset and build-input hashes, and committed native-library
+hashes. The generated
+`artifact-manifest.json` records the target, normalized toolchain provenance,
+every payload hash, and an aggregate payload digest. Assembly verifies the
+temporary output before atomically replacing the final package.
 
 ### Library files
 

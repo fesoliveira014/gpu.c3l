@@ -1,7 +1,7 @@
 {
-  // C3 library providing module `gpu`. Backend bindings (vk, vma) are vendored
-  // under lib/ as git submodules; consumers resolve them via their own
-  // dependency-search-paths (see test/project.json).
+  // Development-tree manifest for the white-box test harness. Supported
+  // consumers use the generated target package, which provides the complete
+  // gpu/backend source closure through one `gpu` dependency.
   "provides": "gpu",
   // Native libs for this library's own targets live here.
   "linklib-dir": "linked-libs",
@@ -21,8 +21,8 @@
       "linked-libraries": []
     },
     "windows-x64": {
-      // Declare-only: builds/links here are not yet proven because vma.c3l
-      // does not ship a Windows VulkanMemoryAllocator static library.
+      // The development harness builds VMA with /MD in CI. The generated
+      // consumer package owns that dynamic-CRT and native-link contract.
       "link-args": [],
       "dependencies": [ "vk", "vma", "spvreflect" ],
       "linked-libraries": []

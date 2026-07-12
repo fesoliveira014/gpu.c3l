@@ -1,0 +1,12 @@
+{
+  "langrev": "1",
+  "dependency-search-paths": [ "lib" ],
+  "dependencies": [ "gpu" ],
+  "output": "build",
+  "targets": {
+    "consumer": {
+      "type": "executable",
+      "sources": [ "src/main.c3" ]
+    }
+  }
+}

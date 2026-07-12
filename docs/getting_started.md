@@ -1,9 +1,10 @@
 # Getting started
 
 From an empty directory to a program that runs compute work on the GPU,
-on Linux or Windows, with or without a real GPU. Every command and file in
-this walkthrough is executed verbatim by CI (`scripts/run_doc.py`), so if
-you can read it, it works.
+on Linux or Windows, with or without a real GPU. Linux `run`/`file` blocks
+are executed verbatim by CI through `scripts/run_doc.py`. The Windows package
+sequence is structurally checked against, and executed by, the blocking
+`package-consumer-windows` job.
 
 ## 1. Toolchain
 
@@ -43,27 +44,35 @@ real GPU with a Vulkan driver, nothing changes.
 
 ## 2. Project setup
 
-Create a directory and vendor the library. `gpu.c3l` brings its own
-backend bindings (`vk`, `vma`, `spvreflect`) as submodules, so clone
-recursively:
+On Linux, create a project, clone the package source recursively, and assemble
+the `linux-x64` consumer package. Windows readers should create the same files
+but use the complete Windows workflow in section 5. The source checkout keeps backend bindings
+separate for development; the generated package closes that implementation
+inside one target-scoped `gpu.c3l` directory:
 
 ```sh run
-mkdir -p hello_gpu/lib hello_gpu/src hello_gpu/shaders
-cd hello_gpu
-git clone --quiet --recurse-submodules "${GPU_C3L_URL:-https://github.com/fesoliveira014/gpu.c3l}" lib/gpu.c3l
+mkdir -p hello_gpu/lib hello_gpu/src hello_gpu/shaders hello_gpu/build
+GIT_SOURCE="${GPU_C3L_URL:-https://github.com/fesoliveira014/gpu.c3l}"
+git clone --quiet --recurse-submodules "$GIT_SOURCE" gpu-source
+python3 gpu-source/scripts/package_gpu.py lock --check
+python3 gpu-source/scripts/package_gpu.py assemble --target linux-x64 --output hello_gpu/lib/gpu.c3l --c3c-version 0.8.0_2
+python3 hello_gpu/lib/gpu.c3l/tools/runtime.py --package hello_gpu/lib/gpu.c3l check --target linux-x64
+python3 hello_gpu/lib/gpu.c3l/tools/runtime.py --package hello_gpu/lib/gpu.c3l stage --target linux-x64 --destination hello_gpu/build
 ```
 
-(The `GPU_C3L_URL` override exists for CI mirrors; you can paste the plain
-`git clone --recurse-submodules https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l`.)
+(The `GPU_C3L_URL` override exists for CI mirrors. Windows consumers assemble
+`windows-x64`; that package owns the release dynamic CRT contract and checks
+its generated VMA archive for `/MD`.)
 
-Wire it up. Two search paths — your `lib/` for `gpu`, and the library's
-own `lib/` for the bindings it vendors:
+Wire the package up with one search root and one dependency. Do not name
+`vk`, `vma`, `spvreflect`, native-library paths, or a Windows CRT override in
+an application project:
 
 ```json file=hello_gpu/project.json
 {
   "langrev": "1",
-  "dependency-search-paths": [ "lib", "lib/gpu.c3l/lib" ],
-  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
+  "dependency-search-paths": [ "lib" ],
+  "dependencies": [ "gpu" ],
   "output": "build",
   "targets": {
     "hello_gpu": {
@@ -279,7 +288,81 @@ fn void? run_frame(gpu::FrameToken* frame, FrameWork* work) {
 }
 ```
 
-## 5. Build and run
+## 5. Windows package, build, and run
+
+Run this workflow from **Git Bash launched inside an x64 Native Tools Command
+Prompt for Visual Studio**. That preserves the `cl`, `lib`, and `dumpbin`
+environment while providing `sh`, `git`, and `cygpath`. Install c3c 0.8.0 and
+the locked Vulkan SDK 1.3.290.0 first. The packager detects the actual MSVC
+compiler version and Vulkan header identity used by the VMA build; callers do not
+assert provenance with command-line strings. The selected headers must report
+`VK_HEADER_VERSION 290` and Vulkan 1.3 in `vulkan_core.h`; a mismatch is
+rejected.
+
+The VMA header is also a locked input. It must be the header from commit
+`1d8f600fd424278486eade7ed3e877c99f0846b1`, placed at
+`$VMA_INCLUDE/vma/vk_mem_alloc.h` (SHA-256
+`90ce12fc4a2466235a09ae02905dd0c13aee80c1bbf11b331ab61230c2ceb112`).
+From the directory containing `hello_gpu/`, run:
+
+```sh windows-package
+set -e
+VMA_COMMIT=1d8f600fd424278486eade7ed3e877c99f0846b1
+VMA_ROOT="$HOME/gpu-package-deps/vma"
+if [ ! -d "$VMA_ROOT/source/.git" ]; then
+  rm -rf "$VMA_ROOT/source"
+  git clone --quiet --filter=blob:none --no-checkout \
+    https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator \
+    "$VMA_ROOT/source"
+fi
+git -C "$VMA_ROOT/source" fetch --quiet --depth 1 origin "$VMA_COMMIT"
+git -C "$VMA_ROOT/source" checkout --quiet --detach "$VMA_COMMIT"
+test "$(git -C "$VMA_ROOT/source" rev-parse HEAD)" = "$VMA_COMMIT"
+mkdir -p "$VMA_ROOT/include/vma"
+cp "$VMA_ROOT/source/include/vk_mem_alloc.h" "$VMA_ROOT/include/vma/"
+export VMA_INCLUDE="$(cygpath -w "$VMA_ROOT/include")"
+
+# Adjust only the install root; the package lock requires SDK 1.3.290.0.
+export VULKAN_SDK='C:\VulkanSDK\1.3.290.0'
+grep -q '#define VK_HEADER_VERSION 290' \
+  "$(cygpath -u "$VULKAN_SDK")/Include/vulkan/vulkan_core.h"
+export PATH="$(cygpath -u "$VULKAN_SDK")/Bin:$PATH"
+cl 2>&1 | head -1
+
+if [ ! -d gpu-source/.git ]; then
+  git clone --quiet --recurse-submodules \
+    https://github.com/fesoliveira014/gpu.c3l gpu-source
+fi
+python gpu-source/scripts/package_gpu.py lock --check
+python gpu-source/scripts/package_gpu.py assemble \
+  --target windows-x64 \
+  --output hello_gpu/lib/gpu.c3l \
+  --c3c-version 0.8.0_2
+python gpu-source/scripts/package_gpu.py verify \
+  --bundle hello_gpu/lib/gpu.c3l \
+  --target windows-x64
+python gpu-source/scripts/package_gpu.py verify-vma-crt \
+  --archive hello_gpu/lib/gpu.c3l/linked-libs/windows-x64/VulkanMemoryAllocator.lib \
+  --dumpbin dumpbin
+python hello_gpu/lib/gpu.c3l/tools/runtime.py \
+  --package hello_gpu/lib/gpu.c3l check --target windows-x64
+python hello_gpu/lib/gpu.c3l/tools/runtime.py \
+  --package hello_gpu/lib/gpu.c3l stage --target windows-x64 \
+  --destination hello_gpu/build
+
+glslc --target-env=vulkan1.3 -fshader-stage=compute \
+  -I hello_gpu/lib/gpu.c3l/include/shaders \
+  -o hello_gpu/shaders/doubler.comp.spv hello_gpu/shaders/doubler.comp.glsl
+c3c build hello_gpu --path hello_gpu
+dumpbin //dependents hello_gpu/build/hello_gpu.exe
+./hello_gpu/build/hello_gpu.exe
+```
+
+The package owns no runtime DLLs today, so `stage` performs a verified no-copy
+and reports the system-owned Vulkan loader and dynamic release CRT. Do not copy
+`vulkan-1.dll` or CRT DLLs from the SDK or toolchain into the package.
+
+## 6. Linux build and run
 
 ```sh run
 cd hello_gpu
@@ -302,7 +385,7 @@ Troubleshooting the two most likely faults:
   layer is not installed (`vulkan-validationlayers` on apt; on Windows it
   ships with the Vulkan SDK). Install it, or set `enable_validation = false`.
 
-## 6. Where to go next
+## 7. Where to go next
 
 The hand-written root struct above is fine for one shader — and exactly the
 kind of thing that silently breaks when two languages each declare it. The

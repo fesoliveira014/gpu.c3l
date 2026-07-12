@@ -5,7 +5,8 @@ This document lists the project documentation set, the intended reading order, a
 ## Reading order
 
 0. `docs/getting_started.md` — consumer walkthrough: fresh machine to a
-   running compute program (executed verbatim by the CI docs job).
+   running compute program (Linux blocks run by the docs job; Windows package
+   commands are checked and executed by the Windows consumer job).
 1. `master.md` — high-level architecture and document map.
 1. `docs/cookbook.md` — task-oriented recipes, each linked to a running sample.
 1. `docs/limitations.md` — deliberate exclusions, limits tables, driver quirks.

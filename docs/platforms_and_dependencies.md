@@ -10,17 +10,9 @@ Language target: C3 0.8.0
 Primary backend: Vulkan 1.3
 ```
 
-## 2. Required library dependencies
+## 2. Development and consumer boundaries
 
-The shipped library depends on:
-
-```text
-vk.c3l
-vma.c3l
-spvreflect.c3l
-```
-
-Vendored layout:
+The development checkout vendors the backend bindings separately:
 
 ```text
 gpu.c3l/
@@ -30,298 +22,254 @@ gpu.c3l/
     └── spvreflect.c3l/
 ```
 
-Manifest shape (shipped):
+Its root `manifest.json` and white-box test projects name `vk`, `vma`, and
+`spvreflect` directly. That shape is for contributors; C3 0.8.0 does not
+activate those packages transitively for an external project.
+
+The supported consumer artifact is generated for one target. Its manifest
+provides `gpu`, compiles package-owned copies of the complete backend source
+closure, declares no C3 package dependencies, and owns native link and CRT
+metadata. A consumer needs one search root and one dependency:
 
 ```json
 {
-  "provides": "gpu",
-  "linklib-dir": "linked-libs",
-  "sources": [ "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/types.c3", /* ...all public files... */ "gpu/vk/**" ],
-  "targets": {
-    "linux-x64":   { "dependencies": [ "vk", "vma", "spvreflect" ] },
-    "windows-x64": { "dependencies": [ "vk", "vma", "spvreflect" ] }
-  }
+  "dependency-search-paths": [ "lib/gpu-package" ],
+  "dependencies": [ "gpu" ]
 }
 ```
 
-`manifest.json` accepts no top-level `dependency-search-paths` (a
-`project.json` key): dependencies are declared per-target and resolved by the
-consumer's search path.
+Supported package targets are `linux-x64` and `windows-x64`. Package and
+runtime verification reject a bundle whose recorded target does not match the
+requested target.
 
-## 3. Vulkan binding: vk.c3l
+## 3. Backend bindings
 
-`vk.c3l` is the Vulkan binding used by the backend.
-
-Backend import:
-
-```c3
-import vk;
-```
-
-Public API rule:
+The generated package compiles the existing modules without exposing them as
+supported consumer APIs:
 
 ```text
-No public gpu function or struct exposes vk:: types.
+vk.c3l         -> module vk, Vulkan calls
+vma.c3l        -> module vma, Vulkan Memory Allocator
+spvreflect.c3l -> module spvreflect, SPIR-V reflection
 ```
 
-The Vulkan backend should call Vulkan through this binding only. Do not mix multiple Vulkan loaders or bindings in the same backend.
+No public `gpu` function or struct exposes `vk::`, `vma::`, or
+`spvreflect::` types. The repository keeps the bindings as submodules so
+contributors can inspect, test, and update them independently. The package
+copies only the explicitly allowed production sources.
 
-## 4. Memory allocator binding: vma.c3l
+## 4. SDL3 ownership
 
-`vma.c3l` provides Vulkan Memory Allocator bindings.
-
-Backend import:
-
-```c3
-import vma;
-```
-
-The binding depends on `vk`. The `gpu` library depends on both `vk` and `vma`.
-
-Backend use:
-
-```text
-create vma::Allocator once per gpu::Device
-create buffers through allocator.try_create_buffer
-create images through allocator.try_create_image
-map/flush/invalidate through VMA wrappers
-query heap budgets/statistics through VMA wrappers
-use vma::VirtualBlock for CPU-side suballocation of persistent arenas
-```
-
-Public API rule:
-
-```text
-No public gpu function or struct exposes vma:: types.
-```
-
-## 5. SDL3 binding: sdl3.c3l
-
-SDL3 belongs to the `gpu.c3l-samples` repository, which vendors it alongside
-this library:
+SDL3 belongs to applications and the `gpu.c3l-samples` repository, not this
+library. The samples repository retains a pinned gpu.c3l source checkout as
+package input, materializes its generated GPU package, and owns SDL separately:
 
 ```text
 gpu.c3l-samples/
 └── lib/
-    ├── gpu.c3l/        (this repository, pinned submodule; nested lib/ holds vk/vma/spvreflect)
+    ├── gpu.c3l/        pinned source input
+    ├── gpu-package/
+    │   └── gpu.c3l/    generated consumer package
     └── sdl3.c3l/
 ```
 
-Samples project dependency:
-
 ```json
 {
-  "dependency-search-paths": [ "lib", "lib/gpu.c3l/lib" ],
-  "dependencies": [ "gpu", "vk", "vma", "spvreflect", "sdl3" ]
+  "dependency-search-paths": [ "lib/gpu-package", "lib" ],
+  "dependencies": [ "gpu", "sdl3" ]
 }
 ```
 
-Sample source import:
+The dependency name is `sdl3`; source imports its module as `sdl`. The GPU
+package does not check or stage `SDL3.dll`.
 
-```c3
-import gpu;
-import sdl;
-```
-
-The package/dependency name is `sdl3`; the C3 module name is `sdl`. This
-library repository carries no SDL3 dependency or submodule.
-
-Public API rule:
-
-```text
-No core gpu public function requires sdl::Window.
-```
-
-If convenience helpers are needed, put them in samples or an optional helper module rather than the core API.
-
-## 6. Static/native library requirements
+## 5. Native link and runtime requirements
 
 ### Vulkan
 
-The system must provide a Vulkan loader:
+Consumers must install a Vulkan 1.3 loader and a suitable driver:
 
 ```text
 Linux:   libvulkan.so.1
-Windows: vulkan-1.dll / vulkan-1 import library
+Windows: vulkan-1.dll
 ```
 
-`vk.c3l` handles link declarations according to its manifest.
+The package owns the corresponding link declarations and Windows import
+library, but it never redistributes or stages a loader or driver from an SDK or
+driver installation.
 
-### VMA
+### VMA and SPIRV-Reflect
 
-`vma.c3l` requires a compiled VMA static library for the target under its `linked-libs/<target>/` directory.
+The `linux-x64` package contains byte-locked
+`libVulkanMemoryAllocator.a` and `libspvreflect.a` artifacts. Its system link
+requirements include the Vulkan loader and required C++ runtime.
 
-Initial support target:
+The `windows-x64` package contains byte-locked `spvreflect.lib` and
+`vulkan-1.lib`. It builds `VulkanMemoryAllocator.lib` from locked source and
+build inputs, then records the normalized toolchain identity and generated
+archive SHA-256 in `artifact-manifest.json`.
+
+Windows VMA is compiled for the release dynamic CRT (`/MD`). Package
+verification inspects the archive directives, the generated manifest selects
+`wincrt: dynamic`, and CI inspects the final consumer executable's PE imports
+for release CRT DLLs while rejecting debug CRT DLLs. Consumers do not repeat a
+CRT setting in their project; the package owns it.
+
+### Runtime metadata
+
+Each bundle includes `runtime.json` and `tools/runtime.py`. The runtime tool:
+
+- checks package target identity and normal Vulkan-loader discovery;
+- reports the Windows dynamic release CRT as a declared, non-authoritatively
+  discovered system prerequisite; and
+- hash-checks and stages only package-owned runtime files.
+
+Current GPU packages own no runtime files, so staging is a successful no-copy
+operation that prints the remaining Vulkan and CRT prerequisites. It never
+harvests a Vulkan loader or CRT from SDK, driver, or toolchain directories.
+
+## 6. Package locking and provenance
+
+`packaging/package.json` is the explicit source, public shader-ABI asset,
+license, native-artifact, and Windows-build-input allowlist. Binding-source
+and asset globs are forbidden. Generated packages include the locked
+`include/shaders/descriptor_heap.glsl` and
+`include/shaders/generated/shader_abi.glsl` assets.
+`packaging/package-lock.json` binds:
 
 ```text
-linux-x64
+package format and C3 version
+binding submodule commits
+every allowed source, public asset, and build-input hash
+committed native-artifact hashes
+Windows VMA upstream header, wrapper, build script, and SDK identity
 ```
 
-Second target:
+For Windows assembly, the packager derives the actual MSVC version by running
+`cl` and validates `VULKAN_HEADERS` or `VULKAN_SDK` by parsing
+`include/vulkan/vulkan_core.h`. The headers must identify Vulkan 1.3 and
+header revision 290; caller-provided provenance strings are not accepted.
 
-```text
-windows-x64
-```
+An intentional dependency update refreshes the lock in the same review.
+Normal assembly and CI use the read-only lock check.
 
-Other targets require building/providing the VMA static library.
+Assembly writes a temporary target directory and publishes it only after
+verification. `artifact-manifest.json` records the target, locked-input digest,
+normalized toolchain identity, every payload hash, and an aggregate digest over
+sorted payload path/hash pairs. Verification rejects stale, missing, extra,
+duplicate, non-normalized, or mismatched payloads. Committed native inputs stay
+byte-locked. The generated Windows VMA archive records its actual output hash
+instead of pretending separate conforming toolchains produce identical bytes.
 
-### SDL3
+## 7. Platform support
 
-`sdl3.c3l` ships or documents the SDL3 native library for the samples
-repository's targets. Nothing in this repository links SDL3.
-
-## 7. Platform support plan
-
-| Platform | Library build | Headless Vulkan tests | SDL3 samples | Notes |
+| Platform | Consumer package | Package fixture | SDL3 samples | Notes |
 |---|---:|---:|---:|---|
-| linux-x64 | Required first | Required first | Required first (samples repo) | Primary development target. |
-| windows-x64 | Required second | Desired | Desired | Needs VMA static lib and SDL3 native setup. |
-| linux-aarch64 | Deferred | Deferred | Deferred | Requires VMA static lib and Vulkan ICD. |
-| macOS | Deferred | Deferred | Deferred | Vulkan requires portability stack; not first scope. |
+| linux-x64 | Supported | Blocking | Blocking in samples repo | Primary target; system Vulkan loader/driver. |
+| windows-x64 | Supported | Blocking | Blocking in samples repo | Dynamic release CRT; system Vulkan loader/driver. |
+| linux-aarch64 | Deferred | No | Deferred | Requires locked native artifacts and CI. |
+| macOS | Deferred | No | Deferred | Requires a portability stack; not first scope. |
 | wasm | Out of scope | No | No | Vulkan backend not applicable. |
 
 ## 8. Developer setup
 
-Library + tests (this repository):
+The contributor checkout remains deliberately white-box:
 
 ```sh
 git clone --recursive https://github.com/fesoliveira014/gpu.c3l
 cd gpu.c3l
-python3 scripts/gen_abi.py --check && python3 scripts/build_shaders.py
-c3c test unit --path test
+python3 scripts/gen_abi.py --check
+python3 scripts/build_shaders.py
+c3c test unit --path test/cpu
+c3c build smoke --path test
+./test/build/smoke
 ```
 
-The test harness compiles the library sources directly and resolves the
-vendored bindings from `lib/` by real directory name — no symlinks, no
-requirement on the checkout directory's name.
+The test harness resolves separate bindings from `lib/` by their real
+directory names. This arrangement is useful for backend work but is not the
+supported external-consumer contract.
 
-Samples (consumer path):
+On Windows, install c3c 0.8.0, fetch its MSVC SDK, install MSVC Build Tools and
+the Vulkan SDK, and run commands from Git Bash after loading the MSVC
+environment. The development harness builds VMA through
+`lib/vma.c3l/scripts/build-vma-windows.sh`. Headless CI uses mesa-dist-win;
+elevated runners register its ICD under
+`HKLM\SOFTWARE\Khronos\Vulkan\Drivers` because elevated Vulkan loaders ignore
+`VK_DRIVER_FILES`.
 
-```sh
-git clone --recursive https://github.com/fesoliveira014/gpu.c3l-samples
-```
+## 9. Consumer package workflow
 
-### windows-x64 setup
-
-The documented shell for `scripts/*.sh` on Windows is git-bash (ships with Git
-for Windows); CI runs the same scripts under `shell: bash`.
-
-```sh
-# 1. c3c: unpack the pinned release and put it on PATH, then fetch the MSVC
-#    link libraries once (c3c discovers msvc_sdk beside its own binary):
-#    https://github.com/c3lang/c3c/releases/download/v0.8.0/c3-windows.zip
-c3c fetch-sdk windows && cp -r ~/AppData/Local/c3/msvc_sdk <c3c-install-dir>/
-# 2. Vulkan SDK (headers, glslc, vulkan-1 import lib). A GPU driver provides
-#    the vulkan-1.dll loader; headless machines get it from LunarG's
-#    VulkanRT-<ver>-Components.zip.
-# 3. MSVC build tools (cl/lib) — any Visual Studio or Build Tools install
-git clone --recursive https://github.com/fesoliveira014/gpu.c3l
-cd gpu.c3l
-sh lib/vma.c3l/scripts/build-vma-windows.sh   # from a shell with cl/lib on PATH; uses VULKAN_SDK
-cp "$VULKAN_SDK/Lib/vulkan-1.lib" lib/vma.c3l/linked-libs/windows-x64/
-python3 scripts/gen_abi.py --check && python3 scripts/build_shaders.py
-c3c build smoke --path test && ./test/build/smoke.exe
-c3c test unit --path test && c3c test shader_abi --path test
-```
-
-Notes proven by CI: harness `project.json`s declare no `target` (the host is
-correct on both platforms — a pinned `linux-x64` makes windows c3c
-cross-compile); `.gitattributes` enforces LF so golden tests and the drift
-gate compare byte-exact; the windows Vulkan test sweep is advisory (see the
-tracking issue for mesa-dist-win lavapipe failures).
-
-Headless Vulkan tests on Windows use lavapipe from
-[mesa-dist-win](https://github.com/pal1000/mesa-dist-win). In elevated shells
-— GitHub runners included — the Vulkan loader ignores `VK_DRIVER_FILES` and
-`VK_LAYER_PATH`, so CI registers the ICD under
-`HKLM\SOFTWARE\Khronos\Vulkan\Drivers` (and the validation layer under
-`...\ExplicitLayers`). Non-elevated shells can use
-`VK_DRIVER_FILES=<extracted>/x64/lvp_icd.x86_64.json` instead. The sweep is
-advisory: CI runs it non-blocking, and behavior may differ from linux
-lavapipe.
-
-### VMA static library artifact policy
-
-Per supported target, `vma.c3l` either ships a prebuilt static library in
-`linked-libs/<target>/` (linux-x64 today) or provides a build script that
-produces it from Vulkan headers alone (`build-vma.sh`, `build-vma-windows.sh`),
-both guarded by the ABI size probe. The end-state for windows-x64 is a
-committed prebuilt `.lib` mirroring linux; until a maintainer blesses one, CI
-and developers build it in place with the script.
-
-## 9. Build organization
-
-Recommended separation:
+From a recursive source checkout, the package workflow is:
 
 ```text
-manifest.json        -> shipped library metadata
-project.json         -> optional developer workspace if useful
-test/project.json    -> test harness
+1. Check the source/build-input lock.
+2. Assemble exactly one target package.
+3. Verify its artifact manifest and aggregate payload digest.
+4. Run the included runtime target/prerequisite check.
+5. Stage package-owned runtime files to the application directory.
+6. Build the application with one package search root and dependency gpu.
 ```
 
-The shipped library manifest should not pull sample/test sources or SDL3 into consumers.
+The exact commands are shown by `python scripts/package_gpu.py --help` and in
+`docs/getting_started.md`. The runtime checker and stager are invoked from the
+generated package so they operate on the package's own metadata.
 
-## 10. Shader toolchain dependencies
+Application shaders remain consumer-owned. The library publishes shader-side
+ABI includes under `include/shaders/`; compiling application shaders to SPIR-V
+is the consumer's build step.
 
-The library consumes SPIR-V only. The shipped shader build uses `glslc`
-(`scripts/build_shaders.py`); linux CI installs it via apt, windows CI uses
-the Vulkan SDK's copy. `glslangValidator` appears only in the getting-started
-walkthrough.
+## 10. Environment variables
 
-Keep shader compilation outside the core runtime unless runtime compilation becomes an explicit feature.
-
-Shader ownership: the shipped library contains no application shaders. Shader programs belong to the consuming project (and, in this repository, to each sample/test). The library publishes only shader-side ABI includes under `include/shaders/` for consumers to `#include`. Compiling application shaders to SPIR-V is therefore the consumer's build step, not part of the library manifest.
-
-## 11. Environment variables
-
-Do not require environment variables for normal library use. Tests may document optional environment variables for selecting a Vulkan ICD.
-
-Examples:
+Development and CI may use:
 
 ```text
-VK_ICD_FILENAMES
-VK_INSTANCE_LAYERS
+VULKAN_SDK       Vulkan headers and developer tools
+VMA_INCLUDE      pinned VMA header root for the Windows VMA build
+VK_DRIVER_FILES  explicit Vulkan ICD selection in non-elevated environments
+VK_LAYER_PATH    explicit validation-layer search path when needed
 ```
 
-These belong in testing documentation, not in core code.
+These are build/test inputs, not public API configuration.
 
-## 12. Continuous integration
+## 11. Continuous integration
 
-`.github/workflows/ci.yml` — one workflow, three jobs, `bash` on all:
+The existing `linux`, `windows`, and `docs-walkthrough` jobs continue to test
+the development tree. Two additional jobs prove the consumer boundary from a
+clean recursive checkout:
 
 ```text
-linux (ubuntu-24.04, blocking):
-    pinned c3c release, glslc, mesa-vulkan-drivers (lavapipe)
-    generator unit tests, gen_abi.py --check, build_shaders.py
-    full test-target sweep under VK_DRIVER_FILES (any failure fails the job)
-    c3c docgen API reference, uploaded as the api-reference artifact
+package-consumer-linux (blocking):
+    lock and fixture-policy checks
+    assemble and verify linux-x64
+    runtime check and no-op stage
+    build and run the gpu-only device + embedded-SPIR-V shader fixture
+    verify the aggregate payload digest
 
-docs-walkthrough (ubuntu-24.04, blocking):
-    executes docs/getting_started.md verbatim via scripts/run_doc.py on a
-    bare runner — the walkthrough is its own regression test
-
-windows (windows-2022, blocking except the last step):
-    pinned c3c release, Vulkan SDK, MSVC env
-    VMA static lib built in-job (build-vma-windows.sh)
-    generator unit tests, gen_abi.py --check, build_shaders.py
-    link proof (smoke) + pure-CPU test targets
-    lavapipe (mesa-dist-win) registered under the HKLM Vulkan driver key,
-    then the Vulkan sweep — advisory, continue-on-error
+package-consumer-windows (blocking):
+    lock and fixture-policy checks
+    build VMA from locked inputs, then assemble and verify windows-x64
+    verify VMA /MD directives
+    runtime check and no-op stage
+    build the unchanged gpu-only fixture without a fixture CRT override
+    require release CRT PE imports and reject debug CRT imports
+    run the device/shader fixture under lavapipe
+    verify the aggregate payload digest
 ```
 
-The c3c version is pinned once, in the workflow's `C3C_VERSION` env var
-(currently 0.8.0). Tool downloads are cached by version key. Compiler upgrades
-are a one-line workflow change plus this document.
+The existing Windows backend Vulkan sweep remains advisory because of
+mesa-dist-win variability. The Windows package-consumer proof is blocking.
 
-## 13. Dependency acceptance criteria
+## 12. Acceptance criteria
 
-Dependency setup is acceptable when:
+Dependency and platform setup is acceptable when:
 
 ```text
-gpu.c3l consumers depend on gpu, vk, vma, and spvreflect only as required by manifest
-SDL3 lives only in the gpu.c3l-samples repository
-linux-x64 builds with vendored vk.c3l, vma.c3l, and spvreflect.c3l
-the samples repository can import gpu and sdl through vendored submodules
-public API signatures contain no vk::, vma::, or sdl:: types
-platform setup steps are documented
+external consumers name only gpu and one generated-package search root
+generated packages are target-scoped, lock-checked, and manifest-verified
+linux-x64 and windows-x64 fixtures create/destroy a device and reflected shader
+windows-x64 proves VMA /MD, package dynamic CRT selection, and final PE imports
+runtime staging copies only hash-checked package-owned files
+Vulkan loader/driver, CRT, and SDL remain system/application-owned
+the samples repository consumes generated gpu plus its app-owned sdl3 package
+public API signatures contain no vk::, vma::, spvreflect::, or sdl:: types
 ```

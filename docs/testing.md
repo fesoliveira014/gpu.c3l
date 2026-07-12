@@ -12,6 +12,29 @@ SDL3 windowed samples (gpu.c3l-samples repository)
 
 Pure CPU tests must run without Vulkan, VMA static library loading beyond compile/link, SDL3, or a window system. Headless Vulkan tests require a Vulkan ICD but no window. SDL3 windowed tests/samples require SDL3 and platform WSI support.
 
+A fourth, boundary-focused harness lives under `test/consumer`. Its unchanged
+`project.json` points at one generated package root, names only `gpu`, and has
+no backend dependency, native-library path, repository source path, or CRT
+override. The fixture creates and destroys a headless device, then creates and
+destroys a compute shader from embedded valid SPIR-V. Device creation crosses
+Vulkan and VMA; shader creation crosses Vulkan and SPIRV-Reflect. The tracked
+fixture shader includes `generated/shader_abi.glsl`: CI compiles it once from the
+source-tree include root before the RED proof, then recompiles the unchanged
+shader from the assembled package include root before building the fixture.
+
+The fixture establishes a deliberate RED/GREEN proof:
+
+```text
+RED:   the development manifest alone fails with missing vk package activation
+GREEN: the generated package builds and runs the unchanged gpu-only fixture
+```
+
+A policy test rejects accidental backend dependencies or escape paths. The
+GREEN path also checks the source/build-input lock, canonical artifact
+manifest, exact payload hashes and aggregate digest, target identity, and
+runtime checker/stager. These package tests complement the white-box backend
+suite; neither substitutes for the other.
+
 The supported test matrix covers one live `Device` per process. Tests that
 create multiple devices exercise isolated defensive behavior (such as
 cross-device command-token rejection), but they do not establish multi-device
@@ -286,13 +309,15 @@ indices; the gate remains necessary on drivers with unreliable descriptor-buffer
 
 ## 9. Build commands
 
-The shipped library is a `manifest.json` package (module `gpu`); it has no
-project of its own. The test harness (`test/project.json`) is whitebox: it
-lists the library sources directly (mirroring `manifest.json`) and declares
-`vk`, `vma`, and `spvreflect` as dependencies, resolved via
-`"dependency-search-paths": ["../lib"]` — vendored bindings by real directory
-name, no symlink directory. Consumer-style resolution of `gpu` is exercised by
-the `gpu.c3l-samples` repository.
+The root `manifest.json` is the development-tree package, not the supported
+consumer artifact. The test harness (`test/project.json`) is white-box: it
+lists library sources directly and resolves separate `vk`, `vma`, and
+`spvreflect` packages from `lib/`. This makes backend failures easy to isolate.
+
+The generated target package is exercised independently by `test/consumer`.
+That project resolves one `gpu.c3l` directory beneath `test/consumer/lib` and
+names only `gpu`. See `scripts/package_gpu.py --help` and
+`docs/getting_started.md` for assembly and verification commands.
 
 Smoke target, as CI runs it:
 
@@ -345,16 +370,13 @@ Windows-specific notes:
 
 Notes pinned during scaffolding (C3 0.8.0):
 
-- Library `manifest.json` does **not** accept `dependency-search-paths` (that is
-  a `project.json` key); dependencies are declared per-target and resolved by
-  the consumer's search path.
-- `manifest.json` `sources` must list files explicitly — all 17 public source
-  files under `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the default does not
-  recurse into `gpu/vk/`.
+- `dependency-search-paths` is a `project.json` key, not a library-manifest key.
+- The generated consumer manifest explicitly lists the complete copied source
+  closure. Binding source globs are forbidden by the package recipe.
 
 ## 10. CI matrix
 
-CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
+CI preserves the development jobs and adds two blocking consumer-package jobs.
 
 ```text
 linux (blocking): generator tests, ABI drift gate, shader build, full
@@ -362,9 +384,22 @@ linux (blocking): generator tests, ABI drift gate, shader build, full
     api-reference artifact
 windows (blocking except the advisory sweep): same suite via mesa-dist-win
     lavapipe, registered in the HKLM Vulkan driver registry
-docs-walkthrough (blocking): executes docs/getting_started.md verbatim on a
-    bare runner
+docs-walkthrough (blocking): executes marked Linux blocks from
+    docs/getting_started.md on a bare runner; Windows onboarding is
+    structurally checked and executed by package-consumer-windows
+package-consumer-linux (blocking): lock and fixture-policy checks; assemble
+    and verify linux-x64; runtime check/stage; build and run the gpu-only
+    device/shader fixture under lavapipe; verify payload digest
+package-consumer-windows (blocking): build VMA from locked inputs; lock and
+    fixture-policy checks; assemble and verify windows-x64; verify VMA /MD;
+    runtime check/stage; build the unchanged fixture without a CRT override;
+    require release and reject debug CRT PE imports; run under lavapipe;
+    verify payload digest
 ```
+
+The Windows white-box Vulkan sweep remains advisory because of mesa-dist-win
+variability. The Windows package-consumer proof is blocking: it proves the
+supported dependency, native-library, CRT, and execution boundary.
 
 Windowed SDL3 samples run in the `gpu.c3l-samples` repository CI under
 xvfb/lavapipe.
@@ -395,6 +430,8 @@ CI tiers (`.github/workflows/ci.yml`):
 | Full lavapipe test sweep + api-reference docgen artifact | linux | yes |
 | Getting-started walkthrough (docs-walkthrough job, `scripts/run_doc.py`) | linux | yes |
 | Link proof (smoke) + pure-CPU targets | windows | yes |
+| Generated package + gpu-only fixture | linux + windows | yes |
+| Windows VMA `/MD` + final PE import verification | windows | yes |
 | lavapipe (mesa-dist-win) Vulkan sweep | windows | no — advisory |
 
 Generated SPIR-V should either:

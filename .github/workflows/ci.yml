@@ -89,8 +89,9 @@ jobs:
           path: test/docs.html
 
   docs-walkthrough:
-    # Executes docs/getting_started.md verbatim (scripts/run_doc.py) on a bare
-    # runner: the walkthrough is its own regression test. Only the checkout,
+    # Executes the marked Linux blocks in docs/getting_started.md through
+    # scripts/run_doc.py on a bare runner. Windows package commands are checked
+    # and executed by package-consumer-windows. Only the checkout,
     # PR-local URL override, and private-phase clone shim are outside the doc.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -283,3 +284,244 @@ jobs:
             echo "::endgroup::"
           done
           exit $FAIL
+
+  package-consumer-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_TOKEN }}
+
+      - name: Cache c3c
+        uses: actions/cache@v4
+        with:
+          path: ~/tools/c3
+          key: c3c-linux-${{ env.C3C_VERSION }}
+
+      - name: Install c3c
+        run: |
+          if [ ! -x ~/tools/c3/c3c ]; then
+            mkdir -p ~/tools
+            curl -fsSL -o /tmp/c3.tar.gz \
+              "https://github.com/c3lang/c3c/releases/download/v${C3C_VERSION}/c3-linux.tar.gz"
+            tar -xzf /tmp/c3.tar.gz -C ~/tools
+          fi
+          echo "$HOME/tools/c3" >> "$GITHUB_PATH"
+
+      - name: Install package-consumer prerequisites
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y glslc mesa-vulkan-drivers vulkan-tools
+
+      - name: Build consumer fixture shader
+        run: |
+          glslc --target-env=vulkan1.3 -fshader-stage=compute -I include/shaders test/consumer/src/shader.comp.glsl \
+            -o test/consumer/src/shader.comp.spv
+
+      - name: Package policy and unit tests
+        run: |
+          python3 -m unittest scripts/test_package_gpu.py
+          python3 scripts/package_gpu.py lock --check
+          python3 scripts/package_gpu.py fixture-policy
+          python3 scripts/package_gpu.py fixture-red
+
+      - name: Assemble and verify linux-x64 package
+        run: |
+          python3 scripts/package_gpu.py assemble \
+            --target linux-x64 \
+            --output test/consumer/lib/gpu.c3l \
+            --c3c-version 0.8.0_2
+          python3 scripts/package_gpu.py verify \
+            --bundle test/consumer/lib/gpu.c3l \
+            --target linux-x64
+          glslc --target-env=vulkan1.3 -fshader-stage=compute \
+            -I test/consumer/lib/gpu.c3l/include/shaders \
+            test/consumer/src/shader.comp.glsl \
+            -o test/consumer/src/shader.comp.spv
+
+      - name: Check and stage runtime contract
+        run: |
+          python3 test/consumer/lib/gpu.c3l/tools/runtime.py \
+            --package test/consumer/lib/gpu.c3l \
+            check --target linux-x64
+          python3 test/consumer/lib/gpu.c3l/tools/runtime.py \
+            --package test/consumer/lib/gpu.c3l \
+            stage --target linux-x64 --destination test/consumer/build/runtime
+
+      - name: Build and run gpu-only fixture
+        run: |
+          export VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
+          c3c build consumer --path test/consumer
+          ./test/consumer/build/consumer
+
+  package-consumer-windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_TOKEN }}
+
+      - name: Cache package toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/tools/c3
+            ~/tools/VulkanSDK
+            ~/tools/VulkanRT
+            ~/tools/vma
+            ~/tools/mesa
+          key: win-package-${{ env.C3C_VERSION }}-${{ env.VULKAN_SDK_VERSION }}-${{ env.MESA_DIST_WIN_VERSION }}-vma330
+
+      - name: Install c3c
+        run: |
+          if [ ! -f ~/tools/c3/c3c.exe ]; then
+            mkdir -p ~/tools
+            curl -fsSL -o /tmp/c3.zip \
+              "https://github.com/c3lang/c3c/releases/download/v${C3C_VERSION}/c3-windows.zip"
+            unzip -q /tmp/c3.zip -d ~/tools
+          fi
+          if [ ! -d ~/tools/c3/msvc_sdk ]; then
+            echo Y | ~/tools/c3/c3c.exe fetch-sdk windows
+            cp -r ~/AppData/Local/c3/msvc_sdk ~/tools/c3/msvc_sdk
+          fi
+          echo "$HOME/tools/c3" >> "$GITHUB_PATH"
+
+      - name: Install Vulkan SDK
+        run: |
+          if [ ! -d ~/tools/VulkanSDK/Include ]; then
+            curl -fsSL -o /tmp/vulkan-sdk.exe \
+              "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/windows/VulkanSDK-${VULKAN_SDK_VERSION}-Installer.exe"
+            /tmp/vulkan-sdk.exe --root "$(cygpath -w "$HOME/tools/VulkanSDK")" \
+              --accept-licenses --default-answer --confirm-command install
+          fi
+          echo "VULKAN_SDK=$(cygpath -w "$HOME/tools/VulkanSDK")" >> "$GITHUB_ENV"
+          echo "$HOME/tools/VulkanSDK/Bin" >> "$GITHUB_PATH"
+
+      - name: Install Vulkan runtime
+        run: |
+          if [ ! -f ~/tools/VulkanRT/x64/vulkan-1.dll ]; then
+            curl -fsSL -o /tmp/vulkanrt.zip \
+              "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/windows/VulkanRT-${VULKAN_SDK_VERSION}-Components.zip"
+            mkdir -p ~/tools/VulkanRT
+            unzip -q -j /tmp/vulkanrt.zip -d ~/tools/VulkanRT/x64 "*/x64/vulkan-1.dll" || unzip -q /tmp/vulkanrt.zip -d ~/tools/VulkanRT
+          fi
+          DLL=$(find ~/tools/VulkanRT -iname vulkan-1.dll | head -1)
+          cygpath -w "$(dirname "$DLL")" >> "$GITHUB_PATH"
+
+      - name: Install pinned VMA header
+        run: |
+          VMA_COMMIT=1d8f600fd424278486eade7ed3e877c99f0846b1
+          if [ ! -d ~/tools/vma/source/.git ]; then
+            rm -rf ~/tools/vma/source
+            git clone -q --filter=blob:none --no-checkout \
+              https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator \
+              ~/tools/vma/source
+          fi
+          git -C ~/tools/vma/source fetch -q --depth 1 origin "$VMA_COMMIT"
+          git -C ~/tools/vma/source checkout -q --detach "$VMA_COMMIT"
+          test "$(git -C ~/tools/vma/source rev-parse HEAD)" = "$VMA_COMMIT"
+          mkdir -p ~/tools/vma/include/vma
+          cp ~/tools/vma/source/include/vk_mem_alloc.h ~/tools/vma/include/vma/
+          echo "VMA_INCLUDE=$(cygpath -w "$HOME/tools/vma/include")" >> "$GITHUB_ENV"
+
+      - name: MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Verify Windows onboarding contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          doc = Path("docs/getting_started.md").read_text(encoding="utf-8")
+          workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+          windows = doc.split("```sh windows-package", 1)[1].split("```", 1)[0]
+          shared = (
+              "1d8f600fd424278486eade7ed3e877c99f0846b1",
+              "VMA_INCLUDE",
+              "VULKAN_SDK",
+              "--target windows-x64",
+              "verify-vma-crt",
+              "include/shaders",
+          )
+          for token in shared:
+              assert token in windows, f"Windows onboarding omits {token}"
+              assert token in workflow, f"Windows CI omits {token}"
+          for token in (" lock --check", " check --target windows-x64", " stage --target windows-x64", "c3c build"):
+              assert token in windows, f"Windows onboarding omits {token}"
+          assemble = workflow.split("- name: Assemble and verify windows-x64 package", 1)[1].split("- name: Check and stage runtime contract", 1)[0]
+          for token in ("--compiler ", "--compiler-version", "--vulkan-sdk"):
+              assert token not in windows, f"Windows onboarding asserts {token}"
+              assert token not in assemble, f"Windows CI asserts {token}"
+          print("Windows onboarding contract: OK")
+          PY
+
+      - name: Build consumer fixture shader
+        run: |
+          glslc --target-env=vulkan1.3 -fshader-stage=compute -I include/shaders test/consumer/src/shader.comp.glsl \
+            -o test/consumer/src/shader.comp.spv
+
+      - name: Package policy and unit tests
+        run: |
+          python -m unittest scripts/test_package_gpu.py
+          python scripts/package_gpu.py lock --check
+          python scripts/package_gpu.py fixture-policy
+          python scripts/package_gpu.py fixture-red
+
+      - name: Assemble and verify windows-x64 package
+        run: |
+          python scripts/package_gpu.py assemble \
+            --target windows-x64 \
+            --output test/consumer/lib/gpu.c3l \
+            --c3c-version 0.8.0_2
+          python scripts/package_gpu.py verify \
+            --bundle test/consumer/lib/gpu.c3l \
+            --target windows-x64
+          glslc --target-env=vulkan1.3 -fshader-stage=compute \
+            -I test/consumer/lib/gpu.c3l/include/shaders \
+            test/consumer/src/shader.comp.glsl \
+            -o test/consumer/src/shader.comp.spv
+          python scripts/package_gpu.py verify-vma-crt \
+            --archive test/consumer/lib/gpu.c3l/linked-libs/windows-x64/VulkanMemoryAllocator.lib \
+            --dumpbin dumpbin
+
+      - name: Check and stage runtime contract
+        run: |
+          python test/consumer/lib/gpu.c3l/tools/runtime.py \
+            --package test/consumer/lib/gpu.c3l \
+            check --target windows-x64
+          python test/consumer/lib/gpu.c3l/tools/runtime.py \
+            --package test/consumer/lib/gpu.c3l \
+            stage --target windows-x64 --destination test/consumer/build/runtime
+
+      - name: Build fixture and verify PE imports
+        run: |
+          c3c build consumer --path test/consumer
+          dumpbin //dependents test/consumer/build/consumer.exe | tee /tmp/consumer-dependents.txt
+          grep -Eiq 'VCRUNTIME[0-9_]*\.dll|MSVCP[0-9_]*\.dll|ucrtbase\.dll' /tmp/consumer-dependents.txt
+          if grep -Eiq 'VCRUNTIME[0-9_]*D\.dll|MSVCP[0-9_]*D\.dll|ucrtbased\.dll' /tmp/consumer-dependents.txt; then
+            echo '::error::consumer imports a debug CRT'
+            exit 1
+          fi
+
+      - name: Install and register lavapipe
+        run: |
+          if [ ! -f ~/tools/mesa/x64/lvp_icd.x86_64.json ]; then
+            mkdir -p ~/tools/mesa
+            curl -fsSL -o /tmp/mesa.7z \
+              "https://github.com/pal1000/mesa-dist-win/releases/download/${MESA_DIST_WIN_VERSION}/mesa3d-${MESA_DIST_WIN_VERSION}-release-msvc.7z"
+            7z x -y -o"$HOME/tools/mesa" /tmp/mesa.7z >/dev/null
+          fi
+          ICD="$(cygpath -w "$HOME/tools/mesa/x64/lvp_icd.x86_64.json")"
+          reg add "HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers" //v "$ICD" //t REG_DWORD //d 0 //f
+
+      - name: Run gpu-only fixture
+        run: |
+          export VK_LOADER_LAYERS_DISABLE=~implicit~
+          ./test/consumer/build/consumer.exe

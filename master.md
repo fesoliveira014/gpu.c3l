@@ -189,7 +189,10 @@ Vulkan still has image layouts, descriptor machinery, queue ownership, swapchain
 
 ## 4. C3 library structure
 
-`gpu.c3l` uses a library package layout rather than an executable project layout. Shipped source files live under the `gpu/` subtree. Tests and samples are consumer harnesses and are not part of the shipped library manifest.
+The repository is a development checkout rather than the consumer artifact.
+It keeps the `gpu` sources at the root and the backend bindings as separate
+packages under `lib/`, which makes white-box development and dependency updates
+explicit. Tests and samples are not part of the library source closure.
 
 ```text
 gpu.c3l/
@@ -266,38 +269,50 @@ gpu.c3l/
 
 ### 4.1 Library manifest
 
-The shipped library manifest should provide `gpu` and depend on backend bindings required by the library implementation:
+The root `manifest.json` is the development-tree manifest. It names the
+separate backend packages used by the white-box harness. C3 0.8.0 does not
+activate those dependencies transitively for an external project, so this
+manifest is not the supported consumer package.
+
+`scripts/package_gpu.py` generates a target-scoped consumer bundle at
+`dist/<target>/gpu.c3l`. Its manifest provides `gpu`, compiles package-owned
+copies of the complete backend source closure, owns native link metadata, and
+declares no C3 package dependencies:
 
 ```json
 {
   "provides": "gpu",
   "linklib-dir": "linked-libs",
-  "sources": [ "gpu/gpu.c3", "gpu/types.c3", "...", "gpu/vk/**" ],
+  "sources": [ "gpu/gpu.c3", "gpu/types.c3", "...", "bindings/..." ],
   "targets": {
-    "linux-x64": { "dependencies": [ "vk", "vma", "spvreflect" ] }
+    "linux-x64": { "linked-libraries": [ "..." ] }
   }
 }
 ```
 
-(Shipped shape: dependencies are declared per target, there is no top-level
-`dependency-search-paths` — consumers resolve the vendored bindings via their
-own search paths — and the manifest carries the full source list.) The
-library depends on `vk`, `vma`, and `spvreflect`; SDL3 is not a library
-dependency unless a public API begins exposing SDL types, which should be
-avoided.
+The package recipe and lock bind the C3 version, backend commits, explicit
+source, public shader-ABI asset, and build inputs plus committed native
+artifacts. Each generated bundle
+adds target identity, normalized toolchain provenance, payload hashes, and an
+aggregate digest. Windows packages own the `/MD` dynamic-CRT contract. SDL3
+remains application-owned and is never part of the GPU package.
 
-### 4.2 Developer project files
+### 4.2 Consumer and developer project files
 
-The samples repository's `project.json` depends on `sdl3` for windowed paths (the test harness does not):
+An external consumer points one search path at the generated package root and
+names only `gpu`:
 
 ```json
 {
-  "dependency-search-paths": [ "../lib", ".." ],
-  "dependencies": [ "gpu", "sdl3" ]
+  "dependency-search-paths": [ "lib/gpu-package" ],
+  "dependencies": [ "gpu" ]
 }
 ```
 
-Windowed sample source imports `sdl`, not `sdl3`, because the SDL3 binding's C3 module is `sdl` while its package/dependency name is `sdl3`.
+Windowed applications add their own `sdl3` package and deployment. Windowed
+source imports `sdl`, because the package name is `sdl3` while its module is
+`sdl`. The repository's white-box harness continues to name `vk`, `vma`, and
+`spvreflect` directly; that contributor arrangement is not a consumer contract.
 
 ---
 
