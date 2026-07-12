@@ -1,76 +1,30 @@
-# gpu.c3l Documentation Index
+# Documentation
 
-This document lists the project documentation set, the intended reading order, and the maintenance rules for each document.
+Start with:
 
-## Reading order
+- [Getting started](getting_started.md) for toolchain setup and a minimal compute program.
+- [Cookbook](cookbook.md) for focused usage patterns.
+- [Limitations](limitations.md) for unsupported features, limits, and driver quirks.
+- [Samples](samples.md) for runnable examples in `gpu.c3l-samples`.
 
-0. `docs/getting_started.md` — consumer walkthrough: fresh machine to a
-   running compute program (executed verbatim by the CI docs job).
-1. `master.md` — high-level architecture and document map.
-1. `docs/cookbook.md` — task-oriented recipes, each linked to a running sample.
-1. `docs/limitations.md` — deliberate exclusions, limits tables, driver quirks.
-2. `docs/architecture.md` — full system architecture.
-3. `docs/api.md` — public API and examples.
-4. `docs/memory.md` — VMA-backed memory architecture.
-5. `docs/shader_abi.md` — shader ABI and generated layout rules.
-6. `docs/vulkan_backend.md` — Vulkan backend implementation details.
-7. `docs/testing.md` — test matrix and verification rules.
-8. `docs/style.md` — coding conventions.
-9. `docs/milestones.md` — implementation plan.
-10. `docs/platforms_and_dependencies.md` — dependency and platform setup.
-11. `docs/samples.md` — pointer to the samples repository and its catalog.
+## Reference
 
-## Document responsibilities
-
-| Document | Maintained when |
+| Document | Scope |
 |---|---|
-| `master.md` | Any major design direction changes. |
-| `docs/getting_started.md` | Toolchain, vendoring flow, or the minimal program's API surface changes — the CI docs job fails when it drifts. |
-| `docs/cookbook.md` | A core workflow's API shape changes or a new sample introduces a pattern worth a recipe. |
-| `docs/limitations.md` | A limit constant, knob, or known quirk changes; a workaround lands or an issue closes. |
-| `docs/architecture.md` | Layers, modules, object model, or resource lifetime rules change. |
-| `docs/api.md` | Public types, descriptors, functions, or examples change. |
-| `docs/memory.md` | Memory kind policy, VMA usage, arenas, or allocation behavior changes. |
-| `docs/shader_abi.md` | Root pointer ABI, shared structs, layout rules, or shader conventions change. |
-| `docs/vulkan_backend.md` | Vulkan feature requirements, descriptor implementation, synchronization, or swapchain policy changes. |
-| `docs/testing.md` | Test targets, validation expectations, CI, or sample verification changes. |
-| `docs/style.md` | Naming, formatting, module, error-handling, or documentation conventions change. |
-| `docs/milestones.md` | Work breakdown, acceptance criteria, or release scope changes. |
-| `docs/platforms_and_dependencies.md` | Dependency names, binding versions, manifests, or platform support change. |
-| `docs/samples.md` | Samples are added, removed, renamed, or promoted to release gates. |
+| [Architecture](architecture.md) | Modules, objects, lifetime, frames, commands, descriptors, and swapchains. |
+| [Public API](api.md) | Public types, functions, faults, and examples. |
+| [Memory](memory.md) | Memory kinds, arenas, upload/readback, mapping, and deferred release. |
+| [Shader ABI](shader_abi.md) | Root pointers, generated layouts, descriptor indices, and reflection. |
+| [Threading](threading.md) | Entry-point tiers, frame boundaries, lock order, and recording contexts. |
+| [Vulkan backend](vulkan_backend.md) | Vulkan 1.3 requirements and backend implementation. |
+| [Platforms and dependencies](platforms_and_dependencies.md) | Supported targets, native dependencies, and setup. |
+| [Testing](testing.md) | Test targets, validation policy, CI, and release checks. |
+| [Style](style.md) | C3 naming, formatting, errors, comments, and dependency hygiene. |
 
-## Stability tiers
+## Maintenance
 
-| Tier | Meaning | Examples |
-|---|---|---|
-| Required | Public API and backend behavior depend on it. | Root pointer ABI, explicit barriers, VMA-backed memory. |
-| Preferred | Default implementation path, but may have fallback. | Descriptor buffer fast path, SDL3 samples. |
-| Deferred | Documented but not first-release blocking. | Defragmentation, Slang support, multi-backend support. |
-
-## Documentation rules
-
-- Public API requirements belong in `docs/api.md` and doc comments in source.
-- Backend behavior belongs in `docs/vulkan_backend.md`, not in public API docs unless it affects users.
-- Memory lifetime and mapping rules belong in `docs/memory.md`.
-- Shader layout rules belong in `docs/shader_abi.md`.
-- Milestone tags belong in docs and planning only, not in code identifiers, file names, tests, or comments.
-- The master document should summarize; topic documents should specify.
-
-## Artifact packaging
-
-A release documentation bundle should include:
-
-```text
-master.md
-docs/document_index.md
-docs/architecture.md
-docs/api.md
-docs/memory.md
-docs/shader_abi.md
-docs/vulkan_backend.md
-docs/testing.md
-docs/style.md
-docs/milestones.md
-docs/platforms_and_dependencies.md
-docs/samples.md
-```
+- Source doc comments define public contracts; `docs/api.md` explains usage.
+- Keep Vulkan and VMA implementation details out of public signatures and consumer examples.
+- Update the relevant topic document with every contract or behavior change.
+- Describe current behavior, not project-management history.
+- Keep examples executable and link to a complete sample when a recipe would otherwise become long.

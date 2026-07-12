@@ -140,6 +140,7 @@ struct SamplerDesc {
     AddressMode address_u;
     AddressMode address_v;
     AddressMode address_w;
+    // LOD values must be finite; min_lod must not exceed max_lod.
     float       mip_lod_bias;
     float       min_lod;
     float       max_lod;

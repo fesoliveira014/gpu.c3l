@@ -26,7 +26,7 @@ root MyRoot {
 `gen_shader_abi` emits the C3 twin (with `$assert` size/offset checks) and a
 GLSL include; `--check` is the CI drift gate. std430 padding is validated,
 not guessed — the generator tells you exactly which `_padN` to insert.
-Gotcha: field names must not be GLSL keywords (#26).
+Field names must not be GLSL keywords.
 
 Running example: every sample's `abi/` directory; flow documented in
 `docs/shader_abi.md`.

@@ -21,8 +21,8 @@
       "linked-libraries": []
     },
     "windows-x64": {
-      // Declare-only: builds/links here are not yet proven because vma.c3l
-      // does not ship a Windows VulkanMemoryAllocator static library.
+      // Build the VMA static library during Windows setup; its dependency
+      // manifest supplies the native link input.
       "link-args": [],
       "dependencies": [ "vk", "vma", "spvreflect" ],
       "linked-libraries": []

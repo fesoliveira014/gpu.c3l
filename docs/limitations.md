@@ -50,8 +50,7 @@ page doesn't explain it, that's a bug in this page — file an issue.
   touched by both GRAPHICS and COMPUTE must then carry the `shared_queues`
   usage flag (concurrent sharing). Single-queue devices (lavapipe) keep the
   graphics alias — the flag is a no-op there. EXCLUSIVE cross-family
-  ownership transfers are deliberately absent
-  ([#36](https://github.com/fesoliveira014/gpu.c3l/issues/36)).
+  ownership transfers are unsupported.
 - **Wireframe polygon rasterization is optional.** `DeviceCaps.line_polygon_mode`
   reports whether `PolygonMode.LINE` is enabled. Unsupported adapters reject
   it with `UNSUPPORTED_FEATURE`; filled rasterization and
@@ -89,8 +88,8 @@ exists (else the limit is compile-time).
 | Live command records | 4096 (`gpu/vk/command_state.c3:7`) | — | `SLOT_TABLE_FULL` |
 | Swapchains | 8 (`gpu/swapchain.c3:3`) | — | `SLOT_TABLE_FULL` |
 | Color attachments per pass | Lesser of 8 (`gpu/pipeline.c3:6`) and the selected device limit, reported by `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
-| Frame arena (per frame in flight) | 1 MiB (`gpu/memory.c3:36`) | — ([#28](https://github.com/fesoliveira014/gpu.c3l/issues/28)) | `ARENA_FULL` |
-| Persistent arena | 64 MiB (`gpu/memory.c3:37`) | — (#28) | `ARENA_FULL` |
+| Frame arena (per frame in flight) | 1 MiB (`gpu/memory.c3:36`) | `frame_arena_size` | `ARENA_FULL` |
+| Persistent arena | 64 MiB (`gpu/memory.c3:37`) | `persistent_arena_size` | `ARENA_FULL` |
 | Staging arena | 32 MiB default (`gpu/memory.c3:38`) | `staging_arena_size` | `ARENA_FULL` |
 | Readback arena | 8 MiB default (`gpu/memory.c3:39`) | `readback_arena_size` | `ARENA_FULL` |
 
@@ -118,15 +117,15 @@ Two sizing rules that bite:
 
 ## 3. Driver and environment quirks
 
-| Symptom | Cause | Workaround | Tracked |
+| Symptom | Cause | Workaround | Notes |
 |---|---|---|---|
 | Segfault on any image/sampler access, lavapipe + descriptor-buffer heap | Mesa 25.0.7 lavapipe descriptor-buffer bug | `DescriptorHeapMode.AUTO` already prefers descriptor-indexing on lavapipe; don't force `DESCRIPTOR_BUFFER` there | retest on Mesa upgrade |
 | `UNSUPPORTED_FEATURE` at device create with validation on | `vulkan-validationlayers` not installed | install it, or `enable_validation = false` | — |
-| Windows: driver not found in elevated shells despite `VK_DRIVER_FILES` | elevated processes ignore loader env vars | register the ICD under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` (CI does this for mesa-dist-win) | [#18](https://github.com/fesoliveira014/gpu.c3l/issues/18) (closed — docs) |
+| Windows: driver not found in elevated shells despite `VK_DRIVER_FILES` | elevated processes ignore loader env vars | register the ICD under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` (CI does this for mesa-dist-win) | elevated shells only |
 | Pipeline-cache blob is 32 bytes, warm start ≈ cold | lavapipe returns a header-only blob (no compiled-shader payload) | expected; real drivers populate it — `pipeline_cache_timing` prints blob size as the signal | — |
 | Multithreaded recording shows ~1× scaling with validation on | the validation layer locks every `vkCmd*` | benchmark with validation off; gate correctness with it on (`multithreaded_recording` does both) | — |
 | FIFO present does not throttle under xvfb | virtual displays have no vblank | expected; pacing numbers under xvfb are structural only (`present_mode_explorer`) | — |
-| Schema field named `sampler` (or other GLSL keyword) breaks shader compile | generator emits the name verbatim into GLSL | rename the field (e.g. `heap_sampler`) | [#26](https://github.com/fesoliveira014/gpu.c3l/issues/26) |
+| Schema field named `sampler` (or other GLSL keyword) breaks shader compile | generator emits the name verbatim into GLSL | rename the field (for example, `heap_sampler`) | reserved names are not rewritten |
 | `TYPE_OPTIONAL` c3c crash building the library with debug info | c3c 0.8.0/0.8.1 debug-codegen bug on optional-of-struct vtable signatures | worked around in-tree (out-param `BeginCommandsFn`); fixed upstream in 0.8.2 — revert lands with the version bump | `scripts/c3c_bug_repro/` |
 
 ## 4. Capability queries

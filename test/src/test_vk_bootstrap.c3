@@ -42,6 +42,10 @@ fn void device_create_destroy() @test {
     assert(device.caps.max_push_constant_size >= gpu::RootPush::size, "push-constant limit contains RootPush");
     gpu::destroy_device(&device)!!;
     assert(device.backend_state == null, "backend state cleared on destroy");
+    assert(device.vtable == null, "destroyed device dispatch is invalidated");
+
+    fault destroyed_fault = @catch(gpu::get_memory_stats(&device));
+    assert(destroyed_fault == gpu::INVALID_ARGUMENT, "destroyed device use faults INVALID_ARGUMENT");
 }
 
 fn void device_heap_mode_and_capacities() @test {

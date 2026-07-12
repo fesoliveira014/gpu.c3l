@@ -78,7 +78,7 @@ jobs:
 
       # Whole-compile reference (public module gpu + gpu::vk internals; a
       # scoped docgen needs a closed source set, which only the whitebox test
-      # project provides). Published per-run; Pages publishing is #29.
+      # project provides). Published as a per-run artifact.
       - name: Generate API reference
         run: |
           cd test && c3c docgen
@@ -258,8 +258,7 @@ jobs:
 
       - name: Register lavapipe and validation layer
         # GH windows runners are elevated, and the Vulkan loader ignores
-        # VK_DRIVER_FILES / VK_LAYER_PATH in elevated processes (issue #18's
-        # root cause). Registry registration is the elevated-safe path.
+        # VK_DRIVER_FILES / VK_LAYER_PATH. Registry registration is reliable.
         run: |
           ICD="$(cygpath -w "$HOME/tools/mesa/x64/lvp_icd.x86_64.json")"
           LAYER="$(cygpath -w "$HOME/tools/VulkanSDK/Bin/VkLayer_khronos_validation.json")"

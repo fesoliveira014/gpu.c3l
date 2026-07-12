@@ -188,7 +188,8 @@ Library + tests (this repository):
 git clone --recursive https://github.com/fesoliveira014/gpu.c3l
 cd gpu.c3l
 python3 scripts/gen_abi.py --check && python3 scripts/build_shaders.py
-c3c test unit --path test
+c3c test unit --path test/cpu
+c3c test shader_abi --path test/cpu
 ```
 
 The test harness compiles the library sources directly and resolves the
@@ -203,51 +204,40 @@ git clone --recursive https://github.com/fesoliveira014/gpu.c3l-samples
 
 ### windows-x64 setup
 
-The documented shell for `scripts/*.sh` on Windows is git-bash (ships with Git
-for Windows); CI runs the same scripts under `shell: bash`.
+Use Git Bash from a Visual Studio x64 developer shell. Install C3 0.8.0, the
+Vulkan SDK, and MSVC Build Tools, then run:
 
 ```sh
-# 1. c3c: unpack the pinned release and put it on PATH, then fetch the MSVC
-#    link libraries once (c3c discovers msvc_sdk beside its own binary):
-#    https://github.com/c3lang/c3c/releases/download/v0.8.0/c3-windows.zip
-c3c fetch-sdk windows && cp -r ~/AppData/Local/c3/msvc_sdk <c3c-install-dir>/
-# 2. Vulkan SDK (headers, glslc, vulkan-1 import lib). A GPU driver provides
-#    the vulkan-1.dll loader; headless machines get it from LunarG's
-#    VulkanRT-<ver>-Components.zip.
-# 3. MSVC build tools (cl/lib) — any Visual Studio or Build Tools install
+c3c fetch-sdk windows
 git clone --recursive https://github.com/fesoliveira014/gpu.c3l
 cd gpu.c3l
-sh lib/vma.c3l/scripts/build-vma-windows.sh   # from a shell with cl/lib on PATH; uses VULKAN_SDK
+
+git clone --depth 1 --branch v1.3.296 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/vh
+git clone --depth 1 --branch v3.3.0 https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git /tmp/vma
+mkdir -p /tmp/vma-inc/vma
+cp /tmp/vma/include/vk_mem_alloc.h /tmp/vma-inc/vma/
+
+VULKAN_HEADERS=$(cygpath -w /tmp/vh) VMA_INCLUDE=$(cygpath -w /tmp/vma-inc) sh lib/vma.c3l/scripts/build-vma-windows.sh
 cp "$VULKAN_SDK/Lib/vulkan-1.lib" lib/vma.c3l/linked-libs/windows-x64/
-python3 scripts/gen_abi.py --check && python3 scripts/build_shaders.py
-c3c build smoke --path test && ./test/build/smoke.exe
-c3c test unit --path test && c3c test shader_abi --path test
+
+python3 scripts/gen_abi.py --check
+python3 scripts/build_shaders.py
+c3c test unit --path test/cpu
+c3c test shader_abi --path test/cpu
+c3c build smoke --path test
+./test/build/smoke.exe
 ```
 
-Notes proven by CI: harness `project.json`s declare no `target` (the host is
-correct on both platforms — a pinned `linux-x64` makes windows c3c
-cross-compile); `.gitattributes` enforces LF so golden tests and the drift
-gate compare byte-exact; the windows Vulkan test sweep is advisory (see the
-tracking issue for mesa-dist-win lavapipe failures).
+Use VMA 3.3.0. Older SDK-bundled VMA headers do not match the binding.
 
-Headless Vulkan tests on Windows use lavapipe from
-[mesa-dist-win](https://github.com/pal1000/mesa-dist-win). In elevated shells
-— GitHub runners included — the Vulkan loader ignores `VK_DRIVER_FILES` and
-`VK_LAYER_PATH`, so CI registers the ICD under
-`HKLM\SOFTWARE\Khronos\Vulkan\Drivers` (and the validation layer under
-`...\ExplicitLayers`). Non-elevated shells can use
-`VK_DRIVER_FILES=<extracted>/x64/lvp_icd.x86_64.json` instead. The sweep is
-advisory: CI runs it non-blocking, and behavior may differ from linux
-lavapipe.
+For headless tests, set `VK_DRIVER_FILES` to a lavapipe ICD. Elevated shells
+may require registering the ICD under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers`
+because the Vulkan loader can ignore that environment variable.
 
 ### VMA static library artifact policy
 
-Per supported target, `vma.c3l` either ships a prebuilt static library in
-`linked-libs/<target>/` (linux-x64 today) or provides a build script that
-produces it from Vulkan headers alone (`build-vma.sh`, `build-vma-windows.sh`),
-both guarded by the ABI size probe. The end-state for windows-x64 is a
-committed prebuilt `.lib` mirroring linux; until a maintainer blesses one, CI
-and developers build it in place with the script.
+`vma.c3l` ships the Linux static library. Windows users build the library with
+`build-vma-windows.sh`. Both build scripts verify the C ABI with a size probe.
 
 ## 9. Build organization
 

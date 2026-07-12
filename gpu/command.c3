@@ -1,8 +1,5 @@
 module gpu;
 
-// Command recording: render-target and copy descriptors, the command-list
-// recorder, and recording contexts.
-
 <* What happens to an attachment's contents when a render pass begins. *>
 enum LoadOp : int {
     LOAD,
@@ -46,8 +43,8 @@ struct ScissorRect {
     int height;
 }
 
-// Indirect argument layouts, byte-identical to Vulkan's and shader-writable
-// (GLSL twins in include/shaders/generated/shader_abi.glsl).
+// Shader-writable indirect argument layouts; GLSL definitions are generated
+// in include/shaders/generated/shader_abi.glsl.
 struct DrawIndirectCommand {
     uint vertex_count;
     uint instance_count;
@@ -56,7 +53,7 @@ struct DrawIndirectCommand {
 }
 $assert DrawIndirectCommand::size == 16;
 
-<* Arguments for the indexed indirect draws; Vulkan layout, shader-writable. *>
+<* Shader-writable arguments for indexed indirect draws. *>
 struct DrawIndexedIndirectCommand {
     uint index_count;
     uint instance_count;
@@ -66,7 +63,7 @@ struct DrawIndexedIndirectCommand {
 }
 $assert DrawIndexedIndirectCommand::size == 20;
 
-<* Workgroup counts for cmd_dispatch_indirect; Vulkan layout, shader-writable. *>
+<* Shader-writable workgroup counts for cmd_dispatch_indirect. *>
 struct DispatchIndirectCommand {
     uint x;
     uint y;
@@ -131,9 +128,8 @@ struct BufferCopyDesc {
     usz          size;
 }
 
-// Copy regions mirror vk::BufferImageCopy. Zero-value defaults: extent 0 is
-// the full mip level, layer_count 0 is one layer, row_length_texels 0 means
-// tightly packed rows.
+// Zero-value defaults: extent 0 is the full mip level, layer_count 0 is one
+// layer, and row_length_texels 0 means tightly packed rows.
 struct BufferTextureCopyDesc {
     GpuSpan       src;
     uint          row_length_texels;

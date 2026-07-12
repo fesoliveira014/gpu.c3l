@@ -169,42 +169,14 @@ Avoid inline comments that restate the code. Comments should explain why, not wh
 
 API preconditions, side effects, and ownership rules belong in doc comments. If a field needs a comment to be understood, consider renaming it or restructuring the type.
 
-## 11. Milestone terminology
+## 11. Development language
 
-Milestone names are allowed in:
+Shipped code and documentation describe current behavior. Do not include
+schedules, development phases, issue or pull-request numbers, or implementation
+history in identifiers, comments, tests, or user documentation.
 
-```text
-docs/milestones.md
-planning documents
-commit messages
-issue titles
-```
-
-Milestone names are not allowed in:
-
-```text
-code identifiers
-file names
-test names
-source comments
-shader symbols
-```
-
-Use behavior names, not schedule names.
-
-Good:
-
-```text
-test_root_pointer_compute
-create_frame_upload_arena
-```
-
-Bad:
-
-```text
-test_m9_root_pointer_compute
-create_m6_arena
-```
+Use behavior names such as `test_root_pointer_compute` and
+`create_frame_upload_arena`.
 
 ## 12. Public API dependency hygiene
 
@@ -279,7 +251,7 @@ swapchain_color_0
 pipeline_root_pointer_compute
 ```
 
-Avoid names that encode milestones or temporary implementation plans.
+Avoid names that encode schedules or temporary implementation plans.
 
 ## 16. Testing style
 
@@ -316,6 +288,6 @@ faults are specific
 public signatures do not leak backend bindings
 calls with 4+ args use named multiline style
 comments document why, ownership, or invariants
-no milestone names appear in code/test identifiers
+no development labels appear in code or test identifiers
 pure CPU tests and relevant backend tests pass
 ```

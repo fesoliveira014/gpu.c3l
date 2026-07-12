@@ -29,8 +29,7 @@ struct GpuSpan {
     MemoryKind   kind;
 }
 
-// Non-blocking readback: data at `span` becomes valid once the device
-// timeline reaches `value`. `dedicated`/`range_end` are backend bookkeeping.
+// Non-blocking readback: `span` becomes readable after the ticket completes.
 struct ReadbackTicket {
     GpuSpan        span;
     SemaphoreValue value;

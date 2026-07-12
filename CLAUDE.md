@@ -16,9 +16,9 @@ C3 is pre-1.0; invoke the bundled skills instead of relying on memory:
 
 For exact syntax/version questions, `c3-expert` wins; for idiom, `c3-style`; for binding authoring, `c3-bindings`.
 
-## Project state — read docs before writing code
+## Project documentation
 
-Architecture-first. The implementation lives under `gpu/`, with the public interface at `gpu/gpu.c3i` and the Vulkan backend under `gpu/vk/`. **Before writing or changing source, read `master.md` and `docs/document_index.md`**, then the relevant doc:
+The implementation lives under `gpu/`; the Vulkan backend is under `gpu/vk/`. Before changing a contract, read `docs/document_index.md` and the relevant topic document:
 
 - `docs/architecture.md` — module split, handle/ABI model
 - `docs/api.md` — public API shape
@@ -26,7 +26,7 @@ Architecture-first. The implementation lives under `gpu/`, with the public inter
 - `docs/shader_abi.md` — root-pointer ABI, std430 struct layout
 - `docs/vulkan_backend.md` — backend strategy
 - `docs/style.md` — full code style guide (source of truth)
-- `docs/testing.md`, `docs/milestones.md`
+- `docs/testing.md` — verification commands and coverage
 
 ## Code style (see `docs/style.md` for the rest)
 
@@ -36,7 +36,7 @@ Architecture-first. The implementation lives under `gpu/`, with the public inter
 - **Definition order in a file**: typedefs → aliases → constants → enums/bitstructs → structs → struct methods → free functions.
 - **Formatting**: K&R braces; calls with 4+ args use named arguments, one per line, trailing comma. No auto-formatter — hand-format to the style guide.
 - **Comments**: keep to a minimum. Code should be self-documenting. Acceptable on non-trivial logic and a one-or-two-sentence doc on a method; avoid superfluous or over-explanatory comments that restate the code.
-- No milestone names in identifiers, file names, or test names.
+- No development labels in identifiers, file names, or test names.
 
 ## Architecture rules
 
@@ -45,6 +45,15 @@ Architecture-first. The implementation lives under `gpu/`, with the public inter
 
 ## Build & deps
 
-- Built with the `c3c` compiler (C3 0.8.0). `manifest.json` provides `gpu`; native libs live under `linked-libs/<target>/`. Verification projects live under `test/`, with generator and build helpers under `tools/` and `scripts/`.
+- Built with `c3c` 0.8.0. `manifest.json` provides `gpu`; native libraries are resolved from dependency manifests.
 - Backend needs a Vulkan 1.3 loader + VMA. SDL3 is used only by the separate `gpu.c3l-samples` repository, not this library.
-- Primary dev target: `linux-x64` (then `windows-x64`).
+- Initialize dependencies with `git submodule update --init --recursive`.
+- Run the core checks from the repository root:
+
+  ```sh
+  c3c test unit --path test/cpu
+  c3c test shader_abi --path test/cpu
+  c3c build smoke --path test
+  ```
+
+- Vulkan targets also require the VMA static library described in `docs/platforms_and_dependencies.md`.

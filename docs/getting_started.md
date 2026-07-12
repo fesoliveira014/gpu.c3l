@@ -1,9 +1,7 @@
 # Getting started
 
-From an empty directory to a program that runs compute work on the GPU,
-on Linux or Windows, with or without a real GPU. Every command and file in
-this walkthrough is executed verbatim by CI (`scripts/run_doc.py`), so if
-you can read it, it works.
+This walkthrough builds a minimal compute program on Linux or Windows. CI
+compiles and runs the embedded project on lavapipe.
 
 ## 1. Toolchain
 
@@ -56,6 +54,10 @@ git clone --quiet --recurse-submodules "${GPU_C3L_URL:-https://github.com/fesoli
 (The `GPU_C3L_URL` override exists for CI mirrors; you can paste the plain
 `git clone --recurse-submodules https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l`.)
 
+On Windows, build the VMA 3.3.0 static library in the cloned dependency before
+building the program. Follow the `windows-x64 setup` section in
+[`platforms_and_dependencies.md`](platforms_and_dependencies.md).
+
 Wire it up. Two search paths — your `lib/` for `gpu`, and the library's
 own `lib/` for the bindings it vendors:
 
@@ -74,7 +76,7 @@ own `lib/` for the bindings it vendors:
 }
 ```
 
-## 3. A compute shader — and why there are no descriptor sets
+## 3. Compute shader and root pointers
 
 If you have not written Vulkan before, here is the problem this library's
 execution model removes. In classic Vulkan, a shader cannot just be handed a

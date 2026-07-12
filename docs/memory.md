@@ -467,7 +467,7 @@ compute families. When those family indices differ, the backend uses concurrent
 sharing; when they alias, the buffer remains exclusive even if transfer uses
 another family. Concurrent sharing is the correctness-first choice while frame
 spans expose no family intent; the explicit-transfer alternative remains
-deferred to gpu.c3l#36. Callers do not set `BufferUsage.shared_queues` for frame
+unsupported. Callers do not set `BufferUsage.shared_queues` for frame
 spans. This ownership policy does not replace barriers or semaphores: callers
 still order host writes and cross-queue GPU accesses explicitly.
 
@@ -632,7 +632,7 @@ dedicated buffer it tags carries that exact value — never the value another
 concurrent helper reserved, and never `frame_timeline`. Drains compare each
 entry against its own tagged timeline's current counter value, so one
 helper's completion can never retire another helper's or an unsubmitted
-list's ranges (gpu.c3l#80). See docs/threading.md §Helper timeline for the
+list's ranges. See docs/threading.md §Helper timeline for the
 completion-side turnstile.
 
 ## 14. Flush and invalidate policy

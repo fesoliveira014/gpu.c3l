@@ -1,11 +1,8 @@
 # gpu.c3l Public API
 
-This document is the curated tour of the public API: shape, idiom, and the
-examples worth reading. It is deliberately not exhaustive — the generated
-reference (`api-reference` CI artifact, built by `c3c docgen` from the source
-doc-strings; GitHub Pages publishing tracked in #29) covers every public
-symbol. When this document and source disagree, source wins; the doc-strings
-are the contract.
+This is a curated guide to the public API and its idioms. The generated
+`api-reference` CI artifact covers every public symbol.
+Source doc comments define the contract.
 
 ## 1. Public module
 
@@ -216,8 +213,8 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan explicitly returned `VK_ERROR_DEVICE_LOST`; unrecoverable |
-| `RESOURCE_IN_USE` | `destroy_texture` | a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first (gpu.c3l#81). Frames-in-flight destroys — including a resource an off-frame `submit` referenced — are unaffected: those are handled by deferred backend release instead (gpu.c3l#44, gpu.c3l#80) |
-| `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block ran out of configured capacity (sizing knobs: gpu.c3l#28) |
+| `RESOURCE_IN_USE` | `destroy_texture` | a live `TextureIndex` still owns the texture; destroy the descriptor first. In-flight backend resources are released after their timeline retires. |
+| `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
 | `SLOT_TABLE_FULL` | creates, `begin_commands` | handle or command-record table at capacity; textures scale via `DeviceDesc.texture_capacity` |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
@@ -536,7 +533,8 @@ create_sampler(Device* device, SamplerDesc* desc) -> SamplerIndex?
 destroy_sampler(Device* device, SamplerIndex index) -> void?
 ```
 
-Samplers are shader-visible indices. The backend may store immutable sampler descriptors or a sampler heap.
+Samplers are shader-visible indices. LOD values must be finite and `min_lod`
+must not exceed `max_lod`. Anisotropy requires the reported device capability.
 
 ## 8. Shader and pipeline API
 

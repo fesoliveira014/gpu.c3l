@@ -7,16 +7,8 @@ import std::io;
 import std::time;
 import std::os::env;
 
-// Advisory, not gating: observes whether a saturating compute dispatch and a
-// heavy fullscreen-fragment pass actually overlap across the graphics and
-// (when distinct) compute queues. Phase A chains the two workloads through
-// one timeline semaphore; phase B submits them independently through two.
-// Overlap materializes iff wall(B) approaches max(parts) rather than
-// sum(parts). Per-queue vkCmdWriteTimestamp2 query pools give GPU-side
-// durations when the adapter supports them; wall clocks are the fallback and
-// remain the primary evidence printed alongside any GPU-duration figures.
-// Never asserts — this is an observation harness, not a correctness test.
-// Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
+// Compares serialized and independent compute/graphics submissions.
+// GPU timestamps are advisory; wall time is the fallback.
 
 const char[*] OVERLAP_COMP_SPIRV   = $embed("shaders/overlap.comp.spv");
 const char[*] OVERLAP_FRAG_SPIRV   = $embed("shaders/overlap.frag.spv");
@@ -33,9 +25,7 @@ const uint MAX_ITERS = 2_000_000;
 const ulong PHASE_WAIT_TIMEOUT_NS = 10_000_000_000;
 const uint OVERLAP_DATA_BYTES = DISPATCH_GROUPS * OVERLAP_WORKGROUP * 4;
 
-<* Env-gated validation opt-in, same idiom as descriptor_churn_bench's
-   GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E: off by default so steady-state numbers
-   aren't skewed by layer overhead. *>
+<* Validation is opt-in so layer overhead does not affect timings. *>
 fn bool validation_enabled() {
     if (try value = env::tget_var("GPU_C3L_BENCH_VALIDATION")) {
         return value == "1";
@@ -48,23 +38,32 @@ fn double mask_and_scale(ulong raw, uint valid_bits, float period) {
     return (double)(raw & mask) * (double)period;
 }
 
-<* Blocking (WAIT_BIT) read of a two-query TIMESTAMP pool, converted to ns and
-   masked to the family's valid bits. *>
-fn void read_pool(vk::Device device, vk::QueryPool pool, uint valid_bits, float period, double* begin_ns, double* end_ns) {
+<* Read and normalize one timestamp pair. *>
+fn void read_pool(vk::VkDeviceState* state, vk::QueryPool pool, uint valid_bits, float period, double* begin_ns, double* end_ns) {
     ulong[2] ticks;
     vk::QueryResultFlags flags = (vk::QueryResultFlags)((uint)vk::QueryResultFlagBits.RESULT_64_BIT | (uint)vk::QueryResultFlagBits.WAIT_BIT);
-    vk::check(vk::get_query_pool_results(device, pool, 0, 2, 16, &ticks, 8, flags))!!;
+    gpu::vk::check_backend_result(
+        state:     state,
+        operation: "async_overlap_bench",
+        result:    vk::get_query_pool_results(
+            device:      state.device,
+            query_pool:  pool,
+            first_query: 0,
+            query_count: 2,
+            data_size:   16,
+            p_data:      &ticks,
+            stride:      8,
+            flags:       flags,
+        ),
+    )!!;
     *begin_ns = mask_and_scale(ticks[0], valid_bits, period);
     *end_ns   = mask_and_scale(ticks[1], valid_bits, period);
 }
 
-<* Record a compute list: reset + top-of-pipe timestamp, the saturating
-   dispatch, all-commands timestamp. Query calls are raw vk:: (hostQueryReset
-   isn't enabled, so resets are cmd-recorded only) against the whitebox
-   backend command buffer. *>
+<* Record the compute workload and optional timestamps. *>
 fn gpu::CommandList record_compute(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAddress root_gpu, vk::QueryPool pool, bool timestamps_ok) {
     gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.COMPUTE)!!;
-    vk::CommandBuffer raw_cmd = (vk::CommandBuffer)cmd.backend;
+    vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);
@@ -82,12 +81,10 @@ fn gpu::CommandList record_compute(gpu::Device* device, gpu::PipelineHandle pipe
     return cmd;
 }
 
-<* Record a graphics list: reset + timestamps outside the pass (a query
-   write mid-pass is avoidable and this keeps the pattern identical to the
-   compute list), the heavy-fragment pass over the whole RT, end. *>
+<* Record the graphics workload and optional timestamps. *>
 fn gpu::CommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::TextureHandle rt, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
     gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
-    vk::CommandBuffer raw_cmd = (vk::CommandBuffer)cmd.backend;
+    vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);
@@ -181,8 +178,26 @@ fn int main() {
     vk::QueryPool gfx_pool;
     if (timestamps_ok) {
         vk::QueryPoolCreateInfo pool_info = vk::query_pool_create_info().set_query_type(vk::QueryType.TIMESTAMP).set_query_count(2);
-        vk::check(vk::create_query_pool(state.device, &pool_info, null, &comp_pool))!!;
-        vk::check(vk::create_query_pool(state.device, &pool_info, null, &gfx_pool))!!;
+        gpu::vk::check_backend_result(
+            state:     state,
+            operation: "async_overlap_bench",
+            result:    vk::create_query_pool(
+                device:        state.device,
+                p_create_info: &pool_info,
+                p_allocator:   null,
+                p_query_pool:  &comp_pool,
+            ),
+        )!!;
+        gpu::vk::check_backend_result(
+            state:     state,
+            operation: "async_overlap_bench",
+            result:    vk::create_query_pool(
+                device:        state.device,
+                p_create_info: &pool_info,
+                p_allocator:   null,
+                p_query_pool:  &gfx_pool,
+            ),
+        )!!;
     }
     defer {
         if (timestamps_ok) {
@@ -290,7 +305,7 @@ fn int main() {
         double comp_wall_ns = (double)(long)comp_start.to_now();
         if (timestamps_ok) {
             double begin_ns; double end_ns;
-            read_pool(state.device, comp_pool, comp_valid_bits, timestamp_period, &begin_ns, &end_ns);
+            read_pool(state, comp_pool, comp_valid_bits, timestamp_period, &begin_ns, &end_ns);
             comp_ns = end_ns - begin_ns;
         } else {
             comp_ns = comp_wall_ns;
@@ -339,7 +354,7 @@ fn int main() {
         double frag_wall_ns = (double)(long)frag_start.to_now();
         if (timestamps_ok) {
             double begin_ns; double end_ns;
-            read_pool(state.device, gfx_pool, gfx_valid_bits, timestamp_period, &begin_ns, &end_ns);
+            read_pool(state, gfx_pool, gfx_valid_bits, timestamp_period, &begin_ns, &end_ns);
             frag_ns = end_ns - begin_ns;
         } else {
             frag_ns = frag_wall_ns;
@@ -430,8 +445,7 @@ fn int main() {
 
         );
         gpu::CommandList[1] a_graphics_lists = { a_graphics };
-        // Stage.PRESENT is the only public all-commands wait spelling
-        // (STAGE_2_ALL_COMMANDS_BIT, gpu/vk/helpers.c3:60).
+        // Stage.PRESENT is the public all-commands wait stage.
         gpu::SemaphoreWait[1] a_graphics_waits = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)av, .stage = gpu::Stage.PRESENT }};
         gpu::SemaphoreSignal[1] a_graphics_signals = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)(av + 1), .stage = gpu::Stage.COLOR_ATTACHMENT }};
         gpu::SubmitDesc a_graphics_submit = { .command_lists = a_graphics_lists[..], .waits = a_graphics_waits[..], .signals = a_graphics_signals[..] };
@@ -505,8 +519,8 @@ fn int main() {
         if (timestamps_ok) {
             double gfx_begin; double gfx_end;
             double comp_begin; double comp_end;
-            read_pool(state.device, gfx_pool, gfx_valid_bits, timestamp_period, &gfx_begin, &gfx_end);
-            read_pool(state.device, comp_pool, comp_valid_bits, timestamp_period, &comp_begin, &comp_end);
+            read_pool(state, gfx_pool, gfx_valid_bits, timestamp_period, &gfx_begin, &gfx_end);
+            read_pool(state, comp_pool, comp_valid_bits, timestamp_period, &comp_begin, &comp_end);
             gfx_parts[rep] = gfx_end - gfx_begin;
             comp_parts[rep] = comp_end - comp_begin;
             double overlap_lo = gfx_begin > comp_begin ? gfx_begin : comp_begin;
