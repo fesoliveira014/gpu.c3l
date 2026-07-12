@@ -23,6 +23,37 @@ struct DescriptorDiagnosticCapture {
     bool matched;
 }
 
+struct DescriptorBackendCapture {
+    uint calls;
+    fault expected_fault;
+    gpu::DebugResourceKind expected_kind;
+    bool expected_identity;
+    uint expected_index;
+    uint expected_generation;
+    ZString expected_operation;
+    ZString expected_text;
+    int expected_result;
+    bool matched;
+}
+
+fn void capture_descriptor_backend_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    DescriptorBackendCapture* capture = (DescriptorBackendCapture*)user_data;
+    capture.calls++;
+    capture.matched = message.severity == gpu::DebugMessageSeverity.ERROR
+        && message.category.backend
+        && message.has_fault
+        && message.public_fault == capture.expected_fault
+        && message.resource.kind == capture.expected_kind
+        && message.resource.has_public_identity == capture.expected_identity
+        && (!capture.expected_identity || (message.resource.index == capture.expected_index
+            && message.resource.generation == capture.expected_generation))
+        && message.operation != null
+        && message.operation.str_view() == capture.expected_operation.str_view()
+        && message.backend_text != null
+        && message.backend_text.str_view() == capture.expected_text.str_view()
+        && message.validation_id_number == capture.expected_result;
+}
+
 fn void capture_descriptor_diagnostic(gpu::DebugMessage* message, void* user_data) {
     DescriptorDiagnosticCapture* capture = (DescriptorDiagnosticCapture*)user_data;
     capture.calls++;
@@ -559,6 +590,9 @@ fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test
     gpu::destroy_texture(&device, stale_texture)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
+    DescriptorDiagnosticCapture capture;
+    state.debug_callback = &capture_descriptor_diagnostic;
+    state.debug_user_data = &capture;
 
     gpu::TextureViewDesc first_view = {
         .base_mip    = 0,
@@ -578,12 +612,25 @@ fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test
         { .texture = stale_texture },
     };
     gpu::TextureIndex[3] indices;
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_HANDLE,
+        expected_kind:       gpu::DebugResourceKind.TEXTURE,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "create_texture_descriptors",
+        expected_field:      "descs[].texture",
+        expected_invariant:  "texture must identify a live generation",
+    );
     fault batch_fault = @catch(gpu::create_texture_descriptors(&device, descs[..], indices[..]));
-    assert(batch_fault == gpu::INVALID_HANDLE, "a fault after two new views rejects the batch");
+    assert(batch_fault == gpu::INVALID_HANDLE && capture.calls == 1 && capture.matched,
+        "a later stale texture emits once after two new views");
     assert(cached_texture_view_count(state, texture) == 0,
         "rollback removes every view created by the failed transaction");
     assert(!slot.views[0].used && !slot.views[1].used,
         "rollback restores both cache cells to their prior unused state");
+    state.debug_callback = null;
 }
 
 fn void texture_descriptors_failed_batch_preserves_existing_and_duplicate_views() @test {
@@ -1060,4 +1107,280 @@ fn void descriptor_heap_raised_capacity_creates() @test {
     gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
     assert(index.is_valid(), "raised-capacity heap creates and serves a descriptor");
     gpu::destroy_texture_descriptor(&device, index)!!;
+}
+
+fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
+    gpu::Device device = make_heap_test_device(1, 1);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    DescriptorDiagnosticCapture capture;
+    state.debug_callback = &capture_descriptor_diagnostic;
+    state.debug_user_data = &capture;
+
+    gpu::TextureDescriptorDesc[1] one = { { .texture = texture } };
+    gpu::TextureIndex[2] too_many_outputs;
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        expected_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "create_texture_descriptors",
+        expected_field:      "out_indices",
+        expected_invariant:  "output count must match descriptor count",
+    );
+    fault lengths = @catch(gpu::create_texture_descriptors(&device, one[..], too_many_outputs[..]));
+    assert(lengths == gpu::INVALID_ARGUMENT && capture.calls == 1 && capture.matched,
+        "batch length rejection reports exact context");
+
+    gpu::TextureHandle stale_texture = make_heap_texture(&device);
+    gpu::destroy_texture(&device, stale_texture)!!;
+    gpu::TextureDescriptorDesc[1] stale_descs = { { .texture = stale_texture } };
+    gpu::TextureIndex[1] stale_outputs = { { .slot = 19, .generation = 7 } };
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_HANDLE,
+        expected_kind:       gpu::DebugResourceKind.TEXTURE,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "create_texture_descriptors",
+        expected_field:      "descs[].texture",
+        expected_invariant:  "texture must identify a live generation",
+    );
+    fault stale = @catch(gpu::create_texture_descriptors(&device, stale_descs[..], stale_outputs[..]));
+    assert(stale == gpu::INVALID_HANDLE && capture.calls == 2 && capture.matched,
+        "batch stale texture rejection omits unvalidated identity");
+    assert(stale_outputs[0].slot == 19 && stale_outputs[0].generation == 7,
+        "batch stale texture rejection preserves outputs");
+
+    gpu::TextureViewDesc bad_view = { .format = gpu::Format.R32_UINT };
+    gpu::TextureDescriptorDesc[1] bad_view_descs = { { .texture = texture, .view = bad_view } };
+    gpu::TextureIndex[1] bad_view_outputs = { { .slot = 23, .generation = 9 } };
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        expected_kind:       gpu::DebugResourceKind.TEXTURE,
+        expected_identity:   true,
+        expected_index:      texture.index,
+        expected_generation: texture.generation,
+        expected_operation:  "create_texture_descriptors",
+        expected_field:      "descs[].view",
+        expected_invariant:  "view must select a valid texture subresource range and format",
+    );
+    fault view = @catch(gpu::create_texture_descriptors(&device, bad_view_descs[..], bad_view_outputs[..]));
+    assert(view == gpu::INVALID_ARGUMENT && capture.calls == 3 && capture.matched,
+        "batch view rejection reports resolved texture identity");
+    assert(bad_view_outputs[0].slot == 23 && bad_view_outputs[0].generation == 9,
+        "batch view rejection preserves outputs");
+
+    gpu::TextureDescriptorDesc[2] over_capacity;
+    foreach (&desc : over_capacity) *desc = { .texture = texture };
+    gpu::TextureIndex[2] capacity_outputs;
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::DESCRIPTOR_HEAP_FULL,
+        expected_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "create_texture_descriptors",
+        expected_field:      "DeviceDesc.texture_descriptor_capacity",
+        expected_invariant:  "must fit the complete descriptor batch after live and retiring descriptors",
+    );
+    fault capacity = @catch(gpu::create_texture_descriptors(&device, over_capacity[..], capacity_outputs[..]));
+    assert(capacity == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 4 && capture.matched,
+        "batch capacity rejection reports exact context");
+
+    gpu::SamplerDesc invalid_anisotropy = { .anisotropy_enable = true, .max_anisotropy = 0.5f };
+    float supported_anisotropy = state.max_sampler_anisotropy;
+    if (supported_anisotropy <= 0) state.max_sampler_anisotropy = 16.0f;
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        expected_kind:       gpu::DebugResourceKind.SAMPLER,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "create_sampler",
+        expected_field:      "SamplerDesc.max_anisotropy",
+        expected_invariant:  "must be at least 1.0 when anisotropy is enabled",
+    );
+    fault anisotropy = @catch(gpu::create_sampler(&device, &invalid_anisotropy));
+    assert(anisotropy == gpu::INVALID_ARGUMENT && capture.calls == 5 && capture.matched,
+        "invalid sampler anisotropy reports exact context");
+
+    state.max_sampler_anisotropy = 0;
+    gpu::SamplerDesc unsupported_anisotropy = { .anisotropy_enable = true, .max_anisotropy = 1.0f };
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::UNSUPPORTED_FEATURE,
+        expected_kind:       gpu::DebugResourceKind.SAMPLER,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "create_sampler",
+        expected_field:      "SamplerDesc.anisotropy_enable",
+        expected_invariant:  "device must support sampler anisotropy",
+    );
+    fault unsupported = @catch(gpu::create_sampler(&device, &unsupported_anisotropy));
+    assert(unsupported == gpu::UNSUPPORTED_FEATURE && capture.calls == 6 && capture.matched,
+        "unsupported sampler anisotropy reports exact context");
+    state.max_sampler_anisotropy = supported_anisotropy;
+    state.debug_callback = null;
+}
+
+fn void texture_descriptor_view_cache_exhaustion_reports_distinct_context() @test {
+    gpu::Device device = make_heap_test_device(16, 4);
+    defer gpu::destroy_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureIndex[vk::MAX_CACHED_VIEWS] live;
+    for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
+        gpu::TextureViewDesc view = {
+            .base_mip    = i % 4,
+            .mip_count   = 1,
+            .base_layer  = i / 4,
+            .layer_count = 1,
+        };
+        live[i] = gpu::create_texture_descriptor(&device, texture, &view)!!;
+    }
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    DescriptorDiagnosticCapture capture;
+    state.debug_callback = &capture_descriptor_diagnostic;
+    state.debug_user_data = &capture;
+    gpu::TextureViewDesc overflow = {
+        .base_mip    = 4,
+        .mip_count   = 1,
+        .base_layer  = 3,
+        .layer_count = 1,
+    };
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::SLOT_TABLE_FULL,
+        expected_kind:       gpu::DebugResourceKind.TEXTURE,
+        expected_identity:   true,
+        expected_index:      texture.index,
+        expected_generation: texture.generation,
+        expected_operation:  "create_texture_descriptor",
+        expected_field:      "texture view cache",
+        expected_invariant:  "texture must have free cached-view capacity",
+    );
+    fault full = @catch(gpu::create_texture_descriptor(&device, texture, &overflow));
+    assert(full == gpu::SLOT_TABLE_FULL && capture.calls == 1 && capture.matched,
+        "view-cache exhaustion has distinct structured context");
+
+    state.debug_callback = null;
+    foreach (index : live) gpu::destroy_texture_descriptor(&device, index)!!;
+}
+fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @test {
+    vk::VkDeviceState state;
+    DescriptorBackendCapture capture;
+    state.debug_callback = &capture_descriptor_backend_diagnostic;
+    state.debug_user_data = &capture;
+
+    capture = {
+        .expected_fault     = gpu::DESCRIPTOR_HEAP_FULL,
+        .expected_operation = "create_device",
+        .expected_text      = "Vulkan descriptor pool is fragmented",
+        .expected_result    = (int)vk::Result.ERROR_FRAGMENTATION,
+    };
+    fault pool = @catch(gpu::vk::check_descriptor_pool_backend_result(
+        state:     &state,
+        operation: "create_device",
+        result:    vk::Result.ERROR_FRAGMENTATION,
+    ));
+    assert(pool == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 1 && capture.matched,
+        "descriptor-pool specialization is reported without changing its fault");
+
+    capture = {
+        .calls              = capture.calls,
+        .expected_fault     = gpu::DESCRIPTOR_HEAP_FULL,
+        .expected_operation = "create_device",
+        .expected_text      = "Vulkan descriptor allocation exhausted the pool",
+        .expected_result    = (int)vk::Result.ERROR_OUT_OF_POOL_MEMORY,
+    };
+    fault allocate = @catch(gpu::vk::check_descriptor_allocate_backend_result(
+        state:     &state,
+        operation: "create_device",
+        result:    vk::Result.ERROR_OUT_OF_POOL_MEMORY,
+    ));
+    assert(allocate == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 2 && capture.matched,
+        "descriptor allocation specialization is reported without changing its fault");
+
+    capture = {
+        .calls              = capture.calls,
+        .expected_fault     = gpu::BACKEND_ERROR,
+        .expected_operation = "create_device",
+        .expected_text      = "descriptor buffer device address is zero",
+        .expected_result    = 0,
+    };
+    fault address = @catch(gpu::vk::report_descriptor_backend_failure(
+        state:         &state,
+        operation:     "create_device",
+        public_fault:  gpu::BACKEND_ERROR,
+        backend_text:  "descriptor buffer device address is zero",
+        backend_result: 0,
+    ));
+    assert(address == gpu::BACKEND_ERROR && capture.calls == 3 && capture.matched,
+        "descriptor bootstrap failure without VkResult is observable");
+
+    fault silent_retire = @catch(gpu::vk::check_descriptor_retire_backend_result(
+        state:     &state,
+        operation: null,
+        result:    vk::Result.ERROR_DEVICE_LOST,
+    ));
+    assert(silent_retire == gpu::DEVICE_LOST && capture.calls == 3,
+        "silent single-descriptor retire fallback does not emit a paired fault");
+
+    capture = {
+        .calls              = capture.calls,
+        .expected_fault     = gpu::DEVICE_LOST,
+        .expected_operation = "create_sampler",
+        .expected_text      = "Vulkan device lost",
+        .expected_result    = (int)vk::Result.ERROR_DEVICE_LOST,
+    };
+    fault sampler_retire = @catch(gpu::vk::check_descriptor_retire_backend_result(
+        state:     &state,
+        operation: "create_sampler",
+        result:    vk::Result.ERROR_DEVICE_LOST,
+    ));
+    assert(sampler_retire == gpu::DEVICE_LOST && capture.calls == 4 && capture.matched,
+        "sampler-retire query reports its backend fault once");
+
+    gpu::TextureHandle texture = { .index = 7, .generation = 11 };
+    vk::TextureSlot texture_slot;
+    capture = {
+        .calls               = capture.calls,
+        .expected_fault      = gpu::OUT_OF_DEVICE_MEMORY,
+        .expected_kind       = gpu::DebugResourceKind.TEXTURE,
+        .expected_identity   = true,
+        .expected_index      = texture.index,
+        .expected_generation = texture.generation,
+        .expected_operation  = "create_texture_descriptor",
+        .expected_text       = "Vulkan device memory exhausted",
+        .expected_result     = (int)vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
+    };
+    fault view_backend = @catch(gpu::vk::check_texture_view_backend_result(
+        state:     &state,
+        operation: "create_texture_descriptor",
+        texture:   texture,
+        slot:      &texture_slot,
+        result:    vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
+    ));
+    assert(view_backend == gpu::OUT_OF_DEVICE_MEMORY && capture.calls == 5 && capture.matched,
+        "image-view creation reports operation and resolved texture identity");
+
+    state.debug_callback = null;
+    fault fallback = @catch(gpu::vk::check_descriptor_pool_backend_result(
+        state:     &state,
+        operation: "create_device",
+        result:    vk::Result.ERROR_FRAGMENTATION,
+    ));
+    assert(fallback == pool && capture.calls == 5,
+        "null callback preserves descriptor bootstrap fault without a duplicate");
 }

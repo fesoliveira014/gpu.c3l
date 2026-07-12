@@ -107,6 +107,71 @@ fn void DescriptorRetireRing.push(&self, uint slot, ulong timeline_value) {
     self.count++;
 }
 
+fn void? report_descriptor_backend_failure(
+    VkDeviceState* state,
+    ZString operation,
+    fault public_fault,
+    ZString backend_text,
+    int backend_result,
+) {
+    if (state.debug_callback != null) {
+        gpu::DebugMessage message = {
+            .severity             = gpu::DebugMessageSeverity.ERROR,
+            .category             = { .backend },
+            .operation            = operation,
+            .has_fault            = true,
+            .public_fault         = public_fault,
+            .backend_text         = backend_text,
+            .validation_id_number = backend_result,
+        };
+        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    }
+    return public_fault~;
+}
+
+fn void? check_descriptor_pool_backend_result(
+    VkDeviceState* state,
+    ZString operation,
+    vk::Result result,
+) {
+    if (result != vk::Result.ERROR_FRAGMENTATION) {
+        return check_backend_result(state, operation, result);
+    }
+    return report_descriptor_backend_failure(
+        state:          state,
+        operation:      operation,
+        public_fault:   gpu::DESCRIPTOR_HEAP_FULL,
+        backend_text:   "Vulkan descriptor pool is fragmented",
+        backend_result: (int)result,
+    );
+}
+
+fn void? check_descriptor_allocate_backend_result(
+    VkDeviceState* state,
+    ZString operation,
+    vk::Result result,
+) {
+    if (result != vk::Result.ERROR_OUT_OF_POOL_MEMORY
+        && result != vk::Result.ERROR_FRAGMENTED_POOL) {
+        return check_backend_result(state, operation, result);
+    }
+    return report_descriptor_backend_failure(
+        state:          state,
+        operation:      operation,
+        public_fault:   gpu::DESCRIPTOR_HEAP_FULL,
+        backend_text:   "Vulkan descriptor allocation exhausted the pool",
+        backend_result: (int)result,
+    );
+}
+
+fn void? check_descriptor_retire_backend_result(
+    VkDeviceState* state,
+    ZString operation,
+    vk::Result result,
+) {
+    if (operation == null) return check(result);
+    return check_backend_result(state, operation, result);
+}
 fn ushort bump_generation(ushort generation) @private {
     uint next = ((uint)generation + 1) & 0xFFFF;
     return next == 0 ? (ushort)1 : (ushort)next;
@@ -171,23 +236,37 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
             limits:       limits,
         );
         if (!fits) {
-            HeapDescriptorTotals totals = descriptor_heap_totals(tex_capacity, smp_capacity);
-            io::eprintfn(
-                "gpu: descriptor capacities (tex %d, smp %d) exceed a device update-after-bind limit (set %d/%d/%d, per-stage %d/%d/%d, per-stage resources %d/%d, all-pools descriptors %d/%d)",
-                tex_capacity,
-                smp_capacity,
-                limits.max_sampled_images,
-                limits.max_storage_images,
-                limits.max_samplers,
-                limits.max_per_stage_sampled_images,
-                limits.max_per_stage_storage_images,
-                limits.max_per_stage_samplers,
-                totals.per_stage_resources,
-                limits.max_per_stage_resources,
-                totals.all_pools_descriptors,
-                limits.max_all_pools_descriptors,
-            );
-            return gpu::INVALID_ARGUMENT~;
+            if (state.debug_callback == null) {
+                HeapDescriptorTotals totals = descriptor_heap_totals(tex_capacity, smp_capacity);
+                io::eprintfn(
+                    "gpu: descriptor capacities (tex %d, smp %d) exceed a device update-after-bind limit (set %d/%d/%d, per-stage %d/%d/%d, per-stage resources %d/%d, all-pools descriptors %d/%d)",
+                    tex_capacity,
+                    smp_capacity,
+                    limits.max_sampled_images,
+                    limits.max_storage_images,
+                    limits.max_samplers,
+                    limits.max_per_stage_sampled_images,
+                    limits.max_per_stage_storage_images,
+                    limits.max_per_stage_samplers,
+                    totals.per_stage_resources,
+                    limits.max_per_stage_resources,
+                    totals.all_pools_descriptors,
+                    limits.max_all_pools_descriptors,
+                );
+            }
+            return report_contract_failure(
+                state:               state,
+                operation:           "create_device",
+                public_fault:        gpu::INVALID_ARGUMENT,
+                resource_kind:       gpu::DebugResourceKind.DEVICE,
+                has_public_identity: false,
+                index:               0,
+                generation:          0,
+                debug_name:          null,
+                rejected_field:      "DeviceDesc.texture_descriptor_capacity/sampler_descriptor_capacity",
+                invariant:           "descriptor capacities must fit device update-after-bind limits",
+                backend_text:        null,
+            )~;
         }
     }
 
@@ -241,7 +320,11 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
         layout_info = layout_info
             .set_flags(vk::DescriptorSetLayoutCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT);
     }
-    check(vk::create_descriptor_set_layout(state.device, &layout_info, null, &heap.set_layout))!;
+    check_backend_result(
+        state:     state,
+        operation: "create_device",
+        result:    vk::create_descriptor_set_layout(state.device, &layout_info, null, &heap.set_layout),
+    )!;
 
     if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
         vk::DescriptorPoolSize[3] pool_sizes = {
@@ -253,24 +336,28 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
             .set_flags(vk::DescriptorPoolCreateFlagBits.UPDATE_AFTER_BIND_BIT)
             .set_max_sets(1)
             .set_pool_sizes(pool_sizes[..]);
-        check_descriptor_pool_create_result(
-            vk::create_descriptor_pool(
+        check_descriptor_pool_backend_result(
+            state:     state,
+            operation: "create_device",
+            result:    vk::create_descriptor_pool(
                 device:            state.device,
                 p_create_info:     &pool_info,
                 p_allocator:       null,
                 p_descriptor_pool: &heap.descriptor_pool,
-            )
+            ),
         )!;
 
         vk::DescriptorSetAllocateInfo alloc_info = vk::descriptor_set_allocate_info()
             .set_descriptor_pool(heap.descriptor_pool)
             .set_set_layouts((&heap.set_layout)[:1]);
-        check_descriptor_allocate_result(
-            vk::allocate_descriptor_sets(
+        check_descriptor_allocate_backend_result(
+            state:     state,
+            operation: "create_device",
+            result:    vk::allocate_descriptor_sets(
                 device:            state.device,
                 p_allocate_info:   &alloc_info,
                 p_descriptor_sets: &heap.descriptor_set,
-            )
+            ),
         )!;
     } else {
         create_descriptor_buffer(state)!;
@@ -326,13 +413,27 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
         limits:       limits,
     );
     if (!fits) {
-        io::eprintfn(
-            "gpu: descriptor buffer layout size %d exceeds a device descriptor-buffer bound (ranges %d/%d, address space %d/%d/%d)",
-            layout_size,
-            limits.max_resource_descriptor_buffer_range, limits.max_sampler_descriptor_buffer_range,
-            limits.resource_descriptor_address_space_size, limits.sampler_descriptor_address_space_size,
-            limits.descriptor_buffer_address_space_size);
-        return gpu::INVALID_ARGUMENT~;
+        if (state.debug_callback == null) {
+            io::eprintfn(
+                "gpu: descriptor buffer layout size %d exceeds a device descriptor-buffer bound (ranges %d/%d, address space %d/%d/%d)",
+                layout_size,
+                limits.max_resource_descriptor_buffer_range, limits.max_sampler_descriptor_buffer_range,
+                limits.resource_descriptor_address_space_size, limits.sampler_descriptor_address_space_size,
+                limits.descriptor_buffer_address_space_size);
+        }
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_device",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.DEVICE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "DeviceDesc.texture_descriptor_capacity/sampler_descriptor_capacity",
+            invariant:           "descriptor buffer layout must fit device limits",
+            backend_text:        null,
+        )~;
     }
 
     vk::extensions.vk_get_descriptor_set_layout_binding_offset_ext(state.device, heap.set_layout, HEAP_BINDING_SAMPLED, &heap.binding_offset_sampled);
@@ -350,12 +451,30 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
         .required_flags = (vk::MemoryPropertyFlags)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT,
     };
     vma::AllocationInfo allocation_info;
-    check(state.allocator.create_buffer(&buffer_info, &alloc_info, &heap.descriptor_buffer, &heap.descriptor_buffer_allocation, &allocation_info))!;
+    check_backend_result(
+        state:     state,
+        operation: "create_device",
+        result:    state.allocator.create_buffer(
+            buffer_info:    &buffer_info,
+            alloc_info:     &alloc_info,
+            out_buffer:     &heap.descriptor_buffer,
+            out_allocation: &heap.descriptor_buffer_allocation,
+            out_info:       &allocation_info,
+        ),
+    )!;
     heap.descriptor_buffer_cpu = allocation_info.mapped_data;
 
     vk::BufferDeviceAddressInfo address_info = vk::buffer_device_address_info().set_buffer(heap.descriptor_buffer);
     heap.descriptor_buffer_gpu = vk::get_buffer_device_address(state.device, &address_info);
-    if (heap.descriptor_buffer_gpu == 0) return gpu::BACKEND_ERROR~;
+    if (heap.descriptor_buffer_gpu == 0) {
+        return report_descriptor_backend_failure(
+            state:          state,
+            operation:      "create_device",
+            public_fault:   gpu::BACKEND_ERROR,
+            backend_text:   "descriptor buffer device address is zero",
+            backend_result: 0,
+        );
+    }
 }
 
 <* Safe on a partial or zeroed heap; destroys live sampler objects, including
@@ -426,12 +545,16 @@ fn void report_descriptor_leaks(VkDeviceState* state) {
     }
 }
 
-fn uint? count_ready_texture_retires(VkDeviceState* state) @private {
+fn uint? count_ready_texture_retires(VkDeviceState* state, ZString operation) @private {
     DescriptorRetireRing* retire = &state.heap.texture_retire;
     if (retire.count == 0) return 0;
 
     ulong current = 0;
-    check(vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current))!;
+    check_descriptor_retire_backend_result(
+        state:     state,
+        operation: operation,
+        result:    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current),
+    )!;
     uint ready = 0;
     while (ready < retire.count) {
         uint index = (retire.head + ready) % (uint)retire.entries.len;
@@ -453,11 +576,15 @@ fn void drain_texture_retire_prefix(VkDeviceState* state, uint ready_count) @pri
 
 <* Recycles ready ring slots under the caller's lock; the ready handles land
    in `drained` for destruction after unlock. Returns the count. *>
-fn uint drain_sampler_retire(VkDeviceState* state, vk::Sampler[] drained) @private {
+fn uint? drain_sampler_retire(VkDeviceState* state, vk::Sampler[] drained) @private {
     DescriptorHeapState* heap = &state.heap;
     if (heap.sampler_retire.count == 0) return 0;
     ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+    check_descriptor_retire_backend_result(
+        state:     state,
+        operation: "create_sampler",
+        result:    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current),
+    )!;
     uint drained_count = 0;
     while (heap.sampler_retire.count > 0) {
         DescriptorRetireEntry* entry = &heap.sampler_retire.entries[heap.sampler_retire.head];
@@ -581,6 +708,83 @@ fn void bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pip
     vk::cmd_set_descriptor_buffer_offsets_ext(cb, bind_point, layout, HEAP_SET, 1, &buffer_index, &offset);
 }
 
+fn TextureSlot*? resolve_descriptor_texture(
+    VkDeviceState* state,
+    gpu::TextureHandle texture,
+    ZString operation,
+    ZString texture_field,
+    ZString usage_field,
+) @private {
+    TextureSlot*? resolved = state.textures.get(texture);
+    if (catch f = resolved) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        f,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      texture_field,
+            invariant:           "texture must identify a live generation",
+            backend_text:        null,
+        )~;
+    }
+    TextureSlot* slot = resolved;
+    if (!slot.usage.sampled && !slot.usage.storage) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               texture.index,
+            generation:          texture.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      usage_field,
+            invariant:           "texture must have sampled or storage usage",
+            backend_text:        null,
+        )~;
+    }
+    return slot;
+}
+
+fn vk::ImageView? resolve_descriptor_texture_view(
+    VkDeviceState* state,
+    TextureSlot* slot,
+    gpu::TextureHandle texture,
+    gpu::TextureViewDesc* view,
+    ZString operation,
+    ZString view_field,
+    CachedViewCreation* creation,
+) @private {
+    vk::ImageView? resolved = resolve_texture_view_tracked(
+        state:     state,
+        slot:      slot,
+        texture:   texture,
+        view:      view,
+        operation: operation,
+        creation:  creation,
+    );
+    if (catch f = resolved) {
+        if (f != gpu::INVALID_ARGUMENT) return f~;
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        f,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE,
+            has_public_identity: true,
+            index:               texture.index,
+            generation:          texture.generation,
+            debug_name:          slot_name(&slot.debug_name[0]),
+            rejected_field:      view_field,
+            invariant:           "view must select a valid texture subresource range and format",
+            backend_text:        null,
+        )~;
+    }
+    return resolved;
+}
 fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::TextureHandle texture, gpu::TextureViewDesc* view) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
@@ -588,26 +792,15 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.heap;
-    TextureSlot* texture_slot = state.textures.get(texture)!;
-    // Descriptors only make sense for shader-visible textures; anything else
-    // would return an index whose heap slots are never written.
-    if (!texture_slot.usage.sampled && !texture_slot.usage.storage) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_texture_descriptor",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.TEXTURE,
-            has_public_identity: true,
-            index:               texture.index,
-            generation:          texture.generation,
-            debug_name:          slot_name(&texture_slot.debug_name[0]),
-            rejected_field:      "TextureDesc.usage",
-            invariant:           "texture must have sampled or storage usage",
-            backend_text:        null,
-        )~;
-    }
+    TextureSlot* texture_slot = resolve_descriptor_texture(
+        state:         state,
+        texture:       texture,
+        operation:     "create_texture_descriptor",
+        texture_field: "texture",
+        usage_field:   "TextureDesc.usage",
+    )!;
 
-    uint ready_retires = count_ready_texture_retires(state) ?? 0;
+    uint ready_retires = count_ready_texture_retires(state, null) ?? 0;
     uint headroom = heap.texture_free_count + ready_retires
         + (uint)heap.texture_cells.len - heap.texture_next_new;
     if (headroom == 0) {
@@ -627,11 +820,14 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
     }
 
     CachedViewCreation creation;
-    vk::ImageView image_view = resolve_texture_view_tracked(
-        state:    state,
-        slot:     texture_slot,
-        view:     view,
-        creation: &creation,
+    vk::ImageView image_view = resolve_descriptor_texture_view(
+        state:     state,
+        slot:      texture_slot,
+        texture:   texture,
+        view:      view,
+        operation: "create_texture_descriptor",
+        view_field: "view",
+        creation:  &creation,
     )!;
 
     drain_texture_retire_prefix(state, ready_retires);
@@ -647,14 +843,27 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
 
 <* Validate and resolve one batch item without touching descriptor allocation
    or output state. The caller owns any returned cache creation until commit. *>
-fn void? prepare_texture_descriptor_item(VkDeviceState* state, gpu::TextureDescriptorDesc* desc, PendingTextureWrite* pending, CachedViewCreation* creation) @private {
-    TextureSlot* texture_slot = state.textures.get(desc.texture)!;
-    if (!texture_slot.usage.sampled && !texture_slot.usage.storage) return gpu::INVALID_ARGUMENT~;
-    vk::ImageView image_view = resolve_texture_view_tracked(
-        state:    state,
-        slot:     texture_slot,
-        view:     &desc.view,
-        creation: creation,
+fn void? prepare_texture_descriptor_item(
+    VkDeviceState* state,
+    gpu::TextureDescriptorDesc* desc,
+    PendingTextureWrite* pending,
+    CachedViewCreation* creation,
+) @private {
+    TextureSlot* texture_slot = resolve_descriptor_texture(
+        state:         state,
+        texture:       desc.texture,
+        operation:     "create_texture_descriptors",
+        texture_field: "descs[].texture",
+        usage_field:   "TextureDesc.usage",
+    )!;
+    vk::ImageView image_view = resolve_descriptor_texture_view(
+        state:      state,
+        slot:       texture_slot,
+        texture:    desc.texture,
+        view:       &desc.view,
+        operation:  "create_texture_descriptors",
+        view_field: "descs[].view",
+        creation:   creation,
     )!;
     *pending = { .texture_slot = texture_slot, .view = image_view };
 }
@@ -708,20 +917,48 @@ fn uint accumulate_texture_descriptor_write(DescriptorHeapState* heap, uint slot
 <* All validation and fallible view creation precedes descriptor mutation.
    A preparation fault restores only views created by this transaction. *>
 fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescriptorDesc[] descs, gpu::TextureIndex[] out_indices) @private {
-    if (out_indices.len != descs.len) return gpu::INVALID_ARGUMENT~;
+    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (out_indices.len != descs.len) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_texture_descriptors",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "out_indices",
+            invariant:           "output count must match descriptor count",
+            backend_text:        null,
+        )~;
+    }
     if (descs.len == 0) return;
 
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.heap;
 
-    uint ready_retires = count_ready_texture_retires(state)!;
+    uint ready_retires = count_ready_texture_retires(state, "create_texture_descriptors")!;
     uint headroom = heap.texture_free_count + ready_retires
         + (uint)heap.texture_cells.len - heap.texture_next_new;
-    if ((uint)descs.len > headroom) return gpu::DESCRIPTOR_HEAP_FULL~;
+    if ((uint)descs.len > headroom) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_texture_descriptors",
+            public_fault:        gpu::DESCRIPTOR_HEAP_FULL,
+            resource_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "DeviceDesc.texture_descriptor_capacity",
+            invariant:           "must fit the complete descriptor batch after live and retiring descriptors",
+            backend_text:        null,
+        )~;
+    }
 
     @pool() {
         PendingTextureWrite[] pending = mem::talloc_array(PendingTextureWrite, descs.len);
@@ -834,7 +1071,7 @@ fn gpu::SamplerIndex? publish_sampler(VkDeviceState* state, vk::Sampler sampler)
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
 
-        drained_count = drain_sampler_retire(state, drained);
+        drained_count = drain_sampler_retire(state, drained)!;
         uint slot;
         if (heap.sampler_free_count > 0) {
             slot = heap.sampler_free[--heap.sampler_free_count];
@@ -856,10 +1093,36 @@ fn gpu::SamplerIndex? publish_sampler(VkDeviceState* state, vk::Sampler sampler)
 
 fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)device.backend_state;
-    if (desc.anisotropy_enable && state.max_sampler_anisotropy <= 0) return gpu::UNSUPPORTED_FEATURE~;
-    // Vulkan requires 1.0 <= maxAnisotropy when enabled; enabling without a
-    // valid value is a caller error, not a default request.
-    if (desc.anisotropy_enable && desc.max_anisotropy < 1.0f) return gpu::INVALID_ARGUMENT~;
+    if (desc.anisotropy_enable && state.max_sampler_anisotropy <= 0) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_sampler",
+            public_fault:        gpu::UNSUPPORTED_FEATURE,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "SamplerDesc.anisotropy_enable",
+            invariant:           "device must support sampler anisotropy",
+            backend_text:        null,
+        )~;
+    }
+    if (desc.anisotropy_enable && desc.max_anisotropy < 1.0f) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "create_sampler",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "SamplerDesc.max_anisotropy",
+            invariant:           "must be at least 1.0 when anisotropy is enabled",
+            backend_text:        null,
+        )~;
+    }
     enter_tracked(state);
     defer exit_tracked(state);
 
@@ -887,10 +1150,11 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
         result:    vk::create_sampler(state.device, &sampler_info, null, &sampler),
     )!;
 
-    if (try index = publish_sampler(state, sampler)) {
-        return index;
-    }
+    gpu::SamplerIndex? published = publish_sampler(state, sampler);
+    if (try index = published) return index;
+    fault publish_fault = @catch(published);
     vk::destroy_sampler(state.device, sampler, null);
+    if (publish_fault != gpu::DESCRIPTOR_HEAP_FULL) return publish_fault~;
     return report_contract_failure(
         state:               state,
         operation:           "create_sampler",

@@ -1504,3 +1504,8 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::end_commands(&commands)!!;
     gpu::end_frame(&frame)!!;
 }
+
+fn void render_pass_view_backend_operation_uses_public_api_name() @test {
+    assert(gpu::vk::render_pass_view_operation().str_view() == "cmd_begin_render_pass",
+        "render-pass view failures use the exact public operation");
+}
