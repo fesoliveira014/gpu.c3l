@@ -39,6 +39,18 @@ fn void device_create_destroy() @test {
         gpu::get_device_caps(&device)!!.max_push_constant_size == props.limits.max_push_constants_size,
         "reported push-constant limit matches the selected physical device"
     );
+    gpu::Vec3u compute_count_limit = gpu::get_device_caps(&device)!!.max_compute_work_group_count;
+    assert(
+        compute_count_limit.x == props.limits.max_compute_work_group_count[0]
+            && compute_count_limit.y == props.limits.max_compute_work_group_count[1]
+            && compute_count_limit.z == props.limits.max_compute_work_group_count[2],
+        "reported dispatch-count limits match the selected physical device"
+    );
+    assert(
+        gpu::get_device_caps(&device)!!.max_draw_indirect_count
+            == props.limits.max_draw_indirect_count,
+        "reported indirect draw-count limit matches the selected physical device"
+    );
     assert(gpu::get_device_caps(&device)!!.max_push_constant_size >= gpu::RootPush::size, "push-constant limit contains RootPush");
     gpu::destroy_device(&device)!!;
     assert(gpu::device_backend_state(device) == null, "backend state cleared on destroy");

@@ -46,7 +46,7 @@ Delivery slices:
   - Edge cases: stale copies, failed readback resolution, teardown with outstanding tickets, invalid device tokens, and the one-live-device contract.
   - Verify: device/readback tests pass; generated `gpu` documentation contains no dispatch aliases, backend pointers, retirement fields, `vk::`, or `vma::` symbols.
 
-- [ ] **1.3 Validate workload dimensions against selected-device limits.**
+- [x] **1.3 Validate workload dimensions against selected-device limits.**
   - Targets: `gpu/caps.c3`, `gpu/command.c3`, `gpu/vk/device.c3`, `gpu/vk/command.c3`, `gpu/vk/render_pass.c3`, `test/src/test_vk_command_validation.c3`, `docs/api.md`, `docs/limitations.md`.
   - Capture compute work-group count and indirect draw-count limits, expose backend-neutral values, and reject over-limit calls before recording backend commands.
   - Edge cases: exact-limit success, zero dimensions, overflow while computing required argument bytes, and count-buffer variants.

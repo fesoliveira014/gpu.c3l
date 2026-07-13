@@ -96,6 +96,8 @@ DeviceCaps
     uint max_sampler_descriptors
     uint max_color_attachments
     uint max_push_constant_size
+    Vec3u max_compute_work_group_count
+    uint max_draw_indirect_count
     usz min_uniform_alignment
     usz min_storage_alignment
     usz min_texel_buffer_alignment
@@ -713,6 +715,10 @@ cmd_dispatch(
 ) -> void?
 ```
 
+Each group count may be zero and must not exceed the corresponding component
+of `DeviceCaps.max_compute_work_group_count`. An over-limit call faults
+`INVALID_ARGUMENT` before a backend command is recorded.
+
 ### Render pass
 
 ```text
@@ -849,8 +855,17 @@ Argument spans must come from a buffer with `indirect` usage, 4-byte aligned,
 with `draw_count` (or `max_draw_count`) times the tight argument size inside
 the span. One vertex/fragment root pair applies to every draw in a
 multi-draw; per-draw variation indexes a table through `gl_DrawID` (see
-`docs/shader_abi.md`). Ordering between argument writes and indirect
-consumption is the caller's barrier (`INDIRECT_COMMAND` / `INDIRECT_READ`).
+`docs/shader_abi.md`). Direct draw counts and GPU-written count values may be
+zero and must not exceed `DeviceCaps.max_draw_indirect_count`. In the count
+variant, `max_draw_count` may exceed that limit, but the argument span must
+hold `max_draw_count` entries; execution uses the smaller of `max_draw_count`
+and the GPU-written count. Argument byte calculations are checked for
+overflow; violations fault `INVALID_ARGUMENT` before recording.
+
+Each GPU-written `DispatchIndirectCommand` component must not exceed the
+corresponding `DeviceCaps.max_compute_work_group_count` component. Ordering
+between argument writes and indirect consumption is the caller's barrier
+(`INDIRECT_COMMAND` / `INDIRECT_READ`).
 
 The count variant requires `DeviceCaps.draw_indirect_count` and faults
 `UNSUPPORTED_FEATURE` without it.

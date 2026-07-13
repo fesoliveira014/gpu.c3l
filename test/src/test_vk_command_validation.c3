@@ -653,7 +653,7 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc args_desc = { .size = gpu::DrawIndexedIndirectCommand::size, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc args_desc = { .size = gpu::DrawIndexedIndirectCommand::size * 2, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE };
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan args_span = gpu::get_buffer_span(&device, args_buffer)!!;
@@ -683,6 +683,114 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
         index_span:     index_span_stub,
     ));
     assert(beyond == gpu::INVALID_ARGUMENT, "indirect count span beyond the backing buffer faults INVALID_ARGUMENT");
+
+    gpu::cmd_end_render_pass(&cmd)!!;
+    gpu::end_commands(&cmd)!!;
+    gpu::end_frame(&frame_token)!!;
+}
+
+fn void indirect_draw_count_limits_follow_command_contract() @test {
+    SyncDiagnosticCapture capture = {};
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+    if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
+    ValDrawCtx ctx = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &ctx);
+    gpu::TextureHandle target = make_val_target(&device);
+    defer gpu::destroy_texture(&device, target)!!;
+
+    gpu::BufferDesc args_desc = {
+        .size        = gpu::DrawIndexedIndirectCommand::size * 2,
+        .usage       = { .indirect },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+    };
+    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
+    defer gpu::destroy_buffer(&device, args_buffer)!!;
+    gpu::GpuSpan args_span = gpu::get_buffer_span(&device, args_buffer)!!;
+
+    gpu::BufferDesc count_desc = {
+        .size        = 4,
+        .usage       = { .indirect },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+    };
+    gpu::BufferHandle count_buffer = gpu::create_buffer(&device, &count_desc)!!;
+    defer gpu::destroy_buffer(&device, count_buffer)!!;
+    gpu::GpuSpan count_span = gpu::get_buffer_span(&device, count_buffer)!!;
+
+    gpu::BufferDesc index_desc = {
+        .size        = 4,
+        .usage       = { .index },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+    };
+    gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
+    defer gpu::destroy_buffer(&device, index_buffer)!!;
+    gpu::GpuSpan index_span = gpu::get_buffer_span(&device, index_buffer)!!;
+
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    record_val_target_to_attach(&cmd, target);
+    gpu::ColorTargetDesc[1] colors = {{
+        .texture  = target,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    uint original_limit = state.caps.max_draw_indirect_count;
+    state.caps.max_draw_indirect_count = 1;
+    defer state.caps.max_draw_indirect_count = original_limit;
+
+    gpu::cmd_draw_indirect(
+        commands:      &cmd,
+        pipeline:      ctx.graphics,
+        vertex_root:   (gpu::GpuAddress)0,
+        fragment_root: (gpu::GpuAddress)0,
+        args:          args_span,
+        draw_count:    1,
+    )!!;
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_draw_indirect",
+        debug_name:     null,
+        rejected_field: "draw_count",
+        invariant:      "count must not exceed DeviceCaps.max_draw_indirect_count",
+    );
+    fault draw_over = @catch(gpu::cmd_draw_indirect(
+        commands:      &cmd,
+        pipeline:      ctx.graphics,
+        vertex_root:   (gpu::GpuAddress)0,
+        fragment_root: (gpu::GpuAddress)0,
+        args:          args_span,
+        draw_count:    2,
+    ));
+    assert(draw_over == gpu::INVALID_ARGUMENT,
+        "direct indirect draw count above the selected-device limit faults before recording");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      draw_over,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+    );
+
+    gpu::cmd_draw_indexed_indirect_count(
+        commands:       &cmd,
+        pipeline:       ctx.graphics,
+        vertex_root:    (gpu::GpuAddress)0,
+        fragment_root:  (gpu::GpuAddress)0,
+        args:           args_span,
+        count_span:     count_span,
+        max_draw_count: 2,
+        index_span:     index_span,
+    )!!;
 
     gpu::cmd_end_render_pass(&cmd)!!;
     gpu::end_commands(&cmd)!!;
@@ -1044,6 +1152,64 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
         "color count above selected device limit faults before invalid handle lookup");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "device-limit rejection records no pass");
     state.caps.max_color_attachments = device_limit;
+
+    gpu::end_commands(&cmd)!!;
+    gpu::end_frame(&frame_token)!!;
+}
+
+fn void selected_device_dispatch_limit_validates_before_recording() @test {
+    SyncDiagnosticCapture capture = {};
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+    ValComputeCtx ctx = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &ctx);
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::DeviceCaps original_caps = state.caps;
+    gpu::DeviceCaps limited_caps = state.caps;
+    limited_caps.max_compute_work_group_count = { .x = 1, .y = 1, .z = 1 };
+    state.caps = limited_caps;
+    defer state.caps = original_caps;
+
+    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: ctx.pipeline,
+        root:     (gpu::GpuAddress)0,
+        groups:   {},
+    )!!;
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: ctx.pipeline,
+        root:     (gpu::GpuAddress)0,
+        groups:   limited_caps.max_compute_work_group_count,
+    )!!;
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_dispatch",
+        debug_name:     null,
+        rejected_field: "groups",
+        invariant:      "group counts must not exceed DeviceCaps.max_compute_work_group_count",
+    );
+    fault dispatch_over = @catch(gpu::cmd_dispatch(
+        commands: &cmd,
+        pipeline: ctx.pipeline,
+        root:     (gpu::GpuAddress)0,
+        groups:   { .x = 2, .y = 1, .z = 1 },
+    ));
+    assert(dispatch_over == gpu::INVALID_ARGUMENT,
+        "dispatch above the selected-device count limit faults before recording");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      dispatch_over,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+    );
 
     gpu::end_commands(&cmd)!!;
     gpu::end_frame(&frame_token)!!;

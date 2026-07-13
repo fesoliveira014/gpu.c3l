@@ -343,10 +343,13 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
         operation: "cmd_draw_indirect",
     )!;
     BufferSlot* args_buffer = resolve_indirect_span(
-        state:    state,
-        span:     &args,
-        arg_size: gpu::DrawIndirectCommand::size,
-        count:    draw_count,
+        state:          state,
+        span:           &args,
+        arg_size:       gpu::DrawIndirectCommand::size,
+        count:          draw_count,
+        max_count:      state.caps.max_draw_indirect_count,
+        operation:      "cmd_draw_indirect",
+        rejected_field: "draw_count",
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
@@ -384,10 +387,13 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
         operation: "cmd_draw_indexed_indirect",
     )!;
     BufferSlot* args_buffer = resolve_indirect_span(
-        state:    state,
-        span:     &args,
-        arg_size: gpu::DrawIndexedIndirectCommand::size,
-        count:    draw_count,
+        state:          state,
+        span:           &args,
+        arg_size:       gpu::DrawIndexedIndirectCommand::size,
+        count:          draw_count,
+        max_count:      state.caps.max_draw_indirect_count,
+        operation:      "cmd_draw_indexed_indirect",
+        rejected_field: "draw_count",
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
@@ -418,16 +424,20 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
     )!;
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     BufferSlot* args_buffer = resolve_indirect_span(
-        state:    state,
-        span:     &args,
-        arg_size: gpu::DrawIndexedIndirectCommand::size,
-        count:    max_draw_count,
+        state:          state,
+        span:           &args,
+        arg_size:       gpu::DrawIndexedIndirectCommand::size,
+        count:          max_draw_count,
+        operation:      "cmd_draw_indexed_indirect_count",
+        rejected_field: "args",
     )!;
     BufferSlot* count_buffer = resolve_indirect_span(
-        state:    state,
-        span:     &count_span,
-        arg_size: 4,
-        count:    1,
+        state:          state,
+        span:           &count_span,
+        arg_size:       4,
+        count:          1,
+        operation:      "cmd_draw_indexed_indirect_count",
+        rejected_field: "count_span",
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(

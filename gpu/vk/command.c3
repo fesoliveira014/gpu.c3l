@@ -487,19 +487,57 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
 }
 
 <* Resolve an indirect argument span: indirect usage, 4-byte offset alignment,
-   count*arg_size within the span, and the span within its backing buffer. *>
+   checked argument bytes within the span, and the span within its backing buffer. *>
 fn BufferSlot*? resolve_indirect_span(
     VkDeviceState* state,
     gpu::GpuSpan* span,
     usz arg_size,
     uint count,
+    uint max_count = uint::max,
     ZString operation = null,
     ZString rejected_field = null,
 ) {
+    if (count > max_count && operation != null) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      rejected_field,
+            invariant:           "count must not exceed DeviceCaps.max_draw_indirect_count",
+            backend_text:        null,
+        )~;
+    }
+    usz? required_result = gpu::indirect_argument_bytes(
+        argument_size: arg_size,
+        count:         count,
+        max_count:     max_count,
+    );
+    if (catch size_fault = required_result) {
+        if (operation == null) return size_fault~;
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        size_fault,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      rejected_field,
+            invariant:           "indirect argument byte size must not overflow",
+            backend_text:        null,
+        )~;
+    }
+    usz required = required_result;
     BufferSlot* slot = resolve_span_slot(
         state:          state,
         span:           span,
-        required:       (usz)count * arg_size,
+        required:       required,
         operation:      operation,
         rejected_field: rejected_field,
     )!;
@@ -528,6 +566,21 @@ fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle,
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    if (catch limit_fault = gpu::validate_dispatch_groups(groups, state.caps.max_compute_work_group_count)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_dispatch",
+            public_fault:        limit_fault,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "groups",
+            invariant:           "group counts must not exceed DeviceCaps.max_compute_work_group_count",
+            backend_text:        null,
+        )~;
+    }
     validate_pipeline_kind(
         state:     state,
         handle:    handle,
