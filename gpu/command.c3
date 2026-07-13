@@ -182,6 +182,7 @@ fn BackendVTable*? command_vtable(CommandList* commands) @private {
     if (vtable == null) return INVALID_HANDLE~;
     return vtable;
 }
+
 <* Create a recording context: per-frame command pools confined to one
    thread at a time. Ownership: release with destroy_recording_context. *>
 fn RecordingContextHandle? create_recording_context(Device* device) {

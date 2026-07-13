@@ -132,7 +132,7 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
             {
                 defer state.command_mutex.unlock();
                 foreach (i, &token : desc.command_lists) {
-                    if (token.device != *device) return gpu::INVALID_ARGUMENT~;
+                    if (token.device != *device) return gpu::INVALID_HANDLE~;
                     for (sz j = 0; j < i; j++) {
                         if ((ulong)desc.command_lists[j].handle == (ulong)token.handle) {
                             return gpu::COMMAND_RECORDING_ERROR~;
