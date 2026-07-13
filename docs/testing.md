@@ -424,7 +424,8 @@ CI tiers (`.github/workflows/ci.yml`):
 | Getting-started walkthrough (docs-walkthrough job, `scripts/run_doc.py`) | linux | yes |
 | Link proof (smoke) + pure-CPU targets | windows | yes |
 | lavapipe (mesa-dist-win) Vulkan sweep | windows | yes |
-| Descriptor-buffer E2E | windows | failures block; unsupported adapters report not exercised |
+| Descriptor-buffer device/heap | windows | yes when exposed; otherwise reported not exercised |
+| Descriptor-buffer shader E2E | real hardware | pending; software ICD is reported not exercised |
 
 Generated SPIR-V should either:
 

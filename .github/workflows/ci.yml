@@ -297,14 +297,16 @@ jobs:
           done
           exit $FAIL
 
-      - name: Descriptor-buffer optional coverage
+      - name: Descriptor-buffer coverage status
         run: |
-          export GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1
           c3c test vk_texture_heap --path test \
-            --test-filter descriptor_buffer_ --test-show-output 2>&1 | tee /tmp/descriptor-buffer.txt
-          if grep -Eq "no capable adapter|skipped" /tmp/descriptor-buffer.txt; then
-            echo "::notice::descriptor-buffer E2E not exercised on this lavapipe adapter"
-            echo "Descriptor-buffer E2E: NOT EXERCISED (adapter support unavailable)." >> "$GITHUB_STEP_SUMMARY"
+            --test-filter descriptor_buffer_device_and_heap --test-show-output 2>&1 \
+            | tee /tmp/descriptor-buffer.txt
+          if grep -q "no capable adapter" /tmp/descriptor-buffer.txt; then
+            echo "::notice::descriptor-buffer device/heap path not exercised on this adapter"
+            echo "Descriptor-buffer device/heap: NOT EXERCISED (adapter support unavailable)." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "Descriptor-buffer E2E: EXERCISED on mesa-dist-win ${MESA_DIST_WIN_VERSION}." >> "$GITHUB_STEP_SUMMARY"
+            echo "Descriptor-buffer device/heap: EXERCISED on mesa-dist-win ${MESA_DIST_WIN_VERSION}." >> "$GITHUB_STEP_SUMMARY"
           fi
+          echo "::notice::descriptor-buffer shader E2E is not exercised on mesa-dist-win ${MESA_DIST_WIN_VERSION}; real-hardware evidence is pending"
+          echo "Descriptor-buffer shader E2E: NOT EXERCISED (mesa-dist-win ${MESA_DIST_WIN_VERSION} crashes in vulkan_lvp.dll; real-hardware evidence pending)." >> "$GITHUB_STEP_SUMMARY"
