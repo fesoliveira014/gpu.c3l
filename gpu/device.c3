@@ -3,7 +3,7 @@ module gpu;
 import gpu::vk;
 
 <* Opaque generation token for the process-wide device slot. *>
-typedef Device = inline ulong;
+typedef Device = ulong;
 
 // Backend dispatch functions. Command recording entries take the owner-bearing
 // CommandList; all other entries take the validated device token.

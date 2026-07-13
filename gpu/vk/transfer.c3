@@ -99,7 +99,7 @@ fn gpu::ReadbackTicket? ReadbackTicketTable.alloc(&self, ReadbackTicketState val
     }
 
     self.slots[index].value = value;
-    self.slots[index].generation++;
+    self.slots[index].generation = gpu::next_readback_ticket_generation(self.slots[index].generation);
     self.slots[index].used = true;
     return (gpu::ReadbackTicket){
         .index      = index,
@@ -118,7 +118,7 @@ fn void? ReadbackTicketTable.free(&self, gpu::ReadbackTicket ticket) {
     self.get(ticket)!;
     uint index = ticket.index;
     self.slots[index].used = false;
-    self.slots[index].generation++;
+    self.slots[index].generation = gpu::next_readback_ticket_generation(self.slots[index].generation);
     self.slots[index].next_free = self.free_head;
     self.free_head = index + 1;
 }
@@ -136,6 +136,8 @@ fn void destroy_readback_tickets(VkDeviceState* state) @private {
     state.readback_tickets = {};
 }
 
+// Immediate destruction follows timeline completion, device idle, or a
+// pre-record failure; no fallible work follows a recorded readback copy.
 fn void destroy_readback_buffer(VkDeviceState* state, gpu::BufferHandle handle) @private {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();

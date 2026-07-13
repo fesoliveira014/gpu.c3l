@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu @public;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
 import std::core::mem;
 import std::io;
@@ -750,6 +750,26 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         resource_generation: buffer.generation,
         resource_name:       "exhaustion_buffer",
     );
+}
+
+fn void readback_ticket_generation_wraps_without_poisoning_slot() @test {
+    vk::ReadbackTicketCell[1] cells;
+    cells[0].generation = gpu::READBACK_TICKET_GENERATION_MAX;
+    vk::ReadbackTicketTable table = {
+        .slots     = cells[..],
+        .free_head = 1,
+        .next_new  = 1,
+    };
+    vk::ReadbackTicketState state = { .range_end = 7 };
+
+    gpu::ReadbackTicket ticket = table.alloc(state)!!;
+
+    assert(ticket.generation == 1, "readback ticket generation wraps to the first valid value");
+    assert(table.get(ticket)!!.range_end == 7, "wrapped readback ticket resolves its state");
+
+    table.free(ticket)!!;
+    fault stale = @catch(table.get(ticket));
+    assert(stale == gpu::INVALID_HANDLE, "free still invalidates the wrapped ticket");
 }
 
 <* An unrelated blocking helper's completion must never make an unsubmitted

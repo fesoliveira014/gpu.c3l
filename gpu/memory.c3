@@ -4,6 +4,8 @@ module gpu;
 // be confused with sizes, offsets, or handles.
 typedef GpuAddress = ulong;
 
+const uint READBACK_TICKET_GENERATION_MAX @private = 0xFF_FFFF;
+
 // Where a resource's memory lives and how the host may access it.
 enum MemoryKind : int {
     // Per-frame upload arena; contents live for one frame.
@@ -24,8 +26,6 @@ bitstruct ReadbackTicket : ulong {
     uint generation : 32..55;
     uint reserved   : 56..63;
 }
-
-const ReadbackTicket READBACK_TICKET_INVALID = {};
 
 <* True while the token names readback state; resolution consumes it. *>
 fn bool ReadbackTicket.is_valid(self) => (ulong)self != 0;
@@ -69,6 +69,10 @@ struct MemoryStats {
     ulong buffer_count;
     ulong texture_count;
     ulong live_allocation_count;
+}
+
+fn uint next_readback_ticket_generation(uint generation) @private {
+    return generation >= READBACK_TICKET_GENERATION_MAX ? 1 : generation + 1;
 }
 
 <* Round value up to a power-of-two alignment. `align` must be a nonzero
