@@ -21,48 +21,34 @@ fn void dispatch_groups_reject_each_over_limit_axis() @test {
     assert(z_fault == gpu::INVALID_ARGUMENT, "dispatch Z above the selected-device limit faults");
 }
 
-fn void indirect_arguments_accept_zero_and_exact_limit() @test {
-    gpu::GpuSpan empty = {};
-    gpu::GpuSpan exact = { .size = 64 };
-
-    gpu::validate_indirect_arguments(
-        args:          &empty,
+fn void indirect_argument_bytes_accept_zero_and_exact_limit() @test {
+    usz empty = gpu::indirect_argument_bytes(
         argument_size: 16,
         count:         0,
         max_count:     4,
     )!!;
-    gpu::validate_indirect_arguments(
-        args:          &exact,
+    usz exact = gpu::indirect_argument_bytes(
         argument_size: 16,
         count:         4,
         max_count:     4,
     )!!;
+
+    assert(empty == 0, "zero count needs no argument bytes");
+    assert(exact == 64, "exact-limit count returns its required bytes");
 }
 
-fn void indirect_arguments_reject_count_size_and_arithmetic_overflow() @test {
-    gpu::GpuSpan exact = { .size = 64 };
-    gpu::GpuSpan undersized = { .size = 63 };
-
-    fault count_fault = @catch(gpu::validate_indirect_arguments(
-        args:          &exact,
+fn void indirect_argument_bytes_reject_count_and_arithmetic_overflow() @test {
+    fault count_fault = @catch(gpu::indirect_argument_bytes(
         argument_size: 16,
         count:         5,
         max_count:     4,
     ));
-    fault size_fault = @catch(gpu::validate_indirect_arguments(
-        args:          &undersized,
-        argument_size: 16,
-        count:         4,
-        max_count:     4,
-    ));
-    fault overflow_fault = @catch(gpu::validate_indirect_arguments(
-        args:          &exact,
+    fault overflow_fault = @catch(gpu::indirect_argument_bytes(
         argument_size: usz::max,
         count:         2,
         max_count:     2,
     ));
 
     assert(count_fault == gpu::INVALID_ARGUMENT, "indirect count above the selected-device limit faults");
-    assert(size_fault == gpu::INVALID_ARGUMENT, "undersized indirect argument span faults");
     assert(overflow_fault == gpu::INVALID_ARGUMENT, "indirect argument byte overflow faults");
 }

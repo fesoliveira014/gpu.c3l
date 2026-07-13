@@ -176,20 +176,6 @@ fn usz? indirect_argument_bytes(
     return argument_size * size_count;
 }
 
-fn void? validate_indirect_arguments(
-    GpuSpan* args,
-    usz argument_size,
-    uint count,
-    uint max_count,
-) @private {
-    usz required = indirect_argument_bytes(
-        argument_size: argument_size,
-        count:         count,
-        max_count:     max_count,
-    )!;
-    if (required > args.size) return INVALID_ARGUMENT~;
-}
-
 <* Create a recording context: per-frame command pools confined to one
    thread at a time. Ownership: release with destroy_recording_context. *>
 fn RecordingContextHandle? create_recording_context(Device* device) {
@@ -368,9 +354,10 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, PipelineHandle pipelin
     return vtable.cmd_draw_indexed_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count, index_span, index_type);
 }
 
-<* Count-buffer variant: the GPU-written uint at count_span limits the draw
-   count up to max_draw_count. Both count values may not exceed
-   DeviceCaps.max_draw_indirect_count. Requires DeviceCaps.draw_indirect_count. *>
+<* Count-buffer variant: the GPU-written uint at count_span limits execution
+   to max_draw_count and may not exceed DeviceCaps.max_draw_indirect_count.
+   The args span must hold max_draw_count entries. Requires
+   DeviceCaps.draw_indirect_count. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
     if (commands.device == null) return INVALID_ARGUMENT~;
     BackendVTable* vtable = device_vtable(commands.device);
@@ -378,7 +365,9 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, PipelineHandle p
     return vtable.cmd_draw_indexed_indirect_count(commands, pipeline, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type);
 }
 
-<* Dispatch from GPU-written DispatchIndirectCommand arguments. *>
+<* Dispatch from GPU-written DispatchIndirectCommand arguments. Each group
+   count must not exceed the corresponding
+   DeviceCaps.max_compute_work_group_count component. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress root, GpuSpan args) {
     if (commands.device == null) return INVALID_ARGUMENT~;
     BackendVTable* vtable = device_vtable(commands.device);
