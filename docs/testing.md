@@ -388,8 +388,8 @@ linux (blocking): generator tests, ABI drift gate, shader build, full
     lavapipe test sweep, then a c3c docgen API reference uploaded as the
     api-reference artifact
 windows (blocking): same suite via mesa-dist-win lavapipe, registered in the
-    HKLM Vulkan driver registry; optional descriptor-buffer E2E reports
-    not exercised when the adapter cannot expose it
+    HKLM Vulkan driver registry; descriptor-buffer device/heap coverage reports
+    its status, while shader E2E awaits a fixed driver or real hardware
 docs-walkthrough (blocking): executes docs/getting_started.md verbatim on a
     bare runner
 ```
