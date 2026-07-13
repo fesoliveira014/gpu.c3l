@@ -82,6 +82,12 @@ jobs:
       - name: Build shaders
         run: python3 scripts/build_shaders.py
 
+      - name: Build benchmark targets
+        run: |
+          for target in $(python3 -c 'import scripts.run_benchmarks as b; print("benchmark_info", *b.BENCHMARK_TARGETS)'); do
+            c3c -O1 build "$target" --path test
+          done
+
       - name: Link proof (smoke)
         run: |
           c3c build smoke --path test
@@ -262,6 +268,12 @@ jobs:
 
       - name: Build shaders
         run: GLSLC="$(cygpath -w "$(command -v glslc)")" python scripts/build_shaders.py
+
+      - name: Build benchmark targets
+        run: |
+          for target in $(python -c 'import scripts.run_benchmarks as b; print("benchmark_info", *b.BENCHMARK_TARGETS)'); do
+            c3c -O1 build "$target" --path test
+          done
 
       - name: Link proof (smoke)
         run: |

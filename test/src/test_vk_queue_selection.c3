@@ -260,6 +260,8 @@ fn void queue_alias_matches_async_compute_cap() @test {
     vk::VkDeviceState* s = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(s.compute_queue_distinct == gpu::get_device_caps(&device)!!.async_compute, "distinct flag mirrors the cap");
     assert((s.compute_queue == s.graphics_queue) == !gpu::get_device_caps(&device)!!.async_compute, "alias iff no async compute");
+    uint expected_index = s.compute_queue_distinct && s.compute_family == s.graphics_family ? 1 : 0;
+    assert(s.compute_queue_index == expected_index, "stored compute queue index matches selection");
 }
 
 fn void cross_queue_timeline_chain_validates() @test {

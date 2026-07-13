@@ -22,10 +22,10 @@ warmups and repetitions.
 Recorded 2026-07-13 with C3 0.8.0_2 on Windows 11:
 
 ```text
-adapter: NVIDIA GeForce RTX 4090
-driver: NVIDIA, id=4, raw version=2417000448
-validation: disabled
-queues: graphics=0:0 compute=0:1 transfer=1:0
+adapter: name="NVIDIA GeForce RTX 4090" type=discrete api_version=4210991
+driver: name="NVIDIA" id=4 version=2417000448
+validation: enabled=false
+queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_distinct=true
 ```
 
 | Area | Case | Iterations | Result |

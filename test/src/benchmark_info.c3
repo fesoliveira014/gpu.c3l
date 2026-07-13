@@ -29,8 +29,6 @@ fn int main() {
     vk::PhysicalDeviceProperties2 properties = vk::physical_device_properties2().set_next(&driver);
     vk::get_physical_device_properties2(state.physical_device, &properties);
 
-    uint compute_index = state.compute_queue_distinct
-        && state.compute_family == state.graphics_family ? 1 : 0;
     bool transfer_distinct = state.transfer_queue != state.graphics_queue;
 
     io::printfn(
@@ -50,7 +48,7 @@ fn int main() {
         "queues: graphics=%d:0 compute=%d:%d compute_distinct=%s transfer=%d:0 transfer_distinct=%s",
         state.graphics_family,
         state.compute_family,
-        compute_index,
+        state.compute_queue_index,
         state.compute_queue_distinct ? "true" : "false",
         state.transfer_family,
         transfer_distinct ? "true" : "false",

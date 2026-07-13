@@ -121,7 +121,7 @@ fn int main() {
     defer gpu::destroy_shader(&device, shader)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader             = shader,
-        .push_constant_size = 16,
+        .push_constant_size = gpu::RootPush::size,
     };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;

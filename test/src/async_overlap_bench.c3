@@ -133,6 +133,11 @@ fn ZString verdict_text(bool async_compute, bool overlap_detected) {
 }
 
 fn int main() {
+    io::printfn(
+        "iterations=calibration=%d;measured=%d units=ms",
+        CALIBRATION_ROUNDS,
+        REPS,
+    );
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = validation_enabled(),
@@ -144,14 +149,12 @@ fn int main() {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     bool families_distinct = state.graphics_family != state.compute_family;
-    uint compute_index = state.compute_queue_distinct
-        && state.compute_family == state.graphics_family ? 1 : 0;
     io::printfn(
         "topology: async_compute=%s graphics=%d:0 compute=%d:%d queues_distinct=%s families_distinct=%s",
         gpu::get_device_caps(&device)!!.async_compute ? "true" : "false",
         state.graphics_family,
         state.compute_family,
-        compute_index,
+        state.compute_queue_index,
         state.compute_queue_distinct ? "true" : "false",
         families_distinct ? "true" : "false",
     );

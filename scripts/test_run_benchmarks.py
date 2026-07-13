@@ -60,6 +60,14 @@ class BenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unit"):
             runner.require_measurement("phase: iterations=100 value=12.5", "target")
 
+    def test_main_validates_raw_output_before_annotation(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        main = source[source.index("def main()"):]
+        self.assertIn("require_measurement(output, target)", main)
+        validation = main.index("require_measurement(output, target)")
+        annotation = main.index('annotated = f"iterations={iterations}')
+        self.assertLess(validation, annotation)
+
 
 if __name__ == "__main__":
     unittest.main()

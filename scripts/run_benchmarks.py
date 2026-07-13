@@ -119,8 +119,8 @@ def main():
     for target in BENCHMARK_TARGETS:
         iterations, units = BENCHMARK_METHODS[target]
         output = run((str(executable(root, target)),), root, env)
+        require_measurement(output, target)
         annotated = f"iterations={iterations}\nunits={units}\n{output}"
-        require_measurement(annotated, target)
         lines.append(report_section(target, annotated))
 
     output_path = args.output if args.output.is_absolute() else root / args.output
