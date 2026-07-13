@@ -10,7 +10,7 @@ headless Vulkan tests
 SDL3 windowed samples (gpu.c3l-samples repository)
 ```
 
-Pure CPU tests must run without Vulkan, VMA static library loading beyond compile/link, SDL3, or a window system. Headless Vulkan tests require a Vulkan ICD but no window. SDL3 windowed tests/samples require SDL3 and platform WSI support.
+Pure CPU tests require no Vulkan loader, VMA static library, SDL3, or window system. Headless Vulkan tests require a Vulkan ICD but no window. SDL3 windowed tests and samples require SDL3 and platform WSI support.
 
 The supported test matrix covers one live `Device` per process. Tests that
 replace a destroyed device exercise stale-owner rejection; they do not establish
@@ -19,10 +19,11 @@ generation, aliases, consumption, retry, and scoped-worker fault semantics.
 
 ## 2. Pure CPU tests
 
-Location:
+Project and sources:
 
 ```text
-test/*.c3
+test/cpu/project.json
+test/src/test_*.c3
 ```
 
 Examples:
@@ -325,6 +326,17 @@ and the `libVulkanMemoryAllocator.a` static lib shipped under
 git submodule update --init --recursive
 ```
 
+The blocking headless matrix is shared by Linux and Windows:
+
+```text
+vk_bootstrap vk_command vk_texture vk_descriptor_heap vk_root_pointer
+vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
+vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading
+vk_queue vk_debug upload_bench_observation
+```
+
+The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.
+
 Prerequisites on `windows-x64`:
 
 - MSVC (VS Build Tools) with the vcvars64 environment loaded — `cl`/`lib` for
@@ -375,8 +387,9 @@ CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
 linux (blocking): generator tests, ABI drift gate, shader build, full
     lavapipe test sweep, then a c3c docgen API reference uploaded as the
     api-reference artifact
-windows (blocking except the advisory sweep): same suite via mesa-dist-win
-    lavapipe, registered in the HKLM Vulkan driver registry
+windows (blocking): same suite via mesa-dist-win lavapipe, registered in the
+    HKLM Vulkan driver registry; optional descriptor-buffer E2E reports
+    not exercised when the adapter cannot expose it
 docs-walkthrough (blocking): executes docs/getting_started.md verbatim on a
     bare runner
 ```
@@ -407,10 +420,12 @@ CI tiers (`.github/workflows/ci.yml`):
 | Tier | Platform | Blocking |
 |---|---|---|
 | Generator tests, drift gate, shader build | linux + windows | yes |
-| Full lavapipe test sweep + api-reference docgen artifact | linux | yes |
+| Smoke linkage + full lavapipe test sweep + api-reference artifact | linux | yes |
 | Getting-started walkthrough (docs-walkthrough job, `scripts/run_doc.py`) | linux | yes |
 | Link proof (smoke) + pure-CPU targets | windows | yes |
-| lavapipe (mesa-dist-win) Vulkan sweep | windows | no — advisory |
+| lavapipe (mesa-dist-win) Vulkan sweep | windows | yes |
+| Descriptor-buffer device/heap | windows | yes when exposed; otherwise reported not exercised |
+| Descriptor-buffer shader E2E | real hardware | pending; software ICD is reported not exercised |
 
 Generated SPIR-V should either:
 

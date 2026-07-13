@@ -9,6 +9,11 @@ env:
   C3C_VERSION: "0.8.0"
   VULKAN_SDK_VERSION: "1.3.290.0"
   MESA_DIST_WIN_VERSION: "25.1.5"
+  HEADLESS_TEST_TARGETS: >-
+    vk_bootstrap vk_command vk_texture vk_descriptor_heap vk_root_pointer
+    vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
+    vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading
+    vk_queue vk_debug upload_bench_observation
 
 jobs:
   linux:
@@ -43,6 +48,16 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y glslc mesa-vulkan-drivers vulkan-validationlayers vulkan-tools
 
+      - name: Select lavapipe and validation
+        run: |
+          ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
+          test -f "$ICD"
+          echo "VK_DRIVER_FILES=$ICD" >> "$GITHUB_ENV"
+          vulkaninfo > /tmp/vulkaninfo.txt
+          head -30 /tmp/vulkaninfo.txt
+          grep -F "VK_LAYER_KHRONOS_validation" /tmp/vulkaninfo.txt
+          grep -Eim1 "lavapipe|llvmpipe" /tmp/vulkaninfo.txt
+
       - name: CPU-only tests (no native libs)
         run: |
           c3c test unit --path test/cpu
@@ -57,16 +72,15 @@ jobs:
       - name: Build shaders
         run: python3 scripts/build_shaders.py
 
+      - name: Link proof (smoke)
+        run: |
+          c3c build smoke --path test
+          ./test/build/smoke
+
       - name: Test sweep (lavapipe)
         run: |
-          export VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
-          echo "ICD: $VK_DRIVER_FILES"
-          vulkaninfo --summary | head -30 || true
           FAIL=0
-          for t in vk_bootstrap vk_command vk_texture vk_descriptor_heap \
-                   vk_root_pointer vk_texture_heap vk_shader_reflection vk_offscreen \
-                   vk_swapchain vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading vk_queue vk_debug \
-                   upload_bench_observation; do
+          for t in $HEADLESS_TEST_TARGETS; do
             echo "::group::$t"
             if ! c3c test "$t" --path test; then
               echo "::error::target $t failed"
@@ -93,8 +107,8 @@ jobs:
 
   docs-walkthrough:
     # Executes docs/getting_started.md verbatim (scripts/run_doc.py) on a bare
-    # runner: the walkthrough is its own regression test. Only the checkout,
-    # PR-local URL override, and private-phase clone shim are outside the doc.
+    # runner: the walkthrough is its own regression test. Only checkout and
+    # repository authentication are outside the document.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -121,9 +135,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers glslang-tools
 
-      # private-phase: rewrite the doc's public clone URL through the PAT so
-      # the recursive clone reaches the private repos. Delete this step (and
-      # nothing else) when the repositories go public.
+      # Let the recursive clone authenticate to the binding repositories.
       - name: Authenticate submodule clones
         run: |
           git config --global url."https://x-access-token:${{ secrets.SUBMODULE_TOKEN }}@github.com/fesoliveira014/".insteadOf \
@@ -267,21 +279,34 @@ jobs:
           LAYER="$(cygpath -w "$HOME/tools/VulkanSDK/Bin/VkLayer_khronos_validation.json")"
           reg add "HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers" //v "$ICD" //t REG_DWORD //d 0 //f
           reg add "HKLM\\SOFTWARE\\Khronos\\Vulkan\\ExplicitLayers" //v "$LAYER" //t REG_DWORD //d 0 //f
-          "$HOME/tools/VulkanSDK/Bin/vulkaninfoSDK.exe" --summary 2>&1 | head -25 || true
+          "$HOME/tools/VulkanSDK/Bin/vulkaninfoSDK.exe" > /tmp/vulkaninfo.txt 2>&1
+          head -30 /tmp/vulkaninfo.txt
+          grep -F "VK_LAYER_KHRONOS_validation" /tmp/vulkaninfo.txt
+          grep -Eim1 "lavapipe|llvmpipe" /tmp/vulkaninfo.txt
 
-      - name: Vulkan sweep (lavapipe, advisory)
-        continue-on-error: true
+      - name: Vulkan sweep (lavapipe)
         run: |
           FAIL=0
-          for t in vk_bootstrap vk_command vk_texture vk_descriptor_heap \
-                   vk_root_pointer vk_texture_heap vk_shader_reflection vk_offscreen \
-                   vk_swapchain vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading vk_queue vk_debug \
-                   upload_bench_observation; do
+          for t in $HEADLESS_TEST_TARGETS; do
             echo "::group::$t"
             if ! c3c test "$t" --path test; then
-              echo "::warning::advisory target $t failed on windows lavapipe"
+              echo "::error::target $t failed on windows lavapipe"
               FAIL=1
             fi
             echo "::endgroup::"
           done
           exit $FAIL
+
+      - name: Descriptor-buffer coverage status
+        run: |
+          c3c test vk_texture_heap --path test \
+            --test-filter descriptor_buffer_device_and_heap --test-show-output 2>&1 \
+            | tee /tmp/descriptor-buffer.txt
+          if grep -q "no capable adapter" /tmp/descriptor-buffer.txt; then
+            echo "::notice::descriptor-buffer device/heap path not exercised on this adapter"
+            echo "Descriptor-buffer device/heap: NOT EXERCISED (adapter support unavailable)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Descriptor-buffer device/heap: EXERCISED on mesa-dist-win ${MESA_DIST_WIN_VERSION}." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "::notice::descriptor-buffer shader E2E is not exercised on mesa-dist-win ${MESA_DIST_WIN_VERSION}; real-hardware evidence is pending"
+          echo "Descriptor-buffer shader E2E: NOT EXERCISED (mesa-dist-win ${MESA_DIST_WIN_VERSION} crashes in vulkan_lvp.dll; real-hardware evidence pending)." >> "$GITHUB_STEP_SUMMARY"
