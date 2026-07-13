@@ -68,8 +68,8 @@ Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
 - **[docs/document_index.md](docs/document_index.md)** — map of the full
   documentation set (architecture, API, memory model, shader ABI, backend,
   testing, style).
-- **[Strict GPU profile](docs/strict_gpu_profile.md)** — target architecture
-  and the gated implementation plan for `gpu` and `gpu::compat`.
+- **[Strict GPU architecture](docs/strict_gpu_profile.md)** — approved target
+  for evolving `gpu` in place and adding `gpu::compat` as an extension.
 
 ## Layout
 

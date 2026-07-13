@@ -4,7 +4,7 @@
 
 `gpu.c3l` is a C3 library that exposes a direct GPU programming model suitable for modern explicit rendering and compute workloads. It is not a renderer, render graph, material system, asset system, or platform abstraction layer.
 
-The current API uses root pointers, bindless heap indices, explicit resource barriers, and Vulkan-backed resource allocation. The [strict GPU profile](strict_gpu_profile.md) defines the target architecture derived from Sebastian Aaltonen's [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api). Until the profile split, this document describes the implemented `gpu` API.
+The current API uses root pointers, bindless heap indices, explicit resource barriers, and Vulkan-backed resource allocation. The [strict GPU architecture](strict_gpu_profile.md) defines the target derived from Sebastian Aaltonen's [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api). This document describes the implemented `gpu` API until each target contract lands.
 
 The API centers on four ideas:
 
