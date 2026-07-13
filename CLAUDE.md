@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 C3 is pre-1.0; invoke the bundled skills instead of relying on memory:
 
-- **`c3-expert`** — language reference: syntax, semantics, the `c3c` 0.8.0 compiler, version differences. Any C3 question, build error, or code you write/review. Verify snippets with `c3c` (on PATH; version pinned in `.claude/c3-skill.json`).
+- **`c3-expert`** — language reference: syntax, semantics, the `c3c` 0.8.0 compiler, version differences. Any C3 question, build error, or code you write/review. Verify snippets with `c3c` on PATH and confirm it reports 0.8.0.
 - **`c3-style`** — house conventions & idiom: naming, definition order, optional/fault error handling, anti-patterns to flag. Use when writing, reviewing, or refactoring `.c3`/`.c3i`.
 - **`c3-bindings`** — `.c3l` binding conventions (`extern fn`, `@cname`, opaque-vs-exposed structs, backend sub-modules). Use when touching the `vk`/`vma`/`sdl3` bindings or wrapping any C library.
 
