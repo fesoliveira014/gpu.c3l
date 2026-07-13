@@ -58,6 +58,7 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - Multiple devices may coexist.
 - Stale runtime, adapter, surface, device, queue, allocation, texture, pipeline, and command tokens fail deterministically.
 - Device-local handles cannot be used with another device.
+- Device state remains pinned while a public operation can access it; concurrent destruction cannot reclaim active state.
 
 ### Queues and commands
 
@@ -69,17 +70,21 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - Successful submission consumes submitted command tokens.
 - Abandoned recording has an explicit discard operation.
 - No recorded command performs a global device-registry lock.
+- Allocation and texture descriptions declare the semantic queue roles that may access them.
+- Resources shared by roles on different native queue families use backend-managed concurrent sharing; the core API performs no implicit exclusive-ownership transfer.
 
 ### Memory and resources
 
 - An owning GPU allocation has one explicit release operation.
 - A `GpuSpan` cannot release its parent allocation.
 - CPU mappings and GPU addresses are reported only when valid for the selected memory class.
+- Mapped-span flush and invalidate operations define CPU/GPU visibility and become no-ops for coherent memory.
 - Generic GPU data, copies, fills, index data, indirect arguments, upload, and readback use spans or addresses rather than `BufferHandle`.
 - Texture requirements are available before texture creation.
 - Texture creation validates allocation compatibility, size, alignment, and offset before backend mutation.
 - Destroying a texture does not release its placement.
 - Samplers are immutable device-interned values and are released with the device.
+- Sampler identity is available to compatibility-only devices; strict sampler-heap publication is a separate capability-gated operation.
 - VMA types and allocation policies remain private.
 
 ### Strict binding and pipelines
@@ -108,6 +113,8 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - No barrier or texture transition is inferred.
 - Debug validation may track expected texture state without changing release semantics.
 - Render-pass begin/end never add implicit synchronization.
+- Cross-queue ordering is explicit through semaphore waits and signals.
+- Explicitly named resources reject unadmitted queue roles; queue-role compliance for allocations reached only through GPU pointers is a caller precondition.
 - Render passes name attachments, load/store operations, and clear values directly.
 - Vulkan 1.2 render-pass and framebuffer objects may be synthesized privately while preserving the same public behavior.
 - Swapchain images use the shared texture, transition, render-pass, and queue model.
@@ -132,8 +139,11 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - Device-request tests cover strict-only, compatibility-only, combined, unsupported, and transactional failure paths.
 - Two devices can create, record, submit, and destroy resources independently in one process.
 - Stale and cross-device handle tests fail before backend mutation.
+- Concurrent device-use and destruction tests prove that active backend state is never reclaimed.
 - Hot command recording performs no registry lock or hidden allocation per command.
 - Allocation and placed-texture ownership tests cover every destruction order.
+- Mapped-memory tests cover coherent and non-coherent flush/invalidate ranges.
+- Queue-access tests cover single-role, same-family multi-role, and cross-family concurrent sharing.
 - Public strict source and generated shader ABI contain no buffer-binding objects.
 - Shader ABI tests pin address and shader-visible index widths.
 - Pipeline tests prove shared IR deduplication and absence of draw-time compilation.

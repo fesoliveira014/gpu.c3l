@@ -145,7 +145,9 @@ Failure before publication releases all temporary state. No partial device or pa
 
 `Device` remains a compact strongly typed generational handle. Its packed representation contains a device-slot index and generation.
 
-The device registry replaces the single process-wide active device. Registry mutation during create and destroy is synchronized. Normal resolution performs a bounds check, generation check, and immutable slot load without taking the mutation lock.
+The device registry replaces the single process-wide active device. Registry mutation during create and destroy is synchronized. Public entry points acquire an active-operation pin while resolving the slot, then recheck its generation and live state before dereferencing backend state. Destruction marks the slot as closing, rejects new pins, and reclaims state only after existing pins retire and the live-child checks pass. A failed destruction attempt restores the live state without changing the generation.
+
+Recording command lists and executable command tokens retain a pin for their lifetime. Hot recording commands therefore use their already-pinned state and perform no registry lookup, atomic pin, or mutation-lock acquisition per command.
 
 A live device slot owns:
 
@@ -167,9 +169,13 @@ C3 explicit casts can manufacture the underlying bits of a handle. Runtime owner
 
 `Queue` is a device-owned generational handle. A queue reports its semantic roles, not native family data. One queue may satisfy several roles.
 
+Allocation and texture descriptions declare the semantic queue roles that may access them. Operations that explicitly name a span or texture reject it when the recording queue has no admitted role. For allocations reached only through root GPU addresses, using an unadmitted queue role is a caller contract violation because the command stream cannot discover nested pointers. When admitted roles resolve to different native queue families, the backend creates the backing buffer, image, or swapchain with concurrent native sharing. Roles resolved to one family retain exclusive native sharing without a public distinction. Narrow access declarations avoid unnecessary cross-family sharing.
+
+The initial strict core has no exclusive queue-ownership transfer operation. Root-addressed shader access does not identify every allocation to the command stream, so the backend cannot safely infer such transfers. Cross-queue visibility and execution ordering remain explicit through global barriers, texture transitions, and semaphore waits and signals.
+
 Command recording starts from a queue. Submission targets the same queue. Command tokens retain their queue and device ownership, preventing cross-device or cross-queue submission.
 
-Resources that require multi-queue access describe semantic queue roles where creation policy depends on them. Native ownership transfer and sharing modes remain private.
+The public contract exposes only admitted semantic roles. The backend's same-family or cross-family native sharing selection remains private.
 
 ## Memory model
 
@@ -185,6 +191,8 @@ Resources that require multi-queue access describe semantic queue roles where cr
 - backend-private placement identity.
 
 `free_allocation` consumes the owning token. A copied stale token fails by generation. A `GpuSpan` is non-owning and cannot free memory.
+
+Mapped allocations report whether CPU/GPU visibility is coherent. `flush_mapped_span` makes completed CPU writes visible to the GPU. After the relevant GPU completion point, `invalidate_mapped_span` makes GPU writes visible to the CPU. Both operations validate that the span belongs to a live mapped allocation, round ranges to backend atom boundaries privately, and become no-ops for coherent memory. Exposing a CPU pointer never implies coherence.
 
 The strict memory classes describe behavior, not Vulkan heaps:
 
@@ -228,7 +236,9 @@ A texture-view allocation returns:
 
 Destroying the ownership token retires the index until every referencing submission completes. Shader indices contain no generation bits.
 
-`Sampler` is an immutable device-local value returned by interning a semantic sampler description. Identical descriptions return the same value. Native sampler objects and heap entries live until device destruction. Compatibility descriptor writes accept the same sampler value.
+`Sampler` is an immutable device-local value returned by interning a semantic sampler description. Identical descriptions return the same value. Native sampler objects live until device destruction, and compatibility descriptor writes accept this value even on a compatibility-only device.
+
+Strict sampler-heap publication is separate from sampler identity. On a device with the strict capability, publishing a sampler returns a stable fixed-width `SamplerIndex` or a heap-capacity fault. The index and its heap entry live until device destruction. Compatibility-only devices create no strict sampler heap and cannot publish or query a `SamplerIndex`.
 
 ## Shader code and pipeline creation
 
@@ -290,7 +300,7 @@ Textures use explicit transitions because representation and presentation state 
 
 No operation infers a barrier or transition. Debug builds may validate expected texture state, but release behavior is determined entirely by explicit commands.
 
-Cross-queue ordering uses explicit semaphore waits and signals. Native queue-family ownership and cache operations remain backend responsibilities derived from resource queue access and semantic hazards.
+Cross-queue ordering uses explicit semaphore waits and signals. The backend derives cache operations from semantic hazards. Queue-family ownership transfers are unnecessary because resources admitted to multiple native families use concurrent sharing established at creation.
 
 Render-pass begin/end commands add no barriers.
 
@@ -410,11 +420,12 @@ The existing stabilization work remains valid. The superseded wholesale compatib
 - Recursive C3 imports may expose submodule declarations; runtime activation must remain explicit.
 - A shared public type does not make every operation valid on every device. Strict operations require the strict capability.
 - Device-request extension storage must not expose raw numeric capability identifiers.
-- Registry slots must remain generation-safe under concurrent create and destroy.
+- Registry slots must remain generation-safe and pin backend state under concurrent use and destruction.
 - C3 explicit casts can bypass nominal typing; runtime validation still protects ownership.
 - Generic data and texture placements may have different native memory compatibility.
+- Exposed CPU mappings do not imply coherent memory; callers must use the mapped-span visibility operations.
 - Exposed GPU addresses prohibit transparent relocation.
-- Resource queue access must remain semantic while avoiding unnecessary native concurrent sharing.
+- Resource queue access must remain semantic, validate the recording queue, and avoid unnecessary native concurrent sharing through narrow access declarations.
 - Pipeline-state separation must not cause hidden draw-time native variants.
 - Descriptor-arena reset is unsafe until all referencing submissions retire.
 - Vulkan version, feature promotion, and extension presence are not interchangeable.
@@ -425,9 +436,9 @@ The existing stabilization work remains valid. The superseded wholesale compatib
 
 ### Pure CPU
 
-- Handle packing, generation, cross-device rejection, and concurrent registry tests.
+- Handle packing, generation, cross-device rejection, active-operation pinning, and concurrent registry tests.
 - Device-request composition and transactional failure tests.
-- Allocation-range, placement, descriptor-arena, sampler-interning, and shader-hash tests.
+- Allocation-range, mapped-memory visibility, placement, queue-access, descriptor-arena, sampler-interning, strict sampler publication, and shader-hash tests.
 - Command and submission state-machine tests.
 - Strict/compat nominal type compile-fail fixtures in both directions.
 - Import-inert tests for every public module.

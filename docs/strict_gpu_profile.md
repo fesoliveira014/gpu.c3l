@@ -20,7 +20,7 @@ Vulkan types, feature names, queue families, layouts, descriptor mechanisms, and
 
 Capability groups are explicit and immutable. A strict request enables only the strict contract. `gpu::compat` can add descriptor-set requirements to that same request. A capable device may enable both groups, but importing `gpu::compat` or detecting descriptor-set support enables nothing by itself.
 
-The library supports multiple live devices. Devices, queues, and resources use generational ownership. Each device owns its backend state, capability state, dispatch tables, and resource tables. Queue requests use semantic roles rather than backend queue-family indices.
+The library supports multiple live devices. Devices, queues, and resources use generational ownership. Active operations pin device state so concurrent destruction cannot reclaim it. Each device owns its backend state, capability state, dispatch tables, and resource tables. Queue requests and resource access domains use semantic roles rather than backend queue-family indices.
 
 Backend API and driver versions are diagnostic information. Applications select semantic capabilities, not Vulkan versions.
 
@@ -28,11 +28,12 @@ Backend API and driver versions are diagnostic information. Applications select 
 
 - An owning GPU allocation exposes its size, memory class, GPU address, and optional CPU mapping.
 - A `GpuSpan` is a checked, non-owning slice of an allocation.
+- Mapped-span flush and invalidate operations define CPU/GPU visibility and are no-ops for coherent memory.
 - Generic GPU data uses addresses and spans rather than public buffer objects.
 - Copies, fills, index data, indirect arguments, uploads, and readback operate on spans or GPU addresses.
 - Textures remain explicit objects and use caller-provided placement.
 - Texture requirements are queried before creation.
-- Samplers are immutable device-interned values and require no individual destruction.
+- Samplers are immutable device-interned values and require no individual destruction. Strict sampler-heap publication returns a separate shader index; compatibility-only devices retain sampler identity without creating the strict heap.
 - VMA remains private.
 
 Allocation-owning arenas and policies are outside the strict core. A future `gpu::alloc` module may provide frame, persistent, staging, and readback allocators over the placement primitives.
@@ -52,6 +53,7 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 - Command lists are transient and one-shot.
 - Recording storage is device-managed and safe for concurrent recording.
 - Submission consumes successfully submitted command tokens.
+- Allocations and textures declare admitted queue roles; cross-family resources use backend-managed concurrent sharing rather than inferred ownership transfers.
 - Buffer and pointer-visible memory hazards use global execution and memory barriers.
 - Texture representation changes use explicit semantic transitions.
 - No barrier, transition, or render-pass dependency is inferred.
