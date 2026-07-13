@@ -63,7 +63,7 @@ Delivery slices:
   - Edge cases: missing validation layers, software ICD selection, Windows VMA linkage, and optional descriptor-buffer coverage.
   - Verify: blocking CI is green; advisory hardware gaps are reported as not exercised rather than passed.
 
-- [ ] **1.6 Establish the compatibility sample baseline.**
+- [x] **1.6 Establish the compatibility sample baseline.**
   - Targets: `gpu.c3l-samples/project.json`, every sample directory, sample scripts, sample README files, `docs/samples.md`.
   - Build every sample, run all headless samples, and smoke windowed samples through bounded frame counts. Record required capabilities per sample.
   - Edge cases: resize, minimization, surface loss, unavailable optional features, and clean teardown.
