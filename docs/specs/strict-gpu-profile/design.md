@@ -21,7 +21,7 @@ The implementation remains in `gpu` and evolves in place. Compatibility is added
 
 ## Target module layout
 
-~~~text
+```text
 gpu/
 ├── runtime.c3
 ├── adapter.c3
@@ -64,7 +64,7 @@ gpu/
         ├── descriptors.c3
         ├── pipeline.c3
         └── command.c3
-~~~
+```
 
 The final file split may change as code is migrated. Module ownership may not.
 
@@ -117,14 +117,14 @@ Presentation support is queried against an adapter and a surface before device c
 
 The intended flow is:
 
-~~~text
+```text
 runtime = create_runtime(...)
 adapters = enumerate_adapters(runtime)
 request = strict_device_request()
 gpu::compat adds descriptor-set requirements when requested
 supports_device_request(adapter, request)
 device = create_device(adapter, request)
-~~~
+```
 
 A compatibility-only request originates from `gpu::compat` but still produces `gpu::Device`.
 
@@ -267,11 +267,11 @@ Strict pipeline handles belong to `gpu`. Compatibility pipeline handles belong t
 
 Binding is separate from execution:
 
-~~~text
+```text
 set strict pipeline
 set depth/stencil state
 draw or dispatch with root addresses
-~~~
+```
 
 Compatibility binding and execution use `gpu::compat` functions because their shader inputs are descriptor sets rather than root addresses.
 

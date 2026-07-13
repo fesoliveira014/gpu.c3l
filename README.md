@@ -73,7 +73,7 @@ Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
 
 ## Layout
 
-```
+```text
 gpu.c3l/
 ├── abi/               shader ABI schemas
 ├── gpu/               shipped library sources (module `gpu`)
