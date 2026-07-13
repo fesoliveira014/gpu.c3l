@@ -1,6 +1,6 @@
 module gpu_bench;
 
-import gpu;
+import gpu::compat;
 import vk;
 
 fn ZString upload_device_type_name(vk::PhysicalDeviceType device_type) {
@@ -14,11 +14,11 @@ fn ZString upload_device_type_name(vk::PhysicalDeviceType device_type) {
     }
 }
 
-fn ZString upload_heap_mode_name(gpu::DescriptorHeapMode heap_mode) {
+fn ZString upload_heap_mode_name(gpu::compat::DescriptorHeapMode heap_mode) {
     switch (heap_mode) {
-        case gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING: return "descriptor-indexing";
-        case gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER:   return "descriptor-buffer";
-        case gpu::DescriptorHeapMode.AUTO:                return "auto";
+        case gpu::compat::DescriptorHeapMode.DESCRIPTOR_INDEXING: return "descriptor-indexing";
+        case gpu::compat::DescriptorHeapMode.DESCRIPTOR_BUFFER:   return "descriptor-buffer";
+        case gpu::compat::DescriptorHeapMode.AUTO:                return "auto";
         default:                                          return "unknown";
     }
 }

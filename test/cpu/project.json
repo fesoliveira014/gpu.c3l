@@ -1,7 +1,7 @@
 {
   "langrev": "1",
-  // Pure-CPU lane: the full public module plus a stub gpu::vk backend, zero
-  // native libraries — a clean checkout runs these with no Vulkan/VMA
+  // Pure-CPU lane: the compatibility module plus a backend stub, zero native
+  // libraries — a clean checkout runs these with no Vulkan/VMA
   // installed. Shared sources at project scope; targets add only test files.
   "warnings": [
     "no-unused"
@@ -10,21 +10,24 @@
     "../../gpu/gpu.c3",
     "../../gpu/gpu.c3i",
     "../../gpu/types.c3",
-    "../../gpu/faults.c3",
-    "../../gpu/device.c3",
-    "../../gpu/caps.c3",
-    "../../gpu/memory.c3",
-    "../../gpu/buffer.c3",
-    "../../gpu/texture.c3",
-    "../../gpu/descriptor_heap.c3",
-    "../../gpu/pipeline.c3",
-    "../../gpu/command.c3",
-    "../../gpu/sync.c3",
-    "../../gpu/queue.c3",
-    "../../gpu/swapchain.c3",
-    "../../gpu/debug.c3",
-    "../../gpu/shader_abi.c3",
-    "../../gpu/vk/internal.c3",
+    "../../gpu/compat/compat.c3",
+    "../../gpu/compat/compat.c3i",
+    "../../gpu/compat/types.c3",
+    "../../gpu/compat/faults.c3",
+    "../../gpu/compat/device.c3",
+    "../../gpu/compat/caps.c3",
+    "../../gpu/compat/memory.c3",
+    "../../gpu/compat/buffer.c3",
+    "../../gpu/compat/texture.c3",
+    "../../gpu/compat/descriptor_heap.c3",
+    "../../gpu/compat/pipeline.c3",
+    "../../gpu/compat/command.c3",
+    "../../gpu/compat/sync.c3",
+    "../../gpu/compat/queue.c3",
+    "../../gpu/compat/swapchain.c3",
+    "../../gpu/compat/debug.c3",
+    "../../gpu/compat/shader_abi.c3",
+    "../../gpu/compat/vk/internal.c3",
     "vk_stub.c3"
   ],
   "output": "build",
@@ -48,6 +51,10 @@
       "sources": [
         "../src/test_shader_abi_layout.c3"
       ]
+    },
+    "import_inert": {
+      "type": "executable",
+      "sources": [ "import_inert.c3" ]
     }
   }
 }

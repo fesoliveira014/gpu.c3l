@@ -1,7 +1,7 @@
 module gpu_bench;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import std::io;
 import std::time;
 
@@ -13,24 +13,24 @@ const uint BENCH_FRAME_COUNT = 2_000;
 
 struct BenchPhase {
     String           name;
-    gpu::QueueKind[] kinds;
+    gpu::compat::QueueKind[] kinds;
 }
 
-fn void run_phase(gpu::Device* device, BenchPhase* phase) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
+fn void run_phase(gpu::compat::Device* device, BenchPhase* phase) {
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(*device);
     vk::SubmitStats before = vk::submit_stats(state);
     std::time::Clock start = std::time::clock::now();
 
     for (uint frame = 0; frame < BENCH_FRAME_COUNT; frame++) {
-        gpu::FrameToken frame_token = gpu::begin_frame(device)!!;
+        gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(device)!!;
         foreach (kind : phase.kinds) {
-            gpu::CommandList cmd = gpu::begin_commands(device, kind)!!;
-            gpu::end_commands(&cmd)!!;
-            gpu::CommandList[1] one = { cmd };
-            gpu::SubmitDesc submit = { .command_lists = one[..] };
-            gpu::submit(device, &submit)!!;
+            gpu::compat::CommandList cmd = gpu::compat::begin_commands(device, kind)!!;
+            gpu::compat::end_commands(&cmd)!!;
+            gpu::compat::CommandList[1] one = { cmd };
+            gpu::compat::SubmitDesc submit = { .command_lists = one[..] };
+            gpu::compat::submit(device, &submit)!!;
         }
-        gpu::end_frame(&frame_token)!!;
+        gpu::compat::end_frame(&frame_token)!!;
     }
 
     long elapsed_ns = (long)start.to_now();
@@ -46,23 +46,23 @@ fn void run_phase(gpu::Device* device, BenchPhase* phase) {
 
 fn int main() {
     io::printfn("iterations=%d/phase units=ns/end_frame,submits/frame", BENCH_FRAME_COUNT);
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .frames_in_flight  = 2,
         .application_name  = "gpu_frame_signal_bench",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
 
-    io::printfn("queue topology: async_compute=%s", gpu::get_device_caps(&device)!!.async_compute ? "true" : "false");
-    if (!gpu::get_device_caps(&device)!!.async_compute) {
+    io::printfn("queue topology: async_compute=%s", gpu::compat::get_device_caps(&device)!!.async_compute ? "true" : "false");
+    if (!gpu::compat::get_device_caps(&device)!!.async_compute) {
         io::printfn("distinct compute/transfer queues unavailable on this adapter: every phase below aliases onto the graphics queue, same as phase 1");
     }
 
-    gpu::QueueKind[1] graphics_only     = { gpu::QueueKind.GRAPHICS };
-    gpu::QueueKind[2] graphics_compute  = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE };
-    gpu::QueueKind[2] graphics_transfer = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.TRANSFER };
-    gpu::QueueKind[3] all_three         = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE, gpu::QueueKind.TRANSFER };
+    gpu::compat::QueueKind[1] graphics_only     = { gpu::compat::QueueKind.GRAPHICS };
+    gpu::compat::QueueKind[2] graphics_compute  = { gpu::compat::QueueKind.GRAPHICS, gpu::compat::QueueKind.COMPUTE };
+    gpu::compat::QueueKind[2] graphics_transfer = { gpu::compat::QueueKind.GRAPHICS, gpu::compat::QueueKind.TRANSFER };
+    gpu::compat::QueueKind[3] all_three         = { gpu::compat::QueueKind.GRAPHICS, gpu::compat::QueueKind.COMPUTE, gpu::compat::QueueKind.TRANSFER };
 
     BenchPhase[4] phases = {
         { .name = "phase 1 (graphics only)",                 .kinds = graphics_only[..] },

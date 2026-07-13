@@ -36,7 +36,7 @@ Manifest shape (shipped):
 {
   "provides": "gpu",
   "linklib-dir": "linked-libs",
-  "sources": [ "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/types.c3", /* ...all public files... */ "gpu/vk/**" ],
+  "sources": [ "gpu/compat/compat.c3", "gpu/compat/compat.c3i", "gpu/compat/types.c3", /* ...all public files... */ "gpu/compat/vk/**" ],
   "targets": {
     "linux-x64":   { "dependencies": [ "vk", "vma", "spvreflect" ] },
     "windows-x64": { "dependencies": [ "vk", "vma", "spvreflect" ] }
@@ -81,7 +81,7 @@ The binding depends on `vk`. The `gpu` library depends on both `vk` and `vma`.
 Backend use:
 
 ```text
-create vma::Allocator once per gpu::Device
+create vma::Allocator once per gpu::compat::Device
 create buffers through allocator.try_create_buffer
 create images through allocator.try_create_image
 map/flush/invalidate through VMA wrappers
@@ -119,7 +119,7 @@ Samples project dependency:
 Sample source import:
 
 ```c3
-import gpu;
+import gpu::compat;
 import sdl;
 ```
 

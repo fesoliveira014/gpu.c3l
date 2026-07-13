@@ -1,7 +1,7 @@
 module gpu_bench;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import vk;
 import std::io;
 import std::time;
@@ -42,7 +42,7 @@ fn double mask_and_scale(ulong raw, uint valid_bits, float period) {
 fn void read_pool(vk::VkDeviceState* state, vk::QueryPool pool, uint valid_bits, float period, double* begin_ns, double* end_ns) {
     ulong[2] ticks;
     vk::QueryResultFlags flags = (vk::QueryResultFlags)((uint)vk::QueryResultFlagBits.RESULT_64_BIT | (uint)vk::QueryResultFlagBits.WAIT_BIT);
-    gpu::vk::check_backend_result(
+    gpu::compat::vk::check_backend_result(
         state:     state,
         operation: "async_overlap_bench",
         result:    vk::get_query_pool_results(
@@ -61,14 +61,14 @@ fn void read_pool(vk::VkDeviceState* state, vk::QueryPool pool, uint valid_bits,
 }
 
 <* Record the compute workload and optional timestamps. *>
-fn gpu::CommandList record_compute(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAddress root_gpu, vk::QueryPool pool, bool timestamps_ok) {
-    gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.COMPUTE)!!;
-    vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
+fn gpu::compat::CommandList record_compute(gpu::compat::Device* device, gpu::compat::PipelineHandle pipeline, gpu::compat::GpuAddress root_gpu, vk::QueryPool pool, bool timestamps_ok) {
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(device, gpu::compat::QueueKind.COMPUTE)!!;
+    vk::CommandBuffer raw_cmd = gpu::compat::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);
     }
-    gpu::cmd_dispatch(
+    gpu::compat::cmd_dispatch(
         commands: &cmd,
         pipeline: pipeline,
         root:     root_gpu,
@@ -77,27 +77,27 @@ fn gpu::CommandList record_compute(gpu::Device* device, gpu::PipelineHandle pipe
     if (timestamps_ok) {
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT, pool, 1);
     }
-    gpu::end_commands(&cmd)!!;
+    gpu::compat::end_commands(&cmd)!!;
     return cmd;
 }
 
 <* Record the graphics workload and optional timestamps. *>
-fn gpu::CommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::TextureHandle rt, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
-    gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
-    vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
+fn gpu::compat::CommandList record_graphics(gpu::compat::Device* device, gpu::compat::PipelineHandle pipeline, gpu::compat::TextureHandle rt, gpu::compat::GpuAddress vertex_root, gpu::compat::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(device, gpu::compat::QueueKind.GRAPHICS)!!;
+    vk::CommandBuffer raw_cmd = gpu::compat::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);
     }
-    gpu::ColorTargetDesc[1] colors = {{
+    gpu::compat::ColorTargetDesc[1] colors = {{
         .texture = rt,
-        .load_op = gpu::LoadOp.CLEAR,
-        .store_op = gpu::StoreOp.STORE,
+        .load_op = gpu::compat::LoadOp.CLEAR,
+        .store_op = gpu::compat::StoreOp.STORE,
         .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
     }};
-    gpu::RenderPassDesc pass = { .colors = colors[..], .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    gpu::cmd_draw(
+    gpu::compat::RenderPassDesc pass = { .colors = colors[..], .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE };
+    gpu::compat::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::compat::cmd_draw(
         commands:       &cmd,
         pipeline:       pipeline,
         vertex_root:    vertex_root,
@@ -105,11 +105,11 @@ fn gpu::CommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pip
         vertex_count:   3,
         instance_count: 1,
     )!!;
-    gpu::cmd_end_render_pass(&cmd)!!;
+    gpu::compat::cmd_end_render_pass(&cmd)!!;
     if (timestamps_ok) {
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT, pool, 1);
     }
-    gpu::end_commands(&cmd)!!;
+    gpu::compat::end_commands(&cmd)!!;
     return cmd;
 }
 
@@ -138,27 +138,27 @@ fn int main() {
         CALIBRATION_ROUNDS,
         REPS,
     );
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = validation_enabled(),
         .frames_in_flight  = 2,
         .application_name  = "gpu_async_overlap_bench",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
     bool families_distinct = state.graphics_family != state.compute_family;
     io::printfn(
         "topology: async_compute=%s graphics=%d:0 compute=%d:%d queues_distinct=%s families_distinct=%s",
-        gpu::get_device_caps(&device)!!.async_compute ? "true" : "false",
+        gpu::compat::get_device_caps(&device)!!.async_compute ? "true" : "false",
         state.graphics_family,
         state.compute_family,
         state.compute_queue_index,
         state.compute_queue_distinct ? "true" : "false",
         families_distinct ? "true" : "false",
     );
-    if (!gpu::get_device_caps(&device)!!.async_compute) {
+    if (!gpu::compat::get_device_caps(&device)!!.async_compute) {
         io::printfn("single queue: compute aliases graphics on this adapter -- phase A and phase B submit to the same queue, so wall_a ~= wall_b is expected");
     }
 
@@ -187,7 +187,7 @@ fn int main() {
     vk::QueryPool gfx_pool;
     if (timestamps_ok) {
         vk::QueryPoolCreateInfo pool_info = vk::query_pool_create_info().set_query_type(vk::QueryType.TIMESTAMP).set_query_count(2);
-        gpu::vk::check_backend_result(
+        gpu::compat::vk::check_backend_result(
             state:     state,
             operation: "async_overlap_bench",
             result:    vk::create_query_pool(
@@ -197,7 +197,7 @@ fn int main() {
                 p_query_pool:  &comp_pool,
             ),
         )!!;
-        gpu::vk::check_backend_result(
+        gpu::compat::vk::check_backend_result(
             state:     state,
             operation: "async_overlap_bench",
             result:    vk::create_query_pool(
@@ -215,79 +215,79 @@ fn int main() {
         }
     }
 
-    gpu::BufferDesc data_desc = {
-        .size = OVERLAP_DATA_BYTES, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE,
+    gpu::compat::BufferDesc data_desc = {
+        .size = OVERLAP_DATA_BYTES, .usage = { .storage, .addressable }, .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name = "overlap_compute_data",
     };
-    gpu::BufferHandle data_buffer = gpu::create_buffer(&device, &data_desc)!!;
-    defer gpu::destroy_buffer(&device, data_buffer)!!;
+    gpu::compat::BufferHandle data_buffer = gpu::compat::create_buffer(&device, &data_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, data_buffer)!!;
 
-    gpu::BufferDesc comp_root_desc = {
-        .size = OverlapComputeRoot::size, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+    gpu::compat::BufferDesc comp_root_desc = {
+        .size = OverlapComputeRoot::size, .usage = { .storage, .addressable }, .memory_kind = gpu::compat::MemoryKind.PERSISTENT_UPLOAD,
         .debug_name = "overlap_compute_root",
     };
-    gpu::BufferHandle comp_root_buffer = gpu::create_buffer(&device, &comp_root_desc)!!;
-    defer gpu::destroy_buffer(&device, comp_root_buffer)!!;
-    gpu::GpuSpan comp_root_span = gpu::get_buffer_span(&device, comp_root_buffer)!!;
+    gpu::compat::BufferHandle comp_root_buffer = gpu::compat::create_buffer(&device, &comp_root_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, comp_root_buffer)!!;
+    gpu::compat::GpuSpan comp_root_span = gpu::compat::get_buffer_span(&device, comp_root_buffer)!!;
     OverlapComputeRoot* comp_root = (OverlapComputeRoot*)comp_root_span.cpu;
-    comp_root.data_gpu = gpu::get_buffer_address(&device, data_buffer)!!;
+    comp_root.data_gpu = gpu::compat::get_buffer_address(&device, data_buffer)!!;
     comp_root.elem_count = DISPATCH_GROUPS * OVERLAP_WORKGROUP;
 
-    gpu::TextureDesc rt_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D, .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE,
-        .format = gpu::Format.RGBA8_UNORM, .usage = { .color_attach }, .debug_name = "overlap_rt",
+    gpu::compat::TextureDesc rt_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D, .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE,
+        .format = gpu::compat::Format.RGBA8_UNORM, .usage = { .color_attach }, .debug_name = "overlap_rt",
     };
-    gpu::TextureHandle rt = gpu::create_texture(&device, &rt_desc)!!;
-    defer gpu::destroy_texture(&device, rt)!!;
+    gpu::compat::TextureHandle rt = gpu::compat::create_texture(&device, &rt_desc)!!;
+    defer gpu::compat::destroy_texture(&device, rt)!!;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = OVERLAP_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle comp_shader = gpu::create_shader(&device, &comp_sd)!!;
-    defer gpu::destroy_shader(&device, comp_shader)!!;
-    gpu::ComputePipelineDesc comp_pipe_desc = { .shader = comp_shader, .push_constant_size = gpu::RootPush::size };
-    gpu::PipelineHandle comp_pipeline = gpu::create_compute_pipeline(&device, &comp_pipe_desc)!!;
-    defer gpu::destroy_pipeline(&device, comp_pipeline)!!;
+    gpu::compat::ShaderDesc comp_sd = { .stage = gpu::compat::ShaderStage.COMPUTE, .spirv = OVERLAP_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle comp_shader = gpu::compat::create_shader(&device, &comp_sd)!!;
+    defer gpu::compat::destroy_shader(&device, comp_shader)!!;
+    gpu::compat::ComputePipelineDesc comp_pipe_desc = { .shader = comp_shader, .push_constant_size = gpu::compat::RootPush::size };
+    gpu::compat::PipelineHandle comp_pipeline = gpu::compat::create_compute_pipeline(&device, &comp_pipe_desc)!!;
+    defer gpu::compat::destroy_pipeline(&device, comp_pipeline)!!;
 
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle vert_shader = gpu::create_shader(&device, &vert_sd)!!;
-    defer gpu::destroy_shader(&device, vert_shader)!!;
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OVERLAP_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle frag_shader = gpu::create_shader(&device, &frag_sd)!!;
-    defer gpu::destroy_shader(&device, frag_shader)!!;
-    gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
-    gpu::GraphicsPipelineDesc gfx_pipe_desc = {
+    gpu::compat::ShaderDesc vert_sd = { .stage = gpu::compat::ShaderStage.VERTEX, .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle vert_shader = gpu::compat::create_shader(&device, &vert_sd)!!;
+    defer gpu::compat::destroy_shader(&device, vert_shader)!!;
+    gpu::compat::ShaderDesc frag_sd = { .stage = gpu::compat::ShaderStage.FRAGMENT, .spirv = OVERLAP_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle frag_shader = gpu::compat::create_shader(&device, &frag_sd)!!;
+    defer gpu::compat::destroy_shader(&device, frag_shader)!!;
+    gpu::compat::Format[1] color_formats = { gpu::compat::Format.RGBA8_UNORM };
+    gpu::compat::GraphicsPipelineDesc gfx_pipe_desc = {
         .vertex_shader = vert_shader, .fragment_shader = frag_shader,
-        .topology = gpu::PrimitiveTopology.TRIANGLES, .color_formats = color_formats[..],
+        .topology = gpu::compat::PrimitiveTopology.TRIANGLES, .color_formats = color_formats[..],
         .debug_name = "overlap_graphics",
     };
-    gpu::PipelineHandle gfx_pipeline = gpu::create_graphics_pipeline(&device, &gfx_pipe_desc)!!;
-    defer gpu::destroy_pipeline(&device, gfx_pipeline)!!;
+    gpu::compat::PipelineHandle gfx_pipeline = gpu::compat::create_graphics_pipeline(&device, &gfx_pipe_desc)!!;
+    defer gpu::compat::destroy_pipeline(&device, gfx_pipeline)!!;
 
-    gpu::SemaphoreDesc sem_a_desc = { .debug_name = "overlap_phase_a" };
-    gpu::SemaphoreHandle sem_a = gpu::create_semaphore(&device, &sem_a_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem_a)!!;
-    gpu::SemaphoreDesc sem_c_desc = { .debug_name = "overlap_phase_b_compute" };
-    gpu::SemaphoreHandle sem_c = gpu::create_semaphore(&device, &sem_c_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem_c)!!;
-    gpu::SemaphoreDesc sem_g_desc = { .debug_name = "overlap_phase_b_graphics" };
-    gpu::SemaphoreHandle sem_g = gpu::create_semaphore(&device, &sem_g_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem_g)!!;
+    gpu::compat::SemaphoreDesc sem_a_desc = { .debug_name = "overlap_phase_a" };
+    gpu::compat::SemaphoreHandle sem_a = gpu::compat::create_semaphore(&device, &sem_a_desc)!!;
+    defer gpu::compat::destroy_semaphore(&device, sem_a)!!;
+    gpu::compat::SemaphoreDesc sem_c_desc = { .debug_name = "overlap_phase_b_compute" };
+    gpu::compat::SemaphoreHandle sem_c = gpu::compat::create_semaphore(&device, &sem_c_desc)!!;
+    defer gpu::compat::destroy_semaphore(&device, sem_c)!!;
+    gpu::compat::SemaphoreDesc sem_g_desc = { .debug_name = "overlap_phase_b_graphics" };
+    gpu::compat::SemaphoreHandle sem_g = gpu::compat::create_semaphore(&device, &sem_g_desc)!!;
+    defer gpu::compat::destroy_semaphore(&device, sem_g)!!;
 
     // One startup transition: re-recording UNDEFINED->COLOR_ATTACHMENT per rep
     // would fault INVALID_RESOURCE_STATE under the pending-layout model.
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList transition_cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::TextureBarrier to_attach = {
-        .texture = rt, .before_stage = gpu::Stage.HOST, .after_stage = gpu::Stage.COLOR_ATTACHMENT,
-        .before_hazard = gpu::Hazard.HOST_WRITE, .after_hazard = gpu::Hazard.COLOR_WRITE,
-        .old_layout = gpu::TextureLayout.UNDEFINED, .new_layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+    gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::CommandList transition_cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::TextureBarrier to_attach = {
+        .texture = rt, .before_stage = gpu::compat::Stage.HOST, .after_stage = gpu::compat::Stage.COLOR_ATTACHMENT,
+        .before_hazard = gpu::compat::Hazard.HOST_WRITE, .after_hazard = gpu::compat::Hazard.COLOR_WRITE,
+        .old_layout = gpu::compat::TextureLayout.UNDEFINED, .new_layout = gpu::compat::TextureLayout.COLOR_ATTACHMENT,
     };
-    gpu::cmd_texture_barrier(&transition_cmd, &to_attach)!!;
-    gpu::end_commands(&transition_cmd)!!;
-    gpu::CommandList[1] transition_lists = { transition_cmd };
-    gpu::SubmitDesc transition_submit = { .command_lists = transition_lists[..] };
-    gpu::submit(&device, &transition_submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
+    gpu::compat::cmd_texture_barrier(&transition_cmd, &to_attach)!!;
+    gpu::compat::end_commands(&transition_cmd)!!;
+    gpu::compat::CommandList[1] transition_lists = { transition_cmd };
+    gpu::compat::SubmitDesc transition_submit = { .command_lists = transition_lists[..] };
+    gpu::compat::submit(&device, &transition_submit)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::end_frame(&frame_token)!!;
 
     // Solo baselines double as calibration: two proportional rounds nudge
     // iters toward TARGET_MS per workload.
@@ -297,9 +297,9 @@ fn int main() {
     double frag_ns = 0;
     for (uint round = 0; round < CALIBRATION_ROUNDS; round++) {
         comp_root.iters = comp_iters;
-        gpu::flush_buffer(&device, comp_root_buffer, 0, 0)!!;
-        frame_token = gpu::begin_frame(&device)!!;
-        gpu::CommandList comp_cmd = record_compute(
+        gpu::compat::flush_buffer(&device, comp_root_buffer, 0, 0)!!;
+        frame_token = gpu::compat::begin_frame(&device)!!;
+        gpu::compat::CommandList comp_cmd = record_compute(
             device:        &device,
             pipeline:      comp_pipeline,
             root_gpu:      comp_root_span.gpu,
@@ -307,10 +307,10 @@ fn int main() {
             timestamps_ok: timestamps_ok,
         );
         std::time::Clock comp_start = std::time::clock::now();
-        gpu::CommandList[1] comp_lists = { comp_cmd };
-        gpu::SubmitDesc comp_submit = { .command_lists = comp_lists[..] };
-        gpu::submit(&device, &comp_submit)!!;
-        gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::compat::CommandList[1] comp_lists = { comp_cmd };
+        gpu::compat::SubmitDesc comp_submit = { .command_lists = comp_lists[..] };
+        gpu::compat::submit(&device, &comp_submit)!!;
+        gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.COMPUTE)!!;
         double comp_wall_ns = (double)(long)comp_start.to_now();
         if (timestamps_ok) {
             double begin_ns; double end_ns;
@@ -319,18 +319,18 @@ fn int main() {
         } else {
             comp_ns = comp_wall_ns;
         }
-        gpu::end_frame(&frame_token)!!;
+        gpu::compat::end_frame(&frame_token)!!;
         double comp_scale = (TARGET_MS * 1.0e6) / comp_ns;
         double comp_next = (double)comp_iters * comp_scale;
         comp_next = comp_next < (double)MIN_ITERS ? (double)MIN_ITERS : comp_next;
         comp_next = comp_next > (double)MAX_ITERS ? (double)MAX_ITERS : comp_next;
         comp_iters = (uint)comp_next;
 
-        frame_token = gpu::begin_frame(&device)!!;
-        gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
+        frame_token = gpu::compat::begin_frame(&device)!!;
+        gpu::compat::GpuSpan frag_span = gpu::compat::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
         OverlapFragRoot* frag_root = (OverlapFragRoot*)frag_span.cpu;
         frag_root.iters = frag_iters;
-        gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+        gpu::compat::GpuSpan vertex_span = gpu::compat::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
         float* verts = (float*)vertex_span.cpu;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
@@ -338,7 +338,7 @@ fn int main() {
             -1.0f,  3.0f, 0.0f, 2.0f,
         };
         for (uint i = 0; i < 12; i++) verts[i] = fullscreen_triangle[i];
-        gpu::CommandList frag_cmd = record_graphics(
+        gpu::compat::CommandList frag_cmd = record_graphics(
 
             device:        &device,
 
@@ -356,10 +356,10 @@ fn int main() {
 
         );
         std::time::Clock frag_start = std::time::clock::now();
-        gpu::CommandList[1] frag_lists = { frag_cmd };
-        gpu::SubmitDesc frag_submit = { .command_lists = frag_lists[..] };
-        gpu::submit(&device, &frag_submit)!!;
-        gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::compat::CommandList[1] frag_lists = { frag_cmd };
+        gpu::compat::SubmitDesc frag_submit = { .command_lists = frag_lists[..] };
+        gpu::compat::submit(&device, &frag_submit)!!;
+        gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
         double frag_wall_ns = (double)(long)frag_start.to_now();
         if (timestamps_ok) {
             double begin_ns; double end_ns;
@@ -368,7 +368,7 @@ fn int main() {
         } else {
             frag_ns = frag_wall_ns;
         }
-        gpu::end_frame(&frame_token)!!;
+        gpu::compat::end_frame(&frame_token)!!;
         double frag_scale = (TARGET_MS * 1.0e6) / frag_ns;
         double frag_next = (double)frag_iters * frag_scale;
         frag_next = frag_next < (double)MIN_ITERS ? (double)MIN_ITERS : frag_next;
@@ -376,7 +376,7 @@ fn int main() {
         frag_iters = (uint)frag_next;
     }
     comp_root.iters = comp_iters;
-    gpu::flush_buffer(&device, comp_root_buffer, 0, 0)!!;
+    gpu::compat::flush_buffer(&device, comp_root_buffer, 0, 0)!!;
     io::printfn(
         "calibration: compute_iters=%d (%.3f ms) fragment_iters=%d (%.3f ms) target_ms=%.1f",
         comp_iters, comp_ns / 1.0e6, frag_iters, frag_ns / 1.0e6, TARGET_MS,
@@ -393,12 +393,12 @@ fn int main() {
     ulong sem_g_counter = 0;
 
     for (uint rep = 0; rep < REPS; rep++) {
-        frame_token = gpu::begin_frame(&device)!!;
+        frame_token = gpu::compat::begin_frame(&device)!!;
 
-        gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
+        gpu::compat::GpuSpan frag_span = gpu::compat::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
         OverlapFragRoot* frag_root = (OverlapFragRoot*)frag_span.cpu;
         frag_root.iters = frag_iters;
-        gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+        gpu::compat::GpuSpan vertex_span = gpu::compat::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
         float* verts = (float*)vertex_span.cpu;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
@@ -410,7 +410,7 @@ fn int main() {
         // Phase A: dependency-chained through one timeline semaphore.
         ulong av = sem_a_counter + 1;
         std::time::Clock a_start = std::time::clock::now();
-        gpu::CommandList a_compute = record_compute(
+        gpu::compat::CommandList a_compute = record_compute(
 
             device:        &device,
 
@@ -423,12 +423,12 @@ fn int main() {
             timestamps_ok: timestamps_ok,
 
         );
-        gpu::CommandList[1] a_compute_lists = { a_compute };
-        gpu::SemaphoreSignal[1] a_compute_signals = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)av, .stage = gpu::Stage.COMPUTE_SHADER }};
-        gpu::SubmitDesc a_compute_submit = { .command_lists = a_compute_lists[..], .signals = a_compute_signals[..] };
-        gpu::submit(&device, &a_compute_submit)!!;
+        gpu::compat::CommandList[1] a_compute_lists = { a_compute };
+        gpu::compat::SemaphoreSignal[1] a_compute_signals = {{ .semaphore = sem_a, .value = (gpu::compat::SemaphoreValue)av, .stage = gpu::compat::Stage.COMPUTE_SHADER }};
+        gpu::compat::SubmitDesc a_compute_submit = { .command_lists = a_compute_lists[..], .signals = a_compute_signals[..] };
+        gpu::compat::submit(&device, &a_compute_submit)!!;
 
-        gpu::CommandList a_graphics = record_graphics(
+        gpu::compat::CommandList a_graphics = record_graphics(
 
 
             device:        &device,
@@ -453,14 +453,14 @@ fn int main() {
 
 
         );
-        gpu::CommandList[1] a_graphics_lists = { a_graphics };
+        gpu::compat::CommandList[1] a_graphics_lists = { a_graphics };
         // Stage.PRESENT is the public all-commands wait stage.
-        gpu::SemaphoreWait[1] a_graphics_waits = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)av, .stage = gpu::Stage.PRESENT }};
-        gpu::SemaphoreSignal[1] a_graphics_signals = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)(av + 1), .stage = gpu::Stage.COLOR_ATTACHMENT }};
-        gpu::SubmitDesc a_graphics_submit = { .command_lists = a_graphics_lists[..], .waits = a_graphics_waits[..], .signals = a_graphics_signals[..] };
-        gpu::submit(&device, &a_graphics_submit)!!;
+        gpu::compat::SemaphoreWait[1] a_graphics_waits = {{ .semaphore = sem_a, .value = (gpu::compat::SemaphoreValue)av, .stage = gpu::compat::Stage.PRESENT }};
+        gpu::compat::SemaphoreSignal[1] a_graphics_signals = {{ .semaphore = sem_a, .value = (gpu::compat::SemaphoreValue)(av + 1), .stage = gpu::compat::Stage.COLOR_ATTACHMENT }};
+        gpu::compat::SubmitDesc a_graphics_submit = { .command_lists = a_graphics_lists[..], .waits = a_graphics_waits[..], .signals = a_graphics_signals[..] };
+        gpu::compat::submit(&device, &a_graphics_submit)!!;
 
-        gpu::wait_semaphore(&device, sem_a, (gpu::SemaphoreValue)(av + 1), PHASE_WAIT_TIMEOUT_NS)!!;
+        gpu::compat::wait_semaphore(&device, sem_a, (gpu::compat::SemaphoreValue)(av + 1), PHASE_WAIT_TIMEOUT_NS)!!;
         wall_a[rep] = (double)(long)a_start.to_now();
         sem_a_counter = av + 1;
 
@@ -470,7 +470,7 @@ fn int main() {
         ulong cv = sem_c_counter + 1;
         ulong gv = sem_g_counter + 1;
         std::time::Clock b_start = std::time::clock::now();
-        gpu::CommandList b_compute = record_compute(
+        gpu::compat::CommandList b_compute = record_compute(
 
             device:        &device,
 
@@ -483,12 +483,12 @@ fn int main() {
             timestamps_ok: timestamps_ok,
 
         );
-        gpu::CommandList[1] b_compute_lists = { b_compute };
-        gpu::SemaphoreSignal[1] b_compute_signals = {{ .semaphore = sem_c, .value = (gpu::SemaphoreValue)cv, .stage = gpu::Stage.COMPUTE_SHADER }};
-        gpu::SubmitDesc b_compute_submit = { .command_lists = b_compute_lists[..], .signals = b_compute_signals[..] };
-        gpu::submit(&device, &b_compute_submit)!!;
+        gpu::compat::CommandList[1] b_compute_lists = { b_compute };
+        gpu::compat::SemaphoreSignal[1] b_compute_signals = {{ .semaphore = sem_c, .value = (gpu::compat::SemaphoreValue)cv, .stage = gpu::compat::Stage.COMPUTE_SHADER }};
+        gpu::compat::SubmitDesc b_compute_submit = { .command_lists = b_compute_lists[..], .signals = b_compute_signals[..] };
+        gpu::compat::submit(&device, &b_compute_submit)!!;
 
-        gpu::CommandList b_graphics = record_graphics(
+        gpu::compat::CommandList b_graphics = record_graphics(
 
 
             device:        &device,
@@ -513,13 +513,13 @@ fn int main() {
 
 
         );
-        gpu::CommandList[1] b_graphics_lists = { b_graphics };
-        gpu::SemaphoreSignal[1] b_graphics_signals = {{ .semaphore = sem_g, .value = (gpu::SemaphoreValue)gv, .stage = gpu::Stage.COLOR_ATTACHMENT }};
-        gpu::SubmitDesc b_graphics_submit = { .command_lists = b_graphics_lists[..], .signals = b_graphics_signals[..] };
-        gpu::submit(&device, &b_graphics_submit)!!;
+        gpu::compat::CommandList[1] b_graphics_lists = { b_graphics };
+        gpu::compat::SemaphoreSignal[1] b_graphics_signals = {{ .semaphore = sem_g, .value = (gpu::compat::SemaphoreValue)gv, .stage = gpu::compat::Stage.COLOR_ATTACHMENT }};
+        gpu::compat::SubmitDesc b_graphics_submit = { .command_lists = b_graphics_lists[..], .signals = b_graphics_signals[..] };
+        gpu::compat::submit(&device, &b_graphics_submit)!!;
 
-        gpu::wait_semaphore(&device, sem_c, (gpu::SemaphoreValue)cv, PHASE_WAIT_TIMEOUT_NS)!!;
-        gpu::wait_semaphore(&device, sem_g, (gpu::SemaphoreValue)gv, PHASE_WAIT_TIMEOUT_NS)!!;
+        gpu::compat::wait_semaphore(&device, sem_c, (gpu::compat::SemaphoreValue)cv, PHASE_WAIT_TIMEOUT_NS)!!;
+        gpu::compat::wait_semaphore(&device, sem_g, (gpu::compat::SemaphoreValue)gv, PHASE_WAIT_TIMEOUT_NS)!!;
         wall_b[rep] = (double)(long)b_start.to_now();
         sem_c_counter = cv;
         sem_g_counter = gv;
@@ -548,7 +548,7 @@ fn int main() {
             rep, wall_a[rep] / 1.0e6, wall_b[rep] / 1.0e6, gfx_parts[rep] / 1.0e6, comp_parts[rep] / 1.0e6, intersection_ns / 1.0e6,
         );
 
-        gpu::end_frame(&frame_token)!!;
+        gpu::compat::end_frame(&frame_token)!!;
     }
 
     double[REPS] sum_parts;
@@ -572,7 +572,7 @@ fn int main() {
     double intersection_ratio = median_max > 0.0 ? median_intersection / median_max : 0.0;
     io::printfn(
         "verdict: %s (intersection_ratio=%.3f) -- cross-queue timestamp comparison assumes one clock domain; per-queue GPU durations and wall clocks above are the primary evidence",
-        verdict_text(gpu::get_device_caps(&device)!!.async_compute, overlap_detected), intersection_ratio,
+        verdict_text(gpu::compat::get_device_caps(&device)!!.async_compute, overlap_detected), intersection_ratio,
     );
 
     return 0;

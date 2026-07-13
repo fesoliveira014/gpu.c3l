@@ -1,7 +1,7 @@
 module gpu_test;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import std::os::env;
 import std::io;
 
@@ -22,50 +22,50 @@ fn bool db_e2e_enabled() {
 }
 
 fn void descriptor_buffer_device_and_heap() @test {
-    gpu::DeviceDesc desc = {
-        .backend                     = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend                     = gpu::compat::BackendKind.VULKAN,
         .enable_validation           = true,
         .frames_in_flight            = 2,
-        .descriptor_heap_mode        = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
+        .descriptor_heap_mode        = gpu::compat::DescriptorHeapMode.DESCRIPTOR_BUFFER,
         .texture_descriptor_capacity = 8,
         .sampler_descriptor_capacity = 4,
         .application_name            = "gpu_descriptor_buffer_test",
     };
 
-    gpu::Device device;
-    if (try dev = gpu::create_device(&desc)) {
+    gpu::compat::Device device;
+    if (try dev = gpu::compat::create_device(&desc)) {
         device = dev;
     } else {
         io::eprintfn("descriptor_buffer_device_and_heap: no capable adapter, skipping");
         return;
     }
-    defer gpu::destroy_device(&device)!!;
-    assert(gpu::get_device_caps(&device)!!.descriptor_buffer, "forced buffer mode implies adapter support");
+    defer gpu::compat::destroy_device(&device)!!;
+    assert(gpu::compat::get_device_caps(&device)!!.descriptor_buffer, "forced buffer mode implies adapter support");
 
-    gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc tex_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = 4,
         .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .sampled, .storage },
     };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::compat::TextureHandle texture = gpu::compat::create_texture(&device, &tex_desc)!!;
+    defer gpu::compat::destroy_texture(&device, texture)!!;
 
-    gpu::TextureDescriptorDesc[2] batch = {
+    gpu::compat::TextureDescriptorDesc[2] batch = {
         { .texture = texture },
         { .texture = texture },
     };
-    gpu::TextureIndex[2] indices;
-    gpu::create_texture_descriptors(&device, batch[..], indices[..])!!;
+    gpu::compat::TextureIndex[2] indices;
+    gpu::compat::create_texture_descriptors(&device, batch[..], indices[..])!!;
     foreach (index : indices) {
         assert(index.is_valid(), "batch descriptor written into the descriptor buffer");
-        gpu::destroy_texture_descriptor(&device, index)!!;
+        gpu::compat::destroy_texture_descriptor(&device, index)!!;
     }
 
-    gpu::SamplerDesc sampler_desc = {};
-    gpu::SamplerIndex sampler = gpu::create_sampler(&device, &sampler_desc)!!;
-    gpu::destroy_sampler(&device, sampler)!!;
+    gpu::compat::SamplerDesc sampler_desc = {};
+    gpu::compat::SamplerIndex sampler = gpu::compat::create_sampler(&device, &sampler_desc)!!;
+    gpu::compat::destroy_sampler(&device, sampler)!!;
 }
 
 fn void descriptor_buffer_compute_to_graphics() @test {
@@ -78,23 +78,23 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     const uint TARGET_SIZE = 32;
     const usz TARGET_BYTES = TARGET_SIZE * TARGET_SIZE * 4;
     const usz VERTEX_BYTES = 3 * 16;
-    gpu::DeviceDesc device_desc = {
-        .backend              = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc device_desc = {
+        .backend              = gpu::compat::BackendKind.VULKAN,
         .enable_validation    = true,
         .frames_in_flight     = 2,
-        .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
+        .descriptor_heap_mode = gpu::compat::DescriptorHeapMode.DESCRIPTOR_BUFFER,
         .application_name     = "gpu_descriptor_buffer_compute_to_graphics",
     };
-    gpu::Device? maybe_device = gpu::create_device(&device_desc);
+    gpu::compat::Device? maybe_device = gpu::compat::create_device(&device_desc);
     if (catch err = maybe_device) {
-        assert(err == gpu::UNSUPPORTED_FEATURE,
+        assert(err == gpu::compat::UNSUPPORTED_FEATURE,
             "forced descriptor-buffer device creation failed unexpectedly: %s", err);
         io::eprintfn("descriptor_buffer_compute_to_graphics: no capable adapter, skipping");
         return;
     }
-    gpu::Device device = maybe_device;
-    defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = maybe_device;
+    defer gpu::compat::destroy_device(&device)!!;
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(device);
     io::eprintfn(
         "descriptor_buffer_compute_to_graphics: graphics_family=%d compute_family=%d topology=%s",
         state.graphics_family,
@@ -102,66 +102,66 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         state.graphics_family == state.compute_family ? "same-family" : "distinct-family",
     );
 
-    gpu::TextureDesc shared_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc shared_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = TEX_SIZE,
         .height    = TEX_SIZE,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .sampled, .storage, .shared_queues },
     };
-    gpu::TextureHandle shared_texture = gpu::create_texture(&device, &shared_desc)!!;
-    defer gpu::destroy_texture(&device, shared_texture)!!;
-    gpu::TextureIndex texture_index = gpu::create_texture_descriptor(&device, shared_texture, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, texture_index)!!;
+    gpu::compat::TextureHandle shared_texture = gpu::compat::create_texture(&device, &shared_desc)!!;
+    defer gpu::compat::destroy_texture(&device, shared_texture)!!;
+    gpu::compat::TextureIndex texture_index = gpu::compat::create_texture_descriptor(&device, shared_texture, null)!!;
+    defer gpu::compat::destroy_texture_descriptor(&device, texture_index)!!;
 
-    gpu::SamplerDesc sampler_desc = {
-        .min_filter = gpu::Filter.NEAREST,
-        .mag_filter = gpu::Filter.NEAREST,
-        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
-        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
-        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    gpu::compat::SamplerDesc sampler_desc = {
+        .min_filter = gpu::compat::Filter.NEAREST,
+        .mag_filter = gpu::compat::Filter.NEAREST,
+        .address_u  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex sampler_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, sampler_index)!!;
+    gpu::compat::SamplerIndex sampler_index = gpu::compat::create_sampler(&device, &sampler_desc)!!;
+    defer gpu::compat::destroy_sampler(&device, sampler_index)!!;
 
-    gpu::BufferDesc compute_root_desc = {
+    gpu::compat::BufferDesc compute_root_desc = {
         .size        = WriteRoot::size,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.PERSISTENT_UPLOAD,
     };
-    gpu::BufferHandle compute_root_buffer = gpu::create_buffer(&device, &compute_root_desc)!!;
-    defer gpu::destroy_buffer(&device, compute_root_buffer)!!;
-    gpu::GpuSpan compute_root_span = gpu::get_buffer_span(&device, compute_root_buffer)!!;
+    gpu::compat::BufferHandle compute_root_buffer = gpu::compat::create_buffer(&device, &compute_root_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, compute_root_buffer)!!;
+    gpu::compat::GpuSpan compute_root_span = gpu::compat::get_buffer_span(&device, compute_root_buffer)!!;
     WriteRoot* compute_root = (WriteRoot*)compute_root_span.cpu;
     *compute_root = {
         .texture_index = texture_index,
         .width         = TEX_SIZE,
         .height        = TEX_SIZE,
     };
-    gpu::flush_buffer(
+    gpu::compat::flush_buffer(
         device: &device,
         buffer: compute_root_buffer,
         offset: 0,
         size:   0,
     )!!;
 
-    gpu::BufferDesc compute_output_desc = {
+    gpu::compat::BufferDesc compute_output_desc = {
         .size        = TEX_SIZE * TEX_SIZE * 16,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.READBACK,
+        .memory_kind = gpu::compat::MemoryKind.READBACK,
     };
-    gpu::BufferHandle compute_output = gpu::create_buffer(&device, &compute_output_desc)!!;
-    defer gpu::destroy_buffer(&device, compute_output)!!;
-    gpu::GpuSpan compute_output_span = gpu::get_buffer_span(&device, compute_output)!!;
+    gpu::compat::BufferHandle compute_output = gpu::compat::create_buffer(&device, &compute_output_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, compute_output)!!;
+    gpu::compat::GpuSpan compute_output_span = gpu::compat::get_buffer_span(&device, compute_output)!!;
 
-    gpu::BufferDesc sample_root_desc = {
+    gpu::compat::BufferDesc sample_root_desc = {
         .size        = SampleRoot::size,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.PERSISTENT_UPLOAD,
     };
-    gpu::BufferHandle sample_root_buffer = gpu::create_buffer(&device, &sample_root_desc)!!;
-    defer gpu::destroy_buffer(&device, sample_root_buffer)!!;
-    gpu::GpuSpan sample_root_span = gpu::get_buffer_span(&device, sample_root_buffer)!!;
+    gpu::compat::BufferHandle sample_root_buffer = gpu::compat::create_buffer(&device, &sample_root_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, sample_root_buffer)!!;
+    gpu::compat::GpuSpan sample_root_span = gpu::compat::get_buffer_span(&device, sample_root_buffer)!!;
     SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
     *sample_root = {
         .output_gpu    = compute_output_span.gpu,
@@ -170,21 +170,21 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .width         = TEX_SIZE,
         .height        = TEX_SIZE,
     };
-    gpu::flush_buffer(
+    gpu::compat::flush_buffer(
         device: &device,
         buffer: sample_root_buffer,
         offset: 0,
         size:   0,
     )!!;
 
-    gpu::BufferDesc graphics_root_desc = {
+    gpu::compat::BufferDesc graphics_root_desc = {
         .size        = VERTEX_BYTES + FragRoot::size,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.PERSISTENT_UPLOAD,
     };
-    gpu::BufferHandle graphics_root_buffer = gpu::create_buffer(&device, &graphics_root_desc)!!;
-    defer gpu::destroy_buffer(&device, graphics_root_buffer)!!;
-    gpu::GpuSpan graphics_root_span = gpu::get_buffer_span(&device, graphics_root_buffer)!!;
+    gpu::compat::BufferHandle graphics_root_buffer = gpu::compat::create_buffer(&device, &graphics_root_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, graphics_root_buffer)!!;
+    gpu::compat::GpuSpan graphics_root_span = gpu::compat::get_buffer_span(&device, graphics_root_buffer)!!;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
          0.8f, -0.8f, 0.9f, 0.1f,
@@ -197,146 +197,146 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .texture_index = texture_index,
         .sampler_index = sampler_index,
     };
-    gpu::flush_buffer(
+    gpu::compat::flush_buffer(
         device: &device,
         buffer: graphics_root_buffer,
         offset: 0,
         size:   0,
     )!!;
 
-    gpu::TextureDesc target_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc target_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = TARGET_SIZE,
         .height    = TARGET_SIZE,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .color_attach, .transfer_src },
     };
-    gpu::TextureHandle target = gpu::create_texture(&device, &target_desc)!!;
-    defer gpu::destroy_texture(&device, target)!!;
-    gpu::BufferDesc readback_desc = {
+    gpu::compat::TextureHandle target = gpu::compat::create_texture(&device, &target_desc)!!;
+    defer gpu::compat::destroy_texture(&device, target)!!;
+    gpu::compat::BufferDesc readback_desc = {
         .size        = TARGET_BYTES,
         .usage       = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.READBACK,
+        .memory_kind = gpu::compat::MemoryKind.READBACK,
     };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &readback_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
+    gpu::compat::BufferHandle readback = gpu::compat::create_buffer(&device, &readback_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, readback)!!;
 
-    gpu::ShaderDesc write_shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_WRITE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle write_shader = gpu::create_shader(&device, &write_shader_desc)!!;
-    defer gpu::destroy_shader(&device, write_shader)!!;
-    gpu::ComputePipelineDesc compute_pipeline_desc = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
-    gpu::PipelineHandle compute_pipeline = gpu::create_compute_pipeline(&device, &compute_pipeline_desc)!!;
-    gpu::ShaderDesc sample_shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
+    gpu::compat::ShaderDesc write_shader_desc = { .stage = gpu::compat::ShaderStage.COMPUTE, .spirv = DB_WRITE_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle write_shader = gpu::compat::create_shader(&device, &write_shader_desc)!!;
+    defer gpu::compat::destroy_shader(&device, write_shader)!!;
+    gpu::compat::ComputePipelineDesc compute_pipeline_desc = { .shader = write_shader, .push_constant_size = gpu::compat::RootPush::size };
+    gpu::compat::PipelineHandle compute_pipeline = gpu::compat::create_compute_pipeline(&device, &compute_pipeline_desc)!!;
+    gpu::compat::ShaderDesc sample_shader_desc = {
+        .stage       = gpu::compat::ShaderStage.COMPUTE,
         .spirv       = DB_SAMPLE_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_shader_desc)!!;
-    defer gpu::destroy_shader(&device, sample_shader)!!;
-    gpu::ComputePipelineDesc sample_pipeline_desc = {
+    gpu::compat::ShaderHandle sample_shader = gpu::compat::create_shader(&device, &sample_shader_desc)!!;
+    defer gpu::compat::destroy_shader(&device, sample_shader)!!;
+    gpu::compat::ComputePipelineDesc sample_pipeline_desc = {
         .shader             = sample_shader,
-        .push_constant_size = gpu::RootPush::size,
+        .push_constant_size = gpu::compat::RootPush::size,
     };
-    gpu::PipelineHandle sample_pipeline = gpu::create_compute_pipeline(&device, &sample_pipeline_desc)!!;
-    defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
-    defer gpu::destroy_pipeline(&device, compute_pipeline)!!;
+    gpu::compat::PipelineHandle sample_pipeline = gpu::compat::create_compute_pipeline(&device, &sample_pipeline_desc)!!;
+    defer gpu::compat::destroy_pipeline(&device, sample_pipeline)!!;
+    defer gpu::compat::destroy_pipeline(&device, compute_pipeline)!!;
 
-    gpu::ShaderDesc vertex_shader_desc = { .stage = gpu::ShaderStage.VERTEX, .spirv = DB_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle vertex_shader = gpu::create_shader(&device, &vertex_shader_desc)!!;
-    defer gpu::destroy_shader(&device, vertex_shader)!!;
-    gpu::ShaderDesc fragment_shader_desc = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = DB_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle fragment_shader = gpu::create_shader(&device, &fragment_shader_desc)!!;
-    defer gpu::destroy_shader(&device, fragment_shader)!!;
-    gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
-    gpu::GraphicsPipelineDesc graphics_pipeline_desc = {
+    gpu::compat::ShaderDesc vertex_shader_desc = { .stage = gpu::compat::ShaderStage.VERTEX, .spirv = DB_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle vertex_shader = gpu::compat::create_shader(&device, &vertex_shader_desc)!!;
+    defer gpu::compat::destroy_shader(&device, vertex_shader)!!;
+    gpu::compat::ShaderDesc fragment_shader_desc = { .stage = gpu::compat::ShaderStage.FRAGMENT, .spirv = DB_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle fragment_shader = gpu::compat::create_shader(&device, &fragment_shader_desc)!!;
+    defer gpu::compat::destroy_shader(&device, fragment_shader)!!;
+    gpu::compat::Format[1] color_formats = { gpu::compat::Format.RGBA8_UNORM };
+    gpu::compat::GraphicsPipelineDesc graphics_pipeline_desc = {
         .vertex_shader   = vertex_shader,
         .fragment_shader = fragment_shader,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
+        .topology        = gpu::compat::PrimitiveTopology.TRIANGLES,
         .color_formats   = color_formats[..],
     };
-    gpu::PipelineHandle graphics_pipeline = gpu::create_graphics_pipeline(&device, &graphics_pipeline_desc)!!;
-    defer gpu::destroy_pipeline(&device, graphics_pipeline)!!;
+    gpu::compat::PipelineHandle graphics_pipeline = gpu::compat::create_graphics_pipeline(&device, &graphics_pipeline_desc)!!;
+    defer gpu::compat::destroy_pipeline(&device, graphics_pipeline)!!;
 
-    gpu::SemaphoreDesc semaphore_desc = {};
-    gpu::SemaphoreHandle dependency = gpu::create_semaphore(&device, &semaphore_desc)!!;
-    defer gpu::destroy_semaphore(&device, dependency)!!;
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::compat::SemaphoreDesc semaphore_desc = {};
+    gpu::compat::SemaphoreHandle dependency = gpu::compat::create_semaphore(&device, &semaphore_desc)!!;
+    defer gpu::compat::destroy_semaphore(&device, dependency)!!;
+    gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
 
-    gpu::CommandList compute_commands = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::TextureBarrier to_general = {
+    gpu::compat::CommandList compute_commands = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.COMPUTE)!!;
+    gpu::compat::TextureBarrier to_general = {
         .texture       = shared_texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .before_stage  = gpu::compat::Stage.HOST,
+        .after_stage   = gpu::compat::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::compat::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::compat::Hazard.SHADER_WRITE,
+        .old_layout    = gpu::compat::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::compat::TextureLayout.GENERAL,
     };
-    gpu::cmd_texture_barrier(&compute_commands, &to_general)!!;
+    gpu::compat::cmd_texture_barrier(&compute_commands, &to_general)!!;
     const uint GROUPS = (TEX_SIZE + 7) / 8;
-    gpu::cmd_dispatch(
+    gpu::compat::cmd_dispatch(
         commands: &compute_commands,
         pipeline: compute_pipeline,
         root:     compute_root_span.gpu,
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
-    gpu::TextureBarrier write_to_sample = {
+    gpu::compat::TextureBarrier write_to_sample = {
         .texture       = shared_texture,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
-        .old_layout    = gpu::TextureLayout.GENERAL,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .before_stage  = gpu::compat::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::compat::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::compat::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::compat::Hazard.SHADER_READ,
+        .old_layout    = gpu::compat::TextureLayout.GENERAL,
+        .new_layout    = gpu::compat::TextureLayout.GENERAL,
     };
-    gpu::cmd_texture_barrier(&compute_commands, &write_to_sample)!!;
-    gpu::cmd_dispatch(
+    gpu::compat::cmd_texture_barrier(&compute_commands, &write_to_sample)!!;
+    gpu::compat::cmd_dispatch(
         commands: &compute_commands,
         pipeline: sample_pipeline,
         root:     sample_root_span.gpu,
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
-    gpu::BufferBarrier compute_output_to_host = {
+    gpu::compat::BufferBarrier compute_output_to_host = {
         .buffer        = compute_output,
         .offset        = 0,
         .size          = TEX_SIZE * TEX_SIZE * 16,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.HOST_READ,
+        .before_stage  = gpu::compat::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::compat::Stage.HOST,
+        .before_hazard = gpu::compat::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::compat::Hazard.HOST_READ,
     };
-    gpu::cmd_buffer_barrier(&compute_commands, &compute_output_to_host)!!;
-    gpu::end_commands(&compute_commands)!!;
-    gpu::CommandList[1] compute_lists = { compute_commands };
-    gpu::SemaphoreSignal[1] compute_signals = {{
+    gpu::compat::cmd_buffer_barrier(&compute_commands, &compute_output_to_host)!!;
+    gpu::compat::end_commands(&compute_commands)!!;
+    gpu::compat::CommandList[1] compute_lists = { compute_commands };
+    gpu::compat::SemaphoreSignal[1] compute_signals = {{
         .semaphore = dependency,
-        .value     = (gpu::SemaphoreValue)1,
-        .stage     = gpu::Stage.COMPUTE_SHADER,
+        .value     = (gpu::compat::SemaphoreValue)1,
+        .stage     = gpu::compat::Stage.COMPUTE_SHADER,
     }};
-    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..], .signals = compute_signals[..] };
-    gpu::submit(&device, &compute_submit)!!;
+    gpu::compat::SubmitDesc compute_submit = { .command_lists = compute_lists[..], .signals = compute_signals[..] };
+    gpu::compat::submit(&device, &compute_submit)!!;
 
-    gpu::CommandList graphics_commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::TextureBarrier target_to_attachment = {
+    gpu::compat::CommandList graphics_commands = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::TextureBarrier target_to_attachment = {
         .texture       = target,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.COLOR_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .before_stage  = gpu::compat::Stage.HOST,
+        .after_stage   = gpu::compat::Stage.COLOR_ATTACHMENT,
+        .before_hazard = gpu::compat::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::compat::Hazard.COLOR_WRITE,
+        .old_layout    = gpu::compat::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::compat::TextureLayout.COLOR_ATTACHMENT,
     };
-    gpu::cmd_texture_barrier(&graphics_commands, &target_to_attachment)!!;
-    gpu::ColorTargetDesc[1] colors = {{
+    gpu::compat::cmd_texture_barrier(&graphics_commands, &target_to_attachment)!!;
+    gpu::compat::ColorTargetDesc[1] colors = {{
         .texture  = target,
-        .load_op  = gpu::LoadOp.CLEAR,
-        .store_op = gpu::StoreOp.STORE,
+        .load_op  = gpu::compat::LoadOp.CLEAR,
+        .store_op = gpu::compat::StoreOp.STORE,
         .clear    = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
     }};
-    gpu::RenderPassDesc pass = { .colors = colors[..], .width = TARGET_SIZE, .height = TARGET_SIZE };
-    gpu::cmd_begin_render_pass(&graphics_commands, &pass)!!;
-    gpu::GpuAddress fragment_root_gpu = (gpu::GpuAddress)((ulong)graphics_root_span.gpu + VERTEX_BYTES);
-    gpu::cmd_draw(
+    gpu::compat::RenderPassDesc pass = { .colors = colors[..], .width = TARGET_SIZE, .height = TARGET_SIZE };
+    gpu::compat::cmd_begin_render_pass(&graphics_commands, &pass)!!;
+    gpu::compat::GpuAddress fragment_root_gpu = (gpu::compat::GpuAddress)((ulong)graphics_root_span.gpu + VERTEX_BYTES);
+    gpu::compat::cmd_draw(
         commands:       &graphics_commands,
         pipeline:       graphics_pipeline,
         vertex_root:    graphics_root_span.gpu,
@@ -344,44 +344,44 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         vertex_count:   3,
         instance_count: 1,
     )!!;
-    gpu::cmd_end_render_pass(&graphics_commands)!!;
-    gpu::TextureBarrier target_to_source = {
+    gpu::compat::cmd_end_render_pass(&graphics_commands)!!;
+    gpu::compat::TextureBarrier target_to_source = {
         .texture       = target,
-        .before_stage  = gpu::Stage.COLOR_ATTACHMENT,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.COLOR_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        .before_stage  = gpu::compat::Stage.COLOR_ATTACHMENT,
+        .after_stage   = gpu::compat::Stage.TRANSFER,
+        .before_hazard = gpu::compat::Hazard.COLOR_WRITE,
+        .after_hazard  = gpu::compat::Hazard.TRANSFER_READ,
+        .old_layout    = gpu::compat::TextureLayout.COLOR_ATTACHMENT,
+        .new_layout    = gpu::compat::TextureLayout.TRANSFER_SRC,
     };
-    gpu::cmd_texture_barrier(&graphics_commands, &target_to_source)!!;
-    gpu::GpuSpan readback_span = gpu::get_buffer_span(&device, readback)!!;
-    gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = readback_span };
-    gpu::cmd_copy_texture_to_buffer(&graphics_commands, &copy)!!;
-    gpu::BufferBarrier host_read = {
+    gpu::compat::cmd_texture_barrier(&graphics_commands, &target_to_source)!!;
+    gpu::compat::GpuSpan readback_span = gpu::compat::get_buffer_span(&device, readback)!!;
+    gpu::compat::TextureBufferCopyDesc copy = { .texture = target, .dst = readback_span };
+    gpu::compat::cmd_copy_texture_to_buffer(&graphics_commands, &copy)!!;
+    gpu::compat::BufferBarrier host_read = {
         .buffer = readback, .offset = 0, .size = TARGET_BYTES,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+        .before_stage = gpu::compat::Stage.TRANSFER, .after_stage = gpu::compat::Stage.HOST,
+        .before_hazard = gpu::compat::Hazard.TRANSFER_WRITE, .after_hazard = gpu::compat::Hazard.HOST_READ,
     };
-    gpu::cmd_buffer_barrier(&graphics_commands, &host_read)!!;
-    gpu::end_commands(&graphics_commands)!!;
-    gpu::CommandList[1] graphics_lists = { graphics_commands };
-    gpu::SemaphoreWait[1] graphics_waits = {{
+    gpu::compat::cmd_buffer_barrier(&graphics_commands, &host_read)!!;
+    gpu::compat::end_commands(&graphics_commands)!!;
+    gpu::compat::CommandList[1] graphics_lists = { graphics_commands };
+    gpu::compat::SemaphoreWait[1] graphics_waits = {{
         .semaphore = dependency,
-        .value     = (gpu::SemaphoreValue)1,
-        .stage     = gpu::Stage.FRAGMENT_SHADER,
+        .value     = (gpu::compat::SemaphoreValue)1,
+        .stage     = gpu::compat::Stage.FRAGMENT_SHADER,
     }};
-    gpu::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..], .waits = graphics_waits[..] };
-    gpu::submit(&device, &graphics_submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::invalidate_buffer(
+    gpu::compat::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..], .waits = graphics_waits[..] };
+    gpu::compat::submit(&device, &graphics_submit)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.COMPUTE)!!;
+    gpu::compat::invalidate_buffer(
         device: &device,
         buffer: readback,
         offset: 0,
         size:   0,
     )!!;
-    gpu::invalidate_buffer(
+    gpu::compat::invalidate_buffer(
         device: &device,
         buffer: compute_output,
         offset: 0,
@@ -412,7 +412,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         io::eprintfn("descriptor_buffer_compute_to_graphics: PASS distinct-family graphics=%d compute=%d",
             state.graphics_family, state.compute_family);
     }
-    gpu::end_frame(&frame_token)!!;
+    gpu::compat::end_frame(&frame_token)!!;
 }
 
 fn void descriptor_buffer_write_then_sample() @test {
@@ -422,133 +422,133 @@ fn void descriptor_buffer_write_then_sample() @test {
     }
 
     const uint TEX = 16;
-    gpu::DeviceDesc device_desc = {
-        .backend              = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc device_desc = {
+        .backend              = gpu::compat::BackendKind.VULKAN,
         .enable_validation    = true,
         .frames_in_flight     = 2,
-        .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
+        .descriptor_heap_mode = gpu::compat::DescriptorHeapMode.DESCRIPTOR_BUFFER,
         .application_name     = "gpu_descriptor_buffer_e2e",
     };
-    gpu::Device device;
-    if (try dev = gpu::create_device(&device_desc)) {
+    gpu::compat::Device device;
+    if (try dev = gpu::compat::create_device(&device_desc)) {
         device = dev;
     } else {
         io::eprintfn("descriptor_buffer_write_then_sample: no capable adapter, skipping");
         return;
     }
-    defer gpu::destroy_device(&device)!!;
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc tex_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = TEX,
         .height    = TEX,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .sampled, .storage },
     };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::compat::TextureHandle texture = gpu::compat::create_texture(&device, &tex_desc)!!;
+    defer gpu::compat::destroy_texture(&device, texture)!!;
+    gpu::compat::TextureIndex tex_index = gpu::compat::create_texture_descriptor(&device, texture, null)!!;
+    defer gpu::compat::destroy_texture_descriptor(&device, tex_index)!!;
 
-    gpu::SamplerDesc sampler_desc = {
-        .min_filter = gpu::Filter.NEAREST,
-        .mag_filter = gpu::Filter.NEAREST,
-        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
-        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
-        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    gpu::compat::SamplerDesc sampler_desc = {
+        .min_filter = gpu::compat::Filter.NEAREST,
+        .mag_filter = gpu::compat::Filter.NEAREST,
+        .address_u  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, smp_index)!!;
+    gpu::compat::SamplerIndex smp_index = gpu::compat::create_sampler(&device, &sampler_desc)!!;
+    defer gpu::compat::destroy_sampler(&device, smp_index)!!;
 
-    gpu::BufferDesc out_desc = {
+    gpu::compat::BufferDesc out_desc = {
         .size        = TEX * TEX * 16,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.READBACK,
+        .memory_kind = gpu::compat::MemoryKind.READBACK,
     };
-    gpu::BufferHandle output = gpu::create_buffer(&device, &out_desc)!!;
-    defer gpu::destroy_buffer(&device, output)!!;
+    gpu::compat::BufferHandle output = gpu::compat::create_buffer(&device, &out_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, output)!!;
 
-    gpu::ShaderDesc write_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_WRITE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle write_shader = gpu::create_shader(&device, &write_sd)!!;
-    defer gpu::destroy_shader(&device, write_shader)!!;
-    gpu::ShaderDesc sample_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_SAMPLE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_sd)!!;
-    defer gpu::destroy_shader(&device, sample_shader)!!;
+    gpu::compat::ShaderDesc write_sd = { .stage = gpu::compat::ShaderStage.COMPUTE, .spirv = DB_WRITE_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle write_shader = gpu::compat::create_shader(&device, &write_sd)!!;
+    defer gpu::compat::destroy_shader(&device, write_shader)!!;
+    gpu::compat::ShaderDesc sample_sd = { .stage = gpu::compat::ShaderStage.COMPUTE, .spirv = DB_SAMPLE_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle sample_shader = gpu::compat::create_shader(&device, &sample_sd)!!;
+    defer gpu::compat::destroy_shader(&device, sample_shader)!!;
 
-    gpu::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
-    gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pd)!!;
-    defer gpu::destroy_pipeline(&device, write_pipe)!!;
-    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
-    gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
-    defer gpu::destroy_pipeline(&device, sample_pipe)!!;
+    gpu::compat::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = gpu::compat::RootPush::size };
+    gpu::compat::PipelineHandle write_pipe = gpu::compat::create_compute_pipeline(&device, &write_pd)!!;
+    defer gpu::compat::destroy_pipeline(&device, write_pipe)!!;
+    gpu::compat::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::compat::RootPush::size };
+    gpu::compat::PipelineHandle sample_pipe = gpu::compat::create_compute_pipeline(&device, &sample_pd)!!;
+    defer gpu::compat::destroy_pipeline(&device, sample_pipe)!!;
 
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
 
-    gpu::GpuSpan write_root_span = gpu::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
+    gpu::compat::GpuSpan write_root_span = gpu::compat::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
     WriteRoot* write_root = (WriteRoot*)write_root_span.cpu;
     write_root.texture_index = tex_index;
     write_root.width         = TEX;
     write_root.height        = TEX;
 
-    gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
+    gpu::compat::GpuSpan sample_root_span = gpu::compat::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
-    sample_root.output_gpu    = gpu::get_buffer_address(&device, output)!!;
+    sample_root.output_gpu    = gpu::compat::get_buffer_address(&device, output)!!;
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
     sample_root.width         = TEX;
     sample_root.height        = TEX;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::TextureBarrier to_general = {
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.COMPUTE)!!;
+    gpu::compat::TextureBarrier to_general = {
         .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .before_stage  = gpu::compat::Stage.HOST,
+        .after_stage   = gpu::compat::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::compat::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::compat::Hazard.SHADER_WRITE,
+        .old_layout    = gpu::compat::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::compat::TextureLayout.GENERAL,
     };
-    gpu::cmd_texture_barrier(&cmd, &to_general)!!;
+    gpu::compat::cmd_texture_barrier(&cmd, &to_general)!!;
 
     const uint GROUPS = (TEX + 7) / 8;
-    gpu::cmd_dispatch(
+    gpu::compat::cmd_dispatch(
         commands: &cmd,
         pipeline: write_pipe,
         root:     write_root_span.gpu,
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
-    gpu::TextureBarrier write_to_sample = {
+    gpu::compat::TextureBarrier write_to_sample = {
         .texture       = texture,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
-        .old_layout    = gpu::TextureLayout.GENERAL,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .before_stage  = gpu::compat::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::compat::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::compat::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::compat::Hazard.SHADER_READ,
+        .old_layout    = gpu::compat::TextureLayout.GENERAL,
+        .new_layout    = gpu::compat::TextureLayout.GENERAL,
     };
-    gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
-    gpu::cmd_dispatch(
+    gpu::compat::cmd_texture_barrier(&cmd, &write_to_sample)!!;
+    gpu::compat::cmd_dispatch(
         commands: &cmd,
         pipeline: sample_pipe,
         root:     sample_root_span.gpu,
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
-    gpu::BufferBarrier out_bar = {
+    gpu::compat::BufferBarrier out_bar = {
         .buffer = output, .offset = 0, .size = TEX * TEX * 16,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+        .before_stage = gpu::compat::Stage.COMPUTE_SHADER, .after_stage = gpu::compat::Stage.HOST,
+        .before_hazard = gpu::compat::Hazard.SHADER_WRITE, .after_hazard = gpu::compat::Hazard.HOST_READ,
     };
-    gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::compat::cmd_buffer_barrier(&cmd, &out_bar)!!;
+    gpu::compat::end_commands(&cmd)!!;
 
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::compat::CommandList[1] lists = { cmd };
+    gpu::compat::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::compat::submit(&device, &submit)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.COMPUTE)!!;
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;
+    gpu::compat::GpuSpan out_span = gpu::compat::get_buffer_span(&device, output)!!;
     float* texels = (float*)out_span.cpu;
     for (uint y = 0; y < TEX; y++) {
         for (uint x = 0; x < TEX; x++) {
@@ -558,5 +558,5 @@ fn void descriptor_buffer_write_then_sample() @test {
             assert(quantize_unorm8(texel[2]) == (x ^ y), "blue channel matches on the buffer path");
         }
     }
-    gpu::end_frame(&frame_token)!!;
+    gpu::compat::end_frame(&frame_token)!!;
 }

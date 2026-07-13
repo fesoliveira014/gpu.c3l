@@ -36,22 +36,22 @@ Running example: every sample's `abi/` directory; flow documented in
 Goal: pixels from CPU to a sampled texture.
 
 ```c3
-gpu::TextureBarrier to_dst = gpu::texture_transition(
+gpu::compat::TextureBarrier to_dst = gpu::compat::texture_transition(
     texture: tex,
-    before:  gpu::TextureUse.UNDEFINED,
-    after:   gpu::TextureUse.TRANSFER_DESTINATION,
+    before:  gpu::compat::TextureUse.UNDEFINED,
+    after:   gpu::compat::TextureUse.TRANSFER_DESTINATION,
 )!;
-gpu::cmd_texture_barrier(&cmd, &to_dst)!;
+gpu::compat::cmd_texture_barrier(&cmd, &to_dst)!;
 
-gpu::BufferTextureCopyDesc upload = { .src = staging_span, .texture = tex };
-gpu::cmd_copy_buffer_to_texture(&cmd, &upload)!;
+gpu::compat::BufferTextureCopyDesc upload = { .src = staging_span, .texture = tex };
+gpu::compat::cmd_copy_buffer_to_texture(&cmd, &upload)!;
 
-gpu::TextureBarrier to_sample = gpu::texture_transition(
+gpu::compat::TextureBarrier to_sample = gpu::compat::texture_transition(
     texture: tex,
-    before:  gpu::TextureUse.TRANSFER_DESTINATION,
-    after:   gpu::TextureUse.SAMPLED_FRAGMENT,
+    before:  gpu::compat::TextureUse.TRANSFER_DESTINATION,
+    after:   gpu::compat::TextureUse.SAMPLED_FRAGMENT,
 )!;
-gpu::cmd_texture_barrier(&cmd, &to_sample)!;
+gpu::compat::cmd_texture_barrier(&cmd, &to_sample)!;
 ```
 
 Running example: `textured_cube` (single texture), `pbr_materials`
@@ -62,7 +62,7 @@ Running example: `textured_cube` (single texture), `pbr_materials`
 Goal: shader picks its texture by an integer you stored anywhere.
 
 ```c3
-gpu::TextureIndex idx = gpu::create_texture_descriptor(&device, tex, null)!;
+gpu::compat::TextureIndex idx = gpu::compat::create_texture_descriptor(&device, tex, null)!;
 root.albedo_tex = idx;              // plain uint field in your root/table
 ```
 
@@ -78,7 +78,7 @@ Running example: `bindless_texture_compute` (compute),
 Goal: get results back on the CPU, simplest form.
 
 ```c3
-gpu::readback_texture_data(device: &device, src: target, mip: 0,
+gpu::compat::readback_texture_data(device: &device, src: target, mip: 0,
     out_data: pixels, from_stage: ..., from_hazard: ..., from_layout: ...)!;
 // round-trips the layout back to from_layout — the texture is left as found
 ```
@@ -90,10 +90,10 @@ Running example: `offscreen_triangle`, `multithreaded_recording`.
 Goal: overlap GPU work with CPU consumption.
 
 ```c3
-gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, buf, 0, size)!;
+gpu::compat::ReadbackTicket ticket = gpu::compat::cmd_readback_buffer(&cmd, buf, 0, size)!;
 // ... frames later:
-if (gpu::poll_readback(&device, &ticket)) {
-    gpu::resolve_readback(&device, &ticket, out)!;   // READBACK_NOT_READY if early
+if (gpu::compat::poll_readback(&device, &ticket)) {
+    gpu::compat::resolve_readback(&device, &ticket, out)!;   // READBACK_NOT_READY if early
 }
 ```
 
@@ -106,7 +106,7 @@ Goal: compute culls, GPU decides the draw count.
 
 ```c3
 // compute writes DrawIndirectCommand[] + a count word, then one call:
-gpu::cmd_draw_indirect(&cmd, pipeline, vroot, froot, args_span, max_draws)!;
+gpu::compat::cmd_draw_indirect(&cmd, pipeline, vroot, froot, args_span, max_draws)!;
 // with caps.draw_indirect_count: the _count variant reads the GPU count
 ```
 
@@ -118,13 +118,13 @@ Running example: `gpu_driven_draw_sdl`, `frustum_culling`.
 Goal: simulation and rendering as separate submits with explicit ordering.
 
 ```c3
-gpu::SemaphoreSignal[1] sim_signals = {{ .semaphore = sim_done,
-    .value = (gpu::SemaphoreValue)(frame + 1), .stage = gpu::Stage.COMPUTE_SHADER }};
-gpu::SubmitDesc sim_submit = { .command_lists = sim_lists[..], .signals = sim_signals[..] };
+gpu::compat::SemaphoreSignal[1] sim_signals = {{ .semaphore = sim_done,
+    .value = (gpu::compat::SemaphoreValue)(frame + 1), .stage = gpu::compat::Stage.COMPUTE_SHADER }};
+gpu::compat::SubmitDesc sim_submit = { .command_lists = sim_lists[..], .signals = sim_signals[..] };
 
-gpu::SemaphoreWait[1] draw_waits = {{ .semaphore = sim_done,
-    .value = (gpu::SemaphoreValue)(frame + 1), .stage = gpu::Stage.VERTEX_SHADER }};
-gpu::SubmitDesc draw_submit = { .command_lists = draw_lists[..],
+gpu::compat::SemaphoreWait[1] draw_waits = {{ .semaphore = sim_done,
+    .value = (gpu::compat::SemaphoreValue)(frame + 1), .stage = gpu::compat::Stage.VERTEX_SHADER }};
+gpu::compat::SubmitDesc draw_submit = { .command_lists = draw_lists[..],
     .waits = draw_waits[..], .swapchain = swapchain };
 ```
 
@@ -139,10 +139,10 @@ Goal: scale CPU-side recording.
 
 ```c3
 // one per worker:
-gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!;
+gpu::compat::RecordingContextHandle ctx = gpu::compat::create_recording_context(&device)!;
 // inside the worker thread (temp allocator required!):
 @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-    gpu::CommandList list = gpu::begin_commands(&device, queue, ctx)!;
+    gpu::compat::CommandList list = gpu::compat::begin_commands(&device, queue, ctx)!;
     ...
 };
 // main thread: one submit with all lists, in your chosen order
@@ -158,8 +158,8 @@ Running example: `multithreaded_recording`.
 Goal: depth-only pass, then hardware PCF.
 
 ```c3
-gpu::SamplerDesc shadow_sampler = { ..., .compare_enable = true,
-    .compare = gpu::CompareOp.LESS_EQUAL };
+gpu::compat::SamplerDesc shadow_sampler = { ..., .compare_enable = true,
+    .compare = gpu::compat::CompareOp.LESS_EQUAL };
 // shadow pipeline: no color formats, depth D32, front-face culling +
 // .raster = { .depth_bias_slope = 1.0f } against acne
 ```
@@ -176,8 +176,8 @@ Running example: `shadow_mapping` (3×3 PCF).
 Goal: G-buffer in one pass.
 
 ```c3
-gpu::ColorTargetDesc[3] colors = { {...albedo}, {...normal}, {...position} };
-gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, ... };
+gpu::compat::ColorTargetDesc[3] colors = { {...albedo}, {...normal}, {...position} };
+gpu::compat::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, ... };
 // pipeline: .color_formats lists all three; frag writes location 0..2
 ```
 
@@ -189,11 +189,11 @@ Reinhard + gamma encode when the swapchain is UNORM).
 Goal: skip shader compiles on the next run.
 
 ```c3
-usz size = gpu::get_pipeline_cache_size(&device)!;
+usz size = gpu::compat::get_pipeline_cache_size(&device)!;
 char[] blob = mem::new_array(char, (sz)size);
-usz written = gpu::get_pipeline_cache_data(&device, blob)!;   // save to disk
+usz written = gpu::compat::get_pipeline_cache_data(&device, blob)!;   // save to disk
 // next run:
-gpu::DeviceDesc desc = { ..., .pipeline_cache_data = loaded_blob };
+gpu::compat::DeviceDesc desc = { ..., .pipeline_cache_data = loaded_blob };
 ```
 
 Blob usefulness is driver-dependent (lavapipe: header only); identical
@@ -206,21 +206,21 @@ Goal: build against the selected format and transition acquired images from
 their actual prior layout.
 
 ```c3
-gpu::PresentModeSupport support = gpu::get_present_mode_support(&device, swapchain)!;
+gpu::compat::PresentModeSupport support = gpu::compat::get_present_mode_support(&device, swapchain)!;
 if (support.mailbox) { /* recreate swapchain with PresentMode.MAILBOX */ }
 
-gpu::SwapchainInfo info = gpu::get_swapchain_info(&device, swapchain)!;
+gpu::compat::SwapchainInfo info = gpu::compat::get_swapchain_info(&device, swapchain)!;
 if (info.dormant) { /* wait for a non-zero resize */ }
 
-gpu::Format[1] color_formats = { info.format };
+gpu::compat::Format[1] color_formats = { info.format };
 
-gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
-gpu::TextureUse before = acquired.prior_layout == gpu::TextureLayout.PRESENT
-    ? gpu::TextureUse.PRESENT : gpu::TextureUse.UNDEFINED;
-gpu::TextureBarrier to_color = gpu::texture_transition(
+gpu::compat::AcquiredImage acquired = gpu::compat::acquire_next_image(&device, swapchain)!;
+gpu::compat::TextureUse before = acquired.prior_layout == gpu::compat::TextureLayout.PRESENT
+    ? gpu::compat::TextureUse.PRESENT : gpu::compat::TextureUse.UNDEFINED;
+gpu::compat::TextureBarrier to_color = gpu::compat::texture_transition(
     acquired.texture,
     before,
-    gpu::TextureUse.COLOR_ATTACHMENT,
+    gpu::compat::TextureUse.COLOR_ATTACHMENT,
 )!;
 ```
 
@@ -255,15 +255,15 @@ Goal: observe worker and frame-end faults without leaving the frame active on
 an early `!`.
 
 ```c3
-fn void? render_frame(gpu::FrameToken* frame, AppState* state) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
+fn void? render_frame(gpu::compat::FrameToken* frame, AppState* state) {
+    gpu::compat::GpuSpan root_span = gpu::compat::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
     record_and_submit(state, root_span)!;
 }
 
-gpu::FrameToken frame;
-if (catch err = gpu::@with_frame(&frame, &device, render_frame, &state)) {
+gpu::compat::FrameToken frame;
+if (catch err = gpu::compat::@with_frame(&frame, &device, render_frame, &state)) {
     if (frame.is_valid()) {
-        gpu::end_frame(&frame)!;
+        gpu::compat::end_frame(&frame)!;
     }
     return err~;
 }

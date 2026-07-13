@@ -1,7 +1,7 @@
 module gpu_test;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import vk;
 
 // Headless (lavapipe): aliased queues mean the piggyback branch never fires
@@ -10,18 +10,18 @@ import vk;
 
 struct SubmitDiagnosticCapture {
     uint              calls;
-    gpu::DebugMessage last;
+    gpu::compat::DebugMessage last;
 }
 
-fn void capture_submit_diagnostic(gpu::DebugMessage* message, void* user_data) {
+fn void capture_submit_diagnostic(gpu::compat::DebugMessage* message, void* user_data) {
     SubmitDiagnosticCapture* capture = (SubmitDiagnosticCapture*)user_data;
     capture.calls++;
     capture.last = *message;
 }
 
-fn gpu::Device make_submit_stats_test_device(SubmitDiagnosticCapture* capture = null) {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+fn gpu::compat::Device make_submit_stats_test_device(SubmitDiagnosticCapture* capture = null) {
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
         .application_name  = "gpu_submit_stats_test",
@@ -30,31 +30,31 @@ fn gpu::Device make_submit_stats_test_device(SubmitDiagnosticCapture* capture = 
         desc.debug_callback = &capture_submit_diagnostic;
         desc.debug_user_data = capture;
     }
-    return gpu::create_device(&desc)!!;
+    return gpu::compat::create_device(&desc)!!;
 }
 
-fn vk::SubmitStats stats_of(gpu::Device* device) {
-    return vk::submit_stats((vk::VkDeviceState*)gpu::device_backend_state(*device));
+fn vk::SubmitStats stats_of(gpu::compat::Device* device) {
+    return vk::submit_stats((vk::VkDeviceState*)gpu::compat::device_backend_state(*device));
 }
 
 <* Any used-queue combination ends the frame with exactly one internal
    empty submit — the graphics frame signal. *>
 fn void end_frame_issues_exactly_one_empty_submit() @test {
-    gpu::Device device = make_submit_stats_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_submit_stats_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::QueueKind[3] kinds = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE, gpu::QueueKind.TRANSFER };
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::QueueKind[3] kinds = { gpu::compat::QueueKind.GRAPHICS, gpu::compat::QueueKind.COMPUTE, gpu::compat::QueueKind.TRANSFER };
     foreach (kind : kinds) {
-        gpu::CommandList cmd = gpu::begin_commands(&device, kind)!!;
-        gpu::end_commands(&cmd)!!;
-        gpu::CommandList[1] one = { cmd };
-        gpu::SubmitDesc submit = { .command_lists = one[..] };
-        gpu::submit(&device, &submit)!!;
+        gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, kind)!!;
+        gpu::compat::end_commands(&cmd)!!;
+        gpu::compat::CommandList[1] one = { cmd };
+        gpu::compat::SubmitDesc submit = { .command_lists = one[..] };
+        gpu::compat::submit(&device, &submit)!!;
     }
 
     vk::SubmitStats before = stats_of(&device);
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
     vk::SubmitStats after = stats_of(&device);
     assert(after.empty_signal_submits - before.empty_signal_submits == 1, "a frame using every queue kind still ends with exactly one internal empty submit");
     assert(after.queue_submits == before.queue_submits, "end_frame's own signal is not counted as a user queue submit");
@@ -62,22 +62,22 @@ fn void end_frame_issues_exactly_one_empty_submit() @test {
 
 <* Same invariant on a graphics-only frame — the spec's baseline scenario. *>
 fn void graphics_only_frame_emits_one_empty_submit() @test {
-    gpu::Device device = make_submit_stats_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_submit_stats_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::end_commands(&cmd)!!;
+    gpu::compat::CommandList[1] lists = { cmd };
+    gpu::compat::SubmitDesc submit = { .command_lists = lists[..] };
 
     vk::SubmitStats before_submit = stats_of(&device);
-    gpu::submit(&device, &submit)!!;
+    gpu::compat::submit(&device, &submit)!!;
     vk::SubmitStats after_submit = stats_of(&device);
     assert(after_submit.queue_submits - before_submit.queue_submits == 1, "one user submit records one queue submit");
 
     vk::SubmitStats before_end = stats_of(&device);
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
     vk::SubmitStats after_end = stats_of(&device);
     assert(after_end.empty_signal_submits - before_end.empty_signal_submits == 1, "a graphics-only frame issues exactly one internal empty submit");
 }
@@ -86,26 +86,26 @@ fn void graphics_only_frame_emits_one_empty_submit() @test {
    and a subsequent end_frame must still complete without waiting on any
    value the rejected submit would have signaled. *>
 fn void failed_submit_records_nothing_and_end_frame_stays_clean() @test {
-    gpu::Device device = make_submit_stats_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_submit_stats_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList unfinished = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandList[1] not_executable = { unfinished };
-    gpu::SubmitDesc bad_submit = { .command_lists = not_executable[..] };
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::CommandList unfinished = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::CommandList[1] not_executable = { unfinished };
+    gpu::compat::SubmitDesc bad_submit = { .command_lists = not_executable[..] };
 
     vk::SubmitStats before = stats_of(&device);
-    fault f = @catch(gpu::submit(&device, &bad_submit));
-    assert(f == gpu::COMMAND_RECORDING_ERROR, "a not-yet-executable list rejects before touching the queue");
+    fault f = @catch(gpu::compat::submit(&device, &bad_submit));
+    assert(f == gpu::compat::COMMAND_RECORDING_ERROR, "a not-yet-executable list rejects before touching the queue");
     vk::SubmitStats after = stats_of(&device);
     assert(after.queue_submits == before.queue_submits, "a rejected submit records no queue submit");
 
-    gpu::end_commands(&unfinished)!!;
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_commands(&unfinished)!!;
+    gpu::compat::end_frame(&frame)!!;
 
     // A clean cycle right after proves end_frame never waited a bogus value.
-    frame = gpu::begin_frame(&device)!!;
-    gpu::end_frame(&frame)!!;
+    frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
 ulong rejected_frame_signal_value;
@@ -149,11 +149,11 @@ fn vk::Result capture_retry_frame_submit(vk::Queue queue, uint submit_count, vk:
 
 fn void failed_end_frame_submit_preserves_retry_state() @test {
     SubmitDiagnosticCapture capture;
-    gpu::Device device = make_submit_stats_test_device(&capture);
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_submit_stats_test_device(&capture);
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
     state.compute_used_since_frame = true;
     state.transfer_used_since_frame = true;
     state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
@@ -174,7 +174,7 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
 
     uint diagnostic_before = capture.calls;
     fault submit_fault = @catch(vk::end_frame_with_submit(&frame, &reject_frame_submit));
-    assert(submit_fault == gpu::OUT_OF_HOST_MEMORY, "injected frame submit faults OUT_OF_HOST_MEMORY");
+    assert(submit_fault == gpu::compat::OUT_OF_HOST_MEMORY, "injected frame submit faults OUT_OF_HOST_MEMORY");
     assert(rejected_frame_signal_value == counter_before + 1, "failed submit uses the prospective frame value");
     assert(rejected_frame_wait_count == 2, "failed submit preserves both cross-queue waits");
     assert(capture.calls == diagnostic_before + 1, "failed frame signal emits exactly once");
@@ -215,31 +215,31 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
 }
 
 fn void post_claim_fault_restores_executable_token() @test {
-    gpu::Device device = make_submit_stats_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_submit_stats_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(
         &device,
-        gpu::QueueKind.GRAPHICS,
+        gpu::compat::QueueKind.GRAPHICS,
     )!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SemaphoreSignal[1] bad_signals = {{
-        .semaphore = gpu::SEMAPHORE_HANDLE_INVALID,
-        .value = (gpu::SemaphoreValue)1,
-        .stage = gpu::Stage.TRANSFER,
+    gpu::compat::end_commands(&cmd)!!;
+    gpu::compat::CommandList[1] lists = { cmd };
+    gpu::compat::SemaphoreSignal[1] bad_signals = {{
+        .semaphore = gpu::compat::SEMAPHORE_HANDLE_INVALID,
+        .value = (gpu::compat::SemaphoreValue)1,
+        .stage = gpu::compat::Stage.TRANSFER,
     }};
-    gpu::SubmitDesc bad = {
+    gpu::compat::SubmitDesc bad = {
         .command_lists = lists[..],
         .signals = bad_signals[..],
     };
     ulong before = stats_of(&device).queue_submits;
-    assert(@catch(gpu::submit(&device, &bad)) == gpu::INVALID_HANDLE,
+    assert(@catch(gpu::compat::submit(&device, &bad)) == gpu::compat::INVALID_HANDLE,
         "post-claim semaphore validation faults INVALID_HANDLE");
     assert(stats_of(&device).queue_submits == before,
         "post-claim rejection reaches no Vulkan queue submit");
 
-    gpu::SubmitDesc good = { .command_lists = lists[..] };
-    gpu::submit(&device, &good)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::SubmitDesc good = { .command_lists = lists[..] };
+    gpu::compat::submit(&device, &good)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
 }

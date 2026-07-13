@@ -1,7 +1,7 @@
 module gpu_bench;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import vk;
 import std::io;
 
@@ -16,14 +16,14 @@ fn ZString device_type_name(vk::PhysicalDeviceType device_type) {
 }
 
 fn int main() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = false,
         .application_name  = "gpu_benchmark_info",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
     vk::PhysicalDeviceDriverProperties driver = vk::physical_device_driver_properties();
     vk::PhysicalDeviceProperties2 properties = vk::physical_device_properties2().set_next(&driver);

@@ -1,15 +1,15 @@
-# gpu.c3l Public API
+# Compatibility API
 
-This is a curated guide to the public API and its idioms. The generated
+This guide covers the implemented `gpu::compat` API. The generated
 `api-reference` CI artifact covers every public symbol.
 Source doc comments define the contract.
 
-## 1. Public module
+## 1. Module
 
-All public API lives in:
+The compatibility API lives in:
 
 ```c3
-module gpu;
+module gpu::compat;
 ```
 
 Backend and dependency modules are not re-exported as public handle types.
@@ -17,7 +17,7 @@ Backend and dependency modules are not re-exported as public handle types.
 Application code should import:
 
 ```c3
-import gpu;
+import gpu::compat;
 ```
 
 Windowed samples may also import:
@@ -26,7 +26,7 @@ Windowed samples may also import:
 import sdl;
 ```
 
-but core `gpu` declarations should not mention `sdl::Window`, `vk::Device`, or `vma::Allocation`.
+Library public signatures must not mention `sdl::Window`, `vk::Device`, or `vma::Allocation`.
 
 ## 2. Naming rules
 
@@ -200,7 +200,7 @@ the range and derived metadata are valid before using it.
 
 ## 4. Faults
 
-Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix. `gpu/faults.c3` documents each fault at its definition; the table below maps them to the operations that raise them.
+Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values; compatibility faults live in `gpu::compat` and are raised with the `~` suffix. `gpu/compat/faults.c3` documents each fault at its definition; the table below maps them to operations.
 
 Descriptor, configuration, barrier, viewport, scissor, and label pointers must
 be non-null unless the API explicitly documents null as a value (such as
@@ -274,13 +274,13 @@ resets.
 For fallible frame work, use the compile-time direct-call helper:
 
 ```c3
-fn void? render_frame(gpu::FrameToken* frame, RenderState* state) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
+fn void? render_frame(gpu::compat::FrameToken* frame, RenderState* state) {
+    gpu::compat::GpuSpan root_span = gpu::compat::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
     record_rendering(&frame.device, state, root_span)!;
 }
 
-gpu::FrameToken frame;
-gpu::@with_frame(&frame, &device, render_frame, &state)!;
+gpu::compat::FrameToken frame;
+gpu::compat::@with_frame(&frame, &device, render_frame, &state)!;
 ```
 
 The worker must be a named optional-returning function whose first parameter is
@@ -785,7 +785,7 @@ A conventional full-depth viewport must set `max_depth` explicitly because
 C3 aggregate literals zero omitted fields:
 
 ```c3
-gpu::Viewport viewport = {
+gpu::compat::Viewport viewport = {
     .x         = 0.0f,
     .y         = 0.0f,
     .width     = 640.0f,
@@ -793,7 +793,7 @@ gpu::Viewport viewport = {
     .min_depth = 0.0f,
     .max_depth = 1.0f,
 };
-gpu::cmd_set_viewport(&commands, &viewport)!!;
+gpu::compat::cmd_set_viewport(&commands, &viewport)!!;
 ```
 
 Both commands are valid only inside a render pass. Viewports require finite,
@@ -1248,62 +1248,62 @@ SDL helper functions should live in samples or an optional helper module, not in
 Pseudo-code:
 
 ```c3
-import gpu;
+import gpu::compat;
 
 struct RootArgs {
-    gpu::GpuAddress input;
-    gpu::GpuAddress output;
+    gpu::compat::GpuAddress input;
+    gpu::compat::GpuAddress output;
     uint count;
     uint _pad0, _pad1, _pad2;
 }
 
 struct ComputeWork {
-    gpu::Device*       device;
-    gpu::BufferHandle  input;
-    gpu::PipelineHandle pipeline;
+    gpu::compat::Device*       device;
+    gpu::compat::BufferHandle  input;
+    gpu::compat::PipelineHandle pipeline;
 }
 
 fn void? run_compute() {
-    gpu::DeviceDesc device_desc = {
-        .backend = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc device_desc = {
+        .backend = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .enable_debug_names = true,
         .frames_in_flight = 2,
-        .descriptor_heap_mode = gpu::DescriptorHeapMode.AUTO,
+        .descriptor_heap_mode = gpu::compat::DescriptorHeapMode.AUTO,
         .application_name = "root_pointer_compute",
     };
 
-    gpu::Device device = gpu::create_device(&device_desc)!;
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = gpu::compat::create_device(&device_desc)!;
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferDesc input_desc = {
+    gpu::compat::BufferDesc input_desc = {
         .size = 4096,
         .usage = { .storage, .addressable, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name = "input",
     };
 
-    gpu::BufferHandle input = gpu::create_buffer(&device, &input_desc)!;
-    defer gpu::destroy_buffer(&device, input)!!;
+    gpu::compat::BufferHandle input = gpu::compat::create_buffer(&device, &input_desc)!;
+    defer gpu::compat::destroy_buffer(&device, input)!!;
 
     ComputeWork work = { .device = &device, .input = input, .pipeline = pipeline };
-    gpu::FrameToken frame;
-    gpu::@with_frame(&frame, &device, record_compute, &work)!;
+    gpu::compat::FrameToken frame;
+    gpu::compat::@with_frame(&frame, &device, record_compute, &work)!;
 }
 
-fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
+fn void? record_compute(gpu::compat::FrameToken* frame, ComputeWork* work) {
+    gpu::compat::GpuSpan root_span = gpu::compat::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
     RootArgs* root = (RootArgs*)root_span.cpu;
-    root.input = gpu::get_buffer_address(work.device, work.input)!;
+    root.input = gpu::compat::get_buffer_address(work.device, work.input)!;
     root.count = 1024;
-    gpu::CommandList commands = gpu::begin_commands(work.device, gpu::QueueKind.COMPUTE)!;
-    gpu::cmd_dispatch(
+    gpu::compat::CommandList commands = gpu::compat::begin_commands(work.device, gpu::compat::QueueKind.COMPUTE)!;
+    gpu::compat::cmd_dispatch(
         commands: &commands,
         pipeline: work.pipeline,
         root:     root_span.gpu,
         groups:   { 16, 1, 1 },
     )!;
-    gpu::end_commands(&commands)!;
+    gpu::compat::end_commands(&commands)!;
 }
 ```
 

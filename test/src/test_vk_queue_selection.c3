@@ -1,7 +1,7 @@
 module gpu_test;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import vk;
 
 // Pure selection-tier units over synthetic family tables (no device), plus
@@ -50,7 +50,7 @@ fn void single_family_aliases() @test {
 fn void no_graphics_family_faults() @test {
     vk::QueueFamilyProperties[1] table = { family(QF_C | QF_T, 4) };
     fault f = @catch(vk::pick_queue_families(table[..]));
-    assert(f == gpu::UNSUPPORTED_FEATURE, "no graphics+compute family faults");
+    assert(f == gpu::compat::UNSUPPORTED_FEATURE, "no graphics+compute family faults");
 }
 
 fn vk::PhysicalDevice fake_physical_device(uptr value) {
@@ -240,93 +240,93 @@ fn void no_suitable_physical_device_faults() @test {
     };
     fault empty_fault = @catch(vk::choose_physical_device({}));
     fault unsuitable_fault = @catch(vk::choose_physical_device(unsuitable[..]));
-    assert(empty_fault == gpu::UNSUPPORTED_FEATURE, "empty candidate set faults unsupported");
-    assert(unsuitable_fault == gpu::UNSUPPORTED_FEATURE, "all-unsuitable candidate set faults unsupported");
+    assert(empty_fault == gpu::compat::UNSUPPORTED_FEATURE, "empty candidate set faults unsupported");
+    assert(unsuitable_fault == gpu::compat::UNSUPPORTED_FEATURE, "all-unsuitable candidate set faults unsupported");
 }
 
-fn gpu::Device make_queue_test_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+fn gpu::compat::Device make_queue_test_device() {
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
         .application_name  = "gpu_queue_selection_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::compat::create_device(&desc)!!;
 }
 
 fn void queue_alias_matches_async_compute_cap() @test {
-    gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* s = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(s.compute_queue_distinct == gpu::get_device_caps(&device)!!.async_compute, "distinct flag mirrors the cap");
-    assert((s.compute_queue == s.graphics_queue) == !gpu::get_device_caps(&device)!!.async_compute, "alias iff no async compute");
+    gpu::compat::Device device = make_queue_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* s = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
+    assert(s.compute_queue_distinct == gpu::compat::get_device_caps(&device)!!.async_compute, "distinct flag mirrors the cap");
+    assert((s.compute_queue == s.graphics_queue) == !gpu::compat::get_device_caps(&device)!!.async_compute, "alias iff no async compute");
     uint expected_index = s.compute_queue_distinct && s.compute_family == s.graphics_family ? 1 : 0;
     assert(s.compute_queue_index == expected_index, "stored compute queue index matches selection");
 }
 
 fn void cross_queue_timeline_chain_validates() @test {
-    gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_queue_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::SemaphoreDesc sem_desc = { .debug_name = "queue_chain" };
-    gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem)!!;
+    gpu::compat::SemaphoreDesc sem_desc = { .debug_name = "queue_chain" };
+    gpu::compat::SemaphoreHandle sem = gpu::compat::create_semaphore(&device, &sem_desc)!!;
+    defer gpu::compat::destroy_semaphore(&device, sem)!!;
 
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList compute_cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::end_commands(&compute_cmd)!!;
-    gpu::CommandList[1] compute_lists = { compute_cmd };
-    gpu::SemaphoreSignal[1] signals = {{ .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.COMPUTE_SHADER }};
-    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..], .signals = signals[..] };
-    gpu::submit(&device, &compute_submit)!!;
+    gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::CommandList compute_cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.COMPUTE)!!;
+    gpu::compat::end_commands(&compute_cmd)!!;
+    gpu::compat::CommandList[1] compute_lists = { compute_cmd };
+    gpu::compat::SemaphoreSignal[1] signals = {{ .semaphore = sem, .value = (gpu::compat::SemaphoreValue)1, .stage = gpu::compat::Stage.COMPUTE_SHADER }};
+    gpu::compat::SubmitDesc compute_submit = { .command_lists = compute_lists[..], .signals = signals[..] };
+    gpu::compat::submit(&device, &compute_submit)!!;
 
-    gpu::CommandList gfx_cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&gfx_cmd)!!;
-    gpu::CommandList[1] gfx_lists = { gfx_cmd };
-    gpu::SemaphoreWait[1] waits = {{ .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.COMPUTE_SHADER }};
-    gpu::SubmitDesc gfx_submit = { .command_lists = gfx_lists[..], .waits = waits[..] };
-    gpu::submit(&device, &gfx_submit)!!;
+    gpu::compat::CommandList gfx_cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::end_commands(&gfx_cmd)!!;
+    gpu::compat::CommandList[1] gfx_lists = { gfx_cmd };
+    gpu::compat::SemaphoreWait[1] waits = {{ .semaphore = sem, .value = (gpu::compat::SemaphoreValue)1, .stage = gpu::compat::Stage.COMPUTE_SHADER }};
+    gpu::compat::SubmitDesc gfx_submit = { .command_lists = gfx_lists[..], .waits = waits[..] };
+    gpu::compat::submit(&device, &gfx_submit)!!;
 
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::end_frame(&frame_token)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.COMPUTE)!!;
+    gpu::compat::end_frame(&frame_token)!!;
 }
 
 fn void shared_queues_noop_on_single_family() @test {
-    gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_queue_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferDesc buf_desc = {
+    gpu::compat::BufferDesc buf_desc = {
         .size        = 256,
         .usage       = { .storage, .addressable, .shared_queues },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.PERSISTENT_UPLOAD,
         .debug_name  = "shared_buf",
     };
-    gpu::BufferHandle buf = gpu::create_buffer(&device, &buf_desc)!!;
-    gpu::destroy_buffer(&device, buf)!!;
+    gpu::compat::BufferHandle buf = gpu::compat::create_buffer(&device, &buf_desc)!!;
+    gpu::compat::destroy_buffer(&device, buf)!!;
 
-    gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc tex_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = 4,
         .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .sampled, .transfer_dst, .shared_queues },
     };
-    gpu::TextureHandle tex = gpu::create_texture(&device, &tex_desc)!!;
-    gpu::destroy_texture(&device, tex)!!;
+    gpu::compat::TextureHandle tex = gpu::compat::create_texture(&device, &tex_desc)!!;
+    gpu::compat::destroy_texture(&device, tex)!!;
 }
 
 fn void shared_queues_alone_is_invalid() @test {
-    gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_queue_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferDesc buf_desc = {
+    gpu::compat::BufferDesc buf_desc = {
         .size        = 64,
         .usage       = { .shared_queues },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.PERSISTENT_UPLOAD,
     };
-    fault f = @catch(gpu::create_buffer(&device, &buf_desc));
-    assert(f == gpu::INVALID_ARGUMENT, "usage with no Vulkan bits faults INVALID_ARGUMENT");
+    fault f = @catch(gpu::compat::create_buffer(&device, &buf_desc));
+    assert(f == gpu::compat::INVALID_ARGUMENT, "usage with no Vulkan bits faults INVALID_ARGUMENT");
 }
 
 fn void frame_arena_families_alias_without_transfer() @test {
@@ -355,10 +355,10 @@ fn void frame_arena_families_are_graphics_compute_only() @test {
 }
 
 fn void frame_arena_create_info_is_exclusive_when_families_alias() @test {
-    gpu::BufferDesc desc = {
+    gpu::compat::BufferDesc desc = {
         .size        = 256,
         .usage       = { .storage, .addressable, .indirect, .index },
-        .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.FRAME_UPLOAD,
     };
     uint[1] families = { 4 };
     vk::BufferCreateInfo info = vk::make_buffer_create_info(&desc, families[..])!!;
@@ -368,10 +368,10 @@ fn void frame_arena_create_info_is_exclusive_when_families_alias() @test {
 }
 
 fn void frame_arena_create_info_uses_exact_distinct_families() @test {
-    gpu::BufferDesc desc = {
+    gpu::compat::BufferDesc desc = {
         .size        = 256,
         .usage       = { .storage, .addressable, .indirect, .index },
-        .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.FRAME_UPLOAD,
     };
     uint[2] families = { 4, 5 };
     vk::BufferCreateInfo info = vk::make_buffer_create_info(&desc, families[..])!!;
@@ -406,8 +406,8 @@ fn void pool_selection_follows_queue_family() @test {
         .transfer_pools = xfer[..],
     };
     aliased.compute_pools = aliased.graphics_pools;
-    assert(vk::pool_for(&aliased, gpu::QueueKind.COMPUTE, 0) == gfx[0], "aliased compute uses graphics pool");
-    assert(vk::pool_for(&aliased, gpu::QueueKind.TRANSFER, 1) == xfer[1], "transfer uses transfer pool");
+    assert(vk::pool_for(&aliased, gpu::compat::QueueKind.COMPUTE, 0) == gfx[0], "aliased compute uses graphics pool");
+    assert(vk::pool_for(&aliased, gpu::compat::QueueKind.TRANSFER, 1) == xfer[1], "transfer uses transfer pool");
 
     vk::RecordingContextState distinct = {
         .graphics_pools = gfx[..],
@@ -415,26 +415,26 @@ fn void pool_selection_follows_queue_family() @test {
         .transfer_pools = xfer[..],
         .compute_pools_distinct = true,
     };
-    assert(vk::pool_for(&distinct, gpu::QueueKind.COMPUTE, 0) == comp[0], "distinct compute uses compute pool");
-    assert(vk::pool_for(&distinct, gpu::QueueKind.GRAPHICS, 0) == gfx[0], "graphics unaffected");
+    assert(vk::pool_for(&distinct, gpu::compat::QueueKind.COMPUTE, 0) == comp[0], "distinct compute uses compute pool");
+    assert(vk::pool_for(&distinct, gpu::compat::QueueKind.GRAPHICS, 0) == gfx[0], "graphics unaffected");
 }
 
 fn void tri_queue_frame_retires_cleanly() @test {
-    gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_queue_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
     for (uint frame = 0; frame < 4; frame++) {
-        gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-        gpu::CommandList[3] lists;
-        gpu::QueueKind[3] kinds = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE, gpu::QueueKind.TRANSFER };
+        gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
+        gpu::compat::CommandList[3] lists;
+        gpu::compat::QueueKind[3] kinds = { gpu::compat::QueueKind.GRAPHICS, gpu::compat::QueueKind.COMPUTE, gpu::compat::QueueKind.TRANSFER };
         for (uint i = 0; i < 3; i++) {
-            gpu::CommandList cmd = gpu::begin_commands(&device, kinds[i])!!;
-            gpu::end_commands(&cmd)!!;
-            gpu::CommandList[1] one = { cmd };
-            gpu::SubmitDesc submit = { .command_lists = one[..] };
-            gpu::submit(&device, &submit)!!;
+            gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, kinds[i])!!;
+            gpu::compat::end_commands(&cmd)!!;
+            gpu::compat::CommandList[1] one = { cmd };
+            gpu::compat::SubmitDesc submit = { .command_lists = one[..] };
+            gpu::compat::submit(&device, &submit)!!;
         }
-        gpu::end_frame(&frame_token)!!;
+        gpu::compat::end_frame(&frame_token)!!;
     }
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
 }

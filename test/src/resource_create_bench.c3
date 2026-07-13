@@ -1,7 +1,7 @@
 module gpu_bench;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import std::io;
 import std::thread;
 import std::time;
@@ -25,7 +25,7 @@ enum BenchPhase : int {
 }
 
 struct BenchWorkerArgs {
-    gpu::Device* device;
+    gpu::compat::Device* device;
     BenchPhase   phase;
     uint         seed;
     uint         iters;
@@ -40,35 +40,35 @@ fn ZString phase_name(BenchPhase phase) {
     }
 }
 
-fn void run_buffer_op(gpu::Device* device) {
-    gpu::BufferDesc desc = {
+fn void run_buffer_op(gpu::compat::Device* device) {
+    gpu::compat::BufferDesc desc = {
         .size        = 256,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
     };
-    gpu::BufferHandle handle = gpu::create_buffer(device, &desc)!!;
-    gpu::destroy_buffer(device, handle)!!;
+    gpu::compat::BufferHandle handle = gpu::compat::create_buffer(device, &desc)!!;
+    gpu::compat::destroy_buffer(device, handle)!!;
 }
 
-fn void run_texture_op(gpu::Device* device) {
-    gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+fn void run_texture_op(gpu::compat::Device* device) {
+    gpu::compat::TextureDesc desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = 4,
         .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .sampled, .transfer_dst },
     };
-    gpu::TextureHandle handle = gpu::create_texture(device, &desc)!!;
-    gpu::destroy_texture(device, handle)!!;
+    gpu::compat::TextureHandle handle = gpu::compat::create_texture(device, &desc)!!;
+    gpu::compat::destroy_texture(device, handle)!!;
 }
 
-fn void run_shader_op(gpu::Device* device) {
-    gpu::ShaderDesc desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = BENCH_SHADER_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle handle = gpu::create_shader(device, &desc)!!;
-    gpu::destroy_shader(device, handle)!!;
+fn void run_shader_op(gpu::compat::Device* device) {
+    gpu::compat::ShaderDesc desc = { .stage = gpu::compat::ShaderStage.COMPUTE, .spirv = BENCH_SHADER_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle handle = gpu::compat::create_shader(device, &desc)!!;
+    gpu::compat::destroy_shader(device, handle)!!;
 }
 
-fn void run_phase_op(gpu::Device* device, BenchPhase phase, uint mix_index) {
+fn void run_phase_op(gpu::compat::Device* device, BenchPhase phase, uint mix_index) {
     switch (phase) {
         case BenchPhase.BUFFER:
             run_buffer_op(device);
@@ -97,7 +97,7 @@ fn int bench_worker(void* arg) {
 
 <* Wall-clock ns/op across `workers` concurrent workers, each running
    `BENCH_ITERS_PER_WORKER` create+destroy round trips of `phase`. *>
-fn double run_phase_worker_count(gpu::Device* device, BenchPhase phase, uint workers) {
+fn double run_phase_worker_count(gpu::compat::Device* device, BenchPhase phase, uint workers) {
     BenchWorkerArgs[BENCH_MAX_WORKERS] args;
     Thread[BENCH_MAX_WORKERS] threads;
     for (uint w = 0; w < workers; w++) {
@@ -113,7 +113,7 @@ fn double run_phase_worker_count(gpu::Device* device, BenchPhase phase, uint wor
     return (double)elapsed_ns / (double)total_ops;
 }
 
-fn void run_phase(gpu::Device* device, vk::VkDeviceState* state, BenchPhase phase) {
+fn void run_phase(gpu::compat::Device* device, vk::VkDeviceState* state, BenchPhase phase) {
     (void)run_phase_worker_count(device, phase, 1);
     double baseline_ns_per_op = 0;
     foreach (workers : BENCH_WORKER_COUNTS) {
@@ -129,13 +129,13 @@ fn void run_phase(gpu::Device* device, vk::VkDeviceState* state, BenchPhase phas
 
 fn int main() {
     io::printfn("iterations=%d/worker units=ns/op", BENCH_ITERS_PER_WORKER);
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend          = gpu::compat::BackendKind.VULKAN,
         .application_name = "gpu_resource_create_bench",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
     run_phase(&device, state, BenchPhase.BUFFER);
     run_phase(&device, state, BenchPhase.TEXTURE);

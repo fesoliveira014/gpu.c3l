@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu::compat;
 
 // Hand-computed std430 layouts for the generated ABI structs. The generated
 // gpu/shader_abi.c3 already carries compile-time asserts; these runtime checks

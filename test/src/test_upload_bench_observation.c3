@@ -1,6 +1,6 @@
 module gpu_bench;
 
-import gpu;
+import gpu::compat;
 import vk;
 
 fn void device_type_labels_are_stable() @test {
@@ -12,10 +12,10 @@ fn void device_type_labels_are_stable() @test {
 }
 
 fn void heap_mode_labels_are_stable() @test {
-    assert(upload_heap_mode_name(gpu::DescriptorHeapMode.AUTO).str_view() == "auto", "auto label");
-    assert(upload_heap_mode_name(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING).str_view() == "descriptor-indexing",
+    assert(upload_heap_mode_name(gpu::compat::DescriptorHeapMode.AUTO).str_view() == "auto", "auto label");
+    assert(upload_heap_mode_name(gpu::compat::DescriptorHeapMode.DESCRIPTOR_INDEXING).str_view() == "descriptor-indexing",
         "descriptor indexing label");
-    assert(upload_heap_mode_name(gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER).str_view() == "descriptor-buffer",
+    assert(upload_heap_mode_name(gpu::compat::DescriptorHeapMode.DESCRIPTOR_BUFFER).str_view() == "descriptor-buffer",
         "descriptor buffer label");
 }
 

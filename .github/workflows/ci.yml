@@ -69,6 +69,13 @@ jobs:
         run: |
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
+          c3c run import_inert --path test/cpu
+
+      - name: Profile boundaries
+        run: |
+          python3 -B -m unittest scripts.test_check_profile_boundary
+          c3c build package_smoke --path test/compat -C
+          python3 scripts/check_profile_boundary.py
 
       - name: Generator unit tests
         run: c3c test unit --path tools/gen_shader_abi
@@ -109,9 +116,8 @@ jobs:
       - name: Check public API boundary
         run: python scripts/check_public_api.py
 
-      # Whole-compile reference (public module gpu + gpu::vk internals; a
-      # scoped docgen needs a closed source set, which only the whitebox test
-      # project provides). Published as a per-run artifact.
+      # The whitebox project supplies the closed strict, compatibility, and
+      # backend source set needed by docgen.
       - name: Generate API reference
         run: |
           cd test && c3c docgen
@@ -286,6 +292,13 @@ jobs:
         run: |
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
+          c3c run import_inert --path test/cpu
+
+      - name: Profile boundaries
+        run: |
+          python -B -m unittest scripts.test_check_profile_boundary
+          c3c build package_smoke --path test/compat -C
+          python scripts/check_profile_boundary.py
 
       - name: Install lavapipe (mesa-dist-win)
         run: |

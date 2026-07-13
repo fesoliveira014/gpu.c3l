@@ -2,10 +2,10 @@
 
 ## 1. Purpose
 
-The Vulkan backend implements the `gpu` public API on Vulkan 1.3. It lives under:
+The Vulkan backend implements `gpu::compat` on Vulkan 1.3:
 
 ```c3
-module gpu::vk @private;
+module gpu::compat::vk @private;
 ```
 
 Backend declarations are private by default. Only the public dispatch layer and
@@ -14,42 +14,42 @@ white-box tests import them with a visibility override.
 It imports:
 
 ```c3
-import gpu;
+import gpu::compat;
 import vk;
 import vma;
 import spvreflect;
 ```
 
-`spvreflect` is used by `gpu/vk/shader.c3` for SPIR-V reflection.
+`spvreflect` is used by `gpu/compat/vk/shader.c3` for SPIR-V reflection.
 
-No `vk::` or `vma::` type should appear in public `gpu` API signatures.
+No `vk::` or `vma::` type may appear in a public signature.
 
 ## 2. Backend files
 
 ```text
-gpu/vk/backend.c3              loader/VMA link probes, backend availability
-gpu/vk/instance.c3             instance creation, validation layers, debug messenger
-gpu/vk/device.c3               physical device selection, logical device, feature chain
-gpu/vk/queue.c3                queue family selection, queue handles, submit
-gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
-gpu/vk/memory.c3               memory kind policy, arenas, virtual allocator
-gpu/vk/buffer.c3               VkBuffer + VMA allocation path
-gpu/vk/texture.c3              VkImage + VMA allocation, views, layout tracking
-gpu/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
-gpu/vk/shader.c3               SPIR-V modules and reflection validation
-gpu/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
-gpu/vk/pipeline_compute.c3     compute pipeline creation
-gpu/vk/pipeline_graphics.c3    graphics pipeline creation
-gpu/vk/command.c3              recording contexts and command encoding
-gpu/vk/command_state.c3        command-list state and handle tracking
-gpu/vk/transfer.c3             upload/readback helpers and staging arenas
-gpu/vk/sync.c3                 barriers, timeline semaphores
-gpu/vk/render_pass.c3          dynamic rendering
-gpu/vk/swapchain.c3            WSI and swapchain
-gpu/vk/deferred.c3             retired backend-object destruction
-gpu/vk/debug.c3                debug names, leak reports
-gpu/vk/helpers.c3              enum and flag translation helpers
-gpu/vk/validate.c3             descriptor and command validation helpers
+gpu/compat/vk/backend.c3              loader/VMA link probes, backend availability
+gpu/compat/vk/instance.c3             instance creation, validation layers, debug messenger
+gpu/compat/vk/device.c3               physical device selection, logical device, feature chain
+gpu/compat/vk/queue.c3                queue family selection, queue handles, submit
+gpu/compat/vk/allocator.c3            vma::Allocator creation/destruction, stats
+gpu/compat/vk/memory.c3               memory kind policy, arenas, virtual allocator
+gpu/compat/vk/buffer.c3               VkBuffer + VMA allocation path
+gpu/compat/vk/texture.c3              VkImage + VMA allocation, views, layout tracking
+gpu/compat/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
+gpu/compat/vk/shader.c3               SPIR-V modules and reflection validation
+gpu/compat/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
+gpu/compat/vk/pipeline_compute.c3     compute pipeline creation
+gpu/compat/vk/pipeline_graphics.c3    graphics pipeline creation
+gpu/compat/vk/command.c3              recording contexts and command encoding
+gpu/compat/vk/command_state.c3        command-list state and handle tracking
+gpu/compat/vk/transfer.c3             upload/readback helpers and staging arenas
+gpu/compat/vk/sync.c3                 barriers, timeline semaphores
+gpu/compat/vk/render_pass.c3          dynamic rendering
+gpu/compat/vk/swapchain.c3            WSI and swapchain
+gpu/compat/vk/deferred.c3             retired backend-object destruction
+gpu/compat/vk/debug.c3                debug names, leak reports
+gpu/compat/vk/helpers.c3              enum and flag translation helpers
+gpu/compat/vk/validate.c3             descriptor and command validation helpers
 ```
 
 ## 3. Required Vulkan features
@@ -74,7 +74,7 @@ default (AUTO): descriptor indexing
 opt-in: descriptor buffer (DescriptorHeapMode.DESCRIPTOR_BUFFER)
 ```
 
-`AUTO` prefers indexing: lavapipe (Mesa 25.0.7) miscompiles descriptor-buffer image access, so descriptor buffer is never auto-selected (`resolve_heap_mode` in `gpu/vk/device.c3`).
+`AUTO` prefers indexing: lavapipe (Mesa 25.0.7) miscompiles descriptor-buffer image access, so descriptor buffer is never auto-selected (`resolve_heap_mode` in `gpu/compat/vk/device.c3`).
 
 Device creation should fail with `UNSUPPORTED_FEATURE` if required features are missing.
 
@@ -684,7 +684,7 @@ image: allocator.destroy_image(image, allocation)
 
 ## 19. Translation helpers
 
-All enum/flag conversion should live in `gpu/vk/helpers.c3`.
+All enum/flag conversion should live in `gpu/compat/vk/helpers.c3`.
 
 Helpers:
 

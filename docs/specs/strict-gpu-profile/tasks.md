@@ -76,18 +76,18 @@ Delivery slices:
 
 ## Milestone 2 — Compatibility profile
 
-- [ ] **2.1 Move the stabilized current implementation into `gpu::compat`.**
+- [x] **2.1 Move the stabilized current implementation into `gpu::compat`.**
   - Targets: `gpu/*.c3`, `gpu/*.c3i`, `gpu/vk/*.c3`, new `gpu/compat/` and `gpu/compat/vk/`, `manifest.json`.
   - Relocate rather than copy the current implementation. Change module declarations and imports while preserving public names and behavior inside `gpu::compat`.
   - Edge cases: explicit manifest source lists, recursive imports, backend-private visibility, and vendored dependency resolution.
   - Verify: the compatibility package compiles with no duplicated implementation files.
 
-- [ ] **2.2 Make compatibility initialization explicit and inert on import.**
+- [x] **2.2 Make compatibility initialization explicit and inert on import.**
   - Targets: `gpu/compat/compat.c3i`, compatibility device/bootstrap files, import-only test fixtures.
   - Provide `gpu::compat::create_device`; ensure no global initializer creates instances, allocators, loaders, descriptors, or threads.
   - Verify: an import-only executable exits without Vulkan loader calls or compatibility state; device creation occurs only through the explicit function.
 
-- [ ] **2.3 Enforce profile type separation at compile time.**
+- [x] **2.3 Enforce profile type separation at compile time.**
   - Targets: strict root declarations, `gpu/compat/types.c3`, compile-pass and compile-fail fixtures under `test/`.
   - Declare distinct compatibility devices, handles, commands, barriers, descriptors, and pipelines. Share only value types with identical semantics.
   - Verify: cross-profile calls fail compilation; same-profile calls compile; no alias bridges exist.
@@ -104,7 +104,7 @@ Delivery slices:
   - Verify: Vulkan 1.3 and 1.2+extensions devices pass the same compatibility smoke contract; missing semantics fail at creation.
   - Gate: this task does not block Milestone 3 or later strict milestones.
 
-- [ ] **2.6 Document and freeze the compatibility contract.**
+- [x] **2.6 Document and freeze the compatibility contract.**
   - Targets: `docs/compatibility.md`, `docs/api.md`, `docs/limitations.md`, `docs/getting_started.md`, generated compatibility reference.
   - Document migration from the former root API, supported Vulkan paths, explicit layouts, descriptor modes, and portability limits.
   - Verify: the compatibility reference matches the stabilized baseline and contains no claim that applies to strict `gpu`.

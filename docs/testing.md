@@ -2,15 +2,18 @@
 
 ## 1. Test layers
 
-`gpu.c3l` uses three test layers:
+`gpu.c3l` uses four test layers:
 
 ```text
+profile-boundary compile tests
 pure CPU tests
 headless Vulkan tests
 SDL3 windowed samples (gpu.c3l-samples repository)
 ```
 
-Pure CPU tests require no Vulkan loader, VMA static library, SDL3, or window system. Headless Vulkan tests require a Vulkan ICD but no window. SDL3 windowed tests and samples require SDL3 and platform WSI support.
+Profile and CPU tests require no Vulkan loader, VMA static library, SDL3, or
+window system. Headless Vulkan tests require a Vulkan ICD but no window. SDL3
+samples require platform WSI support.
 
 The supported test matrix covers one live `Device` per process. Tests that
 replace a destroyed device exercise stale-owner rejection; they do not establish
@@ -66,7 +69,24 @@ synthetic frame-arena graphics/compute sharing plans and exact buffer create-inf
 
 Pure CPU tests should be exhaustive where practical.
 
-## 3. Headless Vulkan tests
+## 3. Profile boundaries
+
+The boundary fixtures compile a same-profile program and require device,
+handle, command, barrier, descriptor, and pipeline cross-profile programs to
+fail compilation. The import-only executable uses a backend stub and exits only
+when importing `gpu` triggered zero compatibility device-creation calls.
+
+```text
+python -B -m unittest scripts.test_check_profile_boundary
+c3c build package_smoke --path test/compat -C
+c3c run import_inert --path test/cpu
+python scripts/check_profile_boundary.py
+```
+
+`package_smoke` is a consumer-style manifest resolution check. The import and
+compile-fail checks link without Vulkan or VMA.
+
+## 4. Headless Vulkan tests
 
 Headless tests validate backend behavior without SDL3 or swapchains.
 
@@ -143,7 +163,7 @@ live `Device`, exact physical range reuse, queue-local destinations, byte and
 fallback-count checks, and reports PASS only for distinct families; aliased
 topologies report N/A.
 
-## 4. SDL3 windowed tests and samples
+## 5. SDL3 windowed tests and samples
 
 SDL3 belongs to sample/test harnesses. The binding package dependency is `sdl3`; the import module is `sdl`.
 
@@ -181,7 +201,7 @@ remains its end-to-end verification boundary.
 
 Windowed tests may be manual at first. Automated windowed tests can be added only when CI/window-system support is stable.
 
-## 5. Sample project dependencies
+## 6. Sample project dependencies
 
 Core library manifest dependencies:
 
@@ -194,11 +214,11 @@ spvreflect
 The test harness compiles the library sources directly (whitebox — see
 `test/project.json`); its dependencies are `vk`, `vma`, `spvreflect` only.
 Samples in `gpu.c3l-samples` depend on `gpu` (vendored submodule) plus `sdl3`
-and import `gpu` / `sdl`.
+and import `gpu::compat` / `sdl`.
 
 Do not make SDL3 a required dependency of the shipped library unless a public helper module explicitly becomes part of the library.
 
-## 6. Validation policy
+## 7. Validation policy
 
 All Vulkan tests should support validation-enabled runs.
 
@@ -255,7 +275,7 @@ Concurrency coverage uses a synchronized application-owned sink; callbacks are
 not assumed serialized or reentrant. The entire matrix still supports exactly
 one live `Device`; multi-device remains unsupported.
 
-## 7. Test naming
+## 8. Test naming
 
 Test functions:
 
@@ -270,7 +290,7 @@ test_vk_root_pointer_compute
 
 Do not include development phase labels in test names.
 
-## 8. Required coverage
+## 9. Required coverage
 
 | Area | Required tests |
 |---|---|
@@ -300,15 +320,16 @@ including ordered family values and transfer exclusion. The gated
 fragment sampling with a timeline dependency. It reports the selected family
 indices; the gate remains necessary on drivers with unreliable descriptor-buffer image access.
 
-## 9. Build commands
+## 10. Build commands
 
-The shipped library is a `manifest.json` package (module `gpu`); it has no
+The shipped library is a `manifest.json` package containing `gpu` and
+`gpu::compat`; it has no
 project of its own. The test harness (`test/project.json`) is whitebox: it
 lists the library sources directly (mirroring `manifest.json`) and declares
 `vk`, `vma`, and `spvreflect` as dependencies, resolved via
 `"dependency-search-paths": ["../lib"]` — vendored bindings by real directory
 name, no symlink directory. Consumer-style resolution of `gpu` is exercised by
-the `gpu.c3l-samples` repository.
+`test/compat` and the `gpu.c3l-samples` repository.
 
 Smoke target, as CI runs it:
 
@@ -375,11 +396,11 @@ C3 0.8.0 constraints:
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
   a `project.json` key); dependencies are declared per-target and resolved by
   the consumer's search path.
-- `manifest.json` `sources` must list files explicitly — all 17 public source
-  files under `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the default does not
-  recurse into `gpu/vk/`.
+- `manifest.json` `sources` must list the strict root, compatibility API, and
+  `gpu/compat/vk/**` explicitly. A glob like `*.c3` is rejected and the default
+  does not recurse into the backend directory.
 
-## 10. CI matrix
+## 11. CI matrix
 
 CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
 
@@ -397,7 +418,7 @@ docs-walkthrough (blocking): executes docs/getting_started.md verbatim on a
 Windowed SDL3 samples run in the `gpu.c3l-samples` repository CI under
 xvfb/lavapipe.
 
-## 11. Test data and shaders
+## 12. Test data and shaders
 
 Tests are consumers of the library, so test shaders are test-owned and live with the tests, not in the shipped library:
 
@@ -436,7 +457,7 @@ or be committed only if shader toolchain availability is a problem
 
 The shader build policy must be documented in `docs/platforms_and_dependencies.md`.
 
-## 12. Readback verification
+## 13. Readback verification
 
 Compute and graphics tests should prefer deterministic readback.
 
@@ -459,7 +480,7 @@ sample a small set of pixels
 compare with tolerance for floating formats
 ```
 
-## 13. Leak verification
+## 14. Leak verification
 
 Every backend test should end with:
 
@@ -485,7 +506,7 @@ creation frame if tracked
 The callback form carries the applicable subset as a borrowed
 `resource_lifetime` message; the stderr form remains the no-callback fallback.
 
-## 14. Failure path tests
+## 15. Failure path tests
 
 Tests should cover specific faults:
 
@@ -505,9 +526,9 @@ enumeration, and bounded-wait timeout behavior without requiring a GPU.
 
 Tests should assert specific faults, not merely that some fault occurred.
 
-## 15. Release verification checklist
+## 16. Release verification checklist
 
-Before first release:
+Before release:
 
 ```text
 pure CPU tests pass
@@ -519,6 +540,8 @@ SDL3 triangle sample queries the selected format/count, presents, and resizes wi
 GPU-driven indirect draw sample works
 memory stats report plausible budgets
 leak reports are clean after all samples
-public API docs match signatures
+importing gpu creates no compatibility state
+cross-profile calls fail compilation
+gpu and gpu::compat API docs match signatures
 no public API signature exposes vk::, vma::, or sdl:: types
 ```

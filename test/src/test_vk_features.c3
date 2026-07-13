@@ -1,7 +1,7 @@
 module gpu_test;
 
-import gpu;
-import gpu::vk @public;
+import gpu::compat;
+import gpu::compat::vk @public;
 import vk;
 
 // Pure-CPU: feeds the feature gate synthetic structs, no ICD required.
@@ -28,7 +28,7 @@ fn void required_features_present_ok() @test {
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
 
-    assert(!@catch(gpu::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13)), "all required features present must pass the gate");
+    assert(!@catch(gpu::compat::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13)), "all required features present must pass the gate");
 }
 
 fn void missing_feature_rejected() @test {
@@ -38,8 +38,8 @@ fn void missing_feature_rejected() @test {
     vk::PhysicalDeviceVulkan12Features v12 = vk::physical_device_vulkan12features();
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features();
 
-    fault gate_fault = @catch(gpu::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13));
-    assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "a missing required feature raises UNSUPPORTED_FEATURE");
+    fault gate_fault = @catch(gpu::compat::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13));
+    assert(gate_fault == gpu::compat::UNSUPPORTED_FEATURE, "a missing required feature raises UNSUPPORTED_FEATURE");
 }
 
 fn void one_missing_feature_rejected() @test {
@@ -52,8 +52,8 @@ fn void one_missing_feature_rejected() @test {
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE);
 
-    fault gate_fault = @catch(gpu::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13));
-    assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "a single missing feature still raises UNSUPPORTED_FEATURE");
+    fault gate_fault = @catch(gpu::compat::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13));
+    assert(gate_fault == gpu::compat::UNSUPPORTED_FEATURE, "a single missing feature still raises UNSUPPORTED_FEATURE");
 }
 
 fn void missing_shader_int64_rejected() @test {
@@ -68,8 +68,8 @@ fn void missing_shader_int64_rejected() @test {
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
 
-    fault gate_fault = @catch(gpu::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13));
-    assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "missing shaderInt64 raises UNSUPPORTED_FEATURE");
+    fault gate_fault = @catch(gpu::compat::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13));
+    assert(gate_fault == gpu::compat::UNSUPPORTED_FEATURE, "missing shaderInt64 raises UNSUPPORTED_FEATURE");
 }
 
 fn void missing_indirect_features_rejected() @test {
@@ -84,14 +84,14 @@ fn void missing_indirect_features_rejected() @test {
     vk::PhysicalDeviceFeatures base_no_mdi;
     base_no_mdi.shader_int64 = vk::TRUE;
     vk::PhysicalDeviceVulkan11Features v11 = v11_with_required();
-    fault mdi_fault = @catch(gpu::vk::check_required_features(base: &base_no_mdi, v11: &v11, v12: &v12, v13: &v13));
-    assert(mdi_fault == gpu::UNSUPPORTED_FEATURE, "missing multiDrawIndirect raises UNSUPPORTED_FEATURE");
+    fault mdi_fault = @catch(gpu::compat::vk::check_required_features(base: &base_no_mdi, v11: &v11, v12: &v12, v13: &v13));
+    assert(mdi_fault == gpu::compat::UNSUPPORTED_FEATURE, "missing multiDrawIndirect raises UNSUPPORTED_FEATURE");
 
     // shaderDrawParameters unset.
     vk::PhysicalDeviceFeatures base = base_with_required();
     vk::PhysicalDeviceVulkan11Features v11_empty = vk::physical_device_vulkan11features();
-    fault sdp_fault = @catch(gpu::vk::check_required_features(base: &base, v11: &v11_empty, v12: &v12, v13: &v13));
-    assert(sdp_fault == gpu::UNSUPPORTED_FEATURE, "missing shaderDrawParameters raises UNSUPPORTED_FEATURE");
+    fault sdp_fault = @catch(gpu::compat::vk::check_required_features(base: &base, v11: &v11_empty, v12: &v12, v13: &v13));
+    assert(sdp_fault == gpu::compat::UNSUPPORTED_FEATURE, "missing shaderDrawParameters raises UNSUPPORTED_FEATURE");
 }
 
 fn vk::PhysicalDeviceVulkan12Features v12_with_heap_bits() {
@@ -115,90 +115,90 @@ fn vk::PhysicalDeviceFeatures base_with_storage_access() {
 fn void heap_indexing_gate() @test {
     vk::PhysicalDeviceFeatures base = base_with_storage_access();
     vk::PhysicalDeviceVulkan12Features full = v12_with_heap_bits();
-    assert(gpu::vk::heap_shared_features_supported(&base, &full), "full bits pass the shared gate");
-    assert(gpu::vk::heap_indexing_supported(&base, &full), "full bits pass the indexing gate");
+    assert(gpu::compat::vk::heap_shared_features_supported(&base, &full), "full bits pass the shared gate");
+    assert(gpu::compat::vk::heap_indexing_supported(&base, &full), "full bits pass the indexing gate");
 
     vk::PhysicalDeviceVulkan12Features no_partial = v12_with_heap_bits()
         .set_descriptor_binding_partially_bound(vk::FALSE);
-    assert(gpu::vk::heap_shared_features_supported(&base, &no_partial), "shared gate ignores set-path bits");
-    assert(!gpu::vk::heap_indexing_supported(&base, &no_partial), "missing partially-bound fails the indexing gate");
+    assert(gpu::compat::vk::heap_shared_features_supported(&base, &no_partial), "shared gate ignores set-path bits");
+    assert(!gpu::compat::vk::heap_indexing_supported(&base, &no_partial), "missing partially-bound fails the indexing gate");
 
     vk::PhysicalDeviceFeatures no_storage_access;
-    assert(!gpu::vk::heap_shared_features_supported(&no_storage_access, &full), "missing format-less storage access fails the shared gate");
+    assert(!gpu::compat::vk::heap_shared_features_supported(&no_storage_access, &full), "missing format-less storage access fails the shared gate");
 
     vk::PhysicalDeviceVulkan12Features empty = vk::physical_device_vulkan12features();
-    assert(!gpu::vk::heap_shared_features_supported(&base, &empty), "empty 1.2 features fail the shared gate");
+    assert(!gpu::compat::vk::heap_shared_features_supported(&base, &empty), "empty 1.2 features fail the shared gate");
 }
 
 fn void heap_mode_auto_resolution() @test {
-    gpu::DescriptorHeapMode auto_mode = gpu::DescriptorHeapMode.AUTO;
+    gpu::compat::DescriptorHeapMode auto_mode = gpu::compat::DescriptorHeapMode.AUTO;
 
-    gpu::DescriptorHeapMode both = gpu::vk::resolve_heap_mode(auto_mode, true, true)!!;
-    assert(both == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, "AUTO prefers descriptor indexing");
+    gpu::compat::DescriptorHeapMode both = gpu::compat::vk::resolve_heap_mode(auto_mode, true, true)!!;
+    assert(both == gpu::compat::DescriptorHeapMode.DESCRIPTOR_INDEXING, "AUTO prefers descriptor indexing");
 
-    gpu::DescriptorHeapMode buffer_only = gpu::vk::resolve_heap_mode(auto_mode, false, true)!!;
-    assert(buffer_only == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, "AUTO falls back to descriptor buffer");
+    gpu::compat::DescriptorHeapMode buffer_only = gpu::compat::vk::resolve_heap_mode(auto_mode, false, true)!!;
+    assert(buffer_only == gpu::compat::DescriptorHeapMode.DESCRIPTOR_BUFFER, "AUTO falls back to descriptor buffer");
 
-    fault auto_fault = @catch(gpu::vk::resolve_heap_mode(auto_mode, false, false));
-    assert(auto_fault == gpu::UNSUPPORTED_FEATURE, "AUTO with no supported path raises UNSUPPORTED_FEATURE");
+    fault auto_fault = @catch(gpu::compat::vk::resolve_heap_mode(auto_mode, false, false));
+    assert(auto_fault == gpu::compat::UNSUPPORTED_FEATURE, "AUTO with no supported path raises UNSUPPORTED_FEATURE");
 }
 
 fn void heap_mode_forced_resolution() @test {
-    gpu::DescriptorHeapMode forced = gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, true, true)!!;
-    assert(forced == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, "forced indexing wins over available buffer");
+    gpu::compat::DescriptorHeapMode forced = gpu::compat::vk::resolve_heap_mode(gpu::compat::DescriptorHeapMode.DESCRIPTOR_INDEXING, true, true)!!;
+    assert(forced == gpu::compat::DescriptorHeapMode.DESCRIPTOR_INDEXING, "forced indexing wins over available buffer");
 
-    fault buffer_fault = @catch(gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, true, false));
-    assert(buffer_fault == gpu::UNSUPPORTED_FEATURE, "forced buffer without support raises UNSUPPORTED_FEATURE");
+    fault buffer_fault = @catch(gpu::compat::vk::resolve_heap_mode(gpu::compat::DescriptorHeapMode.DESCRIPTOR_BUFFER, true, false));
+    assert(buffer_fault == gpu::compat::UNSUPPORTED_FEATURE, "forced buffer without support raises UNSUPPORTED_FEATURE");
 
-    fault indexing_fault = @catch(gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, false, true));
-    assert(indexing_fault == gpu::UNSUPPORTED_FEATURE, "forced indexing without support raises UNSUPPORTED_FEATURE");
+    fault indexing_fault = @catch(gpu::compat::vk::resolve_heap_mode(gpu::compat::DescriptorHeapMode.DESCRIPTOR_INDEXING, false, true));
+    assert(indexing_fault == gpu::compat::UNSUPPORTED_FEATURE, "forced indexing without support raises UNSUPPORTED_FEATURE");
 }
 
 fn void line_polygon_mode_feature_support() @test {
     vk::PhysicalDeviceFeatures unsupported;
-    assert(!gpu::vk::line_polygon_mode_supported(&unsupported), "unset fillModeNonSolid reports no line polygon support");
+    assert(!gpu::compat::vk::line_polygon_mode_supported(&unsupported), "unset fillModeNonSolid reports no line polygon support");
 
     vk::PhysicalDeviceFeatures supported;
     supported.fill_mode_non_solid = vk::TRUE;
-    assert(gpu::vk::line_polygon_mode_supported(&supported), "fillModeNonSolid reports line polygon support");
+    assert(gpu::compat::vk::line_polygon_mode_supported(&supported), "fillModeNonSolid reports line polygon support");
 }
 
 fn void polygon_mode_optional_gate() @test {
-    assert(!@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.FILL, false)),
+    assert(!@catch(gpu::compat::vk::check_polygon_mode_support(gpu::compat::PolygonMode.FILL, false)),
         "FILL remains available without optional support");
-    assert(!@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.LINE, true)),
+    assert(!@catch(gpu::compat::vk::check_polygon_mode_support(gpu::compat::PolygonMode.LINE, true)),
         "LINE is available when optional support is enabled");
-    assert(@catch(gpu::vk::check_polygon_mode_support(gpu::PolygonMode.LINE, false)) == gpu::UNSUPPORTED_FEATURE,
+    assert(@catch(gpu::compat::vk::check_polygon_mode_support(gpu::compat::PolygonMode.LINE, false)) == gpu::compat::UNSUPPORTED_FEATURE,
         "LINE without optional support faults UNSUPPORTED_FEATURE");
 }
 
 fn void combined_texture_hazards_map_to_both_access_bits() @test {
-    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.NONE) == 0,
+    assert((ulong)gpu::compat::vk::hazard_to_vk_access(gpu::compat::Hazard.NONE) == 0,
         "NONE maps to no Vulkan access");
 
     ulong shader_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT;
-    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.SHADER_READ_WRITE) == shader_expected,
+    assert((ulong)gpu::compat::vk::hazard_to_vk_access(gpu::compat::Hazard.SHADER_READ_WRITE) == shader_expected,
         "shader read/write maps both access bits");
 
     ulong color_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.COLOR_READ_WRITE) == color_expected,
+    assert((ulong)gpu::compat::vk::hazard_to_vk_access(gpu::compat::Hazard.COLOR_READ_WRITE) == color_expected,
         "color read/write maps both access bits");
 
     ulong depth_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.DEPTH_READ_WRITE) == depth_expected,
+    assert((ulong)gpu::compat::vk::hazard_to_vk_access(gpu::compat::Hazard.DEPTH_READ_WRITE) == depth_expected,
         "depth read/write maps both access bits");
 }
 
 fn void presentation_scope_translations_are_exact() @test {
-    assert(gpu::vk::stage_to_vk(gpu::Stage.NONE) == vk::PipelineStageFlagBits2.STAGE_2_NONE,
+    assert(gpu::compat::vk::stage_to_vk(gpu::compat::Stage.NONE) == vk::PipelineStageFlagBits2.STAGE_2_NONE,
         "NONE maps to no Vulkan execution stage");
-    assert(gpu::vk::hazard_to_vk_access(gpu::Hazard.NONE) == vk::AccessFlagBits2.ACCESS_2_NONE,
+    assert(gpu::compat::vk::hazard_to_vk_access(gpu::compat::Hazard.NONE) == vk::AccessFlagBits2.ACCESS_2_NONE,
         "NONE maps to no Vulkan access");
-    assert(gpu::vk::stage_to_vk(gpu::Stage.PRESENT) == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+    assert(gpu::compat::vk::stage_to_vk(gpu::compat::Stage.PRESENT) == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
         "legacy PRESENT keeps its broad execution stage");
-    assert(gpu::vk::hazard_to_vk_access(gpu::Hazard.PRESENT_READ) == vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT,
+    assert(gpu::compat::vk::hazard_to_vk_access(gpu::compat::Hazard.PRESENT_READ) == vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT,
         "legacy PRESENT_READ keeps its broad memory access");
 }

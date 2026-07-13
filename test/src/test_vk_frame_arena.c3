@@ -1,7 +1,7 @@
 module gpu_test;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import vk;
 import std::atomic;
 
@@ -10,7 +10,7 @@ import std::atomic;
 
 struct FrameDiagnosticCapture {
     uint              calls;
-    gpu::DebugMessage last;
+    gpu::compat::DebugMessage last;
     char[48]          operation;
     char[64]          rejected_field;
     char[128]         invariant;
@@ -27,7 +27,7 @@ fn void copy_frame_diagnostic_text(char* destination, usz capacity, ZString sour
     destination[index] = 0;
 }
 
-fn void capture_frame_diagnostic(gpu::DebugMessage* message, void* user_data) {
+fn void capture_frame_diagnostic(gpu::compat::DebugMessage* message, void* user_data) {
     FrameDiagnosticCapture* capture = (FrameDiagnosticCapture*)user_data;
     capture.calls++;
     capture.last = *message;
@@ -36,16 +36,16 @@ fn void capture_frame_diagnostic(gpu::DebugMessage* message, void* user_data) {
     copy_frame_diagnostic_text(&capture.invariant[0], 128, message.invariant);
 }
 
-fn gpu::Device make_diagnostic_frame_device(FrameDiagnosticCapture* capture, uint frames_in_flight = 1) {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+fn gpu::compat::Device make_diagnostic_frame_device(FrameDiagnosticCapture* capture, uint frames_in_flight = 1) {
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = frames_in_flight,
         .debug_callback    = &capture_frame_diagnostic,
         .debug_user_data   = capture,
         .application_name  = "gpu_frame_diagnostic_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::compat::create_device(&desc)!!;
 }
 
 fn void assert_frame_diagnostic(
@@ -59,7 +59,7 @@ fn void assert_frame_diagnostic(
     assert(capture.calls == before + 1, "frame rejection emits exactly once");
     assert(capture.last.has_fault && capture.last.public_fault == returned,
         "frame diagnostic preserves the returned fault");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.FRAME,
+    assert(capture.last.resource.kind == gpu::compat::DebugResourceKind.FRAME,
         "frame diagnostic identifies the frame resource kind");
     assert(!capture.last.resource.has_public_identity,
         "frame diagnostic invents no slot identity for a frame token");
@@ -78,46 +78,46 @@ fn vk::Result reject_frame_counter_query(vk::Device device, vk::Semaphore semaph
 }
 
 fn void frame_arena_range_preserves_fault_taxonomy() @test {
-    fault zero_size = @catch(gpu::vk::frame_arena_range(
+    fault zero_size = @catch(gpu::compat::vk::frame_arena_range(
         cursor: 0,
         capacity: 256,
         size: 0,
         align: 16,
     ));
-    fault zero_align = @catch(gpu::vk::frame_arena_range(
+    fault zero_align = @catch(gpu::compat::vk::frame_arena_range(
         cursor: 0,
         capacity: 256,
         size: 1,
         align: 0,
     ));
-    fault bad_align = @catch(gpu::vk::frame_arena_range(
+    fault bad_align = @catch(gpu::compat::vk::frame_arena_range(
         cursor: 0,
         capacity: 256,
         size: 1,
         align: 3,
     ));
-    fault huge_size = @catch(gpu::vk::frame_arena_range(
+    fault huge_size = @catch(gpu::compat::vk::frame_arena_range(
         cursor: 1,
         capacity: 256,
         size: usz::max,
         align: 1,
     ));
 
-    fault cursor_past_capacity = @catch(gpu::vk::frame_arena_range(
+    fault cursor_past_capacity = @catch(gpu::compat::vk::frame_arena_range(
         cursor: 257,
         capacity: 256,
         size: 1,
         align: 1,
     ));
-    assert(zero_size == gpu::INVALID_ARGUMENT, "zero size remains invalid");
-    assert(zero_align == gpu::INVALID_ARGUMENT, "zero alignment remains invalid");
-    assert(bad_align == gpu::INVALID_ARGUMENT, "non-power-of-two alignment remains invalid");
-    assert(huge_size == gpu::ARENA_FULL, "valid huge size exhausts the arena");
-    assert(cursor_past_capacity == gpu::ARENA_FULL, "cursor past capacity faults ARENA_FULL");
+    assert(zero_size == gpu::compat::INVALID_ARGUMENT, "zero size remains invalid");
+    assert(zero_align == gpu::compat::INVALID_ARGUMENT, "zero alignment remains invalid");
+    assert(bad_align == gpu::compat::INVALID_ARGUMENT, "non-power-of-two alignment remains invalid");
+    assert(huge_size == gpu::compat::ARENA_FULL, "valid huge size exhausts the arena");
+    assert(cursor_past_capacity == gpu::compat::ARENA_FULL, "cursor past capacity faults ARENA_FULL");
 }
 
 fn void frame_arena_range_handles_exact_end() @test {
-    gpu::vk::FrameArenaRange exact = gpu::vk::frame_arena_range(
+    gpu::compat::vk::FrameArenaRange exact = gpu::compat::vk::frame_arena_range(
         cursor: 241,
         capacity: 272,
         size: 16,
@@ -126,24 +126,24 @@ fn void frame_arena_range_handles_exact_end() @test {
     assert(exact.offset == 256, "padding resolves to the next aligned offset");
     assert(exact.next_cursor == 272, "exact fit reaches the arena end");
 
-    fault one_over = @catch(gpu::vk::frame_arena_range(
+    fault one_over = @catch(gpu::compat::vk::frame_arena_range(
         cursor: 241,
         capacity: 271,
         size: 16,
         align: 16,
     ));
-    fault at_end = @catch(gpu::vk::frame_arena_range(
+    fault at_end = @catch(gpu::compat::vk::frame_arena_range(
         cursor: 256,
         capacity: 256,
         size: 1,
         align: 1,
     ));
-    assert(one_over == gpu::ARENA_FULL, "one-byte overflow faults ARENA_FULL");
-    assert(at_end == gpu::ARENA_FULL, "nonzero allocation at arena end faults ARENA_FULL");
+    assert(one_over == gpu::compat::ARENA_FULL, "one-byte overflow faults ARENA_FULL");
+    assert(at_end == gpu::compat::ARENA_FULL, "nonzero allocation at arena end faults ARENA_FULL");
 }
 
 fn void frame_arena_range_handles_max_boundaries() @test {
-    gpu::vk::FrameArenaRange high_exact = gpu::vk::frame_arena_range(
+    gpu::compat::vk::FrameArenaRange high_exact = gpu::compat::vk::frame_arena_range(
         cursor: usz::max - 1,
         capacity: usz::max,
         size: 1,
@@ -152,7 +152,7 @@ fn void frame_arena_range_handles_max_boundaries() @test {
     assert(high_exact.offset == usz::max - 1, "already-aligned high cursor is preserved");
     assert(high_exact.next_cursor == usz::max, "representable exact fit reaches usz::max");
 
-    gpu::vk::FrameArenaRange full_exact = gpu::vk::frame_arena_range(
+    gpu::compat::vk::FrameArenaRange full_exact = gpu::compat::vk::frame_arena_range(
         cursor: 0,
         capacity: usz::max,
         size: usz::max,
@@ -160,20 +160,20 @@ fn void frame_arena_range_handles_max_boundaries() @test {
     )!!;
     assert(full_exact.offset == 0 && full_exact.next_cursor == usz::max, "maximum capacity exact fit remains valid");
 
-    fault align_overflow = @catch(gpu::vk::frame_arena_range(
+    fault align_overflow = @catch(gpu::compat::vk::frame_arena_range(
         cursor: usz::max,
         capacity: usz::max,
         size: 1,
         align: 2,
     ));
-    fault extent_overflow = @catch(gpu::vk::frame_arena_range(
+    fault extent_overflow = @catch(gpu::compat::vk::frame_arena_range(
         cursor: usz::max - 1,
         capacity: usz::max,
         size: 2,
         align: 2,
     ));
-    assert(align_overflow == gpu::ARENA_FULL, "unrepresentable alignment faults ARENA_FULL");
-    assert(extent_overflow == gpu::ARENA_FULL, "unrepresentable extent faults ARENA_FULL");
+    assert(align_overflow == gpu::compat::ARENA_FULL, "unrepresentable alignment faults ARENA_FULL");
+    assert(extent_overflow == gpu::compat::ARENA_FULL, "unrepresentable extent faults ARENA_FULL");
 }
 
 struct FrameLifecycleSnapshot {
@@ -202,27 +202,27 @@ struct FrameLifecycleSnapshot {
 }
 
 fn void frame_token_owns_its_device_token_value() @test {
-    gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_frame_lifecycle_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::Device temporary = device;
-    gpu::FrameToken frame = gpu::begin_frame(&temporary)!!;
+    gpu::compat::Device temporary = device;
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&temporary)!!;
     temporary = {};
 
-    gpu::GpuSpan span = gpu::alloc_frame_span(&frame, 16, 16)!!;
+    gpu::compat::GpuSpan span = gpu::compat::alloc_frame_span(&frame, 16, 16)!!;
     assert(span.size == 16, "frame token remains usable after source device storage changes");
 
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
-fn gpu::Device make_frame_lifecycle_device(uint frames_in_flight = 1) {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+fn gpu::compat::Device make_frame_lifecycle_device(uint frames_in_flight = 1) {
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = frames_in_flight,
         .application_name  = "gpu_frame_lifecycle_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::compat::create_device(&desc)!!;
 }
 
 fn FrameLifecycleSnapshot frame_lifecycle_snapshot(vk::VkDeviceState* state) {
@@ -283,153 +283,153 @@ fn void assert_frame_lifecycle_unchanged(FrameLifecycleSnapshot before, FrameLif
 }
 
 fn void frame_span_allocation_requires_active_frame() @test {
-    gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_frame_lifecycle_device();
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
-    gpu::FrameToken frame;
+    gpu::compat::FrameToken frame;
     FrameLifecycleSnapshot before_begin = frame_lifecycle_snapshot(state);
-    fault before_fault = @catch(gpu::alloc_frame_span(&frame, 64, 16));
-    assert(before_fault == gpu::INVALID_HANDLE, "zero token faults INVALID_HANDLE");
+    fault before_fault = @catch(gpu::compat::alloc_frame_span(&frame, 64, 16));
+    assert(before_fault == gpu::compat::INVALID_HANDLE, "zero token faults INVALID_HANDLE");
     assert_frame_lifecycle_unchanged(before_begin, frame_lifecycle_snapshot(state));
 
-    frame = gpu::begin_frame(&device)!!;
-    gpu::FrameToken copy = frame;
-    gpu::GpuSpan span = gpu::alloc_frame_span(&copy, 64, 16)!!;
+    frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::FrameToken copy = frame;
+    gpu::compat::GpuSpan span = gpu::compat::alloc_frame_span(&copy, 64, 16)!!;
     assert(span.offset == 0, "active-frame allocation still succeeds");
-    gpu::end_frame(&frame)!!;
-    gpu::FrameToken malformed = { .device = device, .generation = frame.generation + 1 };
+    gpu::compat::end_frame(&frame)!!;
+    gpu::compat::FrameToken malformed = { .device = device, .generation = frame.generation + 1 };
     FrameLifecycleSnapshot before_malformed = frame_lifecycle_snapshot(state);
-    fault malformed_alloc = @catch(gpu::alloc_frame_span(&malformed, 64, 16));
-    fault malformed_end = @catch(gpu::end_frame(&malformed));
-    assert(malformed_alloc == gpu::INVALID_HANDLE, "wrong generation cannot allocate");
-    assert(malformed_end == gpu::INVALID_HANDLE, "wrong generation cannot end");
+    fault malformed_alloc = @catch(gpu::compat::alloc_frame_span(&malformed, 64, 16));
+    fault malformed_end = @catch(gpu::compat::end_frame(&malformed));
+    assert(malformed_alloc == gpu::compat::INVALID_HANDLE, "wrong generation cannot allocate");
+    assert(malformed_end == gpu::compat::INVALID_HANDLE, "wrong generation cannot end");
     assert_frame_lifecycle_unchanged(before_malformed, frame_lifecycle_snapshot(state));
 
 
     FrameLifecycleSnapshot after_end = frame_lifecycle_snapshot(state);
-    fault consumed_fault = @catch(gpu::alloc_frame_span(&frame, 64, 16));
-    fault stale_fault = @catch(gpu::alloc_frame_span(&copy, 64, 16));
-    assert(consumed_fault == gpu::INVALID_HANDLE, "consumed token faults INVALID_HANDLE");
-    fault stale_end = @catch(gpu::end_frame(&copy));
-    assert(stale_fault == gpu::INVALID_HANDLE, "stale alias faults INVALID_HANDLE");
+    fault consumed_fault = @catch(gpu::compat::alloc_frame_span(&frame, 64, 16));
+    fault stale_fault = @catch(gpu::compat::alloc_frame_span(&copy, 64, 16));
+    assert(consumed_fault == gpu::compat::INVALID_HANDLE, "consumed token faults INVALID_HANDLE");
+    fault stale_end = @catch(gpu::compat::end_frame(&copy));
+    assert(stale_fault == gpu::compat::INVALID_HANDLE, "stale alias faults INVALID_HANDLE");
     assert_frame_lifecycle_unchanged(after_end, frame_lifecycle_snapshot(state));
-    assert(stale_end == gpu::INVALID_HANDLE, "stale alias cannot end the next lifecycle");
+    assert(stale_end == gpu::compat::INVALID_HANDLE, "stale alias cannot end the next lifecycle");
 
-    frame = gpu::begin_frame(&device)!!;
+    frame = gpu::compat::begin_frame(&device)!!;
     FrameLifecycleSnapshot next_active = frame_lifecycle_snapshot(state);
-    fault next_alloc = @catch(gpu::alloc_frame_span(&copy, 64, 16));
-    fault next_end = @catch(gpu::end_frame(&copy));
-    assert(next_alloc == gpu::INVALID_HANDLE, "stale alias cannot allocate in a later active frame");
-    assert(next_end == gpu::INVALID_HANDLE, "stale alias cannot end a later active frame");
+    fault next_alloc = @catch(gpu::compat::alloc_frame_span(&copy, 64, 16));
+    fault next_end = @catch(gpu::compat::end_frame(&copy));
+    assert(next_alloc == gpu::compat::INVALID_HANDLE, "stale alias cannot allocate in a later active frame");
+    assert(next_end == gpu::compat::INVALID_HANDLE, "stale alias cannot end a later active frame");
     assert_frame_lifecycle_unchanged(next_active, frame_lifecycle_snapshot(state));
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
 fn void frame_generation_wraps_without_revalidating_stale_token() @test {
-    gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_frame_lifecycle_device();
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
     state.frame_generation = ulong::max;
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
     assert(frame.generation == 1, "frame generation wraps to the first valid value");
     assert(state.active_frame_generation == 1, "wrapped generation becomes active");
 
-    gpu::FrameToken stale = { .device = device, .generation = ulong::max };
+    gpu::compat::FrameToken stale = { .device = device, .generation = ulong::max };
     FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
-    fault alloc_fault = @catch(gpu::alloc_frame_span(&stale, 64, 16));
-    fault end_fault = @catch(gpu::end_frame(&stale));
-    assert(alloc_fault == gpu::INVALID_HANDLE, "pre-wrap token cannot allocate in the wrapped frame");
-    assert(end_fault == gpu::INVALID_HANDLE, "pre-wrap token cannot end the wrapped frame");
+    fault alloc_fault = @catch(gpu::compat::alloc_frame_span(&stale, 64, 16));
+    fault end_fault = @catch(gpu::compat::end_frame(&stale));
+    assert(alloc_fault == gpu::compat::INVALID_HANDLE, "pre-wrap token cannot allocate in the wrapped frame");
+    assert(end_fault == gpu::compat::INVALID_HANDLE, "pre-wrap token cannot end the wrapped frame");
     assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
 
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
 fn void end_before_begin_is_atomic() @test {
-    gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_frame_lifecycle_device();
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
     state.compute_used_since_frame = true;
     state.transfer_used_since_frame = true;
     state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
 
-    gpu::FrameToken frame;
+    gpu::compat::FrameToken frame;
     FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
-    fault rejected = @catch(gpu::end_frame(&frame));
-    assert(rejected == gpu::INVALID_HANDLE, "end without a token faults INVALID_HANDLE");
+    fault rejected = @catch(gpu::compat::end_frame(&frame));
+    assert(rejected == gpu::compat::INVALID_HANDLE, "end without a token faults INVALID_HANDLE");
     assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
 
-    frame = gpu::begin_frame(&device)!!;
-    gpu::end_frame(&frame)!!;
+    frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
 fn void double_end_is_atomic() @test {
-    gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_frame_lifecycle_device();
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::end_frame(&frame)!!;
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::end_frame(&frame)!!;
     FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
-    fault rejected = @catch(gpu::end_frame(&frame));
-    assert(rejected == gpu::INVALID_HANDLE, "double end faults INVALID_HANDLE");
+    fault rejected = @catch(gpu::compat::end_frame(&frame));
+    assert(rejected == gpu::compat::INVALID_HANDLE, "double end faults INVALID_HANDLE");
     assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
 
-    frame = gpu::begin_frame(&device)!!;
-    gpu::end_frame(&frame)!!;
+    frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
 fn void double_begin_single_slot_is_atomic() @test {
-    gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_frame_lifecycle_device();
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    (void)gpu::alloc_frame_span(&frame, 64, 16)!!;
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
+    (void)gpu::compat::alloc_frame_span(&frame, 64, 16)!!;
     vk::RecordingContextState* context = state.recording_contexts.get(state.default_context)!!;
     context.pool_dirty[state.frame_index].graphics = true;
 
     FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
-    fault rejected = @catch(gpu::begin_frame(&device));
-    assert(rejected == gpu::INVALID_RESOURCE_STATE, "double begin faults INVALID_RESOURCE_STATE");
+    fault rejected = @catch(gpu::compat::begin_frame(&device));
+    assert(rejected == gpu::compat::INVALID_RESOURCE_STATE, "double begin faults INVALID_RESOURCE_STATE");
     assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
 
     context.pool_dirty[state.frame_index].graphics = false;
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
 fn void double_begin_default_slots_is_atomic() @test {
-    gpu::Device device = make_frame_lifecycle_device(2);
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_frame_lifecycle_device(2);
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    (void)gpu::alloc_frame_span(&frame, 64, 16)!!;
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
+    (void)gpu::compat::alloc_frame_span(&frame, 64, 16)!!;
 
     FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
-    fault rejected = @catch(gpu::begin_frame(&device));
-    assert(rejected == gpu::INVALID_RESOURCE_STATE,
+    fault rejected = @catch(gpu::compat::begin_frame(&device));
+    assert(rejected == gpu::compat::INVALID_RESOURCE_STATE,
         "double begin faults independently of frame-slot retirement");
     assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
 
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
 fn void frame_arena_alloc_and_reset() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
         .application_name  = "gpu_frame_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
 
-    gpu::GpuSpan a = gpu::alloc_frame_span(&frame, 100, 16)!!;
+    gpu::compat::GpuSpan a = gpu::compat::alloc_frame_span(&frame, 100, 16)!!;
     assert(a.cpu != null, "arena span is mapped");
     assert(a.offset == 0, "first allocation offset is 0");
     assert((ulong)a.gpu != 0, "arena GPU address is non-zero");
@@ -437,84 +437,84 @@ fn void frame_arena_alloc_and_reset() @test {
     ulong base_gpu = (ulong)a.gpu;
     char* base_cpu = (char*)a.cpu;
 
-    gpu::GpuSpan b = gpu::alloc_frame_span(&frame, 50, 64)!!;
+    gpu::compat::GpuSpan b = gpu::compat::alloc_frame_span(&frame, 50, 64)!!;
     assert(b.offset == 128, "second allocation aligns up to 64 (align_up(100,64)=128)");
     assert((ulong)b.gpu == base_gpu + 128, "GPU address is base + aligned offset");
     assert((char*)b.cpu == base_cpu + 128, "CPU pointer is base + aligned offset");
 
-    fault full = @catch(gpu::alloc_frame_span(&frame, gpu::DEFAULT_FRAME_ARENA_SIZE, 16));
-    assert(full == gpu::ARENA_FULL, "over-allocation returns ARENA_FULL");
+    fault full = @catch(gpu::compat::alloc_frame_span(&frame, gpu::compat::DEFAULT_FRAME_ARENA_SIZE, 16));
+    assert(full == gpu::compat::ARENA_FULL, "over-allocation returns ARENA_FULL");
 
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 
     // Next frame slot: cursor reset to 0.
-    frame = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan c = gpu::alloc_frame_span(&frame, 10, 16)!!;
+    frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::GpuSpan c = gpu::compat::alloc_frame_span(&frame, 10, 16)!!;
     assert(c.offset == 0, "new frame slot starts at offset 0");
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 
     // Wrap back to the first slot (waits on its host-signaled timeline value).
-    frame = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan d = gpu::alloc_frame_span(&frame, 10, 16)!!;
+    frame = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::GpuSpan d = gpu::compat::alloc_frame_span(&frame, 10, 16)!!;
     assert(d.offset == 0, "wrapped slot cursor is reset");
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
 fn void reset_before_retire_rejected() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::DeviceDesc desc = { .backend = gpu::compat::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
     // Slot demands a timeline value the counter has not reached.
     state.frame_arenas[0].frame_timeline_value = 999;
-    fault rejected = @catch(gpu::vk::reset_frame_arena(state, 0));
-    assert(rejected == gpu::INVALID_RESOURCE_STATE, "premature reset returns INVALID_RESOURCE_STATE");
+    fault rejected = @catch(gpu::compat::vk::reset_frame_arena(state, 0));
+    assert(rejected == gpu::compat::INVALID_RESOURCE_STATE, "premature reset returns INVALID_RESOURCE_STATE");
 
     // A retired slot resets fine.
     state.frame_arenas[0].frame_timeline_value = 0;
-    assert(!@catch(gpu::vk::reset_frame_arena(state, 0)), "retired slot may be reset");
+    assert(!@catch(gpu::compat::vk::reset_frame_arena(state, 0)), "retired slot may be reset");
 }
 
 fn void custom_frame_arena_size_holds_larger_spans() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
         .frame_arena_size  = 32 << 20,
         .application_name  = "gpu_frame_arena_size_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
     // Well past the old 1 MiB default and the 16 MiB current default.
-    gpu::GpuSpan span = gpu::alloc_frame_span(&frame, 20 << 20, 16)!!;
+    gpu::compat::GpuSpan span = gpu::compat::alloc_frame_span(&frame, 20 << 20, 16)!!;
     assert(span.size == 20 << 20, "oversized span allocates in a custom-sized arena");
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 }
 
 fn void frame_upload_memory_is_coherent() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
         .application_name  = "gpu_coherency_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferDesc buf_desc = {
+    gpu::compat::BufferDesc buf_desc = {
         .size        = 256,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.FRAME_UPLOAD,
         .debug_name  = "coherency_probe",
     };
-    gpu::BufferHandle buf = gpu::create_buffer(&device, &buf_desc)!!;
-    defer gpu::destroy_buffer(&device, buf)!!;
+    gpu::compat::BufferHandle buf = gpu::compat::create_buffer(&device, &buf_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, buf)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
     vk::BufferSlot* slot = state.buffers.get(buf)!!;
     vk::MemoryPropertyFlags props = state.allocator.allocation_memory_properties(slot.allocation);
     assert(((uint)props & (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT) != 0,
@@ -523,14 +523,14 @@ fn void frame_upload_memory_is_coherent() @test {
 
 fn void frame_contract_rejections_report_exact_context() @test {
     FrameDiagnosticCapture capture;
-    gpu::Device device = make_diagnostic_frame_device(&capture);
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::compat::Device device = make_diagnostic_frame_device(&capture);
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&device)!!;
 
     uint before = capture.calls;
-    fault rejected = @catch(gpu::begin_frame(&device));
-    assert(rejected == gpu::INVALID_RESOURCE_STATE, "double begin keeps its fault");
+    fault rejected = @catch(gpu::compat::begin_frame(&device));
+    assert(rejected == gpu::compat::INVALID_RESOURCE_STATE, "double begin keeps its fault");
     assert_frame_diagnostic(
         capture:   &capture,
         before:    before,
@@ -541,8 +541,8 @@ fn void frame_contract_rejections_report_exact_context() @test {
     );
 
     before = capture.calls;
-    rejected = @catch(gpu::alloc_frame_span(&frame, 0, 0));
-    assert(rejected == gpu::INVALID_ARGUMENT, "ambiguous allocation keeps INVALID_ARGUMENT");
+    rejected = @catch(gpu::compat::alloc_frame_span(&frame, 0, 0));
+    assert(rejected == gpu::compat::INVALID_ARGUMENT, "ambiguous allocation keeps INVALID_ARGUMENT");
     assert_frame_diagnostic(
         capture:   &capture,
         before:    before,
@@ -553,7 +553,7 @@ fn void frame_contract_rejections_report_exact_context() @test {
     );
 
     before = capture.calls;
-    rejected = @catch(gpu::alloc_frame_span(&frame, 0, 16));
+    rejected = @catch(gpu::compat::alloc_frame_span(&frame, 0, 16));
     assert_frame_diagnostic(
         capture:   &capture,
         before:    before,
@@ -564,8 +564,8 @@ fn void frame_contract_rejections_report_exact_context() @test {
     );
 
     before = capture.calls;
-    rejected = @catch(gpu::alloc_frame_span(&frame, gpu::DEFAULT_FRAME_ARENA_SIZE + 1, 16));
-    assert(rejected == gpu::ARENA_FULL, "frame exhaustion keeps ARENA_FULL");
+    rejected = @catch(gpu::compat::alloc_frame_span(&frame, gpu::compat::DEFAULT_FRAME_ARENA_SIZE + 1, 16));
+    assert(rejected == gpu::compat::ARENA_FULL, "frame exhaustion keeps ARENA_FULL");
     assert_frame_diagnostic(
         capture:   &capture,
         before:    before,
@@ -575,11 +575,11 @@ fn void frame_contract_rejections_report_exact_context() @test {
         field:     "size",
     );
 
-    gpu::FrameToken stale = frame;
-    gpu::end_frame(&frame)!!;
+    gpu::compat::FrameToken stale = frame;
+    gpu::compat::end_frame(&frame)!!;
     before = capture.calls;
-    rejected = @catch(gpu::alloc_frame_span(&stale, 16, 16));
-    assert(rejected == gpu::INVALID_HANDLE, "stale allocation keeps INVALID_HANDLE");
+    rejected = @catch(gpu::compat::alloc_frame_span(&stale, 16, 16));
+    assert(rejected == gpu::compat::INVALID_HANDLE, "stale allocation keeps INVALID_HANDLE");
     assert_frame_diagnostic(
         capture:   &capture,
         before:    before,
@@ -589,11 +589,11 @@ fn void frame_contract_rejections_report_exact_context() @test {
         field:     "FrameToken.generation",
     );
 
-    frame = gpu::begin_frame(&device)!!;
+    frame = gpu::compat::begin_frame(&device)!!;
     state.inflight_calls.add(1, AtomicOrdering.RELAXED);
     before = capture.calls;
-    rejected = @catch(gpu::end_frame(&frame));
-    assert(rejected == gpu::INVALID_RESOURCE_STATE, "blocked end keeps INVALID_RESOURCE_STATE");
+    rejected = @catch(gpu::compat::end_frame(&frame));
+    assert(rejected == gpu::compat::INVALID_RESOURCE_STATE, "blocked end keeps INVALID_RESOURCE_STATE");
     assert_frame_diagnostic(
         capture:   &capture,
         before:    before,
@@ -604,11 +604,11 @@ fn void frame_contract_rejections_report_exact_context() @test {
     );
     assert(frame.device == device && state.frame_active, "blocked end preserves the live frame");
     state.inflight_calls.sub(1, AtomicOrdering.RELAXED);
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_frame(&frame)!!;
 
     state.inflight_calls.add(1, AtomicOrdering.RELAXED);
     before = capture.calls;
-    rejected = @catch(gpu::begin_frame(&device));
+    rejected = @catch(gpu::compat::begin_frame(&device));
     assert_frame_diagnostic(
         capture:   &capture,
         before:    before,
@@ -622,9 +622,9 @@ fn void frame_contract_rejections_report_exact_context() @test {
 
 fn void frame_backend_result_helpers_report_without_fault_drift() @test {
     FrameDiagnosticCapture capture;
-    gpu::Device device = make_diagnostic_frame_device(&capture);
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_diagnostic_frame_device(&capture);
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
     uint before = capture.calls;
     fault query_fault = @catch(vk::frame_timeline_value_with_query(
@@ -632,7 +632,7 @@ fn void frame_backend_result_helpers_report_without_fault_drift() @test {
         operation: "begin_frame",
         query_fn:  &reject_frame_counter_query,
     ));
-    assert(query_fault == gpu::DEVICE_LOST, "counter query keeps DEVICE_LOST");
+    assert(query_fault == gpu::compat::DEVICE_LOST, "counter query keeps DEVICE_LOST");
     assert(capture.calls == before + 1, "counter query emits exactly once");
     assert(capture.last.category.backend, "counter query is a backend diagnostic");
     assert(((ZString)&capture.operation[0]).str_view() == "begin_frame", "counter query names begin_frame");
@@ -643,15 +643,15 @@ fn void frame_backend_result_helpers_report_without_fault_drift() @test {
         operation: "begin_frame",
         result:    vk::Result.TIMEOUT,
     ));
-    assert(timeout == gpu::WAIT_TIMEOUT, "operation-aware wait keeps WAIT_TIMEOUT");
+    assert(timeout == gpu::compat::WAIT_TIMEOUT, "operation-aware wait keeps WAIT_TIMEOUT");
     assert(capture.calls == before, "expected wait timeout remains silent");
     before = capture.calls;
     fault mismatch = @catch(vk::report_unretired_frame(state));
-    assert(mismatch == gpu::INVALID_RESOURCE_STATE,
+    assert(mismatch == gpu::compat::INVALID_RESOURCE_STATE,
         "successful-wait retirement mismatch keeps INVALID_RESOURCE_STATE");
     assert(capture.calls == before + 1, "retirement mismatch emits exactly once");
     assert(capture.last.category.backend, "retirement mismatch is backend/internal");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.FRAME,
+    assert(capture.last.resource.kind == gpu::compat::DebugResourceKind.FRAME,
         "retirement mismatch identifies frame context");
     assert(!capture.last.resource.has_public_identity,
         "retirement mismatch invents no public identity");
@@ -663,13 +663,13 @@ fn void frame_backend_result_helpers_report_without_fault_drift() @test {
 
 fn void failed_frame_retirement_query_preserves_begin_state() @test {
     FrameDiagnosticCapture capture;
-    gpu::Device device = make_diagnostic_frame_device(&capture, 2);
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_diagnostic_frame_device(&capture, 2);
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
     FrameLifecycleSnapshot before_state = frame_lifecycle_snapshot(state);
     assert(state.frames_in_flight == 2 && state.frame_index == 0,
         "retirement rollback test starts before a distinct next frame slot");
-    gpu::FrameToken frame;
+    gpu::compat::FrameToken frame;
     uint before_calls = capture.calls;
 
     fault query_fault = @catch(vk::begin_frame_with_counter_query(
@@ -678,7 +678,7 @@ fn void failed_frame_retirement_query_preserves_begin_state() @test {
         query_fn:  &reject_frame_counter_query,
     ));
 
-    assert(query_fault == gpu::DEVICE_LOST, "begin retirement query keeps DEVICE_LOST");
+    assert(query_fault == gpu::compat::DEVICE_LOST, "begin retirement query keeps DEVICE_LOST");
     assert(capture.calls == before_calls + 1, "begin retirement query emits exactly once");
     assert(capture.last.category.backend, "begin retirement query is a backend diagnostic");
     assert(((ZString)&capture.operation[0]).str_view() == "begin_frame",

@@ -1,7 +1,7 @@
 # Getting started
 
-This walkthrough builds a minimal compute program on Linux or Windows. CI
-compiles and runs the embedded project on lavapipe.
+This walkthrough builds a minimal `gpu::compat` compute program on Linux or
+Windows. CI compiles and runs the embedded project on lavapipe.
 
 ## 1. Toolchain
 
@@ -166,23 +166,23 @@ C3 optionals throughout — `!` propagates, no error codes to check:
 ```c3 file=hello_gpu/src/main.c3
 module hello_gpu;
 
-import gpu;
+import gpu::compat;
 import std::io;
 
 const char[*] DOUBLER_SPIRV = $embed("../shaders/doubler.comp.spv");
 const uint COUNT = 256;
 
 struct DoublerRoot {
-    gpu::GpuAddress input_gpu;
-    gpu::GpuAddress output_gpu;
+    gpu::compat::GpuAddress input_gpu;
+    gpu::compat::GpuAddress output_gpu;
     uint            count;
 }
 
 struct FrameWork {
-    gpu::Device*         device;
-    gpu::BufferHandle    input;
-    gpu::BufferHandle    output;
-    gpu::PipelineHandle  pipeline;
+    gpu::compat::Device*         device;
+    gpu::compat::BufferHandle    input;
+    gpu::compat::BufferHandle    output;
+    gpu::compat::PipelineHandle  pipeline;
 }
 
 fn int main() {
@@ -195,42 +195,42 @@ fn int main() {
 }
 
 fn void? run() {
-    gpu::DeviceDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc device_desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
         .application_name  = "hello_gpu",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!;
-    defer (void)gpu::destroy_device(&device);
+    gpu::compat::Device device = gpu::compat::create_device(&device_desc)!;
+    defer (void)gpu::compat::destroy_device(&device);
 
-    gpu::BufferDesc io_desc = {
+    gpu::compat::BufferDesc io_desc = {
         .size        = COUNT * float::size,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.PERSISTENT_UPLOAD,
         .debug_name  = "io",
     };
-    gpu::BufferHandle input = gpu::create_buffer(&device, &io_desc)!;
-    defer (void)gpu::destroy_buffer(&device, input);
-    gpu::BufferHandle output = gpu::create_buffer(&device, &io_desc)!;
-    defer (void)gpu::destroy_buffer(&device, output);
+    gpu::compat::BufferHandle input = gpu::compat::create_buffer(&device, &io_desc)!;
+    defer (void)gpu::compat::destroy_buffer(&device, input);
+    gpu::compat::BufferHandle output = gpu::compat::create_buffer(&device, &io_desc)!;
+    defer (void)gpu::compat::destroy_buffer(&device, output);
 
-    gpu::GpuSpan in_span = gpu::get_buffer_span(&device, input)!;
+    gpu::compat::GpuSpan in_span = gpu::compat::get_buffer_span(&device, input)!;
     float* in_data = (float*)in_span.cpu;
     for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
-    gpu::flush_buffer(&device, input, 0, 0)!;
+    gpu::compat::flush_buffer(&device, input, 0, 0)!;
 
-    gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
+    gpu::compat::ShaderDesc shader_desc = {
+        .stage       = gpu::compat::ShaderStage.COMPUTE,
         .spirv       = DOUBLER_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &shader_desc)!;
-    defer (void)gpu::destroy_shader(&device, shader);
+    gpu::compat::ShaderHandle shader = gpu::compat::create_shader(&device, &shader_desc)!;
+    defer (void)gpu::compat::destroy_shader(&device, shader);
 
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
-    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!;
-    defer (void)gpu::destroy_pipeline(&device, pipeline);
+    gpu::compat::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::compat::RootPush::size };
+    gpu::compat::PipelineHandle pipeline = gpu::compat::create_compute_pipeline(&device, &pipe_desc)!;
+    defer (void)gpu::compat::destroy_pipeline(&device, pipeline);
 
     FrameWork frame_work = {
         .device   = &device,
@@ -238,46 +238,46 @@ fn void? run() {
         .output   = output,
         .pipeline = pipeline,
     };
-    gpu::FrameToken frame;
-    if (catch frame_err = gpu::@with_frame(&frame, &device, run_frame, &frame_work)) {
-        if (frame.is_valid()) gpu::end_frame(&frame)!;
+    gpu::compat::FrameToken frame;
+    if (catch frame_err = gpu::compat::@with_frame(&frame, &device, run_frame, &frame_work)) {
+        if (frame.is_valid()) gpu::compat::end_frame(&frame)!;
         return frame_err~;
     }
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!;
-    gpu::invalidate_buffer(&device, output, 0, 0)!;
+    gpu::compat::GpuSpan out_span = gpu::compat::get_buffer_span(&device, output)!;
+    gpu::compat::invalidate_buffer(&device, output, 0, 0)!;
     float* out_data = (float*)out_span.cpu;
     for (uint i = 0; i < COUNT; i++) {
-        if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
+        if (out_data[i] != (float)i * 2.0f) return gpu::compat::INVALID_ARGUMENT~;
     }
 }
 
-fn void? run_frame(gpu::FrameToken* frame, FrameWork* work) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, DoublerRoot::size, 16)!;
+fn void? run_frame(gpu::compat::FrameToken* frame, FrameWork* work) {
+    gpu::compat::GpuSpan root_span = gpu::compat::alloc_frame_span(frame, DoublerRoot::size, 16)!;
     DoublerRoot* root = (DoublerRoot*)root_span.cpu;
-    root.input_gpu  = gpu::get_buffer_address(work.device, work.input)!;
-    root.output_gpu = gpu::get_buffer_address(work.device, work.output)!;
+    root.input_gpu  = gpu::compat::get_buffer_address(work.device, work.input)!;
+    root.output_gpu = gpu::compat::get_buffer_address(work.device, work.output)!;
     root.count      = COUNT;
 
-    gpu::CommandList cmd = gpu::begin_commands(work.device, gpu::QueueKind.COMPUTE)!;
-    gpu::cmd_dispatch(
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(work.device, gpu::compat::QueueKind.COMPUTE)!;
+    gpu::compat::cmd_dispatch(
         commands: &cmd,
         pipeline: work.pipeline,
         root:     root_span.gpu,
         groups:   { (COUNT + 63) / 64, 1, 1 },
     )!;
-    gpu::BufferBarrier to_host = {
+    gpu::compat::BufferBarrier to_host = {
         .buffer = work.output, .offset = 0, .size = COUNT * float::size,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+        .before_stage = gpu::compat::Stage.COMPUTE_SHADER, .after_stage = gpu::compat::Stage.HOST,
+        .before_hazard = gpu::compat::Hazard.SHADER_WRITE, .after_hazard = gpu::compat::Hazard.HOST_READ,
     };
-    gpu::cmd_buffer_barrier(&cmd, &to_host)!;
-    gpu::end_commands(&cmd)!;
+    gpu::compat::cmd_buffer_barrier(&cmd, &to_host)!;
+    gpu::compat::end_commands(&cmd)!;
 
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(work.device, &submit)!;
-    gpu::wait_queue_idle(work.device, gpu::QueueKind.COMPUTE)!;
+    gpu::compat::CommandList[1] lists = { cmd };
+    gpu::compat::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::compat::submit(work.device, &submit)!;
+    gpu::compat::wait_queue_idle(work.device, gpu::compat::QueueKind.COMPUTE)!;
 }
 ```
 

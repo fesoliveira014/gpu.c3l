@@ -1,4 +1,4 @@
-module gpu;
+module gpu::compat;
 
 struct DiagnosticCapture {
     uint              calls;

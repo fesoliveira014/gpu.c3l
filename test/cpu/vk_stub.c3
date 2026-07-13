@@ -1,10 +1,10 @@
-module gpu::vk @private;
+module gpu::compat::vk @private;
 
-import gpu;
+import gpu::compat;
 
-// CPU-lane stub: satisfies the public module's backend routing so it
-// compiles without the real backend or native libraries. Creating a device
-// through it faults; the CPU tests never do.
-fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
-    return gpu::UNSUPPORTED_BACKEND~;
+uint create_device_calls;
+
+fn gpu::compat::Device? create_vk_device(gpu::compat::DeviceDesc* desc) {
+    create_device_calls++;
+    return gpu::compat::UNSUPPORTED_BACKEND~;
 }

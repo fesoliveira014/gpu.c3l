@@ -1,7 +1,7 @@
 module gpu_test;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import vk;
 import std::core::mem;
 import std::io;
@@ -17,11 +17,11 @@ const usz STAGING_REUSE_BYTES = 64;
 
 struct TransferDiagnosticCapture {
     uint                      calls;
-    gpu::DebugMessageSeverity severity;
-    gpu::DebugMessageCategory category;
+    gpu::compat::DebugMessageSeverity severity;
+    gpu::compat::DebugMessageCategory category;
     bool                      has_fault;
     fault                     public_fault;
-    gpu::DebugResourceKind    resource_kind;
+    gpu::compat::DebugResourceKind    resource_kind;
     bool                      has_public_identity;
     uint                      resource_index;
     uint                      resource_generation;
@@ -35,9 +35,9 @@ struct TransferDiagnosticCapture {
 }
 
 struct StagingReuseFixture {
-    gpu::Device device;
-    gpu::BufferHandle[2] buffers;
-    gpu::GpuSpan[2] spans;
+    gpu::compat::Device device;
+    gpu::compat::BufferHandle[2] buffers;
+    gpu::compat::GpuSpan[2] spans;
 }
 
 fn void copy_transfer_diagnostic_text(char* destination, usz capacity, ZString source) {
@@ -51,7 +51,7 @@ fn void copy_transfer_diagnostic_text(char* destination, usz capacity, ZString s
     destination[index] = 0;
 }
 
-fn void capture_transfer_diagnostic(gpu::DebugMessage* message, void* user_data) {
+fn void capture_transfer_diagnostic(gpu::compat::DebugMessage* message, void* user_data) {
     TransferDiagnosticCapture* capture = (TransferDiagnosticCapture*)user_data;
     capture.calls++;
     capture.severity = message.severity;
@@ -78,14 +78,14 @@ fn void assert_transfer_rejection(
     ZString operation,
     ZString rejected_field,
     ZString invariant,
-    gpu::DebugResourceKind resource_kind,
+    gpu::compat::DebugResourceKind resource_kind,
     bool has_public_identity,
     uint resource_index,
     uint resource_generation,
     ZString resource_name,
 ) {
     assert(capture.calls == before + 1, "transfer rejection emits exactly one diagnostic");
-    assert(capture.severity == gpu::DebugMessageSeverity.ERROR, "transfer rejection severity is ERROR");
+    assert(capture.severity == gpu::compat::DebugMessageSeverity.ERROR, "transfer rejection severity is ERROR");
     assert(capture.category.public_contract, "transfer rejection category is public_contract");
     assert(((ZString)&capture.operation[0]).str_view() == operation.str_view(), "transfer operation is exact");
     assert(capture.has_fault && capture.public_fault == returned, "transfer diagnostic fault matches return");
@@ -102,13 +102,13 @@ fn void assert_transfer_rejection(
     }
 }
 
-fn gpu::Device make_transfer_test_device(
+fn gpu::compat::Device make_transfer_test_device(
     usz staging_size = 0,
     usz readback_size = 0,
     TransferDiagnosticCapture* capture = null,
 ) {
-    gpu::DeviceDesc desc = {
-        .backend            = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend            = gpu::compat::BackendKind.VULKAN,
         .enable_validation  = capture == null,
         .frames_in_flight   = 2,
         .staging_arena_size = staging_size,
@@ -117,24 +117,24 @@ fn gpu::Device make_transfer_test_device(
         .debug_callback     = capture == null ? null : &capture_transfer_diagnostic,
         .debug_user_data    = capture,
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::compat::create_device(&desc)!!;
 }
 
 fn StagingReuseFixture make_staging_reuse_fixture() {
     StagingReuseFixture fixture;
     fixture.device = make_transfer_test_device(staging_size: STAGING_REUSE_BYTES);
-    gpu::BufferDesc desc = { .size = STAGING_REUSE_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK };
+    gpu::compat::BufferDesc desc = { .size = STAGING_REUSE_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::compat::MemoryKind.READBACK };
     for (uint i = 0; i < 2; i++) {
-        fixture.buffers[i] = gpu::create_buffer(&fixture.device, &desc)!!;
-        fixture.spans[i] = gpu::get_buffer_span(&fixture.device, fixture.buffers[i])!!;
+        fixture.buffers[i] = gpu::compat::create_buffer(&fixture.device, &desc)!!;
+        fixture.spans[i] = gpu::compat::get_buffer_span(&fixture.device, fixture.buffers[i])!!;
     }
     return fixture;
 }
 
 fn void destroy_staging_reuse_fixture(StagingReuseFixture* fixture) {
-    gpu::destroy_buffer(&fixture.device, fixture.buffers[1])!!;
-    gpu::destroy_buffer(&fixture.device, fixture.buffers[0])!!;
-    gpu::destroy_device(&fixture.device)!!;
+    gpu::compat::destroy_buffer(&fixture.device, fixture.buffers[1])!!;
+    gpu::compat::destroy_buffer(&fixture.device, fixture.buffers[0])!!;
+    gpu::compat::destroy_device(&fixture.device)!!;
 }
 
 fn void fill_staging_payload(char[] payload, uint seed) {
@@ -142,7 +142,7 @@ fn void fill_staging_payload(char[] payload, uint seed) {
 }
 
 fn void verify_staging_payload(StagingReuseFixture* fixture, uint index, char[] expected) {
-    gpu::invalidate_buffer(
+    gpu::compat::invalidate_buffer(
         device: &fixture.device,
         buffer: fixture.buffers[index],
         offset: 0,
@@ -153,50 +153,50 @@ fn void verify_staging_payload(StagingReuseFixture* fixture, uint index, char[] 
 }
 
 fn void blocking_staging_upload(StagingReuseFixture* fixture, char[] payload) {
-    gpu::upload_buffer_data(
+    gpu::compat::upload_buffer_data(
         device:      &fixture.device,
         dst:         fixture.buffers[0],
         offset:      0,
         data:        payload,
-        next_stage:  gpu::Stage.HOST,
-        next_hazard: gpu::Hazard.HOST_READ,
+        next_stage:  gpu::compat::Stage.HOST,
+        next_hazard: gpu::compat::Hazard.HOST_READ,
     )!!;
     verify_staging_payload(fixture, 0, payload);
 }
 
 <* Waits for frame retirement so the next upload can reuse physical offset zero. *>
-fn void recorded_staging_upload(StagingReuseFixture* fixture, gpu::QueueKind queue, uint index, char[] payload) {
-    gpu::FrameToken frame = gpu::begin_frame(&fixture.device)!!;
-    gpu::CommandList commands = gpu::begin_commands(&fixture.device, queue)!!;
-    gpu::cmd_upload_buffer(
+fn void recorded_staging_upload(StagingReuseFixture* fixture, gpu::compat::QueueKind queue, uint index, char[] payload) {
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(&fixture.device)!!;
+    gpu::compat::CommandList commands = gpu::compat::begin_commands(&fixture.device, queue)!!;
+    gpu::compat::cmd_upload_buffer(
         commands: &commands,
         dst:      fixture.buffers[index],
         offset:   0,
         data:     payload,
     )!!;
-    gpu::BufferBarrier host_read = {
+    gpu::compat::BufferBarrier host_read = {
         .buffer = fixture.buffers[index], .offset = 0, .size = payload.len,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+        .before_stage = gpu::compat::Stage.TRANSFER, .after_stage = gpu::compat::Stage.HOST,
+        .before_hazard = gpu::compat::Hazard.TRANSFER_WRITE, .after_hazard = gpu::compat::Hazard.HOST_READ,
     };
-    gpu::cmd_buffer_barrier(&commands, &host_read)!!;
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&fixture.device, &submit)!!;
-    gpu::wait_queue_idle(&fixture.device, queue)!!;
-    gpu::end_frame(&frame)!!;
-    gpu::wait_queue_idle(&fixture.device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::cmd_buffer_barrier(&commands, &host_read)!!;
+    gpu::compat::end_commands(&commands)!!;
+    gpu::compat::CommandList[1] lists = { commands };
+    gpu::compat::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::compat::submit(&fixture.device, &submit)!!;
+    gpu::compat::wait_queue_idle(&fixture.device, queue)!!;
+    gpu::compat::end_frame(&frame)!!;
+    gpu::compat::wait_queue_idle(&fixture.device, gpu::compat::QueueKind.GRAPHICS)!!;
     verify_staging_payload(fixture, index, payload);
 }
 
-fn void run_blocking_to_recorded_reuse(StagingReuseFixture* fixture, gpu::QueueKind queue, uint first_seed, uint second_seed) {
+fn void run_blocking_to_recorded_reuse(StagingReuseFixture* fixture, gpu::compat::QueueKind queue, uint first_seed, uint second_seed) {
     char[STAGING_REUSE_BYTES] first_payload;
     char[STAGING_REUSE_BYTES] second_payload;
     fill_staging_payload(first_payload[..], first_seed);
     fill_staging_payload(second_payload[..], second_seed);
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(fixture.device);
-    ulong fallbacks = gpu::vk::dedicated_fallback_count(state);
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(fixture.device);
+    ulong fallbacks = gpu::compat::vk::dedicated_fallback_count(state);
     blocking_staging_upload(fixture, first_payload[..]);
     recorded_staging_upload(
         fixture: fixture,
@@ -204,13 +204,13 @@ fn void run_blocking_to_recorded_reuse(StagingReuseFixture* fixture, gpu::QueueK
         index:   1,
         payload: second_payload[..],
     );
-    assert(gpu::vk::dedicated_fallback_count(state) == fallbacks, "cross-family reuse stays on the staging ring");
+    assert(gpu::compat::vk::dedicated_fallback_count(state) == fallbacks, "cross-family reuse stays on the staging ring");
 }
 
 fn void staging_range_reuse_blocking_graphics_to_recorded_compute() @test {
     StagingReuseFixture fixture = make_staging_reuse_fixture();
     defer destroy_staging_reuse_fixture(&fixture);
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(fixture.device);
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(fixture.device);
     if (state.graphics_family == state.compute_family) {
         io::eprintfn(
             "staging_range_reuse_blocking_graphics_to_recorded_compute: N/A graphics=%d compute=%d transfer=%d",
@@ -222,7 +222,7 @@ fn void staging_range_reuse_blocking_graphics_to_recorded_compute() @test {
     }
     run_blocking_to_recorded_reuse(
         fixture:    &fixture,
-        queue:      gpu::QueueKind.COMPUTE,
+        queue:      gpu::compat::QueueKind.COMPUTE,
         first_seed: 11,
         second_seed: 97,
     );
@@ -237,7 +237,7 @@ fn void staging_range_reuse_blocking_graphics_to_recorded_compute() @test {
 fn void staging_range_reuse_blocking_graphics_to_recorded_transfer() @test {
     StagingReuseFixture fixture = make_staging_reuse_fixture();
     defer destroy_staging_reuse_fixture(&fixture);
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(fixture.device);
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(fixture.device);
     if (state.graphics_family == state.transfer_family) {
         io::eprintfn(
             "staging_range_reuse_blocking_graphics_to_recorded_transfer: N/A graphics=%d compute=%d transfer=%d",
@@ -249,7 +249,7 @@ fn void staging_range_reuse_blocking_graphics_to_recorded_transfer() @test {
     }
     run_blocking_to_recorded_reuse(
         fixture:    &fixture,
-        queue:      gpu::QueueKind.TRANSFER,
+        queue:      gpu::compat::QueueKind.TRANSFER,
         first_seed: 23,
         second_seed: 131,
     );
@@ -264,7 +264,7 @@ fn void staging_range_reuse_blocking_graphics_to_recorded_transfer() @test {
 fn void staging_range_reuse_recorded_compute_to_recorded_transfer() @test {
     StagingReuseFixture fixture = make_staging_reuse_fixture();
     defer destroy_staging_reuse_fixture(&fixture);
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(fixture.device);
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(fixture.device);
     if (state.compute_family == state.transfer_family) {
         io::eprintfn(
             "staging_range_reuse_recorded_compute_to_recorded_transfer: N/A graphics=%d compute=%d transfer=%d",
@@ -278,20 +278,20 @@ fn void staging_range_reuse_recorded_compute_to_recorded_transfer() @test {
     char[STAGING_REUSE_BYTES] second_payload;
     fill_staging_payload(first_payload[..], 41);
     fill_staging_payload(second_payload[..], 173);
-    ulong fallbacks = gpu::vk::dedicated_fallback_count(state);
+    ulong fallbacks = gpu::compat::vk::dedicated_fallback_count(state);
     recorded_staging_upload(
         fixture: &fixture,
-        queue:   gpu::QueueKind.COMPUTE,
+        queue:   gpu::compat::QueueKind.COMPUTE,
         index:   0,
         payload: first_payload[..],
     );
     recorded_staging_upload(
         fixture: &fixture,
-        queue:   gpu::QueueKind.TRANSFER,
+        queue:   gpu::compat::QueueKind.TRANSFER,
         index:   1,
         payload: second_payload[..],
     );
-    assert(gpu::vk::dedicated_fallback_count(state) == fallbacks, "recorded family switch stays on the staging ring");
+    assert(gpu::compat::vk::dedicated_fallback_count(state) == fallbacks, "recorded family switch stays on the staging ring");
     io::eprintfn(
         "staging_range_reuse_recorded_compute_to_recorded_transfer: PASS graphics=%d compute=%d transfer=%d",
         state.graphics_family,
@@ -301,37 +301,37 @@ fn void staging_range_reuse_recorded_compute_to_recorded_transfer() @test {
 }
 
 fn void buffer_upload_readback_round_trip() @test {
-    gpu::Device device = make_transfer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_transfer_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferDesc desc = {
+    gpu::compat::BufferDesc desc = {
         .size        = 4096,
         .usage       = { .storage, .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "device_buffer",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &desc)!!;
+    defer gpu::compat::destroy_buffer(&device, buffer)!!;
 
     char[4096] data;
     for (uint i = 0; i < 4096; i++) data[i] = (char)(i * 7);
-    gpu::upload_buffer_data(
+    gpu::compat::upload_buffer_data(
         device:      &device,
         dst:         buffer,
         offset:      0,
         data:        data[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_stage:  gpu::compat::Stage.TRANSFER,
+        next_hazard: gpu::compat::Hazard.TRANSFER_READ,
     )!!;
 
     char[4096] out;
-    gpu::readback_buffer_data(
+    gpu::compat::readback_buffer_data(
         device:      &device,
         src:         buffer,
         offset:      0,
         out_data:    out[..],
-        from_stage:  gpu::Stage.TRANSFER,
-        from_hazard: gpu::Hazard.TRANSFER_READ,
+        from_stage:  gpu::compat::Stage.TRANSFER,
+        from_hazard: gpu::compat::Hazard.TRANSFER_READ,
     )!!;
     for (uint i = 0; i < 4096; i++) {
         assert(out[i] == (char)(i * 7), "device-memory round trip preserves bytes");
@@ -340,23 +340,23 @@ fn void buffer_upload_readback_round_trip() @test {
 
 fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
     TransferDiagnosticCapture capture;
-    gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_transfer_test_device(capture: &capture);
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferDesc buffer_desc = {
+    gpu::compat::BufferDesc buffer_desc = {
         .size        = 64,
         .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, buffer)!!;
 
     char[16] data;
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&commands)!!;
+    gpu::compat::CommandList commands = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::end_commands(&commands)!!;
     uint before = capture.calls;
-    fault command_state = @catch(gpu::cmd_upload_buffer(&commands, buffer, 0, data[..]));
-    assert(command_state == gpu::COMMAND_RECORDING_ERROR, "ended upload command keeps COMMAND_RECORDING_ERROR");
+    fault command_state = @catch(gpu::compat::cmd_upload_buffer(&commands, buffer, 0, data[..]));
+    assert(command_state == gpu::compat::COMMAND_RECORDING_ERROR, "ended upload command keeps COMMAND_RECORDING_ERROR");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -364,18 +364,18 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
         operation:           "cmd_upload_buffer",
         rejected_field:      "CommandList.state",
         invariant:           "command must be recording outside a render pass",
-        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        resource_kind:       gpu::compat::DebugResourceKind.COMMAND_LIST,
         has_public_identity: true,
         resource_index:      commands.handle.index,
         resource_generation: commands.handle.generation,
         resource_name:       null,
     );
 
-    gpu::CommandList lookup_commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::BufferHandle missing = { .index = gpu::MAX_BUFFERS, .generation = 1 };
+    gpu::compat::CommandList lookup_commands = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::BufferHandle missing = { .index = gpu::compat::MAX_BUFFERS, .generation = 1 };
     before = capture.calls;
-    fault invalid_buffer = @catch(gpu::cmd_upload_buffer(&lookup_commands, missing, 0, data[..]));
-    assert(invalid_buffer == gpu::INVALID_HANDLE, "missing upload buffer keeps INVALID_HANDLE");
+    fault invalid_buffer = @catch(gpu::compat::cmd_upload_buffer(&lookup_commands, missing, 0, data[..]));
+    assert(invalid_buffer == gpu::compat::INVALID_HANDLE, "missing upload buffer keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -383,7 +383,7 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
         operation:           "cmd_upload_buffer",
         rejected_field:      "dst",
         invariant:           "destination buffer handle must resolve to a live resource",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -393,21 +393,21 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
 
 fn void stale_transfer_command_owners_report_without_identity() @test {
     TransferDiagnosticCapture capture;
-    gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_transfer_test_device(capture: &capture);
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::CommandList stale = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&stale)!!;
-    gpu::CommandList[1] lists = { stale };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::CommandList stale = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::end_commands(&stale)!!;
+    gpu::compat::CommandList[1] lists = { stale };
+    gpu::compat::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::compat::submit(&device, &submit)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
 
     char[4] data;
-    gpu::TextureUploadDesc texture_upload;
+    gpu::compat::TextureUploadDesc texture_upload;
     uint before = capture.calls;
-    fault upload_buffer = @catch(gpu::cmd_upload_buffer(&stale, {}, 0, data[..]));
-    assert(upload_buffer == gpu::INVALID_HANDLE, "stale buffer upload keeps INVALID_HANDLE");
+    fault upload_buffer = @catch(gpu::compat::cmd_upload_buffer(&stale, {}, 0, data[..]));
+    assert(upload_buffer == gpu::compat::INVALID_HANDLE, "stale buffer upload keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -415,7 +415,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
         operation:           "cmd_upload_buffer",
         rejected_field:      "CommandList.handle",
         invariant:           "command list handle must identify a live command list",
-        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        resource_kind:       gpu::compat::DebugResourceKind.COMMAND_LIST,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -423,8 +423,8 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
     );
 
     before = capture.calls;
-    fault upload_texture = @catch(gpu::cmd_upload_texture(&stale, &texture_upload, data[..]));
-    assert(upload_texture == gpu::INVALID_HANDLE, "stale texture upload keeps INVALID_HANDLE");
+    fault upload_texture = @catch(gpu::compat::cmd_upload_texture(&stale, &texture_upload, data[..]));
+    assert(upload_texture == gpu::compat::INVALID_HANDLE, "stale texture upload keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -432,7 +432,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
         operation:           "cmd_upload_texture",
         rejected_field:      "CommandList.handle",
         invariant:           "command list handle must identify a live command list",
-        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        resource_kind:       gpu::compat::DebugResourceKind.COMMAND_LIST,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -440,8 +440,8 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
     );
 
     before = capture.calls;
-    fault readback_buffer = @catch(gpu::cmd_readback_buffer(&stale, {}, 0, 4));
-    assert(readback_buffer == gpu::INVALID_HANDLE, "stale buffer readback keeps INVALID_HANDLE");
+    fault readback_buffer = @catch(gpu::compat::cmd_readback_buffer(&stale, {}, 0, 4));
+    assert(readback_buffer == gpu::compat::INVALID_HANDLE, "stale buffer readback keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -449,7 +449,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
         operation:           "cmd_readback_buffer",
         rejected_field:      "CommandList.handle",
         invariant:           "command list handle must identify a live command list",
-        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        resource_kind:       gpu::compat::DebugResourceKind.COMMAND_LIST,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -457,8 +457,8 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
     );
 
     before = capture.calls;
-    fault readback_texture = @catch(gpu::cmd_readback_texture(&stale, {}, 0));
-    assert(readback_texture == gpu::INVALID_HANDLE, "stale texture readback keeps INVALID_HANDLE");
+    fault readback_texture = @catch(gpu::compat::cmd_readback_texture(&stale, {}, 0));
+    assert(readback_texture == gpu::compat::INVALID_HANDLE, "stale texture readback keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -466,7 +466,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
         operation:           "cmd_readback_texture",
         rejected_field:      "CommandList.handle",
         invariant:           "command list handle must identify a live command list",
-        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+        resource_kind:       gpu::compat::DebugResourceKind.COMMAND_LIST,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -476,18 +476,18 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
 
 fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test {
     TransferDiagnosticCapture capture;
-    gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_transfer_test_device(capture: &capture);
+    defer gpu::compat::destroy_device(&device)!!;
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
     uint before = capture.calls;
-    fault cleanup_fault = @catch(gpu::vk::check_helper_backend_result(
+    fault cleanup_fault = @catch(gpu::compat::vk::check_helper_backend_result(
         state:           state,
         operation:       "upload_buffer_data",
         result:          vk::Result.ERROR_DEVICE_LOST,
         fault_is_public: false,
     ));
-    assert(cleanup_fault == gpu::DEVICE_LOST, "cleanup result mapping keeps DEVICE_LOST");
+    assert(cleanup_fault == gpu::compat::DEVICE_LOST, "cleanup result mapping keeps DEVICE_LOST");
     assert(capture.calls == before + 1, "cleanup backend failure emits exactly once");
     assert(capture.category.backend, "cleanup result is a backend diagnostic");
     assert(!capture.has_fault, "swallowed cleanup diagnostic omits a public fault");
@@ -496,13 +496,13 @@ fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test
     assert(capture.validation_id_number == (int)vk::Result.ERROR_DEVICE_LOST, "cleanup diagnostic preserves backend result");
 
     before = capture.calls;
-    fault reset_fault = @catch(gpu::vk::check_helper_backend_result(
+    fault reset_fault = @catch(gpu::compat::vk::check_helper_backend_result(
         state:           state,
         operation:       "readback_texture_data",
         result:          vk::Result.ERROR_DEVICE_LOST,
         fault_is_public: true,
     ));
-    assert(reset_fault == gpu::DEVICE_LOST, "propagated reset result keeps DEVICE_LOST");
+    assert(reset_fault == gpu::compat::DEVICE_LOST, "propagated reset result keeps DEVICE_LOST");
     assert(capture.calls == before + 1, "propagated backend failure emits exactly once");
     assert(capture.category.backend, "propagated result is a backend diagnostic");
     assert(capture.has_fault && capture.public_fault == reset_fault, "propagated result carries matching public fault");
@@ -513,46 +513,46 @@ fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test
 
 fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     TransferDiagnosticCapture capture;
-    gpu::Device device = make_transfer_test_device(
+    gpu::compat::Device device = make_transfer_test_device(
         staging_size:  64,
         readback_size: 64,
         capture:       &capture,
     );
-    defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    defer gpu::compat::destroy_device(&device)!!;
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
-    gpu::BufferDesc buffer_desc = {
+    gpu::compat::BufferDesc buffer_desc = {
         .size        = 128,
         .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "exhaustion_buffer",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::TextureDesc texture_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, buffer)!!;
+    gpu::compat::CommandList commands = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::TextureDesc texture_desc = {
+        .dimension  = gpu::compat::TextureDimension.TEX_2D,
         .width      = 2,
         .height     = 2,
-        .format     = gpu::Format.RGBA8_UNORM,
+        .format     = gpu::compat::Format.RGBA8_UNORM,
         .usage      = { .transfer_src, .transfer_dst },
         .debug_name = "exhaustion_texture",
     };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::compat::TextureHandle texture = gpu::compat::create_texture(&device, &texture_desc)!!;
+    defer gpu::compat::destroy_texture(&device, texture)!!;
 
     usz staging_size = state.staging_arena.size;
     uint dedicated_count = state.dedicated_staging.count;
     state.staging_arena.size = 1;
-    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    state.dedicated_staging.count = gpu::compat::vk::DEDICATED_RETIRE_CAP;
     foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
 
     char[16] data;
     uint before = capture.calls;
-    fault staging_full = @catch(gpu::cmd_upload_buffer(&commands, buffer, 0, data[..]));
+    fault staging_full = @catch(gpu::compat::cmd_upload_buffer(&commands, buffer, 0, data[..]));
     state.staging_arena.size = staging_size;
     state.dedicated_staging.count = dedicated_count;
-    assert(staging_full == gpu::ARENA_FULL, "staging exhaustion keeps ARENA_FULL");
+    assert(staging_full == gpu::compat::ARENA_FULL, "staging exhaustion keeps ARENA_FULL");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -560,31 +560,31 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "cmd_upload_buffer",
         rejected_field:      "data",
         invariant:           "staging capacity must be available for the upload",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: true,
         resource_index:      buffer.index,
         resource_generation: buffer.generation,
         resource_name:       "exhaustion_buffer",
     );
-    gpu::TextureBarrier to_dst = {
+    gpu::compat::TextureBarrier to_dst = {
         .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+        .before_stage  = gpu::compat::Stage.HOST,
+        .after_stage   = gpu::compat::Stage.TRANSFER,
+        .before_hazard = gpu::compat::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::compat::Hazard.TRANSFER_WRITE,
+        .old_layout    = gpu::compat::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::compat::TextureLayout.TRANSFER_DST,
     };
-    gpu::cmd_texture_barrier(&commands, &to_dst)!!;
+    gpu::compat::cmd_texture_barrier(&commands, &to_dst)!!;
     state.staging_arena.size = 1;
-    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    state.dedicated_staging.count = gpu::compat::vk::DEDICATED_RETIRE_CAP;
     foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
-    gpu::TextureUploadDesc upload = { .texture = texture };
+    gpu::compat::TextureUploadDesc upload = { .texture = texture };
     before = capture.calls;
-    fault texture_staging_full = @catch(gpu::cmd_upload_texture(&commands, &upload, data[..]));
+    fault texture_staging_full = @catch(gpu::compat::cmd_upload_texture(&commands, &upload, data[..]));
     state.staging_arena.size = staging_size;
     state.dedicated_staging.count = dedicated_count;
-    assert(texture_staging_full == gpu::ARENA_FULL, "texture staging exhaustion keeps ARENA_FULL");
+    assert(texture_staging_full == gpu::compat::ARENA_FULL, "texture staging exhaustion keeps ARENA_FULL");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -592,7 +592,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "cmd_upload_texture",
         rejected_field:      "data",
         invariant:           "staging capacity must be available for the upload",
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        resource_kind:       gpu::compat::DebugResourceKind.TEXTURE,
         has_public_identity: true,
         resource_index:      texture.index,
         resource_generation: texture.generation,
@@ -600,20 +600,20 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     );
 
     state.staging_arena.size = 1;
-    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    state.dedicated_staging.count = gpu::compat::vk::DEDICATED_RETIRE_CAP;
     foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
     before = capture.calls;
-    fault helper_buffer_full = @catch(gpu::upload_buffer_data(
+    fault helper_buffer_full = @catch(gpu::compat::upload_buffer_data(
         device:      &device,
         dst:         buffer,
         offset:      0,
         data:        data[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_stage:  gpu::compat::Stage.TRANSFER,
+        next_hazard: gpu::compat::Hazard.TRANSFER_READ,
     ));
     state.staging_arena.size = staging_size;
     state.dedicated_staging.count = dedicated_count;
-    assert(helper_buffer_full == gpu::ARENA_FULL, "blocking buffer upload exhaustion keeps ARENA_FULL");
+    assert(helper_buffer_full == gpu::compat::ARENA_FULL, "blocking buffer upload exhaustion keeps ARENA_FULL");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -621,7 +621,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "upload_buffer_data",
         rejected_field:      "data",
         invariant:           "staging capacity must be available for the upload",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: true,
         resource_index:      buffer.index,
         resource_generation: buffer.generation,
@@ -629,21 +629,21 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     );
 
     state.staging_arena.size = 1;
-    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    state.dedicated_staging.count = gpu::compat::vk::DEDICATED_RETIRE_CAP;
     foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
     before = capture.calls;
-    fault helper_texture_full = @catch(gpu::upload_texture_data(
+    fault helper_texture_full = @catch(gpu::compat::upload_texture_data(
         device:      &device,
         dst:         texture,
         mip:         0,
         data:        data[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
-        next_layout: gpu::TextureLayout.TRANSFER_DST,
+        next_stage:  gpu::compat::Stage.TRANSFER,
+        next_hazard: gpu::compat::Hazard.TRANSFER_READ,
+        next_layout: gpu::compat::TextureLayout.TRANSFER_DST,
     ));
     state.staging_arena.size = staging_size;
     state.dedicated_staging.count = dedicated_count;
-    assert(helper_texture_full == gpu::ARENA_FULL, "blocking texture upload exhaustion keeps ARENA_FULL");
+    assert(helper_texture_full == gpu::compat::ARENA_FULL, "blocking texture upload exhaustion keeps ARENA_FULL");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -651,23 +651,23 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "upload_texture_data",
         rejected_field:      "data",
         invariant:           "staging capacity must be available for the upload",
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        resource_kind:       gpu::compat::DebugResourceKind.TEXTURE,
         has_public_identity: true,
         resource_index:      texture.index,
         resource_generation: texture.generation,
         resource_name:       "exhaustion_texture",
     );
 
-    gpu::TextureBarrier to_src = {
+    gpu::compat::TextureBarrier to_src = {
         .texture       = texture,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = gpu::TextureLayout.TRANSFER_DST,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        .before_stage  = gpu::compat::Stage.TRANSFER,
+        .after_stage   = gpu::compat::Stage.TRANSFER,
+        .before_hazard = gpu::compat::Hazard.TRANSFER_WRITE,
+        .after_hazard  = gpu::compat::Hazard.TRANSFER_READ,
+        .old_layout    = gpu::compat::TextureLayout.TRANSFER_DST,
+        .new_layout    = gpu::compat::TextureLayout.TRANSFER_SRC,
     };
-    gpu::cmd_texture_barrier(&commands, &to_src)!!;
+    gpu::compat::cmd_texture_barrier(&commands, &to_src)!!;
     usz texture_readback_size = state.readback_arena.size;
     uint texture_next_new = state.buffers.next_new;
     uint texture_free_head = state.buffers.free_head;
@@ -675,11 +675,11 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     state.buffers.next_new = (uint)state.buffers.slots.len;
     state.buffers.free_head = 0;
     before = capture.calls;
-    fault texture_ticket_full = @catch(gpu::cmd_readback_texture(&commands, texture, 0));
+    fault texture_ticket_full = @catch(gpu::compat::cmd_readback_texture(&commands, texture, 0));
     state.readback_arena.size = texture_readback_size;
     state.buffers.next_new = texture_next_new;
     state.buffers.free_head = texture_free_head;
-    assert(texture_ticket_full == gpu::SLOT_TABLE_FULL, "texture ticket exhaustion keeps SLOT_TABLE_FULL");
+    assert(texture_ticket_full == gpu::compat::SLOT_TABLE_FULL, "texture ticket exhaustion keeps SLOT_TABLE_FULL");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -687,7 +687,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "cmd_readback_texture",
         rejected_field:      "mip",
         invariant:           "readback capacity must be available for the ticket",
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        resource_kind:       gpu::compat::DebugResourceKind.TEXTURE,
         has_public_identity: true,
         resource_index:      texture.index,
         resource_generation: texture.generation,
@@ -697,21 +697,21 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     usz blocking_readback_size = state.readback_arena.size;
     dedicated_count = state.dedicated_staging.count;
     state.readback_arena.size = 1;
-    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    state.dedicated_staging.count = gpu::compat::vk::DEDICATED_RETIRE_CAP;
     foreach (&entry : state.dedicated_staging.entries) entry.timeline_value = ulong::max;
     char[16] out_data;
     before = capture.calls;
-    fault readback_full = @catch(gpu::readback_buffer_data(
+    fault readback_full = @catch(gpu::compat::readback_buffer_data(
         device:      &device,
         src:         buffer,
         offset:      0,
         out_data:    out_data[..],
-        from_stage:  gpu::Stage.TRANSFER,
-        from_hazard: gpu::Hazard.TRANSFER_READ,
+        from_stage:  gpu::compat::Stage.TRANSFER,
+        from_hazard: gpu::compat::Hazard.TRANSFER_READ,
     ));
     state.readback_arena.size = blocking_readback_size;
     state.dedicated_staging.count = dedicated_count;
-    assert(readback_full == gpu::ARENA_FULL, "blocking readback exhaustion keeps ARENA_FULL");
+    assert(readback_full == gpu::compat::ARENA_FULL, "blocking readback exhaustion keeps ARENA_FULL");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -719,7 +719,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "readback_buffer_data",
         rejected_field:      "out_data",
         invariant:           "readback capacity must be available for the destination",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: true,
         resource_index:      buffer.index,
         resource_generation: buffer.generation,
@@ -732,11 +732,11 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     state.buffers.next_new = (uint)state.buffers.slots.len;
     state.buffers.free_head = 0;
     before = capture.calls;
-    fault ticket_full = @catch(gpu::cmd_readback_buffer(&commands, buffer, 0, 16));
+    fault ticket_full = @catch(gpu::compat::cmd_readback_buffer(&commands, buffer, 0, 16));
     state.readback_arena.size = readback_size;
     state.buffers.next_new = next_new;
     state.buffers.free_head = free_head;
-    assert(ticket_full == gpu::SLOT_TABLE_FULL, "ticket fallback exhaustion keeps SLOT_TABLE_FULL");
+    assert(ticket_full == gpu::compat::SLOT_TABLE_FULL, "ticket fallback exhaustion keeps SLOT_TABLE_FULL");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -744,7 +744,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "cmd_readback_buffer",
         rejected_field:      "size",
         invariant:           "readback capacity must be available for the ticket",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: true,
         resource_index:      buffer.index,
         resource_generation: buffer.generation,
@@ -762,40 +762,40 @@ fn void readback_ticket_generation_wraps_without_poisoning_slot() @test {
     };
     vk::ReadbackTicketState state = { .range_end = 7 };
 
-    gpu::ReadbackTicket ticket = table.alloc(state)!!;
+    gpu::compat::ReadbackTicket ticket = table.alloc(state)!!;
 
     assert(ticket.generation == 1, "readback ticket generation wraps to the first valid value");
     assert(table.get(ticket)!!.range_end == 7, "wrapped readback ticket resolves its state");
 
     table.free(ticket)!!;
     fault stale = @catch(table.get(ticket));
-    assert(stale == gpu::INVALID_HANDLE, "free still invalidates the wrapped ticket");
+    assert(stale == gpu::compat::INVALID_HANDLE, "free still invalidates the wrapped ticket");
 }
 
 <* An unrelated blocking helper's completion must never make an unsubmitted
    ticket poll ready. *>
 fn void cmd_readback_ticket_not_ready_before_submit() @test {
     TransferDiagnosticCapture capture;
-    gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_transfer_test_device(capture: &capture);
+    defer gpu::compat::destroy_device(&device)!!;
 
     // Settle the timeline to a known baseline.
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::end_frame(&frame_token)!!;
+    gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::end_frame(&frame_token)!!;
 
-    gpu::BufferDesc src_desc = {
+    gpu::compat::BufferDesc src_desc = {
         .size        = 256,
         .usage       = { .storage, .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "ticket_src",
     };
-    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
-    defer gpu::destroy_buffer(&device, src)!!;
+    gpu::compat::BufferHandle src = gpu::compat::create_buffer(&device, &src_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, src)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
     uint before = capture.calls;
-    fault zero_size = @catch(gpu::cmd_readback_buffer(&cmd, src, 0, 0));
-    assert(zero_size == gpu::INVALID_ARGUMENT, "zero ticket size keeps INVALID_ARGUMENT");
+    fault zero_size = @catch(gpu::compat::cmd_readback_buffer(&cmd, src, 0, 0));
+    assert(zero_size == gpu::compat::INVALID_ARGUMENT, "zero ticket size keeps INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -803,7 +803,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         operation:           "cmd_readback_buffer",
         rejected_field:      "size",
         invariant:           "readback size must be greater than zero",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -811,8 +811,8 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
     );
 
     before = capture.calls;
-    fault range_fault = @catch(gpu::cmd_readback_buffer(&cmd, src, 200, 64));
-    assert(range_fault == gpu::INVALID_ARGUMENT, "ticket range past source keeps INVALID_ARGUMENT");
+    fault range_fault = @catch(gpu::compat::cmd_readback_buffer(&cmd, src, 200, 64));
+    assert(range_fault == gpu::compat::INVALID_ARGUMENT, "ticket range past source keeps INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -820,43 +820,43 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         operation:           "cmd_readback_buffer",
         rejected_field:      "offset/size",
         invariant:           "readback range must fit the source buffer",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: true,
         resource_index:      src.index,
         resource_generation: src.generation,
         resource_name:       "ticket_src",
     );
 
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, src, 0, 256)!!;
-    gpu::end_commands(&cmd)!!;
-    // Deliberately never gpu::submit(&device, ...): the ticket's copy never runs.
+    gpu::compat::ReadbackTicket ticket = gpu::compat::cmd_readback_buffer(&cmd, src, 0, 256)!!;
+    gpu::compat::end_commands(&cmd)!!;
+    // Deliberately never gpu::compat::submit(&device, ...): the ticket's copy never runs.
 
-    gpu::BufferDesc unrelated_desc = {
+    gpu::compat::BufferDesc unrelated_desc = {
         .size        = 64,
         .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "unrelated",
     };
-    gpu::BufferHandle unrelated = gpu::create_buffer(&device, &unrelated_desc)!!;
-    defer gpu::destroy_buffer(&device, unrelated)!!;
+    gpu::compat::BufferHandle unrelated = gpu::compat::create_buffer(&device, &unrelated_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, unrelated)!!;
 
     char[64] payload;
     foreach (&b : payload) *b = (char)0xAB;
-    gpu::upload_buffer_data(
+    gpu::compat::upload_buffer_data(
         device:      &device,
         dst:         unrelated,
         offset:      0,
         data:        payload[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_stage:  gpu::compat::Stage.TRANSFER,
+        next_hazard: gpu::compat::Hazard.TRANSFER_READ,
     )!!;
 
-    assert(!gpu::poll_readback(&device, &ticket), "an unrelated blocking helper must not retire an unsubmitted ticket");
+    assert(!gpu::compat::poll_readback(&device, &ticket), "an unrelated blocking helper must not retire an unsubmitted ticket");
 
     char[256] dest;
     before = capture.calls;
-    fault short_dest = @catch(gpu::resolve_readback(&device, &ticket, dest[:255]));
-    assert(short_dest == gpu::INVALID_ARGUMENT, "short ticket destination keeps INVALID_ARGUMENT");
+    fault short_dest = @catch(gpu::compat::resolve_readback(&device, &ticket, dest[:255]));
+    assert(short_dest == gpu::compat::INVALID_ARGUMENT, "short ticket destination keeps INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -864,7 +864,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         operation:           "resolve_readback",
         rejected_field:      "dest",
         invariant:           "destination must cover the complete ticket span",
-        resource_kind:       gpu::DebugResourceKind.NONE,
+        resource_kind:       gpu::compat::DebugResourceKind.NONE,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -872,8 +872,8 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
     );
 
     before = capture.calls;
-    fault not_ready = @catch(gpu::resolve_readback(&device, &ticket, dest[..]));
-    assert(not_ready == gpu::READBACK_NOT_READY, "resolve on an unsubmitted ticket faults READBACK_NOT_READY");
+    fault not_ready = @catch(gpu::compat::resolve_readback(&device, &ticket, dest[..]));
+    assert(not_ready == gpu::compat::READBACK_NOT_READY, "resolve on an unsubmitted ticket faults READBACK_NOT_READY");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -881,7 +881,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         operation:           "resolve_readback",
         rejected_field:      "ticket",
         invariant:           "ticket timeline value must be signaled before resolve",
-        resource_kind:       gpu::DebugResourceKind.NONE,
+        resource_kind:       gpu::compat::DebugResourceKind.NONE,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -892,103 +892,103 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
 fn void oversized_upload_uses_dedicated_staging() @test {
     // Tiny arena: every upload larger than 1 KiB falls back to a dedicated buffer.
     TransferDiagnosticCapture capture;
-    gpu::Device device = make_transfer_test_device(
+    gpu::compat::Device device = make_transfer_test_device(
         staging_size:  1024,
         readback_size: 1024,
         capture:       &capture,
     );
-    defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
-    ulong fallbacks = gpu::vk::dedicated_fallback_count(state);
+    defer gpu::compat::destroy_device(&device)!!;
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(device);
+    ulong fallbacks = gpu::compat::vk::dedicated_fallback_count(state);
     uint diagnostic_count = capture.calls;
 
     const usz BIG = 256 * 1024;
-    gpu::BufferDesc desc = {
+    gpu::compat::BufferDesc desc = {
         .size        = BIG,
         .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &desc)!!;
+    defer gpu::compat::destroy_buffer(&device, buffer)!!;
 
     @pool() {
         char[] data = mem::talloc_array(char, (sz)BIG);
         for (usz i = 0; i < BIG; i++) data[i] = (char)(i % 251);
-        gpu::upload_buffer_data(
+        gpu::compat::upload_buffer_data(
             device:      &device,
             dst:         buffer,
             offset:      0,
             data:        data,
-            next_stage:  gpu::Stage.TRANSFER,
-            next_hazard: gpu::Hazard.TRANSFER_READ,
+            next_stage:  gpu::compat::Stage.TRANSFER,
+            next_hazard: gpu::compat::Hazard.TRANSFER_READ,
         )!!;
 
         char[] out = mem::talloc_array(char, (sz)BIG);
-        gpu::readback_buffer_data(
+        gpu::compat::readback_buffer_data(
             device:      &device,
             src:         buffer,
             offset:      0,
             out_data:    out,
-            from_stage:  gpu::Stage.TRANSFER,
-            from_hazard: gpu::Hazard.TRANSFER_READ,
+            from_stage:  gpu::compat::Stage.TRANSFER,
+            from_hazard: gpu::compat::Hazard.TRANSFER_READ,
         )!!;
         for (usz i = 0; i < BIG; i += 4093) {
             assert(out[i] == (char)(i % 251), "larger-than-arena upload round-trips");
         }
     };
-    assert(gpu::vk::dedicated_fallback_count(state) == fallbacks + 2, "oversized upload and readback each use a dedicated fallback");
+    assert(gpu::compat::vk::dedicated_fallback_count(state) == fallbacks + 2, "oversized upload and readback each use a dedicated fallback");
     assert(capture.calls == diagnostic_count, "successful dedicated fallback emits no contract diagnostic");
 }
 
 fn void staging_ring_reuses_across_frames() @test {
     // Arena fits ~4 allocations; 12 frames of uploads force wrap + recycle.
-    gpu::Device device = make_transfer_test_device(staging_size: 4096);
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_transfer_test_device(staging_size: 4096);
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferDesc desc = {
+    gpu::compat::BufferDesc desc = {
         .size        = 1024,
         .usage       = { .storage, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &desc)!!;
+    defer gpu::compat::destroy_buffer(&device, buffer)!!;
 
     char[1024] data;
     for (uint frame = 0; frame < 12; frame++) {
         for (uint i = 0; i < 1024; i++) data[i] = (char)(frame + i);
-        gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-        gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-        gpu::cmd_upload_buffer(&cmd, buffer, 0, data[..])!!;
-        gpu::BufferBarrier next_use = {
+        gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
+        gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+        gpu::compat::cmd_upload_buffer(&cmd, buffer, 0, data[..])!!;
+        gpu::compat::BufferBarrier next_use = {
             .buffer = buffer, .offset = 0, .size = 1024,
-            .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.COMPUTE_SHADER,
-            .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
+            .before_stage = gpu::compat::Stage.TRANSFER, .after_stage = gpu::compat::Stage.COMPUTE_SHADER,
+            .before_hazard = gpu::compat::Hazard.TRANSFER_WRITE, .after_hazard = gpu::compat::Hazard.SHADER_READ,
         };
-        gpu::cmd_buffer_barrier(&cmd, &next_use)!!;
-        gpu::end_commands(&cmd)!!;
-        gpu::CommandList[1] lists = { cmd };
-        gpu::SubmitDesc submit = { .command_lists = lists[..] };
-        gpu::submit(&device, &submit)!!;
-        gpu::end_frame(&frame_token)!!;
+        gpu::compat::cmd_buffer_barrier(&cmd, &next_use)!!;
+        gpu::compat::end_commands(&cmd)!!;
+        gpu::compat::CommandList[1] lists = { cmd };
+        gpu::compat::SubmitDesc submit = { .command_lists = lists[..] };
+        gpu::compat::submit(&device, &submit)!!;
+        gpu::compat::end_frame(&frame_token)!!;
     }
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
 }
 
 fn void out_of_frame_uploads_do_not_alias_staging() @test {
     // Two cmd-level uploads recorded outside any frame into one list: their
     // staging ranges must not alias (ranges hold until a timeline advance).
-    gpu::Device device = make_transfer_test_device(staging_size: 4096);
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_transfer_test_device(staging_size: 4096);
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferDesc desc = {
+    gpu::compat::BufferDesc desc = {
         .size        = 1024,
         .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
     };
-    gpu::BufferHandle first = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, first)!!;
-    gpu::BufferHandle second = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, second)!!;
+    gpu::compat::BufferHandle first = gpu::compat::create_buffer(&device, &desc)!!;
+    defer gpu::compat::destroy_buffer(&device, first)!!;
+    gpu::compat::BufferHandle second = gpu::compat::create_buffer(&device, &desc)!!;
+    defer gpu::compat::destroy_buffer(&device, second)!!;
 
     char[1024] a;
     char[1024] b;
@@ -997,57 +997,57 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
         b[i] = (char)77;
     }
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::cmd_upload_buffer(&cmd, first, 0, a[..])!!;
-    gpu::cmd_upload_buffer(&cmd, second, 0, b[..])!!;
-    gpu::BufferBarrier next_use = {
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::cmd_upload_buffer(&cmd, first, 0, a[..])!!;
+    gpu::compat::cmd_upload_buffer(&cmd, second, 0, b[..])!!;
+    gpu::compat::BufferBarrier next_use = {
         .buffer = first, .offset = 0, .size = 1024,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.TRANSFER_READ,
+        .before_stage = gpu::compat::Stage.TRANSFER, .after_stage = gpu::compat::Stage.TRANSFER,
+        .before_hazard = gpu::compat::Hazard.TRANSFER_WRITE, .after_hazard = gpu::compat::Hazard.TRANSFER_READ,
     };
-    gpu::cmd_buffer_barrier(&cmd, &next_use)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::cmd_buffer_barrier(&cmd, &next_use)!!;
+    gpu::compat::end_commands(&cmd)!!;
+    gpu::compat::CommandList[1] lists = { cmd };
+    gpu::compat::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::compat::submit(&device, &submit)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
 
     char[1024] out;
-    gpu::readback_buffer_data(
+    gpu::compat::readback_buffer_data(
         device:      &device,
         src:         first,
         offset:      0,
         out_data:    out[..],
-        from_stage:  gpu::Stage.TRANSFER,
-        from_hazard: gpu::Hazard.TRANSFER_READ,
+        from_stage:  gpu::compat::Stage.TRANSFER,
+        from_hazard: gpu::compat::Hazard.TRANSFER_READ,
     )!!;
     assert(out[0] == (char)11 && out[1023] == (char)11, "first upload's staging was not overwritten by the second");
 }
 
 fn void texture_upload_helper_sampled() @test {
-    gpu::Device device = make_transfer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_transfer_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc tex_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = UR_TEX,
         .height    = UR_TEX,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .sampled, .transfer_dst },
     };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
-    gpu::SamplerDesc sampler_desc = {
-        .min_filter = gpu::Filter.NEAREST,
-        .mag_filter = gpu::Filter.NEAREST,
-        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
-        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
-        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    gpu::compat::TextureHandle texture = gpu::compat::create_texture(&device, &tex_desc)!!;
+    defer gpu::compat::destroy_texture(&device, texture)!!;
+    gpu::compat::TextureIndex tex_index = gpu::compat::create_texture_descriptor(&device, texture, null)!!;
+    defer gpu::compat::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::compat::SamplerDesc sampler_desc = {
+        .min_filter = gpu::compat::Filter.NEAREST,
+        .mag_filter = gpu::compat::Filter.NEAREST,
+        .address_u  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, smp_index)!!;
+    gpu::compat::SamplerIndex smp_index = gpu::compat::create_sampler(&device, &sampler_desc)!!;
+    defer gpu::compat::destroy_sampler(&device, smp_index)!!;
 
     char[UR_TEX_BYTES] texels;
     for (uint i = 0; i < UR_TEX * UR_TEX; i++) {
@@ -1056,163 +1056,163 @@ fn void texture_upload_helper_sampled() @test {
         texels[i * 4 + 2] = (char)160;
         texels[i * 4 + 3] = (char)255;
     }
-    gpu::upload_texture_data(
+    gpu::compat::upload_texture_data(
         device:      &device,
         dst:         texture,
         mip:         0,
         data:        texels[..],
-        next_stage:  gpu::Stage.COMPUTE_SHADER,
-        next_hazard: gpu::Hazard.SHADER_READ,
-        next_layout: gpu::TextureLayout.SHADER_READ,
+        next_stage:  gpu::compat::Stage.COMPUTE_SHADER,
+        next_hazard: gpu::compat::Hazard.SHADER_READ,
+        next_layout: gpu::compat::TextureLayout.SHADER_READ,
     )!!;
 
     // Re-uploading now that the texture is in SHADER_READ must fault.
-    fault in_use = @catch(gpu::upload_texture_data(
+    fault in_use = @catch(gpu::compat::upload_texture_data(
         device:      &device,
         dst:         texture,
         mip:         0,
         data:        texels[..],
-        next_stage:  gpu::Stage.COMPUTE_SHADER,
-        next_hazard: gpu::Hazard.SHADER_READ,
-        next_layout: gpu::TextureLayout.SHADER_READ,
+        next_stage:  gpu::compat::Stage.COMPUTE_SHADER,
+        next_hazard: gpu::compat::Hazard.SHADER_READ,
+        next_layout: gpu::compat::TextureLayout.SHADER_READ,
     ));
-    assert(in_use == gpu::INVALID_RESOURCE_STATE, "in-use texture upload faults INVALID_RESOURCE_STATE");
+    assert(in_use == gpu::compat::INVALID_RESOURCE_STATE, "in-use texture upload faults INVALID_RESOURCE_STATE");
 
     // Sample it through the heap: the shader must see the uploaded texels.
-    gpu::BufferDesc out_desc = {
+    gpu::compat::BufferDesc out_desc = {
         .size        = UR_TEX * UR_TEX * 16,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.READBACK,
+        .memory_kind = gpu::compat::MemoryKind.READBACK,
     };
-    gpu::BufferHandle sample_out = gpu::create_buffer(&device, &out_desc)!!;
-    defer gpu::destroy_buffer(&device, sample_out)!!;
+    gpu::compat::BufferHandle sample_out = gpu::compat::create_buffer(&device, &out_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, sample_out)!!;
 
-    gpu::ShaderDesc sample_sd = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = UPLOAD_HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
+    gpu::compat::ShaderDesc sample_sd = {
+        .stage = gpu::compat::ShaderStage.COMPUTE, .spirv = UPLOAD_HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &sample_sd)!!;
-    defer gpu::destroy_shader(&device, shader)!!;
-    gpu::ComputePipelineDesc pd = { .shader = shader, .push_constant_size = gpu::RootPush::size };
-    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pd)!!;
-    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::compat::ShaderHandle shader = gpu::compat::create_shader(&device, &sample_sd)!!;
+    defer gpu::compat::destroy_shader(&device, shader)!!;
+    gpu::compat::ComputePipelineDesc pd = { .shader = shader, .push_constant_size = gpu::compat::RootPush::size };
+    gpu::compat::PipelineHandle pipeline = gpu::compat::create_compute_pipeline(&device, &pd)!!;
+    defer gpu::compat::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
+    gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::GpuSpan root_span = gpu::compat::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* root = (SampleRoot*)root_span.cpu;
-    root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
+    root.output_gpu    = gpu::compat::get_buffer_address(&device, sample_out)!!;
     root.texture_index = tex_index;
     root.sampler_index = smp_index;
     root.width         = UR_TEX;
     root.height        = UR_TEX;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::cmd_dispatch(
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.COMPUTE)!!;
+    gpu::compat::cmd_dispatch(
         commands: &cmd,
         pipeline: pipeline,
         root:     root_span.gpu,
         groups:   { 1, 1, 1 },
     )!!;
-    gpu::BufferBarrier out_bar = {
+    gpu::compat::BufferBarrier out_bar = {
         .buffer = sample_out, .offset = 0, .size = UR_TEX * UR_TEX * 16,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+        .before_stage = gpu::compat::Stage.COMPUTE_SHADER, .after_stage = gpu::compat::Stage.HOST,
+        .before_hazard = gpu::compat::Hazard.SHADER_WRITE, .after_hazard = gpu::compat::Hazard.HOST_READ,
     };
-    gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::compat::cmd_buffer_barrier(&cmd, &out_bar)!!;
+    gpu::compat::end_commands(&cmd)!!;
+    gpu::compat::CommandList[1] lists = { cmd };
+    gpu::compat::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::compat::submit(&device, &submit)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.COMPUTE)!!;
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
+    gpu::compat::GpuSpan out_span = gpu::compat::get_buffer_span(&device, sample_out)!!;
     float* sampled = (float*)out_span.cpu;
     assert(quantize_unorm8(sampled[1]) == 90, "sampled green matches helper upload");
     assert(quantize_unorm8(sampled[2]) == 160, "sampled blue matches helper upload");
-    gpu::end_frame(&frame_token)!!;
+    gpu::compat::end_frame(&frame_token)!!;
 }
 
 fn void texture_readback_helper_restores_layout() @test {
-    gpu::Device device = make_transfer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_transfer_test_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc tex_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = UR_TEX,
         .height    = UR_TEX,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .sampled, .transfer_src, .transfer_dst },
     };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::compat::TextureHandle texture = gpu::compat::create_texture(&device, &tex_desc)!!;
+    defer gpu::compat::destroy_texture(&device, texture)!!;
 
     char[UR_TEX_BYTES] texels;
     for (uint i = 0; i < UR_TEX_BYTES; i++) texels[i] = (char)(i % 253);
-    gpu::upload_texture_data(
+    gpu::compat::upload_texture_data(
         device:      &device,
         dst:         texture,
         mip:         0,
         data:        texels[..],
-        next_stage:  gpu::Stage.FRAGMENT_SHADER,
-        next_hazard: gpu::Hazard.SHADER_READ,
-        next_layout: gpu::TextureLayout.SHADER_READ,
+        next_stage:  gpu::compat::Stage.FRAGMENT_SHADER,
+        next_hazard: gpu::compat::Hazard.SHADER_READ,
+        next_layout: gpu::compat::TextureLayout.SHADER_READ,
     )!!;
 
     char[UR_TEX_BYTES] out;
-    gpu::readback_texture_data(
+    gpu::compat::readback_texture_data(
         device:      &device,
         src:         texture,
         mip:         0,
         out_data:    out[..],
-        from_stage:  gpu::Stage.FRAGMENT_SHADER,
-        from_hazard: gpu::Hazard.SHADER_READ,
-        from_layout: gpu::TextureLayout.SHADER_READ,
+        from_stage:  gpu::compat::Stage.FRAGMENT_SHADER,
+        from_hazard: gpu::compat::Hazard.SHADER_READ,
+        from_layout: gpu::compat::TextureLayout.SHADER_READ,
     )!!;
     for (uint i = 0; i < UR_TEX_BYTES; i++) {
         assert(out[i] == (char)(i % 253), "texture readback matches upload");
     }
 
     // Layout restored: a second readback with the same from trio must work.
-    gpu::readback_texture_data(
+    gpu::compat::readback_texture_data(
         device:      &device,
         src:         texture,
         mip:         0,
         out_data:    out[..],
-        from_stage:  gpu::Stage.FRAGMENT_SHADER,
-        from_hazard: gpu::Hazard.SHADER_READ,
-        from_layout: gpu::TextureLayout.SHADER_READ,
+        from_stage:  gpu::compat::Stage.FRAGMENT_SHADER,
+        from_hazard: gpu::compat::Hazard.SHADER_READ,
+        from_layout: gpu::compat::TextureLayout.SHADER_READ,
     )!!;
 }
 
 fn void upload_helper_validation_faults() @test {
     TransferDiagnosticCapture capture;
-    gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_transfer_test_device(capture: &capture);
+    defer gpu::compat::destroy_device(&device)!!;
+    gpu::compat::vk::VkDeviceState* state = (gpu::compat::vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
-    gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc tex_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = UR_TEX,
         .height    = UR_TEX,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .sampled, .transfer_dst },
         .debug_name = "helper_upload_texture",
     };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::compat::TextureHandle texture = gpu::compat::create_texture(&device, &tex_desc)!!;
+    defer gpu::compat::destroy_texture(&device, texture)!!;
 
     char[16] short_data;
     uint before = capture.calls;
     ulong helper_before = state.helper_counter;
-    fault len_fault = @catch(gpu::upload_texture_data(
+    fault len_fault = @catch(gpu::compat::upload_texture_data(
         device:      &device,
         dst:         texture,
         mip:         0,
         data:        short_data[..],
-        next_stage:  gpu::Stage.COMPUTE_SHADER,
-        next_hazard: gpu::Hazard.SHADER_READ,
-        next_layout: gpu::TextureLayout.SHADER_READ,
+        next_stage:  gpu::compat::Stage.COMPUTE_SHADER,
+        next_hazard: gpu::compat::Hazard.SHADER_READ,
+        next_layout: gpu::compat::TextureLayout.SHADER_READ,
     ));
-    assert(len_fault == gpu::INVALID_ARGUMENT, "mismatched data length faults INVALID_ARGUMENT");
+    assert(len_fault == gpu::compat::INVALID_ARGUMENT, "mismatched data length faults INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -1220,7 +1220,7 @@ fn void upload_helper_validation_faults() @test {
         operation:           "upload_texture_data",
         rejected_field:      "data",
         invariant:           "data length must match the selected texture mip",
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        resource_kind:       gpu::compat::DebugResourceKind.TEXTURE,
         has_public_identity: true,
         resource_index:      texture.index,
         resource_generation: texture.generation,
@@ -1230,16 +1230,16 @@ fn void upload_helper_validation_faults() @test {
 
     before = capture.calls;
     helper_before = state.helper_counter;
-    fault mip_fault = @catch(gpu::upload_texture_data(
+    fault mip_fault = @catch(gpu::compat::upload_texture_data(
         device:      &device,
         dst:         texture,
         mip:         1,
         data:        short_data[..],
-        next_stage:  gpu::Stage.COMPUTE_SHADER,
-        next_hazard: gpu::Hazard.SHADER_READ,
-        next_layout: gpu::TextureLayout.SHADER_READ,
+        next_stage:  gpu::compat::Stage.COMPUTE_SHADER,
+        next_hazard: gpu::compat::Hazard.SHADER_READ,
+        next_layout: gpu::compat::TextureLayout.SHADER_READ,
     ));
-    assert(mip_fault == gpu::INVALID_ARGUMENT, "invalid bare mip faults INVALID_ARGUMENT");
+    assert(mip_fault == gpu::compat::INVALID_ARGUMENT, "invalid bare mip faults INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -1247,7 +1247,7 @@ fn void upload_helper_validation_faults() @test {
         operation:           "upload_texture_data",
         rejected_field:      "mip",
         invariant:           "mip must exist in the texture mip chain",
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        resource_kind:       gpu::compat::DebugResourceKind.TEXTURE,
         has_public_identity: true,
         resource_index:      texture.index,
         resource_generation: texture.generation,
@@ -1255,25 +1255,25 @@ fn void upload_helper_validation_faults() @test {
     );
     assert(state.helper_counter == helper_before, "invalid bare mip reserves no helper value");
 
-    gpu::BufferDesc buf_desc = {
-        .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "helper_upload_buffer",
+    gpu::compat::BufferDesc buf_desc = {
+        .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::compat::MemoryKind.DEVICE, .debug_name = "helper_upload_buffer",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buf_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &buf_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, buffer)!!;
 
     char[128] too_big;
     char[] empty_data = {};
     before = capture.calls;
     helper_before = state.helper_counter;
-    fault empty_fault = @catch(gpu::upload_buffer_data(
+    fault empty_fault = @catch(gpu::compat::upload_buffer_data(
         device:      &device,
         dst:         buffer,
         offset:      0,
         data:        empty_data,
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_stage:  gpu::compat::Stage.TRANSFER,
+        next_hazard: gpu::compat::Hazard.TRANSFER_READ,
     ));
-    assert(empty_fault == gpu::INVALID_ARGUMENT, "empty upload faults INVALID_ARGUMENT");
+    assert(empty_fault == gpu::compat::INVALID_ARGUMENT, "empty upload faults INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -1281,7 +1281,7 @@ fn void upload_helper_validation_faults() @test {
         operation:           "upload_buffer_data",
         rejected_field:      "data",
         invariant:           "upload data must not be empty",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -1289,26 +1289,26 @@ fn void upload_helper_validation_faults() @test {
     );
     assert(state.helper_counter == helper_before, "empty upload reserves no helper value");
 
-    gpu::BufferDesc no_transfer_buffer_desc = {
+    gpu::compat::BufferDesc no_transfer_buffer_desc = {
         .size        = 64,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "no_transfer_upload_buffer",
     };
-    gpu::BufferHandle no_transfer_buffer = gpu::create_buffer(&device, &no_transfer_buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, no_transfer_buffer)!!;
+    gpu::compat::BufferHandle no_transfer_buffer = gpu::compat::create_buffer(&device, &no_transfer_buffer_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, no_transfer_buffer)!!;
     char[8] small_upload;
     before = capture.calls;
     helper_before = state.helper_counter;
-    fault buffer_usage_fault = @catch(gpu::upload_buffer_data(
+    fault buffer_usage_fault = @catch(gpu::compat::upload_buffer_data(
         device:      &device,
         dst:         no_transfer_buffer,
         offset:      0,
         data:        small_upload[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_stage:  gpu::compat::Stage.TRANSFER,
+        next_hazard: gpu::compat::Hazard.TRANSFER_READ,
     ));
-    assert(buffer_usage_fault == gpu::INVALID_ARGUMENT, "buffer without transfer_dst faults INVALID_ARGUMENT");
+    assert(buffer_usage_fault == gpu::compat::INVALID_ARGUMENT, "buffer without transfer_dst faults INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -1316,7 +1316,7 @@ fn void upload_helper_validation_faults() @test {
         operation:           "upload_buffer_data",
         rejected_field:      "BufferDesc.usage",
         invariant:           "destination buffer must include transfer_dst",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: true,
         resource_index:      no_transfer_buffer.index,
         resource_generation: no_transfer_buffer.generation,
@@ -1326,15 +1326,15 @@ fn void upload_helper_validation_faults() @test {
 
     before = capture.calls;
     helper_before = state.helper_counter;
-    fault bounds_fault = @catch(gpu::upload_buffer_data(
+    fault bounds_fault = @catch(gpu::compat::upload_buffer_data(
         device:      &device,
         dst:         buffer,
         offset:      0,
         data:        too_big[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_stage:  gpu::compat::Stage.TRANSFER,
+        next_hazard: gpu::compat::Hazard.TRANSFER_READ,
     ));
-    assert(bounds_fault == gpu::INVALID_ARGUMENT, "past-the-end upload faults INVALID_ARGUMENT");
+    assert(bounds_fault == gpu::compat::INVALID_ARGUMENT, "past-the-end upload faults INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -1342,7 +1342,7 @@ fn void upload_helper_validation_faults() @test {
         operation:           "upload_buffer_data",
         rejected_field:      "offset/data",
         invariant:           "upload range must fit the destination buffer",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: true,
         resource_index:      buffer.index,
         resource_generation: buffer.generation,
@@ -1350,29 +1350,29 @@ fn void upload_helper_validation_faults() @test {
     );
     assert(state.helper_counter == helper_before, "invalid buffer range reserves no helper value");
 
-    gpu::TextureDesc no_transfer_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc no_transfer_desc = {
+        .dimension  = gpu::compat::TextureDimension.TEX_2D,
         .width      = UR_TEX,
         .height     = UR_TEX,
-        .format     = gpu::Format.RGBA8_UNORM,
+        .format     = gpu::compat::Format.RGBA8_UNORM,
         .usage      = { .sampled },
         .debug_name = "no_transfer_upload_texture",
     };
-    gpu::TextureHandle no_transfer_texture = gpu::create_texture(&device, &no_transfer_desc)!!;
-    defer gpu::destroy_texture(&device, no_transfer_texture)!!;
+    gpu::compat::TextureHandle no_transfer_texture = gpu::compat::create_texture(&device, &no_transfer_desc)!!;
+    defer gpu::compat::destroy_texture(&device, no_transfer_texture)!!;
     char[UR_TEX_BYTES] full_upload;
     before = capture.calls;
     helper_before = state.helper_counter;
-    fault texture_usage_fault = @catch(gpu::upload_texture_data(
+    fault texture_usage_fault = @catch(gpu::compat::upload_texture_data(
         device:      &device,
         dst:         no_transfer_texture,
         mip:         0,
         data:        full_upload[..],
-        next_stage:  gpu::Stage.COMPUTE_SHADER,
-        next_hazard: gpu::Hazard.SHADER_READ,
-        next_layout: gpu::TextureLayout.SHADER_READ,
+        next_stage:  gpu::compat::Stage.COMPUTE_SHADER,
+        next_hazard: gpu::compat::Hazard.SHADER_READ,
+        next_layout: gpu::compat::TextureLayout.SHADER_READ,
     ));
-    assert(texture_usage_fault == gpu::INVALID_ARGUMENT, "texture without transfer_dst faults INVALID_ARGUMENT");
+    assert(texture_usage_fault == gpu::compat::INVALID_ARGUMENT, "texture without transfer_dst faults INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -1380,30 +1380,30 @@ fn void upload_helper_validation_faults() @test {
         operation:           "upload_texture_data",
         rejected_field:      "TextureDesc.usage",
         invariant:           "destination texture must include transfer_dst",
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        resource_kind:       gpu::compat::DebugResourceKind.TEXTURE,
         has_public_identity: true,
         resource_index:      no_transfer_texture.index,
         resource_generation: no_transfer_texture.generation,
         resource_name:       "no_transfer_upload_texture",
     );
     assert(state.helper_counter == helper_before, "invalid texture usage reserves no helper value");
-    gpu::vk::TextureSlot* no_transfer_slot = state.textures.get(no_transfer_texture)!!;
+    gpu::compat::vk::TextureSlot* no_transfer_slot = state.textures.get(no_transfer_texture)!!;
     assert(
-        gpu::vk::texture_layout(no_transfer_slot) == gpu::TextureLayout.UNDEFINED,
+        gpu::compat::vk::texture_layout(no_transfer_slot) == gpu::compat::TextureLayout.UNDEFINED,
         "invalid texture usage preserves the tracked layout"
     );
 
     char[8] readback_dest;
     before = capture.calls;
-    fault usage_fault = @catch(gpu::readback_buffer_data(
+    fault usage_fault = @catch(gpu::compat::readback_buffer_data(
         device:      &device,
         src:         buffer,
         offset:      0,
         out_data:    readback_dest[..],
-        from_stage:  gpu::Stage.TRANSFER,
-        from_hazard: gpu::Hazard.TRANSFER_WRITE,
+        from_stage:  gpu::compat::Stage.TRANSFER,
+        from_hazard: gpu::compat::Hazard.TRANSFER_WRITE,
     ));
-    assert(usage_fault == gpu::INVALID_ARGUMENT, "readback source without transfer_src keeps INVALID_ARGUMENT");
+    assert(usage_fault == gpu::compat::INVALID_ARGUMENT, "readback source without transfer_src keeps INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -1411,7 +1411,7 @@ fn void upload_helper_validation_faults() @test {
         operation:           "readback_buffer_data",
         rejected_field:      "BufferDesc.usage",
         invariant:           "source buffer must include transfer_src",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: true,
         resource_index:      buffer.index,
         resource_generation: buffer.generation,
@@ -1419,14 +1419,14 @@ fn void upload_helper_validation_faults() @test {
     );
 
     // cmd-level upload into a texture that is not TRANSFER_DST still faults.
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
     char[UR_TEX_BYTES] full;
-    gpu::TextureUploadDesc upload = { .texture = texture, .mip = 0 };
-    gpu::TextureUploadDesc invalid_mip_upload = { .texture = texture, .mip = 1 };
+    gpu::compat::TextureUploadDesc upload = { .texture = texture, .mip = 0 };
+    gpu::compat::TextureUploadDesc invalid_mip_upload = { .texture = texture, .mip = 1 };
     before = capture.calls;
-    fault desc_mip_fault = @catch(gpu::cmd_upload_texture(&cmd, &invalid_mip_upload, full[..]));
-    assert(desc_mip_fault == gpu::INVALID_ARGUMENT, "invalid descriptor mip faults INVALID_ARGUMENT");
+    fault desc_mip_fault = @catch(gpu::compat::cmd_upload_texture(&cmd, &invalid_mip_upload, full[..]));
+    assert(desc_mip_fault == gpu::compat::INVALID_ARGUMENT, "invalid descriptor mip faults INVALID_ARGUMENT");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -1434,7 +1434,7 @@ fn void upload_helper_validation_faults() @test {
         operation:           "cmd_upload_texture",
         rejected_field:      "TextureUploadDesc.mip",
         invariant:           "mip must exist in the texture mip chain",
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        resource_kind:       gpu::compat::DebugResourceKind.TEXTURE,
         has_public_identity: true,
         resource_index:      texture.index,
         resource_generation: texture.generation,
@@ -1442,8 +1442,8 @@ fn void upload_helper_validation_faults() @test {
     );
 
     before = capture.calls;
-    fault layout_fault = @catch(gpu::cmd_upload_texture(&cmd, &upload, full[..]));
-    assert(layout_fault == gpu::INVALID_RESOURCE_STATE, "cmd upload into UNDEFINED layout faults INVALID_RESOURCE_STATE");
+    fault layout_fault = @catch(gpu::compat::cmd_upload_texture(&cmd, &upload, full[..]));
+    assert(layout_fault == gpu::compat::INVALID_RESOURCE_STATE, "cmd upload into UNDEFINED layout faults INVALID_RESOURCE_STATE");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -1451,45 +1451,45 @@ fn void upload_helper_validation_faults() @test {
         operation:           "cmd_upload_texture",
         rejected_field:      "TextureUploadDesc.texture",
         invariant:           "destination texture must be in TRANSFER_DST layout",
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        resource_kind:       gpu::compat::DebugResourceKind.TEXTURE,
         has_public_identity: true,
         resource_index:      texture.index,
         resource_generation: texture.generation,
         resource_name:       "helper_upload_texture",
     );
-    gpu::end_commands(&cmd)!!;
-    gpu::end_frame(&frame_token)!!;
+    gpu::compat::end_commands(&cmd)!!;
+    gpu::compat::end_frame(&frame_token)!!;
 }
 
 fn void transfer_callback_presence_preserves_upload_fault() @test {
     TransferDiagnosticCapture capture;
-    gpu::Device callback_device = make_transfer_test_device(capture: &capture);
-    gpu::BufferDesc desc = { .size = 16, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE };
-    gpu::BufferHandle callback_buffer = gpu::create_buffer(&callback_device, &desc)!!;
+    gpu::compat::Device callback_device = make_transfer_test_device(capture: &capture);
+    gpu::compat::BufferDesc desc = { .size = 16, .usage = { .transfer_dst }, .memory_kind = gpu::compat::MemoryKind.DEVICE };
+    gpu::compat::BufferHandle callback_buffer = gpu::compat::create_buffer(&callback_device, &desc)!!;
     char[32] payload;
-    fault callback_fault = @catch(gpu::upload_buffer_data(
+    fault callback_fault = @catch(gpu::compat::upload_buffer_data(
         device:      &callback_device,
         dst:         callback_buffer,
         offset:      0,
         data:        payload[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_stage:  gpu::compat::Stage.TRANSFER,
+        next_hazard: gpu::compat::Hazard.TRANSFER_READ,
     ));
     assert(capture.calls == 1, "callback upload rejection emits exactly once");
-    gpu::destroy_buffer(&callback_device, callback_buffer)!!;
-    gpu::destroy_device(&callback_device)!!;
+    gpu::compat::destroy_buffer(&callback_device, callback_buffer)!!;
+    gpu::compat::destroy_device(&callback_device)!!;
 
-    gpu::Device plain_device = make_transfer_test_device();
-    gpu::BufferHandle plain_buffer = gpu::create_buffer(&plain_device, &desc)!!;
-    fault plain_fault = @catch(gpu::upload_buffer_data(
+    gpu::compat::Device plain_device = make_transfer_test_device();
+    gpu::compat::BufferHandle plain_buffer = gpu::compat::create_buffer(&plain_device, &desc)!!;
+    fault plain_fault = @catch(gpu::compat::upload_buffer_data(
         device:      &plain_device,
         dst:         plain_buffer,
         offset:      0,
         data:        payload[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
+        next_stage:  gpu::compat::Stage.TRANSFER,
+        next_hazard: gpu::compat::Hazard.TRANSFER_READ,
     ));
-    gpu::destroy_buffer(&plain_device, plain_buffer)!!;
-    gpu::destroy_device(&plain_device)!!;
+    gpu::compat::destroy_buffer(&plain_device, plain_buffer)!!;
+    gpu::compat::destroy_device(&plain_device)!!;
     assert(plain_fault == callback_fault, "callback presence does not change upload fault");
 }

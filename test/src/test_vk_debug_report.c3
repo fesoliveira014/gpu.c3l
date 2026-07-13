@@ -1,7 +1,7 @@
 module gpu_test;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import vk;
 import std::core::mem;
 import std::thread;
@@ -13,14 +13,14 @@ const char[*] DBG_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
 struct DebugCapture {
     uint              calls;
-    gpu::DebugMessage last;
+    gpu::compat::DebugMessage last;
     bool              validation_strings_match;
     bool              buffer_strings_match;
     bool              device_name_matches;
     bool              messenger_failure_strings_match;
 }
 
-fn void capture_debug_message(gpu::DebugMessage* message, void* user_data) {
+fn void capture_debug_message(gpu::compat::DebugMessage* message, void* user_data) {
     DebugCapture* capture = (DebugCapture*)user_data;
     capture.calls++;
     capture.last = *message;
@@ -39,7 +39,7 @@ fn void capture_debug_message(gpu::DebugMessage* message, void* user_data) {
             && message.invariant != null
             && message.invariant.str_view() == "must be greater than zero";
     }
-    if (message.resource.kind == gpu::DebugResourceKind.DEVICE && message.resource.debug_name != null) {
+    if (message.resource.kind == gpu::compat::DebugResourceKind.DEVICE && message.resource.debug_name != null) {
         capture.device_name_matches = message.resource.debug_name.str_view() == "named_device";
     }
     if (message.backend_text != null && message.backend_text.str_view() == "fabricated messenger failure") {
@@ -61,20 +61,20 @@ struct LeakCapture {
     uint persistent_spans;
     uint public_identities;
     bool metadata_valid;
-    gpu::PipelineHandle expected_pipeline_a;
-    gpu::PipelineHandle expected_pipeline_b;
+    gpu::compat::PipelineHandle expected_pipeline_a;
+    gpu::compat::PipelineHandle expected_pipeline_b;
     bool pipeline_identity_valid;
     bool named_resources_valid;
 }
 
-fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
+fn void capture_leak_message(gpu::compat::DebugMessage* message, void* user_data) {
     LeakCapture* capture = (LeakCapture*)user_data;
     capture.total++;
     bool operation_valid = message.operation != null && message.operation.str_view() == "destroy_device";
     bool invariant_valid = message.invariant != null
         && message.invariant.str_view() == "resource remains live at device destruction";
     capture.metadata_valid = capture.metadata_valid
-        && message.severity == gpu::DebugMessageSeverity.WARNING
+        && message.severity == gpu::compat::DebugMessageSeverity.WARNING
         && message.category.resource_lifetime
         && !message.has_fault
         && operation_valid
@@ -85,17 +85,17 @@ fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
             && message.resource.generation != 0;
     }
     switch (message.resource.kind) {
-        case gpu::DebugResourceKind.BUFFER:
+        case gpu::compat::DebugResourceKind.BUFFER:
             capture.buffers++;
             capture.named_resources_valid = capture.named_resources_valid
                 && message.resource.debug_name != null
                 && message.resource.debug_name.str_view() == "leaky_buffer";
-        case gpu::DebugResourceKind.TEXTURE:
+        case gpu::compat::DebugResourceKind.TEXTURE:
             capture.textures++;
             capture.named_resources_valid = capture.named_resources_valid
                 && message.resource.debug_name != null
                 && message.resource.debug_name.str_view() == "leaky_texture";
-        case gpu::DebugResourceKind.PIPELINE:
+        case gpu::compat::DebugResourceKind.PIPELINE:
             capture.pipelines++;
             bool first = message.resource.index == capture.expected_pipeline_a.index
                 && message.resource.generation == capture.expected_pipeline_a.generation;
@@ -103,12 +103,12 @@ fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
                 && message.resource.generation == capture.expected_pipeline_b.generation;
             capture.pipeline_identity_valid = message.resource.has_public_identity
                 && (first || second);
-        case gpu::DebugResourceKind.SHADER:             capture.shaders++;
-        case gpu::DebugResourceKind.SEMAPHORE:          capture.semaphores++;
-        case gpu::DebugResourceKind.RECORDING_CONTEXT:  capture.contexts++;
-        case gpu::DebugResourceKind.TEXTURE_DESCRIPTOR: capture.texture_descriptors++;
-        case gpu::DebugResourceKind.SAMPLER:            capture.samplers++;
-        case gpu::DebugResourceKind.PERSISTENT_SPAN:    capture.persistent_spans++;
+        case gpu::compat::DebugResourceKind.SHADER:             capture.shaders++;
+        case gpu::compat::DebugResourceKind.SEMAPHORE:          capture.semaphores++;
+        case gpu::compat::DebugResourceKind.RECORDING_CONTEXT:  capture.contexts++;
+        case gpu::compat::DebugResourceKind.TEXTURE_DESCRIPTOR: capture.texture_descriptors++;
+        case gpu::compat::DebugResourceKind.SAMPLER:            capture.samplers++;
+        case gpu::compat::DebugResourceKind.PERSISTENT_SPAN:    capture.persistent_spans++;
         default: capture.metadata_valid = false;
     }
 }
@@ -126,14 +126,14 @@ struct DebugRouteArgs {
     uint messages;
 }
 
-fn void capture_concurrent_debug_message(gpu::DebugMessage* message, void* user_data) {
+fn void capture_concurrent_debug_message(gpu::compat::DebugMessage* message, void* user_data) {
     ConcurrentDebugCapture* capture = (ConcurrentDebugCapture*)user_data;
     capture.mutex.lock()!!;
     defer capture.mutex.unlock();
     capture.calls++;
     switch (message.severity) {
-        case gpu::DebugMessageSeverity.WARNING: capture.warnings++;
-        case gpu::DebugMessageSeverity.ERROR:   capture.errors++;
+        case gpu::compat::DebugMessageSeverity.WARNING: capture.warnings++;
+        case gpu::compat::DebugMessageSeverity.ERROR:   capture.errors++;
         default:
     }
 }
@@ -208,13 +208,13 @@ fn void vulkan_debug_message_routes_structured_fields() @test {
 
     assert(result == vk::FALSE, "debug callback never requests Vulkan abort");
     assert(capture.calls == 1, "structured callback receives exactly one message");
-    assert(capture.last.severity == gpu::DebugMessageSeverity.ERROR, "error severity is preserved");
+    assert(capture.last.severity == gpu::compat::DebugMessageSeverity.ERROR, "error severity is preserved");
     assert(capture.last.category.backend, "Vulkan diagnostics are backend messages");
     assert(capture.last.category.validation, "validation category is preserved");
     assert(capture.last.category.performance, "performance category is preserved");
     assert(!capture.last.category.general, "unset general category stays clear");
     assert(capture.last.validation_id_number == 2718, "numeric validation ID is preserved");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER, "named Vulkan buffer maps to public resource kind");
+    assert(capture.last.resource.kind == gpu::compat::DebugResourceKind.BUFFER, "named Vulkan buffer maps to public resource kind");
     assert(capture.validation_strings_match, "callback observes borrowed validation ID, text, and object name while valid");
     assert(!capture.last.resource.has_public_identity, "native callback data invents no public handle identity");
     assert(capture.last.resource.index == 0 && capture.last.resource.generation == 0,
@@ -232,7 +232,7 @@ fn void vulkan_debug_message_routes_structured_fields() @test {
         data:         &data,
     );
     assert(capture.calls == 2, "fabricated device message is routed");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.DEVICE, "Vulkan device maps to public device resource kind");
+    assert(capture.last.resource.kind == gpu::compat::DebugResourceKind.DEVICE, "Vulkan device maps to public device resource kind");
     assert(capture.device_name_matches, "callback observes the borrowed device name while valid");
     assert(!capture.last.resource.has_public_identity, "native device handle does not become a public identity");
 }
@@ -264,7 +264,7 @@ fn void vulkan_debug_message_prefers_named_resource_and_falls_back_to_kind() @te
         data:         &data,
     );
 
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.TEXTURE,
+    assert(capture.last.resource.kind == gpu::compat::DebugResourceKind.TEXTURE,
         "later named object wins over an earlier unnamed mapped object");
     assert(capture.last.resource.debug_name.str_view() == "later_texture",
         "selected resource keeps the first useful name");
@@ -277,7 +277,7 @@ fn void vulkan_debug_message_prefers_named_resource_and_falls_back_to_kind() @te
         data:         &data,
     );
 
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER,
+    assert(capture.last.resource.kind == gpu::compat::DebugResourceKind.BUFFER,
         "all-unnamed objects fall back to the first mapped kind");
     assert(capture.last.resource.debug_name == null, "fallback resource has no invented name");
 }
@@ -298,43 +298,43 @@ fn void vulkan_debug_message_handles_null_callback_data() @test {
 
     assert(result == vk::FALSE, "null callback data still returns VK_FALSE");
     assert(capture.calls == 1, "null callback data still routes one message");
-    assert(capture.last.severity == gpu::DebugMessageSeverity.INFO, "info severity is preserved");
+    assert(capture.last.severity == gpu::compat::DebugMessageSeverity.INFO, "info severity is preserved");
     assert(capture.last.category.backend && capture.last.category.general, "general backend category is preserved");
     assert(capture.last.backend_text == null, "missing text remains absent");
     assert(capture.last.validation_id_name == null, "missing validation ID name remains absent");
     assert(capture.last.validation_id_number == 0, "missing numeric validation ID remains zero");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.NONE, "missing objects produce no resource kind");
+    assert(capture.last.resource.kind == gpu::compat::DebugResourceKind.NONE, "missing objects produce no resource kind");
     assert(!capture.last.resource.has_public_identity, "missing objects produce no public identity");
 }
 
 fn void zero_size_buffer_diagnostic_preserves_fault() @test {
     DebugCapture capture;
-    gpu::DeviceDesc device_desc = {
-        .backend         = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc device_desc = {
+        .backend         = gpu::compat::BackendKind.VULKAN,
         .debug_callback  = &capture_debug_message,
         .debug_user_data = &capture,
         .frames_in_flight = 2,
         .application_name = "gpu_debug_contract_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = gpu::compat::create_device(&device_desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
 
     uint before = capture.calls;
-    gpu::BufferDesc desc = {
+    gpu::compat::BufferDesc desc = {
         .size        = 0,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "zero_buffer",
     };
-    fault rejected = @catch(gpu::create_buffer(&device, &desc));
+    fault rejected = @catch(gpu::compat::create_buffer(&device, &desc));
 
-    assert(rejected == gpu::INVALID_ARGUMENT, "structured diagnostics do not change the public fault");
+    assert(rejected == gpu::compat::INVALID_ARGUMENT, "structured diagnostics do not change the public fault");
     assert(capture.calls == before + 1, "one public-contract message accompanies the fault");
-    assert(capture.last.severity == gpu::DebugMessageSeverity.ERROR, "public rejection is an error");
+    assert(capture.last.severity == gpu::compat::DebugMessageSeverity.ERROR, "public rejection is an error");
     assert(capture.last.category.public_contract, "public rejection carries the contract category");
-    assert(capture.last.has_fault && capture.last.public_fault == gpu::INVALID_ARGUMENT,
+    assert(capture.last.has_fault && capture.last.public_fault == gpu::compat::INVALID_ARGUMENT,
         "diagnostic carries the same public fault");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER, "rejected resource kind is identified");
+    assert(capture.last.resource.kind == gpu::compat::DebugResourceKind.BUFFER, "rejected resource kind is identified");
     assert(!capture.last.resource.has_public_identity, "rejected create has no invented public identity");
     assert(capture.buffer_strings_match, "callback observes borrowed operation metadata and debug name while valid");
 }
@@ -349,8 +349,8 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
     fault returned = vk::report_contract_failure(
         state:               &state,
         operation:           "create_buffer",
-        public_fault:        gpu::INVALID_ARGUMENT,
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        public_fault:        gpu::compat::INVALID_ARGUMENT,
+        resource_kind:       gpu::compat::DebugResourceKind.BUFFER,
         has_public_identity: true,
         index:               7,
         generation:          9,
@@ -360,11 +360,11 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
         backend_text:        null,
     );
 
-    assert(returned == gpu::INVALID_ARGUMENT, "helper returns the unchanged public fault");
+    assert(returned == gpu::compat::INVALID_ARGUMENT, "helper returns the unchanged public fault");
     assert(capture.calls == 1, "helper dispatches exactly once");
     assert(capture.last.has_fault && capture.last.public_fault == returned,
         "structured message carries the returned fault");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER,
+    assert(capture.last.resource.kind == gpu::compat::DebugResourceKind.BUFFER,
         "helper preserves resource kind");
     assert(capture.last.resource.has_public_identity
         && capture.last.resource.index == 7
@@ -383,7 +383,7 @@ fn void debug_messenger_failure_routes_backend_warning() @test {
     vk::report_debug_messenger_failure(&state, "fabricated messenger failure");
 
     assert(capture.calls == 1, "messenger setup failure routes exactly once");
-    assert(capture.last.severity == gpu::DebugMessageSeverity.WARNING, "messenger setup failure is a warning");
+    assert(capture.last.severity == gpu::compat::DebugMessageSeverity.WARNING, "messenger setup failure is a warning");
     assert(capture.last.category.backend, "messenger setup failure is a backend diagnostic");
     assert(!capture.last.has_fault, "best-effort messenger setup failure carries no public fault");
     assert(capture.messenger_failure_strings_match,
@@ -391,80 +391,80 @@ fn void debug_messenger_failure_routes_backend_warning() @test {
 }
 
 fn void debug_names_do_not_require_validation() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = false,
         .enable_debug_names = true,
         .frames_in_flight  = 2,
         .application_name  = "gpu_debug_names_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
     assert(state.debug_names, "backend retains the debug-name opt-in without validation");
 
-    gpu::BufferDesc buffer_desc = {
+    gpu::compat::BufferDesc buffer_desc = {
         .size        = 64,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "names_without_validation",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    gpu::destroy_buffer(&device, buffer)!!;
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &buffer_desc)!!;
+    gpu::compat::destroy_buffer(&device, buffer)!!;
 }
 
-fn gpu::Device make_dbg_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+fn gpu::compat::Device make_dbg_device() {
+    gpu::compat::DeviceDesc desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
         .application_name  = "gpu_debug_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::compat::create_device(&desc)!!;
 }
 
 fn void leak_reporters_count_leaks() @test {
-    gpu::Device device = make_dbg_device();
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_dbg_device();
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
-    gpu::BufferDesc buf_desc = {
+    gpu::compat::BufferDesc buf_desc = {
         .size        = 256,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "leaky_buffer",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buf_desc)!!;
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &buf_desc)!!;
 
-    gpu::TextureDesc tex_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc tex_desc = {
+        .dimension  = gpu::compat::TextureDimension.TEX_2D,
         .width      = 8,
         .height     = 8,
-        .format     = gpu::Format.RGBA8_UNORM,
+        .format     = gpu::compat::Format.RGBA8_UNORM,
         .usage      = { .sampled },
         .debug_name = "leaky_texture",
     };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
+    gpu::compat::TextureHandle texture = gpu::compat::create_texture(&device, &tex_desc)!!;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DBG_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &comp_sd)!!;
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = 8 };
-    gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
-    gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
+    gpu::compat::ShaderDesc comp_sd = { .stage = gpu::compat::ShaderStage.COMPUTE, .spirv = DBG_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::compat::ShaderHandle shader = gpu::compat::create_shader(&device, &comp_sd)!!;
+    gpu::compat::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = 8 };
+    gpu::compat::PipelineHandle first_alias = gpu::compat::create_compute_pipeline(&device, &pipe_desc)!!;
+    gpu::compat::PipelineHandle second_alias = gpu::compat::create_compute_pipeline(&device, &pipe_desc)!!;
 
-    gpu::SemaphoreDesc sem_desc = { .debug_name = "leaky_semaphore" };
-    gpu::SemaphoreHandle semaphore = gpu::create_semaphore(&device, &sem_desc)!!;
-    gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!!;
+    gpu::compat::SemaphoreDesc sem_desc = { .debug_name = "leaky_semaphore" };
+    gpu::compat::SemaphoreHandle semaphore = gpu::compat::create_semaphore(&device, &sem_desc)!!;
+    gpu::compat::RecordingContextHandle ctx = gpu::compat::create_recording_context(&device)!!;
 
-    gpu::TextureIndex texture_index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    gpu::SamplerDesc sampler_desc = {
-        .min_filter = gpu::Filter.NEAREST,
-        .mag_filter = gpu::Filter.NEAREST,
-        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
-        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
-        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    gpu::compat::TextureIndex texture_index = gpu::compat::create_texture_descriptor(&device, texture, null)!!;
+    gpu::compat::SamplerDesc sampler_desc = {
+        .min_filter = gpu::compat::Filter.NEAREST,
+        .mag_filter = gpu::compat::Filter.NEAREST,
+        .address_u  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::compat::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex sampler = gpu::create_sampler(&device, &sampler_desc)!!;
+    gpu::compat::SamplerIndex sampler = gpu::compat::create_sampler(&device, &sampler_desc)!!;
 
     LeakCapture capture = {
         .metadata_valid        = true,
@@ -500,52 +500,52 @@ fn void leak_reporters_count_leaks() @test {
     vk::TextureSlot* tex_slot = &state.textures.slots[texture.index].value;
     assert(tex_slot.allocation_size > 0, "texture leak line carries the allocation size");
 
-    gpu::destroy_texture_descriptor(&device, texture_index)!!;
-    gpu::destroy_sampler(&device, sampler)!!;
-    gpu::destroy_recording_context(&device, ctx)!!;
-    gpu::destroy_semaphore(&device, semaphore)!!;
-    gpu::destroy_pipeline(&device, first_alias)!!;
-    gpu::destroy_pipeline(&device, second_alias)!!;
-    gpu::destroy_shader(&device, shader)!!;
-    gpu::destroy_texture(&device, texture)!!;
-    gpu::destroy_buffer(&device, buffer)!!;
+    gpu::compat::destroy_texture_descriptor(&device, texture_index)!!;
+    gpu::compat::destroy_sampler(&device, sampler)!!;
+    gpu::compat::destroy_recording_context(&device, ctx)!!;
+    gpu::compat::destroy_semaphore(&device, semaphore)!!;
+    gpu::compat::destroy_pipeline(&device, first_alias)!!;
+    gpu::compat::destroy_pipeline(&device, second_alias)!!;
+    gpu::compat::destroy_shader(&device, shader)!!;
+    gpu::compat::destroy_texture(&device, texture)!!;
+    gpu::compat::destroy_buffer(&device, buffer)!!;
 
-    gpu::PersistentAllocDesc persistent_desc = {
+    gpu::compat::PersistentAllocDesc persistent_desc = {
         .size        = 64,
         .align       = 16,
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .memory_kind = gpu::compat::MemoryKind.PERSISTENT_UPLOAD,
         .debug_name  = "leaky_persistent_span",
     };
-    gpu::GpuSpan persistent = gpu::alloc_persistent_span(&device, &persistent_desc)!!;
+    gpu::compat::GpuSpan persistent = gpu::compat::alloc_persistent_span(&device, &persistent_desc)!!;
     assert(vk::report_resource_leaks(state) == 1, "one persistent span leak counted");
     assert(capture.total == 9 && capture.persistent_spans == 1,
         "persistent allocation summary emits one structured warning");
     assert(capture.metadata_valid, "persistent warning uses the same resource-lifetime contract");
-    gpu::free_persistent_span(&device, persistent)!!;
+    gpu::compat::free_persistent_span(&device, persistent)!!;
 
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
     assert(capture.total == 9, "clean leak report emits nothing");
-    gpu::destroy_device(&device)!!;
+    gpu::compat::destroy_device(&device)!!;
 }
 
 fn void debug_name_copy_is_independent() @test {
-    gpu::Device device = make_dbg_device();
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::compat::Device device = make_dbg_device();
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
     char[16] volatile_name;
     char[7] source = { 'v', 'o', 'l', 'a', 't', 'i', 'l' };
     for (uint i = 0; i < 7; i++) volatile_name[i] = source[i];
     volatile_name[7] = 0;
 
-    gpu::BufferDesc desc = {
+    gpu::compat::BufferDesc desc = {
         .size        = 64,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = (ZString)&volatile_name[0],
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &desc)!!;
+    defer gpu::compat::destroy_buffer(&device, buffer)!!;
 
     foreach (&b : volatile_name) *b = 'X';
 
@@ -555,103 +555,103 @@ fn void debug_name_copy_is_independent() @test {
 }
 
 fn void stats_counts_populated() @test {
-    gpu::Device device = make_dbg_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_dbg_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferHandle[3] buffers;
+    gpu::compat::BufferHandle[3] buffers;
     for (uint i = 0; i < 3; i++) {
-        gpu::BufferDesc desc = { .size = 128, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
-        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+        gpu::compat::BufferDesc desc = { .size = 128, .usage = { .storage }, .memory_kind = gpu::compat::MemoryKind.DEVICE };
+        buffers[i] = gpu::compat::create_buffer(&device, &desc)!!;
     }
-    gpu::TextureHandle[2] textures;
+    gpu::compat::TextureHandle[2] textures;
     for (uint i = 0; i < 2; i++) {
-        gpu::TextureDesc desc = {
-            .dimension = gpu::TextureDimension.TEX_2D,
+        gpu::compat::TextureDesc desc = {
+            .dimension = gpu::compat::TextureDimension.TEX_2D,
             .width     = 4,
             .height    = 4,
-            .format    = gpu::Format.RGBA8_UNORM,
+            .format    = gpu::compat::Format.RGBA8_UNORM,
             .usage     = { .sampled },
         };
-        textures[i] = gpu::create_texture(&device, &desc)!!;
+        textures[i] = gpu::compat::create_texture(&device, &desc)!!;
     }
 
-    gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
+    gpu::compat::MemoryStats stats = gpu::compat::get_memory_stats(&device)!!;
     assert(stats.buffer_count == 3, "buffer count reflects live buffers");
     assert(stats.texture_count == 2, "texture count reflects live textures");
     assert(stats.heap_count > 0 && stats.heaps[0].budget > 0, "stats include a VMA budget");
 
-    foreach (t : textures) gpu::destroy_texture(&device, t)!!;
-    foreach (b : buffers) gpu::destroy_buffer(&device, b)!!;
-    stats = gpu::get_memory_stats(&device)!!;
+    foreach (t : textures) gpu::compat::destroy_texture(&device, t)!!;
+    foreach (b : buffers) gpu::compat::destroy_buffer(&device, b)!!;
+    stats = gpu::compat::get_memory_stats(&device)!!;
     assert(stats.buffer_count == 0 && stats.texture_count == 0, "counts drop to zero after destroy");
 }
 
 fn void labels_record_validation_clean() @test {
-    gpu::Device device = make_dbg_device();
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = make_dbg_device();
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::TextureDesc rt_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
+    gpu::compat::TextureDesc rt_desc = {
+        .dimension = gpu::compat::TextureDimension.TEX_2D,
         .width     = 8,
         .height    = 8,
-        .format    = gpu::Format.RGBA8_UNORM,
+        .format    = gpu::compat::Format.RGBA8_UNORM,
         .usage     = { .color_attach },
     };
-    gpu::TextureHandle target = gpu::create_texture(&device, &rt_desc)!!;
-    defer gpu::destroy_texture(&device, target)!!;
+    gpu::compat::TextureHandle target = gpu::compat::create_texture(&device, &rt_desc)!!;
+    defer gpu::compat::destroy_texture(&device, target)!!;
 
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::FrameToken frame_token = gpu::compat::begin_frame(&device)!!;
+    gpu::compat::CommandList cmd = gpu::compat::begin_commands(&device, gpu::compat::QueueKind.GRAPHICS)!!;
 
-    gpu::cmd_begin_label(&cmd, "frame_setup")!!;
-    gpu::TextureBarrier to_attach = {
+    gpu::compat::cmd_begin_label(&cmd, "frame_setup")!!;
+    gpu::compat::TextureBarrier to_attach = {
         .texture       = target,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.COLOR_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .before_stage  = gpu::compat::Stage.HOST,
+        .after_stage   = gpu::compat::Stage.COLOR_ATTACHMENT,
+        .before_hazard = gpu::compat::Hazard.HOST_WRITE,
+        .after_hazard  = gpu::compat::Hazard.COLOR_WRITE,
+        .old_layout    = gpu::compat::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::compat::TextureLayout.COLOR_ATTACHMENT,
     };
-    gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
-    gpu::cmd_end_label(&cmd)!!;
+    gpu::compat::cmd_texture_barrier(&cmd, &to_attach)!!;
+    gpu::compat::cmd_end_label(&cmd)!!;
 
-    gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+    gpu::compat::ColorTargetDesc[1] colors = {{
+        .texture = target, .load_op = gpu::compat::LoadOp.CLEAR, .store_op = gpu::compat::StoreOp.STORE,
     }};
-    gpu::RenderPassDesc pass = { .colors = colors[..], .width = 8, .height = 8 };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    gpu::cmd_begin_label(&cmd, "main_pass", { 0.2f, 0.8f, 0.2f, 1.0f })!!;
-    gpu::cmd_begin_label(&cmd, "nested")!!;
-    gpu::cmd_end_label(&cmd)!!;
-    gpu::cmd_end_label(&cmd)!!;
-    gpu::cmd_end_render_pass(&cmd)!!;
+    gpu::compat::RenderPassDesc pass = { .colors = colors[..], .width = 8, .height = 8 };
+    gpu::compat::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::compat::cmd_begin_label(&cmd, "main_pass", { 0.2f, 0.8f, 0.2f, 1.0f })!!;
+    gpu::compat::cmd_begin_label(&cmd, "nested")!!;
+    gpu::compat::cmd_end_label(&cmd)!!;
+    gpu::compat::cmd_end_label(&cmd)!!;
+    gpu::compat::cmd_end_render_pass(&cmd)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
+    gpu::compat::end_commands(&cmd)!!;
+    gpu::compat::CommandList[1] lists = { cmd };
+    gpu::compat::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::compat::submit(&device, &submit)!!;
+    gpu::compat::wait_queue_idle(&device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::end_frame(&frame_token)!!;
 
-    fault ended = @catch(gpu::cmd_begin_label(&cmd, "too_late"));
-    assert(ended == gpu::INVALID_HANDLE, "labels on a consumed list fault INVALID_HANDLE");
-    fault end_stale = @catch(gpu::cmd_end_label(&cmd));
-    assert(end_stale == gpu::INVALID_HANDLE, "ending a label on a consumed list faults INVALID_HANDLE");
+    fault ended = @catch(gpu::compat::cmd_begin_label(&cmd, "too_late"));
+    assert(ended == gpu::compat::INVALID_HANDLE, "labels on a consumed list fault INVALID_HANDLE");
+    fault end_stale = @catch(gpu::compat::cmd_end_label(&cmd));
+    assert(end_stale == gpu::compat::INVALID_HANDLE, "ending a label on a consumed list faults INVALID_HANDLE");
 }
 
 fn void destroy_reports_leaks_before_sweeping() @test {
-    gpu::Device device = make_dbg_device();
-    gpu::BufferDesc desc = {
+    gpu::compat::Device device = make_dbg_device();
+    gpu::compat::BufferDesc desc = {
         .size        = 128,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "canary_buffer",
     };
-    (void)gpu::create_buffer(&device, &desc)!!;
+    (void)gpu::compat::create_buffer(&device, &desc)!!;
     // Teardown must print the canary's leak line (visible in test stderr)
     // and still destroy everything without faulting.
-    gpu::destroy_device(&device)!!;
+    gpu::compat::destroy_device(&device)!!;
 }
 
 fn void callback_reports_leaks_without_validation() @test {
@@ -659,23 +659,23 @@ fn void callback_reports_leaks_without_validation() @test {
         .metadata_valid        = true,
         .named_resources_valid = true,
     };
-    gpu::DeviceDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc device_desc = {
+        .backend           = gpu::compat::BackendKind.VULKAN,
         .debug_callback    = &capture_leak_message,
         .debug_user_data   = &capture,
         .frames_in_flight  = 2,
         .application_name  = "gpu_callback_leak_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
-    gpu::BufferDesc buffer_desc = {
+    gpu::compat::Device device = gpu::compat::create_device(&device_desc)!!;
+    gpu::compat::BufferDesc buffer_desc = {
         .size        = 128,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
         .debug_name  = "leaky_buffer",
     };
-    (void)gpu::create_buffer(&device, &buffer_desc)!!;
+    (void)gpu::compat::create_buffer(&device, &buffer_desc)!!;
 
-    gpu::destroy_device(&device)!!;
+    gpu::compat::destroy_device(&device)!!;
 
     assert(capture.total == 1 && capture.buffers == 1,
         "callback receives one leaked-buffer warning without validation");

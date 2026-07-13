@@ -6,19 +6,25 @@ Target C3 0.8.0. C3 is pre-1.0, so code examples and implementation work must be
 
 ## 2. Module names
 
-Public module:
+Strict root:
 
 ```c3
 module gpu;
 ```
 
-Vulkan backend module:
+Compatibility API:
 
 ```c3
-module gpu::vk @private;
+module gpu::compat;
 ```
 
-Sample modules may use sample-specific namespaces. Do not put samples in `module gpu;` unless they are shipped helpers.
+Compatibility backend:
+
+```c3
+module gpu::compat::vk @private;
+```
+
+Samples use sample-specific modules and never join a library module.
 
 ## 3. Naming
 
@@ -28,7 +34,7 @@ Sample modules may use sample-specific namespaces. Do not put samples in `module
 | Functions | `snake_case` | `create_buffer`, `cmd_dispatch`, `alloc_frame_span` |
 | Structs, enums, typedefs, aliases | `PascalCase` | `DeviceDesc`, `GpuSpan`, `TextureUsage` |
 | Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_BUFFERS`, `TRANSFER_DST`, `DEVICE_LOST` |
-| Modules | lowercase, dotted | `gpu`, `gpu::vk` |
+| Modules | lowercase, dotted | `gpu`, `gpu::compat`, `gpu::compat::vk` |
 | Files | `snake_case.c3` | `descriptor_heap.c3`, `pipeline_graphics.c3` |
 
 ## 4. Definition order
@@ -194,33 +200,34 @@ Backend files may import `vk` and `vma`. Samples may import `sdl`.
 
 ## 13. File organization
 
-Public files should be grouped by API area:
+Strict root declarations live directly under `gpu/`. Compatibility files are
+grouped by API area:
 
 ```text
-gpu/device.c3
-gpu/memory.c3
-gpu/buffer.c3
-gpu/texture.c3
-gpu/pipeline.c3
-gpu/command.c3
-gpu/sync.c3
-gpu/swapchain.c3
+gpu/compat/device.c3
+gpu/compat/memory.c3
+gpu/compat/buffer.c3
+gpu/compat/texture.c3
+gpu/compat/pipeline.c3
+gpu/compat/command.c3
+gpu/compat/sync.c3
+gpu/compat/swapchain.c3
 ```
 
 Backend implementation should mirror public areas:
 
 ```text
-gpu/vk/device.c3
-gpu/vk/memory.c3
-gpu/vk/buffer.c3
-gpu/vk/texture.c3
-gpu/vk/pipeline_compute.c3
-gpu/vk/pipeline_graphics.c3
-gpu/vk/command.c3
-gpu/vk/sync.c3
+gpu/compat/vk/device.c3
+gpu/compat/vk/memory.c3
+gpu/compat/vk/buffer.c3
+gpu/compat/vk/texture.c3
+gpu/compat/vk/pipeline_compute.c3
+gpu/compat/vk/pipeline_graphics.c3
+gpu/compat/vk/command.c3
+gpu/compat/vk/sync.c3
 ```
 
-Translation helpers belong in `gpu/vk/helpers.c3` and should not be duplicated.
+Translation helpers belong in `gpu/compat/vk/helpers.c3` and should not be duplicated.
 
 ## 14. Shader style
 

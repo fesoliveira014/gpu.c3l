@@ -1,7 +1,7 @@
 module gpu_bench;
 
-import gpu @public;
-import gpu::vk @public;
+import gpu::compat @public;
+import gpu::compat::vk @public;
 import std::io;
 import std::thread;
 import std::time;
@@ -27,9 +27,9 @@ enum BenchPhase : int {
 }
 
 struct BenchWorkerArgs {
-    gpu::Device*        device;
+    gpu::compat::Device*        device;
     BenchPhase          phase;
-    gpu::TextureHandle  texture;
+    gpu::compat::TextureHandle  texture;
     uint                iters;
 }
 
@@ -45,26 +45,26 @@ fn uint descriptors_per_op(BenchPhase phase) {
     return phase == BenchPhase.TEXTURE_BATCHED ? BENCH_BATCH_SIZE : 1;
 }
 
-fn void run_texture_single_op(gpu::Device* device, gpu::TextureHandle texture) {
-    gpu::TextureIndex index = gpu::create_texture_descriptor(device, texture, null)!!;
-    gpu::destroy_texture_descriptor(device, index)!!;
+fn void run_texture_single_op(gpu::compat::Device* device, gpu::compat::TextureHandle texture) {
+    gpu::compat::TextureIndex index = gpu::compat::create_texture_descriptor(device, texture, null)!!;
+    gpu::compat::destroy_texture_descriptor(device, index)!!;
 }
 
-fn void run_texture_batched_op(gpu::Device* device, gpu::TextureHandle texture) {
-    gpu::TextureDescriptorDesc[BENCH_BATCH_SIZE] descs;
+fn void run_texture_batched_op(gpu::compat::Device* device, gpu::compat::TextureHandle texture) {
+    gpu::compat::TextureDescriptorDesc[BENCH_BATCH_SIZE] descs;
     foreach (&desc : descs) *desc = { .texture = texture };
-    gpu::TextureIndex[BENCH_BATCH_SIZE] indices;
-    gpu::create_texture_descriptors(device, descs[..], indices[..])!!;
-    foreach (index : indices) gpu::destroy_texture_descriptor(device, index)!!;
+    gpu::compat::TextureIndex[BENCH_BATCH_SIZE] indices;
+    gpu::compat::create_texture_descriptors(device, descs[..], indices[..])!!;
+    foreach (index : indices) gpu::compat::destroy_texture_descriptor(device, index)!!;
 }
 
-fn void run_sampler_op(gpu::Device* device) {
-    gpu::SamplerDesc desc = {};
-    gpu::SamplerIndex index = gpu::create_sampler(device, &desc)!!;
-    gpu::destroy_sampler(device, index)!!;
+fn void run_sampler_op(gpu::compat::Device* device) {
+    gpu::compat::SamplerDesc desc = {};
+    gpu::compat::SamplerIndex index = gpu::compat::create_sampler(device, &desc)!!;
+    gpu::compat::destroy_sampler(device, index)!!;
 }
 
-fn void run_phase_op(gpu::Device* device, BenchPhase phase, gpu::TextureHandle texture) {
+fn void run_phase_op(gpu::compat::Device* device, BenchPhase phase, gpu::compat::TextureHandle texture) {
     switch (phase) {
         case BenchPhase.TEXTURE_SINGLE:  run_texture_single_op(device, texture);
         case BenchPhase.TEXTURE_BATCHED: run_texture_batched_op(device, texture);
@@ -87,7 +87,7 @@ fn int bench_worker(void* arg) {
    BENCH_ITERS_PER_WORKER descriptor create+destroy round trips of `phase`
    (batched phase: BENCH_ITERS_PER_WORKER/BENCH_BATCH_SIZE calls of
    BENCH_BATCH_SIZE each) against its own pool texture. *>
-fn double run_phase_worker_count(gpu::Device* device, BenchPhase phase, gpu::TextureHandle[] textures, uint workers) {
+fn double run_phase_worker_count(gpu::compat::Device* device, BenchPhase phase, gpu::compat::TextureHandle[] textures, uint workers) {
     BenchWorkerArgs[BENCH_MAX_WORKERS] args;
     Thread[BENCH_MAX_WORKERS] threads;
     for (uint w = 0; w < workers; w++) {
@@ -103,7 +103,7 @@ fn double run_phase_worker_count(gpu::Device* device, BenchPhase phase, gpu::Tex
     return (double)elapsed_ns / (double)total_descriptors;
 }
 
-fn double run_phase(gpu::Device* device, BenchPhase phase, gpu::TextureHandle[] textures) {
+fn double run_phase(gpu::compat::Device* device, BenchPhase phase, gpu::compat::TextureHandle[] textures) {
     (void)run_phase_worker_count(device, phase, textures, 1);
     double baseline_ns_per_op = 0;
     double single_worker_ns = 0;
@@ -117,34 +117,34 @@ fn double run_phase(gpu::Device* device, BenchPhase phase, gpu::TextureHandle[] 
     return single_worker_ns;
 }
 
-fn gpu::TextureHandle[BENCH_MAX_WORKERS] make_texture_pool(gpu::Device* device) {
-    gpu::TextureHandle[BENCH_MAX_WORKERS] textures;
+fn gpu::compat::TextureHandle[BENCH_MAX_WORKERS] make_texture_pool(gpu::compat::Device* device) {
+    gpu::compat::TextureHandle[BENCH_MAX_WORKERS] textures;
     foreach (&handle : textures) {
-        gpu::TextureDesc desc = {
-            .dimension = gpu::TextureDimension.TEX_2D,
+        gpu::compat::TextureDesc desc = {
+            .dimension = gpu::compat::TextureDimension.TEX_2D,
             .width     = 4,
             .height    = 4,
-            .format    = gpu::Format.RGBA8_UNORM,
+            .format    = gpu::compat::Format.RGBA8_UNORM,
             .usage     = { .sampled, .storage },
         };
-        *handle = gpu::create_texture(device, &desc)!!;
+        *handle = gpu::compat::create_texture(device, &desc)!!;
     }
     return textures;
 }
 
-fn void run_bench_suite(gpu::DeviceDesc* desc, ZString label) {
-    gpu::Device device = gpu::create_device(desc)!!;
-    defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+fn void run_bench_suite(gpu::compat::DeviceDesc* desc, ZString label) {
+    gpu::compat::Device device = gpu::compat::create_device(desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::compat::device_backend_state(device);
 
-    gpu::TextureHandle[BENCH_MAX_WORKERS] textures = make_texture_pool(&device);
+    gpu::compat::TextureHandle[BENCH_MAX_WORKERS] textures = make_texture_pool(&device);
 
     double single_ns = run_phase(&device, BenchPhase.TEXTURE_SINGLE, textures[..]);
     double batched_ns = run_phase(&device, BenchPhase.TEXTURE_BATCHED, textures[..]);
     run_phase(&device, BenchPhase.SAMPLER, textures[..]);
     io::printfn("%s: batch/single ratio (1 worker) = %.2fx", label, single_ns / batched_ns);
 
-    foreach (handle : textures) (void)gpu::destroy_texture(&device, handle);
+    foreach (handle : textures) (void)gpu::compat::destroy_texture(&device, handle);
     uint leaks = vk::report_resource_leaks(state);
     io::printfn("%s: leaks=%d", label, leaks);
 }
@@ -158,16 +158,16 @@ fn bool db_e2e_enabled() {
 
 fn int main() {
     io::printfn("iterations=%d/worker units=ns/descriptor", BENCH_ITERS_PER_WORKER);
-    gpu::DeviceDesc indexing_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc indexing_desc = {
+        .backend          = gpu::compat::BackendKind.VULKAN,
         .application_name = "gpu_descriptor_churn_bench",
     };
     run_bench_suite(&indexing_desc, "indexing");
 
     if (db_e2e_enabled()) {
-        gpu::DeviceDesc buffer_desc = {
-            .backend              = gpu::BackendKind.VULKAN,
-            .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
+        gpu::compat::DeviceDesc buffer_desc = {
+            .backend              = gpu::compat::BackendKind.VULKAN,
+            .descriptor_heap_mode = gpu::compat::DescriptorHeapMode.DESCRIPTOR_BUFFER,
             .application_name     = "gpu_descriptor_churn_bench_db",
         };
         run_bench_suite(&buffer_desc, "buffer");

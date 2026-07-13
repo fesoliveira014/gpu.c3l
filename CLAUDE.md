@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`gpu.c3l` — a C3 GPU programming library. Public module `gpu`; private Vulkan 1.3 backend module `gpu::vk`. Targets **C3 0.8.0** (pre-1.0; syntax changes between releases — use the C3 skills below / bundled C3 docs, don't rely on memory).
+`gpu.c3l` — a C3 GPU programming library. Strict root module `gpu`; stabilized API `gpu::compat`; private Vulkan 1.3 backend `gpu::compat::vk`. Targets **C3 0.8.0** (pre-1.0; syntax changes between releases — use the C3 skills below / bundled C3 docs, don't rely on memory).
 
 ## C3 skills — use when planning, reviewing, or implementing
 
@@ -18,7 +18,7 @@ For exact syntax/version questions, `c3-expert` wins; for idiom, `c3-style`; for
 
 ## Project documentation
 
-The implementation lives under `gpu/`; the Vulkan backend is under `gpu/vk/`. Before changing a contract, read `docs/document_index.md` and the relevant topic document:
+Strict declarations live under `gpu/`; compatibility lives under `gpu/compat/`; its Vulkan backend is under `gpu/compat/vk/`. Before changing a contract, read `docs/document_index.md` and the relevant topic document:
 
 - `docs/architecture.md` — module split, handle/ABI model
 - `docs/api.md` — public API shape
@@ -40,7 +40,9 @@ The implementation lives under `gpu/`; the Vulkan backend is under `gpu/vk/`. Be
 
 ## Architecture rules
 
-- Public API is **GPU-shaped, not Vulkan-shaped**: keep `vk::` and `vma::` types out of public signatures.
+- Public APIs are **GPU-shaped, not Vulkan-shaped**: keep `vk::` and `vma::` types out of public signatures.
+- `gpu` and `gpu::compat` types are distinct; do not add aliases or fallback.
+- Importing either profile must not initialize compatibility state.
 - Use strongly-typed handles, not raw `int`/`uint`/`ulong`.
 
 ## Build & deps
@@ -53,6 +55,9 @@ The implementation lives under `gpu/`; the Vulkan backend is under `gpu/vk/`. Be
   ```sh
   c3c test unit --path test/cpu
   c3c test shader_abi --path test/cpu
+  c3c run import_inert --path test/cpu
+  python -B -m unittest scripts.test_check_profile_boundary
+  python scripts/check_profile_boundary.py
   c3c build smoke --path test
   ```
 

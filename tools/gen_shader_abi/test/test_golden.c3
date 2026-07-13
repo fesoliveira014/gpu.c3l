@@ -58,7 +58,7 @@ fn void generation_is_deterministic() @test {
     assert(glsl_a.str_view() == glsl_b.str_view());
 }
 
-fn void app_module_imports_gpu() @test {
+fn void app_module_imports_compat() @test {
     DString c3_text;
     c3_text.init(mem);
     defer c3_text.free();
@@ -72,5 +72,22 @@ fn void app_module_imports_gpu() @test {
         }
     `, "my_app::abi", &c3_text, &glsl_text);
     assert(c3_text.str_view().contains("module my_app::abi;"));
-    assert(c3_text.str_view().contains("import gpu;"));
+    assert(c3_text.str_view().contains("import gpu::compat;"));
+    assert(c3_text.str_view().contains("gpu::compat::GpuAddress data_gpu;"));
+}
+
+fn void compat_module_does_not_import_root() @test {
+    DString c3_text;
+    c3_text.init(mem);
+    defer c3_text.free();
+    DString glsl_text;
+    glsl_text.init(mem);
+    defer glsl_text.free();
+    generate(`
+        abi compat;
+        root Root {
+            GpuAddress data_gpu;
+        }
+    `, "gpu::compat", &c3_text, &glsl_text);
+    assert(!c3_text.str_view().contains("import gpu;"));
 }

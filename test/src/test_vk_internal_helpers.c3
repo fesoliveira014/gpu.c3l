@@ -1,6 +1,6 @@
-module gpu::vk;
+module gpu::compat::vk;
 
-import gpu @public;
+import gpu::compat @public;
 
 fn void pow2_helper() @test {
     assert(is_pow2(1) && is_pow2(16) && is_pow2(4096), "powers of two accepted");
@@ -8,20 +8,20 @@ fn void pow2_helper() @test {
 }
 
 fn void descriptor_capacity_resolution() @test {
-    uint defaulted = resolve_descriptor_capacity(0, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
-    assert(defaulted == gpu::DEFAULT_TEXTURE_DESCRIPTORS, "zero requests the default capacity");
+    uint defaulted = resolve_descriptor_capacity(0, gpu::compat::DEFAULT_TEXTURE_DESCRIPTORS)!!;
+    assert(defaulted == gpu::compat::DEFAULT_TEXTURE_DESCRIPTORS, "zero requests the default capacity");
 
-    uint explicit_capacity = resolve_descriptor_capacity(16, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
+    uint explicit_capacity = resolve_descriptor_capacity(16, gpu::compat::DEFAULT_TEXTURE_DESCRIPTORS)!!;
     assert(explicit_capacity == 16, "explicit capacity is honored");
 
-    uint at_ceiling = resolve_descriptor_capacity(gpu::MAX_DESCRIPTOR_SLOTS, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
-    assert(at_ceiling == gpu::MAX_DESCRIPTOR_SLOTS, "the packed-slot ceiling itself is allowed");
+    uint at_ceiling = resolve_descriptor_capacity(gpu::compat::MAX_DESCRIPTOR_SLOTS, gpu::compat::DEFAULT_TEXTURE_DESCRIPTORS)!!;
+    assert(at_ceiling == gpu::compat::MAX_DESCRIPTOR_SLOTS, "the packed-slot ceiling itself is allowed");
 
     fault ceiling_fault = @catch(resolve_descriptor_capacity(
-        gpu::MAX_DESCRIPTOR_SLOTS + 1,
-        gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        gpu::compat::MAX_DESCRIPTOR_SLOTS + 1,
+        gpu::compat::DEFAULT_TEXTURE_DESCRIPTORS,
     ));
-    assert(ceiling_fault == gpu::INVALID_ARGUMENT,
+    assert(ceiling_fault == gpu::compat::INVALID_ARGUMENT,
         "capacity above the packed-slot ceiling faults INVALID_ARGUMENT");
 }
 

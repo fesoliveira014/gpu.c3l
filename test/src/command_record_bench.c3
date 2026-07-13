@@ -1,6 +1,6 @@
 module gpu_bench;
 
-import gpu @public;
+import gpu::compat @public;
 import std::io;
 import std::time;
 
@@ -8,57 +8,57 @@ const char[*] COMMAND_BENCH_SHADER_SPIRV = $embed("shaders/root_pointer.comp.spv
 const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 
-fn double record_global_barriers(gpu::Device* device) {
-    gpu::FrameToken frame = gpu::begin_frame(device)!!;
-    gpu::CommandList commands = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::GlobalBarrier barrier = {
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
+fn double record_global_barriers(gpu::compat::Device* device) {
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(device)!!;
+    gpu::compat::CommandList commands = gpu::compat::begin_commands(device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::GlobalBarrier barrier = {
+        .before_stage  = gpu::compat::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::compat::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::compat::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::compat::Hazard.SHADER_READ,
     };
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
-        gpu::cmd_global_barrier(&commands, &barrier)!!;
+        gpu::compat::cmd_global_barrier(&commands, &barrier)!!;
     }
     long elapsed_ns = (long)start.to_now();
-    gpu::end_commands(&commands)!!;
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_commands(&commands)!!;
+    gpu::compat::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
-fn double record_buffer_barriers(gpu::Device* device, gpu::BufferHandle buffer) {
-    gpu::FrameToken frame = gpu::begin_frame(device)!!;
-    gpu::CommandList commands = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::BufferBarrier barrier = {
+fn double record_buffer_barriers(gpu::compat::Device* device, gpu::compat::BufferHandle buffer) {
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(device)!!;
+    gpu::compat::CommandList commands = gpu::compat::begin_commands(device, gpu::compat::QueueKind.GRAPHICS)!!;
+    gpu::compat::BufferBarrier barrier = {
         .buffer        = buffer,
         .size          = 64,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
+        .before_stage  = gpu::compat::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::compat::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::compat::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::compat::Hazard.SHADER_READ,
     };
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
-        gpu::cmd_buffer_barrier(&commands, &barrier)!!;
+        gpu::compat::cmd_buffer_barrier(&commands, &barrier)!!;
     }
     long elapsed_ns = (long)start.to_now();
-    gpu::end_commands(&commands)!!;
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_commands(&commands)!!;
+    gpu::compat::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
 fn double record_indirect_dispatches(
-    gpu::Device* device,
-    gpu::PipelineHandle pipeline,
-    gpu::GpuAddress root,
-    gpu::GpuSpan args,
+    gpu::compat::Device* device,
+    gpu::compat::PipelineHandle pipeline,
+    gpu::compat::GpuAddress root,
+    gpu::compat::GpuSpan args,
 ) {
-    gpu::FrameToken frame = gpu::begin_frame(device)!!;
-    gpu::CommandList commands = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::compat::FrameToken frame = gpu::compat::begin_frame(device)!!;
+    gpu::compat::CommandList commands = gpu::compat::begin_commands(device, gpu::compat::QueueKind.GRAPHICS)!!;
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
-        gpu::cmd_dispatch_indirect(
+        gpu::compat::cmd_dispatch_indirect(
             commands: &commands,
             pipeline: pipeline,
             root:     root,
@@ -66,8 +66,8 @@ fn double record_indirect_dispatches(
         )!!;
     }
     long elapsed_ns = (long)start.to_now();
-    gpu::end_commands(&commands)!!;
-    gpu::end_frame(&frame)!!;
+    gpu::compat::end_commands(&commands)!!;
+    gpu::compat::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
@@ -86,45 +86,45 @@ fn double command_median(double[COMMAND_RECORD_REPETITIONS] values) {
 }
 
 fn int main() {
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::compat::DeviceDesc desc = {
+        .backend          = gpu::compat::BackendKind.VULKAN,
         .frames_in_flight = 1,
         .application_name = "gpu_command_record_bench",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    gpu::compat::Device device = gpu::compat::create_device(&desc)!!;
+    defer gpu::compat::destroy_device(&device)!!;
 
-    gpu::BufferDesc buffer_desc = {
+    gpu::compat::BufferDesc buffer_desc = {
         .size        = 64,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::GpuSpan buffer_span = gpu::get_buffer_span(&device, buffer)!!;
+    gpu::compat::BufferHandle buffer = gpu::compat::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, buffer)!!;
+    gpu::compat::GpuSpan buffer_span = gpu::compat::get_buffer_span(&device, buffer)!!;
 
-    gpu::BufferDesc args_desc = {
-        .size        = gpu::DispatchIndirectCommand::size,
+    gpu::compat::BufferDesc args_desc = {
+        .size        = gpu::compat::DispatchIndirectCommand::size,
         .usage       = { .indirect },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_kind = gpu::compat::MemoryKind.DEVICE,
     };
-    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
-    defer gpu::destroy_buffer(&device, args_buffer)!!;
-    gpu::GpuSpan args = gpu::get_buffer_span(&device, args_buffer)!!;
+    gpu::compat::BufferHandle args_buffer = gpu::compat::create_buffer(&device, &args_desc)!!;
+    defer gpu::compat::destroy_buffer(&device, args_buffer)!!;
+    gpu::compat::GpuSpan args = gpu::compat::get_buffer_span(&device, args_buffer)!!;
 
-    gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
+    gpu::compat::ShaderDesc shader_desc = {
+        .stage       = gpu::compat::ShaderStage.COMPUTE,
         .spirv       = COMMAND_BENCH_SHADER_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &shader_desc)!!;
-    defer gpu::destroy_shader(&device, shader)!!;
-    gpu::ComputePipelineDesc pipeline_desc = {
+    gpu::compat::ShaderHandle shader = gpu::compat::create_shader(&device, &shader_desc)!!;
+    defer gpu::compat::destroy_shader(&device, shader)!!;
+    gpu::compat::ComputePipelineDesc pipeline_desc = {
         .shader             = shader,
-        .push_constant_size = gpu::RootPush::size,
+        .push_constant_size = gpu::compat::RootPush::size,
     };
-    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
-    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::compat::PipelineHandle pipeline = gpu::compat::create_compute_pipeline(&device, &pipeline_desc)!!;
+    defer gpu::compat::destroy_pipeline(&device, pipeline)!!;
 
     (void)record_global_barriers(&device);
     (void)record_buffer_barriers(&device, buffer);

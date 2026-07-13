@@ -49,8 +49,8 @@ def main():
     check = "--check" in sys.argv[1:]
     gen_bin = build_generator()
 
-    gen(gen_bin, check, "gpu",
-        ROOT / "gpu" / "shader_abi.c3",
+    gen(gen_bin, check, "gpu::compat",
+        ROOT / "gpu" / "compat" / "shader_abi.c3",
         ROOT / "include" / "shaders" / "generated" / "shader_abi.glsl",
         sorted((ROOT / "abi").glob("*.abi")))
 

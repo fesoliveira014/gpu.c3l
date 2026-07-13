@@ -1,4 +1,4 @@
-module gpu;
+module gpu::compat;
 
 fn void range_helper() @test {
     assert(range_fits(256, 0, 256), "exact fit passes");

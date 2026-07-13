@@ -5,13 +5,15 @@
   "provides": "gpu",
   // Native libs for this library's own targets live here.
   "linklib-dir": "linked-libs",
-  // gpu/ module files plus the gpu::vk backend subdir. Without listing gpu/vk/**,
-  // the backend module is not compiled into the library.
+  // Strict root plus the explicit compatibility profile and its backend.
   "sources": [
-    "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/types.c3", "gpu/faults.c3", "gpu/device.c3",
-    "gpu/caps.c3", "gpu/memory.c3", "gpu/buffer.c3", "gpu/texture.c3",
-    "gpu/descriptor_heap.c3", "gpu/pipeline.c3", "gpu/command.c3", "gpu/sync.c3", "gpu/queue.c3",
-    "gpu/swapchain.c3", "gpu/debug.c3", "gpu/shader_abi.c3", "gpu/vk/**"
+    "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/types.c3",
+    "gpu/compat/compat.c3", "gpu/compat/compat.c3i", "gpu/compat/types.c3",
+    "gpu/compat/faults.c3", "gpu/compat/device.c3", "gpu/compat/caps.c3",
+    "gpu/compat/memory.c3", "gpu/compat/buffer.c3", "gpu/compat/texture.c3",
+    "gpu/compat/descriptor_heap.c3", "gpu/compat/pipeline.c3", "gpu/compat/command.c3",
+    "gpu/compat/sync.c3", "gpu/compat/queue.c3", "gpu/compat/swapchain.c3",
+    "gpu/compat/debug.c3", "gpu/compat/shader_abi.c3", "gpu/compat/vk/**"
   ],
   "targets": {
     "linux-x64": {

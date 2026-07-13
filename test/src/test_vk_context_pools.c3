@@ -1,7 +1,7 @@
 module gpu_test;
 
-import gpu;
-import gpu::vk @public;
+import gpu::compat;
+import gpu::compat::vk @public;
 import vk;
 
 const uint CONTEXT_POOL_STAGE_CAP = 6;
@@ -22,7 +22,7 @@ fn vk::CommandPool? fake_create_context_pool(void* user_data, vk::Device device,
     ContextPoolFixture* fixture = (ContextPoolFixture*)user_data;
     uint ordinal = fixture.create_calls++;
     fixture.families[ordinal] = family;
-    if (ordinal == fixture.fail_at) return gpu::OUT_OF_HOST_MEMORY~;
+    if (ordinal == fixture.fail_at) return gpu::compat::OUT_OF_HOST_MEMORY~;
     return (vk::CommandPool)(uptr)(ordinal + 1);
 }
 
@@ -33,7 +33,7 @@ fn void fake_destroy_context_pool(void* user_data, vk::Device device, vk::Comman
     fixture.destroy_calls++;
 }
 
-fn gpu::vk::ContextPoolOps context_pool_ops(ContextPoolFixture* fixture) {
+fn gpu::compat::vk::ContextPoolOps context_pool_ops(ContextPoolFixture* fixture) {
     return {
         .user_data = fixture,
         .create = &fake_create_context_pool,
@@ -52,7 +52,7 @@ fn uint expected_pool_family(bool distinct, uint ordinal) {
     return ordinal % 2 == 0 ? FIXTURE_GRAPHICS_FAMILY : FIXTURE_TRANSFER_FAMILY;
 }
 
-fn void assert_context_empty(gpu::vk::RecordingContextState* context) {
+fn void assert_context_empty(gpu::compat::vk::RecordingContextState* context) {
     assert(context.graphics_pools.ptr == null, "graphics array released");
     assert(context.compute_pools.ptr == null, "compute array or alias cleared");
     assert(context.transfer_pools.ptr == null, "transfer array released");
@@ -61,18 +61,18 @@ fn void assert_context_empty(gpu::vk::RecordingContextState* context) {
 }
 
 fn void run_context_pool_failure(bool distinct, uint fail_at, uint stage_count) {
-    gpu::vk::VkDeviceState state = {
+    gpu::compat::vk::VkDeviceState state = {
         .frames_in_flight = 2,
         .graphics_family = FIXTURE_GRAPHICS_FAMILY,
         .compute_family = distinct ? FIXTURE_COMPUTE_FAMILY : FIXTURE_GRAPHICS_FAMILY,
         .transfer_family = FIXTURE_TRANSFER_FAMILY,
     };
     ContextPoolFixture fixture = { .fail_at = fail_at };
-    gpu::vk::ContextPoolOps ops = context_pool_ops(&fixture);
-    gpu::vk::RecordingContextState context;
+    gpu::compat::vk::ContextPoolOps ops = context_pool_ops(&fixture);
+    gpu::compat::vk::RecordingContextState context;
 
-    fault create_fault = @catch(gpu::vk::create_context_pools_with_ops(&state, &context, &ops));
-    assert(create_fault == gpu::OUT_OF_HOST_MEMORY, "original create fault propagates");
+    fault create_fault = @catch(gpu::compat::vk::create_context_pools_with_ops(&state, &context, &ops));
+    assert(create_fault == gpu::compat::OUT_OF_HOST_MEMORY, "original create fault propagates");
     assert(fixture.create_calls == fail_at + 1, "creation stops at injected stage");
     assert(fixture.destroy_calls == fail_at, "every prior pool is destroyed once");
     for (uint i = 0; i < fixture.create_calls; i++) {
@@ -84,22 +84,22 @@ fn void run_context_pool_failure(bool distinct, uint fail_at, uint stage_count) 
     }
     assert_context_empty(&context);
 
-    gpu::vk::destroy_context_pools_with_ops(&state, &context, &ops);
+    gpu::compat::vk::destroy_context_pools_with_ops(&state, &context, &ops);
     assert(fixture.destroy_calls == fail_at, "second cleanup is a no-op");
 }
 
 fn void run_context_pool_success(bool distinct, uint stage_count) {
-    gpu::vk::VkDeviceState state = {
+    gpu::compat::vk::VkDeviceState state = {
         .frames_in_flight = 2,
         .graphics_family = FIXTURE_GRAPHICS_FAMILY,
         .compute_family = distinct ? FIXTURE_COMPUTE_FAMILY : FIXTURE_GRAPHICS_FAMILY,
         .transfer_family = FIXTURE_TRANSFER_FAMILY,
     };
     ContextPoolFixture fixture = { .fail_at = uint::max };
-    gpu::vk::ContextPoolOps ops = context_pool_ops(&fixture);
-    gpu::vk::RecordingContextState context;
+    gpu::compat::vk::ContextPoolOps ops = context_pool_ops(&fixture);
+    gpu::compat::vk::RecordingContextState context;
 
-    gpu::vk::create_context_pools_with_ops(&state, &context, &ops)!!;
+    gpu::compat::vk::create_context_pools_with_ops(&state, &context, &ops)!!;
     assert(fixture.create_calls == stage_count, "all topology stages are created");
     assert(context.compute_pools_distinct == distinct, "compute ownership matches topology");
     if (distinct) {
@@ -114,14 +114,14 @@ fn void run_context_pool_success(bool distinct, uint stage_count) {
         assert(fixture.families[i] == expected_pool_family(distinct, i), "successful creation follows family order");
     }
 
-    gpu::vk::destroy_context_pools_with_ops(&state, &context, &ops);
+    gpu::compat::vk::destroy_context_pools_with_ops(&state, &context, &ops);
     assert(fixture.destroy_calls == stage_count, "successful pools are destroyed once");
     for (uint i = 0; i < stage_count; i++) {
         assert(fixture.destroyed[i] == 1, "each successful handle is destroyed exactly once");
     }
     assert_context_empty(&context);
 
-    gpu::vk::destroy_context_pools_with_ops(&state, &context, &ops);
+    gpu::compat::vk::destroy_context_pools_with_ops(&state, &context, &ops);
     assert(fixture.destroy_calls == stage_count, "repeated success cleanup is a no-op");
 }
 
@@ -139,17 +139,17 @@ fn void successful_context_pool_ownership_is_idempotent() @test {
 }
 
 fn void built_in_context_insertion_failure_cleans_full_context() @test {
-    gpu::vk::VkDeviceState state = {
+    gpu::compat::vk::VkDeviceState state = {
         .frames_in_flight = 2,
         .graphics_family = FIXTURE_GRAPHICS_FAMILY,
         .compute_family = FIXTURE_GRAPHICS_FAMILY,
         .transfer_family = FIXTURE_TRANSFER_FAMILY,
     };
     ContextPoolFixture fixture = { .fail_at = uint::max };
-    gpu::vk::ContextPoolOps ops = context_pool_ops(&fixture);
+    gpu::compat::vk::ContextPoolOps ops = context_pool_ops(&fixture);
 
-    fault insert_fault = @catch(gpu::vk::create_builtin_recording_context_with_ops(&state, &ops));
-    assert(insert_fault == gpu::SLOT_TABLE_FULL, "built-in insertion fault propagates");
+    fault insert_fault = @catch(gpu::compat::vk::create_builtin_recording_context_with_ops(&state, &ops));
+    assert(insert_fault == gpu::compat::SLOT_TABLE_FULL, "built-in insertion fault propagates");
     assert(fixture.create_calls == 4, "full shared pool set was constructed");
     assert(fixture.destroy_calls == 4, "full local pool set is destroyed on insertion failure");
     for (uint i = 0; i < 4; i++) {

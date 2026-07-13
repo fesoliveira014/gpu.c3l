@@ -3,6 +3,7 @@
 Start with:
 
 - [Getting started](getting_started.md) for toolchain setup and a minimal compute program.
+- [Compatibility](compatibility.md) for profile initialization, migration, and support boundaries.
 - [Cookbook](cookbook.md) for focused usage patterns.
 - [Limitations](limitations.md) for unsupported features, limits, and driver quirks.
 - [Samples](samples.md) for runnable examples in `gpu.c3l-samples`.
@@ -12,8 +13,9 @@ Start with:
 | Document | Scope |
 |---|---|
 | [Architecture](architecture.md) | Modules, objects, lifetime, frames, commands, descriptors, and swapchains. |
+| [Compatibility](compatibility.md) | Explicit initialization, frozen behavior, migration, and limits. |
 | [Strict GPU profile](strict_gpu_profile.md) | Target architecture, compatibility boundary, adoption order, and completion criteria. |
-| [Public API](api.md) | Public types, functions, faults, and examples. |
+| [Compatibility API](api.md) | `gpu::compat` types, functions, faults, and examples. |
 | [Memory](memory.md) | Memory kinds, arenas, upload/readback, mapping, and deferred release. |
 | [Shader ABI](shader_abi.md) | Root pointers, generated layouts, descriptor indices, and reflection. |
 | [Threading](threading.md) | Entry-point tiers, frame boundaries, lock order, and recording contexts. |

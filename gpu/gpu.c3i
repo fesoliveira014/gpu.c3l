@@ -1,3 +1,1 @@
 module gpu;
-
-// Public interface for consumers of gpu.c3l.

@@ -3,7 +3,7 @@
   // Whitebox harness: compiles the library sources directly (list mirrors
   // manifest.json — c3c has no single-star glob) so no gpu.c3l resolution or
   // symlinks are needed. Bindings resolve from ../lib by real directory name.
-  // Consumer-style resolution is exercised by the gpu.c3l-samples repo.
+  // Consumer-style resolution is exercised by test/compat and gpu.c3l-samples.
   "warnings": [ "no-unused" ],
   "dependency-search-paths": [ "../lib" ],
   "dependencies": [ "vk", "vma", "spvreflect" ],
@@ -12,10 +12,11 @@
   // crashes in VMA's std::mutex when the runtimes drift apart.
   "wincrt": "dynamic",
   "sources": [
-    "../gpu/gpu.c3", "../gpu/types.c3", "../gpu/faults.c3", "../gpu/device.c3", "../gpu/caps.c3",
-    "../gpu/memory.c3", "../gpu/buffer.c3", "../gpu/texture.c3", "../gpu/descriptor_heap.c3",
-    "../gpu/pipeline.c3", "../gpu/command.c3", "../gpu/sync.c3", "../gpu/queue.c3",
-    "../gpu/swapchain.c3", "../gpu/debug.c3", "../gpu/shader_abi.c3", "../gpu/vk/**"
+    "../gpu/gpu.c3", "../gpu/gpu.c3i", "../gpu/types.c3",
+    "../gpu/compat/compat.c3", "../gpu/compat/compat.c3i", "../gpu/compat/types.c3", "../gpu/compat/faults.c3", "../gpu/compat/device.c3", "../gpu/compat/caps.c3",
+    "../gpu/compat/memory.c3", "../gpu/compat/buffer.c3", "../gpu/compat/texture.c3", "../gpu/compat/descriptor_heap.c3",
+    "../gpu/compat/pipeline.c3", "../gpu/compat/command.c3", "../gpu/compat/sync.c3", "../gpu/compat/queue.c3",
+    "../gpu/compat/swapchain.c3", "../gpu/compat/debug.c3", "../gpu/compat/shader_abi.c3", "../gpu/compat/vk/**"
   ],
   "output": "build",
   "targets": {

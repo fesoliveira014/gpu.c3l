@@ -1,0 +1,3 @@
+module gpu::compat;
+
+// Public interface for consumers of gpu.c3l.

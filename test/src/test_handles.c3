@@ -1,13 +1,13 @@
 module gpu_test;
 
-import gpu @public;
+import gpu::compat @public;
 
 fn void handle_pack_unpack() @test {
     BufferHandle h = { .index = 42, .generation = 7 };
     assert(h.index == 42, "index round-trips");
     assert(h.generation == 7, "generation round-trips");
     assert(h.is_valid(), "non-zero handle is valid");
-    assert(!gpu::BUFFER_HANDLE_INVALID.is_valid(), "INVALID handle is not valid");
+    assert(!gpu::compat::BUFFER_HANDLE_INVALID.is_valid(), "INVALID handle is not valid");
 }
 
 fn void handle_kinds_distinct_raw() @test {
@@ -29,8 +29,8 @@ fn void index_pack_unpack() @test {
     assert((uint)t == (7u << 16) | 42u, "raw uint matches slot(0..15)|generation(16..31)");
     assert(((uint)t & 0xFFFFu) == 42, "shader-side slot mask recovers the slot");
     assert(t.is_valid(), "non-zero index is valid");
-    assert(!gpu::TEXTURE_INDEX_INVALID.is_valid(), "INVALID index is not valid");
-    assert(!gpu::SAMPLER_INDEX_INVALID.is_valid(), "INVALID sampler index is not valid");
+    assert(!gpu::compat::TEXTURE_INDEX_INVALID.is_valid(), "INVALID index is not valid");
+    assert(!gpu::compat::SAMPLER_INDEX_INVALID.is_valid(), "INVALID sampler index is not valid");
 }
 
 fn void index_smallest_valid_never_zero() @test {
@@ -39,9 +39,8 @@ fn void index_smallest_valid_never_zero() @test {
     assert(s.is_valid(), "slot 0 with generation 1 is valid");
 }
 
-// Concrete generation-checked slot table mirroring the backend's per-type
-// tables (the generic gpu::slots module was removed to avoid a c3c 0.8.0
-// codegen crash; see slot table comments in gpu/vk/*.c3).
+// Mirrors the backend's concrete slot-table workaround for a c3c 0.8.0
+// generic-instantiation codegen crash (gpu/compat/vk/*.c3).
 const uint FREE_NONE = 0;
 
 struct IntCell {
@@ -66,7 +65,7 @@ fn BufferHandle? IntTable.alloc(&self, int value) {
         idx = self.next_new++;
         self.slots[idx].generation = 0;
     } else {
-        return gpu::SLOT_TABLE_FULL~;
+        return gpu::compat::SLOT_TABLE_FULL~;
     }
     self.slots[idx].value = value;
     self.slots[idx].generation++;
@@ -76,8 +75,8 @@ fn BufferHandle? IntTable.alloc(&self, int value) {
 
 fn int*? IntTable.get(&self, BufferHandle h) {
     uint idx = h.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
-    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
+    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::compat::INVALID_HANDLE~;
+    if (self.slots[idx].generation != h.generation) return gpu::compat::INVALID_HANDLE~;
     return &self.slots[idx].value;
 }
 
@@ -100,7 +99,7 @@ fn void slot_alloc_get_free() @test {
 
     t.free(a)!!;
     fault freed_fault = @catch(t.get(a));
-    assert(freed_fault == gpu::INVALID_HANDLE, "freed handle returns INVALID_HANDLE");
+    assert(freed_fault == gpu::compat::INVALID_HANDLE, "freed handle returns INVALID_HANDLE");
 }
 
 fn void generation_mismatch_rejected() @test {
@@ -115,7 +114,7 @@ fn void generation_mismatch_rejected() @test {
     assert(fresh.generation > stale.generation, "reused slot bumps generation");
 
     fault stale_fault = @catch(t.get(stale));
-    assert(stale_fault == gpu::INVALID_HANDLE, "stale handle to reused slot returns INVALID_HANDLE");
+    assert(stale_fault == gpu::compat::INVALID_HANDLE, "stale handle to reused slot returns INVALID_HANDLE");
     assert(*t.get(fresh)!! == 2, "fresh handle resolves");
 }
 
@@ -126,5 +125,5 @@ fn void slot_table_full() @test {
     t.alloc(1)!!;
     t.alloc(2)!!;
     fault full_fault = @catch(t.alloc(3));
-    assert(full_fault == gpu::SLOT_TABLE_FULL, "allocating past capacity raises SLOT_TABLE_FULL");
+    assert(full_fault == gpu::compat::SLOT_TABLE_FULL, "allocating past capacity raises SLOT_TABLE_FULL");
 }

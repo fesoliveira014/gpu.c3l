@@ -1,0 +1,12 @@
+{
+  "langrev": "1",
+  "warnings": [ "no-unused" ],
+  "dependency-search-paths": [ "../../..", "../../lib" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
+  "targets": {
+    "package_smoke": {
+      "type": "executable",
+      "sources": [ "src/package_smoke.c3" ]
+    }
+  }
+}

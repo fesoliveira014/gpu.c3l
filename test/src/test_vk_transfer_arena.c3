@@ -1,7 +1,7 @@
 module gpu_test;
 
-import gpu;
-import gpu::vk @public;
+import gpu::compat;
+import gpu::compat::vk @public;
 import vk;
 
 fn void staging_buffer_create_info_covers_selected_families() @test {
@@ -19,9 +19,9 @@ fn void staging_buffer_create_info_covers_selected_families() @test {
             .transfer_family = topology[2],
         };
         uint[3] families;
-        uint family_count = gpu::vk::used_queue_families(&state, families[..]);
-        gpu::BufferDesc desc = gpu::vk::staging_arena_desc(4096);
-        vk::BufferCreateInfo info = gpu::vk::make_buffer_create_info(&desc, families[:family_count])!!;
+        uint family_count = gpu::compat::vk::used_queue_families(&state, families[..]);
+        gpu::compat::BufferDesc desc = gpu::compat::vk::staging_arena_desc(4096);
+        vk::BufferCreateInfo info = gpu::compat::vk::make_buffer_create_info(&desc, families[:family_count])!!;
         uint expected_count = expected_counts[index];
         assert(family_count == expected_count, "selected family count is exact");
         assert(info.size == 4096, "staging size is preserved");
@@ -43,20 +43,20 @@ fn void staging_buffer_create_info_covers_selected_families() @test {
 }
 
 fn void transfer_single_family_buffers_stay_exclusive() @test {
-    gpu::BufferDesc[2] descs = {
-        gpu::vk::readback_arena_desc(2048),
-        gpu::vk::staging_dedicated_desc(2048),
+    gpu::compat::BufferDesc[2] descs = {
+        gpu::compat::vk::readback_arena_desc(2048),
+        gpu::compat::vk::staging_dedicated_desc(2048),
     };
     uint[2] expected_usage = {
         (uint)vk::BufferUsageFlagBits.TRANSFER_DST_BIT,
         (uint)vk::BufferUsageFlagBits.TRANSFER_SRC_BIT,
     };
-    gpu::MemoryKind[2] expected_memory = {
-        gpu::MemoryKind.READBACK,
-        gpu::MemoryKind.STAGING,
+    gpu::compat::MemoryKind[2] expected_memory = {
+        gpu::compat::MemoryKind.READBACK,
+        gpu::compat::MemoryKind.STAGING,
     };
     foreach (index, &desc : descs) {
-        vk::BufferCreateInfo info = gpu::vk::make_buffer_create_info(desc, {})!!;
+        vk::BufferCreateInfo info = gpu::compat::vk::make_buffer_create_info(desc, {})!!;
         assert(!desc.usage.shared_queues, "single-family transfer descriptor does not request sharing");
         assert((uint)info.usage == expected_usage[index], "single-family transfer usage remains exact");
         assert(desc.memory_kind == expected_memory[index], "single-family transfer memory kind remains exact");
@@ -67,7 +67,7 @@ fn void transfer_single_family_buffers_stay_exclusive() @test {
 }
 
 fn void transfer_range_places_aligned_extent() @test {
-    gpu::vk::TransferArenaRange range = gpu::vk::transfer_arena_range(
+    gpu::compat::vk::TransferArenaRange range = gpu::compat::vk::transfer_arena_range(
         virtual_head: 0,
         virtual_tail: 12,
         retire_count: 1,
@@ -81,7 +81,7 @@ fn void transfer_range_places_aligned_extent() @test {
 }
 
 fn void transfer_range_wraps_to_physical_zero() @test {
-    gpu::vk::TransferArenaRange range = gpu::vk::transfer_arena_range(
+    gpu::compat::vk::TransferArenaRange range = gpu::compat::vk::transfer_arena_range(
         virtual_head: 48,
         virtual_tail: 60,
         retire_count: 1,
@@ -95,7 +95,7 @@ fn void transfer_range_wraps_to_physical_zero() @test {
 }
 
 fn void transfer_range_rejects_one_byte_beyond_live_window() @test {
-    fault full = @catch(gpu::vk::transfer_arena_range(
+    fault full = @catch(gpu::compat::vk::transfer_arena_range(
         virtual_head: ulong::max - 64,
         virtual_tail: ulong::max - 16,
         retire_count: 1,
@@ -103,11 +103,11 @@ fn void transfer_range_rejects_one_byte_beyond_live_window() @test {
         size:         17,
         align:        1,
     ));
-    assert(full == gpu::ARENA_FULL, "one byte beyond remaining live capacity faults ARENA_FULL");
+    assert(full == gpu::compat::ARENA_FULL, "one byte beyond remaining live capacity faults ARENA_FULL");
 }
 
 fn void transfer_range_rejects_alignment_overflow() @test {
-    fault full = @catch(gpu::vk::transfer_arena_range(
+    fault full = @catch(gpu::compat::vk::transfer_arena_range(
         virtual_head: ulong::max - 16,
         virtual_tail: ulong::max,
         retire_count: 1,
@@ -115,11 +115,11 @@ fn void transfer_range_rejects_alignment_overflow() @test {
         size:         1,
         align:        2,
     ));
-    assert(full == gpu::ARENA_FULL, "alignment beyond ulong max faults ARENA_FULL");
+    assert(full == gpu::compat::ARENA_FULL, "alignment beyond ulong max faults ARENA_FULL");
 }
 
 fn void transfer_range_accepts_exact_virtual_end() @test {
-    gpu::vk::TransferArenaRange range = gpu::vk::transfer_arena_range(
+    gpu::compat::vk::TransferArenaRange range = gpu::compat::vk::transfer_arena_range(
         virtual_head: ulong::max - 64,
         virtual_tail: ulong::max - 1,
         retire_count: 1,
@@ -131,7 +131,7 @@ fn void transfer_range_accepts_exact_virtual_end() @test {
 }
 
 fn void transfer_range_rejects_extent_overflow() @test {
-    fault full = @catch(gpu::vk::transfer_arena_range(
+    fault full = @catch(gpu::compat::vk::transfer_arena_range(
         virtual_head: ulong::max - 1,
         virtual_tail: ulong::max - 1,
         retire_count: 1,
@@ -139,11 +139,11 @@ fn void transfer_range_rejects_extent_overflow() @test {
         size:         2,
         align:        1,
     ));
-    assert(full == gpu::ARENA_FULL, "extent beyond ulong max faults ARENA_FULL");
+    assert(full == gpu::compat::ARENA_FULL, "extent beyond ulong max faults ARENA_FULL");
 }
 
 fn void transfer_range_rejects_head_ahead_of_tail() @test {
-    fault full = @catch(gpu::vk::transfer_arena_range(
+    fault full = @catch(gpu::compat::vk::transfer_arena_range(
         virtual_head: 10,
         virtual_tail: 9,
         retire_count: 1,
@@ -151,11 +151,11 @@ fn void transfer_range_rejects_head_ahead_of_tail() @test {
         size:         1,
         align:        1,
     ));
-    assert(full == gpu::ARENA_FULL, "head ahead of tail cannot underflow live accounting");
+    assert(full == gpu::compat::ARENA_FULL, "head ahead of tail cannot underflow live accounting");
 }
 
 fn void empty_transfer_range_normalizes_high_cursors() @test {
-    gpu::vk::TransferArenaRange range = gpu::vk::transfer_arena_range(
+    gpu::compat::vk::TransferArenaRange range = gpu::compat::vk::transfer_arena_range(
         virtual_head: ulong::max,
         virtual_tail: ulong::max,
         retire_count: 0,
@@ -168,7 +168,7 @@ fn void empty_transfer_range_normalizes_high_cursors() @test {
 }
 
 fn void live_transfer_range_preserves_virtual_identity() @test {
-    gpu::vk::TransferArenaRange range = gpu::vk::transfer_arena_range(
+    gpu::compat::vk::TransferArenaRange range = gpu::compat::vk::transfer_arena_range(
         virtual_head: ulong::max - 64,
         virtual_tail: ulong::max - 16,
         retire_count: 1,
@@ -183,7 +183,7 @@ fn void live_transfer_range_preserves_virtual_identity() @test {
 }
 
 fn void transfer_range_rejects_invalid_alignment() @test {
-    fault invalid = @catch(gpu::vk::transfer_arena_range(
+    fault invalid = @catch(gpu::compat::vk::transfer_arena_range(
         virtual_head: 0,
         virtual_tail: 0,
         retire_count: 0,
@@ -191,11 +191,11 @@ fn void transfer_range_rejects_invalid_alignment() @test {
         size:         1,
         align:        3,
     ));
-    assert(invalid == gpu::INVALID_ARGUMENT, "non-power-of-two alignment faults INVALID_ARGUMENT");
+    assert(invalid == gpu::compat::INVALID_ARGUMENT, "non-power-of-two alignment faults INVALID_ARGUMENT");
 }
 
 fn void transfer_range_rejects_zero_size() @test {
-    fault invalid = @catch(gpu::vk::transfer_arena_range(
+    fault invalid = @catch(gpu::compat::vk::transfer_arena_range(
         virtual_head: 0,
         virtual_tail: 0,
         retire_count: 0,
@@ -203,5 +203,5 @@ fn void transfer_range_rejects_zero_size() @test {
         size:         0,
         align:        1,
     ));
-    assert(invalid == gpu::INVALID_ARGUMENT, "zero-size transfer ranges fault INVALID_ARGUMENT");
+    assert(invalid == gpu::compat::INVALID_ARGUMENT, "zero-size transfer ranges fault INVALID_ARGUMENT");
 }

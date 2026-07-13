@@ -1,513 +1,150 @@
 # gpu.c3l Architecture
 
-## 1. Purpose
+## Purpose
 
-`gpu.c3l` is a C3 library that exposes a direct GPU programming model suitable for modern explicit rendering and compute workloads. It is not a renderer, render graph, material system, asset system, or platform abstraction layer.
+`gpu.c3l` is a direct GPU programming library for C3. It is not a renderer,
+render graph, material system, asset system, or windowing layer.
 
-The current API uses root pointers, bindless heap indices, explicit resource barriers, and Vulkan-backed resource allocation. The [strict GPU profile](strict_gpu_profile.md) defines the target architecture derived from Sebastian Aaltonen's [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api). Until the profile split, this document describes the implemented `gpu` API.
+The package exposes two profiles:
 
-The API centers on four ideas:
+| Module | Role |
+|---|---|
+| `gpu` | Strict GPU-shaped type boundary. |
+| `gpu::compat` | Stabilized Vulkan 1.3 API. |
+| `gpu::compat::vk` | Private compatibility backend. |
 
-```text
-GpuAddress      -> shader-visible buffer pointers
-GpuSpan         -> CPU/GPU range metadata
-TextureIndex    -> shader-visible texture heap index
-SamplerIndex    -> shader-visible sampler heap index
+The [strict GPU profile](strict_gpu_profile.md) defines the root API target.
+The implemented runtime currently lives entirely in `gpu::compat`.
+
+## Profile boundary
+
+Strict and compatibility devices, resources, commands, barriers, descriptors,
+and pipelines are nominally distinct C3 types. There are no aliases between
+profiles and neither profile can fall back to the other.
+
+C3 imports submodules recursively, so `import gpu;` may expose
+`gpu::compat`. Importing either module is runtime-inert. Compatibility state is
+created only by `gpu::compat::create_device`.
+
+```c3
+import gpu::compat;
+
+gpu::compat::Device device = gpu::compat::create_device(&desc)!;
+defer gpu::compat::destroy_device(&device)!!;
 ```
 
-Draw and dispatch commands pass root GPU addresses. Shaders follow pointers to structured data and use texture/sampler indices for image access. Barriers are explicit. Resource lifetimes are explicit.
-
-## 2. Layer model
-
-```text
-application / engine / sample
-        |
-        v
-gpu public API, module gpu
-        |
-        v
-backend dispatch layer
-        |
-        v
-gpu::vk Vulkan backend
-        |
-        +--> vk.c3l         -> Vulkan API calls
-        +--> vma.c3l        -> Vulkan memory allocation
-        +--> spvreflect.c3l -> SPIR-V shader reflection
-```
-
-The public API does not expose Vulkan or VMA types. SDL3 integration belongs to the separate `gpu.c3l-samples` repository and is not a backend dependency.
-
-## 3. Package structure
-
-`gpu.c3l` uses a C3 library package layout. Shipped library source files live under one `gpu/` subtree.
+## Package layout
 
 ```text
 gpu.c3l/
-├── abi/                     shader ABI schemas
-├── manifest.json
+├── abi/                       shader ABI schemas
 ├── gpu/
+│   ├── gpu.c3                 strict root
 │   ├── gpu.c3i
-│   ├── gpu.c3
-│   ├── types.c3
-│   ├── faults.c3
-│   ├── caps.c3
-│   ├── device.c3
-│   ├── queue.c3
-│   ├── memory.c3
-│   ├── buffer.c3
-│   ├── texture.c3
-│   ├── descriptor_heap.c3
-│   ├── shader_abi.c3
-│   ├── pipeline.c3
-│   ├── command.c3
-│   ├── sync.c3
-│   ├── swapchain.c3
-│   ├── debug.c3
-│   └── vk/
-│       └── *.c3
-├── include/
-│   └── shaders/        published shader-side ABI includes only (no application shaders)
-├── lib/                     vendored C3 bindings
-├── scripts/                 ABI, shader, and documentation checks
-├── test/
-├── tools/
-└── docs/
+│   ├── types.c3               strict nominal types
+│   └── compat/
+│       ├── compat.c3          compatibility entry point
+│       ├── compat.c3i
+│       ├── *.c3               compatibility API
+│       └── vk/*.c3            private Vulkan backend
+├── include/shaders/           published shader ABI includes
+├── lib/                       vk, vma, and spvreflect bindings
+├── scripts/                   generation and contract checks
+└── test/                      CPU, Vulkan, and profile-boundary tests
 ```
 
-### Library files
+`manifest.json` provides the single `gpu` package and lists both profiles.
+There is one relocated compatibility implementation; no root-level copy is
+retained.
 
-Files under `gpu/` declare:
+Compatibility files declare:
 
 ```c3
-module gpu;
+module gpu::compat;
 ```
 
-Backend files under `gpu/vk/` declare:
+Backend files declare:
 
 ```c3
-module gpu::vk @private;
+module gpu::compat::vk @private;
 ```
 
-The public `gpu` module explicitly imports this implementation module with a
-visibility override. White-box tests do the same; consumers should not depend on
-backend declarations.
+The backend imports `gpu::compat` with a visibility override. Consumer code
+must not import backend declarations.
 
-Samples are standalone consumers and may declare their own sample modules.
-
-### Shader ownership
-
-The library ships **no application shaders**. Shader entry points are written and owned by the consuming project. The only shader-side artifacts the library publishes are ABI includes under `include/shaders/` (descriptor-heap helpers and generated ABI structs/offsets) that a consumer's shaders `#include`. Samples and tests own their shaders inside their own trees, because they are consumers like any other.
-
-## 4. Public object model
+## Compatibility runtime
 
 ### Device
 
-`Device` owns all backend resources.
+`gpu::compat::Device` is an opaque generation token for one process-wide live
+device. Device state owns queues, resource tables, VMA, descriptor storage,
+arenas, pipeline caches, diagnostics, and deferred destruction.
 
-Responsibilities:
+All compatibility handles, indices, addresses, spans, commands, and timeline
+values belong to that device lifetime. Multi-device operation is unsupported.
 
-```text
-backend lifetime
-queue ownership
-resource slot tables
-VMA allocator through backend state
-descriptor heaps
-frame upload arenas
-persistent arenas
-readback/staging arenas
-pipeline cache
-debug and stats state
-```
+### Resources and memory
 
-Public shape:
+Buffers and textures are backend-owned Vulkan resources. VMA remains private.
+Frame, persistent, staging, and readback arenas expose checked CPU/GPU spans.
+Resource destruction invalidates the public token immediately and retires the
+backend object after in-flight work completes.
 
-```text
-Device                         (opaque generation token)
-get_device_backend(Device*)    -> BackendKind?
-get_device_caps(Device*)       -> DeviceCaps?
-```
+### Commands and queues
 
-gpu.c3l currently supports at most one live `Device` per process. Multiple
-devices require ownership information that the present resource handles and
-descriptor indices do not encode, so multi-device operation is deferred.
-
-All handles, indices, addresses, spans, command tokens, and synchronization
-values are scoped to this device and its runtime lifetime. Passing them to
-another device is unsupported. Table- and index-backed values without owner
-metadata may resolve a coincident resource rather than returning a fault.
-Owner-bearing frame and command tokens embed the creating `Device` value and
-reject stale owners; this does not make multi-device operation supported.
-
-### Queues
-
-The API exposes queue kinds rather than raw queue handles:
-
-```text
-QueueKind.GRAPHICS
-QueueKind.COMPUTE
-QueueKind.TRANSFER
-```
-
-The backend maps those kinds to Vulkan queue families and queue handles.
-
-### Command lists
-
-A command list is a transient, owner-bearing token for a device-owned command
-record. The public token contains only a `Device` value and generation-checked handle;
-the Vulkan command buffer, bind cache, pending layouts, context, queue, frame slot,
-and lifecycle state remain backend-owned. Copies therefore alias one record.
-
-State transitions:
+Public queue kinds map to backend-selected Vulkan queues. Command lists are
+owner-bearing aliases of a generation-checked backend record:
 
 ```text
 RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> consumed
 ```
 
-`begin_commands` creates a record in `RECORDING`. Render passes nest into
-`RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes
-the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
-batch as `SUBMITTING`; a pre-queue fault restores it, while success invalidates
-every alias. Frame-slot pool reset also invalidates abandoned records. Invalid
-transitions return faults, and render-pass command constraints remain enforced.
+A successful submit consumes every alias. A pre-submit fault restores the
+record. Recording contexts provide per-thread command pools.
 
-### Buffers
+### Descriptors
 
-Buffers are backend-owned resources with optional CPU mapping and optional shader-visible GPU address.
+`TextureHandle` owns an image. `TextureIndex` and `SamplerIndex` identify
+entries in the compatibility descriptor heap. The backend uses descriptor
+indexing by default and supports opt-in descriptor buffers when available.
 
-Public uses:
+### Synchronization
 
-```text
-copy source/destination
-shader-readable/writable storage
-indirect command buffers
-index buffers
-fixed vertex buffers when needed
-arena backing buffers
-readback buffers
-```
+Compatibility barriers name resources and explicit texture layouts. Texture
+layout changes are staged per command list and committed only by successful
+submission. Render-pass boundaries add no implicit synchronization.
 
-Backend slot:
+### Pipelines and shaders
 
-```text
-BufferSlot
-    vk::Buffer buffer
-    vma::Allocation allocation
-    vma::AllocationInfo allocation_info
-    vk::DeviceAddress gpu_base
-    void* cpu_base
-    usz size
-    BufferUsage usage
-    MemoryKind memory_kind
-    ushort generation
-    bool used
-```
+Shaders are validated through SPIR-V reflection. Compute and graphics pipeline
+creation uses explicit compatibility descriptors and a device-owned cache.
+Draw and dispatch commands pass root GPU addresses through the generated shader
+ABI.
 
-### Textures
+### Presentation
 
-Textures represent Vulkan images and their default views.
+Swapchains are optional. The core library accepts platform-neutral native
+surface handles; SDL3 helpers remain in `gpu.c3l-samples`.
 
-Public uses:
+## Backend boundary
 
-```text
-sampled textures
-storage textures
-color attachments
-depth/stencil attachments
-transfer sources/destinations
-```
+Public signatures contain no `vk::`, `vma::`, or SDL types. The private Vulkan
+backend owns feature chains, queue families, native handles, layouts, allocator
+objects, and loader calls.
 
-Backend slot:
+The compatibility runtime requires Vulkan 1.3 semantics. Vulkan 1.2 plus
+extensions is not currently supported.
 
-```text
-TextureSlot
-    vk::Image image
-    vma::Allocation allocation
-    vma::AllocationInfo allocation_info
-    vk::ImageView default_view
-    vk::ImageLayout layout
-    Format format
-    TextureUsage usage
-    uint width, height, depth
-    uint mip_levels
-    ushort generation
-    bool used
-```
+## Verification
 
-### Texture and sampler descriptors
+The repository gates:
 
-`TextureHandle` owns the image. `TextureIndex` is the shader-visible descriptor heap index.
+- import-only execution with zero backend creation calls;
+- compile-pass and compile-fail profile-boundary fixtures;
+- CPU and shader ABI tests;
+- Linux and Windows Vulkan sweeps;
+- generated ABI and public-documentation scans;
+- benchmark target builds and a fixed-method baseline.
 
-This separation matters:
-
-```text
-TextureHandle -> lifetime and commands
-TextureIndex  -> shader-visible sampled/storage reference
-```
-
-Destroying a texture must invalidate or reject descriptors pointing at it according to the final debug policy. The safer initial policy is to require descriptor destruction before texture destruction in debug builds and report a fault otherwise.
-
-### Pipelines
-
-Pipelines are immutable shader execution objects. Creation is split by kind:
-
-```text
-create_compute_pipeline(device, ComputePipelineDesc)   -> PipelineHandle?
-create_graphics_pipeline(device, GraphicsPipelineDesc) -> PipelineHandle?
-```
-
-Graphics pipelines include the Vulkan-required immutable state. Viewport, scissor, cull mode, front face, and supported depth state are dynamic. The pipeline cache deduplicates the remaining blend/depth/raster state and fronts a serializable driver cache: `get_pipeline_cache_size` / `get_pipeline_cache_data` export the driver blob, and `DeviceDesc.pipeline_cache_data` warm-starts it at device creation.
-
-### Semaphores
-
-Timeline semaphores are the default synchronization primitive.
-
-Public:
-
-```text
-SemaphoreHandle
-SemaphoreValue
-```
-
-Binary semaphores are backend-internal swapchain details unless a public need appears.
-
-### Swapchains
-
-Swapchains are optional. Headless compute and offscreen graphics must work without a swapchain.
-
-A swapchain depends on platform surface creation. Samples use SDL3 to create windows and provide platform handles, but the `gpu` public API should not require `sdl::Window` in signatures.
-
-## 5. Backend dispatch
-
-Preferred backend connection:
-
-```text
-public Device token -> private device state -> private backend dispatch
-```
-
-Public functions validate the token before dispatch. Backend pointers and
-dispatch declarations are not part of the public module surface.
-
-## 6. Resource lifetime
-
-### Creation
-
-Creation functions return fallible values:
-
-```text
-Device?
-BufferHandle?
-TextureHandle?
-PipelineHandle?
-GpuSpan?
-```
-
-Failures return specific faults.
-
-### Destruction
-
-Destruction is explicit and validates handles.
-
-Policy:
-
-```text
-invalid handle              -> INVALID_HANDLE
-resource still referenced   -> RESOURCE_IN_USE or INVALID_RESOURCE_STATE
-valid destruction           -> retire slot and increment generation
-```
-
-### Deferred destruction
-
-Vulkan resources cannot be destroyed while in use by the GPU. The backend maintains per-frame deferred destruction queues:
-
-```text
-retire_frame(frame_index)
-    destroy resources whose retire_timeline <= completed_timeline
-```
-
-Calling `destroy_buffer` removes the public handle immediately, but backend destruction may be deferred.
-
-## 7. Frame model
-
-Each frame-in-flight has:
-
-```text
-frame upload arena
-command pool(s)
-deferred destruction list
-last submit timeline value
-```
-
-Frame lifecycle and flow:
-
-```text
-IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDLE
-
-begin_frame(device) -> token      // valid only in IDLE
-    wait if frame slot is still in flight
-    reset command pools
-    reset frame upload arena
-    set VMA current frame index
-
-alloc_frame_span(token, ...)     // current active generation only
-record work
-submit work
-
-end_frame(token)                 // consumes only after success
-    record frame timeline value
-```
-
-The public `FrameToken` embeds its owning `Device` value plus a nonzero
-device-owned generation. Copies alias one active generation.
-Successful end clears the passed copy and invalidates every alias through
-device-owned state. Failed end preserves the token and all prospective
-retirement state so the caller can retry. Invalid lifecycle transitions fault
-before changing the frame slot, arena, pools, retirement state, or queue
-submissions.
-
-`@with_frame` is a compile-time direct-call helper, not a runtime callback. It
-calls a named optional-returning worker and attempts end exactly once after the
-worker completes or faults. End faults take precedence and retain the caller's
-token for retry. This adds no heap allocation or per-frame indirect dispatch.
-
-Headless tests may skip swapchain-specific acquire/present steps.
-
-## 8. Command model
-
-`begin_commands` takes an optional `RecordingContextHandle`. One context per worker thread (`create_recording_context` / `destroy_recording_context`) enables concurrent recording; see `docs/threading.md`.
-`end_commands(CommandList*)` derives the device from the owner-bearing token;
-callers do not repeat it. Defensive owner validation does not extend the
-one-live-device supported boundary.
-
-### Compute
-
-```text
-cmd_dispatch(command_list, pipeline, root_gpu, groups)
-```
-
-The command binds the compute pipeline, pushes the root pointer, and dispatches.
-
-### Graphics
-
-```text
-cmd_begin_render_pass(command_list, render_pass_desc)
-cmd_set_viewport(command_list, viewport)
-cmd_set_scissor(command_list, scissor)
-cmd_draw(command_list, pipeline, vertex_root, fragment_root, vertex_count, instance_count)
-cmd_draw_indexed(command_list, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count, index_type = IndexType.U32)
-cmd_end_render_pass(command_list)
-```
-
-Pass begin records full-pass viewport/scissor defaults. The public setters
-record one portable pass-bounded rectangle each; their state persists across
-pipeline binds until another setter or the next pass begin. Viewport/scissor
-remain outside pipeline keys and pipeline-state replay, so handle aliasing
-cannot overwrite caller-selected rectangles.
-
-Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex input is allowed for simple paths, but it is not the preferred data model.
-
-### Transfer
-
-```text
-cmd_copy_buffer
-cmd_copy_buffer_to_texture
-cmd_copy_texture_to_buffer
-cmd_fill_buffer
-```
-
-Transfer helpers do not imply next-use barriers.
-
-### Barriers
-
-Barriers are explicit:
-
-```text
-cmd_buffer_barrier(command_list, BufferBarrier)
-cmd_texture_barrier(command_list, TextureBarrier)
-cmd_global_barrier(command_list, GlobalBarrier)
-```
-
-Render pass boundaries do not imply shader-read or transfer-read readiness.
-
-## 9. Descriptor heap model
-
-The public API exposes descriptor allocation and updates:
-
-```text
-create_texture_descriptor(device, texture, view_desc) -> TextureIndex?
-destroy_texture_descriptor(device, index) -> void?
-create_sampler(device, desc) -> SamplerIndex?
-destroy_sampler(device, index) -> void?
-```
-
-Backend implementations:
-
-```text
-default (AUTO): descriptor indexing + large descriptor arrays
-opt-in: VK_EXT_descriptor_buffer (DescriptorHeapMode.DESCRIPTOR_BUFFER)
-```
-
-Neither path changes shader material records.
-
-## 10. Swapchain model
-
-Swapchain operations:
-
-```text
-create_swapchain(device, SurfaceDesc, SwapchainDesc) -> SwapchainHandle?
-get_swapchain_info(device, swapchain) -> SwapchainInfo?
-acquire_next_image(device, swapchain) -> AcquiredImage?
-present(device, PresentDesc) -> void?
-get_present_mode_support(device, swapchain) -> PresentModeSupport?
-retry unchanged on WAIT_TIMEOUT
-resize on SWAPCHAIN_OUT_OF_DATE
-replace the surface and swapchain on SURFACE_LOST
-```
-
-`PresentModeSupport` is a bitstruct reporting fifo/immediate/mailbox availability for the swapchain's surface.
-
-`SwapchainInfo` is the coherent runtime snapshot: selected format, clamped
-extent, driver-returned image count, selected present mode, and dormant state.
-Successful creation/recreation publishes all fields together. A zero extent
-or failed rebuild publishes a queryable dormant sentinel with `UNDEFINED`
-format, zero extent/count, and FIFO as the inactive mode value. Consumers
-re-query after resize and rebuild format-dependent pipelines if needed.
-
-`AcquiredImage.prior_layout` comes from committed texture-layout state. New
-swapchain images report `UNDEFINED`; images that completed the normal
-transition/present cycle report `PRESENT`.
-
-Surface creation is platform-specific. The sample harness may provide helper functions that take `sdl::Window*`, but those helpers should live outside the core public API.
-
-## 11. Debug model
-
-Debug builds should track:
-
-```text
-resource names
-live resource counts
-allocation names
-allocation user data
-slot generation errors
-resource state errors
-outstanding frame allocations
-leaked descriptors
-leaked backend objects
-```
-
-`destroy_device` reports live resources before destroying the backend.
-
-## 12. Supported baseline
-
-The current architecture supports:
-
-```text
-headless root-pointer compute
-bindless texture compute
-offscreen graphics readback
-SDL3 windowed triangle sample
-GPU-driven indirect draw sample
-VMA memory budget reporting
-debug resource leak reporting
-shader ABI docs and generated layout checks
-```
+See [Testing](testing.md) for commands and [Compatibility](compatibility.md)
+for the frozen public contract and migration rules.

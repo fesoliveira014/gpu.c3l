@@ -1,0 +1,36 @@
+{
+  "langrev": "1",
+  "warnings": [ "no-unused" ],
+  "dependency-search-paths": [ "../../..", "../../lib" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
+  "targets": {
+    "same_profile": {
+      "type": "executable",
+      "sources": [ "src/same_profile.c3" ]
+    },
+    "cross_device": {
+      "type": "executable",
+      "sources": [ "src/cross_device.c3" ]
+    },
+    "cross_handle": {
+      "type": "executable",
+      "sources": [ "src/cross_handle.c3" ]
+    },
+    "cross_command": {
+      "type": "executable",
+      "sources": [ "src/cross_command.c3" ]
+    },
+    "cross_barrier": {
+      "type": "executable",
+      "sources": [ "src/cross_barrier.c3" ]
+    },
+    "cross_descriptor": {
+      "type": "executable",
+      "sources": [ "src/cross_descriptor.c3" ]
+    },
+    "cross_pipeline": {
+      "type": "executable",
+      "sources": [ "src/cross_pipeline.c3" ]
+    }
+  }
+}
