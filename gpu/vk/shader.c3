@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import vma;
 import std::thread;
@@ -144,7 +144,7 @@ fn void? copy_entry_point(char* dst, ZString name) @private {
 <* SPIR-V arrives with no alignment guarantee; it is copied into a
    4-byte-aligned word buffer for the uint* code pointer Vulkan requires. *>
 fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     if (desc.spirv.len == 0 || desc.spirv.len % 4 != 0) {
@@ -312,7 +312,7 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
 <* Frees the handle now; module release is deferred until frames referencing
    its pipelines retire. *>
 fn void? vk_destroy_shader(gpu::Device* device, gpu::ShaderHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;

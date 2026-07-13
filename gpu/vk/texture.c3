@@ -127,7 +127,7 @@ fn gpu::TextureFormatSupport? vk_get_texture_format_support(
     gpu::Device* device,
     gpu::Format format,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
 
@@ -216,7 +216,7 @@ fn bool? vk_supports_texture_desc(
     gpu::TextureDesc* desc,
 ) @private {
     if (!gpu::texture_desc_valid(desc)) return false;
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     return texture_desc_supported(state, desc);
@@ -438,7 +438,7 @@ fn void enqueue_cached_views(VkDeviceState* state, TextureSlot* slot, ulong reti
 }
 
 fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     if (!gpu::texture_desc_valid(desc)) {
@@ -555,7 +555,7 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
 <* Frees the handle now; views, image, and allocation release is deferred
    until every referencing frame retires. *>
 fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;

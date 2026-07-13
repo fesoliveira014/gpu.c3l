@@ -119,14 +119,10 @@ debug and stats state
 Public shape:
 
 ```text
-Device
-    BackendKind backend
-    DeviceCaps caps
-    BackendVTable* vtable
-    void* backend_state
+Device                         (opaque generation token)
+get_device_backend(Device*)    -> BackendKind?
+get_device_caps(Device*)       -> DeviceCaps?
 ```
-
-The pointer is opaque. Public code should not inspect it.
 
 gpu.c3l currently supports at most one live `Device` per process. Multiple
 devices require ownership information that the present resource handles and
@@ -282,29 +278,11 @@ A swapchain depends on platform surface creation. Samples use SDL3 to create win
 Preferred backend connection:
 
 ```text
-Device
-    BackendVTable* vtable
-    void* backend_state
+public Device token -> private device state -> private backend dispatch
 ```
 
-The vtable groups operations by resource type:
-
-```text
-create/destroy device
-create/destroy buffer
-create/destroy texture
-create/destroy descriptors
-create/destroy pipeline
-create/destroy recording contexts
-begin/end/submit commands
-record commands
-upload/readback helpers
-create/destroy swapchain
-query present-mode support
-query stats
-```
-
-The public functions perform handle validation and call the backend implementation.
+Public functions validate the token before dispatch. Backend pointers and
+dispatch declarations are not part of the public module surface.
 
 ## 6. Resource lifetime
 

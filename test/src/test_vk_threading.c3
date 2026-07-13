@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import vk;
 import std::thread;
@@ -154,7 +154,7 @@ fn void same_descriptor_pipeline_race() @test {
     }
     foreach (&t : threads) t.join()!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(vk::pipeline_cache_entry_count(state) == 1, "same-key race converges to one entry");
     uint entry = state.pipelines.slots[args[0].handle.index].value.entry;
     assert(state.pipeline_cache.entries[entry].refcount == THR_THREADS,
@@ -546,7 +546,7 @@ fn int helper_hammer_worker(void* arg) {
 fn void two_helper_tiny_arena_hammer() @test {
     gpu::Device device = make_thr_device_tiny_staging(HELPER_HAMMER_TINY_STAGING);
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     HelperHammerArgs[HELPER_HAMMER_THREADS] args;
     gpu::BufferHandle[HELPER_HAMMER_THREADS] buffers;
@@ -600,7 +600,7 @@ fn void sequential_helper_calls_bound_the_pool_to_one_buffer() @test {
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     ulong resets_before = vk::helper_pool_reset_count(state);
 
     char[HELPER_HAMMER_PAYLOAD] payload;
@@ -626,7 +626,7 @@ const uint HELPER_FAULT_ITERS = 32;
 fn void failed_helpers_reclaim_command_records_on_pool_reset() @test {
     gpu::Device device = make_thr_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     char[16] payload;
     for (uint i = 0; i < HELPER_FAULT_ITERS; i++) {
@@ -705,7 +705,7 @@ fn void deferred_queue_growth_from_worker_threads() @test {
     }
     foreach (&t : threads) t.join()!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     uint pending = vk::deferred_queue_count(state);
     assert(pending == GROWTH_THREADS * GROWTH_PER_THREAD, "every worker-thread destroy enqueued exactly one deferred entry");
     assert(pending > vk::DEFERRED_QUEUE_INITIAL_CAP, "worker-thread destroys crossed the initial capacity, forcing cross-thread growth");
@@ -881,7 +881,7 @@ fn int fallback_hammer_worker(void* arg) {
 fn void multi_thread_tiny_arena_fallback_hammer() @test {
     gpu::Device device = make_thr_device_tiny_staging(FALLBACK_HAMMER_TINY_STAGING);
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::RecordingContextHandle[FALLBACK_HAMMER_THREADS] contexts;
     foreach (&ctx : contexts) *ctx = gpu::create_recording_context(&device)!!;

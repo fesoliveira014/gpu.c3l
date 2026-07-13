@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import std::os::env;
 import std::io;
@@ -40,7 +40,7 @@ fn void descriptor_buffer_device_and_heap() @test {
         return;
     }
     defer gpu::destroy_device(&device)!!;
-    assert(device.caps.descriptor_buffer, "forced buffer mode implies adapter support");
+    assert(gpu::get_device_caps(&device)!!.descriptor_buffer, "forced buffer mode implies adapter support");
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -94,7 +94,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     }
     gpu::Device device = maybe_device;
     defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
     io::eprintfn(
         "descriptor_buffer_compute_to_graphics: graphics_family=%d compute_family=%d topology=%s",
         state.graphics_family,

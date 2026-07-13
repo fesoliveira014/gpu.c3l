@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import std::thread;
 import vma;
@@ -785,7 +785,7 @@ fn vk::ImageView? resolve_descriptor_texture_view(
 }
 
 fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::TextureHandle texture, gpu::TextureViewDesc* view) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
@@ -916,7 +916,7 @@ fn uint accumulate_texture_descriptor_write(DescriptorHeapState* heap, uint slot
 <* All validation and fallible view creation precedes descriptor mutation.
    A preparation fault restores only views created by this transaction. *>
 fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescriptorDesc[] descs, gpu::TextureIndex[] out_indices) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (out_indices.len != descs.len) {
         return report_contract_failure(
             state:               state,
@@ -1015,7 +1015,7 @@ fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescript
 }
 
 fn void? vk_destroy_texture_descriptor(gpu::Device* device, gpu::TextureIndex index) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
@@ -1091,7 +1091,7 @@ fn gpu::SamplerIndex? publish_sampler(VkDeviceState* state, vk::Sampler sampler)
 }
 
 fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (!math::is_finite(desc.mip_lod_bias)) {
         return report_contract_failure(
             state:               state,
@@ -1245,7 +1245,7 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
 }
 
 fn void? vk_destroy_sampler(gpu::Device* device, gpu::SamplerIndex index) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;

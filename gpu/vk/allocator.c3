@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import vma;
 import std::core::mem;
@@ -24,7 +24,7 @@ fn void? create_vk_allocator(VkDeviceState* state) {
 }
 
 fn gpu::MemoryStats? vk_get_memory_stats(gpu::Device* device) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (state == null || state.allocator == null) return gpu::INVALID_ARGUMENT~;
 
     vk::PhysicalDeviceMemoryProperties mem_props;
@@ -60,7 +60,7 @@ fn gpu::MemoryStats? vk_get_memory_stats(gpu::Device* device) @private {
 }
 
 fn String? vk_build_memory_report(gpu::Device* device, bool detailed) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (state == null || state.allocator == null) return gpu::INVALID_ARGUMENT~;
 
     ZString vma_string;

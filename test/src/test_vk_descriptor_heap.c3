@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk @public;
 import vk;
 
@@ -173,7 +173,7 @@ fn void descriptor_sampler_failures_report_context() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle transfer = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, transfer)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.textures.slots[transfer.index].value.usage = { .transfer_dst };
     DescriptorDiagnosticCapture capture;
     state.debug_callback = &capture_descriptor_diagnostic;
@@ -310,7 +310,7 @@ fn void texture_descriptor_exhaustion_does_not_cache_failed_views() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureIndex occupied = gpu::create_texture_descriptor(&device, texture, null)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(cached_texture_view_count(state, texture) == 0, "the fixture starts with an empty view cache");
 
     for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
@@ -560,7 +560,7 @@ fn void texture_descriptors_failed_batch_restores_full_view_capacity() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
         gpu::TextureViewDesc failed_view = {
@@ -603,7 +603,7 @@ fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
     DescriptorDiagnosticCapture capture;
     state.debug_callback = &capture_descriptor_diagnostic;
@@ -655,7 +655,7 @@ fn void texture_descriptors_failed_batch_preserves_existing_and_duplicate_views(
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
 
     gpu::TextureViewDesc existing_view = {
@@ -713,7 +713,7 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
 
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::DescriptorHeapState* heap = &state.heap;
     assert(heap.texture_retire.count > 0, "the fixture has a ready undrained descriptor retire");
 
@@ -1140,8 +1140,8 @@ fn void descriptor_heap_raised_capacity_creates() @test {
     gpu::Device device = make_heap_test_device(8192, 512);
     defer gpu::destroy_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
-    assert(device.caps.max_texture_descriptors == 8192, "caps report the created texture capacity");
-    assert(device.caps.max_sampler_descriptors == 512, "caps report the created sampler capacity");
+    assert(gpu::get_device_caps(&device)!!.max_texture_descriptors == 8192, "caps report the created texture capacity");
+    assert(gpu::get_device_caps(&device)!!.max_sampler_descriptors == 512, "caps report the created sampler capacity");
     defer gpu::destroy_texture(&device, texture)!!;
 
     gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
@@ -1154,7 +1154,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
     defer gpu::destroy_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     DescriptorDiagnosticCapture capture;
     state.debug_callback = &capture_descriptor_diagnostic;
     state.debug_user_data = &capture;
@@ -1289,7 +1289,7 @@ fn void texture_descriptor_view_cache_exhaustion_reports_distinct_context() @tes
         live[i] = gpu::create_texture_descriptor(&device, texture, &view)!!;
     }
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     DescriptorDiagnosticCapture capture;
     state.debug_callback = &capture_descriptor_diagnostic;
     state.debug_user_data = &capture;

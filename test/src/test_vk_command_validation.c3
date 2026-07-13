@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 
 // Headless (lavapipe): recording/submit validation faults — mixed-queue
@@ -200,7 +200,7 @@ fn void record_val_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle dep
 }
 
 fn uint val_cached_view_count(gpu::Device* device, gpu::TextureHandle texture) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
     uint count = 0;
     foreach (&cached : slot.views) if (cached.used) count++;
@@ -208,7 +208,7 @@ fn uint val_cached_view_count(gpu::Device* device, gpu::TextureHandle texture) {
 }
 
 fn bool val_has_cached_view(gpu::Device* device, gpu::TextureHandle texture, uint base_mip, uint mip_count) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
     foreach (&cached : slot.views) {
         if (cached.used && cached.base_mip == base_mip && cached.mip_count == mip_count
@@ -647,7 +647,7 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
 fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
     defer gpu::destroy_device(&device)!!;
-    if (!device.caps.draw_indirect_count) return;
+    if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
@@ -1025,7 +1025,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
 fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::Device device = make_val_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -1066,7 +1066,7 @@ fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
         mip_levels: 5,
     );
     defer gpu::destroy_texture(&device, saturated)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     SyncDiagnosticCapture capture;
     reset_sync_diagnostic(
         capture:        &capture,
@@ -1158,7 +1158,7 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     assert(capture.rejected_field_matches, "barrier size field is identified");
     assert(capture.invariant_matches, "barrier range invariant is identified");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.debug_callback = null;
     fault without_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
     assert(without_callback == with_callback, "callback presence does not alter the barrier fault");
@@ -1242,7 +1242,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferDesc plain_desc = {
         .size = 64, .usage = { .storage, .addressable },

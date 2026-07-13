@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 
 // Headless (lavapipe): record a buffer copy from a host-written upload buffer to
@@ -8,7 +8,7 @@ import gpu::vk;
 // bytes. Assumes host-coherent memory (non-coherent flush/invalidate is later).
 
 fn ulong command_submit_count(gpu::Device* device) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
     return vk::submit_stats(state).queue_submits;
 }
 
@@ -131,7 +131,7 @@ fn void command_generation_wraps_without_poisoning_slot() @test {
 
     gpu::CommandList nearly_wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_commands(&nearly_wrapped)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.commands.slots[nearly_wrapped.handle.index].generation = vk::COMMAND_GENERATION_MAX - 1;
     nearly_wrapped.handle.generation = vk::COMMAND_GENERATION_MAX - 1;
 
@@ -169,22 +169,17 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void cross_device_submit_rejects_and_owner_can_submit() @test {
+fn void second_live_device_is_rejected() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device owner = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&owner)!!;
-    gpu::Device other = gpu::create_device(&desc)!!;
-    defer gpu::destroy_device(&other)!!;
+    fault second_device = @catch(gpu::create_device(&desc));
+    assert(second_device == gpu::INVALID_RESOURCE_STATE, "only one device may be live");
 
     gpu::CommandList cmd = gpu::begin_commands(&owner, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    ulong before = command_submit_count(&other);
-    fault rejected = @catch(gpu::submit(&other, &submit));
-    assert(rejected == gpu::INVALID_ARGUMENT, "another device rejects the command token owner");
-    assert(command_submit_count(&other) == before, "cross-device rejection reaches no Vulkan queue submit");
-
     gpu::submit(&owner, &submit)!!;
     gpu::wait_queue_idle(&owner, gpu::QueueKind.GRAPHICS)!!;
 }
@@ -295,7 +290,7 @@ fn void idle_context_pools_are_never_reset() @test {
     gpu::RecordingContextHandle idle_ctx = gpu::create_recording_context(&device)!!;
     defer (void)gpu::destroy_recording_context(&device, idle_ctx);
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     for (uint i = 0; i < 6; i++) {
         gpu::FrameToken frame = gpu::begin_frame(&device)!!;
         assert(vk::pool_reset_stats(state).reset == 0, "an idle context's pools are never reset");
@@ -310,7 +305,7 @@ fn void used_context_pool_resets_exactly_once_on_slot_wrap() @test {
 
     gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!!;
     defer (void)gpu::destroy_recording_context(&device, ctx);
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!; // slot 1
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS, ctx)!!;

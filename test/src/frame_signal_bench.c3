@@ -1,6 +1,6 @@
 module gpu_bench;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import std::io;
 import std::time;
@@ -17,7 +17,7 @@ struct BenchPhase {
 }
 
 fn void run_phase(gpu::Device* device, BenchPhase* phase) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
     vk::SubmitStats before = vk::submit_stats(state);
     std::time::Clock start = std::time::clock::now();
 
@@ -53,8 +53,8 @@ fn int main() {
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
-    io::printfn("queue topology: async_compute=%s", device.caps.async_compute ? "true" : "false");
-    if (!device.caps.async_compute) {
+    io::printfn("queue topology: async_compute=%s", gpu::get_device_caps(&device)!!.async_compute ? "true" : "false");
+    if (!gpu::get_device_caps(&device)!!.async_compute) {
         io::printfn("distinct compute/transfer queues unavailable on this adapter: every phase below aliases onto the graphics queue, same as phase 1");
     }
 

@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk @public;
 import vk;
 
@@ -34,7 +34,7 @@ fn gpu::Device make_submit_stats_test_device(SubmitDiagnosticCapture* capture = 
 }
 
 fn vk::SubmitStats stats_of(gpu::Device* device) {
-    return vk::submit_stats((vk::VkDeviceState*)device.backend_state);
+    return vk::submit_stats((vk::VkDeviceState*)gpu::device_backend_state(*device));
 }
 
 <* Any used-queue combination ends the frame with exactly one internal
@@ -151,7 +151,7 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     SubmitDiagnosticCapture capture;
     gpu::Device device = make_submit_stats_test_device(&capture);
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     state.compute_used_since_frame = true;

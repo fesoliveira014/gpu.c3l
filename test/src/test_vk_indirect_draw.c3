@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import vk;
 import std::io;
@@ -157,7 +157,7 @@ fn char* center_pixel(gpu::GpuSpan* rb_span) {
 }
 
 fn bool distinct_graphics_compute_families(gpu::Device* device, ZString test_name) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
     if (state.graphics_family != state.compute_family) return true;
     io::eprintfn("%s not applicable: graphics and compute share family %d", test_name, state.graphics_family);
     return false;
@@ -444,6 +444,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
 
     assert(gpu::poll_readback(&device, &ticket), "ticket resolvable after the recording frame ends");
     gpu::DrawIndexedIndirectCommand[2] got;
+    gpu::ReadbackTicket stale_ticket = ticket;
     gpu::resolve_readback(&device, &ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size])!!;
     for (uint i = 0; i < 2; i++) {
         assert(got[i].index_count == 3 && got[i].instance_count == 1, "GPU-written args read back intact");
@@ -454,6 +455,9 @@ fn void compute_generated_indexed_indirect_draw() @test {
     fault again = @catch(gpu::resolve_readback(&device, &ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size]));
     assert(again == gpu::INVALID_ARGUMENT, "double resolve faults INVALID_ARGUMENT");
     assert(!gpu::poll_readback(&device, &ticket), "poll on a resolved ticket is false");
+    fault stale = @catch(gpu::resolve_readback(&device, &stale_ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size]));
+    assert(stale == gpu::INVALID_HANDLE, "stale ticket alias faults INVALID_HANDLE");
+    assert(!gpu::poll_readback(&device, &stale_ticket), "poll on a stale ticket alias is false");
 }
 
 fn void plain_indirect_draw_from_frame_span() @test {
@@ -605,7 +609,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
 fn void count_buffer_limits_draws() @test {
     gpu::Device device = make_ind_device();
     defer gpu::destroy_device(&device)!!;
-    if (!device.caps.draw_indirect_count) return;
+    if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
 
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
     defer destroy_ind_draw_ctx(&device, &ctx);
@@ -710,7 +714,8 @@ fn void ticket_hybrid_and_short_dest() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::ReadbackTicket[TICKETS] tickets;
-    uint dedicated_count = 0;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong fallbacks_before = vk::dedicated_fallback_count(state);
     for (uint i = 0; i < TICKETS; i++) {
         tickets[i] = gpu::cmd_readback_buffer(
             commands: &cmd,
@@ -718,8 +723,8 @@ fn void ticket_hybrid_and_short_dest() @test {
             offset:   0,
             size:     CHUNK,
         )!!;
-        if (tickets[i].dedicated.is_valid()) dedicated_count++;
     }
+    ulong dedicated_count = vk::dedicated_fallback_count(state) - fallbacks_before;
     assert(dedicated_count > 0, "arena saturation falls back to dedicated tickets");
     assert(dedicated_count < TICKETS, "early tickets are arena-backed");
     gpu::end_commands(&cmd)!!;
@@ -740,6 +745,31 @@ fn void ticket_hybrid_and_short_dest() @test {
             assert(dest[b] == (char)(b % 251), "ticket bytes intact on both arena and dedicated paths");
         }
     }
+}
+
+fn void outstanding_readback_ticket_does_not_block_teardown() @test {
+    gpu::Device device = make_ind_device(readback_arena_size: 1);
+    gpu::BufferDesc src_desc = {
+        .size        = 1024,
+        .usage       = { .transfer_src, .transfer_dst },
+        .memory_kind = gpu::MemoryKind.STAGING,
+    };
+    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(
+        commands: &commands,
+        src:      src,
+        offset:   0,
+        size:     1024,
+    )!!;
+    gpu::end_commands(&commands)!!;
+
+    gpu::destroy_device(&device)!!;
+    assert(!gpu::poll_readback(&device, &ticket), "poll rejects a ticket after owner teardown");
+    char[1024] dest;
+    fault resolve_fault = @catch(gpu::resolve_readback(&device, &ticket, dest[..]));
+    assert(resolve_fault == gpu::INVALID_HANDLE, "resolve rejects a ticket after owner teardown");
 }
 
 fn void indirect_argument_validation() @test {

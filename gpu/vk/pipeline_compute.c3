@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import std::thread;
 
@@ -67,7 +67,7 @@ fn void? PipelineTable.free(&self, gpu::PipelineHandle h) {
    set_stage takes the embedded struct by value, and that by-value flow
    crashes c3c 0.8.0 codegen. *>
 fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::ComputePipelineDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     if (desc.push_constant_size < gpu::RootPush::size
@@ -167,7 +167,7 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
 }
 
 fn void? vk_destroy_pipeline(gpu::Device* device, gpu::PipelineHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;

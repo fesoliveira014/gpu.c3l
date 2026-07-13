@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import vma;
 import std::thread;
@@ -63,7 +63,7 @@ fn void? SemaphoreTable.free(&self, gpu::SemaphoreHandle h) {
 fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* barrier) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     BufferSlot* slot = state.buffers.get(barrier.buffer)!;
     // size 0 is the whole-buffer convention, matching flush/invalidate/fill.
     if (!gpu::range_fits(slot.size, barrier.offset, barrier.size)) {
@@ -179,7 +179,7 @@ fn void commit_pending_layouts(VkDeviceState* state, CommandRecord* record) @pri
 fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier* barrier) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     TextureSlot* slot = state.textures.get(barrier.texture)!;
     if (barrier.old_layout != effective_layout(record, slot, barrier.texture)) {
         return report_contract_failure(
@@ -229,7 +229,7 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
 }
 
 fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::SemaphoreDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     vk::SemaphoreTypeCreateInfo type_info = vk::semaphore_type_create_info()
@@ -259,7 +259,7 @@ fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::Semaphore
 <* Frees the handle now; the vk semaphore release is deferred. The public
    contract already forbids pending waits at destroy. *>
 fn void? vk_destroy_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
@@ -272,7 +272,7 @@ fn void? vk_destroy_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle) 
 }
 
 fn void? vk_wait_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle, gpu::SemaphoreValue value, ulong timeout_ns) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     SemaphoreSlot* slot = state.semaphores.get(handle)!;
     ulong wait_value = (ulong)value;
     vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()

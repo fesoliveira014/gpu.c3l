@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk @public;
 import vk;
 
@@ -257,9 +257,9 @@ fn gpu::Device make_queue_test_device() {
 fn void queue_alias_matches_async_compute_cap() @test {
     gpu::Device device = make_queue_test_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* s = (vk::VkDeviceState*)device.backend_state;
-    assert(s.compute_queue_distinct == device.caps.async_compute, "distinct flag mirrors the cap");
-    assert((s.compute_queue == s.graphics_queue) == !device.caps.async_compute, "alias iff no async compute");
+    vk::VkDeviceState* s = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(s.compute_queue_distinct == gpu::get_device_caps(&device)!!.async_compute, "distinct flag mirrors the cap");
+    assert((s.compute_queue == s.graphics_queue) == !gpu::get_device_caps(&device)!!.async_compute, "alias iff no async compute");
 }
 
 fn void cross_queue_timeline_chain_validates() @test {

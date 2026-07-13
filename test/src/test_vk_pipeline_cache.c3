@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import vk;
 
@@ -37,11 +37,11 @@ fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
 }
 
 fn uint cache_entry_count(gpu::Device* device) {
-    return vk::pipeline_cache_entry_count((vk::VkDeviceState*)device.backend_state);
+    return vk::pipeline_cache_entry_count((vk::VkDeviceState*)gpu::device_backend_state(*device));
 }
 
 fn bool cache_index_consistent(gpu::Device* device) {
-    return vk::pipeline_cache_index_consistent((vk::VkDeviceState*)device.backend_state);
+    return vk::pipeline_cache_index_consistent((vk::VkDeviceState*)gpu::device_backend_state(*device));
 }
 
 struct CacheShaders {
@@ -156,7 +156,7 @@ fn void formats_split_entries_and_limits_enforced() @test {
     defer gpu::destroy_pipeline(&device, second)!!;
     assert(cache_entry_count(&device) == 2, "different formats produce distinct pipelines");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::PipelineLayout first_layout = state.pipelines.slots[first.index].value.layout;
     vk::PipelineLayout second_layout = state.pipelines.slots[second.index].value.layout;
     assert(first_layout == second_layout, "graphics pipelines share one layout");
@@ -190,7 +190,7 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
     defer gpu::destroy_pipeline(&device, third)!!;
     assert(cache_entry_count(&device) == 2, "push size is part of the compute key");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(state.compute_layout_cache.count == 2, "duplicate push sizes reuse one layout entry");
     vk::PipelineLayout first_layout = state.pipelines.slots[first.index].value.layout;
     vk::PipelineLayout second_layout = state.pipelines.slots[second.index].value.layout;
@@ -537,7 +537,7 @@ fn void line_polygon_mode_respects_optional_feature() @test {
     defer gpu::destroy_shader(&device, shaders.vert)!!;
     defer gpu::destroy_shader(&device, shaders.frag)!!;
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     bool supported = state.caps.line_polygon_mode;
 
     state.caps.line_polygon_mode = false;
@@ -578,7 +578,7 @@ fn void compute_push_constant_sizes_validate_before_vulkan() @test {
     assert(@catch(gpu::create_compute_pipeline(&device, &unaligned)) == gpu::INVALID_ARGUMENT,
         "unaligned push-constant size faults INVALID_ARGUMENT");
 
-    uint limit = device.caps.max_push_constant_size;
+    uint limit = gpu::get_device_caps(&device)!!.max_push_constant_size;
     uint aligned_limit = limit - limit % 4;
     gpu::ComputePipelineDesc over_maximum = { .shader = comp, .push_constant_size = aligned_limit + 4 };
     assert(@catch(gpu::create_compute_pipeline(&device, &over_maximum)) == gpu::INVALID_ARGUMENT,
@@ -603,7 +603,7 @@ fn void compute_layout_cache_grows_beyond_pipeline_capacity_hint() @test {
         gpu::destroy_pipeline(&device, pipeline)!!;
     }
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(state.compute_layout_cache.count == sizes.len, "each distinct size has one cached layout");
     assert(state.compute_layout_cache.entries.len >= sizes.len, "layout cache grows beyond the one-pipeline hint");
 }

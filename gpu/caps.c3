@@ -46,8 +46,8 @@ struct DeviceDesc {
     void*                debug_user_data;
 }
 
-<* Capabilities of the created device, filled by create_device into Device.caps;
-   query these instead of hardcoding limits. *>
+<* Capabilities of the created device. Query with get_device_caps instead of
+   hardcoding limits. *>
 struct DeviceCaps {
     bool buffer_device_address;
     bool synchronization2;

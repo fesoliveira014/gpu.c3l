@@ -14,7 +14,7 @@ faultdef
     // values, undersized output buffers, mismatched spans.
     INVALID_ARGUMENT,
     // A handle is stale (generation mismatch after destroy) or was never
-    // live; also raised through a zeroed Device vtable.
+    // live; also raised for zero, consumed, or stale device tokens.
     INVALID_HANDLE,
     // An operation found a resource in the wrong tracked state — most
     // commonly a texture barrier whose old_layout disagrees with the

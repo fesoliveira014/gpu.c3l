@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import std::thread;
 import vma;
@@ -69,7 +69,7 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
 
     usz frame_arena_size = desc.frame_arena_size == 0 ? gpu::DEFAULT_FRAME_ARENA_SIZE : desc.frame_arena_size;
     state.frame_arenas = mem::new_array(FrameArenaState, state.frames_in_flight);
-    gpu::Device handle = { .backend = gpu::BackendKind.VULKAN, .vtable = &VK_VTABLE, .backend_state = (void*)state };
+    gpu::Device handle = state.owner;
     uint[2] frame_families;
     uint frame_family_count = graphics_compute_queue_families(state, frame_families[..]);
     for (uint i = 0; i < state.frames_in_flight; i++) {
@@ -199,7 +199,7 @@ fn void? reset_frame_arena(VkDeviceState* state, uint index) {
 }
 
 fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* out_frame, FrameCounterQueryFn query_fn) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (state.frame_active) {
         return report_contract_failure(
             state:               state,
@@ -343,8 +343,8 @@ fn void? vk_begin_frame(gpu::Device* device, gpu::FrameToken* out_frame) @privat
 
 fn VkDeviceState*? resolve_frame_token(gpu::FrameToken* frame, ZString operation) @private {
     if (frame == null || frame.device == null || frame.generation == 0) return gpu::INVALID_HANDLE~;
-    if (frame.device.backend_state == null) return gpu::INVALID_HANDLE~;
-    VkDeviceState* state = (VkDeviceState*)frame.device.backend_state;
+    if (gpu::device_backend_state_ptr(frame.device) == null) return gpu::INVALID_HANDLE~;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(frame.device);
     if (!state.frame_active || state.active_frame_generation != frame.generation) {
         return report_contract_failure(
             state:               state,
@@ -576,7 +576,7 @@ fn PersistentArenaCreatePlan persistent_arena_create_plan(VkDeviceState* state, 
    block that suballocates it. *>
 fn void? create_persistent_arena(VkDeviceState* state, gpu::DeviceDesc* device_desc) {
     usz arena_size = device_desc.persistent_arena_size == 0 ? gpu::DEFAULT_PERSISTENT_ARENA_SIZE : device_desc.persistent_arena_size;
-    gpu::Device handle = { .backend = gpu::BackendKind.VULKAN, .vtable = &VK_VTABLE, .backend_state = (void*)state };
+    gpu::Device handle = state.owner;
     PersistentArenaCreatePlan plan = persistent_arena_create_plan(state, arena_size);
     gpu::BufferHandle buffer = vk_create_buffer_with_families(&handle, &plan.desc, plan.families[:plan.family_count])!;
     mark_buffer_internal(state, buffer);
@@ -602,7 +602,7 @@ fn void destroy_persistent_arena(VkDeviceState* state) @private {
 }
 
 fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAllocDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     if (desc.memory_kind != gpu::MemoryKind.PERSISTENT_UPLOAD) {
@@ -696,7 +696,7 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
 }
 
 fn void? vk_free_persistent_span(gpu::Device* device, gpu::GpuSpan span) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
@@ -739,7 +739,7 @@ fn void? vk_free_persistent_span(gpu::Device* device, gpu::GpuSpan span) @privat
 }
 
 fn gpu::PersistentArenaStats? vk_get_persistent_stats(gpu::Device* device) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     PersistentArenaState* arena = &state.persistent_arena;
     vma::Statistics stats;
     arena.virtual_block.get_statistics(&stats);

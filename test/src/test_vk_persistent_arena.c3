@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk @public;
 import vk;
 import std::io;
@@ -122,7 +122,7 @@ fn gpu::GpuSpan alloc_frame_empty_root(gpu::FrameToken* frame) {
 fn void persistent_span_crosses_compute_and_graphics_families_when_available() @test {
     gpu::Device device = make_persistent_usage_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     if (state.graphics_family == state.compute_family) {
         io::eprintfn(
             "persistent_span_crosses_compute_and_graphics: N/A graphics=%d compute=%d",
@@ -205,7 +205,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     };
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     if (state.graphics_family == state.compute_family) {
         io::eprintfn(
             "persistent_span_reused_offset_switches_family: N/A graphics=%d compute=%d",

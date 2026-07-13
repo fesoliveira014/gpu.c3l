@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import std::io;
 import std::thread;
@@ -9,6 +9,8 @@ import std::atomic;
 import std::atomic::types;
 
 const uint TRANSFER_RETIRE_CAP = 1024;
+const uint READBACK_TICKET_CAPACITY @private = 4096;
+const uint READBACK_TICKET_FREE_NONE @private = 0;
 const uint DEDICATED_RETIRE_CAP = 64;
 const usz TRANSFER_ALIGN = 16;
 // Per-round wait; rounds repeat with a warning until the predecessor signals
@@ -64,12 +66,98 @@ struct DedicatedRetireState {
     uint head;
     uint count;
 }
+struct ReadbackTicketState @private {
+    gpu::GpuSpan        span;
+    gpu::SemaphoreValue value;
+    gpu::BufferHandle   dedicated;
+    ulong               range_end;
+}
 
-<* The buffer fns used here only dereference backend_state, so a shim Device
-   works without the public Device value (which lives by-value with the
-   caller and has no stable address). *>
+struct ReadbackTicketCell @private {
+    ReadbackTicketState value;
+    uint                generation;
+    uint                next_free;
+    bool                used;
+}
+
+struct ReadbackTicketTable @private {
+    ReadbackTicketCell[] slots;
+    uint                 free_head;
+    uint                 next_new;
+}
+
+fn gpu::ReadbackTicket? ReadbackTicketTable.alloc(&self, ReadbackTicketState value) {
+    uint index;
+    if (self.free_head != READBACK_TICKET_FREE_NONE) {
+        index = self.free_head - 1;
+        self.free_head = self.slots[index].next_free;
+    } else if (self.next_new < self.slots.len) {
+        index = self.next_new++;
+        self.slots[index].generation = 0;
+    } else {
+        return gpu::SLOT_TABLE_FULL~;
+    }
+
+    self.slots[index].value = value;
+    self.slots[index].generation = gpu::next_readback_ticket_generation(self.slots[index].generation);
+    self.slots[index].used = true;
+    return (gpu::ReadbackTicket){
+        .index      = index,
+        .generation = self.slots[index].generation,
+    };
+}
+
+fn ReadbackTicketState*? ReadbackTicketTable.get(&self, gpu::ReadbackTicket ticket) {
+    uint index = ticket.index;
+    if (index >= self.slots.len || !self.slots[index].used) return gpu::INVALID_HANDLE~;
+    if (self.slots[index].generation != ticket.generation) return gpu::INVALID_HANDLE~;
+    return &self.slots[index].value;
+}
+
+fn void? ReadbackTicketTable.free(&self, gpu::ReadbackTicket ticket) {
+    self.get(ticket)!;
+    uint index = ticket.index;
+    self.slots[index].used = false;
+    self.slots[index].generation = gpu::next_readback_ticket_generation(self.slots[index].generation);
+    self.slots[index].next_free = self.free_head;
+    self.free_head = index + 1;
+}
+
+fn ReadbackTicketState*? resolve_readback_ticket(VkDeviceState* state, gpu::ReadbackTicket ticket) @private {
+    return state.readback_tickets.get(ticket);
+}
+
+fn void destroy_readback_tickets(VkDeviceState* state) @private {
+    if (state.readback_tickets.slots.ptr == null) return;
+    foreach (&cell : state.readback_tickets.slots[:state.readback_tickets.next_new]) {
+        if (cell.used) release_readback_state(state, &cell.value);
+    }
+    mem::free(state.readback_tickets.slots.ptr);
+    state.readback_tickets = {};
+}
+
+// Immediate destruction follows timeline completion, device idle, or a
+// pre-record failure; no fallible work follows a recorded readback copy.
+fn void destroy_readback_buffer(VkDeviceState* state, gpu::BufferHandle handle) @private {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    if (try slot = state.buffers.get(handle)) {
+        state.allocator.destroy_buffer(slot.buffer, slot.allocation);
+        state.buffers.free(handle)!!;
+    }
+}
+
+fn void release_readback_state(VkDeviceState* state, ReadbackTicketState* ticket) @private {
+    if (ticket.dedicated.is_valid()) {
+        destroy_readback_buffer(state, ticket.dedicated);
+    } else {
+        unpin_ticket_range(&state.readback_arena, ticket.range_end);
+    }
+}
+
+
 fn gpu::Device device_shim(VkDeviceState* state) @private {
-    return { .backend_state = (void*)state };
+    return state.owner;
 }
 
 fn gpu::BufferDesc staging_arena_desc(usz size) @private {
@@ -386,7 +474,7 @@ fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc,
 
 fn CommandRecord*? resolve_transfer_command(gpu::CommandList* commands, ZString operation) @private {
     if (commands.device == null) return gpu::INVALID_HANDLE~;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     if (state == null) return gpu::INVALID_HANDLE~;
     CommandRecord*? resolved = state.commands.get(commands.handle);
     if (catch lookup_fault = resolved) {
@@ -466,7 +554,7 @@ fn BufferSlot*? validate_upload_buffer(VkDeviceState* state, gpu::BufferHandle d
 <* The caller supplies the timeline tag its staging range retires against. *>
 fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data, TimelineTag tag, ZString operation) @private {
     CommandRecord* record = resolve_transfer_command(commands, operation)!;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -520,7 +608,7 @@ fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle ds
 }
 
 fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data) @private {
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
     return cmd_upload_buffer_impl(
         commands: commands,
@@ -534,7 +622,7 @@ fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst,
 
 fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data, TimelineTag tag, ZString operation, ZString mip_field) @private {
     CommandRecord* record = resolve_transfer_command(commands, operation)!;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -650,7 +738,7 @@ fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadD
 }
 
 fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data) @private {
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
     return cmd_upload_texture_impl(
         commands:  commands,
@@ -760,7 +848,7 @@ fn ulong dedicated_fallback_count(VkDeviceState* state) {
 }
 
 fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz offset, char[] data, gpu::Stage next_stage, gpu::Hazard next_hazard) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     validate_upload_buffer(state, dst, offset, data, "upload_buffer_data")!;
@@ -806,7 +894,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
 }
 
 fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uint mip, char[] data, gpu::Stage next_stage, gpu::Hazard next_hazard, gpu::TextureLayout next_layout) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     ulong helper_value = 0;
@@ -930,7 +1018,7 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
 }
 
 fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz offset, char[] out_data, gpu::Stage from_stage, gpu::Hazard from_hazard) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     ulong helper_value = 0;
@@ -1072,7 +1160,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
 }
 
 fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, uint mip, char[] out_data, gpu::Stage from_stage, gpu::Hazard from_hazard, gpu::TextureLayout from_layout) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
     ulong helper_value = 0;
@@ -1269,11 +1357,17 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
             size:  size,
             tag:   tag,
         )) {
-            return {
+            ReadbackTicketState data = {
                 .span      = alloc.span,
                 .value     = (gpu::SemaphoreValue)tag.value,
                 .range_end = alloc.range_end,
             };
+            gpu::ReadbackTicket? ticket = state.readback_tickets.alloc(data);
+            if (catch allocation_fault = ticket) {
+                unpin_ticket_range(&state.readback_arena, alloc.range_end);
+                return allocation_fault~;
+            }
+            return ticket;
         }
     }
 
@@ -1286,36 +1380,40 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
     gpu::Device shim = device_shim(state);
     gpu::BufferHandle buffer = vk_create_buffer(&shim, &desc)!;
     if (try span = vk_get_buffer_span(&shim, buffer)) {
-        state.transfer_mutex.lock()!!;
-        mark_buffer_internal(state, buffer);
-        state.dedicated_fallbacks++;
-        state.transfer_mutex.unlock();
-        return {
+        ReadbackTicketState data = {
             .span      = span,
             .value     = (gpu::SemaphoreValue)tag.value,
             .dedicated = buffer,
         };
+        state.transfer_mutex.lock()!!;
+        mark_buffer_internal(state, buffer);
+        state.dedicated_fallbacks++;
+        gpu::ReadbackTicket? ticket = state.readback_tickets.alloc(data);
+        state.transfer_mutex.unlock();
+        if (catch allocation_fault = ticket) {
+            (void)vk_destroy_buffer(&shim, buffer);
+            return allocation_fault~;
+        }
+        return ticket;
     }
     (void)vk_destroy_buffer(&shim, buffer);
     return gpu::ARENA_FULL~;
 }
 
-fn void release_ticket(VkDeviceState* state, gpu::ReadbackTicket* ticket) @private {
+fn void? release_ticket(VkDeviceState* state, gpu::ReadbackTicket* ticket) @private {
     state.transfer_mutex.lock()!!;
     defer state.transfer_mutex.unlock();
-    if (ticket.dedicated.is_valid()) {
-        gpu::Device shim = device_shim(state);
-        (void)vk_destroy_buffer(&shim, ticket.dedicated);
-    } else {
-        unpin_ticket_range(&state.readback_arena, ticket.range_end);
-    }
+    ReadbackTicketState* data = resolve_readback_ticket(state, *ticket)!;
+    release_readback_state(state, data);
+    state.readback_tickets.free(*ticket)!;
+    *ticket = {};
 }
 
 <* Record the copy plus the transfer→host barrier on the destination range;
    source-side ordering stays with the caller. *>
 fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::BufferHandle src, usz offset, usz size) @private {
     CommandRecord* record = resolve_transfer_command(commands, "cmd_readback_buffer")!;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -1401,17 +1499,18 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
         )~;
     }
     gpu::ReadbackTicket ticket = allocated_ticket;
-    defer catch release_ticket(state, &ticket);
+    defer catch (void)release_ticket(state, &ticket);
+    ReadbackTicketState* ticket_data = resolve_readback_ticket(state, ticket)!;
 
     gpu::BufferCopyDesc copy = {
         .src        = src,
-        .dst        = ticket.span.buffer,
+        .dst        = ticket_data.span.buffer,
         .src_offset = offset,
-        .dst_offset = ticket.span.offset,
+        .dst_offset = ticket_data.span.offset,
         .size       = size,
     };
     vk_cmd_copy_buffer(commands, &copy)!;
-    record_ticket_host_barrier(commands, &ticket)!;
+    record_ticket_host_barrier(commands, ticket_data)!;
     return ticket;
 }
 
@@ -1419,7 +1518,7 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
    tracked layout (caller's barriers on both sides). *>
 fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu::TextureHandle src, uint mip) @private {
     CommandRecord* record = resolve_transfer_command(commands, "cmd_readback_texture")!;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -1497,19 +1596,20 @@ fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu:
         )~;
     }
     gpu::ReadbackTicket ticket = allocated_ticket;
-    defer catch release_ticket(state, &ticket);
+    defer catch (void)release_ticket(state, &ticket);
+    ReadbackTicketState* ticket_data = resolve_readback_ticket(state, ticket)!;
 
     gpu::TextureBufferCopyDesc copy = {
         .texture = src,
-        .dst     = ticket.span,
+        .dst     = ticket_data.span,
         .mip     = mip,
     };
     vk_cmd_copy_texture_to_buffer(commands, &copy)!;
-    record_ticket_host_barrier(commands, &ticket)!;
+    record_ticket_host_barrier(commands, ticket_data)!;
     return ticket;
 }
 
-fn void? record_ticket_host_barrier(gpu::CommandList* commands, gpu::ReadbackTicket* ticket) @private {
+fn void? record_ticket_host_barrier(gpu::CommandList* commands, ReadbackTicketState* ticket) @private {
     gpu::BufferBarrier host_read = {
         .buffer        = ticket.span.buffer,
         .offset        = ticket.span.offset,
@@ -1523,18 +1623,27 @@ fn void? record_ticket_host_barrier(gpu::CommandList* commands, gpu::ReadbackTic
 }
 
 fn bool vk_poll_readback(gpu::Device* device, gpu::ReadbackTicket* ticket) @private {
-    if ((ulong)ticket.value == 0) return false;
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    if (ticket == null || !ticket.is_valid()) return false;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    gpu::SemaphoreValue value;
+    state.transfer_mutex.lock()!!;
+    if (try data = resolve_readback_ticket(state, *ticket)) {
+        value = data.value;
+    } else {
+        state.transfer_mutex.unlock();
+        return false;
+    }
+    state.transfer_mutex.unlock();
     ulong current = 0;
     vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
-    return current >= (ulong)ticket.value;
+    return current >= (ulong)value;
 }
 
 fn void? vk_resolve_readback(gpu::Device* device, gpu::ReadbackTicket* ticket, char[] dest) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
-    if ((ulong)ticket.value == 0) {
+    if (ticket == null || !ticket.is_valid()) {
         return report_contract_failure(
             state:               state,
             operation:           "resolve_readback",
@@ -1544,12 +1653,33 @@ fn void? vk_resolve_readback(gpu::Device* device, gpu::ReadbackTicket* ticket, c
             index:               0,
             generation:          0,
             debug_name:          null,
-            rejected_field:      "ticket.value",
+            rejected_field:      "ticket",
             invariant:           "ticket must be live and unresolved",
             backend_text:        null,
         )~;
     }
-    if (dest.len < ticket.span.size) {
+
+    state.transfer_mutex.lock()!!;
+    defer state.transfer_mutex.unlock();
+    ReadbackTicketState* data;
+    if (try resolved = resolve_readback_ticket(state, *ticket)) {
+        data = resolved;
+    } else {
+        return report_contract_failure(
+            state:               state,
+            operation:           "resolve_readback",
+            public_fault:        gpu::INVALID_HANDLE,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "ticket",
+            invariant:           "ticket must name live readback state",
+            backend_text:        null,
+        )~;
+    }
+    if (dest.len < data.span.size) {
         return report_contract_failure(
             state:               state,
             operation:           "resolve_readback",
@@ -1566,7 +1696,7 @@ fn void? vk_resolve_readback(gpu::Device* device, gpu::ReadbackTicket* ticket, c
     }
     ulong current = 0;
     vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
-    if (current < (ulong)ticket.value) {
+    if (current < (ulong)data.value) {
         return report_contract_failure(
             state:               state,
             operation:           "resolve_readback",
@@ -1576,14 +1706,15 @@ fn void? vk_resolve_readback(gpu::Device* device, gpu::ReadbackTicket* ticket, c
             index:               0,
             generation:          0,
             debug_name:          null,
-            rejected_field:      "ticket.value",
+            rejected_field:      "ticket",
             invariant:           "ticket timeline value must be signaled before resolve",
             backend_text:        null,
         )~;
     }
 
-    vk_invalidate_buffer(device, ticket.span.buffer, ticket.span.offset, ticket.span.size)!;
-    mem::copy(dest.ptr, ticket.span.cpu, (sz)ticket.span.size);
-    release_ticket(state, ticket);
+    vk_invalidate_buffer(device, data.span.buffer, data.span.offset, data.span.size)!;
+    mem::copy(dest.ptr, data.span.cpu, (sz)data.span.size);
+    release_readback_state(state, data);
+    state.readback_tickets.free(*ticket)!;
     *ticket = {};
 }

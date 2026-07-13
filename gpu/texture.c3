@@ -217,26 +217,30 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
 <* Query library-creatable features for a format. Individual feature bits do
    not guarantee that a combination is supported. *>
 fn TextureFormatSupport? get_texture_format_support(Device* device, Format format) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.get_texture_format_support(device, format);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.get_texture_format_support(device, format);
 }
 
 <* Return whether an exact descriptor is creatable by the backend and adapter.
    This checks capabilities only; allocation can still fail for lack of memory. *>
 fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.supports_texture_desc(device, desc);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.supports_texture_desc(device, desc);
 }
 
 <* The handle owns the image; shader access goes through a TextureIndex.
    Ownership: release with destroy_texture. *>
 fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.create_texture(device, desc);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.create_texture(device, desc);
 }
 
 <* Counterpart of create_texture; descriptors created from the texture must be destroyed first. *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.destroy_texture(device, texture);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.destroy_texture(device, texture);
 }

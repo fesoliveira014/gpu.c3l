@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import vk;
 
@@ -366,7 +366,7 @@ fn void depth_state_variants_share_entry() @test {
     gpu::PipelineHandle test_off = make_depth_pipeline(&device, &ctx, untested);
     defer gpu::destroy_pipeline(&device, test_off)!!;
 
-    uint entries = vk::pipeline_cache_entry_count((vk::VkDeviceState*)device.backend_state);
+    uint entries = vk::pipeline_cache_entry_count((vk::VkDeviceState*)gpu::device_backend_state(device));
     assert(entries == 1, "depth-state variants share one cache entry");
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
