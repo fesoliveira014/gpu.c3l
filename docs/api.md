@@ -151,7 +151,8 @@ RecordingContextHandle
 (Samplers have no handle — they are `SamplerIndex` heap indices.)
 
 Invalid sentinels are module constants (`BUFFER_HANDLE_INVALID`, ...), all
-zero-valued; `handle.is_valid()` answers liveness.
+zero-valued. `handle.is_valid()` checks that the token is nonzero; operations
+validate current ownership and liveness.
 
 A valid handle packs slot index and generation. Public code should not inspect the packed representation.
 
@@ -259,7 +260,9 @@ end_frame(FrameToken* frame) -> void?
 copy may allocate while its device-owned generation remains active. Its embedded
 `Device` value does not borrow the variable passed to `begin_frame`. Successful
 end clears the passed token and invalidates every alias; a consumed, malformed,
-or stale token faults `INVALID_HANDLE`. Double begin faults
+or stale token faults `INVALID_HANDLE`. `frame.is_valid()` checks whether the
+token contains a generation so cleanup code can retry a failed end; operations
+still validate liveness. Double begin faults
 `INVALID_RESOURCE_STATE`. Rejections change no frame or arena state.
 
 When end submission faults, `end_frame` returns the exact fault and preserves

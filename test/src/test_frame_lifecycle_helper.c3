@@ -68,6 +68,21 @@ fn void frame_token_stays_within_two_machine_words() @test {
     assert(gpu::FrameToken::size <= 16, "FrameToken stays within two machine words");
 }
 
+fn void frame_token_validity_follows_lifecycle() @test {
+    FrameFixture fixture;
+    gpu::Device device = fixture_device(&fixture);
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::FrameToken frame;
+    assert(!frame.is_valid(), "zero frame token is invalid");
+
+    frame = gpu::begin_frame(&device)!!;
+    assert(frame.is_valid(), "begun frame token is valid");
+
+    gpu::end_frame(&frame)!!;
+    assert(!frame.is_valid(), "ended frame token is invalid");
+}
+
 fn void scoped_frame_rejects_null_output_token() @test {
     FrameFixture fixture;
     gpu::Device device = fixture_device(&fixture);
@@ -158,6 +173,7 @@ fn void scoped_frame_end_fault_wins_and_retains_retry_token() @test {
 
     assert(end_fault == FRAME_END_FAILED, "end fault takes precedence over the worker fault");
     assert(fixture.end_calls == 1, "helper attempts end exactly once");
+    assert(frame.is_valid(), "failed end retains a valid token");
     assert(frame.device == device && frame.generation != 0, "failed end retains the live token");
 
     fixture.fail_end = false;

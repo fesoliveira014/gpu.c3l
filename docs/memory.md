@@ -436,8 +436,10 @@ retry.
 A malformed, consumed, or stale token faults `INVALID_HANDLE`. `begin_frame`
 while active faults `INVALID_RESOURCE_STATE` before changing frame state. This
 is particularly important with one frame in flight, where the next slot is the
-active slot itself. Tokens are stack-only, at most 16 bytes, and add no heap
-allocation or new atomic operation to the allocation path.
+active slot itself. `frame.is_valid()` reports whether the token contains a
+generation; it does not validate a stale alias. Tokens are stack-only, at most
+16 bytes, and add no heap allocation or new atomic operation to the allocation
+path.
 Retirement waits and counter queries complete before frame state is committed.
 A timeout or backend query failure therefore leaves the frame index, arena
 cursor, retirement counters, pool accounting, and output token unchanged.
