@@ -173,6 +173,7 @@ fn void scoped_frame_end_fault_wins_and_retains_retry_token() @test {
 
     assert(end_fault == FRAME_END_FAILED, "end fault takes precedence over the worker fault");
     assert(fixture.end_calls == 1, "helper attempts end exactly once");
+    assert(frame.is_valid(), "failed end retains a valid token");
     assert(frame.device == device && frame.generation != 0, "failed end retains the live token");
 
     fixture.fail_end = false;

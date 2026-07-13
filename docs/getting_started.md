@@ -240,7 +240,7 @@ fn void? run() {
     };
     gpu::FrameToken frame;
     if (catch frame_err = gpu::@with_frame(&frame, &device, run_frame, &frame_work)) {
-        if ((ulong)frame.device != 0) gpu::end_frame(&frame)!;
+        if (frame.is_valid()) gpu::end_frame(&frame)!;
         return frame_err~;
     }
 
