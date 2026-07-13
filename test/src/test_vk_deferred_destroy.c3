@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu @public;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
 
 // Headless (lavapipe): destroys free the handle immediately but defer the

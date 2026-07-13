@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`gpu.c3l` — a C3 GPU programming library. Public module `gpu`; Vulkan 1.3 backend module `gpu::vk`. Targets **C3 0.8.0** (pre-1.0; syntax changes between releases — use the C3 skills below / bundled C3 docs, don't rely on memory).
+`gpu.c3l` — a C3 GPU programming library. Public module `gpu`; private Vulkan 1.3 backend module `gpu::vk`. Targets **C3 0.8.0** (pre-1.0; syntax changes between releases — use the C3 skills below / bundled C3 docs, don't rely on memory).
 
 ## C3 skills — use when planning, reviewing, or implementing
 

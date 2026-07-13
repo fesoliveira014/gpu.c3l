@@ -24,6 +24,7 @@
     "../../gpu/swapchain.c3",
     "../../gpu/debug.c3",
     "../../gpu/shader_abi.c3",
+    "../../gpu/vk/internal.c3",
     "vk_stub.c3"
   ],
   "output": "build",
@@ -31,6 +32,8 @@
     "unit": {
       "type": "test",
       "sources": [
+        "../src/test_internal_helpers.c3",
+        "../src/test_vk_internal_helpers.c3",
         "../src/test_handles.c3",
         "../src/test_ranges.c3",
         "../src/test_texture_transition.c3",

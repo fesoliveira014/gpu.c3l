@@ -5,8 +5,11 @@
 The Vulkan backend implements the `gpu` public API on Vulkan 1.3. It lives under:
 
 ```c3
-module gpu::vk;
+module gpu::vk @private;
 ```
+
+Backend declarations are private by default. Only the public dispatch layer and
+white-box tests import them with a visibility override.
 
 It imports:
 
@@ -483,7 +486,7 @@ Public command token:
 
 ```text
 CommandList
-    Device* device
+    Device device
     CommandListHandle handle
 ```
 
@@ -494,10 +497,11 @@ array of pending texture-layout transitions. The public token stays within two
 machine words; copying it creates an alias, not an independent recorder.
 
 Begin/end validate state transitions. Submit preflights a whole batch under the
-command-table mutex, rejects duplicate or foreign-owner tokens, and claims every
-record as `SUBMITTING` before constructing the Vulkan submission. A fault before
-`vkQueueSubmit2` succeeds restores claimed records to `EXECUTABLE`. Success commits layout
-transitions in submission order and frees the records, invalidating all aliases.
+command-table mutex, rejects duplicate tokens, mixed queue kinds, and stale
+owners, then claims every record as `SUBMITTING` before constructing the Vulkan
+submission. A fault before `vkQueueSubmit2` succeeds restores claimed records to
+`EXECUTABLE`. Success commits layout transitions in submission order and frees
+the records, invalidating all aliases.
 Frame-slot pool reset reclaims any unsubmitted records before resetting their
 Vulkan command pool. A recording context cannot be destroyed while one of its
 records remains live.
@@ -543,8 +547,8 @@ The presentation-facing access scope is empty because the presentation engine
 is external to the Vulkan pipeline. Its stage remains color-attachment output
 so the acquire transition chains after the image-available semaphore wait and
 the release transition chains before the render-finished semaphore signal;
-both semaphore operations use that stage. `Stage.NONE` remains available for
-raw empty barrier sides, not semaphore waits or signals.
+both semaphore operations use that stage. `Stage.NONE` is legal for semaphore
+operations but carries no pipeline work; use it only deliberately.
 
 ## 14. Timeline semaphores
 
@@ -565,6 +569,10 @@ SubmitDesc
     SemaphoreWait[] waits
     SemaphoreSignal[] signals
 ```
+
+User signal values must exceed the semaphore counter when they execute. The
+caller orders pending signals across queues and observes
+`DeviceCaps.max_timeline_semaphore_value_difference`.
 
 ## 15. Render pass implementation
 

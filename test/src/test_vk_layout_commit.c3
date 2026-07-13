@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
 
 // Headless (lavapipe): texture layouts commit onto tracked state at submit,
 // not at record time — a dropped list must leave no trace, submitted lists

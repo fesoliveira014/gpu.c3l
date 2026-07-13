@@ -427,9 +427,10 @@ IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDL
 
 `begin_frame` returns a `FrameToken`; `alloc_frame_span` and `end_frame` require
 that token rather than a bare device pointer. A copied token may allocate while
-its generation remains active. Successful end clears the passed copy and makes
-every alias stale. Failed end leaves the token, generation, frame slot,
-retirement values, queue-use flags, and prospective signal value unchanged for
+its generation remains active. The token embeds the owning `Device` value and
+does not borrow the caller's device variable. Successful end clears the passed
+copy and makes every alias stale. Failed end leaves the token, generation, frame
+slot, retirement values, queue-use flags, and prospective signal value unchanged for
 retry.
 
 A malformed, consumed, or stale token faults `INVALID_HANDLE`. `begin_frame`

@@ -112,9 +112,9 @@ struct RenderPassDesc {
 }
 
 // A small recording token. Mutable lifecycle and backend state are device-owned;
-// the owner pointer keeps cmd_* dispatch source-compatible.
+// the embedded device token keeps copies independent of caller storage.
 struct CommandList {
-    Device*           device;
+    Device            device;
     CommandListHandle handle;
 }
 $assert CommandList::size <= 16;
@@ -176,6 +176,12 @@ fn usz? indirect_argument_bytes(
     return argument_size * size_count;
 }
 
+fn BackendVTable*? command_vtable(CommandList* commands) @private {
+    if (commands == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = device_vtable(&commands.device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable;
+}
 <* Create a recording context: per-frame command pools confined to one
    thread at a time. Ownership: release with destroy_recording_context. *>
 fn RecordingContextHandle? create_recording_context(Device* device) {
@@ -205,66 +211,56 @@ fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContext
 
 <* Finish recording through the list's owner; it becomes submittable once. *>
 fn void? end_commands(CommandList* commands) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.end_commands(commands);
 }
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.cmd_copy_buffer(commands, desc);
 }
 
 <* Record a 32-bit-pattern fill over [offset, offset + size); offset and size must be 4-byte multiples, size 0 fills to the end. *>
 fn void? cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset, usz size, uint value) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_fill_buffer(commands, buffer, offset, size, value);
 }
 
 <* The texture's effective layout must be TRANSFER_DST; the caller records
    the surrounding barriers. *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.cmd_copy_buffer_to_texture(commands, desc);
 }
 
 <* The texture's effective layout must be TRANSFER_SRC. *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.cmd_copy_texture_to_buffer(commands, desc);
 }
 
 <* Record an execution/memory barrier over a buffer range. *>
 fn void? cmd_buffer_barrier(CommandList* commands, BufferBarrier* barrier) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (barrier == null) return INVALID_ARGUMENT~;
     return vtable.cmd_buffer_barrier(commands, barrier);
 }
 
 <* Record a device-wide execution/memory barrier with no resource transition. *>
 fn void? cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (barrier == null) return INVALID_ARGUMENT~;
     return vtable.cmd_global_barrier(commands, barrier);
 }
 
 <* Record a texture barrier; old_layout must match the texture's tracked layout. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (barrier == null) return INVALID_ARGUMENT~;
     return vtable.cmd_texture_barrier(commands, barrier);
 }
 
@@ -272,9 +268,7 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
    push constant at offset 0. Counts may be zero and may not exceed
    DeviceCaps.max_compute_work_group_count on any axis. *>
 fn void? cmd_dispatch(CommandList* commands, PipelineHandle pipeline, GpuAddress root, Vec3u groups) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_dispatch(commands, pipeline, root, groups);
 }
 
@@ -283,51 +277,42 @@ fn void? cmd_dispatch(CommandList* commands, PipelineHandle pipeline, GpuAddress
    DeviceCaps.max_color_attachments. Viewport and scissor cover the full
    pass dimensions. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.cmd_begin_render_pass(commands, desc);
 }
 
 <* Set one pass-bounded dynamic viewport for subsequent draws. Requires an
    active render pass; malformed values fault INVALID_ARGUMENT. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (viewport == null) return INVALID_ARGUMENT~;
     return vtable.cmd_set_viewport(commands, viewport);
 }
 
 <* Set one pass-bounded dynamic scissor for subsequent draws. Requires an
    active render pass; malformed values fault INVALID_ARGUMENT. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (scissor == null) return INVALID_ARGUMENT~;
     return vtable.cmd_set_scissor(commands, scissor);
 }
 
 <* Counterpart of cmd_begin_render_pass. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_end_render_pass(commands);
 }
 
 <* Draw inside a render pass, pushing the vertex and fragment root addresses. *>
 fn void? cmd_draw(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_draw(commands, pipeline, vertex_root, fragment_root, vertex_count, instance_count);
 }
 
 <* Draw indexed geometry; indices are read from the start of index_span. *>
 fn void? cmd_draw_indexed(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_draw_indexed(commands, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count, index_type);
 }
 
@@ -337,9 +322,7 @@ fn void? cmd_draw_indexed(CommandList* commands, PipelineHandle pipeline, GpuAdd
    argument writes is the caller's barrier. draw_count may not exceed
    DeviceCaps.max_draw_indirect_count. *>
 fn void? cmd_draw_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_draw_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count);
 }
 
@@ -348,9 +331,7 @@ fn void? cmd_draw_indirect(CommandList* commands, PipelineHandle pipeline, GpuAd
    out-of-bounds indices follow device robustness. draw_count may not exceed
    DeviceCaps.max_draw_indirect_count. *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_draw_indexed_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count, index_span, index_type);
 }
 
@@ -359,9 +340,7 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, PipelineHandle pipelin
    The args span must hold max_draw_count entries. Requires
    DeviceCaps.draw_indirect_count. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_draw_indexed_indirect_count(commands, pipeline, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type);
 }
 
@@ -369,8 +348,6 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, PipelineHandle p
    count must not exceed the corresponding
    DeviceCaps.max_compute_work_group_count component. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress root, GpuSpan args) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_dispatch_indirect(commands, pipeline, root, args);
 }

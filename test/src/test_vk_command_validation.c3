@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu @public;
-import gpu::vk;
+import gpu::vk @public;
 
 // Headless (lavapipe): recording/submit validation faults — mixed-queue
 // submits, usage/alignment, pipeline-kind and shader-stage mismatches.

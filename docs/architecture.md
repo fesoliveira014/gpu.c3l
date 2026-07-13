@@ -86,8 +86,12 @@ module gpu;
 Backend files under `gpu/vk/` declare:
 
 ```c3
-module gpu::vk;
+module gpu::vk @private;
 ```
+
+The public `gpu` module explicitly imports this implementation module with a
+visibility override. White-box tests do the same; consumers should not depend on
+backend declarations.
 
 Samples are standalone consumers and may declare their own sample modules.
 
@@ -132,8 +136,8 @@ All handles, indices, addresses, spans, command tokens, and synchronization
 values are scoped to this device and its runtime lifetime. Passing them to
 another device is unsupported. Table- and index-backed values without owner
 metadata may resolve a coincident resource rather than returning a fault.
-The owner-bearing `CommandList` token has a defensive cross-device rejection,
-but that isolated check does not make multi-device operation supported.
+Owner-bearing frame and command tokens embed the creating `Device` value and
+reject stale owners; this does not make multi-device operation supported.
 
 ### Queues
 
@@ -150,7 +154,7 @@ The backend maps those kinds to Vulkan queue families and queue handles.
 ### Command lists
 
 A command list is a transient, owner-bearing token for a device-owned command
-record. The public token contains only its `Device*` and generation-checked handle;
+record. The public token contains only a `Device` value and generation-checked handle;
 the Vulkan command buffer, bind cache, pending layouts, context, queue, frame slot,
 and lifecycle state remain backend-owned. Copies therefore alias one record.
 

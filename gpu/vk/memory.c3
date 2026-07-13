@@ -1,4 +1,4 @@
-module gpu::vk;
+module gpu::vk @private;
 
 import gpu @public;
 import vk;
@@ -315,13 +315,13 @@ fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* ou
     state.frame_generation = generation;
     state.active_frame_generation = generation;
     state.frame_active = true;
-    *out_frame = { .device = device, .generation = generation };
+    *out_frame = { .device = *device, .generation = generation };
 }
 
 <* Resolve a bump range without forming an unchecked alignment or extent sum.
    Pure. *>
 fn FrameArenaRange? frame_arena_range(usz cursor, usz capacity, usz size, usz align) @private {
-    if (!gpu::is_pow2(align) || size == 0) return gpu::INVALID_ARGUMENT~;
+    if (!is_pow2(align) || size == 0) return gpu::INVALID_ARGUMENT~;
     if (cursor > capacity) return gpu::ARENA_FULL~;
 
     usz mask = align - 1;
@@ -342,9 +342,9 @@ fn void? vk_begin_frame(gpu::Device* device, gpu::FrameToken* out_frame) @privat
 }
 
 fn VkDeviceState*? resolve_frame_token(gpu::FrameToken* frame, ZString operation) @private {
-    if (frame == null || frame.device == null || frame.generation == 0) return gpu::INVALID_HANDLE~;
-    if (gpu::device_backend_state_ptr(frame.device) == null) return gpu::INVALID_HANDLE~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(frame.device);
+    if (frame == null || frame.generation == 0) return gpu::INVALID_HANDLE~;
+    if (gpu::device_backend_state_ptr(&frame.device) == null) return gpu::INVALID_HANDLE~;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&frame.device);
     if (!state.frame_active || state.active_frame_generation != frame.generation) {
         return report_contract_failure(
             state:               state,
@@ -383,7 +383,7 @@ fn gpu::GpuSpan? vk_alloc_frame_span(gpu::FrameToken* frame, usz size, usz align
             backend_text:        null,
         )~;
     }
-    if (!gpu::is_pow2(align)) {
+    if (!is_pow2(align)) {
         return report_contract_failure(
             state:               state,
             operation:           "alloc_frame_span",
@@ -637,7 +637,7 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
     }
     // align 0 = no requirement (documented); anything else must be a power
     // of two (VMA virtual-alloc requirement).
-    if (desc.align != 0 && !gpu::is_pow2(desc.align)) {
+    if (desc.align != 0 && !is_pow2(desc.align)) {
         return report_contract_failure(
             state:               state,
             operation:           "alloc_persistent_span",

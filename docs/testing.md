@@ -13,11 +13,9 @@ SDL3 windowed samples (gpu.c3l-samples repository)
 Pure CPU tests must run without Vulkan, VMA static library loading beyond compile/link, SDL3, or a window system. Headless Vulkan tests require a Vulkan ICD but no window. SDL3 windowed tests/samples require SDL3 and platform WSI support.
 
 The supported test matrix covers one live `Device` per process. Tests that
-create multiple devices exercise isolated defensive behavior (such as
-cross-device command-token rejection), but they do not establish multi-device
-resource ownership as a supported contract. Token-specific coverage stays
-same-device: generation, aliases, consumption, retry, and scoped-worker fault
-semantics.
+replace a destroyed device exercise stale-owner rejection; they do not establish
+multi-device resource ownership as a supported contract. Token coverage includes
+generation, aliases, consumption, retry, and scoped-worker fault semantics.
 
 ## 2. Pure CPU tests
 

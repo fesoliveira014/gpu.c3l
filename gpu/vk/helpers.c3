@@ -1,7 +1,7 @@
-module gpu::vk;
+module gpu::vk @private;
 
 import std::io;
-import gpu;
+import gpu @public;
 import vk;
 
 // Vulkan 1.3 in the (variant<<29)|(major<<22)|(minor<<12)|patch layout. The

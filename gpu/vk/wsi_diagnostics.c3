@@ -1,6 +1,6 @@
-module gpu::vk;
+module gpu::vk @private;
 
-import gpu;
+import gpu @public;
 import vk;
 
 struct WsiDiagnosticContext {

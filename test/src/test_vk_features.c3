@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
 
 // Pure-CPU: feeds the feature gate synthetic structs, no ICD required.

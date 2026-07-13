@@ -22,11 +22,11 @@ fn void? fixture_begin(gpu::Device* device, gpu::FrameToken* out_frame) {
     fixture.begin_calls++;
     if (fixture.fail_begin) return FRAME_BEGIN_FAILED~;
     fixture.generation++;
-    *out_frame = { .device = device, .generation = fixture.generation };
+    *out_frame = { .device = *device, .generation = fixture.generation };
 }
 
 fn void? fixture_end(gpu::FrameToken* frame) {
-    FrameFixture* fixture = (FrameFixture*)gpu::device_backend_state_ptr(frame.device);
+    FrameFixture* fixture = (FrameFixture*)gpu::device_backend_state_ptr(&frame.device);
     fixture.end_calls++;
     if (fixture.fail_end) return FRAME_END_FAILED~;
 }
@@ -66,6 +66,21 @@ fn gpu::Device fixture_device(FrameFixture* fixture) {
 
 fn void frame_token_stays_within_two_machine_words() @test {
     assert(gpu::FrameToken::size <= 16, "FrameToken stays within two machine words");
+}
+
+fn void scoped_frame_rejects_null_output_token() @test {
+    FrameFixture fixture;
+    gpu::Device device = fixture_device(&fixture);
+    defer gpu::destroy_device(&device)!!;
+
+    fault result = @catch(gpu::@with_frame(
+        (gpu::FrameToken*)null,
+        &device,
+        fixture_work,
+        &fixture,
+    ));
+    assert(result == gpu::INVALID_HANDLE, "null frame output faults INVALID_HANDLE");
+    assert(fixture.begin_calls == 0, "null frame output does not begin a frame");
 }
 
 fn void invalid_device_token_is_rejected() @test {
@@ -117,7 +132,7 @@ fn void scoped_frame_ends_once_after_success() @test {
     assert(fixture.begin_calls == 1, "helper begins once");
     assert(fixture.work_calls == 1, "helper invokes the worker once");
     assert(fixture.end_calls == 1, "helper ends once");
-    assert(frame.device == null && frame.generation == 0, "successful end consumes the token");
+    assert((ulong)frame.device == 0 && frame.generation == 0, "successful end consumes the token");
 }
 
 fn void scoped_frame_preserves_natural_worker_fault() @test {
@@ -130,7 +145,7 @@ fn void scoped_frame_preserves_natural_worker_fault() @test {
 
     assert(worker_fault == FRAME_WORK_FAILED, "worker rethrow reaches the helper caller");
     assert(fixture.work_calls == 1 && fixture.end_calls == 1, "worker fault still ends exactly once");
-    assert(frame.device == null && frame.generation == 0, "successful cleanup consumes the token");
+    assert((ulong)frame.device == 0 && frame.generation == 0, "successful cleanup consumes the token");
 }
 
 fn void scoped_frame_end_fault_wins_and_retains_retry_token() @test {
@@ -143,24 +158,24 @@ fn void scoped_frame_end_fault_wins_and_retains_retry_token() @test {
 
     assert(end_fault == FRAME_END_FAILED, "end fault takes precedence over the worker fault");
     assert(fixture.end_calls == 1, "helper attempts end exactly once");
-    assert(frame.device == &device && frame.generation != 0, "failed end retains the live token");
+    assert(frame.device == device && frame.generation != 0, "failed end retains the live token");
 
     fixture.fail_end = false;
     gpu::end_frame(&frame)!!;
     assert(fixture.end_calls == 2, "caller can retry with the retained token");
-    assert(frame.device == null && frame.generation == 0, "successful retry consumes the token");
+    assert((ulong)frame.device == 0 && frame.generation == 0, "successful retry consumes the token");
 }
 
 fn void scoped_frame_begin_fault_short_circuits() @test {
     FrameFixture fixture = { .fail_begin = true };
     gpu::Device device = fixture_device(&fixture);
     defer gpu::destroy_device(&device)!!;
-    gpu::FrameToken frame = { .device = &device, .generation = 99 };
+    gpu::FrameToken frame = { .device = device, .generation = 99 };
 
     fault begin_fault = @catch(gpu::@with_frame(&frame, &device, fixture_work, &fixture));
 
     assert(begin_fault == FRAME_BEGIN_FAILED, "begin fault reaches the helper caller");
     assert(fixture.begin_calls == 1, "helper attempts begin once");
     assert(fixture.work_calls == 0 && fixture.end_calls == 0, "failed begin skips worker and end");
-    assert(frame.device == null && frame.generation == 0, "failed begin leaves no apparent live token");
+    assert((ulong)frame.device == 0 && frame.generation == 0, "failed begin leaves no apparent live token");
 }

@@ -1,7 +1,9 @@
 module gpu_test;
 
 import gpu @public;
-import gpu::vk;
+import gpu::vk @public;
+
+const uint TEST_HANDLE_GENERATION_MAX = 0xFF_FFFF;
 
 // Headless (lavapipe): record a buffer copy from a host-written upload buffer to
 // a readback buffer, submit signaling a timeline semaphore, wait, and verify the
@@ -94,6 +96,22 @@ fn void empty_command_list_submits() @test {
     gpu::end_frame(&frame)!!;
 }
 
+fn void command_list_owns_its_device_token_value() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::Device temporary = device;
+    gpu::CommandList commands = gpu::begin_commands(&temporary, gpu::QueueKind.GRAPHICS)!!;
+    temporary = {};
+    gpu::end_commands(&commands)!!;
+
+    gpu::CommandList[1] lists = { commands };
+    gpu::SubmitDesc submit_desc = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit_desc)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}
+
 fn void copied_alias_cannot_resubmit_after_success() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device device = gpu::create_device(&desc)!!;
@@ -132,8 +150,8 @@ fn void command_generation_wraps_without_poisoning_slot() @test {
     gpu::CommandList nearly_wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_commands(&nearly_wrapped)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    state.commands.slots[nearly_wrapped.handle.index].generation = vk::COMMAND_GENERATION_MAX - 1;
-    nearly_wrapped.handle.generation = vk::COMMAND_GENERATION_MAX - 1;
+    state.commands.slots[nearly_wrapped.handle.index].generation = TEST_HANDLE_GENERATION_MAX - 1;
+    nearly_wrapped.handle.generation = TEST_HANDLE_GENERATION_MAX - 1;
 
     gpu::CommandList[1] first_lists = { nearly_wrapped };
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };

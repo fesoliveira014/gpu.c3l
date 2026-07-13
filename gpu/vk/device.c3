@@ -1,4 +1,4 @@
-module gpu::vk;
+module gpu::vk @private;
 
 import gpu @public;
 import vk;
@@ -278,8 +278,8 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.compute_queue_mutex.init()!;
     state.transfer_queue_mutex.init()!;
 
-    state.texture_descriptor_capacity = gpu::resolve_descriptor_capacity(desc.texture_descriptor_capacity, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!;
-    state.sampler_descriptor_capacity = gpu::resolve_descriptor_capacity(desc.sampler_descriptor_capacity, gpu::DEFAULT_SAMPLER_DESCRIPTORS)!;
+    state.texture_descriptor_capacity = resolve_descriptor_capacity(desc.texture_descriptor_capacity, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!;
+    state.sampler_descriptor_capacity = resolve_descriptor_capacity(desc.sampler_descriptor_capacity, gpu::DEFAULT_SAMPLER_DESCRIPTORS)!;
 
     state.validation = desc.enable_validation;
     state.presentation_enabled = desc.enable_presentation;
@@ -339,9 +339,9 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.helper_context = create_builtin_recording_context(state)!;
     state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     state.shaders.slots    = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
-    uint pipeline_capacity = gpu::resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
+    uint pipeline_capacity = resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
     state.pipelines.slots  = mem::new_array(PipelineCell, pipeline_capacity);
-    state.textures.slots   = mem::new_array(TextureCell, gpu::resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
+    state.textures.slots   = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
     state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     state.deferred.entries = alloc::new_array(state.host_allocator, DeferredEntry, DEFERRED_QUEUE_INITIAL_CAP);
     create_transfer_arenas(state, desc)!;
@@ -730,8 +730,12 @@ fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString na
 <* Descriptor flags report adapter support per heap path; max counts report
    the configured capacities. *>
 fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13, vk::PhysicalDevice physical_device, CapsInputs* inputs) @private {
-    vk::PhysicalDeviceProperties props;
-    vk::get_physical_device_properties(physical_device, &props);
+    vk::PhysicalDeviceTimelineSemaphoreProperties timeline_props =
+        vk::physical_device_timeline_semaphore_properties();
+    vk::PhysicalDeviceProperties2 props2 =
+        vk::physical_device_properties2().set_next(&timeline_props);
+    vk::get_physical_device_properties2(physical_device, &props2);
+    vk::PhysicalDeviceProperties props = props2.properties;
     return (gpu::DeviceCaps){
         .buffer_device_address      = v12.buffer_device_address != 0,
         .synchronization2           = v13.synchronization2 != 0,
@@ -754,6 +758,8 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
             .z = props.limits.max_compute_work_group_count[2],
         },
         .max_draw_indirect_count    = props.limits.max_draw_indirect_count,
+        .max_timeline_semaphore_value_difference =
+            timeline_props.max_timeline_semaphore_value_difference,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,

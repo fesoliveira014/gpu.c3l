@@ -201,6 +201,20 @@ struct FrameLifecycleSnapshot {
     bool  transfer_pool_dirty;
 }
 
+fn void frame_token_owns_its_device_token_value() @test {
+    gpu::Device device = make_frame_lifecycle_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::Device temporary = device;
+    gpu::FrameToken frame = gpu::begin_frame(&temporary)!!;
+    temporary = {};
+
+    gpu::GpuSpan span = gpu::alloc_frame_span(&frame, 16, 16)!!;
+    assert(span.size == 16, "frame token remains usable after source device storage changes");
+
+    gpu::end_frame(&frame)!!;
+}
+
 fn gpu::Device make_frame_lifecycle_device(uint frames_in_flight = 1) {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -284,7 +298,7 @@ fn void frame_span_allocation_requires_active_frame() @test {
     gpu::GpuSpan span = gpu::alloc_frame_span(&copy, 64, 16)!!;
     assert(span.offset == 0, "active-frame allocation still succeeds");
     gpu::end_frame(&frame)!!;
-    gpu::FrameToken malformed = { .device = &device, .generation = frame.generation + 1 };
+    gpu::FrameToken malformed = { .device = device, .generation = frame.generation + 1 };
     FrameLifecycleSnapshot before_malformed = frame_lifecycle_snapshot(state);
     fault malformed_alloc = @catch(gpu::alloc_frame_span(&malformed, 64, 16));
     fault malformed_end = @catch(gpu::end_frame(&malformed));
@@ -322,7 +336,7 @@ fn void frame_generation_wraps_without_revalidating_stale_token() @test {
     assert(frame.generation == 1, "frame generation wraps to the first valid value");
     assert(state.active_frame_generation == 1, "wrapped generation becomes active");
 
-    gpu::FrameToken stale = { .device = &device, .generation = ulong::max };
+    gpu::FrameToken stale = { .device = device, .generation = ulong::max };
     FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
     fault alloc_fault = @catch(gpu::alloc_frame_span(&stale, 64, 16));
     fault end_fault = @catch(gpu::end_frame(&stale));
@@ -588,7 +602,7 @@ fn void frame_contract_rejections_report_exact_context() @test {
         backend:   false,
         field:     "Device.frame_state",
     );
-    assert(frame.device == &device && state.frame_active, "blocked end preserves the live frame");
+    assert(frame.device == device && state.frame_active, "blocked end preserves the live frame");
     state.inflight_calls.sub(1, AtomicOrdering.RELAXED);
     gpu::end_frame(&frame)!!;
 
@@ -669,7 +683,7 @@ fn void failed_frame_retirement_query_preserves_begin_state() @test {
     assert(capture.last.category.backend, "begin retirement query is a backend diagnostic");
     assert(((ZString)&capture.operation[0]).str_view() == "begin_frame",
         "begin retirement query names begin_frame");
-    assert(frame.device == null && frame.generation == 0,
+    assert((ulong)frame.device == 0 && frame.generation == 0,
         "failed retirement query issues no token");
     assert_frame_lifecycle_unchanged(before_state, frame_lifecycle_snapshot(state));
 }

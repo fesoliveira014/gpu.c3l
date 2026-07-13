@@ -6,6 +6,8 @@ import vk;
 import std::core::mem;
 import std::io;
 
+const uint TEST_HANDLE_GENERATION_MAX = 0xFF_FFFF;
+
 // Headless (lavapipe): upload/readback helpers over the staging and readback
 // arenas. The compute shader from the heap tests consumes helper-uploaded data.
 
@@ -754,7 +756,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
 
 fn void readback_ticket_generation_wraps_without_poisoning_slot() @test {
     vk::ReadbackTicketCell[1] cells;
-    cells[0].generation = gpu::READBACK_TICKET_GENERATION_MAX;
+    cells[0].generation = TEST_HANDLE_GENERATION_MAX;
     vk::ReadbackTicketTable table = {
         .slots     = cells[..],
         .free_head = 1,

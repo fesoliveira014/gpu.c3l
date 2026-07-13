@@ -1,6 +1,6 @@
 module gpu;
 
-import gpu::vk;
+import gpu::vk @public;
 
 <* Opaque generation token for the process-wide device slot. *>
 typedef Device = ulong;
@@ -244,6 +244,7 @@ fn DeviceCaps? get_device_caps(Device* device) {
 <* Create a device for the requested backend.
    Ownership: the caller must release the returned device with destroy_device. *>
 fn Device? create_device(DeviceDesc* desc) {
+    if (desc == null) return INVALID_ARGUMENT~;
     if (!device_slot_available()) return INVALID_RESOURCE_STATE~;
     switch (desc.backend) {
         case BackendKind.VULKAN:
