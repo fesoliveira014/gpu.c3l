@@ -19,10 +19,17 @@
   ],
   "output": "build",
   "targets": {
-    // Link-proof: builds the gpu -> vma -> vk graph + native libs.
     "smoke": {
       "type": "executable",
       "sources": [ "src/smoke.c3" ]
+    },
+    "benchmark_info": {
+      "type": "executable",
+      "sources": [ "src/benchmark_info.c3" ]
+    },
+    "arena_allocation_bench": {
+      "type": "executable",
+      "sources": [ "src/arena_allocation_bench.c3" ]
     },
     // Advisory pipeline-cache lookup timing; executable so it never gates CI.
     // Needs an ICD — pin lavapipe via VK_DRIVER_FILES when running this target.
@@ -41,6 +48,10 @@
     "context_reset_bench": {
       "type": "executable",
       "sources": [ "src/context_reset_bench.c3" ]
+    },
+    "command_record_bench": {
+      "type": "executable",
+      "sources": [ "src/command_record_bench.c3" ]
     },
     // Advisory two-phase creation timing across worker counts 1/2/4;
     // executable so it never gates CI. Needs an ICD — pin lavapipe via

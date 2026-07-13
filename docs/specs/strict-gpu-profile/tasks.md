@@ -69,7 +69,7 @@ Delivery slices:
   - Edge cases: resize, minimization, surface loss, unavailable optional features, and clean teardown.
   - Verify: the sample index matches project targets and each runnable target has a deterministic smoke command.
 
-- [ ] **1.7 Record performance baselines and close the stabilization gate.**
+- [x] **1.7 Record performance baselines and close the stabilization gate.**
   - Targets: existing `test/src/*bench.c3`, a small benchmark runner under `scripts/`, `docs/performance.md`.
   - Record allocation, resource creation, descriptor churn, upload, command reset/recording, submission, pipeline creation, and async overlap using a fixed methodology. Add barrier and indirect-recording measurements where absent.
   - Verify: results identify adapter, driver, validation state, queue topology, iteration count, and units; the architecture review has no unresolved correctness blocker.

@@ -143,11 +143,17 @@ fn int main() {
     defer gpu::destroy_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    bool distinct = state.graphics_family != state.compute_family;
+    bool families_distinct = state.graphics_family != state.compute_family;
+    uint compute_index = state.compute_queue_distinct
+        && state.compute_family == state.graphics_family ? 1 : 0;
     io::printfn(
-        "topology: async_compute=%s graphics_family=%d compute_family=%d distinct=%s",
-        gpu::get_device_caps(&device)!!.async_compute ? "true" : "false", state.graphics_family, state.compute_family,
-        distinct ? "true" : "false",
+        "topology: async_compute=%s graphics=%d:0 compute=%d:%d queues_distinct=%s families_distinct=%s",
+        gpu::get_device_caps(&device)!!.async_compute ? "true" : "false",
+        state.graphics_family,
+        state.compute_family,
+        compute_index,
+        state.compute_queue_distinct ? "true" : "false",
+        families_distinct ? "true" : "false",
     );
     if (!gpu::get_device_caps(&device)!!.async_compute) {
         io::printfn("single queue: compute aliases graphics on this adapter -- phase A and phase B submit to the same queue, so wall_a ~= wall_b is expected");
