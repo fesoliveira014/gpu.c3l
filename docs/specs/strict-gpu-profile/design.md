@@ -22,7 +22,9 @@ The current architecture is stabilized first. Its behavior then moves into `gpu:
 | 10 | Consumer migration | Strict samples, documentation, tooling, and benchmarks are canonical. |
 | 11 | Transitional removal | Strict aliases and obsolete ABI forms are gone. |
 
-Each gate is blocking. Compatibility extraction does not begin while current contracts are still changing. Strict implementation does not begin while compatibility types or initialization remain ambiguous.
+Implementation gates are blocking. Compatibility extraction does not begin while current contracts are still changing, and strict implementation does not begin while compatibility types or initialization remain ambiguous. Vulkan 1.2 compatibility is deferrable and does not block the strict sequence.
+
+Positive hardware conformance is a release gate, not a prerequisite for later implementation. CI software drivers must cover compilation, deterministic feature rejection, injected capability tests, and every supported positive path they expose. Hardware runs record the adapter, driver, API version, and extensions used for positive strict paths. A path that no available runner exposes remains pending hardware evidence and cannot be advertised as release-ready, but it does not stall unrelated implementation.
 
 ## Target module layout
 
@@ -62,7 +64,7 @@ The current public and Vulkan files move into `gpu::compat` and `gpu::compat::vk
 
 All current tests and samples first move to the compatibility module. This provides a direct proof that the relocation preserved behavior. Strict tests and samples are then added independently.
 
-The compatibility backend preserves the working Vulkan 1.3 path before adding Vulkan 1.2 support. Vulkan 1.2 support is expressed as core-or-extension feature loading inside `gpu::compat::vk`; it is not a mode bit on strict device creation.
+The compatibility backend preserves the working Vulkan 1.3 path before adding Vulkan 1.2 support. Vulkan 1.2 support is a parallel follow-up expressed as core-or-extension feature loading inside `gpu::compat::vk`; it is not a mode bit on strict device creation.
 
 ## Strict runtime model
 
@@ -140,7 +142,7 @@ The vendored Vulkan binding does not yet expose every required strict extension.
 - Raw descriptor indices require separate CPU lifetime tokens and delayed reuse.
 - Exposed GPU addresses make transparent defragmentation unsafe.
 - Strict image synchronization depends on unified-layout support; compatibility keeps layout transitions.
-- Some strict extensions may be unavailable on CI software drivers. Feature-probe tests and real-hardware runs are both required.
+- Lavapipe is the baseline and negative-path environment. Positive paths for strict extensions run only on CI or recorded hardware that enumerates them; final release evidence names each adapter and driver.
 - Existing portability fallbacks belong to compatibility even when they are convenient for strict callers.
 - Milestone identifiers remain in planning documents only, never in source names, tests, or comments.
 
@@ -151,6 +153,7 @@ The vendored Vulkan binding does not yet expose every required strict extension.
 - Compile-fail fixtures prove profile types cannot cross.
 - Headless Vulkan tests cover device, memory, descriptors, barriers, pipelines, indirect work, readback, and cleanup.
 - Windowed samples cover acquire, render, present, resize, surface loss, and teardown.
+- Release evidence distinguishes CI-positive, hardware-positive, and pending-hardware strict paths; pending paths are not advertised as supported.
 - Generated API documentation is scanned for backend leakage.
 - Shader ABI tests pin all CPU/GPU shared layouts.
 - Benchmarks compare the stabilized baseline with each strict replacement.

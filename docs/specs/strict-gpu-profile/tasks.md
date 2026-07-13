@@ -6,15 +6,15 @@ Source documents:
 - [Design](design.md)
 - [Architecture overview](../../strict_gpu_profile.md)
 
-Tasks stay unchecked until their verification step passes. Milestone gates are blocking: do not begin compatibility extraction before Milestone 1, or strict implementation before Milestone 2.
+Tasks stay unchecked until their verification step passes. Milestone gates are blocking except task 2.5: do not begin compatibility extraction before Milestone 1, or strict implementation before tasks 2.1–2.4 and 2.6.
 
 ## Milestones
 
 | Milestone | Outcome | Depends on |
 |---|---|---|
 | 1. Current architecture | Stable, documented, tested, and benchmarked current API. | — |
-| 2. Compatibility profile | Current behavior isolated under `gpu::compat`. | 1 |
-| 3. Strict boundary | Strict types, capabilities, and device lifetime. | 2 |
+| 2. Compatibility profile | Current Vulkan 1.3 behavior isolated under `gpu::compat`. | 1 |
+| 3. Strict boundary | Strict types, capabilities, and device lifetime. | 2.1–2.4, 2.6 |
 | 4. Memory placement | Independent allocations and placed resources. | 3 |
 | 5. Descriptor heaps | Raw contiguous shader indices with separate ownership. | 4 |
 | 6. Synchronization | Resource-agnostic stage and hazard barriers. | 4, 5 |
@@ -23,6 +23,8 @@ Tasks stay unchecked until their verification step passes. Milestone gates are b
 | 9. Raster and presentation | Strict graphics and window presentation. | 4–8 |
 | 10. Consumer migration | Strict samples, docs, tooling, and performance evidence. | 9 |
 | 11. Final strict surface | Transitional APIs removed; release gates pass. | 10 |
+
+Vulkan 1.2 compatibility (task 2.5) is a secondary, parallel follow-up. It does not block strict work after the compatibility boundary and Vulkan 1.3 contract are complete.
 
 ## Milestone 1 — Current architecture
 
@@ -95,11 +97,12 @@ Delivery slices:
   - Convert current imports and qualified names mechanically. Do not redesign the samples during this move.
   - Verify: Milestone 1 test, sample, and benchmark results remain behaviorally equivalent through `gpu::compat`.
 
-- [ ] **2.5 Add Vulkan 1.2 plus required extensions to compatibility.**
+- [ ] **2.5 Add Vulkan 1.2 plus required extensions to compatibility (deferrable).**
   - Targets: `gpu/compat/vk/instance.c3`, `device.c3`, command loading, capability building, `lib/vk.c3l/commands.c3`, compatibility bootstrap tests, `docs/platforms_and_dependencies.md`.
   - Accept Vulkan 1.2 only when every required 1.3 semantic is available through core or extension entry points. Load dynamic rendering, synchronization2, maintenance4, timeline semaphore, and buffer-device-address variants explicitly.
   - Edge cases: mixed core/extension support, missing suffixed commands, headless operation, presentation extension selection, and deterministic missing-feature faults.
   - Verify: Vulkan 1.3 and 1.2+extensions devices pass the same compatibility smoke contract; missing semantics fail at creation.
+  - Gate: this task does not block Milestone 3 or later strict milestones.
 
 - [ ] **2.6 Document and freeze the compatibility contract.**
   - Targets: `docs/compatibility.md`, `docs/api.md`, `docs/limitations.md`, `docs/getting_started.md`, generated compatibility reference.

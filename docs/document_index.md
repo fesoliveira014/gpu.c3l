@@ -24,7 +24,9 @@ Start with:
 
 ## Planning
 
-- [Strict GPU profile tasks](specs/strict-gpu-profile/tasks.md) for dependency-ordered implementation milestones and verification gates.
+- [Strict GPU profile requirements](specs/strict-gpu-profile/requirements.md) for scope and acceptance criteria.
+- [Strict GPU profile design](specs/strict-gpu-profile/design.md) for module boundaries and delivery order.
+- [Strict GPU profile tasks](specs/strict-gpu-profile/tasks.md) for implementation milestones and verification gates.
 
 ## Maintenance
 
