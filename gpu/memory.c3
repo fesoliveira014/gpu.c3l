@@ -45,6 +45,9 @@ struct FrameToken {
 }
 $assert FrameToken::size <= 16;
 
+<* True while the token contains a frame generation. *>
+fn bool FrameToken.is_valid(self) => (ulong)self.device != 0 && self.generation != 0;
+
 const usz MAX_MEMORY_HEAPS = 16;
 const usz DEFAULT_FRAME_ARENA_SIZE = 16 << 20;
 const usz DEFAULT_PERSISTENT_ARENA_SIZE = 64 << 20;

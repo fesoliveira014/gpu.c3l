@@ -357,8 +357,8 @@ end_frame(token)                 // consumes only after success
     record frame timeline value
 ```
 
-The public `FrameToken` is an owner pointer plus a nonzero device-owned
-generation, no larger than 16 bytes. Copies alias one active generation.
+The public `FrameToken` embeds its owning `Device` value plus a nonzero
+device-owned generation. Copies alias one active generation.
 Successful end clears the passed copy and invalidates every alias through
 device-owned state. Failed end preserves the token and all prospective
 retirement state so the caller can retry. Invalid lifecycle transitions fault
