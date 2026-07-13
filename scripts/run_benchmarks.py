@@ -39,8 +39,11 @@ C3_BUILD_FLAGS = ("-O1",)
 
 
 CONTEXT_FIELDS = ("adapter:", "driver:", "validation:", "queues:")
-MEASUREMENT_UNIT = re.compile(
-    r"\b(?:ns/(?:allocation|free|op|descriptor|begin_frame|record|end_frame|create)|uploads/s|submits/frame|ms)\b"
+# A unit token alone is not enough: the startup header already declares
+# units=..., so the gate demands a number carrying the unit.
+MEASURED_VALUE = re.compile(
+    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|begin_frame|record|end_frame|create)|ms)\b"
+    r"|uploads_per_sec=\d"
 )
 
 
@@ -53,8 +56,8 @@ def require_context_fields(output):
 def require_measurement(output, target):
     if not re.search(r"\biterations?=\S+", output):
         raise ValueError(f"{target} is missing an iteration count")
-    if not MEASUREMENT_UNIT.search(output):
-        raise ValueError(f"{target} is missing a measurement unit")
+    if not MEASURED_VALUE.search(output):
+        raise ValueError(f"{target} is missing a measured value")
 
 
 def run(command, cwd, env=None):

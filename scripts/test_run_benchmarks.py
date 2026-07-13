@@ -54,11 +54,25 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_measurements_require_iteration_count_and_units(self):
         runner = load_runner()
         runner.require_measurement("phase: iterations=100 12.5 ns/op", "target")
+        runner.require_measurement(
+            "iterations=40/worker units=uploads/s\nphase=A workers=1 uploads_per_sec=36680",
+            "target",
+        )
 
         with self.assertRaisesRegex(ValueError, "iteration count"):
             runner.require_measurement("phase: 12.5 ns/op", "target")
-        with self.assertRaisesRegex(ValueError, "unit"):
+        with self.assertRaisesRegex(ValueError, "measured value"):
             runner.require_measurement("phase: iterations=100 value=12.5", "target")
+
+    def test_startup_header_alone_is_not_a_measurement(self):
+        runner = load_runner()
+        with self.assertRaisesRegex(ValueError, "measured value"):
+            runner.require_measurement("iterations=300/worker units=ns/op", "target")
+        with self.assertRaisesRegex(ValueError, "measured value"):
+            runner.require_measurement(
+                "iterations=2000/phase units=ns/begin_frame\nbenchmark crashed",
+                "target",
+            )
 
     def test_main_validates_raw_output_before_annotation(self):
         source = SCRIPT.read_text(encoding="utf-8")
