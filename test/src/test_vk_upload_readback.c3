@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import vk;
 import std::core::mem;
@@ -195,7 +195,7 @@ fn void run_blocking_to_recorded_reuse(StagingReuseFixture* fixture, gpu::QueueK
     char[STAGING_REUSE_BYTES] second_payload;
     fill_staging_payload(first_payload[..], first_seed);
     fill_staging_payload(second_payload[..], second_seed);
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)fixture.device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(fixture.device);
     ulong fallbacks = gpu::vk::dedicated_fallback_count(state);
     blocking_staging_upload(fixture, first_payload[..]);
     recorded_staging_upload(
@@ -210,7 +210,7 @@ fn void run_blocking_to_recorded_reuse(StagingReuseFixture* fixture, gpu::QueueK
 fn void staging_range_reuse_blocking_graphics_to_recorded_compute() @test {
     StagingReuseFixture fixture = make_staging_reuse_fixture();
     defer destroy_staging_reuse_fixture(&fixture);
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)fixture.device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(fixture.device);
     if (state.graphics_family == state.compute_family) {
         io::eprintfn(
             "staging_range_reuse_blocking_graphics_to_recorded_compute: N/A graphics=%d compute=%d transfer=%d",
@@ -237,7 +237,7 @@ fn void staging_range_reuse_blocking_graphics_to_recorded_compute() @test {
 fn void staging_range_reuse_blocking_graphics_to_recorded_transfer() @test {
     StagingReuseFixture fixture = make_staging_reuse_fixture();
     defer destroy_staging_reuse_fixture(&fixture);
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)fixture.device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(fixture.device);
     if (state.graphics_family == state.transfer_family) {
         io::eprintfn(
             "staging_range_reuse_blocking_graphics_to_recorded_transfer: N/A graphics=%d compute=%d transfer=%d",
@@ -264,7 +264,7 @@ fn void staging_range_reuse_blocking_graphics_to_recorded_transfer() @test {
 fn void staging_range_reuse_recorded_compute_to_recorded_transfer() @test {
     StagingReuseFixture fixture = make_staging_reuse_fixture();
     defer destroy_staging_reuse_fixture(&fixture);
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)fixture.device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(fixture.device);
     if (state.compute_family == state.transfer_family) {
         io::eprintfn(
             "staging_range_reuse_recorded_compute_to_recorded_transfer: N/A graphics=%d compute=%d transfer=%d",
@@ -478,7 +478,7 @@ fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test
     TransferDiagnosticCapture capture;
     gpu::Device device = make_transfer_test_device(capture: &capture);
     defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     uint before = capture.calls;
     fault cleanup_fault = @catch(gpu::vk::check_helper_backend_result(
@@ -519,7 +519,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         capture:       &capture,
     );
     defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferDesc buffer_desc = {
         .size        = 128,
@@ -859,7 +859,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         before:              before,
         returned:            not_ready,
         operation:           "resolve_readback",
-        rejected_field:      "ticket.value",
+        rejected_field:      "ticket",
         invariant:           "ticket timeline value must be signaled before resolve",
         resource_kind:       gpu::DebugResourceKind.NONE,
         has_public_identity: false,
@@ -878,7 +878,7 @@ fn void oversized_upload_uses_dedicated_staging() @test {
         capture:       &capture,
     );
     defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
     ulong fallbacks = gpu::vk::dedicated_fallback_count(state);
     uint diagnostic_count = capture.calls;
 
@@ -1167,7 +1167,7 @@ fn void upload_helper_validation_faults() @test {
     TransferDiagnosticCapture capture;
     gpu::Device device = make_transfer_test_device(capture: &capture);
     defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,

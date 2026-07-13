@@ -15,6 +15,11 @@ fn void handle_kinds_distinct_raw() @test {
     BufferHandle h = { .index = 0, .generation = 1 };
     assert((ulong)h != 0, "live handle is never all-zero");
 }
+fn void public_state_tokens_are_compact() @test {
+    assert(Device::size == ulong::size, "Device is one opaque 64-bit token");
+    assert(ReadbackTicket::size == ulong::size, "ReadbackTicket is one generation-checked token");
+}
+
 
 fn void index_pack_unpack() @test {
     TextureIndex t = { .slot = 42, .generation = 7 };

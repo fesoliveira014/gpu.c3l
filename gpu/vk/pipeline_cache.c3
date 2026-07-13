@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import vma;
 import std::thread;
@@ -413,7 +413,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
 }
 
 fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     sz size = 0;
     check_backend_result(
         state:     state,
@@ -424,7 +424,7 @@ fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
 }
 
 fn usz? vk_get_pipeline_cache_data(gpu::Device* device, char[] out) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     sz required = 0;
     check_backend_result(
         state:     state,

@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 
 // Headless (lavapipe): minimal texture lifecycle and whole-image barriers.
@@ -544,7 +544,7 @@ fn void invalid_texture_descriptor_diagnostic_preserves_fault() @test {
     assert(capture.rejected_field_matches, "invalid descriptor is reported without re-deriving its field");
     assert(capture.invariant_matches, "generic texture creation invariant is identified");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.debug_callback = null;
     fault without_callback = @catch(gpu::create_texture(&device, &invalid));
     assert(without_callback == with_callback, "callback presence does not alter the descriptor fault");
@@ -584,7 +584,7 @@ fn void unsupported_texture_capability_diagnostic_preserves_fault() @test {
     assert(capture.rejected_field_matches, "capability rejection avoids guessing a limiting field");
     assert(capture.invariant_matches, "generic capability invariant is accurate");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.debug_callback = null;
     fault without_callback = @catch(gpu::create_texture(&device, &unsupported));
     assert(without_callback == with_callback, "callback presence does not alter the capability fault");
@@ -640,7 +640,7 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
     assert(capture.rejected_field_matches, "old_layout field is identified");
     assert(capture.invariant_matches, "tracked-layout invariant is identified");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.debug_callback = null;
     fault without_callback = @catch(gpu::cmd_texture_barrier(&commands, &barrier));
     assert(without_callback == with_callback, "callback presence does not alter the layout fault");

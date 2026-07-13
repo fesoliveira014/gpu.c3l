@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import vk;
 import std::core::mem;
@@ -400,7 +400,7 @@ fn void debug_names_do_not_require_validation() @test {
     };
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     assert(state.debug_names, "backend retains the debug-name opt-in without validation");
 
@@ -426,7 +426,7 @@ fn gpu::Device make_dbg_device() {
 
 fn void leak_reporters_count_leaks() @test {
     gpu::Device device = make_dbg_device();
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferDesc buf_desc = {
         .size        = 256,
@@ -531,7 +531,7 @@ fn void leak_reporters_count_leaks() @test {
 fn void debug_name_copy_is_independent() @test {
     gpu::Device device = make_dbg_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     char[16] volatile_name;
     char[7] source = { 'v', 'o', 'l', 'a', 't', 'i', 'l' };

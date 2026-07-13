@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk @public;
 import vk;
 import std::atomic;
@@ -271,7 +271,7 @@ fn void assert_frame_lifecycle_unchanged(FrameLifecycleSnapshot before, FrameLif
 fn void frame_span_allocation_requires_active_frame() @test {
     gpu::Device device = make_frame_lifecycle_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame;
     FrameLifecycleSnapshot before_begin = frame_lifecycle_snapshot(state);
@@ -315,7 +315,7 @@ fn void frame_span_allocation_requires_active_frame() @test {
 fn void frame_generation_wraps_without_revalidating_stale_token() @test {
     gpu::Device device = make_frame_lifecycle_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.frame_generation = ulong::max;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -336,7 +336,7 @@ fn void frame_generation_wraps_without_revalidating_stale_token() @test {
 fn void end_before_begin_is_atomic() @test {
     gpu::Device device = make_frame_lifecycle_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.compute_used_since_frame = true;
     state.transfer_used_since_frame = true;
     state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
@@ -354,7 +354,7 @@ fn void end_before_begin_is_atomic() @test {
 fn void double_end_is_atomic() @test {
     gpu::Device device = make_frame_lifecycle_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::end_frame(&frame)!!;
@@ -370,7 +370,7 @@ fn void double_end_is_atomic() @test {
 fn void double_begin_single_slot_is_atomic() @test {
     gpu::Device device = make_frame_lifecycle_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     (void)gpu::alloc_frame_span(&frame, 64, 16)!!;
@@ -389,7 +389,7 @@ fn void double_begin_single_slot_is_atomic() @test {
 fn void double_begin_default_slots_is_atomic() @test {
     gpu::Device device = make_frame_lifecycle_device(2);
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     (void)gpu::alloc_frame_span(&frame, 64, 16)!!;
@@ -451,7 +451,7 @@ fn void reset_before_retire_rejected() @test {
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     // Slot demands a timeline value the counter has not reached.
     state.frame_arenas[0].frame_timeline_value = 999;
@@ -500,7 +500,7 @@ fn void frame_upload_memory_is_coherent() @test {
     gpu::BufferHandle buf = gpu::create_buffer(&device, &buf_desc)!!;
     defer gpu::destroy_buffer(&device, buf)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::BufferSlot* slot = state.buffers.get(buf)!!;
     vk::MemoryPropertyFlags props = state.allocator.allocation_memory_properties(slot.allocation);
     assert(((uint)props & (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT) != 0,
@@ -511,7 +511,7 @@ fn void frame_contract_rejections_report_exact_context() @test {
     FrameDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_frame_device(&capture);
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
 
     uint before = capture.calls;
@@ -610,7 +610,7 @@ fn void frame_backend_result_helpers_report_without_fault_drift() @test {
     FrameDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_frame_device(&capture);
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     uint before = capture.calls;
     fault query_fault = @catch(vk::frame_timeline_value_with_query(
@@ -651,7 +651,7 @@ fn void failed_frame_retirement_query_preserves_begin_state() @test {
     FrameDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_frame_device(&capture, 2);
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     FrameLifecycleSnapshot before_state = frame_lifecycle_snapshot(state);
     assert(state.frames_in_flight == 2 && state.frame_index == 0,
         "retirement rollback test starts before a distinct next frame slot");

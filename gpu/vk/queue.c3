@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import std::thread;
 import std::core::mem;
@@ -117,7 +117,7 @@ fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
    on a distinct compute/transfer queue also piggybacks one internal aux
    signal, so end_frame needs no per-queue empty submit of its own. *>
 fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;
 
     @pool() {
@@ -305,7 +305,7 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
 }
 
 fn void? vk_wait_queue_idle(gpu::Device* device, gpu::QueueKind queue) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     Mutex* queue_mutex = queue_mutex_for(state, queue);
     queue_mutex.lock()!!;
     defer queue_mutex.unlock();

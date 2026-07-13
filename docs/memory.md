@@ -572,9 +572,9 @@ Blocking flow (the `readback_buffer_data` / `readback_texture_data` helpers):
 
 Non-blocking flow (tickets): `cmd_readback_buffer` / `cmd_readback_texture`
 record the copy into the caller's command list and return a `ReadbackTicket`
-carrying the arena span and the timeline value it becomes valid at. The
-caller keeps rendering; `poll_readback` answers readiness without blocking,
-and `resolve_readback` copies out and releases the span (faulting
+that identifies private readback state. The caller keeps rendering;
+`poll_readback` answers readiness without blocking, and `resolve_readback`
+copies out and releases the state (faulting
 `READBACK_NOT_READY` if polled early). The ticket owns its range until
 resolved.
 

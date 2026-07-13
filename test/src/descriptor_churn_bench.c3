@@ -1,6 +1,6 @@
 module gpu_bench;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import std::io;
 import std::thread;
@@ -135,7 +135,7 @@ fn gpu::TextureHandle[BENCH_MAX_WORKERS] make_texture_pool(gpu::Device* device) 
 fn void run_bench_suite(gpu::DeviceDesc* desc, ZString label) {
     gpu::Device device = gpu::create_device(desc)!!;
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::TextureHandle[BENCH_MAX_WORKERS] textures = make_texture_pool(&device);
 

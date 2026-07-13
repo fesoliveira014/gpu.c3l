@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import std::core::mem;
 
@@ -93,7 +93,7 @@ fn void? CommandTable.free(&self, gpu::CommandListHandle handle) {
 
 fn CommandRecord*? resolve_command(gpu::CommandList* commands) {
     if (commands.device == null || !commands.handle.is_valid()) return gpu::INVALID_HANDLE~;
-    VkDeviceState* state = (VkDeviceState*)commands.device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
     if (state == null) return gpu::INVALID_HANDLE~;
     return state.commands.get(commands.handle);
 }

@@ -76,6 +76,9 @@ jobs:
           done
           exit $FAIL
 
+      - name: Check public API boundary
+        run: python scripts/check_public_api.py
+
       # Whole-compile reference (public module gpu + gpu::vk internals; a
       # scoped docgen needs a closed source set, which only the whitebox test
       # project provides). Published as a per-run artifact.

@@ -1,6 +1,6 @@
 module gpu_bench;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import std::io;
 import std::thread;
@@ -134,7 +134,7 @@ fn int main() {
     };
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     run_phase(&device, state, BenchPhase.BUFFER);
     run_phase(&device, state, BenchPhase.TEXTURE);

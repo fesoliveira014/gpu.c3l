@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import std::thread;
 import std::core::mem;
@@ -555,7 +555,7 @@ fn void release_swapchain_images(VkDeviceState* state, SwapchainSlot* slot) @pri
 }
 
 fn gpu::SwapchainHandle? vk_create_swapchain(gpu::Device* device, gpu::SurfaceDesc* surface, gpu::SwapchainDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = {
         .state      = state,
         .operation  = "create_swapchain",
@@ -647,7 +647,7 @@ fn void destroy_swapchain_slot(VkDeviceState* state, SwapchainSlot* slot) @priva
 }
 
 fn void? vk_destroy_swapchain(gpu::Device* device, gpu::SwapchainHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = { .state = state, .operation = "destroy_swapchain" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
     {
@@ -664,7 +664,7 @@ fn void? vk_destroy_swapchain(gpu::Device* device, gpu::SwapchainHandle handle) 
 }
 
 fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, uint width, uint height) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = { .state = state, .operation = "resize_swapchain" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
     {
@@ -705,14 +705,14 @@ fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, u
 }
 
 fn gpu::SwapchainInfo? vk_get_swapchain_info(gpu::Device* device, gpu::SwapchainHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = { .state = state, .operation = "get_swapchain_info" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
     return slot.info;
 }
 
 fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::SwapchainHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = { .state = state, .operation = "acquire_next_image" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
     check_swapchain_acquire_lifecycle(&context, slot)!;
@@ -750,7 +750,7 @@ fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::Swapchain
 }
 
 fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = { .state = state, .operation = "present" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, desc.swapchain)!;
     check_swapchain_present_lifecycle(&context, slot)!;
@@ -784,7 +784,7 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
 }
 
 fn gpu::PresentModeSupport? vk_get_present_mode_support(gpu::Device* device, gpu::SwapchainHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)device.backend_state;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = { .state = state, .operation = "get_present_mode_support" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
 

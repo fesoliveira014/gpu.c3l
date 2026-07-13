@@ -1,6 +1,6 @@
 module gpu_bench;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import vk;
 import std::io;
@@ -141,15 +141,15 @@ fn int main() {
     };
     gpu::Device device = gpu::create_device(&desc)!!;
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     bool distinct = state.graphics_family != state.compute_family;
     io::printfn(
         "topology: async_compute=%s graphics_family=%d compute_family=%d distinct=%s",
-        device.caps.async_compute ? "true" : "false", state.graphics_family, state.compute_family,
+        gpu::get_device_caps(&device)!!.async_compute ? "true" : "false", state.graphics_family, state.compute_family,
         distinct ? "true" : "false",
     );
-    if (!device.caps.async_compute) {
+    if (!gpu::get_device_caps(&device)!!.async_compute) {
         io::printfn("single queue: compute aliases graphics on this adapter -- phase A and phase B submit to the same queue, so wall_a ~= wall_b is expected");
     }
 
@@ -563,7 +563,7 @@ fn int main() {
     double intersection_ratio = median_max > 0.0 ? median_intersection / median_max : 0.0;
     io::printfn(
         "verdict: %s (intersection_ratio=%.3f) -- cross-queue timestamp comparison assumes one clock domain; per-queue GPU durations and wall clocks above are the primary evidence",
-        verdict_text(device.caps.async_compute, overlap_detected), intersection_ratio,
+        verdict_text(gpu::get_device_caps(&device)!!.async_compute, overlap_detected), intersection_ratio,
     );
 
     return 0;

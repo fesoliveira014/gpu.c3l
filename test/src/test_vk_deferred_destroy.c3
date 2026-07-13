@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import vk;
 
@@ -22,11 +22,11 @@ fn gpu::Device make_defer_test_device() {
 }
 
 fn uint deferred_count(gpu::Device* device) {
-    return vk::deferred_queue_count((vk::VkDeviceState*)device.backend_state);
+    return vk::deferred_queue_count((vk::VkDeviceState*)gpu::device_backend_state(*device));
 }
 
 fn vk::DeferredStats defer_stats(gpu::Device* device) {
-    return vk::deferred_stats((vk::VkDeviceState*)device.backend_state);
+    return vk::deferred_stats((vk::VkDeviceState*)gpu::device_backend_state(*device));
 }
 
 struct DeferRig {
@@ -139,7 +139,7 @@ fn void destroy_after_submit_survives_frame_cycle() @test {
     assert(deferred_count(&device) == 0, "every deferred entry retires within frames_in_flight cycles");
     gpu::end_frame(&frame_token)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 0, "destroyed handles leave no leaked slots");
     gpu::destroy_device(&device)!!;
 }
@@ -207,7 +207,7 @@ fn void off_frame_destroy_defers_release() @test {
     gpu::destroy_buffer(&device, src)!!;
 
     // No end_frame ever covers it; teardown must retire it validation-clean.
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 0, "off-frame destroy leaves no leaked slots at teardown");
 }
 
@@ -249,7 +249,7 @@ fn void mid_frame_destroy_storm_issues_no_host_queries() @test {
 fn void deferred_stats_reconcile_without_teardown() @test {
     gpu::Device device = make_defer_test_device();
     defer gpu::destroy_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferHandle[16] buffers;
     for (uint i = 0; i < 16; i++) {

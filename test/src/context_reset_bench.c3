@@ -1,6 +1,6 @@
 module gpu_bench;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import std::io;
 import std::time;
@@ -51,7 +51,7 @@ fn int main() {
     gpu::BufferHandle target = gpu::create_buffer(&device, &buf_desc)!!;
     defer gpu::destroy_buffer(&device, target)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     // Warm-up: let both frame slots pass once so phase timing starts clean.
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;

@@ -1,6 +1,6 @@
 module gpu::vk;
 
-import gpu;
+import gpu @public;
 import vk;
 import vma;
 import std::core::mem;
@@ -14,8 +14,8 @@ alias DeviceExtensionQuery = fn bool(vk::PhysicalDevice physical_device, ZString
 
 const ZString SWAPCHAIN_EXTENSION = "VK_KHR_swapchain";
 
-// Per-device backend state, reached through Device.backend_state.
 struct VkDeviceState {
+    gpu::Device                 owner;
     vk::Instance               instance;
     vk::DebugUtilsMessengerEXT messenger;
     vk::PhysicalDevice         physical_device;
@@ -97,6 +97,7 @@ struct VkDeviceState {
     DescriptorHeapState        heap;
     TransferArenaState         staging_arena;
     TransferArenaState         readback_arena;
+    ReadbackTicketTable        readback_tickets;
     DedicatedRetireState       dedicated_staging;
     // Thread-safe by construction (libc): deferred-queue growth may run on
     // any destroying thread, outside any allocator's tracking scope.
@@ -166,7 +167,7 @@ fn PoolResetStats pool_reset_stats(VkDeviceState* state) {
 }
 
 // One static vtable shared by every Vulkan device.
-const gpu::BackendVTable VK_VTABLE = {
+const gpu::BackendVTable VK_VTABLE @private = {
     .destroy_device      = &vk_destroy_device,
     .get_memory_stats    = &vk_get_memory_stats,
     .build_memory_report = &vk_build_memory_report,
@@ -250,7 +251,21 @@ const gpu::BackendVTable VK_VTABLE = {
    and freed before the fault propagates, so nothing leaks. *>
 fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     VkDeviceState* state = mem::new(VkDeviceState);
-    defer catch destroy_state(state);
+    gpu::Device handle;
+    defer catch {
+        if ((ulong)handle != 0) {
+            (void)gpu::destroy_device(&handle);
+        } else {
+            mem::free(state);
+        }
+    }
+    handle = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &VK_VTABLE,
+        backend_state: (void*)state,
+    )!;
+    state.owner = handle;
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
@@ -315,6 +330,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
 
     create_vk_allocator(state)!;
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
+    state.readback_tickets.slots = mem::new_array(ReadbackTicketCell, READBACK_TICKET_CAPACITY);
     create_frame_resources(state, desc)!;
     create_persistent_arena(state, desc)!;
     state.recording_contexts.slots = mem::new_array(RecordingContextCell, gpu::MAX_RECORDING_CONTEXTS);
@@ -346,18 +362,12 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
         physical_device: state.physical_device,
         inputs:          &caps_inputs,
     );
-
-    return (gpu::Device){
-        .backend       = gpu::BackendKind.VULKAN,
-        .caps          = state.caps,
-        .vtable        = &VK_VTABLE,
-        .backend_state = (void*)state,
-    };
+    gpu::update_device_caps(&handle, state.caps)!;
+    return handle;
 }
 
 fn void vk_destroy_device(gpu::Device* device) @private {
-    destroy_state((VkDeviceState*)device.backend_state);
-    *device = {};
+    destroy_state((VkDeviceState*)gpu::device_backend_state_ptr(device));
 }
 
 <* Reverse-order teardown; safe on a partial or zeroed state. *>
@@ -369,6 +379,7 @@ fn void destroy_state(VkDeviceState* state) @private {
         destroy_deferred_queue(state);
         // Leak reporting first: the sweeps below free the tables it reads.
         if (state.validation || state.debug_callback != null) (void)report_resource_leaks(state);
+        destroy_readback_tickets(state);
         // Destroy any buffers the caller did not, so no VMA allocation leaks.
         if (state.allocator != null && state.buffers.slots.ptr != null) {
             foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {

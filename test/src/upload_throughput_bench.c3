@@ -1,6 +1,6 @@
 module gpu_bench;
 
-import gpu;
+import gpu @public;
 import gpu::vk;
 import vk;
 import std::io;
@@ -129,7 +129,7 @@ fn UploadBenchObservation run_phase_a_combo(
 ) {
     gpu::Device device = make_bench_device(arena_size);
     defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     if (!*context_printed) {
         print_upload_bench_context(state);
@@ -238,7 +238,7 @@ fn void run_phase_b() {
     io::printfn("-- phase B hypothesis: observe blocking-helper throughput; serialization and queue costs vary by adapter/topology --");
     gpu::Device device = make_bench_device(0);
     defer gpu::destroy_device(&device)!!;
-    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)device.backend_state;
+    gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferHandle[UPLOAD_BENCH_MAX_THREADS] dsts;
     for (uint i = 0; i < UPLOAD_BENCH_MAX_THREADS; i++) {

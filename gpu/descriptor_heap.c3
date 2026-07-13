@@ -17,14 +17,16 @@ fn uint? resolve_descriptor_capacity(uint requested, uint default_capacity) {
    owned by its TextureHandle. Ownership: release with
    destroy_texture_descriptor. *>
 fn TextureIndex? create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.create_texture_descriptor(device, texture, view);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.create_texture_descriptor(device, texture, view);
 }
 
 <* The slot is recycled only after in-flight frames retire. *>
 fn void? destroy_texture_descriptor(Device* device, TextureIndex index) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.destroy_texture_descriptor(device, index);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.destroy_texture_descriptor(device, index);
 }
 
 <* One create_texture_descriptors input; a zero-initialized view is the
@@ -40,19 +42,22 @@ struct TextureDescriptorDesc {
    ownership, and out_indices unchanged. Ownership on success: release each
    index with destroy_texture_descriptor. *>
 fn void? create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.create_texture_descriptors(device, descs, out_indices);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.create_texture_descriptors(device, descs, out_indices);
 }
 
 <* Samplers are pure heap entries; the descriptor is the resource.
    Ownership: release with destroy_sampler. *>
 fn SamplerIndex? create_sampler(Device* device, SamplerDesc* desc) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.create_sampler(device, desc);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.create_sampler(device, desc);
 }
 
 <* Counterpart of create_sampler; the heap slot recycles after in-flight frames retire. *>
 fn void? destroy_sampler(Device* device, SamplerIndex index) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.destroy_sampler(device, index);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.destroy_sampler(device, index);
 }

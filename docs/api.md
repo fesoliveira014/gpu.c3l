@@ -101,11 +101,9 @@ DeviceCaps
     usz min_texel_buffer_alignment
     float max_sampler_anisotropy
 
-Device
-    BackendKind backend
-    DeviceCaps caps
-    BackendVTable* vtable
-    void* backend_state
+Device                           (opaque generation token)
+get_device_backend(Device*)      -> BackendKind?
+get_device_caps(Device*)         -> DeviceCaps?
 ```
 
 Descriptor capacities are exact creation requests, not clampable upper bounds.
@@ -874,10 +872,7 @@ cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset, usz size
 Non-blocking readback: record now, resolve later.
 
 ```text
-ReadbackTicket
-    GpuSpan span
-    SemaphoreValue value
-    (backend bookkeeping fields)
+ReadbackTicket                   (generation-checked token)
 
 cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) -> ReadbackTicket?
 cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) -> ReadbackTicket?
@@ -902,8 +897,9 @@ Tickets hold a pinned readback-arena range until resolved — an unresolved
 ticket blocks arena reclamation behind it (FIFO); when the arena is full,
 tickets fall back to dedicated buffers destroyed at resolve. `resolve_readback`
 faults `READBACK_NOT_READY` before the timeline signals, and
-`INVALID_ARGUMENT` on an already-resolved ticket or a `dest` smaller than the
-span. Each ticket resolves exactly once.
+`INVALID_ARGUMENT` on a consumed token or a `dest` smaller than the copied
+range. A stale alias faults `INVALID_HANDLE`. Each ticket resolves exactly
+once; device teardown releases unresolved tickets.
 
 ### Barriers
 

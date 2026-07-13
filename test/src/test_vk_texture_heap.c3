@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 
 // Headless (lavapipe): the bindless heap proof. Dispatch 1 writes a pattern
 // into a storage image through its TextureIndex; a barrier orders the write
@@ -173,7 +173,7 @@ fn void anisotropic_sampler_caps_honest() @test {
         .anisotropy_enable = true,
         .max_anisotropy    = 1024.0f,
     };
-    if (device.caps.max_sampler_anisotropy > 0) {
+    if (gpu::get_device_caps(&device)!!.max_sampler_anisotropy > 0) {
         // Creation succeeds (max_anisotropy clamps to the device limit).
         gpu::SamplerIndex smp = gpu::create_sampler(&device, &aniso)!!;
         gpu::destroy_sampler(&device, smp)!!;
@@ -192,7 +192,7 @@ fn void anisotropy_range_validated() @test {
     };
     gpu::Device device = gpu::create_device(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
-    if (device.caps.max_sampler_anisotropy <= 0) return;
+    if (gpu::get_device_caps(&device)!!.max_sampler_anisotropy <= 0) return;
 
     float[3] bad = { 0.0f, -1.0f, 0.5f };
     foreach (value : bad) {

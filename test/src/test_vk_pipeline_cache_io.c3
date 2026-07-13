@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 import gpu::vk @public;
 import std::core::mem;
 import vk;
@@ -192,7 +192,7 @@ fn void cache_export_undersized_buffer_faults() @test {
     gpu::PipelineHandle pipe = build_cache_io_pipeline(&device);
     defer gpu::destroy_pipeline(&device, pipe)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)device.backend_state;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     CacheDiagnosticCapture capture;
     state.debug_callback = &capture_cache_diagnostic;
     state.debug_user_data = &capture;
@@ -219,7 +219,7 @@ fn void cache_corrupt_blob_tolerated() @test {
     foreach (usz i, &b : blob) {
         if (i >= 32) *b ^= (char)0xA5;
     }
-    vk::VkDeviceState* state_a = (vk::VkDeviceState*)device_a.backend_state;
+    vk::VkDeviceState* state_a = (vk::VkDeviceState*)gpu::device_backend_state(device_a);
     assert(gpu::vk::cache_blob_compatible(state_a, blob),
         "corrupt payload retains a compatible header and reaches the driver retry path");
     gpu::destroy_pipeline(&device_a, pipe_a)!!;

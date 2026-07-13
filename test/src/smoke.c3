@@ -1,13 +1,13 @@
 module gpu_smoke;
 
-import gpu;
+import gpu::vk @public;
 import std::io;
 
-<* Smoke proof: import gpu, call a public facade function that routes into the
-   gpu::vk backend, forcing the full gpu -> vma -> vk graph plus native libs to
-   resolve and link. Exits zero when the backend reports a non-zero version. *>
+<* Link the backend bindings and native libraries without adding a backend
+   probe to the public gpu module. *>
 fn int main() {
-    uint version = gpu::backend_vulkan_version();
+    if (!gpu::vk::probe_vma_allocator()) return 1;
+    uint version = gpu::vk::probe_vulkan_version();
     io::printfn("gpu.c3l smoke: backend vulkan instance version = %d", version);
     return version != 0 ? 0 : 1;
 }

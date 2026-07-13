@@ -40,7 +40,7 @@ Delivery slices:
   - Replace stale stub, missing-file, and source-layout claims with the actual public/backend/test structure. Keep C3 0.8.0 and the current one-device limit explicit.
   - Verify: all documentation links resolve; searches for removed paths and stub claims return no matches.
 
-- [ ] **1.2 Make backend dispatch and readback bookkeeping private.**
+- [x] **1.2 Make backend dispatch and readback bookkeeping private.**
   - Targets: `gpu/device.c3`, `gpu/memory.c3`, `gpu/gpu.c3`, `gpu/vk/device.c3`, backend call sites, `test/src/test_vk_*`, doc generation checks.
   - Replace public dispatch tables, backend pointers, Vulkan probe helpers, and readback retirement fields with opaque or generation-checked public tokens. Preserve command, frame, and readback alias behavior.
   - Edge cases: stale copies, failed readback resolution, teardown with outstanding tickets, invalid device tokens, and the one-live-device contract.

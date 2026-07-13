@@ -14,12 +14,14 @@ struct SubmitDesc {
 <* Submit command lists to their queue, waiting on and signaling the requested
    timeline values. All lists must share a queue kind and be executable. *>
 fn void? submit(Device* device, SubmitDesc* desc) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.submit(device, desc);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.submit(device, desc);
 }
 
 <* Block until the queue drains — a heavyweight sync for shutdown and one-shot work, not per-frame pacing. *>
 fn void? wait_queue_idle(Device* device, QueueKind queue) {
-    if (device.vtable == null) return INVALID_ARGUMENT~;
-    return device.vtable.wait_queue_idle(device, queue);
+    BackendVTable* vtable = device_vtable(device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable.wait_queue_idle(device, queue);
 }

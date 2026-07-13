@@ -1,6 +1,6 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
 
 faultdef
     FRAME_BEGIN_FAILED,
@@ -18,7 +18,7 @@ struct FrameFixture {
 }
 
 fn void? fixture_begin(gpu::Device* device, gpu::FrameToken* out_frame) {
-    FrameFixture* fixture = (FrameFixture*)device.backend_state;
+    FrameFixture* fixture = (FrameFixture*)gpu::device_backend_state_ptr(device);
     fixture.begin_calls++;
     if (fixture.fail_begin) return FRAME_BEGIN_FAILED~;
     fixture.generation++;
@@ -26,7 +26,7 @@ fn void? fixture_begin(gpu::Device* device, gpu::FrameToken* out_frame) {
 }
 
 fn void? fixture_end(gpu::FrameToken* frame) {
-    FrameFixture* fixture = (FrameFixture*)frame.device.backend_state;
+    FrameFixture* fixture = (FrameFixture*)gpu::device_backend_state_ptr(frame.device);
     fixture.end_calls++;
     if (fixture.fail_end) return FRAME_END_FAILED~;
 }
@@ -47,22 +47,69 @@ fn void? fixture_rethrowing_work(gpu::FrameToken* frame, FrameFixture* fixture) 
     fail_frame_work()!;
 }
 
+fn void fixture_destroy(gpu::Device* device) {}
+
 gpu::BackendVTable frame_fixture_vtable = {
+    .destroy_device = &fixture_destroy,
     .begin_frame = &fixture_begin,
     .end_frame = &fixture_end,
 };
 
 fn gpu::Device fixture_device(FrameFixture* fixture) {
-    return { .vtable = &frame_fixture_vtable, .backend_state = fixture };
+    return gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &frame_fixture_vtable,
+        backend_state: fixture,
+    )!!;
 }
 
 fn void frame_token_stays_within_two_machine_words() @test {
     assert(gpu::FrameToken::size <= 16, "FrameToken stays within two machine words");
 }
 
+fn void invalid_device_token_is_rejected() @test {
+    gpu::Device invalid;
+    fault caps_fault = @catch(gpu::get_device_caps(&invalid));
+    assert(caps_fault == gpu::INVALID_HANDLE, "zero device token faults INVALID_HANDLE");
+}
+
+fn void stale_device_copy_is_rejected() @test {
+    FrameFixture fixture;
+    gpu::Device device = fixture_device(&fixture);
+    gpu::Device stale = device;
+    gpu::destroy_device(&device)!!;
+
+    fault stale_fault = @catch(gpu::get_device_caps(&stale));
+    assert(stale_fault == gpu::INVALID_HANDLE, "destroyed device alias faults INVALID_HANDLE");
+
+    gpu::Device replacement = fixture_device(&fixture);
+    defer gpu::destroy_device(&replacement)!!;
+    assert((ulong)replacement != (ulong)stale, "replacement uses a fresh device generation");
+    fault reused_fault = @catch(gpu::get_device_caps(&stale));
+    assert(reused_fault == gpu::INVALID_HANDLE, "replacement does not revive a stale device alias");
+}
+
+fn void one_live_device_is_enforced() @test {
+    FrameFixture first_fixture;
+    FrameFixture second_fixture;
+    gpu::Device first = fixture_device(&first_fixture);
+    defer gpu::destroy_device(&first)!!;
+
+    gpu::Device? second = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &frame_fixture_vtable,
+        backend_state: &second_fixture,
+    );
+    fault second_fault = @catch(second);
+    assert(second_fault == gpu::INVALID_RESOURCE_STATE, "second live device faults INVALID_RESOURCE_STATE");
+}
+
 fn void scoped_frame_ends_once_after_success() @test {
     FrameFixture fixture;
     gpu::Device device = fixture_device(&fixture);
+    defer gpu::destroy_device(&device)!!;
     gpu::FrameToken frame;
 
     gpu::@with_frame(&frame, &device, fixture_work, &fixture)!!;
@@ -76,6 +123,7 @@ fn void scoped_frame_ends_once_after_success() @test {
 fn void scoped_frame_preserves_natural_worker_fault() @test {
     FrameFixture fixture;
     gpu::Device device = fixture_device(&fixture);
+    defer gpu::destroy_device(&device)!!;
     gpu::FrameToken frame;
 
     fault worker_fault = @catch(gpu::@with_frame(&frame, &device, fixture_rethrowing_work, &fixture));
@@ -88,6 +136,7 @@ fn void scoped_frame_preserves_natural_worker_fault() @test {
 fn void scoped_frame_end_fault_wins_and_retains_retry_token() @test {
     FrameFixture fixture = { .fail_work = true, .fail_end = true };
     gpu::Device device = fixture_device(&fixture);
+    defer gpu::destroy_device(&device)!!;
     gpu::FrameToken frame;
 
     fault end_fault = @catch(gpu::@with_frame(&frame, &device, fixture_work, &fixture));
@@ -105,6 +154,7 @@ fn void scoped_frame_end_fault_wins_and_retains_retry_token() @test {
 fn void scoped_frame_begin_fault_short_circuits() @test {
     FrameFixture fixture = { .fail_begin = true };
     gpu::Device device = fixture_device(&fixture);
+    defer gpu::destroy_device(&device)!!;
     gpu::FrameToken frame = { .device = &device, .generation = 99 };
 
     fault begin_fault = @catch(gpu::@with_frame(&frame, &device, fixture_work, &fixture));
