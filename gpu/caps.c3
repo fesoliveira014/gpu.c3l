@@ -70,6 +70,10 @@ struct DeviceCaps {
     uint max_color_attachments;
     // Raw selected-device limit for one Vulkan push-constant range.
     uint max_push_constant_size;
+    // Selected-device direct-dispatch work-group count limit per axis.
+    Vec3u max_compute_work_group_count;
+    // Selected-device limit for one multi-draw indirect command.
+    uint max_draw_indirect_count;
     usz  min_uniform_alignment;
     usz  min_storage_alignment;
     usz  min_texel_buffer_alignment;

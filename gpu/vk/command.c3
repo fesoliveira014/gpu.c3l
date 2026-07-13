@@ -487,19 +487,25 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
 }
 
 <* Resolve an indirect argument span: indirect usage, 4-byte offset alignment,
-   count*arg_size within the span, and the span within its backing buffer. *>
+   checked argument bytes within the span, and the span within its backing buffer. *>
 fn BufferSlot*? resolve_indirect_span(
     VkDeviceState* state,
     gpu::GpuSpan* span,
     usz arg_size,
     uint count,
+    uint max_count = uint::max,
     ZString operation = null,
     ZString rejected_field = null,
 ) {
+    usz required = gpu::indirect_argument_bytes(
+        argument_size: arg_size,
+        count:         count,
+        max_count:     max_count,
+    )!;
     BufferSlot* slot = resolve_span_slot(
         state:          state,
         span:           span,
-        required:       (usz)count * arg_size,
+        required:       required,
         operation:      operation,
         rejected_field: rejected_field,
     )!;
@@ -528,6 +534,7 @@ fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle,
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    gpu::validate_dispatch_groups(groups, state.caps.max_compute_work_group_count)!;
     validate_pipeline_kind(
         state:     state,
         handle:    handle,

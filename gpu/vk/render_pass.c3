@@ -347,6 +347,7 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
         span:     &args,
         arg_size: gpu::DrawIndirectCommand::size,
         count:    draw_count,
+        max_count: state.caps.max_draw_indirect_count,
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
@@ -388,6 +389,7 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
         span:     &args,
         arg_size: gpu::DrawIndexedIndirectCommand::size,
         count:    draw_count,
+        max_count: state.caps.max_draw_indirect_count,
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
@@ -422,6 +424,7 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
         span:     &args,
         arg_size: gpu::DrawIndexedIndirectCommand::size,
         count:    max_draw_count,
+        max_count: state.caps.max_draw_indirect_count,
     )!;
     BufferSlot* count_buffer = resolve_indirect_span(
         state:    state,

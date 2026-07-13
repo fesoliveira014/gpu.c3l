@@ -748,6 +748,12 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .max_color_attachments      = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS
             ? props.limits.max_color_attachments : gpu::MAX_COLOR_ATTACHMENTS,
         .max_push_constant_size     = props.limits.max_push_constants_size,
+        .max_compute_work_group_count = {
+            .x = props.limits.max_compute_work_group_count[0],
+            .y = props.limits.max_compute_work_group_count[1],
+            .z = props.limits.max_compute_work_group_count[2],
+        },
+        .max_draw_indirect_count    = props.limits.max_draw_indirect_count,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,
