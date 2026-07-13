@@ -57,7 +57,7 @@ Delivery slices:
   - Align ownership, faults, state transitions, and documentation for devices, frames, commands, resources, descriptors, semaphores, swapchains, and tickets. Fix current correctness defects; do not introduce strict placement, raw heaps, or resource-free barriers yet.
   - Verify: public symbol scan is backend-neutral; documented state machines match tests and implementation.
 
-- [ ] **1.5 Establish the blocking library baseline.**
+- [x] **1.5 Establish the blocking library baseline.**
   - Targets: `scripts/gen_abi.py`, `scripts/build_shaders.py`, `test/project.json`, `test/cpu/project.json`, `.github/workflows/ci.yml`, `docs/testing.md`.
   - Run generator drift checks, pure CPU tests, shader ABI tests, smoke linkage, and every documented headless Vulkan target on Linux and Windows.
   - Edge cases: missing validation layers, software ICD selection, Windows VMA linkage, and optional descriptor-buffer coverage.
