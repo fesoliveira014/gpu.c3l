@@ -12,6 +12,7 @@ Start with:
 | Document | Scope |
 |---|---|
 | [Architecture](architecture.md) | Modules, objects, lifetime, frames, commands, descriptors, and swapchains. |
+| [Strict GPU profile](strict_gpu_profile.md) | Target architecture, compatibility boundary, adoption order, and completion criteria. |
 | [Public API](api.md) | Public types, functions, faults, and examples. |
 | [Memory](memory.md) | Memory kinds, arenas, upload/readback, mapping, and deferred release. |
 | [Shader ABI](shader_abi.md) | Root pointers, generated layouts, descriptor indices, and reflection. |
@@ -20,6 +21,12 @@ Start with:
 | [Platforms and dependencies](platforms_and_dependencies.md) | Supported targets, native dependencies, and setup. |
 | [Testing](testing.md) | Test targets, validation policy, CI, and release checks. |
 | [Style](style.md) | C3 naming, formatting, errors, comments, and dependency hygiene. |
+
+## Planning
+
+- [Strict GPU profile requirements](specs/strict-gpu-profile/requirements.md) for scope and acceptance criteria.
+- [Strict GPU profile design](specs/strict-gpu-profile/design.md) for module boundaries and delivery order.
+- [Strict GPU profile tasks](specs/strict-gpu-profile/tasks.md) for implementation milestones and verification gates.
 
 ## Maintenance
 

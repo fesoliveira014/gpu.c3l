@@ -3,7 +3,7 @@
 [![ci](https://github.com/fesoliveira014/gpu.c3l/actions/workflows/ci.yml/badge.svg)](https://github.com/fesoliveira014/gpu.c3l/actions/workflows/ci.yml)
 
 A GPU programming library for [C3](https://c3-lang.org/), built on Vulkan 1.3
-— with the Vulkan kept out of your way. One module (`gpu`), strongly-typed
+— with the Vulkan kept out of your way. One public module (`gpu`), strongly-typed
 handles, C3 optionals for every error, and an execution model built around
 two ideas:
 
@@ -11,9 +11,9 @@ two ideas:
   a single 64-bit GPU address pushed per dispatch/draw; your shader casts it
   to a struct and walks to its data. No binding numbers, no set layouts, no
   descriptor churn for buffer data.
-- **One bindless heap for textures.** `TextureIndex`/`SamplerIndex` are
-  plain integers you put in your own structs; a global descriptor heap the
-  library manages is the only set that exists.
+- **One bindless heap for textures.** `TextureIndex`/`SamplerIndex` are compact
+  generation-checked CPU tokens with shader-visible slots. Put them in your own
+  structs; the library-managed global heap is the only set that exists.
 
 ```c3
 gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame, DoublerRoot::size, 16)!;
@@ -68,15 +68,19 @@ Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
 - **[docs/document_index.md](docs/document_index.md)** — map of the full
   documentation set (architecture, API, memory model, shader ABI, backend,
   testing, style).
+- **[Strict GPU profile](docs/strict_gpu_profile.md)** — target architecture
+  and the gated implementation plan for `gpu` and `gpu::compat`.
 
 ## Layout
 
 ```
 gpu.c3l/
+├── abi/               shader ABI schemas
 ├── gpu/               shipped library sources (module `gpu`)
 │   └── vk/            Vulkan backend (module `gpu::vk`)
 ├── lib/               vendored bindings: vk.c3l, vma.c3l, spvreflect.c3l
 ├── include/shaders/   GLSL includes consumed by shaders
+├── scripts/           ABI, shader, and documentation checks
 ├── tools/gen_shader_abi/
 ├── test/              whitebox test suite (compiles library sources directly)
 └── docs/

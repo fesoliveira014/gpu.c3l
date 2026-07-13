@@ -4,7 +4,7 @@
 
 `gpu.c3l` is a C3 library that exposes a direct GPU programming model suitable for modern explicit rendering and compute workloads. It is not a renderer, render graph, material system, asset system, or platform abstraction layer.
 
-It is a concrete take on Sebastian Aaltonen's "No Graphics API" proposal (<https://www.sebastianaaltonen.com/blog/no-graphics-api>): expose the modern GPU directly — root pointers, bindless heap indices, explicit barriers — instead of the descriptor/binding abstractions designed for ~2012 hardware.
+The current API uses root pointers, bindless heap indices, explicit resource barriers, and Vulkan-backed resource allocation. The [strict GPU profile](strict_gpu_profile.md) defines the target architecture derived from Sebastian Aaltonen's [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api). Until the profile split, this document describes the implemented `gpu` API.
 
 The API centers on four ideas:
 
@@ -34,10 +34,9 @@ gpu::vk Vulkan backend
         +--> vk.c3l         -> Vulkan API calls
         +--> vma.c3l        -> Vulkan memory allocation
         +--> spvreflect.c3l -> SPIR-V shader reflection
-        +--> sdl3.c3l       -> gpu.c3l-samples repository only, not backend public API
 ```
 
-The public API does not expose backend handles. A Vulkan backend can be replaced or supplemented later without changing shader data structures or most user code.
+The public API does not expose Vulkan or VMA types. SDL3 integration belongs to the separate `gpu.c3l-samples` repository and is not a backend dependency.
 
 ## 3. Package structure
 
@@ -45,6 +44,7 @@ The public API does not expose backend handles. A Vulkan backend can be replaced
 
 ```text
 gpu.c3l/
+├── abi/                     shader ABI schemas
 ├── manifest.json
 ├── gpu/
 │   ├── gpu.c3i
@@ -68,6 +68,8 @@ gpu.c3l/
 │       └── *.c3
 ├── include/
 │   └── shaders/        published shader-side ABI includes only (no application shaders)
+├── lib/                     vendored C3 bindings
+├── scripts/                 ABI, shader, and documentation checks
 ├── test/
 ├── tools/
 └── docs/
@@ -254,7 +256,7 @@ create_compute_pipeline(device, ComputePipelineDesc)   -> PipelineHandle?
 create_graphics_pipeline(device, GraphicsPipelineDesc) -> PipelineHandle?
 ```
 
-Graphics pipelines include the minimum Vulkan-required immutable state. Dynamic viewport/scissor should be used. Blend/depth/raster state should be deduplicated through the pipeline cache. The cache also fronts a serializable driver cache: `get_pipeline_cache_size` / `get_pipeline_cache_data` export the driver blob, and `DeviceDesc.pipeline_cache_data` warm-starts it at device creation.
+Graphics pipelines include the Vulkan-required immutable state. Viewport, scissor, cull mode, front face, and supported depth state are dynamic. The pipeline cache deduplicates the remaining blend/depth/raster state and fronts a serializable driver cache: `get_pipeline_cache_size` / `get_pipeline_cache_data` export the driver blob, and `DeviceDesc.pipeline_cache_data` warm-starts it at device creation.
 
 ### Semaphores
 
@@ -322,9 +324,9 @@ Failures return specific faults.
 
 ### Destruction
 
-Destruction functions should be explicit and should validate handles.
+Destruction is explicit and validates handles.
 
-Initial policy:
+Policy:
 
 ```text
 invalid handle              -> INVALID_HANDLE
@@ -334,7 +336,7 @@ valid destruction           -> retire slot and increment generation
 
 ### Deferred destruction
 
-Vulkan resources cannot be destroyed while in use by the GPU. The backend should maintain per-frame deferred destruction queues:
+Vulkan resources cannot be destroyed while in use by the GPU. The backend maintains per-frame deferred destruction queues:
 
 ```text
 retire_frame(frame_index)
@@ -420,7 +422,7 @@ pipeline binds until another setter or the next pass begin. Viewport/scissor
 remain outside pipeline keys and pipeline-state replay, so handle aliasing
 cannot overwrite caller-selected rectangles.
 
-Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex input is allowed for simple paths and compatibility, but it is not the preferred data model.
+Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex input is allowed for simple paths, but it is not the preferred data model.
 
 ### Transfer
 
@@ -511,11 +513,11 @@ leaked descriptors
 leaked backend objects
 ```
 
-`destroy_device` should report live resources before destroying the backend.
+`destroy_device` reports live resources before destroying the backend.
 
-## 12. Release architecture gate
+## 12. Supported baseline
 
-The architecture is complete enough for a first release when the library supports:
+The current architecture supports:
 
 ```text
 headless root-pointer compute
