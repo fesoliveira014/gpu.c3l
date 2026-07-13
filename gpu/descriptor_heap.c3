@@ -5,13 +5,6 @@ const uint DEFAULT_SAMPLER_DESCRIPTORS = 256;
 // Ceiling set by the 16-bit slot field in TextureIndex/SamplerIndex.
 const uint MAX_DESCRIPTOR_SLOTS = 65_536;
 
-<* Zero means default; capacities above the packed-slot ceiling fault. *>
-fn uint? resolve_descriptor_capacity(uint requested, uint default_capacity) {
-    uint capacity = requested == 0 ? default_capacity : requested;
-    if (capacity > MAX_DESCRIPTOR_SLOTS) return INVALID_ARGUMENT~;
-    return capacity;
-}
-
 <* Register a texture in the shader-visible heap; the texture must carry
    sampled or storage usage (INVALID_ARGUMENT otherwise). The texture stays
    owned by its TextureHandle. Ownership: release with
@@ -52,6 +45,7 @@ fn void? create_texture_descriptors(Device* device, TextureDescriptorDesc[] desc
 fn SamplerIndex? create_sampler(Device* device, SamplerDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.create_sampler(device, desc);
 }
 

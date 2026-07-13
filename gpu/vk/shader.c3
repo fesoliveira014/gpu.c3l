@@ -1,4 +1,4 @@
-module gpu::vk;
+module gpu::vk @private;
 
 import gpu @public;
 import vk;
@@ -43,7 +43,7 @@ fn gpu::ShaderHandle? ShaderTable.alloc(&self, ShaderSlot value) {
         return gpu::SLOT_TABLE_FULL~;
     }
     self.slots[idx].value = value;
-    self.slots[idx].generation++;
+    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
     return (gpu::ShaderHandle){ .index = idx, .generation = self.slots[idx].generation };
 }
@@ -59,7 +59,7 @@ fn void? ShaderTable.free(&self, gpu::ShaderHandle h) {
     self.get(h)!;
     uint idx = h.index;
     self.slots[idx].used = false;
-    self.slots[idx].generation++;
+    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].next_free = self.free_head;
     self.free_head = idx + 1;
 }

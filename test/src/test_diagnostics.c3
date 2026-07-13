@@ -18,6 +18,26 @@ fn void diagnostic_dispatch_is_null_safe() @test {
     dispatch_debug_message(null, null, &message);
 }
 
+fn void null_device_descriptor_faults_without_dereference() @test {
+    fault result = @catch(create_device((DeviceDesc*)null));
+    assert(result == INVALID_ARGUMENT,
+        "null device descriptor faults INVALID_ARGUMENT");
+}
+
+fn void null_owner_tokens_fault_as_invalid_handles() @test {
+    fault frame_result = @catch(end_frame((FrameToken*)null));
+    fault command_result = @catch(end_commands((CommandList*)null));
+
+    assert(
+        frame_result == INVALID_HANDLE,
+        "null frame token faults INVALID_HANDLE"
+    );
+    assert(
+        command_result == INVALID_HANDLE,
+        "null command token faults INVALID_HANDLE"
+    );
+}
+
 fn void diagnostic_dispatch_delivers_complete_message_once() @test {
     DiagnosticCapture capture = {};
     DebugMessage message = {

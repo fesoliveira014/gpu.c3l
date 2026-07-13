@@ -39,6 +39,7 @@ struct BufferDesc {
 fn BufferHandle? create_buffer(Device* device, BufferDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.create_buffer(device, desc);
 }
 

@@ -98,6 +98,7 @@ DeviceCaps
     uint max_push_constant_size
     Vec3u max_compute_work_group_count
     uint max_draw_indirect_count
+    ulong max_timeline_semaphore_value_difference
     usz min_uniform_alignment
     usz min_storage_alignment
     usz min_texel_buffer_alignment
@@ -157,12 +158,8 @@ A valid handle packs slot index and generation. Public code should not inspect t
 Handles, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
 command tokens, and synchronization values are runtime-only and scoped to the
 sole device that created them. Do not persist, serialize, reconstruct, or pass
-them across device or process lifetimes. Cross-device use is unsupported.
-Table- and index-backed values that do not carry an owner may alias a
-coincident live resource instead of returning `INVALID_HANDLE`.
-Owner-bearing `CommandList` tokens currently reject a foreign device with
-`INVALID_ARGUMENT`; that defensive check does not establish broader
-multi-device support.
+them across device or process lifetimes. `FrameToken` and `CommandList` embed a
+copy of their owning `Device` token; they do not borrow caller variable storage.
 
 ### GPU addresses
 
@@ -204,11 +201,16 @@ the range and derived metadata are valid before using it.
 
 Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix. `gpu/faults.c3` documents each fault at its definition; the table below maps them to the operations that raise them.
 
+Descriptor, configuration, barrier, viewport, scissor, and label pointers must
+be non-null unless the API explicitly documents null as a value (such as
+`TextureViewDesc* view`). Null required input faults `INVALID_ARGUMENT` before a
+backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
+
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_device` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | `create_device`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation off; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `end_commands`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | malformed descriptor, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_ARGUMENT` | any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | `destroy_device`, `get_device_*`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `resolve_readback` | zero, destroyed, or stale device token; use after resource destroy; never-live handle; consumed or stale command-list alias, `FrameToken`, or `ReadbackTicket` |
 | `INVALID_RESOURCE_STATE` | `create_device`, `create_swapchain`, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | a device is already live; the native window is already bound to another Vulkan surface; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
@@ -254,7 +256,8 @@ end_frame(FrameToken* frame) -> void?
 ```
 
 `FrameToken` is a stack-only owner-bearing token no larger than 16 bytes. A
-copy may allocate while its device-owned generation remains active. Successful
+copy may allocate while its device-owned generation remains active. Its embedded
+`Device` value does not borrow the variable passed to `begin_frame`. Successful
 end clears the passed token and invalidates every alias; a consumed, malformed,
 or stale token faults `INVALID_HANDLE`. Double begin faults
 `INVALID_RESOURCE_STATE`. Rejections change no frame or arena state.
@@ -270,7 +273,7 @@ For fallible frame work, use the compile-time direct-call helper:
 ```c3
 fn void? render_frame(gpu::FrameToken* frame, RenderState* state) {
     gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
-    record_rendering(frame.device, state, root_span)!;
+    record_rendering(&frame.device, state, root_span)!;
 }
 
 gpu::FrameToken frame;
@@ -688,12 +691,19 @@ create_recording_context / destroy_recording_context    (one per worker thread; 
 
 `CommandList` is a small owner-bearing token; mutable lifecycle, binding cache,
 pending texture layouts, and the backend command buffer are device-owned. Copies
-alias the same record. A successful `submit` consumes every alias, so later use
-faults `INVALID_HANDLE`. A submit batch is validated as a transaction: duplicate
-tokens fault `COMMAND_RECORDING_ERROR`, cross-device tokens fault
-`INVALID_ARGUMENT`, and failures before a successful Vulkan queue call leave all valid
-tokens executable. An unsubmitted token becomes stale when its frame-slot command
-pool resets.
+alias the same record, and the embedded `Device` value does not borrow the
+variable passed to `begin_commands`. A successful `submit` consumes every alias,
+so later use faults `INVALID_HANDLE`. A submit batch is validated as a
+transaction: duplicate tokens fault `COMMAND_RECORDING_ERROR`, mixed queue kinds
+fault `INVALID_ARGUMENT`, and failures before a successful Vulkan queue call
+leave all valid tokens executable. Device-token copies for the sole live device
+are accepted; stale owners fault `INVALID_HANDLE`. An unsubmitted token becomes
+stale when its frame-slot command pool resets.
+
+Timeline signal values must be greater than the semaphore counter when they
+execute. The caller orders pending signals across queues and keeps waits and
+signals within `DeviceCaps.max_timeline_semaphore_value_difference` of current
+and pending values. Waits may target future values.
 
 `QueueKind.COMPUTE` routes to a real compute queue when
 `DeviceCaps.async_compute` is true; resources used by both GRAPHICS and
@@ -980,9 +990,9 @@ cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) -> void?
 ```
 
 `Stage.NONE` is an empty execution scope. Use it only for a barrier side that
-has no pipeline work to wait for; it is not a useful semaphore wait or signal
-stage. Explicit `Stage.PRESENT` and `Hazard.PRESENT_READ` values remain the
-legacy broad spelling and map to all commands and memory read respectively.
+has no pipeline work to wait for. It is legal for semaphore operations but does
+not order pipeline work. Explicit `Stage.PRESENT` and `Hazard.PRESENT_READ`
+remain the legacy broad spelling and map to all commands and memory read.
 They are retained for raw-barrier and semaphore compatibility, not used by the
 `TextureUse.PRESENT` preset. The preset uses `COLOR_ATTACHMENT` with no access
 scope so its barriers chain with the WSI wait and signal stages.

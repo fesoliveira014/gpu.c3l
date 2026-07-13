@@ -1,4 +1,4 @@
-module gpu::vk;
+module gpu::vk @private;
 
 import gpu @public;
 import vk;
@@ -40,7 +40,7 @@ fn gpu::PipelineHandle? PipelineTable.alloc(&self, PipelineSlot value) {
         return gpu::SLOT_TABLE_FULL~;
     }
     self.slots[idx].value = value;
-    self.slots[idx].generation++;
+    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
     return (gpu::PipelineHandle){ .index = idx, .generation = self.slots[idx].generation };
 }
@@ -56,7 +56,7 @@ fn void? PipelineTable.free(&self, gpu::PipelineHandle h) {
     self.get(h)!;
     uint idx = h.index;
     self.slots[idx].used = false;
-    self.slots[idx].generation++;
+    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].next_free = self.free_head;
     self.free_head = idx + 1;
 }

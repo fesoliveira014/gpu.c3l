@@ -16,12 +16,6 @@ fn void handle_kinds_distinct_raw() @test {
     assert((ulong)h != 0, "live handle is never all-zero");
 }
 
-fn void readback_ticket_generation_wraps_to_public_width() @test {
-    assert(
-        gpu::next_readback_ticket_generation(gpu::READBACK_TICKET_GENERATION_MAX) == 1,
-        "readback ticket generation wraps before exceeding its 24-bit field"
-    );
-}
 
 fn void public_state_tokens_are_compact() @test {
     assert(Device::size == ulong::size, "Device is one opaque 64-bit token");
@@ -43,20 +37,6 @@ fn void index_smallest_valid_never_zero() @test {
     SamplerIndex s = { .slot = 0, .generation = 1 };
     assert((uint)s != 0, "live index is never all-zero");
     assert(s.is_valid(), "slot 0 with generation 1 is valid");
-}
-
-fn void descriptor_capacity_resolution() @test {
-    uint defaulted = gpu::resolve_descriptor_capacity(0, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
-    assert(defaulted == gpu::DEFAULT_TEXTURE_DESCRIPTORS, "zero requests the default capacity");
-
-    uint explicit_capacity = gpu::resolve_descriptor_capacity(16, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
-    assert(explicit_capacity == 16, "explicit capacity is honored");
-
-    uint at_ceiling = gpu::resolve_descriptor_capacity(gpu::MAX_DESCRIPTOR_SLOTS, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
-    assert(at_ceiling == gpu::MAX_DESCRIPTOR_SLOTS, "the packed-slot ceiling itself is allowed");
-
-    fault ceiling_fault = @catch(gpu::resolve_descriptor_capacity(gpu::MAX_DESCRIPTOR_SLOTS + 1, gpu::DEFAULT_TEXTURE_DESCRIPTORS));
-    assert(ceiling_fault == gpu::INVALID_ARGUMENT, "capacity above the packed-slot ceiling faults INVALID_ARGUMENT");
 }
 
 // Concrete generation-checked slot table mirroring the backend's per-type

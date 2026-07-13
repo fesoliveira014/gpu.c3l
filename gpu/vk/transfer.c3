@@ -1,4 +1,4 @@
-module gpu::vk;
+module gpu::vk @private;
 
 import gpu @public;
 import vk;
@@ -99,7 +99,7 @@ fn gpu::ReadbackTicket? ReadbackTicketTable.alloc(&self, ReadbackTicketState val
     }
 
     self.slots[index].value = value;
-    self.slots[index].generation = gpu::next_readback_ticket_generation(self.slots[index].generation);
+    self.slots[index].generation = next_handle_generation(self.slots[index].generation);
     self.slots[index].used = true;
     return (gpu::ReadbackTicket){
         .index      = index,
@@ -118,7 +118,7 @@ fn void? ReadbackTicketTable.free(&self, gpu::ReadbackTicket ticket) {
     self.get(ticket)!;
     uint index = ticket.index;
     self.slots[index].used = false;
-    self.slots[index].generation = gpu::next_readback_ticket_generation(self.slots[index].generation);
+    self.slots[index].generation = next_handle_generation(self.slots[index].generation);
     self.slots[index].next_free = self.free_head;
     self.free_head = index + 1;
 }
@@ -237,7 +237,7 @@ fn TransferArenaRange? transfer_arena_range(
 ) @private {
     if (size == 0) return gpu::INVALID_ARGUMENT~;
     if (capacity == 0 || size > capacity) return gpu::ARENA_FULL~;
-    if (!gpu::is_pow2(align)) return gpu::INVALID_ARGUMENT~;
+    if (!is_pow2(align)) return gpu::INVALID_ARGUMENT~;
     if (retire_count == 0) {
         virtual_head = 0;
         virtual_tail = 0;
@@ -322,7 +322,7 @@ fn void drain_dedicated_transfers(VkDeviceState* state) @private {
    The fallback's creation runs outside transfer_mutex; only ring bookkeeping
    is locked, and the full re-check destroys the fresh buffer. *>
 fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, gpu::BufferDesc* dedicated_desc, TimelineTag tag) @private {
-    if (size == 0 || !gpu::is_pow2(align)) return gpu::INVALID_ARGUMENT~;
+    if (size == 0 || !is_pow2(align)) return gpu::INVALID_ARGUMENT~;
     {
         state.transfer_mutex.lock()!!;
         defer state.transfer_mutex.unlock();
@@ -473,8 +473,8 @@ fn usz? texture_upload_bytes(VkDeviceState* state, gpu::TextureUploadDesc* desc,
 }
 
 fn CommandRecord*? resolve_transfer_command(gpu::CommandList* commands, ZString operation) @private {
-    if (commands.device == null) return gpu::INVALID_HANDLE~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    if (commands == null || !commands.handle.is_valid()) return gpu::INVALID_HANDLE~;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     if (state == null) return gpu::INVALID_HANDLE~;
     CommandRecord*? resolved = state.commands.get(commands.handle);
     if (catch lookup_fault = resolved) {
@@ -554,7 +554,7 @@ fn BufferSlot*? validate_upload_buffer(VkDeviceState* state, gpu::BufferHandle d
 <* The caller supplies the timeline tag its staging range retires against. *>
 fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data, TimelineTag tag, ZString operation) @private {
     CommandRecord* record = resolve_transfer_command(commands, operation)!;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -595,7 +595,7 @@ fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle ds
     }
     gpu::GpuSpan staging = allocated_staging;
     mem::copy(staging.cpu, data.ptr, data.len);
-    vk_flush_buffer(commands.device, staging.buffer, staging.offset, staging.size)!;
+    vk_flush_buffer(&commands.device, staging.buffer, staging.offset, staging.size)!;
 
     gpu::BufferCopyDesc copy = {
         .src        = staging.buffer,
@@ -608,7 +608,7 @@ fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle ds
 }
 
 fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst, usz offset, char[] data) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
     return cmd_upload_buffer_impl(
         commands: commands,
@@ -622,7 +622,7 @@ fn void? vk_cmd_upload_buffer(gpu::CommandList* commands, gpu::BufferHandle dst,
 
 fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data, TimelineTag tag, ZString operation, ZString mip_field) @private {
     CommandRecord* record = resolve_transfer_command(commands, operation)!;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -721,7 +721,7 @@ fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadD
     }
     gpu::GpuSpan staging = allocated_staging;
     mem::copy(staging.cpu, data.ptr, data.len);
-    vk_flush_buffer(commands.device, staging.buffer, staging.offset, staging.size)!;
+    vk_flush_buffer(&commands.device, staging.buffer, staging.offset, staging.size)!;
 
     gpu::BufferTextureCopyDesc copy = {
         .src         = staging,
@@ -738,7 +738,7 @@ fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadD
 }
 
 fn void? vk_cmd_upload_texture(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
     return cmd_upload_texture_impl(
         commands:  commands,
@@ -1413,7 +1413,7 @@ fn void? release_ticket(VkDeviceState* state, gpu::ReadbackTicket* ticket) @priv
    source-side ordering stays with the caller. *>
 fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::BufferHandle src, usz offset, usz size) @private {
     CommandRecord* record = resolve_transfer_command(commands, "cmd_readback_buffer")!;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -1518,7 +1518,7 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
    tracked layout (caller's barriers on both sides). *>
 fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu::TextureHandle src, uint mip) @private {
     CommandRecord* record = resolve_transfer_command(commands, "cmd_readback_texture")!;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,

@@ -227,6 +227,7 @@ fn TextureFormatSupport? get_texture_format_support(Device* device, Format forma
 fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.supports_texture_desc(device, desc);
 }
 
@@ -235,6 +236,7 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
 fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.create_texture(device, desc);
 }
 

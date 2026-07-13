@@ -79,6 +79,7 @@ struct PresentDesc {
 fn SwapchainHandle? create_swapchain(Device* device, SurfaceDesc* surface, SwapchainDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (surface == null || desc == null) return INVALID_ARGUMENT~;
     return vtable.create_swapchain(device, surface, desc);
 }
 
@@ -127,6 +128,7 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) 
 fn void? present(Device* device, PresentDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.present(device, desc);
 }
 

@@ -1,7 +1,7 @@
 module gpu_bench;
 
 import gpu @public;
-import gpu::vk;
+import gpu::vk @public;
 import std::io;
 import std::time;
 

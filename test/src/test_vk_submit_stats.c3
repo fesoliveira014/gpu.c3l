@@ -194,7 +194,7 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     assert(state.off_frame_pending.load(AtomicOrdering.RELAXED), "failed submit preserves off-frame marker");
     assert(state.frame_active, "failed submit keeps frame active");
     assert(state.aux_compute_counter == compute_counter_before && state.aux_compute_last_signaled == compute_signaled_before, "failed submit preserves compute timeline state");
-    assert(frame.device == &device && frame.generation == state.active_frame_generation, "failed submit retains the live frame token");
+    assert(frame.device == device && frame.generation == state.active_frame_generation, "failed submit retains the live frame token");
     assert(state.aux_transfer_counter == transfer_counter_before && state.aux_transfer_last_signaled == transfer_signaled_before, "failed submit preserves transfer timeline state");
     assert(state.signaled_shadow == shadow_before, "failed submit preserves signaled shadow");
     assert(stats_of(&device).empty_signal_submits == stats_before.empty_signal_submits, "failed submit records no empty signal");
@@ -210,7 +210,7 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     assert(!state.compute_used_since_frame && !state.transfer_used_since_frame, "retry clears queue-use flags");
     assert(!state.off_frame_pending.load(AtomicOrdering.RELAXED), "retry clears off-frame marker");
     assert(!state.frame_active, "retry ends the frame");
-    assert(frame.device == null && frame.generation == 0, "successful retry consumes the token");
+    assert((ulong)frame.device == 0 && frame.generation == 0, "successful retry consumes the token");
     assert(stats_of(&device).empty_signal_submits == stats_before.empty_signal_submits + 1, "retry records one empty signal");
 }
 

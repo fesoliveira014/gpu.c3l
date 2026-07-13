@@ -110,7 +110,9 @@ struct SemaphoreWait {
     Stage           stage;
 }
 
-<* Sets the timeline to `value` once the submit's work clears `stage`. *>
+<* Sets the timeline to value once the submit's work clears stage.
+   The value must exceed the counter when the signal executes; ordering pending
+   signals across queues is the caller's responsibility. *>
 struct SemaphoreSignal {
     SemaphoreHandle semaphore;
     SemaphoreValue  value;
@@ -189,6 +191,7 @@ fn TextureBarrier? texture_transition(
 fn SemaphoreHandle? create_semaphore(Device* device, SemaphoreDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.create_semaphore(device, desc);
 }
 

@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu @public;
-import gpu::vk;
+import gpu::vk @public;
 import std::os::env;
 import std::io;
 

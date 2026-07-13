@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu @public;
-import gpu::vk;
+import gpu::vk @public;
 import vk;
 
 // Headless device create/destroy. Needs a real Vulkan ICD at runtime; the test
@@ -32,6 +32,16 @@ fn void device_create_destroy() @test {
         "line polygon cap matches the selected physical device");
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(state.physical_device, &props);
+    vk::PhysicalDeviceTimelineSemaphoreProperties timeline_props =
+        vk::physical_device_timeline_semaphore_properties();
+    vk::PhysicalDeviceProperties2 props2 =
+        vk::physical_device_properties2().set_next(&timeline_props);
+    vk::get_physical_device_properties2(state.physical_device, &props2);
+    ulong timeline_difference = gpu::get_device_caps(&device)!!.max_timeline_semaphore_value_difference;
+    assert(
+        timeline_difference == timeline_props.max_timeline_semaphore_value_difference,
+        "reported timeline-value difference matches the selected device"
+    );
     uint expected_color_attachments = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS
         ? props.limits.max_color_attachments : gpu::MAX_COLOR_ATTACHMENTS;
     assert(gpu::get_device_caps(&device)!!.max_color_attachments == expected_color_attachments, "effective color attachment limit matches the selected device");

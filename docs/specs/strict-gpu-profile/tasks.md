@@ -52,7 +52,7 @@ Delivery slices:
   - Edge cases: exact-limit success, zero dimensions, overflow while computing required argument bytes, and count-buffer variants.
   - Verify: pure validation tests cover exact and over-limit values without requiring adapter-specific constants.
 
-- [ ] **1.4 Audit the current public contract for internal leaks and lifecycle drift.**
+- [x] **1.4 Audit the current public contract for internal leaks and lifecycle drift.**
   - Targets: `gpu/*.c3`, `gpu/*.c3i`, `gpu/vk/*.c3`, `docs/api.md`, `docs/memory.md`, `docs/threading.md`, `docs/vulkan_backend.md`.
   - Align ownership, faults, state transitions, and documentation for devices, frames, commands, resources, descriptors, semaphores, swapchains, and tickets. Fix current correctness defects; do not introduce strict placement, raw heaps, or resource-free barriers yet.
   - Verify: public symbol scan is backend-neutral; documented state machines match tests and implementation.

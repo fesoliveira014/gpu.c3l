@@ -2,14 +2,6 @@ module gpu_test;
 
 import gpu;
 
-fn void align_up_math() @test {
-    assert(gpu::align_up(0, 16) == 0, "0 stays 0");
-    assert(gpu::align_up(1, 16) == 16, "rounds up to alignment");
-    assert(gpu::align_up(16, 16) == 16, "exact multiple unchanged");
-    assert(gpu::align_up(17, 16) == 32, "rounds up to next multiple");
-    assert(gpu::align_up(40, 32) == 64, "non-power case within power-of-two align");
-}
-
 fn void unchecked_subspan_math() @test {
     char[256] backing;
     GpuSpan s = {
@@ -105,16 +97,4 @@ fn void checked_subspan_rejects_metadata_overflow() @test {
     assert(gpu_fault == gpu::INVALID_ARGUMENT, "GPU address addition cannot wrap");
     assert(offset_fault == gpu::INVALID_ARGUMENT, "backing offset addition cannot wrap");
     assert(cpu_fault == gpu::INVALID_ARGUMENT, "CPU pointer addition cannot wrap");
-}
-
-fn void pow2_and_range_helpers() @test {
-    assert(gpu::is_pow2(1) && gpu::is_pow2(16) && gpu::is_pow2(4096), "powers of two accepted");
-    assert(!gpu::is_pow2(0) && !gpu::is_pow2(3) && !gpu::is_pow2(48), "zero and non-powers rejected");
-
-    assert(gpu::range_fits(256, 0, 256), "exact fit passes");
-    assert(gpu::range_fits(256, 256, 0), "to-end at limit passes offset check");
-    assert(!gpu::range_fits(256, 257, 0), "offset past limit fails");
-    assert(!gpu::range_fits(256, 0, 257), "oversized fails");
-    assert(!gpu::range_fits(256, 200, usz::max), "overflowing size fails");
-    assert(gpu::range_fits(256, 255, 1), "last byte fits");
 }

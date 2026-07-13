@@ -1,4 +1,4 @@
-module gpu::vk;
+module gpu::vk @private;
 
 import gpu @public;
 import vk;
@@ -28,7 +28,7 @@ fn vk::AttachmentStoreOp store_op_to_vk(gpu::StoreOp op) @private {
 fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDesc* desc) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     if (desc.colors.len == 0 && desc.depth == null) return gpu::INVALID_ARGUMENT~;
     if (desc.width == 0 || desc.height == 0) return gpu::INVALID_ARGUMENT~;
     if (desc.colors.len > state.caps.max_color_attachments) return gpu::INVALID_ARGUMENT~;
@@ -283,7 +283,7 @@ fn void? bind_graphics_and_push(VkDeviceState* state, CommandRecord* record, gpu
 fn void? vk_cmd_draw(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, uint vertex_count, uint instance_count) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,
@@ -304,7 +304,7 @@ fn void? vk_cmd_draw(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu
 fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan index_span, uint index_count, uint instance_count, gpu::IndexType index_type) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,
@@ -335,7 +335,7 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
 fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, uint draw_count) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,
@@ -379,7 +379,7 @@ fn void? bind_index_span(VkDeviceState* state, vk::CommandBuffer cb, gpu::GpuSpa
 fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, uint draw_count, gpu::GpuSpan index_span, gpu::IndexType index_type) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,
@@ -415,7 +415,7 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
 fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, gpu::GpuSpan count_span, uint max_draw_count, gpu::GpuSpan index_span, gpu::IndexType index_type) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,

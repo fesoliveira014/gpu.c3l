@@ -59,7 +59,7 @@ Tier S calls pay nothing.
 Frame lifecycle errors are independent of validation: double begin faults
 `INVALID_RESOURCE_STATE`; malformed, consumed, and stale frame tokens fault
 `INVALID_HANDLE`. Every rejection is mutation-free. A successful end consumes
-the device generation and all token aliases; a failed end retains the caller's
+the frame generation and all token aliases; a failed end retains the caller's
 token and boundary state for retry.
 
 `@with_frame(&frame, &device, named_worker, ...args)` is Tier E around the
@@ -114,7 +114,8 @@ stays the caller's responsibility.
 - Command records also live in a fixed table. The public `CommandList` is an
   owner-bearing handle into that table; passing it from a recording thread to
   the submitting thread is the required hand-off. Copies remain aliases and
-  must not be used concurrently.
+  must not be used concurrently. Its embedded `Device` value is independent of
+  the caller variable passed to `begin_commands`.
 - Destruction must happen-after the last use of the handle on any thread.
 
 ## Worker-thread setup (C3)

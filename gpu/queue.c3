@@ -16,6 +16,7 @@ struct SubmitDesc {
 fn void? submit(Device* device, SubmitDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.submit(device, desc);
 }
 

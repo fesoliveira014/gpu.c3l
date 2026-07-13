@@ -1,4 +1,4 @@
-module gpu::vk;
+module gpu::vk @private;
 
 import gpu @public;
 import vk;
@@ -39,7 +39,7 @@ fn gpu::SemaphoreHandle? SemaphoreTable.alloc(&self, SemaphoreSlot value) {
         return gpu::SLOT_TABLE_FULL~;
     }
     self.slots[idx].value = value;
-    self.slots[idx].generation++;
+    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
     return (gpu::SemaphoreHandle){ .index = idx, .generation = self.slots[idx].generation };
 }
@@ -55,7 +55,7 @@ fn void? SemaphoreTable.free(&self, gpu::SemaphoreHandle h) {
     self.get(h)!;
     uint idx = h.index;
     self.slots[idx].used = false;
-    self.slots[idx].generation++;
+    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].next_free = self.free_head;
     self.free_head = idx + 1;
 }
@@ -63,7 +63,7 @@ fn void? SemaphoreTable.free(&self, gpu::SemaphoreHandle h) {
 fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* barrier) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     BufferSlot* slot = state.buffers.get(barrier.buffer)!;
     // size 0 is the whole-buffer convention, matching flush/invalidate/fill.
     if (!gpu::range_fits(slot.size, barrier.offset, barrier.size)) {
@@ -179,7 +179,7 @@ fn void commit_pending_layouts(VkDeviceState* state, CommandRecord* record) @pri
 fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier* barrier) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     TextureSlot* slot = state.textures.get(barrier.texture)!;
     if (barrier.old_layout != effective_layout(record, slot, barrier.texture)) {
         return report_contract_failure(

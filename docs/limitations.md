@@ -9,14 +9,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
 - **One live device per process.** Multi-device operation is not supported.
   Resource handles, descriptor indices, GPU addresses/spans, frame tokens,
   command tokens, and synchronization values are scoped to their sole creating
-  device.
-  Passing them between devices is outside the contract. Table- and
+  device and runtime lifetime. Table- and
   index-backed values without owner metadata can silently resolve a
   coincident slot and target the wrong resource; a safe fault is not
-  guaranteed. Owner-bearing frame and command tokens have defensive checks,
-  but the library does not comprehensively validate cross-device use and those
-  checks do not establish multi-device support. Supporting multiple devices is
-  deferred until a dedicated ownership/validation design is approved.
+  guaranteed after a device is replaced. Frame and command tokens embed the
+  owner token and reject stale owners.
 - **Debug callbacks are borrowed, synchronous, and non-reentrant.** Public and
   backend messages run before the originating call returns; Vulkan may invoke
   the callback concurrently on arbitrary threads. Payload pointers are valid

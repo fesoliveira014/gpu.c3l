@@ -145,6 +145,7 @@ struct GraphicsPipelineDesc {
 fn ShaderHandle? create_shader(Device* device, ShaderDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.create_shader(device, desc);
 }
 
@@ -161,6 +162,7 @@ fn void? destroy_shader(Device* device, ShaderHandle shader) {
 fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.create_compute_pipeline(device, desc);
 }
 
@@ -173,6 +175,7 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
 fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.create_graphics_pipeline(device, desc);
 }
 

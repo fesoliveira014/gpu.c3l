@@ -262,7 +262,7 @@ fn void? render_frame(gpu::FrameToken* frame, AppState* state) {
 
 gpu::FrameToken frame;
 if (catch err = gpu::@with_frame(&frame, &device, render_frame, &state)) {
-    if (frame.device != null) {
+    if (frame.generation != 0) {
         gpu::end_frame(&frame)!;
     }
     return err~;

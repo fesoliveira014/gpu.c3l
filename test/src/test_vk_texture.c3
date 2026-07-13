@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu @public;
-import gpu::vk;
+import gpu::vk @public;
 
 // Headless (lavapipe): minimal texture lifecycle and whole-image barriers.
 

@@ -15,7 +15,7 @@ module gpu;
 Vulkan backend module:
 
 ```c3
-module gpu::vk;
+module gpu::vk @private;
 ```
 
 Sample modules may use sample-specific namespaces. Do not put samples in `module gpu;` unless they are shipped helpers.

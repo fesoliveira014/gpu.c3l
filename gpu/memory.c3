@@ -4,8 +4,6 @@ module gpu;
 // be confused with sizes, offsets, or handles.
 typedef GpuAddress = ulong;
 
-const uint READBACK_TICKET_GENERATION_MAX @private = 0xFF_FFFF;
-
 // Where a resource's memory lives and how the host may access it.
 enum MemoryKind : int {
     // Per-frame upload arena; contents live for one frame.
@@ -42,8 +40,8 @@ struct GpuSpan {
 }
 
 struct FrameToken {
-    Device* device;
-    ulong   generation;
+    Device device;
+    ulong  generation;
 }
 $assert FrameToken::size <= 16;
 
@@ -71,22 +69,18 @@ struct MemoryStats {
     ulong live_allocation_count;
 }
 
-fn uint next_readback_ticket_generation(uint generation) @private {
-    return generation >= READBACK_TICKET_GENERATION_MAX ? 1 : generation + 1;
-}
-
-<* Round value up to a power-of-two alignment. `align` must be a nonzero
-   power of two — validate with is_pow2 first; align_up(v, 0) returns 0. *>
-fn usz align_up(usz value, usz align) => (value + align - 1) & ~(align - 1);
-
-<* True for nonzero powers of two — the only valid alignments. *>
-fn bool is_pow2(usz value) => value != 0 && (value & (value - 1)) == 0;
-
 <* Overflow-safe bounds check: offset + size must fit in limit. A zero size
    only checks the offset; each caller defines what zero means. *>
-fn bool range_fits(usz limit, usz offset, usz size) {
+fn bool range_fits(usz limit, usz offset, usz size) @private {
     if (offset > limit) return false;
     return size <= limit - offset;
+}
+
+fn BackendVTable*? frame_vtable(FrameToken* frame) @private {
+    if (frame == null || frame.generation == 0) return INVALID_HANDLE~;
+    BackendVTable* vtable = device_vtable(&frame.device);
+    if (vtable == null) return INVALID_HANDLE~;
+    return vtable;
 }
 
 <* Enter an idle frame. Double begin faults `INVALID_RESOURCE_STATE`; a retire
@@ -104,9 +98,7 @@ fn FrameToken? begin_frame(Device* device) {
    capacity faults `ARENA_FULL`, invalid or stale tokens `INVALID_HANDLE`.
    Faults do not advance the arena; spans remain valid until its reset. *>
 fn GpuSpan? alloc_frame_span(FrameToken* frame, usz size, usz align) {
-    if (frame == null || frame.device == null || frame.generation == 0) return INVALID_HANDLE~;
-    BackendVTable* vtable = device_vtable(frame.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = frame_vtable(frame)!;
     return vtable.alloc_frame_span(frame, size, align);
 }
 
@@ -114,9 +106,7 @@ fn GpuSpan? alloc_frame_span(FrameToken* frame, usz size, usz align) {
    `INVALID_HANDLE` without mutation; a failed end retains the token and
    lifecycle state for retry. *>
 fn void? end_frame(FrameToken* frame) {
-    if (frame == null || frame.device == null || frame.generation == 0) return INVALID_HANDLE~;
-    BackendVTable* vtable = device_vtable(frame.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = frame_vtable(frame)!;
     vtable.end_frame(frame)!;
     *frame = {};
 }
@@ -124,6 +114,7 @@ fn void? end_frame(FrameToken* frame) {
 <* Run `work` inside one frame. End faults take precedence and retain
    `out_frame`; successful end clears it. *>
 macro void? @with_frame(FrameToken* out_frame, Device* device, #work, ...) {
+    if (out_frame == null) return INVALID_HANDLE~;
     *out_frame = {};
     *out_frame = begin_frame(device)!;
     fault work_fault = @catch(#work(out_frame, ...$vaarg));
@@ -169,6 +160,7 @@ struct TextureUploadDesc {
 fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.alloc_persistent_span(device, desc);
 }
 
@@ -190,18 +182,15 @@ fn PersistentArenaStats? get_persistent_stats(Device* device) {
    memcpy, flush, copy. Records no barriers — destination preconditions and
    next-use transitions stay with the caller, exactly as with raw copies. *>
 fn void? cmd_upload_buffer(CommandList* commands, BufferHandle dst, usz offset, char[] data) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_upload_buffer(commands, dst, offset, data);
 }
 
 <* Texture flavor of cmd_upload_buffer. The region follows the copy-desc rules
    (extent 0 = full mip); the tracked layout must be TRANSFER_DST. *>
 fn void? cmd_upload_texture(CommandList* commands, TextureUploadDesc* desc, char[] data) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
     return vtable.cmd_upload_texture(commands, desc, data);
 }
 
@@ -244,9 +233,7 @@ fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char
    after the recording frame ends (the device timeline advances at end_frame).
    Ownership: the range is held until resolve_readback releases it. *>
 fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_readback_buffer(commands, src, offset, size);
 }
 
@@ -254,9 +241,7 @@ fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, BufferHandle src, 
    transfer_src usage and sit in the TRANSFER_SRC tracked layout; the caller
    owns the barriers on both sides. *>
 fn ReadbackTicket? cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) {
-    if (commands.device == null) return INVALID_ARGUMENT~;
-    BackendVTable* vtable = device_vtable(commands.device);
-    if (vtable == null) return INVALID_HANDLE~;
+    BackendVTable* vtable = command_vtable(commands)!;
     return vtable.cmd_readback_texture(commands, src, mip);
 }
 
