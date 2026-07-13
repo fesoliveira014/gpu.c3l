@@ -318,7 +318,7 @@ real workflow generates both sides from one schema:
   `docs/api.md`.
 - **The samples repository** —
   [gpu.c3l-samples](https://github.com/fesoliveira014/gpu.c3l-samples):
-  seventeen runnable programs from a windowed triangle through GPU-driven
+  eighteen runnable programs from a windowed triangle through GPU-driven
   rendering, deferred shading, PBR, and multithreaded command recording,
   each with a README and a screenshot where it has something to show.
 - **The rest of the docs** — `docs/document_index.md` is the map.

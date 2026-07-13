@@ -150,7 +150,7 @@ SDL3 belongs to sample/test harnesses. The binding package dependency is `sdl3`;
 Windowed samples live in the `gpu.c3l-samples` repository (this library repo
 carries no SDL3 dependency). Ten windowed samples ship today —
 `hello_triangle_sdl`, `textured_cube`, `shadow_mapping`, `gpu_driven_draw_sdl`
-among them; see that repository and `docs/samples.md` for the full list.
+among them; see the samples repository README for the full list.
 
 Coverage:
 
