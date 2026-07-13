@@ -16,6 +16,11 @@ const uint BENCH_DISTINCT_COUNT  = 200;
 const uint BENCH_DUPLICATE_COUNT = 200_000;
 
 fn int main() {
+    io::printfn(
+        "iterations=cold=%d;duplicate=%d units=ns/create",
+        BENCH_DISTINCT_COUNT,
+        BENCH_DUPLICATE_COUNT,
+    );
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .pipeline_capacity = BENCH_DISTINCT_COUNT + 1,

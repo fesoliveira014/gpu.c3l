@@ -157,6 +157,7 @@ fn bool db_e2e_enabled() {
 }
 
 fn int main() {
+    io::printfn("iterations=%d/worker units=ns/descriptor", BENCH_ITERS_PER_WORKER);
     gpu::DeviceDesc indexing_desc = {
         .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_descriptor_churn_bench",

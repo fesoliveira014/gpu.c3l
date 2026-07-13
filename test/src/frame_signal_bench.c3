@@ -45,6 +45,7 @@ fn void run_phase(gpu::Device* device, BenchPhase* phase) {
 }
 
 fn int main() {
+    io::printfn("iterations=%d/phase units=ns/end_frame,submits/frame", BENCH_FRAME_COUNT);
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .frames_in_flight  = 2,

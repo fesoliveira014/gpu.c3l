@@ -23,6 +23,7 @@ struct VkDeviceState {
     vma::Allocator             allocator;
     uint                       graphics_family;
     uint                       compute_family;
+    uint                       compute_queue_index;
     uint                       transfer_family;
     vk::Queue                  graphics_queue;
     vk::Queue                  compute_queue;
@@ -317,6 +318,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
     state.graphics_family = families.graphics;
     state.compute_family  = families.compute;
     state.transfer_family = families.transfer;
+    state.compute_queue_index = families.compute_index;
 
     create_logical_device(state, &families, line_polygon_mode)!;
     vk::get_device_queue(state.device, state.graphics_family, 0, &state.graphics_queue);

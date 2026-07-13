@@ -19,6 +19,7 @@ Start with:
 | [Threading](threading.md) | Entry-point tiers, frame boundaries, lock order, and recording contexts. |
 | [Vulkan backend](vulkan_backend.md) | Vulkan 1.3 requirements and backend implementation. |
 | [Platforms and dependencies](platforms_and_dependencies.md) | Supported targets, native dependencies, and setup. |
+| [Performance](performance.md) | Reproducible benchmark method, baseline, and usage guidance. |
 | [Testing](testing.md) | Test targets, validation policy, CI, and release checks. |
 | [Style](style.md) | C3 naming, formatting, errors, comments, and dependency hygiene. |
 

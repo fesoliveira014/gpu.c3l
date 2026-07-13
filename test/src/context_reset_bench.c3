@@ -29,6 +29,11 @@ fn void? record_and_submit_all(gpu::Device* device, gpu::RecordingContextHandle[
 }
 
 fn int main() {
+    io::printfn(
+        "iterations=idle=%d;recording=%d units=ns/begin_frame",
+        BENCH_IDLE_FRAMES,
+        BENCH_RECORDING_FRAMES,
+    );
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .frames_in_flight  = 2,

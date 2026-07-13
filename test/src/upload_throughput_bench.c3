@@ -68,9 +68,6 @@ fn void print_upload_bench_context(gpu::vk::VkDeviceState* state) {
 
     ZString device_name = (ZString)&properties.properties.device_name[0];
     ZString driver_name = (ZString)&driver.driver_name[0];
-    // Mirrors pick_queue_families: only a second queue in the graphics family uses index 1.
-    uint compute_index = state.compute_queue_distinct
-        && state.compute_family == state.graphics_family ? 1 : 0;
     bool transfer_distinct = state.transfer_queue != state.graphics_queue;
 
     io::printfn(
@@ -85,7 +82,7 @@ fn void print_upload_bench_context(gpu::vk::VkDeviceState* state) {
         "queues: graphics=%d:0 compute=%d:%d compute_distinct=%s transfer=%d:0 transfer_distinct=%s",
         state.graphics_family,
         state.compute_family,
-        compute_index,
+        state.compute_queue_index,
         state.compute_queue_distinct ? "true" : "false",
         state.transfer_family,
         transfer_distinct ? "true" : "false",
@@ -282,6 +279,7 @@ fn void run_phase_b() {
 }
 
 fn int main() {
+    io::printfn("iterations=%d/worker/combination units=uploads/s", UPLOAD_BENCH_HELPER_ITERS_PER_THREAD);
     io::printfn(
         "config: workers=[%d,%d,%d] phase_a_payload_kib=[%d,%d,%d] phase_a_staging_mib=[%d,%d] waves=%d uploads_per_wave=%d phase_b_payload_kib=%d phase_b_iters_per_worker=%d",
         UPLOAD_BENCH_THREAD_COUNTS[0],
