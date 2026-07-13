@@ -175,7 +175,7 @@ repository's targets. Nothing in this repository links SDL3.
 | Platform | Library build | Headless Vulkan tests | SDL3 samples | Notes |
 |---|---:|---:|---:|---|
 | linux-x64 | Required first | Required first | Required first (samples repo) | Primary development target. |
-| windows-x64 | Required second | Desired | Desired | Needs VMA static lib and SDL3 native setup. |
+| windows-x64 | Required | Required | Desired | CI builds VMA and runs the headless matrix on mesa-dist-win. |
 | linux-aarch64 | Deferred | Deferred | Deferred | Requires VMA static lib and Vulkan ICD. |
 | macOS | Deferred | Deferred | Deferred | Vulkan requires portability stack; not first scope. |
 | wasm | Out of scope | No | No | Vulkan backend not applicable. |
