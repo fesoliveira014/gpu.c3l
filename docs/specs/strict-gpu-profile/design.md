@@ -145,7 +145,17 @@ Failure before publication releases all temporary state. No partial device or pa
 
 `Device` remains a compact strongly typed generational handle. Its packed representation contains a device-slot index and generation.
 
-The device registry replaces the single process-wide active device. Registry mutation during create and destroy is synchronized. Public entry points acquire an active-operation pin while resolving the slot, then recheck its generation and live state before dereferencing backend state. Destruction marks the slot as closing, rejects new pins, and reclaims state only after existing pins retire and the live-child checks pass. A failed destruction attempt restores the live state without changing the generation.
+The device registry replaces the single process-wide active device. Registry mutation during create and destroy is synchronized. Public entry points acquire a short-lived operation pin while resolving the slot, then recheck its generation and live state before dereferencing backend state.
+
+`destroy_device` is non-blocking and retryable:
+
+1. Under the registry mutation lock, validate the device and check live children. If any remain, return `RESOURCE_IN_USE` without changing state.
+2. If queue work is incomplete, return `DEVICE_BUSY` without changing state.
+3. Mark the slot as closing. New pins and operations that observe it return retryable `DEVICE_BUSY`.
+4. If short-lived pins remain, restore the live state and return `DEVICE_BUSY`.
+5. Otherwise destroy backend state, increment the generation, and release the slot.
+
+Destruction never waits for GPU or host work. Failed attempts preserve the device generation and all state.
 
 Recording command lists and executable command tokens retain a pin for their lifetime. Hot recording commands therefore use their already-pinned state and perform no registry lookup, atomic pin, or mutation-lock acquisition per command.
 
@@ -157,7 +167,8 @@ A live device slot owns:
 - the shared backend dispatch table;
 - optional compatibility dispatch and state;
 - queue slots;
-- allocation, texture, view, sampler, pipeline, semaphore, swapchain, and command tables.
+- queue-owned completion state;
+- allocation, texture, view, sampler, pipeline, swapchain, and command tables.
 
 Resource tokens are device-local. Public operations accept or derive the owning device and validate the token in that device's table. Passing a valid token to a different device faults before backend mutation.
 
@@ -171,11 +182,29 @@ C3 explicit casts can manufacture the underlying bits of a handle. Runtime owner
 
 Allocation and texture descriptions declare the semantic queue roles that may access them. Operations that explicitly name a span or texture reject it when the recording queue has no admitted role. For allocations reached only through root GPU addresses, using an unadmitted queue role is a caller contract violation because the command stream cannot discover nested pointers. When admitted roles resolve to different native queue families, the backend creates the backing buffer, image, or swapchain with concurrent native sharing. Roles resolved to one family retain exclusive native sharing without a public distinction. Narrow access declarations avoid unnecessary cross-family sharing.
 
-The initial strict core has no exclusive queue-ownership transfer operation. Root-addressed shader access does not identify every allocation to the command stream, so the backend cannot safely infer such transfers. Cross-queue visibility and execution ordering remain explicit through global barriers, texture transitions, and semaphore waits and signals.
+The initial strict core has no exclusive queue-ownership transfer operation. Root-addressed shader access does not identify every allocation to the command stream, so the backend cannot safely infer such transfers. Cross-queue execution order uses completion-point waits; visibility and representation changes remain explicit through global barriers and texture transitions.
 
 Command recording starts from a queue. Submission targets the same queue. Command tokens retain their queue and device ownership, preventing cross-device or cross-queue submission.
 
 The public contract exposes only admitted semantic roles. The backend's same-family or cross-family native sharing selection remains private.
+
+### Completion points
+
+`CompletionPoint` is an opaque value of at most two machine words containing queue identity and a monotonically increasing submission sequence. The queue owns the native completion timeline. Creating a point allocates no table entry and exposes no counter management.
+
+The submission shape is:
+
+```text
+point = submit(queue, commands, waits)
+poll_completion(point)
+wait_completion(point, timeout)
+```
+
+A successful submit consumes its executable command tokens and publishes the next point for that queue. A retryable failure publishes no point and preserves the tokens. Device loss invalidates affected tokens and points.
+
+Waits accept reusable completion points from other queues on the same device. Same-queue order is inherent. Sequence exhaustion faults before native submission, so values never wrap or repeat within a live device. A point remains valid until its device is destroyed; stale or cross-device points fail deterministically.
+
+Completion points also establish host completion for mapped readback, resource reuse, presentation, and compatibility-arena reset. They do not own resources or implement deferred destruction.
 
 ## Memory model
 
@@ -190,7 +219,11 @@ The public contract exposes only admitted semantic roles. The backend's same-fam
 - optional GPU address range;
 - backend-private placement identity.
 
-`free_allocation` consumes the owning token. A copied stale token fails by generation. A `GpuSpan` is non-owning and cannot free memory.
+`free_allocation` consumes the owning token immediately. It returns `RESOURCE_IN_USE` without consuming the token when placed textures remain. A copied stale token fails by generation. A `GpuSpan` is non-owning and cannot free memory.
+
+Every strict-core `destroy_*` operation is also immediate: it never waits or enters a deferred-release queue. No live recording command list, executable command token, or incomplete submission may reference the resource.
+
+Debug validation may detect references to explicitly named resources. References reached through GPU pointers or shader heap indices remain caller-managed because the command stream cannot enumerate them.
 
 Mapped allocations report whether CPU/GPU visibility is coherent. `flush_mapped_span` makes completed CPU writes visible to the GPU. After the relevant GPU completion point, `invalidate_mapped_span` makes GPU writes visible to the CPU. Both operations validate that the span belongs to a live mapped allocation, round ranges to backend atom boundaries privately, and become no-ops for coherent memory. Exposing a CPU pointer never implies coherence.
 
@@ -211,17 +244,36 @@ There is no public `BufferHandle` in the target strict API. Addressable data all
 
 GPU addresses are stable for the allocation lifetime. Allocations whose addresses have escaped never move transparently.
 
+Readback is ordinary memory use:
+
+```text
+allocate a CPU-cached span
+record a copy into the span
+submit and obtain a completion point
+wait for or poll the point
+invalidate the mapped span
+read through the CPU mapping
+```
+
 ### Textures
 
 A texture requirements query runs from `TextureDesc` before creation. It returns size, alignment, placement compatibility, and whether dedicated allocation is required.
 
-Texture creation accepts an allocation and offset. It validates compatibility, bounds, alignment, and live-placement conflicts before native mutation. Destroying a texture releases the texture object and views but not its allocation.
+`create_placed_texture(device, desc, allocation, offset)` validates compatibility, bounds, alignment, live-placement conflicts, and the dedicated requirement before native mutation. If dedicated backing is required, it faults without mutation.
+
+`create_dedicated_texture(device, desc, allocation_desc)` publishes separate `Texture` and `GpuAllocation` tokens.
+
+The dedicated path privately creates the image first, allocates and binds compatible dedicated memory, then publishes both tokens atomically. Failure releases temporary state and publishes neither token.
+
+Both paths produce ordinary ownership tokens. After completion, the caller destroys the texture before freeing its allocation.
 
 Overlapping live texture placements are rejected initially. Explicit aliasing can be added later only with a complete hazard and lifetime contract.
 
 ### Future allocation utilities
 
-Frame arenas, persistent arenas, staging rings, readback pools, and deferred release policies are not strict-core ownership APIs. A future `gpu::alloc` extension may build them from `GpuAllocation` and `GpuSpan`.
+Frame arenas, persistent arenas, staging rings, readback pools, and deferred release policies are not strict-core APIs. A future `gpu::alloc` extension may build them from allocations, spans, and completion points.
+
+The root module has no frame token, frame begin/end operation, scoped frame helper, or readback-ticket type.
 
 Samples may contain local allocator utilities until that extension exists.
 
@@ -234,7 +286,7 @@ A texture-view allocation returns:
 - a generation-checked CPU ownership token;
 - a fixed-width `TextureIndex` stored in shader data.
 
-Destroying the ownership token retires the index until every referencing submission completes. Shader indices contain no generation bits.
+Destroying the ownership token immediately releases the index for reuse. No live recording command list, executable command token, or incomplete submission may reference it. Shader indices contain no generation bits, so stale shader data is a caller lifetime violation.
 
 `Sampler` is an immutable device-local value returned by interning a semantic sampler description. Identical descriptions return the same value. Native sampler objects live until device destruction, and compatibility descriptor writes accept this value even on a compatibility-only device.
 
@@ -286,7 +338,7 @@ Public recording uses two states:
 
 `begin_commands(queue)` acquires backend recording storage. Native pools are device-managed and may be cached per worker or sharded internally. They are not public resources.
 
-`discard_commands` consumes an unfinished recording. Successful submission consumes executable tokens. Validation failure before native submission preserves retryable tokens. Device loss invalidates affected tokens.
+`discard_commands` consumes an unfinished recording. Successful submission consumes executable tokens and returns a completion point. Validation failure before native submission preserves retryable tokens and publishes no point. Device loss invalidates affected tokens.
 
 Concurrent workers may record for the same device. Synchronization may occur during begin, end, and submit. Individual command calls do not take a process-global lock or allocate a public recording context.
 
@@ -300,7 +352,9 @@ Textures use explicit transitions because representation and presentation state 
 
 No operation infers a barrier or transition. Debug builds may validate expected texture state, but release behavior is determined entirely by explicit commands.
 
-Cross-queue ordering uses explicit semaphore waits and signals. The backend derives cache operations from semantic hazards. Queue-family ownership transfers are unnecessary because resources admitted to multiple native families use concurrent sharing established at creation.
+Cross-queue submission waits accept reusable completion points. Barriers and transitions remain explicit. Queue-family ownership transfers are unnecessary because resources admitted to multiple native families use concurrent sharing established at creation.
+
+There is no public semaphore type or user-managed synchronization counter. Native synchronization objects and values are queue-owned backend state.
 
 Render-pass begin/end commands add no barriers.
 
@@ -310,7 +364,11 @@ A render-pass descriptor names texture views, load/store operations, and clear v
 
 Vulkan 1.3 may use dynamic rendering. A Vulkan 1.2 path may synthesize and cache compatible native render passes and framebuffers. This does not justify a compatibility render-pass API because the public semantics are unchanged.
 
-Swapchains belong to a device and surface. Acquired images are borrowed textures with explicit lifetime. Presentation uses the shared queue, semaphore, texture-transition, and render-pass model.
+Swapchains belong to a device and surface. Acquisition returns a borrowed texture plus a one-shot readiness token. The rendering submission consumes readiness and returns its ordinary completion point.
+
+Presentation consumes the acquired image and accepts its render completion point. The point remains observable, must belong to the same device, and must cover the rendering work. Texture transitions and render-pass synchronization remain explicit.
+
+Native binary or timeline synchronization used to bridge acquire, submit, and present remains private.
 
 Resize, dormant surfaces, out-of-date swapchains, surface loss, and device loss retain distinct public faults and retry contracts.
 
@@ -329,13 +387,15 @@ There is no public pipeline-layout object unless an independent semantic need is
 
 Descriptor kinds use GPU-shaped terms for spans, sampled textures, storage textures, and samplers. Batched writes accept shared `GpuSpan`, texture-view, and `Sampler` values.
 
-Transient arenas reset only after the caller-provided synchronization point is complete. Persistent arenas support individual set release. Native pool allocation, fragmentation, and rollover remain private.
+Transient arenas reset only after the caller-provided completion point is complete. Persistent arenas support individual set release. Native pool allocation, fragmentation, and rollover remain private.
 
 ### Coexistence
 
 A device may enable strict and descriptor-set capabilities together. Strict and compatibility pipelines can alternate within one command list. Shared resources and synchronization do not change meaning when the binding model changes.
 
 Compatibility shaders are authored for explicit descriptor layouts. The library does not translate strict shader IR, synthesize descriptor layouts from root data, or emulate root pointers.
+
+The compatibility per-draw data contract requires a separate design review before compatibility pipeline and command tasks are generated. This architecture exposes no placeholder binding API.
 
 A Vulkan 1.2 backend enables the core features and extensions needed for the requested public semantics. If a 1.2 implementation can preserve a root operation exactly, the fallback remains in `gpu::vk`. Only descriptor-set authoring and other unavoidable semantic differences belong in `gpu::compat`.
 
@@ -382,12 +442,14 @@ Diagnostic backend information may report backend name, API version, driver name
 
 - Invalid pointers, handles, ownership, ranges, alignment, state, and request composition fault before backend mutation.
 - Unsupported semantic requirements fail request validation or device creation with the unmet requirement identified.
-- Device creation, texture placement, descriptor writes, and batch pipeline creation are transactional.
-- Destroying an owner with live children faults.
-- Releasing an allocation with live placed textures faults.
+- Device creation, dedicated texture creation, descriptor writes, and batch pipeline creation are transactional.
+- Invalid placed texture creation faults before backend mutation.
+- Device destruction returns `RESOURCE_IN_USE` for live children and retryable `DEVICE_BUSY` for incomplete work or active operations.
+- GPU-visible resource destruction has a caller-completion precondition and never waits or defers.
+- Releasing an allocation with live placed textures faults without consuming it.
 - Descriptor and sampler exhaustion publishes no partial allocation.
 - Failed command validation leaves recording state unchanged.
-- Submit validation failure preserves executable command tokens.
+- Retryable submit failure preserves executable command tokens and publishes no completion point.
 - Native device loss invalidates the affected device and returns the public device-loss fault.
 - Unmapped native failures become backend errors with diagnostic detail, not leaked native result codes.
 
@@ -396,6 +458,8 @@ Diagnostic backend information may report backend name, API version, driver name
 - Device resolution is a lock-free slot and generation check in steady state.
 - Command calls perform no process-global lock and no hidden pipeline compilation.
 - Recording storage is acquired in batches at command-list begin.
+- Completion points require no public allocation, table insertion, or caller-managed counter.
+- Resource and device destruction perform no hidden wait or deferred-release work.
 - GPU allocations are explicit so applications can batch and suballocate.
 - Shader hashing can be amortized through `prepare_shader_code`.
 - Pipeline creation can be batched and deduplicate shared IR.
@@ -407,27 +471,32 @@ Diagnostic backend information may report backend name, API version, driver name
 ## Implementation order
 
 1. Replace the runtime singleton with `Runtime`, adapters, device requests, multiple device slots, explicit queues, and runtime-owned surfaces.
-2. Move the current backend onto per-device shared state without changing binding semantics.
-3. Introduce allocations, spans, placed textures, strict heaps, shader-code values, explicit pipeline binding, transient commands, global barriers, and semantic texture transitions in `gpu`.
-4. Migrate tests, samples, shader ABI tooling, and benchmarks with each in-place API change.
-5. Add `gpu::compat` descriptor layouts, arenas, sets, pipelines, and commands on the shared backend.
-6. Add and verify Vulkan 1.2 backend fallbacks after the strict architecture is coherent.
+2. Move the backend onto per-device shared state and implement non-blocking, retryable destruction.
+3. Introduce queue-owned completion points; remove the root frame lifecycle, public semaphores, and readback tickets; migrate presentation and readback.
+4. Introduce allocations, spans, placed and dedicated textures, immediate lifetime rules, and future allocator extension points.
+5. Add strict heaps, shader-code values, explicit pipeline binding, transient commands, global barriers, and semantic texture transitions in `gpu`.
+6. Migrate tests, samples, shader ABI tooling, and benchmarks with each in-place API change.
+7. Design compatibility per-draw data, then add `gpu::compat` descriptors, pipelines, and commands on the shared backend.
+8. Add and verify Vulkan 1.2 backend fallbacks after the strict architecture and compatibility contract are coherent.
 
-The existing stabilization work remains valid. The superseded wholesale compatibility extraction is not reused.
+Regenerated tasks retain completed stabilization work as a concise historical record. The superseded wholesale compatibility extraction is not reused.
 
 ## Pitfalls and gotchas
 
 - Recursive C3 imports may expose submodule declarations; runtime activation must remain explicit.
 - A shared public type does not make every operation valid on every device. Strict operations require the strict capability.
 - Device-request extension storage must not expose raw numeric capability identifiers.
-- Registry slots must remain generation-safe and pin backend state under concurrent use and destruction.
+- Device destruction must check children and queue progress before closing, reject new pins while closing, and change generation only on success.
 - C3 explicit casts can bypass nominal typing; runtime validation still protects ownership.
 - Generic data and texture placements may have different native memory compatibility.
 - Exposed CPU mappings do not imply coherent memory; callers must use the mapped-span visibility operations.
 - Exposed GPU addresses prohibit transparent relocation.
 - Resource queue access must remain semantic, validate the recording queue, and avoid unnecessary native concurrent sharing through narrow access declarations.
+- Caller-managed lifetime includes resources reached through GPU pointers and shader indices; backend validation cannot discover every reference.
+- Completion points prove queue progress but do not track resource ownership or make destruction automatic.
 - Pipeline-state separation must not cause hidden draw-time native variants.
-- Descriptor-arena reset is unsafe until all referencing submissions retire.
+- Descriptor-arena reset is unsafe until the caller's covering completion point is complete.
+- Frame-scoped allocation and deferred release belong in `gpu::alloc`, not the root module.
 - Vulkan version, feature promotion, and extension presence are not interchangeable.
 - Target architecture documents must not be presented as current API documentation before implementation.
 - Milestone or review identifiers belong only in planning records, never source identifiers, tests, or comments.
@@ -436,9 +505,10 @@ The existing stabilization work remains valid. The superseded wholesale compatib
 
 ### Pure CPU
 
-- Handle packing, generation, cross-device rejection, active-operation pinning, and concurrent registry tests.
+- Handle packing, generation, cross-device rejection, closing-state transitions, active-operation pinning, and concurrent registry tests.
 - Device-request composition and transactional failure tests.
-- Allocation-range, mapped-memory visibility, placement, queue-access, descriptor-arena, sampler-interning, strict sampler publication, and shader-hash tests.
+- Allocation-range, mapped-memory visibility, placed and dedicated texture, immediate-release, queue-access, descriptor-arena, sampler-interning, strict sampler publication, and shader-hash tests.
+- Completion-point packing, monotonicity, poll/wait, cross-queue, stale, and failed-submit tests.
 - Command and submission state-machine tests.
 - Strict/compat nominal type compile-fail fixtures in both directions.
 - Import-inert tests for every public module.
@@ -447,7 +517,8 @@ The existing stabilization work remains valid. The superseded wholesale compatib
 
 - Runtime, adapter, surface, multi-device, queue, and teardown tests.
 - Strict-only, compatibility-only, and combined device creation.
-- Allocation, placed texture, upload, readback, render, and presentation tests.
+- Allocation, placed and dedicated texture, upload, readback, render, and presentation tests.
+- Host completion, cross-queue waits, acquire readiness, and present completion tests.
 - Global barrier and texture-transition validation.
 - Strict and compatibility pipelines alternating in one command list.
 - Vulkan 1.2 and 1.3 semantic-equivalence tests where runners support them.
@@ -460,6 +531,7 @@ The existing stabilization work remains valid. The superseded wholesale compatib
 - Generated API scans for backend leakage.
 - Documentation link and walkthrough checks.
 - Sample builds against the packaged library.
-- Benchmarks for allocation, descriptors, pipeline creation, command recording, submission, barriers, and indirect work.
+- Strict API scans reject frame lifecycle, public semaphore, and readback-ticket symbols.
+- Benchmarks for allocation, descriptors, pipeline creation, command recording, submission, completion polling, barriers, and indirect work.
 
 Hardware-dependent positive claims must record adapter, driver, backend API version, and enabled native features. Missing hardware evidence does not justify advertising unsupported semantics.
