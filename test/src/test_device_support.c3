@@ -58,7 +58,7 @@ fn void invalid_requests_and_stale_adapters_fault_before_backend_work() @test {
     Adapter adapter = first_support_adapter(&runtime);
     DeviceRequest empty = gpu::empty_device_request();
     DeviceRequest malformed;
-    DeviceRequest reserved = (DeviceRequest)((ulong)gpu::strict_device_request() | (1ull << 63));
+    DeviceRequest reserved = (DeviceRequest)((uint128)gpu::strict_device_request() | ((uint128)1 << 63));
 
     assert(@catch(gpu::supports_device_request(&adapter, &empty)) == gpu::INVALID_ARGUMENT);
     assert(@catch(gpu::supports_device_request(&adapter, &malformed)) == gpu::INVALID_ARGUMENT);

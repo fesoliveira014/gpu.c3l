@@ -27,5 +27,14 @@ fn DeviceRequestSupport? supports_device_request(
             .unmet_requirement = "strict semantics",
         };
     }
+
+    Surface surface = requested_surface(*request);
+    if (surface.is_valid() && !supports_presentation(adapter, &surface)!) {
+        return {
+            .supported         = false,
+            .unmet_requirement = "presentation",
+        };
+    }
+
     return { .supported = true };
 }

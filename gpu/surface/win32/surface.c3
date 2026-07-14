@@ -1,0 +1,37 @@
+module gpu::surface::win32;
+
+import gpu @public;
+
+typedef InstanceHandle = void*;
+typedef WindowHandle = void*;
+
+<* Create a runtime-owned Win32 surface from native handles. *>
+fn gpu::Surface? create_surface(
+    gpu::Runtime* runtime,
+    InstanceHandle instance,
+    WindowHandle window,
+) {
+    void* native_instance = (void*)instance;
+    void* native_window = (void*)window;
+    if (native_instance == null || native_window == null) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+
+    gpu::RuntimeData* runtime_data = gpu::resolve_runtime(runtime);
+    if (runtime_data == null) return gpu::INVALID_HANDLE~;
+    if (runtime_data.vtable.create_win32_surface == null
+        || runtime_data.vtable.destroy_surface == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+
+    void* backend_surface = runtime_data.vtable.create_win32_surface(
+        runtime_data.backend_state,
+        native_instance,
+        native_window,
+    )!;
+    defer catch runtime_data.vtable.destroy_surface(
+        runtime_data.backend_state,
+        backend_surface,
+    );
+    return gpu::register_surface(runtime, backend_surface);
+}

@@ -26,9 +26,11 @@ struct VkDeviceState {
     uint                       compute_family;
     uint                       compute_queue_index;
     uint                       transfer_family;
+    uint                       present_family;
     vk::Queue                  graphics_queue;
     vk::Queue                  compute_queue;
     vk::Queue                  transfer_queue;
+    vk::Queue                  present_queue;
     gpu::DeviceCaps            caps;
     bool                       validation;
     bool                       debug_names;
@@ -73,6 +75,7 @@ struct VkDeviceState {
     Mutex                      graphics_queue_mutex;
     Mutex                      compute_queue_mutex;
     Mutex                      transfer_queue_mutex;
+    Mutex                      present_queue_mutex;
     bool                       compute_queue_distinct;
     Atomic{int}                inflight_calls;
     uint                       frames_in_flight;
@@ -145,6 +148,7 @@ struct PhysicalDeviceCandidate {
 struct CapsInputs {
     bool indexing_supported;
     bool buffer_supported;
+    bool presentation_enabled;
     bool async_compute;
     bool line_polygon_mode;
     uint texture_capacity;
@@ -290,13 +294,22 @@ fn gpu::Device? create_vk_device(
         .debug_user_data   = runtime_state.debug_user_data,
     };
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
+    gpu::Surface requested_surface = gpu::requested_surface(*request);
+    vk::SurfaceKHR presentation_surface = requested_surface.is_valid()
+        ? (vk::SurfaceKHR)gpu::surface_backend_handle(&requested_surface)!
+        : (vk::SurfaceKHR)null;
     return create_vk_device_with_selection(
-        desc:            &desc,
-        instance:        runtime_state.instance,
-        physical_device: adapter_state.physical_device,
-        owns_instance:   false,
-        retained_runtime: retained_runtime,
-        adapter:          adapter,
+        desc:                       &desc,
+        instance:                   runtime_state.instance,
+        physical_device:            adapter_state.physical_device,
+        owns_instance:              false,
+        retained_runtime:           retained_runtime,
+        adapter:                    adapter,
+        runtime_state:              runtime_state,
+        presentation_surface:       presentation_surface,
+        presentation_surface_owner: requested_surface.is_valid()
+            ? &requested_surface
+            : null,
     );
 }
 
@@ -307,6 +320,9 @@ fn gpu::Device? create_vk_device_with_selection(
     bool owns_instance,
     gpu::Runtime* retained_runtime = null,
     gpu::Adapter* adapter = null,
+    VkRuntimeState* runtime_state = null,
+    vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null,
+    gpu::Surface* presentation_surface_owner = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
     bool initialized_before_publish = false;
@@ -326,12 +342,13 @@ fn gpu::Device? create_vk_device_with_selection(
     state.graphics_queue_mutex.init()!;
     state.compute_queue_mutex.init()!;
     state.transfer_queue_mutex.init()!;
+    state.present_queue_mutex.init()!;
 
     state.texture_descriptor_capacity = resolve_descriptor_capacity(desc.texture_descriptor_capacity, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!;
     state.sampler_descriptor_capacity = resolve_descriptor_capacity(desc.sampler_descriptor_capacity, gpu::DEFAULT_SAMPLER_DESCRIPTORS)!;
 
     state.validation = desc.enable_validation;
-    state.presentation_enabled = desc.enable_presentation;
+    state.presentation_enabled = presentation_surface != null;
     QueueFamilies families;
     if (owns_instance) {
         vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
@@ -341,7 +358,6 @@ fn gpu::Device? create_vk_device_with_selection(
             .enable_debug_utils     = desc.enable_validation
                 || desc.enable_debug_names
                 || desc.debug_callback != null,
-            .require_surface_support = desc.enable_presentation,
             .application_name       = desc.application_name,
             .debug_messenger_info   = desc.enable_validation
                 ? &messenger_info
@@ -359,7 +375,13 @@ fn gpu::Device? create_vk_device_with_selection(
         state.instance = instance;
         state.physical_device = physical_device;
         vk::load_extensions(state.instance);
-        families = select_queue_families(state.physical_device)!;
+        families = presentation_surface == null
+            ? select_queue_families(state.physical_device)!
+            : select_queue_families_for_surface(
+                runtime_state,
+                state.physical_device,
+                presentation_surface,
+            )!;
     }
 
     vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
@@ -385,10 +407,11 @@ fn gpu::Device? create_vk_device_with_selection(
     bool buffer_supported   = heap_shared_features_supported(&features2.features, &features12) && query_descriptor_buffer_support(state.physical_device);
     state.heap_mode = resolve_heap_mode(desc.descriptor_heap_mode, indexing_supported, buffer_supported)!;
 
-    state.graphics_family = families.graphics;
-    state.compute_family  = families.compute;
-    state.transfer_family = families.transfer;
+    state.graphics_family     = families.graphics;
+    state.compute_family      = families.compute;
     state.compute_queue_index = families.compute_index;
+    state.transfer_family     = families.transfer;
+    state.present_family      = families.present;
 
     create_logical_device(state, &families, line_polygon_mode)!;
     vk::get_device_queue(state.device, state.graphics_family, 0, &state.graphics_queue);
@@ -399,6 +422,7 @@ fn gpu::Device? create_vk_device_with_selection(
         state.compute_queue = state.graphics_queue;
     }
     vk::get_device_queue(state.device, state.transfer_family, 0, &state.transfer_queue);
+    vk::get_device_queue(state.device, state.present_family, 0, &state.present_queue);
 
     create_vk_allocator(state)!;
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
@@ -420,12 +444,13 @@ fn gpu::Device? create_vk_device_with_selection(
     create_descriptor_heap(state)!;
     create_pipeline_shared(state, desc.pipeline_cache_data, pipeline_capacity)!;
     CapsInputs caps_inputs = {
-        .indexing_supported = indexing_supported,
-        .buffer_supported   = buffer_supported,
-        .async_compute      = state.compute_queue_distinct,
-        .line_polygon_mode  = line_polygon_mode,
-        .texture_capacity   = state.texture_descriptor_capacity,
-        .sampler_capacity   = state.sampler_descriptor_capacity,
+        .indexing_supported   = indexing_supported,
+        .buffer_supported     = buffer_supported,
+        .presentation_enabled = state.presentation_enabled,
+        .async_compute        = state.compute_queue_distinct,
+        .line_polygon_mode    = line_polygon_mode,
+        .texture_capacity     = state.texture_descriptor_capacity,
+        .sampler_capacity     = state.sampler_descriptor_capacity,
     };
     state.caps = build_caps(
         base:            &features2.features,
@@ -438,13 +463,14 @@ fn gpu::Device? create_vk_device_with_selection(
     initialized_before_publish = true;
     if (fail_device_creation_before_publish) return gpu::BACKEND_ERROR~;
     return gpu::register_device(
-        backend:       gpu::BackendKind.VULKAN,
-        caps:          state.caps,
-        vtable:        &VK_VTABLE,
-        backend_state: (void*)state,
-        retained_runtime: retained_runtime,
-        adapter:          adapter,
-        owner:         &state.owner,
+        backend:              gpu::BackendKind.VULKAN,
+        caps:                 state.caps,
+        vtable:               &VK_VTABLE,
+        backend_state:        (void*)state,
+        retained_runtime:     retained_runtime,
+        adapter:              adapter,
+        presentation_surface: presentation_surface_owner,
+        owner:                &state.owner,
     );
 }
 
@@ -543,6 +569,7 @@ fn void destroy_state(VkDeviceState* state) @private {
     if (state.graphics_queue_mutex.is_initialized()) (void)state.graphics_queue_mutex.destroy();
     if (state.compute_queue_mutex.is_initialized())  (void)state.compute_queue_mutex.destroy();
     if (state.transfer_queue_mutex.is_initialized()) (void)state.transfer_queue_mutex.destroy();
+    if (state.present_queue_mutex.is_initialized())  (void)state.present_queue_mutex.destroy();
     mem::free(state);
 }
 
@@ -602,15 +629,6 @@ fn gpu::DescriptorHeapMode? resolve_heap_mode(gpu::DescriptorHeapMode requested,
     }
 }
 
-<* Pure conditional extension check; query is an injectable seam for selection tests. *>
-fn bool presentation_requirement_satisfied(
-    bool required,
-    vk::PhysicalDevice physical_device,
-    DeviceExtensionQuery query = &device_supports_extension
-) {
-    if (!required) return true;
-    return query(physical_device, SWAPCHAIN_EXTENSION);
-}
 
 <* The feature struct is only chained once the extension is confirmed. *>
 fn bool query_descriptor_buffer_support(vk::PhysicalDevice physical_device) @private {
@@ -678,7 +696,6 @@ fn bool candidate_satisfies(vk::PhysicalDevice candidate, gpu::DeviceDesc* desc)
             limits,
         )) return false;
     }
-    if (!presentation_requirement_satisfied(desc.enable_presentation, candidate)) return false;
     return true;
 }
 
@@ -763,6 +780,13 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families, bo
     if (families.transfer != families.graphics && families.transfer != families.compute) {
         queue_infos[queue_info_count++] = vk::device_queue_create_info()
             .set_queue_family_index(families.transfer)
+            .set_queue_priorities(priorities[:1]);
+    }
+    if (families.present != families.graphics
+        && families.present != families.compute
+        && families.present != families.transfer) {
+        queue_infos[queue_info_count++] = vk::device_queue_create_info()
+            .set_queue_family_index(families.present)
             .set_queue_priorities(priorities[:1]);
     }
 
@@ -857,6 +881,7 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
     vk::PhysicalDeviceProperties props = props2.properties;
     return (gpu::DeviceCaps){
         .strict_enabled            = true,
+        .presentation_enabled      = inputs.presentation_enabled,
         .buffer_device_address      = v12.buffer_device_address != 0,
         .synchronization2           = v13.synchronization2 != 0,
         .dynamic_rendering          = v13.dynamic_rendering != 0,

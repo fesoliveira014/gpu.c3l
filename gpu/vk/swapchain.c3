@@ -12,6 +12,7 @@ const uint MAX_SWAPCHAIN_IMAGES = 8;
 const ulong ACQUIRE_TIMEOUT_NS = 1_000_000_000;
 
 struct SwapchainSlot {
+    gpu::Surface        surface_owner;
     vk::SurfaceKHR      surface;
     vk::SwapchainKHR    swapchain;
     uint                image_count;
@@ -151,6 +152,10 @@ fn void? swapchain_present_guard(bool acquire_pending, bool acquire_consumed) {
     if (!acquire_pending || !acquire_consumed) return gpu::INVALID_RESOURCE_STATE~;
 }
 
+fn void? swapchain_mutation_guard(bool acquire_pending) {
+    if (acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
+}
+
 <* Map the VkImageUsageFlags granted at swapchain creation to the wrapped
    TextureSlot's usage: color attach is always requested, transfer_src
    carries over iff the surface granted it. Pure. *>
@@ -203,86 +208,6 @@ fn gpu::AcquiredImage make_acquired_image(TextureSlot* texture, gpu::TextureHand
         .suboptimal   = suboptimal,
         .prior_layout = texture_layout(texture),
     };
-}
-
-fn vk::SurfaceKHR? create_platform_surface(
-    VkDeviceState* state,
-    gpu::SurfaceDesc* surface,
-    WsiDiagnosticContext* context,
-) @private {
-    vk::SurfaceKHR vk_surface;
-    switch (surface.platform) {
-        case gpu::PlatformKind.WAYLAND:
-            vk::WaylandSurfaceCreateInfoKHR info = {
-                .s_type  = vk::StructureType.WAYLAND_SURFACE_CREATE_INFO_KHR,
-                .display = surface.native_display,
-                .surface = surface.native_window,
-            };
-            if (vk::extensions.vk_create_wayland_surface_khr == null) {
-                return report_wsi_backend_failure(
-                    context:      context,
-                    public_fault: gpu::UNSUPPORTED_FEATURE,
-                    backend_text: "required platform surface entry point is unavailable",
-                )~;
-            }
-            check_wsi_backend_result(
-                context: context,
-                kind:    WsiResultKind.SURFACE,
-                result:  vk::extensions.vk_create_wayland_surface_khr(
-                    state.instance,
-                    &info,
-                    null,
-                    &vk_surface,
-                ),
-            )!;
-        case gpu::PlatformKind.X11:
-            vk::XlibSurfaceCreateInfoKHR info = {
-                .s_type = vk::StructureType.XLIB_SURFACE_CREATE_INFO_KHR,
-                .dpy    = surface.native_display,
-                .window = (ulong)surface.native_window,
-            };
-            if (vk::extensions.vk_create_xlib_surface_khr == null) {
-                return report_wsi_backend_failure(
-                    context:      context,
-                    public_fault: gpu::UNSUPPORTED_FEATURE,
-                    backend_text: "required platform surface entry point is unavailable",
-                )~;
-            }
-            check_wsi_backend_result(
-                context: context,
-                kind:    WsiResultKind.SURFACE,
-                result:  vk::extensions.vk_create_xlib_surface_khr(
-                    state.instance,
-                    &info,
-                    null,
-                    &vk_surface,
-                ),
-            )!;
-        case gpu::PlatformKind.WIN32:
-            vk::Win32SurfaceCreateInfoKHR info = {
-                .s_type    = vk::StructureType.WIN32_SURFACE_CREATE_INFO_KHR,
-                .hinstance = surface.native_display,
-                .hwnd      = surface.native_window,
-            };
-            if (vk::extensions.vk_create_win32surface_khr == null) {
-                return report_wsi_backend_failure(
-                    context:      context,
-                    public_fault: gpu::UNSUPPORTED_FEATURE,
-                    backend_text: "required platform surface entry point is unavailable",
-                )~;
-            }
-            check_wsi_backend_result(
-                context: context,
-                kind:    WsiResultKind.SURFACE,
-                result:  vk::extensions.vk_create_win32surface_khr(
-                    state.instance,
-                    &info,
-                    null,
-                    &vk_surface,
-                ),
-            )!;
-    }
-    return vk_surface;
 }
 
 <* Create the vk swapchain for `slot` at the clamped extent and wrap its
@@ -388,21 +313,28 @@ fn void? build_swapchain(
             usage |= (uint)vk::ImageUsageFlagBits.TRANSFER_SRC_BIT;
         }
 
+        uint[2] queue_families;
+        uint queue_family_count = swapchain_queue_families(state, queue_families[..]);
+
         vk::SwapchainCreateInfoKHR create_info = {
-            .s_type             = vk::StructureType.SWAPCHAIN_CREATE_INFO_KHR,
-            .surface            = slot.surface,
-            .min_image_count    = image_count,
-            .image_format       = format_to_vk(format),
-            .image_color_space  = vk::ColorSpaceKHR.SRGB_NONLINEAR_KHR,
-            .image_extent       = extent,
-            .image_array_layers = 1,
-            .image_usage        = (vk::ImageUsageFlags)usage,
-            .image_sharing_mode = vk::SharingMode.EXCLUSIVE,
-            .pre_transform      = caps.current_transform,
-            .composite_alpha    = vk::CompositeAlphaFlagBitsKHR.OPAQUE_BIT_KHR,
-            .present_mode       = present_mode,
-            .clipped            = vk::TRUE,
-            .old_swapchain      = old,
+            .s_type                   = vk::StructureType.SWAPCHAIN_CREATE_INFO_KHR,
+            .surface                  = slot.surface,
+            .min_image_count          = image_count,
+            .image_format             = format_to_vk(format),
+            .image_color_space        = vk::ColorSpaceKHR.SRGB_NONLINEAR_KHR,
+            .image_extent             = extent,
+            .image_array_layers       = 1,
+            .image_usage              = (vk::ImageUsageFlags)usage,
+            .image_sharing_mode       = queue_family_count == 1
+                ? vk::SharingMode.EXCLUSIVE
+                : vk::SharingMode.CONCURRENT,
+            .queue_family_index_count = queue_family_count == 1 ? 0 : queue_family_count,
+            .p_queue_family_indices   = queue_family_count == 1 ? null : &queue_families[0],
+            .pre_transform            = caps.current_transform,
+            .composite_alpha          = vk::CompositeAlphaFlagBitsKHR.OPAQUE_BIT_KHR,
+            .present_mode             = present_mode,
+            .clipped                  = vk::TRUE,
+            .old_swapchain            = old,
         };
         check_wsi_backend_result(
             context: context,
@@ -554,7 +486,11 @@ fn void release_swapchain_images(VkDeviceState* state, SwapchainSlot* slot) @pri
     slot.image_count = 0;
 }
 
-fn gpu::SwapchainHandle? vk_create_swapchain(gpu::Device* device, gpu::SurfaceDesc* surface, gpu::SwapchainDesc* desc) @private {
+fn gpu::SwapchainHandle? vk_create_swapchain(
+    gpu::Device* device,
+    gpu::Surface* surface,
+    gpu::SwapchainDesc* desc,
+) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = {
         .state      = state,
@@ -565,14 +501,16 @@ fn gpu::SwapchainHandle? vk_create_swapchain(gpu::Device* device, gpu::SurfaceDe
         return report_wsi_contract(
             context:        &context,
             public_fault:   gpu::UNSUPPORTED_FEATURE,
-            rejected_field: "DeviceDesc.enable_presentation",
-            invariant:      "must be enabled before creating a swapchain",
+            rejected_field: "DeviceRequest.presentation",
+            invariant:      "must be requested before device creation",
         )~;
     }
 
     SwapchainSlot slot = { .requested = *desc };
     defer catch destroy_swapchain_slot(state, &slot);
-    slot.surface = create_platform_surface(state, surface, &context)!;
+    gpu::surface_retain_swapchain(surface)!;
+    slot.surface_owner = *surface;
+    slot.surface = (vk::SurfaceKHR)gpu::surface_backend_handle(surface)!;
 
     uint supported = 0;
     check_wsi_backend_result(
@@ -580,7 +518,7 @@ fn gpu::SwapchainHandle? vk_create_swapchain(gpu::Device* device, gpu::SurfaceDe
         kind:    WsiResultKind.SURFACE,
         result:  vk::extensions.vk_get_physical_device_surface_support_khr(
             state.physical_device,
-            state.graphics_family,
+            state.present_family,
             slot.surface,
             &supported,
         ),
@@ -589,7 +527,7 @@ fn gpu::SwapchainHandle? vk_create_swapchain(gpu::Device* device, gpu::SurfaceDe
         return report_wsi_backend_failure(
             context:      &context,
             public_fault: gpu::UNSUPPORTED_FEATURE,
-            backend_text: "selected graphics queue family cannot present to the surface",
+            backend_text: "selected presentation queue family cannot present to the surface",
         )~;
     }
 
@@ -640,9 +578,32 @@ fn void destroy_swapchain_slot(VkDeviceState* state, SwapchainSlot* slot) @priva
         mem::free(slot.acquire_semaphores.ptr);
         slot.acquire_semaphores = {};
     }
-    if (slot.surface != null) {
-        vk::extensions.vk_destroy_surface_khr(state.instance, slot.surface, null);
-        slot.surface = (vk::SurfaceKHR)null;
+    slot.surface = (vk::SurfaceKHR)null;
+    if (slot.surface_owner.is_valid()) {
+        gpu::surface_release_swapchain(&slot.surface_owner)!!;
+        slot.surface_owner = {};
+    }
+}
+
+fn void? wait_swapchain_queues_idle(
+    VkDeviceState* state,
+    WsiDiagnosticContext* context,
+) @private {
+    vk::Queue[2] queues;
+    uint queue_count = swapchain_idle_queues(state, queues[..]);
+    for (uint index = 0; index < queue_count; index++) {
+        {
+            Mutex* queue_mutex = index == 0
+                ? &state.graphics_queue_mutex
+                : present_queue_mutex_for(state);
+            queue_mutex.lock()!!;
+            defer queue_mutex.unlock();
+            check_wsi_backend_result(
+                context: context,
+                kind:    WsiResultKind.COMMON,
+                result:  vk::queue_wait_idle(queues[index]),
+            )!;
+        }
     }
 }
 
@@ -650,15 +611,8 @@ fn void? vk_destroy_swapchain(gpu::Device* device, gpu::SwapchainHandle handle) 
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = { .state = state, .operation = "destroy_swapchain" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
-    {
-        state.graphics_queue_mutex.lock()!!;
-        defer state.graphics_queue_mutex.unlock();
-        check_wsi_backend_result(
-            context: &context,
-            kind:    WsiResultKind.COMMON,
-            result:  vk::queue_wait_idle(state.graphics_queue),
-        )!;
-    }
+    check_swapchain_mutation_lifecycle(&context, slot)!;
+    wait_swapchain_queues_idle(state, &context)!;
     destroy_swapchain_slot(state, slot);
     state.swapchains.free(handle)!;
 }
@@ -667,15 +621,8 @@ fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, u
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = { .state = state, .operation = "resize_swapchain" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
-    {
-        state.graphics_queue_mutex.lock()!!;
-        defer state.graphics_queue_mutex.unlock();
-        check_wsi_backend_result(
-            context: &context,
-            kind:    WsiResultKind.COMMON,
-            result:  vk::queue_wait_idle(state.graphics_queue),
-        )!;
-    }
+    check_swapchain_mutation_lifecycle(&context, slot)!;
+    wait_swapchain_queues_idle(state, &context)!;
 
     vk::SwapchainKHR old = slot.swapchain;
     release_swapchain_images(state, slot);
@@ -773,9 +720,10 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
     slot.acquire_pending = false;
     slot.acquire_consumed = false;
 
-    state.graphics_queue_mutex.lock()!!;
-    defer state.graphics_queue_mutex.unlock();
-    vk::Result result = vk::extensions.vk_queue_present_khr(state.graphics_queue, &info);
+    Mutex* queue_mutex = present_queue_mutex_for(state);
+    queue_mutex.lock()!!;
+    defer queue_mutex.unlock();
+    vk::Result result = vk::extensions.vk_queue_present_khr(state.present_queue, &info);
     return check_wsi_backend_result(
         context: &context,
         kind:    WsiResultKind.PRESENT,

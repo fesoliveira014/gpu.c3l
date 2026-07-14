@@ -68,6 +68,9 @@ jobs:
       - name: CPU-only tests (no native libs)
         run: |
           c3c run import_gpu --path test/cpu
+          c3c build import_surface_win32 --path test/cpu
+          c3c build import_surface_wayland --path test/cpu
+          c3c build import_surface_x11 --path test/cpu
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
 
@@ -108,7 +111,9 @@ jobs:
           exit $FAIL
 
       - name: Check public API boundary
-        run: python scripts/check_public_api.py
+        run: |
+          python -m unittest scripts.test_check_public_api
+          python scripts/check_public_api.py
 
       # Whole-compile reference (public module gpu + gpu::vk internals; a
       # scoped docgen needs a closed source set, which only the whitebox test
@@ -286,6 +291,9 @@ jobs:
       - name: CPU test targets
         run: |
           c3c run import_gpu --path test/cpu
+          c3c build import_surface_win32 --path test/cpu
+          c3c build import_surface_wayland --path test/cpu
+          c3c build import_surface_x11 --path test/cpu
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
 

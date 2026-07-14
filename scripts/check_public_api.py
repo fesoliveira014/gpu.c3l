@@ -12,9 +12,11 @@ CPU_PROJECT = ROOT / "test" / "cpu"
 FORBIDDEN_TEXT = {
     "backend_state": "backend state pointer",
     "backendvtable": "backend dispatch table",
+    "platformkind": "retired PlatformKind",
     "probe_vulkan_version": "Vulkan loader probe",
     "probe_vma_allocator": "VMA probe",
     "range_end": "readback retirement range",
+    "surfacedesc": "retired SurfaceDesc",
     "ticket.value": "readback retirement value",
     "vk::": "Vulkan type",
     "vma::": "VMA type",
@@ -30,7 +32,103 @@ FORBIDDEN_SYMBOLS = {
     "CmdDrawFn",
     "CmdReadbackBufferFn",
     "ResolveReadbackFn",
+    "create_wayland_surface",
+    "create_win32_surface",
+    "create_x11_surface",
 }
+
+PLATFORM_HANDLE_TYPES = {
+    "gpu::surface::win32": ("InstanceHandle", "WindowHandle"),
+    "gpu::surface::wayland": ("DisplayHandle", "SurfaceHandle"),
+    "gpu::surface::x11": ("DisplayHandle", "WindowHandle"),
+}
+
+RETIRED_SOURCE_SYMBOLS = ("PlatformKind", "SurfaceDesc")
+
+
+def public_entries(module: dict) -> dict:
+    return {
+        section: (
+            [entry for entry in contents if entry.get("visibility") != "private"]
+            if isinstance(contents, list) else contents
+        )
+        for section, contents in module.items()
+    }
+
+
+def validate_document(document: dict) -> list[str]:
+    modules = document.get("modules", {})
+    public_module = modules.get("gpu")
+    if public_module is None:
+        return ["missing gpu module"]
+
+    public_surface = public_entries(public_module)
+    encoded = json.dumps(public_surface, separators=(",", ":"))
+    lowered = encoded.lower()
+    failures = [
+        label
+        for token, label in FORBIDDEN_TEXT.items()
+        if token in lowered
+    ]
+    failures.extend(
+        symbol
+        for symbol in FORBIDDEN_SYMBOLS
+        if f'"{symbol}"' in encoded
+    )
+
+    for module_name, handle_names in PLATFORM_HANDLE_TYPES.items():
+        module = modules.get(module_name)
+        if module is None:
+            failures.append(f"missing {module_name}")
+            continue
+
+        surface = public_entries(module)
+        definitions = {
+            entry.get("name"): entry
+            for entry in surface.get("types", [])
+        }
+        for handle_name in handle_names:
+            definition = definitions.get(handle_name)
+            if definition is None or definition.get("kind") != "distinct type":
+                failures.append(
+                    f"{module_name}::{handle_name} must be a distinct type"
+                )
+
+        create_surface = next(
+            (
+                entry
+                for entry in surface.get("functions", [])
+                if entry.get("name") == "create_surface"
+            ),
+            None,
+        )
+        if create_surface is None:
+            failures.append(f"missing {module_name}::create_surface")
+            continue
+
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in create_surface.get("members", [])
+        )
+        expected_types = ("Runtime*", *handle_names)
+        if parameter_types != expected_types:
+            failures.append(
+                f"{module_name}::create_surface must use typed platform handles"
+            )
+
+    return failures
+
+
+def scan_retired_source_symbols() -> list[str]:
+    failures = []
+    for path in sorted((ROOT / "gpu").rglob("*.c3")):
+        source = path.read_text(encoding="utf-8")
+        relative = path.relative_to(ROOT)
+        for symbol in RETIRED_SOURCE_SYMBOLS:
+            if symbol in source:
+                failures.append(f"retired {symbol} in {relative}")
+    return failures
+
 
 def main() -> int:
     result = subprocess.run(
@@ -45,30 +143,17 @@ def main() -> int:
         return result.returncode
 
     document = json.loads(result.stdout)
-    public_module = document.get("modules", {}).get("gpu")
-    if public_module is None:
-        print("docgen did not emit module gpu", file=sys.stderr)
-        return 1
-
-    public_surface = {
-        section: (
-            [entry for entry in contents if entry.get("visibility") != "private"]
-            if isinstance(contents, list) else contents
-        )
-        for section, contents in public_module.items()
-    }
-    encoded = json.dumps(public_surface, separators=(",", ":"))
-    lowered = encoded.lower()
-    failures = [label for token, label in FORBIDDEN_TEXT.items() if token in lowered]
-    failures.extend(symbol for symbol in FORBIDDEN_SYMBOLS if f'"{symbol}"' in encoded)
+    failures = validate_document(document)
+    failures.extend(scan_retired_source_symbols())
     if failures:
-        print("public gpu documentation leaks internal symbols:", file=sys.stderr)
+        print("public GPU API contract violations:", file=sys.stderr)
         for failure in failures:
             print(f"- {failure}", file=sys.stderr)
         return 1
 
-    print("public gpu documentation is backend-neutral")
+    print("public GPU API is backend-neutral and uses typed platform surfaces")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -59,7 +59,7 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
     assert(
         @catch(gpu::create_swapchain(
             &device,
-            (gpu::SurfaceDesc*)null,
+            (gpu::Surface*)null,
             (gpu::SwapchainDesc*)null,
         )) == gpu::INVALID_ARGUMENT,
         "create_swapchain rejects null descriptors"

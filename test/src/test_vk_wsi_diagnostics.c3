@@ -29,16 +29,16 @@ fn void wsi_presentation_gate_diagnostic() @test {
     defer gpu::destroy_device(&device)!!;
     capture = {};
 
-    gpu::SurfaceDesc surface = { .platform = gpu::PlatformKind.WAYLAND };
+    gpu::Surface surface;
     gpu::SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
-    fault gate_fault = @catch(gpu::create_swapchain(&device, &surface, &swapchain_desc));
+    fault gate_fault = @catch(gpu::vk::vk_create_swapchain(&device, &surface, &swapchain_desc));
 
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "presentation gate fault is unchanged");
     assert(capture.calls == 1, "presentation gate emits exactly once");
     assert(capture.last.public_fault == gate_fault, "diagnostic preserves the returned fault");
     assert(capture.last.operation.str_view() == "create_swapchain", "diagnostic names create_swapchain");
     assert(
-        capture.last.rejected_field.str_view() == "DeviceDesc.enable_presentation",
+        capture.last.rejected_field.str_view() == "DeviceRequest.presentation",
         "diagnostic names the presentation gate"
     );
     assert(capture.last.resource.kind == gpu::DebugResourceKind.SWAPCHAIN, "diagnostic identifies a swapchain");
@@ -369,7 +369,7 @@ fn void capability_failures_are_backend_only_and_success_is_silent() @test {
     fault capability_fault = gpu::vk::report_wsi_backend_failure(
         context:      &context,
         public_fault: gpu::UNSUPPORTED_FEATURE,
-        backend_text: "selected graphics queue family cannot present to the surface",
+        backend_text: "selected presentation queue family cannot present to the surface",
     );
     assert(capability_fault == gpu::UNSUPPORTED_FEATURE, "capability fault is unchanged");
     assert(capture.calls == 1, "capability failure emits exactly once");

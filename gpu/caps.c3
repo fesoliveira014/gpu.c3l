@@ -27,7 +27,6 @@ struct DeviceDesc {
     BackendKind          backend;
     bool                 enable_validation;
     bool                 enable_debug_names;
-    bool                 enable_presentation;
     DescriptorHeapMode   descriptor_heap_mode;
     uint                 texture_descriptor_capacity;
     uint                 sampler_descriptor_capacity;
@@ -50,6 +49,7 @@ struct DeviceDesc {
    hardcoding limits. *>
 struct DeviceCaps {
     bool strict_enabled;
+    bool presentation_enabled;
     bool buffer_device_address;
     bool synchronization2;
     bool dynamic_rendering;

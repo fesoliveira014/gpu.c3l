@@ -2,12 +2,6 @@ module gpu;
 
 const uint MAX_SWAPCHAINS = 8;
 
-<* Windowing system that owns the native handles in SurfaceDesc. *>
-enum PlatformKind : int {
-    WAYLAND,
-    X11,
-    WIN32,
-}
 
 <* Pacing of presentation; unsupported requested modes fall back to FIFO. *>
 enum PresentMode : int {
@@ -26,13 +20,6 @@ bitstruct PresentModeSupport : uint {
     bool mailbox;
 }
 
-<* Native window-system handles; meaning follows `platform`: wl_display/wl_surface
-   (WAYLAND), Display*/Window (X11), HINSTANCE/HWND (WIN32). *>
-struct SurfaceDesc {
-    PlatformKind platform;
-    void*        native_display;
-    void*        native_window;
-}
 
 <* Creation parameters for create_swapchain. *>
 struct SwapchainDesc {
@@ -73,17 +60,28 @@ struct PresentDesc {
     SwapchainHandle swapchain;
 }
 
-<* Create a swapchain against platform-native window handles. Requires a
-   device created with enable_presentation.
-   Ownership: release with destroy_swapchain. *>
-fn SwapchainHandle? create_swapchain(Device* device, SurfaceDesc* surface, SwapchainDesc* desc) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+<* The surface remains owned by its runtime and must outlive the swapchain. *>
+fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, SwapchainDesc* desc) {
     if (surface == null || desc == null) return INVALID_ARGUMENT~;
-    return vtable.create_swapchain(device, surface, desc);
+    DeviceData* device_data = resolve_device(device);
+    SurfaceData* surface_data = resolve_surface(surface);
+    if (device_data == null || surface_data == null) return INVALID_HANDLE~;
+    if (!device_data.runtime_retained) return INVALID_RESOURCE_STATE~;
+    if (!device_data.presentation_surface.is_valid()) return UNSUPPORTED_FEATURE~;
+    if ((ulong)*surface != (ulong)device_data.presentation_surface) {
+        return INVALID_HANDLE~;
+    }
+
+    RuntimeData* device_runtime = resolve_runtime(&device_data.runtime);
+    RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
+    if (device_runtime == null || surface_runtime != device_runtime) {
+        return INVALID_HANDLE~;
+    }
+    return device_data.vtable.create_swapchain(device, surface, desc);
 }
 
-<* Counterpart of create_swapchain; in-flight presentation must be idle. *>
+<* Counterpart of create_swapchain. Returns INVALID_RESOURCE_STATE while an
+   acquired image is pending; otherwise waits for in-flight swapchain work. *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;
@@ -93,7 +91,8 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
 <* Recreate under the same handle at a new extent. A zero clamped extent or
    a failed rebuild leaves the swapchain dormant (acquire faults
    SWAPCHAIN_OUT_OF_DATE) until a successful resize. Prior acquired-image
-   handles become stale. *>
+   handles become stale. Returns INVALID_RESOURCE_STATE while an acquired
+   image is pending. *>
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     BackendVTable* vtable = device_vtable(device);
     if (vtable == null) return INVALID_HANDLE~;

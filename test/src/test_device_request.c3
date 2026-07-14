@@ -9,15 +9,15 @@ fn void strict_device_request_is_an_immutable_value() @test {
         empty,
         gpu::DeviceCapability.STRICT,
     )!!;
-    assert(gpu::DeviceRequest::size == ulong::size, "request storage is opaque and compact");
-    assert((ulong)empty == (ulong)original, "composition preserves its input value");
-    assert((ulong)strict != (ulong)empty, "composition returns a new request value");
+    assert(gpu::DeviceRequest::size == uint128::size, "request storage fits in two machine words");
+    assert((uint128)empty == (uint128)original, "composition preserves its input value");
+    assert((uint128)strict != (uint128)empty, "composition returns a new request value");
 }
 
 fn void strict_device_request_is_explicit_and_non_empty() @test {
     gpu::DeviceRequest request = gpu::strict_device_request();
     assert(
-        (ulong)request != (ulong)gpu::empty_device_request(),
+        (uint128)request != (uint128)gpu::empty_device_request(),
         "strict construction explicitly contributes strict semantics"
     );
     gpu::validate_device_request(&request)!!;

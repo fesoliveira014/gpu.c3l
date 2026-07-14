@@ -64,6 +64,11 @@ gpu.c3l/
 │   ├── pipeline.c3
 │   ├── command.c3
 │   ├── sync.c3
+│   ├── surface.c3
+│   ├── surface/
+│   │   ├── win32/surface.c3
+│   │   ├── wayland/surface.c3
+│   │   └── x11/surface.c3
 │   ├── swapchain.c3
 │   ├── debug.c3
 │   └── vk/
@@ -127,7 +132,28 @@ destroy_runtime(Runtime*)          -> void?
 
 `AdapterList` is an allocation-free view. Its adapters and the read-only strings in adapter query results are borrowed until their runtime is destroyed. Destroying a runtime consumes its token, invalidates its adapter views and handles, and returns `RESOURCE_IN_USE` while a dependent surface or device is live.
 
-Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact borrowed adapter, retains its runtime, and reuses the runtime-owned backend instance. `supports_device_request` is read-only and does not enable state. The transitional `create_device_from_desc(DeviceDesc*)` path remains independent of runtime discovery and owns a separate backend instance.
+Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact borrowed adapter, retains its runtime, and reuses the runtime-owned backend instance. `supports_device_request` is read-only and does not enable state. The transitional `create_device_from_desc(DeviceDesc*)` path is headless, performs independent discovery, and owns a separate backend instance.
+
+### Surfaces
+
+`Surface` is an opaque token owned by one runtime. Platform modules expose
+distinct native handle types:
+
+```text
+gpu::surface::win32::create_surface(Runtime*, InstanceHandle, WindowHandle)
+gpu::surface::wayland::create_surface(Runtime*, DisplayHandle, SurfaceHandle)
+gpu::surface::x11::create_surface(Runtime*, DisplayHandle, WindowHandle)
+
+supports_presentation(Adapter*, Surface*) -> bool?
+destroy_surface(Surface*)                 -> void?
+request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
+```
+
+Query presentation support before device creation, then add the surface to the
+immutable request. The device is bound to that exact surface and selects a
+presentation-capable private queue, which may differ from its graphics queue.
+A surface must outlive its swapchains; destroying a live dependency returns
+`RESOURCE_IN_USE`.
 
 ### Device
 
@@ -303,7 +329,7 @@ Binary semaphores are backend-internal swapchain details unless a public need ap
 
 Swapchains are optional. Headless compute and offscreen graphics must work without a swapchain.
 
-A swapchain depends on platform surface creation. Samples use SDL3 to create windows and provide platform handles, but the `gpu` public API should not require `sdl::Window` in signatures.
+A swapchain borrows a runtime-owned `Surface`. SDL3 supplies native handles to the platform surface module in samples; SDL types do not enter the core API.
 
 ## 5. Backend dispatch
 
@@ -482,7 +508,7 @@ Neither path changes shader material records.
 Swapchain operations:
 
 ```text
-create_swapchain(device, SurfaceDesc, SwapchainDesc) -> SwapchainHandle?
+create_swapchain(device, Surface*, SwapchainDesc*) -> SwapchainHandle?
 get_swapchain_info(device, swapchain) -> SwapchainInfo?
 acquire_next_image(device, swapchain) -> AcquiredImage?
 present(device, PresentDesc) -> void?

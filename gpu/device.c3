@@ -78,7 +78,7 @@ alias CmdReadbackBufferFn @private     = fn ReadbackTicket? (CommandList*, Buffe
 alias CmdReadbackTextureFn @private    = fn ReadbackTicket? (CommandList*, TextureHandle, uint);
 alias PollReadbackFn @private          = fn bool (Device*, ReadbackTicket*);
 alias ResolveReadbackFn @private       = fn void? (Device*, ReadbackTicket*, char[]);
-alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, SurfaceDesc*, SwapchainDesc*);
+alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
 alias GetSwapchainInfoFn @private      = fn SwapchainInfo? (Device*, SwapchainHandle);
@@ -175,6 +175,7 @@ struct DeviceData @private {
     void*          backend_state;
     Runtime        runtime;
     Adapter        adapter;
+    Surface        presentation_surface;
     bool           runtime_retained;
 }
 
@@ -197,15 +198,18 @@ fn Device? register_device(
     void* backend_state,
     Runtime* retained_runtime = null,
     Adapter* adapter = null,
+    Surface* presentation_surface = null,
     Device* owner = null,
 ) @private {
     if (device_active || vtable == null || backend_state == null) return INVALID_RESOURCE_STATE~;
     bool has_runtime = retained_runtime != null;
     if (has_runtime != (adapter != null)) return INVALID_ARGUMENT~;
+
     Runtime runtime;
     Adapter registered_adapter;
+    RuntimeData* runtime_data;
     if (has_runtime) {
-        RuntimeData* runtime_data = resolve_runtime(retained_runtime);
+        runtime_data = resolve_runtime(retained_runtime);
         RuntimeData* adapter_data = resolve_adapter(adapter);
         if (runtime_data == null || adapter_data != runtime_data) {
             return INVALID_HANDLE~;
@@ -215,18 +219,30 @@ fn Device? register_device(
         registered_adapter = *adapter;
     }
 
+    Surface registered_surface;
+    if (presentation_surface != null) {
+        if (!has_runtime) return INVALID_ARGUMENT~;
+        SurfaceData* surface_data = resolve_surface(presentation_surface);
+        if (surface_data == null) return INVALID_HANDLE~;
+        RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
+        if (surface_runtime != runtime_data) return INVALID_HANDLE~;
+        registered_surface = *presentation_surface;
+    }
+    caps.presentation_enabled = registered_surface.is_valid();
+
     next_device_generation++;
     if (next_device_generation == 0) next_device_generation++;
     Device handle = (Device)next_device_generation;
     active_device = {
-        .generation       = next_device_generation,
-        .backend          = backend,
-        .caps             = caps,
-        .vtable           = vtable,
-        .backend_state    = backend_state,
-        .runtime          = runtime,
-        .adapter          = registered_adapter,
-        .runtime_retained = has_runtime,
+        .generation           = next_device_generation,
+        .backend              = backend,
+        .caps                 = caps,
+        .vtable               = vtable,
+        .backend_state        = backend_state,
+        .runtime              = runtime,
+        .adapter              = registered_adapter,
+        .presentation_surface = registered_surface,
+        .runtime_retained     = has_runtime,
     };
     if (owner != null) *owner = handle;
     device_active = true;
