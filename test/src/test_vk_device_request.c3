@@ -90,8 +90,9 @@ fn void malformed_native_request_preserves_runtime_state() @test {
 
 fn void failed_native_device_creation_rolls_back_before_publication() @test {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
-        .application_name = "gpu_vk_device_request_rollback_test",
+        .backend           = gpu::BackendKind.VULKAN,
+        .application_name  = "gpu_vk_device_request_rollback_test",
+        .enable_validation = true,
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;

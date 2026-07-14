@@ -5,6 +5,11 @@ import gpu::vk @public;
 alias DestroyRuntimeBackendFn @private = fn void (void*);
 alias GetAdapterInfoBackendFn @private = fn AdapterInfo? (void*, uint);
 alias GetAdapterDiagnosticsBackendFn @private = fn AdapterDiagnostics? (void*, uint);
+alias CreateWin32SurfaceBackendFn @private = fn void*? (void*, void*, void*);
+alias CreateWaylandSurfaceBackendFn @private = fn void*? (void*, void*, void*);
+alias CreateX11SurfaceBackendFn @private = fn void*? (void*, void*, ulong);
+alias DestroySurfaceBackendFn @private = fn void (void*, void*);
+alias SupportsPresentationBackendFn @private = fn bool? (void*, uint, void*);
 
 const uint MAX_RUNTIMES @private = 16;
 const uint MAX_ADAPTERS_PER_RUNTIME @private = (uint)ushort::max + 1;
@@ -31,6 +36,11 @@ struct RuntimeBackendVTable @private {
     DestroyRuntimeBackendFn        destroy_runtime;
     GetAdapterInfoBackendFn        get_adapter_info;
     GetAdapterDiagnosticsBackendFn get_adapter_diagnostics;
+    CreateWin32SurfaceBackendFn     create_win32_surface;
+    CreateWaylandSurfaceBackendFn   create_wayland_surface;
+    CreateX11SurfaceBackendFn       create_x11_surface;
+    DestroySurfaceBackendFn         destroy_surface;
+    SupportsPresentationBackendFn   supports_presentation;
 }
 
 struct RuntimeData @private {

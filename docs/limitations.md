@@ -132,10 +132,13 @@ Two sizing rules that bite:
 Anything the device can answer at runtime lives in `DeviceCaps` (filled at
 `create_device`): heap capacities, alignments, `max_sampler_anisotropy`,
 workload limits (`max_compute_work_group_count`,
-`max_draw_indirect_count`), feature booleans (`draw_indirect_count`,
-`descriptor_buffer`, …), and
-`get_present_mode_support` answers per-surface present modes. Prefer
-querying over hardcoding — the samples show the pattern.
+`max_draw_indirect_count`), and feature booleans such as
+`draw_indirect_count` and `descriptor_buffer`.
+
+Surface support is queried separately. `supports_presentation(adapter,
+surface)` preflights device creation; `get_present_mode_support(device,
+swapchain)` reports modes after swapchain creation. Prefer queries over
+hardcoded assumptions.
 
 Texture format support is queried separately because it depends on both the
 backend profile and the physical adapter:

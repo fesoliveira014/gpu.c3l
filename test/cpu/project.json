@@ -16,6 +16,8 @@
     "../../gpu/device.c3",
     "../../gpu/device_request.c3",
     "../../gpu/device_support.c3",
+    "../../gpu/surface.c3",
+    "../../gpu/surface/**",
     "../../gpu/caps.c3",
     "../../gpu/memory.c3",
     "../../gpu/buffer.c3",
@@ -39,6 +41,24 @@
         "import_gpu.c3"
       ]
     },
+    "import_surface_win32": {
+      "type": "executable",
+      "sources": [
+        "import_surface_win32.c3"
+      ]
+    },
+    "import_surface_wayland": {
+      "type": "executable",
+      "sources": [
+        "import_surface_wayland.c3"
+      ]
+    },
+    "import_surface_x11": {
+      "type": "executable",
+      "sources": [
+        "import_surface_x11.c3"
+      ]
+    },
     "unit": {
       "type": "test",
       "sources": [
@@ -49,6 +69,7 @@
         "../src/test_device_request.c3",
         "../src/test_device_support.c3",
         "../src/test_device_creation.c3",
+        "../src/test_surface.c3",
         "../src/test_ranges.c3",
         "../src/test_texture_transition.c3",
         "../src/test_texture_support.c3",

@@ -53,6 +53,62 @@ fn void no_graphics_family_faults() @test {
     assert(f == gpu::UNSUPPORTED_FEATURE, "no graphics+compute family faults");
 }
 
+fn void presentation_selects_a_surface_capable_main_family() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G | QF_C | QF_T, 1),
+        family(QF_G | QF_C | QF_T, 2),
+        family(QF_T, 1),
+    };
+    bool[3] present_support = { false, true, false };
+
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+        table[..],
+        present_support[..],
+    )!!;
+
+    assert(picked.graphics == 1, "presentation chooses the supported graphics+compute family");
+    assert(picked.present == 1, "the main family also presents");
+    assert(picked.compute == 1 && picked.compute_index == 1, "main-family compute tier remains available");
+    assert(picked.transfer == 2, "dedicated transfer selection is preserved");
+}
+
+fn void presentation_can_use_a_separate_queue_family() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 1),
+        family(QF_C | QF_T, 2),
+    };
+    bool[2] present_support = { false, true };
+
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+        table[..],
+        present_support[..],
+    )!!;
+
+    assert(picked.graphics == 0, "graphics remains on the main family");
+    assert(picked.present == 1, "presentation uses the supported separate family");
+    assert(picked.compute == 1, "compute selection remains independent");
+}
+
+fn void presentation_support_must_cover_every_queue_family() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 1),
+    };
+
+    fault result = @catch(vk::pick_queue_families_for_surface(table[..], {}));
+
+    assert(result == gpu::INVALID_ARGUMENT, "mismatched presentation support is rejected");
+}
+
+fn void presentation_queue_selection_requires_instance_dispatch() @test {
+    vk::VkRuntimeState runtime;
+    fault result = @catch(vk::select_queue_families_for_surface(
+        &runtime,
+        (vk::PhysicalDevice)(uptr)0x10,
+        (vk::SurfaceKHR)(uptr)0x20,
+    ));
+    assert(result == gpu::UNSUPPORTED_FEATURE, "surface selection requires instance dispatch");
+}
+
 fn vk::PhysicalDevice fake_physical_device(uptr value) {
     return (vk::PhysicalDevice)value;
 }
@@ -66,45 +122,6 @@ fn vk::PhysicalDeviceCandidate candidate(uptr device, int score, bool suitable, 
         .score = score,
         .suitable = suitable,
     };
-}
-
-uint presentation_query_count;
-bool presentation_query_result;
-
-fn bool query_presentation_support(vk::PhysicalDevice physical_device, ZString extension) {
-    presentation_query_count++;
-    assert(extension == vk::SWAPCHAIN_EXTENSION, "selection queries the swapchain extension");
-    return presentation_query_result;
-}
-
-fn void presentation_requirement_is_conditional() @test {
-    presentation_query_count = 0;
-    presentation_query_result = false;
-    assert(vk::presentation_requirement_satisfied(
-        false,
-        fake_physical_device(0x80),
-        &query_presentation_support,
-    ),
-        "headless selection does not require swapchain support");
-    assert(presentation_query_count == 0,
-        "headless selection performs no swapchain extension query");
-
-    presentation_query_result = true;
-    assert(vk::presentation_requirement_satisfied(
-        true,
-        fake_physical_device(0x81),
-        &query_presentation_support,
-    ),
-        "presentation accepts swapchain-capable adapters");
-    presentation_query_result = false;
-    assert(!vk::presentation_requirement_satisfied(
-        true,
-        fake_physical_device(0x82),
-        &query_presentation_support,
-    ),
-        "presentation rejects adapters without swapchain support");
-    assert(presentation_query_count == 2,
-        "presentation selection queries each candidate once");
 }
 
 fn void later_unsuitable_high_score_does_not_replace_selection() @test {
@@ -437,4 +454,49 @@ fn void tri_queue_frame_retires_cleanly() @test {
         gpu::end_frame(&frame_token)!!;
     }
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn void swapchain_sharing_aliases_the_main_family() @test {
+    vk::Queue queue = (vk::Queue)(uptr)0x10;
+    vk::VkDeviceState state = {
+        .graphics_family = 4,
+        .present_family  = 4,
+        .graphics_queue  = queue,
+        .present_queue   = queue,
+    };
+    uint[2] families;
+    uint family_count = vk::swapchain_queue_families(&state, families[..]);
+    assert(family_count == 1, "aliased presentation uses exclusive sharing");
+    assert(families[0] == 4, "the graphics family is retained");
+
+    vk::Queue[2] queues;
+    uint queue_count = vk::swapchain_idle_queues(&state, queues[..]);
+    assert(queue_count == 1, "an aliased queue is waited once");
+    assert(queues[0] == queue, "the graphics queue is waited");
+}
+
+fn void swapchain_sharing_includes_a_separate_present_family() @test {
+    vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
+    vk::Queue present_queue = (vk::Queue)(uptr)0x20;
+    vk::VkDeviceState state = {
+        .graphics_family = 4,
+        .present_family  = 7,
+        .graphics_queue  = graphics_queue,
+        .present_queue   = present_queue,
+    };
+    uint[2] families;
+    uint family_count = vk::swapchain_queue_families(&state, families[..]);
+    assert(family_count == 2, "split presentation uses concurrent sharing");
+    assert(
+        families[0] == 4 && families[1] == 7,
+        "sharing keeps graphics then presentation"
+    );
+
+    vk::Queue[2] queues;
+    uint queue_count = vk::swapchain_idle_queues(&state, queues[..]);
+    assert(queue_count == 2, "split queues are both waited");
+    assert(
+        queues[0] == graphics_queue && queues[1] == present_queue,
+        "idle waits preserve graphics then presentation order"
+    );
 }

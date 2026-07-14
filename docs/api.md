@@ -20,13 +20,16 @@ Application code should import:
 import gpu;
 ```
 
-Windowed samples may also import:
+Windowed applications import one platform surface module:
 
 ```c3
-import sdl;
+import gpu::surface::win32;
+// or gpu::surface::wayland
+// or gpu::surface::x11
 ```
 
-but core `gpu` declarations should not mention `sdl::Window`, `vk::Device`, or `vma::Allocation`.
+SDL3 may supply the native handles in a consumer, but core declarations do not
+mention `sdl::Window`, `vk::Device`, or `vma::Allocation`.
 
 ## 2. Naming rules
 
@@ -133,12 +136,36 @@ gpu::destroy_runtime(&runtime)!!;
 ```
 
 Adapters and query-result strings are borrowed until runtime destruction. Borrowed strings are read-only and must not be modified. Backend and driver diagnostics are for logging; feature selection uses semantic adapter fields. Runtime destruction returns `RESOURCE_IN_USE` while a dependent surface or device is live.
+### Runtime-owned surfaces
+
+`Surface` is an opaque token owned by one runtime. Each platform module uses
+distinct native handle types:
+
+```text
+gpu::surface::win32::create_surface(Runtime*, InstanceHandle, WindowHandle) -> Surface?
+gpu::surface::wayland::create_surface(Runtime*, DisplayHandle, SurfaceHandle) -> Surface?
+gpu::surface::x11::create_surface(Runtime*, DisplayHandle, WindowHandle) -> Surface?
+
+supports_presentation(Adapter*, Surface*) -> bool?
+destroy_surface(Surface*)                 -> void?
+```
+
+The adapter and surface must belong to the same runtime. A presentation device
+accepts swapchains only for the exact surface named in its request and reports
+that capability through `DeviceCaps.presentation_enabled`. Presentation may
+use a private queue distinct from graphics. Destroying a surface with a live
+swapchain returns `RESOURCE_IN_USE`; destroy surfaces before their runtime.
+
+### Device requests and creation
+
+Presentation is an explicit addition to the immutable strict request. It binds
+queue selection and swapchain enablement to one surface.
 
 Strict device creation takes one exact borrowed adapter plus an immutable
 semantic request. Support detection is read-only and enables nothing;
-successful creation records strict enablement separately in `DeviceCaps`.
-The unmet-requirement label is borrowed static text and names GPU semantics
-rather than backend features.
+successful creation records strict and presentation enablement separately in
+`DeviceCaps`. The unmet-requirement label is borrowed static text and names
+GPU semantics rather than backend features.
 
 ```text
 DeviceRequest                    (opaque immutable value)
@@ -147,6 +174,7 @@ DeviceRequestSupport
     String unmet_requirement     (borrowed static semantic label)
 
 strict_device_request()          -> DeviceRequest
+request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
 supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
 create_device(Adapter*, DeviceRequest*) -> Device?
 ```
@@ -154,7 +182,7 @@ create_device(Adapter*, DeviceRequest*) -> Device?
 A live adapter-created device retains its runtime and reuses the runtime-owned
 backend instance. Destroy the device before destroying that runtime.
 `create_device_from_desc` remains as a transitional direct-device path for
-existing consumers; it performs its own discovery and owns that discovery state.
+existing headless consumers; it performs its own discovery and owns that discovery state.
 
 ```text
 DescriptorHeapMode
@@ -166,7 +194,6 @@ DeviceDesc
     BackendKind backend
     bool enable_validation
     bool enable_debug_names
-    bool enable_presentation
     DescriptorHeapMode descriptor_heap_mode
     uint texture_descriptor_capacity      (0 = default; docs/limitations.md)
     uint sampler_descriptor_capacity
@@ -181,6 +208,7 @@ DeviceDesc
 
 DeviceCaps
     bool strict_enabled
+    bool presentation_enabled
     bool buffer_device_address
     bool synchronization2
     bool dynamic_rendering
@@ -223,6 +251,7 @@ Creation:
 ```text
 strict_device_request() -> DeviceRequest
 supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
+request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
 create_device(Adapter*, DeviceRequest*) -> Device?
 create_device_from_desc(DeviceDesc*) -> Device?    (transitional)
 destroy_device(Device*) -> void?
@@ -318,14 +347,14 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
-| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation off; an adapter does not satisfy the requested strict semantics; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `resolve_readback` | zero, destroyed, or stale runtime, adapter, device, or resource token; consumed or stale command-list alias, `FrameToken`, or `ReadbackTicket` |
-| `INVALID_RESOURCE_STATE` | device creation, `create_swapchain`, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | a device is already live; the native window is already bound to another Vulkan surface; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
+| `INVALID_RESOURCE_STATE` | device creation, swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | a device is already live; an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan explicitly returned `VK_ERROR_DEVICE_LOST`; unrecoverable |
-| `RESOURCE_IN_USE` | `destroy_runtime`, `destroy_texture` | a runtime still owns a surface or device, or a live `TextureIndex` still owns a texture. |
+| `RESOURCE_IN_USE` | `destroy_runtime`, `destroy_surface`, `destroy_texture` | a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture. |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
 | `SLOT_TABLE_FULL` | runtime and resource creates, `begin_commands` | the runtime registry, adapter token, handle table, or command-record table is at capacity |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
@@ -1244,15 +1273,10 @@ caller's string.
 
 ## 10. Swapchain API
 
-Core WSI types should be platform-neutral.
+`create_swapchain` borrows a runtime-owned `Surface`; the surface must outlive
+the swapchain.
 
 ```text
-SurfaceDesc
-    PlatformKind platform
-    void* native_display
-    void* native_window
-
-PlatformKind: WAYLAND, X11, WIN32
 PresentMode: FIFO, IMMEDIATE, MAILBOX
 
 SwapchainDesc
@@ -1286,7 +1310,7 @@ bitstruct PresentModeSupport : uint
     bool immediate
     bool mailbox
 
-create_swapchain(Device* device, SurfaceDesc* surface, SwapchainDesc* desc) -> SwapchainHandle?
+create_swapchain(Device* device, Surface* surface, SwapchainDesc* desc) -> SwapchainHandle?
 destroy_swapchain(Device* device, SwapchainHandle swapchain) -> void?
 resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) -> void?
 get_swapchain_info(Device* device, SwapchainHandle swapchain) -> SwapchainInfo?
@@ -1340,6 +1364,10 @@ against a swapchain texture does **not** block a resize, and is not faulted
 or freed by it: the descriptor is left dangling once the backing image is
 gone. Destroy any descriptors on the current swapchain textures before
 calling `resize_swapchain`.
+
+Resize and destruction reject a pending acquire with
+`INVALID_RESOURCE_STATE`. Otherwise, they wait for both graphics and
+presentation work before releasing swapchain resources.
 
 Each acquired image couples to exactly one GRAPHICS `submit` before present:
 a second coupled submit or a present without a consumed submit faults

@@ -6,8 +6,9 @@ library's own state, but results and validation verdicts are undefined.
 
 ## Tiers
 
-- **E — externally synchronized.** One thread at a time across all Tier E
-  calls on a device. Typically the "frame owner" thread.
+- **E — externally synchronized.** The caller serializes calls within the
+  scope named in the table. Device calls normally share one device-wide scope;
+  runtime and surface calls may use a process-wide scope.
 - **S — thread-safe.** Any thread, any time within a frame; internally
   synchronized (see the lock map).
 - **C — confined.** The object (a `CommandList` and the `RecordingContext` it
@@ -20,11 +21,15 @@ library's own state, but results and validation verdicts are undefined.
 |---|---|---|
 | `create_runtime` / `destroy_runtime` | E | process-wide runtime registry mutation |
 | `enumerate_adapters` / `AdapterList.get` / adapter queries | S | immutable cache reads; borrowed strings are read-only |
-| `create_device` / `destroy_device` | E | |
+| `Surface.is_valid` / `strict_device_request` | S | pure value operations; no registry access |
+| `surface::{win32,wayland,x11}::create_surface` / `destroy_surface` | E | process-wide surface registry mutation |
+| `supports_presentation` / `request_presentation` / `supports_device_request` | E | process-wide surface registry access; a presentation request does not retain its surface |
+| `create_device` / `destroy_device` | E | process-wide device slot; presentation paths also access the surface registry |
 | `begin_frame` / `end_frame` / `@with_frame` | E | token-paired `IDLE -> ACTIVE -> IDLE`; quiescence required; helper worker is a direct call |
 | `submit` / `present` | E | queue-mutex backed, so Tier S private submits interleave safely |
 | `wait_queue_idle` | E | queue-mutex backed |
-| `create_swapchain` / `destroy_swapchain` / `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; info is coherent only at Tier-E boundaries |
+| `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction rejects a pending acquire and waits graphics/present work |
+| `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; resize rejects a pending acquire and waits graphics/present work |
 | `create_buffer` / `destroy_buffer` | S | |
 | `get_buffer_address` / `get_buffer_span` | S | lock-free read |
 | `flush_buffer` / `invalidate_buffer` | S | VMA is internally synchronized |
@@ -50,6 +55,23 @@ library's own state, but results and validation verdicts are undefined.
 Runtime creation and destruction must not overlap other runtime operations. After
 publication, enumeration and adapter queries may run concurrently; all such calls
 must finish before runtime destruction.
+
+The surface registry and its runtime retain counts are process-wide and have no
+internal synchronization. Calls identified above as registry mutations or
+accesses must not overlap each other, `create_runtime`, or `destroy_runtime`,
+even for different runtimes, devices, or surfaces. `present`,
+`resize_swapchain`, swapchain queries, and acquire do not access that registry
+and remain externally synchronized per
+device or swapchain.
+
+`create_surface` retains its runtime. A presentation-bearing `DeviceRequest`
+and the created device store only the surface token, so the surface must remain
+live through support checks, device creation, and swapchain creation. A device
+accepts only that exact surface. `create_swapchain` retains the surface until
+`destroy_swapchain` or device teardown; `destroy_surface` returns
+`RESOURCE_IN_USE` while any swapchain retains it. The application keeps the
+native instance, display, and window objects valid until the surface is
+destroyed.
 
 ## Phase rule
 

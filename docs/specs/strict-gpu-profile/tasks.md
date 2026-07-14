@@ -59,7 +59,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 1.2 Immutable semantic device requests
 
-- [ ] Add canonical `DeviceRequest`, strict request construction, semantic support queries, and transactional request validation in `gpu/device.c3`, `gpu/caps.c3`, `gpu/vk/adapter.c3`, and `gpu/vk/device.c3`.
+- [x] Add canonical `DeviceRequest`, strict request construction, semantic support queries, and transactional request validation in `gpu/device.c3`, `gpu/caps.c3`, `gpu/vk/adapter.c3`, and `gpu/vk/device.c3`.
   - **Depends on:** 1.1.
   - **Contract:** support, requested capabilities, and enabled capabilities are separate; request contents become immutable at creation; unsupported requirements identify the unmet semantic requirement; no API-version selector is public.
   - **Edges:** strict-only, empty, unsupported, duplicate contribution, and failure after temporary native allocation.

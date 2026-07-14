@@ -104,7 +104,7 @@ fn void extent_clamp_rules() @test {
     assert(clamped.width == 2048 && clamped.height == 64, "request clamps to min/max when the app decides");
 }
 
-fn void swapchain_requires_presentation() @test {
+fn void swapchain_requires_a_presentation_request() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
@@ -114,10 +114,10 @@ fn void swapchain_requires_presentation() @test {
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::SurfaceDesc surface = { .platform = gpu::PlatformKind.WAYLAND };
+    gpu::Surface surface;
     gpu::SwapchainDesc sc_desc = { .width = 640, .height = 480 };
-    fault gate_fault = @catch(gpu::create_swapchain(&device, &surface, &sc_desc));
-    assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "swapchain without enable_presentation faults UNSUPPORTED_FEATURE");
+    fault gate_fault = @catch(gpu::vk::vk_create_swapchain(&device, &surface, &sc_desc));
+    assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "swapchain without a presentation request faults");
 }
 
 // Acquire-submit-present coupling lifecycle. One state matrix per
@@ -168,6 +168,15 @@ fn void swapchain_present_guard_lifecycle() @test {
     // as the submit guard.
     fault stale_consumed = @catch(gpu::vk::swapchain_present_guard(false, true));
     assert(stale_consumed == gpu::INVALID_RESOURCE_STATE, "consumed without pending faults INVALID_RESOURCE_STATE");
+}
+
+fn void swapchain_mutation_guard_lifecycle() @test {
+    gpu::vk::swapchain_mutation_guard(false)!!;
+    fault acquired = @catch(gpu::vk::swapchain_mutation_guard(true));
+    assert(
+        acquired == gpu::INVALID_RESOURCE_STATE,
+        "resize or destroy with an acquired image faults INVALID_RESOURCE_STATE"
+    );
 }
 
 fn void swapchain_image_usage_mapping() @test {

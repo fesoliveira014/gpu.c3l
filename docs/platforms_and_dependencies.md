@@ -4,7 +4,8 @@
 
 ```text
 Library package: gpu.c3l
-Public module:   gpu
+Public modules:  gpu
+                 gpu::surface::{win32,wayland,x11}
 Manifest name:   provides "gpu"
 Language target: C3 0.8.0
 Primary backend: Vulkan 1.3
@@ -121,10 +122,13 @@ Sample source import:
 ```c3
 import gpu;
 import sdl;
+import gpu::surface::win32; // select the host platform module
 ```
 
 The package/dependency name is `sdl3`; the C3 module name is `sdl`. This
-library repository carries no SDL3 dependency or submodule.
+library repository carries no SDL3 dependency or submodule. A consumer converts
+SDL's native window properties to the selected module's distinct handle types
+when creating a runtime-owned `Surface`.
 
 Public API rule:
 

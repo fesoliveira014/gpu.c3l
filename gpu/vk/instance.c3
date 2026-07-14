@@ -18,7 +18,6 @@ const uint MAX_INSTANCE_EXTENSIONS = 8;
 struct VkInstanceDesc {
     bool enable_validation;
     bool enable_debug_utils;
-    bool require_surface_support;
     bool enable_available_surfaces;
     ZString application_name;
     vk::DebugUtilsMessengerCreateInfoEXT* debug_messenger_info;
@@ -74,12 +73,8 @@ fn vk::Instance? create_vk_instance(VkInstanceDesc* desc) {
             extensions[extension_count++] = DEBUG_UTILS_EXTENSION;
         }
 
-        bool has_surface_support = instance_supports_extension(SURFACE_EXTENSION);
-        if (desc.require_surface_support && !has_surface_support) {
-            return gpu::UNSUPPORTED_FEATURE~;
-        }
-        if (has_surface_support
-            && (desc.require_surface_support || desc.enable_available_surfaces)) {
+        if (desc.enable_available_surfaces
+            && instance_supports_extension(SURFACE_EXTENSION)) {
             extensions[extension_count++] = SURFACE_EXTENSION;
             foreach (platform_extension : PLATFORM_SURFACE_EXTENSIONS) {
                 if (instance_supports_extension(platform_extension)) {

@@ -29,6 +29,7 @@ No `vk::` or `vma::` type should appear in public `gpu` API signatures.
 ```text
 gpu/vk/backend.c3              loader/VMA link probes, backend availability
 gpu/vk/runtime.c3              per-runtime instance, diagnostics, adapter ownership
+gpu/vk/surface.c3              per-runtime WSI dispatch and VkSurfaceKHR operations
 gpu/vk/adapter.c3              semantic adapter metadata and diagnostic snapshots
 gpu/vk/instance.c3             shared instance construction
 gpu/vk/device.c3               physical device selection, logical device, feature chain
@@ -47,7 +48,7 @@ gpu/vk/command_state.c3        command-list state and handle tracking
 gpu/vk/transfer.c3             upload/readback helpers and staging arenas
 gpu/vk/sync.c3                 barriers, timeline semaphores
 gpu/vk/render_pass.c3          dynamic rendering
-gpu/vk/swapchain.c3            WSI and swapchain
+gpu/vk/swapchain.c3            swapchain lifecycle and presentation
 gpu/vk/deferred.c3             retired backend-object destruction
 gpu/vk/debug.c3                debug names, leak reports
 gpu/vk/helpers.c3              enum and flag translation helpers
@@ -97,7 +98,9 @@ load extension entry points
 install a persistent debug-utils messenger for validation or callback routing
 ```
 
-Runtime creation enables available surface extensions without requiring them. The direct device path requires surface support only when presentation is requested.
+Runtime creation enables available platform surface extensions and loads their
+instance-local entry points. Missing platform support faults only when that
+platform constructor is called. The direct-device path is headless.
 
 `VK_EXT_debug_utils` is requested when validation, Vulkan debug names, or a
 structured callback needs it. `enable_debug_names` remains independent of
@@ -159,10 +162,12 @@ pick_physical_device(instance, desc) -> PhysicalDeviceSelection?
 
 Each feature-compatible candidate's queue topology is resolved once during selection. The winning `PhysicalDeviceSelection` carries that cached `QueueFamilies` value into logical-device creation; queue topology remains a suitability filter rather than a scoring bonus.
 
-When `DeviceDesc.enable_presentation` is true, a candidate must advertise
-`VK_KHR_swapchain` before it is scored. This is only the device-level
-prerequisite: concrete-surface queue support, formats, and present modes remain
-validated by `create_swapchain` after the native surface exists.
+A presentation request names a runtime-owned surface. Device creation requires
+`VK_KHR_swapchain`, selects a graphics-and-compute queue family, and selects a
+presentation-capable family for that surface. The queues alias when possible;
+split families use concurrent swapchain-image sharing. `supports_presentation`
+performs the same semantic preflight without enabling state. Surface formats
+and present modes remain swapchain-creation concerns.
 
 ## 6. Logical device creation
 
@@ -606,10 +611,13 @@ Do not transition attachments to shader-read automatically.
 
 ## 16. Swapchain implementation
 
+The runtime-owned `gpu::Surface` backend object owns its `vk::SurfaceKHR` and
+retains the Vulkan instance through the runtime. A swapchain borrows that handle
+and retains the public surface token until swapchain destruction.
+
 Swapchain module owns:
 
 ```text
-vk::SurfaceKHR
 vk::SwapchainKHR
 vk::Image[]
 vk::ImageView[]
@@ -617,7 +625,10 @@ SwapchainInfo info
 uint image_count
 ```
 
-Surface creation is platform-specific. SDL3 samples should create windows and provide native handles or use a sample helper that calls backend WSI functions.
+Consumers create surfaces through the typed
+`gpu::surface::{win32,wayland,x11}::create_surface` modules. SDL3 helpers may
+translate window properties into those native handle types; they do not call
+`gpu::vk` or Vulkan WSI functions.
 
 Swapchain operations:
 
@@ -630,7 +641,9 @@ query present-mode support
 resize on out-of-date/suboptimal; recreate the surface on surface-lost
 ```
 
-`vk_get_present_mode_support` queries the retained `vk::SurfaceKHR` for fifo/immediate/mailbox availability. At creation, `select_present_mode` falls back to FIFO silently when the requested mode is unavailable.
+`vk_get_present_mode_support` queries the borrowed, runtime-owned
+`vk::SurfaceKHR` for fifo/immediate/mailbox availability. At creation,
+`select_present_mode` falls back to FIFO when the requested mode is unavailable.
 
 WSI result mapping is explicit and pure-tested:
 

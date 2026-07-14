@@ -163,6 +163,20 @@ fn void? check_swapchain_present_lifecycle(
     }
 }
 
+fn void? check_swapchain_mutation_lifecycle(
+    WsiDiagnosticContext* context,
+    SwapchainSlot* slot,
+) {
+    if (catch guard_fault = swapchain_mutation_guard(slot.acquire_pending)) {
+        return report_wsi_contract(
+            context:        context,
+            public_fault:   guard_fault,
+            rejected_field: "swapchain acquire lifecycle",
+            invariant:      "no image may be acquired during resize or destruction",
+        )~;
+    }
+}
+
 fn void? check_swapchain_present_layout(
     WsiDiagnosticContext* context,
     TextureSlot* image_slot,

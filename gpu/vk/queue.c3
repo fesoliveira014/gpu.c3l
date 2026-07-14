@@ -5,14 +5,15 @@ import vk;
 import std::thread;
 import std::core::mem;
 
-// Graphics, compute, transfer — the most distinct families a device uses.
-const uint MAX_QUEUE_FAMILIES = 3;
+// Graphics, compute, transfer, and presentation.
+const uint MAX_QUEUE_FAMILIES = 4;
 
 struct QueueFamilies {
     uint graphics;
     uint compute;
     uint compute_index;
     uint transfer;
+    uint present;
     bool async_compute;
 }
 
@@ -25,8 +26,18 @@ struct SubmitStats {
 <* Compute tiers: a second queue in the main family when it has one, else a
    compute-capable non-graphics family, else the graphics queue itself. A
    transfer-only family is used for transfer when present. *>
-fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
+fn QueueFamilies? pick_queue_families_impl(
+    vk::QueueFamilyProperties[] families,
+    bool[] presentation_support,
+    bool require_presentation,
+) @private {
+    if (require_presentation && presentation_support.len != families.len) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+
     int main_family = -1;
+    int presenting_main = -1;
+    int present_family = -1;
     int compute_only = -1;
     int transfer_only = -1;
     foreach (i, family : families) {
@@ -34,18 +45,33 @@ fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
         bool graphics = (flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0;
         bool compute  = (flags & (uint)vk::QueueFlagBits.COMPUTE_BIT) != 0;
         bool transfer = (flags & (uint)vk::QueueFlagBits.TRANSFER_BIT) != 0;
+        bool presentation = require_presentation && presentation_support[i];
         if (graphics && compute && main_family < 0) main_family = (int)i;
+        if (graphics && compute && presentation && presenting_main < 0) {
+            presenting_main = (int)i;
+        }
+        if (presentation && present_family < 0) present_family = (int)i;
         if (compute && !graphics && compute_only < 0) compute_only = (int)i;
-        if (transfer && !graphics && !compute && transfer_only < 0) transfer_only = (int)i;
+        if (transfer && !graphics && !compute && transfer_only < 0) {
+            transfer_only = (int)i;
+        }
     }
 
     if (main_family < 0) return gpu::UNSUPPORTED_FEATURE~;
+    if (require_presentation) {
+        if (present_family < 0) return gpu::UNSUPPORTED_FEATURE~;
+        if (presenting_main >= 0) main_family = presenting_main;
+    }
+
     uint main = (uint)main_family;
     QueueFamilies picked = {
-        .graphics = main,
-        .compute = main,
+        .graphics      = main,
+        .compute       = main,
         .compute_index = 0,
-        .transfer = transfer_only < 0 ? main : (uint)transfer_only,
+        .transfer      = transfer_only < 0 ? main : (uint)transfer_only,
+        .present       = require_presentation && presenting_main < 0
+            ? (uint)present_family
+            : main,
     };
     if (families[main].queue_count >= 2) {
         picked.compute_index = 1;
@@ -57,6 +83,17 @@ fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
     return picked;
 }
 
+fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
+    return pick_queue_families_impl(families, {}, false);
+}
+
+fn QueueFamilies? pick_queue_families_for_surface(
+    vk::QueueFamilyProperties[] families,
+    bool[] presentation_support,
+) {
+    return pick_queue_families_impl(families, presentation_support, true);
+}
+
 fn QueueFamilies? select_queue_families(vk::PhysicalDevice physical_device) {
     uint count = 0;
     vk::get_physical_device_queue_family_properties(physical_device, &count, null);
@@ -66,6 +103,41 @@ fn QueueFamilies? select_queue_families(vk::PhysicalDevice physical_device) {
         vk::QueueFamilyProperties[] families = mem::talloc_array(vk::QueueFamilyProperties, (sz)count);
         vk::get_physical_device_queue_family_properties(physical_device, &count, families.ptr);
         return pick_queue_families(families[:count]);
+    };
+}
+
+fn QueueFamilies? select_queue_families_for_surface(
+    VkRuntimeState* runtime,
+    vk::PhysicalDevice physical_device,
+    vk::SurfaceKHR surface,
+) {
+    if (runtime == null || runtime.get_surface_support == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    uint count = 0;
+    vk::get_physical_device_queue_family_properties(physical_device, &count, null);
+    if (count == 0) return gpu::UNSUPPORTED_FEATURE~;
+
+    @pool() {
+        vk::QueueFamilyProperties[] families =
+            mem::talloc_array(vk::QueueFamilyProperties, (sz)count);
+        bool[] presentation_support = mem::talloc_array(bool, (sz)count);
+        vk::get_physical_device_queue_family_properties(
+            physical_device,
+            &count,
+            families.ptr,
+        );
+        for (uint index = 0; index < count; index++) {
+            uint supported = 0;
+            check_surface_result(runtime.get_surface_support(
+                physical_device,
+                index,
+                surface,
+                &supported,
+            ))!;
+            presentation_support[index] = supported != 0;
+        }
+        return pick_queue_families_for_surface(families[:count], presentation_support);
     };
 }
 
@@ -88,6 +160,32 @@ fn uint graphics_compute_queue_families(VkDeviceState* state, uint[] out_familie
     return count;
 }
 
+<* Graphics and presentation families for swapchain image sharing. *>
+fn uint swapchain_queue_families(
+    VkDeviceState* state,
+    uint[] out_families,
+) {
+    uint count = 0;
+    out_families[count++] = state.graphics_family;
+    if (state.present_family != state.graphics_family) {
+        out_families[count++] = state.present_family;
+    }
+    return count;
+}
+
+<* Graphics and presentation queues that must be idle before teardown. *>
+fn uint swapchain_idle_queues(
+    VkDeviceState* state,
+    vk::Queue[] out_queues,
+) {
+    uint count = 0;
+    out_queues[count++] = state.graphics_queue;
+    if (state.present_family != state.graphics_family) {
+        out_queues[count++] = state.present_queue;
+    }
+    return count;
+}
+
 fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
     switch (queue) {
         case gpu::QueueKind.TRANSFER: return state.transfer_queue;
@@ -107,6 +205,19 @@ fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
         default:
             return &state.graphics_queue_mutex;
     }
+}
+
+fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
+    if (state.present_family == state.graphics_family) {
+        return &state.graphics_queue_mutex;
+    }
+    if (state.present_family == state.compute_family) {
+        return queue_mutex_for(state, gpu::QueueKind.COMPUTE);
+    }
+    if (state.present_family == state.transfer_family) {
+        return queue_mutex_for(state, gpu::QueueKind.TRANSFER);
+    }
+    return &state.present_queue_mutex;
 }
 
 <* Submit command lists to their queue via vkQueueSubmit2, waiting on and

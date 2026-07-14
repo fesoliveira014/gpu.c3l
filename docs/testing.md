@@ -99,6 +99,7 @@ Coverage:
 ```text
 two independent Vulkan runtimes and borrowed-adapter invalidation
 exact-adapter request creation with runtime-instance reuse and retention
+surface-aware queue selection and presentation-request gating
 create/destroy Vulkan device
 create/destroy VMA allocator
 query memory budget and stats
@@ -167,7 +168,9 @@ Coverage:
 ```text
 SDL init/shutdown
 window creation/destruction
-Vulkan surface creation path
+typed Win32, Wayland, and X11 surface-module imports
+runtime-owned surface creation and destruction
+adapter/surface presentation support and request composition
 swapchain creation
 runtime info: selected format/mode, clamped extent, actual image count
 image acquire/present
@@ -324,8 +327,13 @@ CPU targets:
 
 ```sh
 c3c run import_gpu --path test/cpu
+c3c build import_surface_win32 --path test/cpu
+c3c build import_surface_wayland --path test/cpu
+c3c build import_surface_x11 --path test/cpu
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
+python -m unittest scripts.test_check_public_api
+python scripts/check_public_api.py
 ```
 
 Smoke target, as CI runs it:
