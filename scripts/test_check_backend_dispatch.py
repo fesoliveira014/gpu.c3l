@@ -55,7 +55,9 @@ fn void? try_create_swapchain_khr(Device device) {
             backend.mkdir(parents=True)
             (binding / "commands.c3").write_text(
                 """
-fn void get_descriptor_ext() => extensions.vk_get_descriptor_ext();
+fn void load_extensions(Instance instance) {
+    extensions.vk_get_descriptor_ext();
+}
 fn Instance? InstanceCreateInfo.build(&self) {
     Instance created_instance;
     load_extensions(created_instance);
@@ -74,7 +76,65 @@ fn Instance? InstanceCreateInfo.build(&self) {
                 ["gpu/vk/runtime.c3:2: .build("],
             )
 
-    def test_accepts_build_when_instance_builder_avoids_global_extensions(self) -> None:
+    def test_rejects_build_when_builder_calls_singleton_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binding = root / "lib" / "vk.c3l"
+            backend = root / "gpu" / "vk"
+            binding.mkdir(parents=True)
+            backend.mkdir(parents=True)
+            (binding / "commands.c3").write_text(
+                """
+fn void? try_create_swapchain_khr() {
+    extensions.vk_create_swapchain_khr();
+}
+fn Instance? InstanceCreateInfo.build(&self) {
+    return try_create_instance(self);
+}
+fn SwapchainKHR? SwapchainCreateInfoKHR.build(&self) {
+    return try_create_swapchain_khr();
+}
+""",
+                encoding="utf-8",
+            )
+            (backend / "runtime.c3").write_text(
+                "module gpu::vk;\nInstance instance = create_info.build();\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                check_backend_dispatch.scan_backend_sources(root),
+                ["gpu/vk/runtime.c3:2: .build("],
+            )
+
+    def test_rejects_build_when_builder_reads_global_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binding = root / "lib" / "vk.c3l"
+            backend = root / "gpu" / "vk"
+            binding.mkdir(parents=True)
+            backend.mkdir(parents=True)
+            (binding / "commands.c3").write_text(
+                """
+fn void get_descriptor_ext() => extensions.vk_get_descriptor_ext();
+fn SwapchainKHR? SwapchainCreateInfoKHR.build(&self) {
+    extensions.vk_create_swapchain_khr();
+    return {};
+}
+""",
+                encoding="utf-8",
+            )
+            (backend / "runtime.c3").write_text(
+                "module gpu::vk;\nInstance instance = create_info.build();\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                check_backend_dispatch.scan_backend_sources(root),
+                ["gpu/vk/runtime.c3:2: .build("],
+            )
+
+    def test_accepts_build_when_all_builders_avoid_global_extensions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binding = root / "lib" / "vk.c3l"
