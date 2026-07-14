@@ -72,8 +72,7 @@ fn bool create_runtime_debug_messenger(
     vk::DebugUtilsMessengerCreateInfoEXT* create_info,
 ) {
     if (state.instance == null || create_info == null) return false;
-    if (state.dispatch.create_debug_messenger == null
-        || state.dispatch.destroy_debug_messenger == null) return false;
+    if (!instance_dispatch_supports_debug_messenger(&state.dispatch)) return false;
     vk::Result result = state.dispatch.create_debug_messenger(
         state.instance,
         create_info,

@@ -143,6 +143,16 @@ fn VkDeviceDispatch load_vk_device_dispatch(
     };
 }
 
+fn bool instance_dispatch_supports_debug_messenger(VkInstanceDispatch* dispatch) {
+    return dispatch.create_debug_messenger != null
+        && dispatch.destroy_debug_messenger != null;
+}
+
+fn bool device_dispatch_supports_labels(VkDeviceDispatch* dispatch) {
+    return dispatch.cmd_begin_label != null
+        && dispatch.cmd_end_label != null;
+}
+
 fn bool instance_dispatch_supports_presentation(VkInstanceDispatch* dispatch) {
     return dispatch.get_surface_support != null
         && dispatch.get_surface_capabilities != null

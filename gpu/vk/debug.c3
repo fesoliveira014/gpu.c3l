@@ -211,7 +211,7 @@ fn bool create_debug_messenger(
 ) {
     if (state == null || state.instance == null
         || create_info == null || out_messenger == null) return false;
-    if (state.instance_dispatch.create_debug_messenger == null) return false;
+    if (!instance_dispatch_supports_debug_messenger(&state.instance_dispatch)) return false;
     vk::Result result = state.instance_dispatch.create_debug_messenger(
         state.instance,
         create_info,
@@ -440,7 +440,7 @@ fn void? vk_cmd_begin_label(gpu::CommandList* commands, ZString label, float[4] 
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING
         && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    if (state.device_dispatch.cmd_begin_label == null) return;
+    if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     vk::DebugUtilsLabelEXT info = vk::debug_utils_label_ext();
     info.p_label_name = (char*)label;
     info.color = color;
@@ -452,6 +452,6 @@ fn void? vk_cmd_end_label(gpu::CommandList* commands) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING
         && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    if (state.device_dispatch.cmd_end_label == null) return;
+    if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     state.device_dispatch.cmd_end_label(record.command_buffer);
 }
