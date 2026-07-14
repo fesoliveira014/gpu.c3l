@@ -206,19 +206,27 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void second_live_device_is_rejected() @test {
+fn void simultaneous_devices_submit_independently() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device owner = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&owner)!!;
-    fault second_device = @catch(gpu::create_device_from_desc(&desc));
-    assert(second_device == gpu::INVALID_RESOURCE_STATE, "only one device may be live");
+    gpu::Device first = gpu::create_device_from_desc(&desc)!!;
+    defer gpu::destroy_device(&first)!!;
+    gpu::Device second = gpu::create_device_from_desc(&desc)!!;
+    defer gpu::destroy_device(&second)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(&owner, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&owner, &submit)!!;
-    gpu::wait_queue_idle(&owner, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList first_cmd = gpu::begin_commands(&first, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&first_cmd)!!;
+    gpu::CommandList second_cmd = gpu::begin_commands(&second, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&second_cmd)!!;
+
+    gpu::CommandList[1] first_lists = { first_cmd };
+    gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
+    gpu::submit(&first, &first_submit)!!;
+    gpu::wait_queue_idle(&first, gpu::QueueKind.GRAPHICS)!!;
+
+    gpu::CommandList[1] second_lists = { second_cmd };
+    gpu::SubmitDesc second_submit = { .command_lists = second_lists[..] };
+    gpu::submit(&second, &second_submit)!!;
+    gpu::wait_queue_idle(&second, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void abandoned_token_invalidates_when_pool_slot_resets() @test {

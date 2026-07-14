@@ -474,8 +474,8 @@ fn gpu::Device? create_vk_device_with_selection(
     );
 }
 
-fn void vk_destroy_device(gpu::Device* device) @private {
-    destroy_state((VkDeviceState*)gpu::device_backend_state_ptr(device));
+fn void vk_destroy_device(void* backend_state) @private {
+    destroy_state((VkDeviceState*)backend_state);
 }
 
 <* Reverse-order teardown; safe on a partial or zeroed state. *>

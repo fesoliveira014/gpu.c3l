@@ -226,8 +226,8 @@ fn void stub_set_presentation_support(bool supported) {
     presentation_supported = supported;
 }
 
-fn void destroy_stub_device(gpu::Device* device) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+fn void destroy_stub_device(void* backend_state) {
+    StubDeviceState* state = (StubDeviceState*)backend_state;
     if (state.swapchain_live) {
         gpu::surface_release_swapchain(&state.surface)!!;
     }
