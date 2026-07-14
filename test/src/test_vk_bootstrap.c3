@@ -82,9 +82,11 @@ fn void device_heap_mode_and_capacities() @test {
     };
 
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    assert(gpu::get_device_caps(&device)!!.descriptor_indexing, "indexing support reported");
-    assert(gpu::get_device_caps(&device)!!.max_texture_descriptors == 64, "texture capacity reflects the desc");
-    assert(gpu::get_device_caps(&device)!!.max_sampler_descriptors == 8, "sampler capacity reflects the desc");
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    assert(caps.descriptor_indexing, "the indexing path is enabled");
+    assert(!caps.descriptor_buffer, "the unselected descriptor-buffer path is disabled");
+    assert(caps.max_texture_descriptors == 64, "texture capacity reflects the desc");
+    assert(caps.max_sampler_descriptors == 8, "sampler capacity reflects the desc");
     gpu::destroy_device(&device)!!;
 }
 

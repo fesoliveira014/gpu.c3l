@@ -205,11 +205,11 @@ fn bool heap_fits_limits(gpu::DescriptorHeapMode mode, uint tex_capacity, uint s
 }
 
 fn void? create_descriptor_heap(VkDeviceState* state) {
-    DescriptorHeapState* heap = &state.heap;
-    uint tex_capacity = state.texture_descriptor_capacity;
-    uint smp_capacity = state.sampler_descriptor_capacity;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    uint tex_capacity = state.strict_heap.texture_capacity;
+    uint smp_capacity = state.strict_heap.sampler_capacity;
 
-    if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
         IndexingHeapLimits limits = query_indexing_heap_limits(state.physical_device);
         bool fits = indexing_heap_fits_limits(
             tex_capacity,
@@ -293,7 +293,7 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
 
     vk::DescriptorSetLayoutCreateInfo layout_info = vk::descriptor_set_layout_create_info()
         .set_bindings(bindings[..]);
-    if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
         layout_info = layout_info
             .set_next(&flags_info)
             .set_flags(vk::DescriptorSetLayoutCreateFlagBits.UPDATE_AFTER_BIND_POOL_BIT);
@@ -307,7 +307,7 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
         result:    vk::create_descriptor_set_layout(state.device, &layout_info, null, &heap.set_layout),
     )!;
 
-    if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
         vk::DescriptorPoolSize[3] pool_sizes = {
             { .type = vk::DescriptorType.SAMPLED_IMAGE, .descriptor_count = tex_capacity },
             { .type = vk::DescriptorType.STORAGE_IMAGE, .descriptor_count = tex_capacity },
@@ -367,7 +367,7 @@ fn vk::BufferCreateInfo make_descriptor_buffer_create_info(
 <* Descriptor sizes, binding offsets, and total layout size come from the
    driver; descriptors are written straight into mapped memory. *>
 fn void? create_descriptor_buffer(VkDeviceState* state) @private {
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
 
     vk::PhysicalDeviceDescriptorBufferPropertiesEXT db_props = vk::physical_device_descriptor_buffer_properties_ext();
     vk::PhysicalDeviceProperties2 props2 = vk::physical_device_properties2().set_next(&db_props);
@@ -388,9 +388,9 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
         .layout_size                          = layout_size,
     };
     bool fits = heap_fits_limits(
-        mode:         state.heap_mode,
-        tex_capacity: state.texture_descriptor_capacity,
-        smp_capacity: state.sampler_descriptor_capacity,
+        mode:         state.strict_heap.mode,
+        tex_capacity: state.strict_heap.texture_capacity,
+        smp_capacity: state.strict_heap.sampler_capacity,
         limits:       limits,
     );
     if (!fits) {
@@ -476,7 +476,7 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
 <* Safe on a partial or zeroed heap; destroys live sampler objects, including
    retired-but-undrained ones. *>
 fn void destroy_descriptor_heap(VkDeviceState* state) {
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     if (heap.sampler_cells.ptr != null) {
         foreach (&cell : heap.sampler_cells[:heap.sampler_next_new]) {
             if (cell.sampler != null) {
@@ -506,7 +506,7 @@ fn void destroy_descriptor_heap(VkDeviceState* state) {
 }
 
 fn void report_descriptor_leaks(VkDeviceState* state) {
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     if (heap.texture_cells.ptr != null) {
         foreach (i, &cell : heap.texture_cells[:heap.texture_next_new]) {
             if (!cell.used) continue;
@@ -542,7 +542,7 @@ fn void report_descriptor_leaks(VkDeviceState* state) {
 }
 
 fn uint? count_ready_texture_retires(VkDeviceState* state, ZString operation) @private {
-    DescriptorRetireRing* retire = &state.heap.texture_retire;
+    DescriptorRetireRing* retire = &state.strict_heap.descriptors.texture_retire;
     if (retire.count == 0) return 0;
 
     ulong current = 0;
@@ -561,7 +561,7 @@ fn uint? count_ready_texture_retires(VkDeviceState* state, ZString operation) @p
 }
 
 fn void drain_texture_retire_prefix(VkDeviceState* state, uint ready_count) @private {
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     for (uint i = 0; i < ready_count; i++) {
         DescriptorRetireEntry* entry = &heap.texture_retire.entries[heap.texture_retire.head];
         heap.texture_free[heap.texture_free_count++] = entry.slot;
@@ -573,7 +573,7 @@ fn void drain_texture_retire_prefix(VkDeviceState* state, uint ready_count) @pri
 <* Recycles ready ring slots under the caller's lock; the ready handles land
    in `drained` for destruction after unlock. Returns the count. *>
 fn uint drain_sampler_retire(VkDeviceState* state, vk::Sampler[] drained) @private {
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     if (heap.sampler_retire.count == 0) return 0;
     ulong current = 0;
     vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
@@ -612,13 +612,13 @@ fn SamplerDescriptorCell*? sampler_cell_get(DescriptorHeapState* heap, gpu::Samp
    layout follows usage: sampled-only textures are accessed in SHADER_READ,
    storage-capable ones in GENERAL. *>
 fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* texture, vk::ImageView view) @private {
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     vk::DescriptorImageInfo image_info = {
         .image_view   = view,
         .image_layout = texture.usage.storage ? vk::ImageLayout.GENERAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
     };
 
-    if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
         vk::WriteDescriptorSet[2] writes;
         uint write_count = 0;
         if (texture.usage.sampled) {
@@ -670,9 +670,9 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
 }
 
 fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sampler) @private {
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
 
-    if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
         vk::DescriptorImageInfo image_info = { .sampler = sampler };
         vk::WriteDescriptorSet write = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
@@ -697,8 +697,17 @@ fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sa
 }
 
 fn void bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::PipelineLayout layout, vk::PipelineBindPoint bind_point) {
-    if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
-        vk::cmd_bind_descriptor_sets(cb, bind_point, layout, HEAP_SET, 1, &state.heap.descriptor_set, 0, null);
+    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+        vk::cmd_bind_descriptor_sets(
+            command_buffer:       cb,
+            pipeline_bind_point:   bind_point,
+            layout:                layout,
+            first_set:             HEAP_SET,
+            descriptor_set_count:  1,
+            p_descriptor_sets:     &state.strict_heap.descriptors.descriptor_set,
+            dynamic_offset_count:  0,
+            p_dynamic_offsets:     null,
+        );
         return;
     }
 
@@ -706,7 +715,7 @@ fn void bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pip
         | (uint)vk::BufferUsageFlagBits.SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
         | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
     vk::DescriptorBufferBindingInfoEXT binding_info = vk::descriptor_buffer_binding_info_ext();
-    binding_info.address = state.heap.descriptor_buffer_gpu;
+    binding_info.address = state.strict_heap.descriptors.descriptor_buffer_gpu;
     binding_info.usage   = (vk::BufferUsageFlags)usage;
     state.device_dispatch.descriptor_buffer.cmd_bind_descriptor_buffers(cb, 1, &binding_info);
 
@@ -807,7 +816,7 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     TextureSlot* texture_slot = resolve_descriptor_texture(
         state:         state,
         texture:       texture,
@@ -955,7 +964,7 @@ fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescript
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
 
     uint ready_retires = count_ready_texture_retires(state, "create_texture_descriptors")!;
     uint headroom = heap.texture_free_count + ready_retires
@@ -999,7 +1008,7 @@ fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescript
             commit_texture_descriptor_item(heap, descs[i].texture, &out_indices[i]);
         }
 
-        if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+        if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
             uint max_writes = (uint)descs.len * 2;
             vk::WriteDescriptorSet[TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP] writes_stack;
             vk::DescriptorImageInfo[TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP] image_infos_stack;
@@ -1037,7 +1046,7 @@ fn void? vk_destroy_texture_descriptor(gpu::Device* device, gpu::TextureIndex in
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    if (catch f = texture_cell_get(&state.heap, index)) {
+    if (catch f = texture_cell_get(&state.strict_heap.descriptors, index)) {
         return report_contract_failure(
             state:               state,
             operation:           "destroy_texture_descriptor",
@@ -1052,10 +1061,10 @@ fn void? vk_destroy_texture_descriptor(gpu::Device* device, gpu::TextureIndex in
             backend_text:        null,
         )~;
     }
-    TextureDescriptorCell* cell = texture_cell_get(&state.heap, index)!!;
+    TextureDescriptorCell* cell = texture_cell_get(&state.strict_heap.descriptors, index)!!;
     cell.used = false;
     cell.generation = bump_generation(cell.generation);
-    state.heap.texture_retire.push((uint)index.slot, retire_timeline_value(state));
+    state.strict_heap.descriptors.texture_retire.push((uint)index.slot, retire_timeline_value(state));
 }
 
 fn vk::Filter filter_to_vk(gpu::Filter filter) @private {
@@ -1076,7 +1085,7 @@ fn vk::SamplerAddressMode address_mode_to_vk(gpu::AddressMode mode) @private {
    `sampler` untouched, so the caller destroys it unlocked. Drained retirees
    are destroyed after unlock on every exit path. *>
 fn gpu::SamplerIndex? publish_sampler(VkDeviceState* state, vk::Sampler sampler) @private {
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     @pool() {
         vk::Sampler[] drained = mem::talloc_array(vk::Sampler, heap.sampler_retire.entries.len);
         uint drained_count = 0;
@@ -1267,7 +1276,7 @@ fn void? vk_destroy_sampler(gpu::Device* device, gpu::SamplerIndex index) @priva
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    if (catch f = sampler_cell_get(&state.heap, index)) {
+    if (catch f = sampler_cell_get(&state.strict_heap.descriptors, index)) {
         return report_contract_failure(
             state:               state,
             operation:           "destroy_sampler",
@@ -1282,8 +1291,8 @@ fn void? vk_destroy_sampler(gpu::Device* device, gpu::SamplerIndex index) @priva
             backend_text:        null,
         )~;
     }
-    SamplerDescriptorCell* cell = sampler_cell_get(&state.heap, index)!!;
+    SamplerDescriptorCell* cell = sampler_cell_get(&state.strict_heap.descriptors, index)!!;
     cell.used = false;
     cell.generation = bump_generation(cell.generation);
-    state.heap.sampler_retire.push((uint)index.slot, retire_timeline_value(state));
+    state.strict_heap.descriptors.sampler_retire.push((uint)index.slot, retire_timeline_value(state));
 }

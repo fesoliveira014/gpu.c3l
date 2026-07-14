@@ -15,6 +15,64 @@ fn uint live_device_slot_count() @private {
     return live_count;
 }
 
+fn void strict_heap_state_follows_request_and_mode() @test {
+    gpu::DeviceDesc desc = {
+        .descriptor_heap_mode        = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
+        .texture_descriptor_capacity = 7,
+        .sampler_descriptor_capacity = 9,
+    };
+    gpu::vk::VkStrictHeapState disabled = gpu::vk::resolve_strict_heap_state(false, &desc)!!;
+    gpu::vk::select_strict_heap_mode(
+        state:              &disabled,
+        requested:          desc.descriptor_heap_mode,
+        indexing_supported: false,
+        buffer_supported:   false,
+    )!!;
+    assert(!disabled.enabled, "an unrequested strict heap remains disabled");
+    assert(disabled.mode == gpu::DescriptorHeapMode.AUTO, "a disabled strict heap selects no backend mode");
+    assert(disabled.texture_capacity == 0, "a disabled strict heap reserves no texture capacity");
+    assert(disabled.sampler_capacity == 0, "a disabled strict heap reserves no sampler capacity");
+    assert(disabled.descriptors.texture_cells.ptr == null, "a disabled strict heap owns no descriptor cells");
+    assert(
+        !gpu::vk::strict_heap_uses_descriptor_indexing(&disabled),
+        "a disabled strict heap requests no indexing features"
+    );
+    assert(
+        !gpu::vk::strict_heap_uses_descriptor_buffer(&disabled),
+        "a disabled strict heap requests no descriptor-buffer dispatch"
+    );
+
+    desc.descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING;
+    gpu::vk::VkStrictHeapState indexing = gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::vk::select_strict_heap_mode(
+        state:              &indexing,
+        requested:          desc.descriptor_heap_mode,
+        indexing_supported: true,
+        buffer_supported:   false,
+    )!!;
+    assert(indexing.enabled, "a requested strict heap is enabled");
+    assert(indexing.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, "the indexing path remains exact");
+    assert(indexing.texture_capacity == 7, "the requested texture capacity is preserved");
+    assert(indexing.sampler_capacity == 9, "the requested sampler capacity is preserved");
+    assert(gpu::vk::strict_heap_uses_descriptor_indexing(&indexing), "the indexing path requests indexing features");
+    assert(
+        !gpu::vk::strict_heap_uses_descriptor_buffer(&indexing),
+        "the indexing path requests no descriptor-buffer dispatch"
+    );
+
+    desc.descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER;
+    gpu::vk::VkStrictHeapState buffer = gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::vk::select_strict_heap_mode(
+        state:              &buffer,
+        requested:          desc.descriptor_heap_mode,
+        indexing_supported: false,
+        buffer_supported:   true,
+    )!!;
+    assert(buffer.mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, "the descriptor-buffer path remains exact");
+    assert(!gpu::vk::strict_heap_uses_descriptor_indexing(&buffer), "the buffer path requests no indexing features");
+    assert(gpu::vk::strict_heap_uses_descriptor_buffer(&buffer), "the buffer path requests descriptor-buffer dispatch");
+}
+
 fn void adapter_request_creation_reuses_runtime_discovery() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -49,7 +107,50 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             "the device uses the exact requested physical adapter"
         );
         assert(!device_state.owns_instance, "the adapter device does not own the runtime instance");
-        assert(gpu::get_device_caps(&device)!!.strict_enabled, "strict state is enabled");
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        assert(device_state.strict_heap.enabled, "the strict request owns heap state");
+        assert(caps.strict_enabled, "strict state is enabled");
+        assert(
+            device_state.strict_heap.descriptors.texture_cells.ptr != null,
+            "strict state owns texture descriptor cells"
+        );
+        assert(
+            device_state.strict_heap.descriptors.sampler_cells.ptr != null,
+            "strict state owns sampler descriptor cells"
+        );
+        assert(
+            device_state.strict_heap.descriptors.set_layout != null,
+            "strict state owns its descriptor layout"
+        );
+        assert(
+            caps.max_texture_descriptors == device_state.strict_heap.texture_capacity,
+            "published texture capacity matches strict state"
+        );
+        assert(
+            caps.max_sampler_descriptors == device_state.strict_heap.sampler_capacity,
+            "published sampler capacity matches strict state"
+        );
+        if (gpu::vk::strict_heap_uses_descriptor_buffer(&device_state.strict_heap)) {
+            assert(caps.descriptor_buffer, "the selected descriptor-buffer path is published");
+            assert(
+                gpu::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
+                "the selected descriptor-buffer path loads its dispatch"
+            );
+            assert(
+                device_state.strict_heap.descriptors.descriptor_buffer != null,
+                "the selected descriptor-buffer path owns its buffer"
+            );
+        } else {
+            assert(caps.descriptor_indexing, "the selected indexing path is published");
+            assert(
+                !gpu::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
+                "the indexing path loads no descriptor-buffer dispatch"
+            );
+            assert(
+                device_state.strict_heap.descriptors.descriptor_buffer == null,
+                "the indexing path owns no descriptor buffer"
+            );
+        }
         assert(!device_state.presentation.enabled, "headless requests create no presentation state");
         assert(device_state.presentation.queue == null, "headless requests retrieve no presentation queue");
         assert(!device_state.presentation.queue_mutex.is_initialized(), "headless requests initialize no presentation mutex");

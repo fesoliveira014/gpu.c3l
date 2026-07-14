@@ -34,6 +34,10 @@ fn Surface requested_surface(DeviceRequest request) @private {
     return (Surface)(ulong)((uint128)request >> DEVICE_REQUEST_SURFACE_SHIFT);
 }
 
+fn bool requests_strict(DeviceRequest request) @private {
+    return ((ulong)(uint128)request & DEVICE_REQUEST_STRICT_BIT) != 0;
+}
+
 fn DeviceRequest? compose_device_request(
     DeviceRequest request,
     DeviceCapability capability,
@@ -68,9 +72,7 @@ fn void? validate_device_request(DeviceRequest* request) @private {
     if (request == null || !device_request_is_well_formed(*request)) {
         return INVALID_ARGUMENT~;
     }
-    if (((ulong)(uint128)*request & DEVICE_REQUEST_STRICT_BIT) == 0) {
-        return INVALID_ARGUMENT~;
-    }
+    if (!requests_strict(*request)) return INVALID_ARGUMENT~;
 
     Surface surface = requested_surface(*request);
     if (surface.is_valid() && resolve_surface(&surface) == null) {

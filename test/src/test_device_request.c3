@@ -23,6 +23,14 @@ fn void strict_device_request_is_explicit_and_non_empty() @test {
     gpu::validate_device_request(&request)!!;
 }
 
+fn void strict_request_state_is_explicit() @test {
+    gpu::DeviceRequest empty = gpu::empty_device_request();
+    gpu::DeviceRequest strict = gpu::strict_device_request();
+
+    assert(!gpu::requests_strict(empty), "an empty request does not enable strict state");
+    assert(gpu::requests_strict(strict), "the strict request enables strict state");
+}
+
 fn void request_composition_rejects_duplicate_and_malformed_inputs() @test {
     gpu::DeviceRequest strict = gpu::strict_device_request();
     assert(

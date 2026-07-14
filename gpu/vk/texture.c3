@@ -562,7 +562,7 @@ fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @pri
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;
     if (slot.swapchain_owned) return gpu::INVALID_ARGUMENT~;
-    DescriptorHeapState* heap = &state.heap;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     foreach (&cell : heap.texture_cells[:heap.texture_next_new]) {
         if (cell.used && (ulong)cell.owner == (ulong)handle) return gpu::RESOURCE_IN_USE~;
     }

@@ -348,7 +348,7 @@ fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) 
         .size        = push_size,
     };
     vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
-        .set_set_layouts((&state.heap.set_layout)[:1])
+        .set_set_layouts((&state.strict_heap.descriptors.set_layout)[:1])
         .set_push_constant_ranges((&range)[:1]);
     vk::PipelineLayout layout;
     check_backend_result(
@@ -390,7 +390,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         .size        = GRAPHICS_ROOT_PUSH_SIZE,
     };
     vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
-        .set_set_layouts((&state.heap.set_layout)[:1])
+        .set_set_layouts((&state.strict_heap.descriptors.set_layout)[:1])
         .set_push_constant_ranges((&range)[:1]);
     check_backend_result(
         state:     state,
