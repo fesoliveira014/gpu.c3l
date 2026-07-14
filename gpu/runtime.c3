@@ -133,6 +133,7 @@ fn Runtime? create_runtime(RuntimeDesc* desc) {
                 .public_fault   = UNSUPPORTED_BACKEND,
                 .rejected_field = "RuntimeDesc.backend",
                 .invariant      = "backend must be supported",
+                .backend_text   = "unsupported GPU backend",
             };
             dispatch_debug_message(desc.debug_callback, desc.debug_user_data, &message);
             return UNSUPPORTED_BACKEND~;

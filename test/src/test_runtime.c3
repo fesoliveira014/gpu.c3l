@@ -109,6 +109,28 @@ fn void reserved_runtime_and_adapter_bits_are_rejected() @test {
     );
 }
 
+fn void forged_adapter_runtime_identity_is_rejected() @test {
+    gpu::vk::stub_set_adapter_count(1);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    Adapter adapter = adapters.get(0)!!;
+
+    Adapter wrong_generation = adapter;
+    wrong_generation.runtime_generation = adapter.runtime_generation + 1;
+    Adapter out_of_range_runtime = adapter;
+    out_of_range_runtime.runtime_index = (ushort)gpu::MAX_RUNTIMES;
+    assert(
+        @catch(gpu::get_adapter_info(&wrong_generation)) == gpu::INVALID_HANDLE,
+        "a forged runtime generation cannot alias a live adapter"
+    );
+    assert(
+        @catch(gpu::get_adapter_info(&out_of_range_runtime)) == gpu::INVALID_HANDLE,
+        "an out-of-range runtime index cannot alias a live adapter"
+    );
+}
+
 fn void runtime_is_invalid_during_backend_teardown() @test {
     gpu::vk::stub_set_adapter_count(1);
     gpu::vk::stub_probe_destroy_visibility();

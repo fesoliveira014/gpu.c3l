@@ -123,6 +123,27 @@ fn void invalid_backend_delivers_diagnostic_before_unchanged_fault() @test {
     assert(capture.message.invariant.str_view() == "backend must be supported", "backend invariant is identified");
 }
 
+fn void invalid_runtime_backend_reports_backend_text() @test {
+    DiagnosticCapture capture = {};
+    BackendKind invalid_backend = bitcast(99, BackendKind);
+    RuntimeDesc desc = {
+        .backend         = invalid_backend,
+        .debug_callback  = &capture_diagnostic,
+        .debug_user_data = &capture,
+    };
+
+    fault result = @catch(create_runtime(&desc));
+
+    assert(result == UNSUPPORTED_BACKEND, "invalid runtime backend keeps UNSUPPORTED_BACKEND");
+    assert(capture.calls == 1, "invalid runtime backend emits exactly one diagnostic");
+    assert(capture.message.operation.str_view() == "create_runtime", "runtime creation operation is identified");
+    assert(capture.message.backend_text != null, "invalid runtime backend includes backend text");
+    assert(
+        capture.message.backend_text.str_view() == "unsupported GPU backend",
+        "invalid runtime backend includes stable backend text"
+    );
+}
+
 fn void invalid_backend_fault_is_callback_independent() @test {
     BackendKind invalid_backend = bitcast(99, BackendKind);
     DeviceDesc without_callback = { .backend = invalid_backend };
