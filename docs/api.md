@@ -304,7 +304,7 @@ validate current ownership and liveness.
 A valid handle packs slot index and generation. Public code should not inspect the packed representation.
 
 Handles, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
-command tokens, and synchronization values are runtime-only and scoped to its
+command tokens, and synchronization values are runtime-only and scoped to their
 owning device. Do not persist, serialize, reconstruct, or pass
 them across device or process lifetimes. `FrameToken` and `CommandList` embed a
 copy of their owning `Device` token; they do not borrow caller variable storage.
