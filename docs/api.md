@@ -364,7 +364,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan explicitly returned `VK_ERROR_DEVICE_LOST`; unrecoverable |
-| `DEVICE_BUSY` | public device operations; `destroy_device` | the operation observed a closing device, or destruction found an active host operation; retry without replacing the device token |
+| `DEVICE_BUSY` | public device operations; `destroy_device` | the operation observed a closing device or exhausted its bounded pin-acquisition retries, or destruction found an active host operation; retry without replacing the device token |
 | `RESOURCE_IN_USE` | `destroy_runtime`, `destroy_surface`, `destroy_texture` | a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture. |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
 | `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands` | the runtime or device registry, adapter token, handle table, or command-record table is at capacity |

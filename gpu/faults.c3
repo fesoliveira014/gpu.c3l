@@ -26,8 +26,8 @@ faultdef
     OUT_OF_DEVICE_MEMORY,
     // The driver reported VK_ERROR_DEVICE_LOST; the device is unrecoverable.
     DEVICE_LOST,
-    // Device destruction observed an active host operation or another
-    // destruction attempt. The operation is safe to retry.
+    // A device operation encountered closing state or sustained pin
+    // contention. Destruction may also return this fault. Safe to retry.
     DEVICE_BUSY,
     // destroy_texture while a live TextureIndex still owns the texture;
     // destroy the descriptor first. In-flight destroys defer instead.

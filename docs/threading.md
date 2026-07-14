@@ -55,6 +55,8 @@ library's own state, but results and validation verdicts are undefined.
 
 Except for `destroy_device`, each public device operation that accesses
 backend state takes a short-lived atomic pin. Pins do not serialize operations.
+Pin acquisition returns `DEVICE_BUSY` after bounded contention rather than
+waiting indefinitely.
 `destroy_device` prevents new
 pins while closing and returns `DEVICE_BUSY` if an existing pin remains;
 callers may retry with the unchanged token.

@@ -90,6 +90,7 @@ alias GetPresentModeSupportFn @private = fn PresentModeSupport? (Device*, Swapch
 const uint MAX_DEVICES @private = 64;
 const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
 const uint MAX_DEVICE_OPERATION_PINS @private = 0x3FFF_FFFF;
+const uint MAX_DEVICE_OPERATION_PIN_ATTEMPTS @private = 64;
 
 const uint DEVICE_SLOT_FREE @private = 0;
 const uint DEVICE_SLOT_LIVE @private = 1;
@@ -204,7 +205,6 @@ struct DeviceOperation @private {
     DeviceSlot*    slot;
     DeviceData*    data;
     BackendVTable* vtable;
-    uint           generation;
     bool           active;
 }
 
@@ -227,7 +227,7 @@ fn DeviceOperation? begin_device_operation(Device* device) @private {
 
     DeviceSlot* slot = &device_slots[device.index];
     ulong packed = slot.control.load(AtomicOrdering.ACQUIRE);
-    while (true) {
+    for (uint attempt = 0; attempt < MAX_DEVICE_OPERATION_PIN_ATTEMPTS; attempt++) {
         DeviceSlotControl control = (DeviceSlotControl)packed;
         if (control.generation != device.generation) return INVALID_HANDLE~;
         if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
@@ -251,42 +251,18 @@ fn DeviceOperation? begin_device_operation(Device* device) @private {
             .slot       = slot,
             .data       = &slot.data,
             .vtable     = slot.data.vtable,
-            .generation = control.generation,
             .active     = true,
         };
     }
+    return DEVICE_BUSY~;
 }
 
 fn void end_device_operation(DeviceOperation* operation) @private {
     if (operation == null || !operation.active) return;
 
-    ulong packed = operation.slot.control.load(AtomicOrdering.RELAXED);
-    while (true) {
-        DeviceSlotControl control = (DeviceSlotControl)packed;
-        if (control.generation != operation.generation || control.pins == 0) {
-            operation.active = false;
-            return;
-        }
-        if (control.state != DEVICE_SLOT_LIVE && control.state != DEVICE_SLOT_CLOSING) {
-            operation.active = false;
-            return;
-        }
-
-        DeviceSlotControl released = control;
-        released.pins--;
-        ulong seen = mem::compare_exchange(
-            &operation.slot.control.data,
-            packed,
-            (ulong)released,
-            AtomicOrdering.RELEASE,
-            AtomicOrdering.RELAXED,
-        );
-        if (seen == packed) {
-            operation.active = false;
-            return;
-        }
-        packed = seen;
-    }
+    DeviceSlotControl pin = { .pins = 1 };
+    (void)operation.slot.control.sub((ulong)pin, AtomicOrdering.RELEASE);
+    operation.active = false;
 }
 
 fn DeviceData* resolve_pinned_device(Device* device) @private {
@@ -480,43 +456,19 @@ fn void? destroy_device(Device* device) {
     lock_device_registry();
     defer unlock_device_registry();
     DeviceSlot* slot = &device_slots[device.index];
-    ulong packed = slot.control.load(AtomicOrdering.ACQUIRE);
-    DeviceSlotControl closing;
-    while (true) {
-        DeviceSlotControl control = (DeviceSlotControl)packed;
-        if (control.generation != device.generation) return INVALID_HANDLE~;
-        if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
-        if (control.state != DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
+    DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+    if (control.generation != device.generation) return INVALID_HANDLE~;
+    if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
+    if (control.state != DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
 
-        closing = control;
-        closing.state = DEVICE_SLOT_CLOSING;
-        ulong seen = mem::compare_exchange(
-            &slot.control.data,
-            packed,
-            (ulong)closing,
-            AtomicOrdering.ACQUIRE_RELEASE,
-            AtomicOrdering.ACQUIRE,
-        );
-        if (seen == packed) break;
-        packed = seen;
-    }
+    DeviceSlotControl state_step = { .state = 1 };
+    ulong previous = slot.control.add((ulong)state_step, AtomicOrdering.ACQUIRE_RELEASE);
+    DeviceSlotControl closing = (DeviceSlotControl)previous;
+    closing.state = DEVICE_SLOT_CLOSING;
 
     if (closing.pins > 0) {
-        packed = (ulong)closing;
-        while (true) {
-            DeviceSlotControl current = (DeviceSlotControl)packed;
-            DeviceSlotControl restored = current;
-            restored.state = DEVICE_SLOT_LIVE;
-            ulong seen = mem::compare_exchange(
-                &slot.control.data,
-                packed,
-                (ulong)restored,
-                AtomicOrdering.RELEASE,
-                AtomicOrdering.RELAXED,
-            );
-            if (seen == packed) return DEVICE_BUSY~;
-            packed = seen;
-        }
+        (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
+        return DEVICE_BUSY~;
     }
 
     DeviceData data = slot.data;
