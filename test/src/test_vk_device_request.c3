@@ -50,6 +50,18 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
         );
         assert(!device_state.owns_instance, "the adapter device does not own the runtime instance");
         assert(gpu::get_device_caps(&device)!!.strict_enabled, "strict state is enabled");
+        assert(!device_state.presentation.enabled, "headless requests create no presentation state");
+        assert(device_state.presentation.queue == null, "headless requests retrieve no presentation queue");
+        assert(!device_state.presentation.queue_mutex.is_initialized(), "headless requests initialize no presentation mutex");
+        assert(device_state.presentation.swapchains.slots.ptr == null, "headless requests allocate no swapchain table");
+        assert(
+            !gpu::vk::instance_dispatch_supports_presentation(&device_state.instance_dispatch),
+            "headless requests retain no surface procedures"
+        );
+        assert(
+            !gpu::vk::device_dispatch_supports_presentation(&device_state.device_dispatch),
+            "headless requests load no presentation procedures"
+        );
         assert(
             @catch(gpu::destroy_runtime(&runtime)) == gpu::RESOURCE_IN_USE,
             "the live device retains its runtime"

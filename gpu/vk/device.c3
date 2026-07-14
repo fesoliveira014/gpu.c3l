@@ -14,6 +14,14 @@ alias DeviceExtensionQuery = fn bool(vk::PhysicalDevice physical_device, ZString
 
 const ZString SWAPCHAIN_EXTENSION = "VK_KHR_swapchain";
 
+struct VkPresentationState {
+    bool           enabled;
+    uint           family;
+    vk::Queue      queue;
+    Mutex          queue_mutex;
+    SwapchainTable swapchains;
+}
+
 struct VkDeviceState {
     gpu::Device                 owner;
     vk::Instance               instance;
@@ -28,11 +36,9 @@ struct VkDeviceState {
     uint                       compute_family;
     uint                       compute_queue_index;
     uint                       transfer_family;
-    uint                       present_family;
     vk::Queue                  graphics_queue;
     vk::Queue                  compute_queue;
     vk::Queue                  transfer_queue;
-    vk::Queue                  present_queue;
     gpu::DeviceCaps            caps;
     bool                       validation;
     bool                       debug_names;
@@ -44,7 +50,6 @@ struct VkDeviceState {
     gpu::DescriptorHeapMode    heap_mode;
     uint                       texture_descriptor_capacity;
     uint                       sampler_descriptor_capacity;
-    bool                       presentation_enabled;
     BufferTable                buffers;
     vk::Semaphore              frame_timeline;
     // Per-queue aux timelines piggybacked onto user submits; each signals
@@ -77,7 +82,6 @@ struct VkDeviceState {
     Mutex                      graphics_queue_mutex;
     Mutex                      compute_queue_mutex;
     Mutex                      transfer_queue_mutex;
-    Mutex                      present_queue_mutex;
     bool                       compute_queue_distinct;
     Atomic{int}                inflight_calls;
     uint                       frames_in_flight;
@@ -100,7 +104,7 @@ struct VkDeviceState {
     ComputeLayoutCache         compute_layout_cache;
     vk::PipelineCache          driver_cache;
     TextureTable               textures;
-    SwapchainTable             swapchains;
+    VkPresentationState        presentation;
     DescriptorHeapState        heap;
     TransferArenaState         staging_arena;
     TransferArenaState         readback_arena;
@@ -344,13 +348,14 @@ fn gpu::Device? create_vk_device_with_selection(
     state.graphics_queue_mutex.init()!;
     state.compute_queue_mutex.init()!;
     state.transfer_queue_mutex.init()!;
-    state.present_queue_mutex.init()!;
 
     state.texture_descriptor_capacity = resolve_descriptor_capacity(desc.texture_descriptor_capacity, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!;
     state.sampler_descriptor_capacity = resolve_descriptor_capacity(desc.sampler_descriptor_capacity, gpu::DEFAULT_SAMPLER_DESCRIPTORS)!;
 
     state.validation = desc.enable_validation;
-    state.presentation_enabled = presentation_surface != null;
+    state.presentation.enabled = presentation_surface != null;
+    if (state.presentation.enabled) state.presentation.queue_mutex.init()!;
+    bool debug_utils_enabled;
     QueueFamilies families;
     if (owns_instance) {
         vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
@@ -365,12 +370,22 @@ fn gpu::Device? create_vk_device_with_selection(
                 ? &messenger_info
                 : null,
         };
-        state.instance = create_vk_instance(&instance_desc)!;
+        VkInstanceCreateResult instance_result =
+            create_vk_instance(&instance_desc)!;
+        state.instance = instance_result.instance;
+        debug_utils_enabled = instance_result.capabilities.debug_utils;
+        VkInstanceDispatchPlan dispatch_plan = {
+            .debug = debug_utils_enabled,
+        };
         state.instance_dispatch = load_vk_instance_dispatch(
             state.instance,
             &vk::get_instance_proc_addr,
+            dispatch_plan,
         );
-        if (state.validation || state.debug_callback != null) setup_debug_messenger(state);
+        if (should_create_debug_messenger(
+            instance_result.capabilities,
+            state.validation || state.debug_callback != null,
+        )) setup_debug_messenger(state);
 
         PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
         state.physical_device = selection.physical_device;
@@ -378,7 +393,11 @@ fn gpu::Device? create_vk_device_with_selection(
     } else {
         if (instance == null || physical_device == null || runtime_state == null) return gpu::INVALID_ARGUMENT~;
         state.instance = instance;
-        state.instance_dispatch = runtime_state.dispatch;
+        debug_utils_enabled =
+            runtime_state.instance_capabilities.debug_utils;
+        if (state.presentation.enabled) {
+            state.instance_dispatch.surface = runtime_state.dispatch.surface;
+        }
         state.physical_device = physical_device;
         families = presentation_surface == null
             ? select_queue_families(state.physical_device)!
@@ -416,14 +435,20 @@ fn gpu::Device? create_vk_device_with_selection(
     state.compute_family      = families.compute;
     state.compute_queue_index = families.compute_index;
     state.transfer_family     = families.transfer;
-    state.present_family      = families.present;
+    if (state.presentation.enabled) state.presentation.family = families.present;
 
     create_logical_device(state, &families, line_polygon_mode)!;
+    VkDeviceDispatchPlan dispatch_plan = {
+        .debug             = debug_utils_enabled,
+        .presentation      = state.presentation.enabled,
+        .descriptor_buffer = state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
+    };
     state.device_dispatch = load_vk_device_dispatch(
         state.device,
         &vk::get_device_proc_addr,
+        dispatch_plan,
     );
-    if (state.presentation_enabled
+    if (state.presentation.enabled
         && (!instance_dispatch_supports_presentation(&state.instance_dispatch)
             || !device_dispatch_supports_presentation(&state.device_dispatch))) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -440,7 +465,9 @@ fn gpu::Device? create_vk_device_with_selection(
         state.compute_queue = state.graphics_queue;
     }
     vk::get_device_queue(state.device, state.transfer_family, 0, &state.transfer_queue);
-    vk::get_device_queue(state.device, state.present_family, 0, &state.present_queue);
+    if (state.presentation.enabled) {
+        vk::get_device_queue(state.device, state.presentation.family, 0, &state.presentation.queue);
+    }
 
     create_vk_allocator(state)!;
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
@@ -456,7 +483,9 @@ fn gpu::Device? create_vk_device_with_selection(
     uint pipeline_capacity = resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
     state.pipelines.slots  = mem::new_array(PipelineCell, pipeline_capacity);
     state.textures.slots   = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
-    state.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
+    if (state.presentation.enabled) {
+        state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
+    }
     state.deferred.entries = alloc::new_array(state.host_allocator, DeferredEntry, DEFERRED_QUEUE_INITIAL_CAP);
     create_transfer_arenas(state, desc)!;
     create_descriptor_heap(state)!;
@@ -464,7 +493,7 @@ fn gpu::Device? create_vk_device_with_selection(
     CapsInputs caps_inputs = {
         .indexing_supported   = indexing_supported,
         .buffer_supported     = buffer_supported,
-        .presentation_enabled = state.presentation_enabled,
+        .presentation_enabled = state.presentation.enabled,
         .async_compute        = state.compute_queue_distinct,
         .line_polygon_mode    = line_polygon_mode,
         .texture_capacity     = state.texture_descriptor_capacity,
@@ -517,12 +546,12 @@ fn void destroy_state(VkDeviceState* state) @private {
             state.buffers.slots = {};
         }
         // Swapchains before textures: their wrapped image slots free here.
-        if (state.swapchains.slots.ptr != null) {
-            foreach (&cell : state.swapchains.slots[:state.swapchains.next_new]) {
+        if (state.presentation.swapchains.slots.ptr != null) {
+            foreach (&cell : state.presentation.swapchains.slots[:state.presentation.swapchains.next_new]) {
                 if (cell.used) destroy_swapchain_slot(state, &cell.value);
             }
-            mem::free(state.swapchains.slots.ptr);
-            state.swapchains.slots = {};
+            mem::free(state.presentation.swapchains.slots.ptr);
+            state.presentation.swapchains.slots = {};
         }
         if (state.validation || state.debug_callback != null) report_descriptor_leaks(state);
         destroy_descriptor_heap(state);
@@ -587,7 +616,7 @@ fn void destroy_state(VkDeviceState* state) @private {
     if (state.graphics_queue_mutex.is_initialized()) (void)state.graphics_queue_mutex.destroy();
     if (state.compute_queue_mutex.is_initialized())  (void)state.compute_queue_mutex.destroy();
     if (state.transfer_queue_mutex.is_initialized()) (void)state.transfer_queue_mutex.destroy();
-    if (state.present_queue_mutex.is_initialized())  (void)state.present_queue_mutex.destroy();
+    if (state.presentation.queue_mutex.is_initialized()) (void)state.presentation.queue_mutex.destroy();
     mem::free(state);
 }
 
@@ -799,7 +828,8 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families, bo
             .set_queue_family_index(families.transfer)
             .set_queue_priorities(priorities[:1]);
     }
-    if (families.present != families.graphics
+    if (state.presentation.enabled
+        && families.present != families.graphics
         && families.present != families.compute
         && families.present != families.transfer) {
         queue_infos[queue_info_count++] = vk::device_queue_create_info()
@@ -851,7 +881,7 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families, bo
     if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER) {
         extensions[extension_count++] = "VK_EXT_descriptor_buffer";
     }
-    if (state.presentation_enabled) {
+    if (state.presentation.enabled) {
         if (!device_supports_extension(state.physical_device, SWAPCHAIN_EXTENSION)) return gpu::UNSUPPORTED_FEATURE~;
         extensions[extension_count++] = SWAPCHAIN_EXTENSION;
     }

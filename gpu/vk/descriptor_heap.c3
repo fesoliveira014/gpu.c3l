@@ -377,7 +377,7 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
     heap.sampler_descriptor_size = (usz)db_props.sampler_descriptor_size;
 
     vk::DeviceSize layout_size;
-    state.device_dispatch.get_descriptor_set_layout_size(state.device, heap.set_layout, &layout_size);
+    state.device_dispatch.descriptor_buffer.get_descriptor_set_layout_size(state.device, heap.set_layout, &layout_size);
 
     HeapLimits limits = {
         .max_resource_descriptor_buffer_range    = db_props.max_resource_descriptor_buffer_range,
@@ -417,19 +417,19 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
         )~;
     }
 
-    state.device_dispatch.get_descriptor_set_layout_binding_offset(
+    state.device_dispatch.descriptor_buffer.get_descriptor_set_layout_binding_offset(
         state.device,
         heap.set_layout,
         HEAP_BINDING_SAMPLED,
         &heap.binding_offset_sampled,
     );
-    state.device_dispatch.get_descriptor_set_layout_binding_offset(
+    state.device_dispatch.descriptor_buffer.get_descriptor_set_layout_binding_offset(
         state.device,
         heap.set_layout,
         HEAP_BINDING_STORAGE,
         &heap.binding_offset_storage,
     );
-    state.device_dispatch.get_descriptor_set_layout_binding_offset(
+    state.device_dispatch.descriptor_buffer.get_descriptor_set_layout_binding_offset(
         state.device,
         heap.set_layout,
         HEAP_BINDING_SAMPLERS,
@@ -648,7 +648,7 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
         info.type = vk::DescriptorType.SAMPLED_IMAGE;
         info.data.p_sampled_image = &image_info;
         void* dst = (char*)heap.descriptor_buffer_cpu + (usz)heap.binding_offset_sampled + slot * heap.sampled_descriptor_size;
-        state.device_dispatch.get_descriptor(
+        state.device_dispatch.descriptor_buffer.get_descriptor(
             state.device,
             &info,
             (sz)heap.sampled_descriptor_size,
@@ -660,7 +660,7 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
         info.type = vk::DescriptorType.STORAGE_IMAGE;
         info.data.p_storage_image = &image_info;
         void* dst = (char*)heap.descriptor_buffer_cpu + (usz)heap.binding_offset_storage + slot * heap.storage_descriptor_size;
-        state.device_dispatch.get_descriptor(
+        state.device_dispatch.descriptor_buffer.get_descriptor(
             state.device,
             &info,
             (sz)heap.storage_descriptor_size,
@@ -688,7 +688,7 @@ fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sa
     info.type = vk::DescriptorType.SAMPLER;
     info.data.p_sampler = &sampler;
     void* dst = (char*)heap.descriptor_buffer_cpu + (usz)heap.binding_offset_samplers + slot * heap.sampler_descriptor_size;
-    state.device_dispatch.get_descriptor(
+    state.device_dispatch.descriptor_buffer.get_descriptor(
         state.device,
         &info,
         (sz)heap.sampler_descriptor_size,
@@ -708,11 +708,11 @@ fn void bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pip
     vk::DescriptorBufferBindingInfoEXT binding_info = vk::descriptor_buffer_binding_info_ext();
     binding_info.address = state.heap.descriptor_buffer_gpu;
     binding_info.usage   = (vk::BufferUsageFlags)usage;
-    state.device_dispatch.cmd_bind_descriptor_buffers(cb, 1, &binding_info);
+    state.device_dispatch.descriptor_buffer.cmd_bind_descriptor_buffers(cb, 1, &binding_info);
 
     uint buffer_index = 0;
     vk::DeviceSize offset = 0;
-    state.device_dispatch.cmd_set_descriptor_buffer_offsets(
+    state.device_dispatch.descriptor_buffer.cmd_set_descriptor_buffer_offsets(
         cb,
         bind_point,
         layout,

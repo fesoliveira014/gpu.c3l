@@ -212,7 +212,7 @@ fn bool create_debug_messenger(
     if (state == null || state.instance == null
         || create_info == null || out_messenger == null) return false;
     if (!instance_dispatch_supports_debug_messenger(&state.instance_dispatch)) return false;
-    vk::Result result = state.instance_dispatch.create_debug_messenger(
+    vk::Result result = state.instance_dispatch.debug.create_debug_messenger(
         state.instance,
         create_info,
         null,
@@ -237,18 +237,18 @@ fn void setup_debug_messenger(VkDeviceState* state) @private {
 fn void set_object_name(VkDeviceState* state, vk::ObjectType object_type, ulong object_handle, ZString name) {
     if (!state.debug_names) return;
     if (name == null) return;
-    if (state.device_dispatch.set_object_name == null) return;
+    if (state.device_dispatch.debug.set_object_name == null) return;
     vk::DebugUtilsObjectNameInfoEXT info = vk::debug_utils_object_name_info_ext();
     info.object_type = object_type;
     info.object_handle = object_handle;
     info.p_object_name = (char*)name;
-    if (state.device_dispatch.set_object_name(state.device, &info) != vk::Result.SUCCESS) return;
+    if (state.device_dispatch.debug.set_object_name(state.device, &info) != vk::Result.SUCCESS) return;
 }
 
 fn void destroy_debug_messenger(VkDeviceState* state) @private {
     if (state.messenger == null) return;
-    if (state.instance_dispatch.destroy_debug_messenger != null) {
-        state.instance_dispatch.destroy_debug_messenger(
+    if (state.instance_dispatch.debug.destroy_debug_messenger != null) {
+        state.instance_dispatch.debug.destroy_debug_messenger(
             state.instance,
             state.messenger,
             null,
@@ -444,7 +444,7 @@ fn void? vk_cmd_begin_label(gpu::CommandList* commands, ZString label, float[4] 
     vk::DebugUtilsLabelEXT info = vk::debug_utils_label_ext();
     info.p_label_name = (char*)label;
     info.color = color;
-    state.device_dispatch.cmd_begin_label(record.command_buffer, &info);
+    state.device_dispatch.debug.cmd_begin_label(record.command_buffer, &info);
 }
 
 fn void? vk_cmd_end_label(gpu::CommandList* commands) @private {
@@ -453,5 +453,5 @@ fn void? vk_cmd_end_label(gpu::CommandList* commands) @private {
     if (record.state != CommandState.RECORDING
         && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
-    state.device_dispatch.cmd_end_label(record.command_buffer);
+    state.device_dispatch.debug.cmd_end_label(record.command_buffer);
 }

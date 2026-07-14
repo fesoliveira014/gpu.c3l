@@ -12,7 +12,7 @@ fn void*? vk_create_win32_surface(
     if (state == null || instance == null || window == null) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (state.dispatch.create_win32_surface == null || state.dispatch.destroy_surface == null) {
+    if (state.dispatch.surface.create_win32_surface == null || state.dispatch.surface.destroy_surface == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
 
@@ -22,7 +22,7 @@ fn void*? vk_create_win32_surface(
         .hwnd      = window,
     };
     vk::SurfaceKHR surface;
-    check_surface_result(state.dispatch.create_win32_surface(
+    check_surface_result(state.dispatch.surface.create_win32_surface(
         state.instance,
         &info,
         null,
@@ -40,7 +40,7 @@ fn void*? vk_create_wayland_surface(
     if (state == null || display == null || window_surface == null) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (state.dispatch.create_wayland_surface == null || state.dispatch.destroy_surface == null) {
+    if (state.dispatch.surface.create_wayland_surface == null || state.dispatch.surface.destroy_surface == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
 
@@ -50,7 +50,7 @@ fn void*? vk_create_wayland_surface(
         .surface = window_surface,
     };
     vk::SurfaceKHR surface;
-    check_surface_result(state.dispatch.create_wayland_surface(
+    check_surface_result(state.dispatch.surface.create_wayland_surface(
         state.instance,
         &info,
         null,
@@ -68,7 +68,7 @@ fn void*? vk_create_x11_surface(
     if (state == null || display == null || window == 0) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (state.dispatch.create_xlib_surface == null || state.dispatch.destroy_surface == null) {
+    if (state.dispatch.surface.create_xlib_surface == null || state.dispatch.surface.destroy_surface == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
 
@@ -78,7 +78,7 @@ fn void*? vk_create_x11_surface(
         .window = window,
     };
     vk::SurfaceKHR surface;
-    check_surface_result(state.dispatch.create_xlib_surface(
+    check_surface_result(state.dispatch.surface.create_xlib_surface(
         state.instance,
         &info,
         null,
@@ -89,10 +89,10 @@ fn void*? vk_create_x11_surface(
 
 fn void vk_destroy_surface(void* backend_state, void* backend_surface) {
     VkRuntimeState* state = (VkRuntimeState*)backend_state;
-    if (state == null || backend_surface == null || state.dispatch.destroy_surface == null) {
+    if (state == null || backend_surface == null || state.dispatch.surface.destroy_surface == null) {
         return;
     }
-    state.dispatch.destroy_surface(
+    state.dispatch.surface.destroy_surface(
         state.instance,
         (vk::SurfaceKHR)backend_surface,
         null,

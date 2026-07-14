@@ -346,9 +346,10 @@ public Device token -> private device state -> private backend dispatch
 ```
 
 Public functions validate the token before dispatch. Each Vulkan runtime owns
-its instance dispatch. Each Vulkan device copies that immutable instance
-dispatch and owns a device dispatch loaded from its logical device. Backend
-pointers and dispatch declarations are not part of the public module surface.
+surface discovery and optional debug instance dispatch. A device retains only
+the instance group required by its request and loads only its selected device
+groups. Headless devices create no presentation queue, mutex, table, or
+dispatch. Backend pointers and dispatch declarations remain private.
 
 ## 6. Resource lifetime
 

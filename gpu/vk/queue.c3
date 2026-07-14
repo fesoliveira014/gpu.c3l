@@ -111,7 +111,7 @@ fn QueueFamilies? select_queue_families_for_surface(
     vk::PhysicalDevice physical_device,
     vk::SurfaceKHR surface,
 ) {
-    if (runtime == null || runtime.dispatch.get_surface_support == null) {
+    if (runtime == null || runtime.dispatch.surface.get_surface_support == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     uint count = 0;
@@ -129,7 +129,7 @@ fn QueueFamilies? select_queue_families_for_surface(
         );
         for (uint index = 0; index < count; index++) {
             uint supported = 0;
-            check_surface_result(runtime.dispatch.get_surface_support(
+            check_surface_result(runtime.dispatch.surface.get_surface_support(
                 physical_device,
                 index,
                 surface,
@@ -167,8 +167,8 @@ fn uint swapchain_queue_families(
 ) {
     uint count = 0;
     out_families[count++] = state.graphics_family;
-    if (state.present_family != state.graphics_family) {
-        out_families[count++] = state.present_family;
+    if (state.presentation.family != state.graphics_family) {
+        out_families[count++] = state.presentation.family;
     }
     return count;
 }
@@ -180,8 +180,8 @@ fn uint swapchain_idle_queues(
 ) {
     uint count = 0;
     out_queues[count++] = state.graphics_queue;
-    if (state.present_family != state.graphics_family) {
-        out_queues[count++] = state.present_queue;
+    if (state.presentation.family != state.graphics_family) {
+        out_queues[count++] = state.presentation.queue;
     }
     return count;
 }
@@ -208,16 +208,16 @@ fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
 }
 
 fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
-    if (state.present_family == state.graphics_family) {
+    if (state.presentation.family == state.graphics_family) {
         return &state.graphics_queue_mutex;
     }
-    if (state.present_family == state.compute_family) {
+    if (state.presentation.family == state.compute_family) {
         return queue_mutex_for(state, gpu::QueueKind.COMPUTE);
     }
-    if (state.present_family == state.transfer_family) {
+    if (state.presentation.family == state.transfer_family) {
         return queue_mutex_for(state, gpu::QueueKind.TRANSFER);
     }
-    return &state.present_queue_mutex;
+    return &state.presentation.queue_mutex;
 }
 
 <* Submit command lists to their queue via vkQueueSubmit2, waiting on and
@@ -293,7 +293,7 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
 
         SwapchainSlot* swapchain = null;
         if (desc.swapchain.is_valid()) {
-            swapchain = state.swapchains.get(desc.swapchain)!;
+            swapchain = state.presentation.swapchains.get(desc.swapchain)!;
             swapchain_submit_guard(
                 swapchain.acquire_pending,
                 swapchain.acquire_consumed,
