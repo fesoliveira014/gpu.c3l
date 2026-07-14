@@ -100,7 +100,7 @@ fn SwapchainSlot*? resolve_swapchain_for_operation(
     WsiDiagnosticContext* context,
     gpu::SwapchainHandle handle,
 ) {
-    SwapchainSlot*? resolved = context.state.swapchains.get(handle);
+    SwapchainSlot*? resolved = context.state.presentation.swapchains.get(handle);
     if (catch lookup_fault = resolved) {
         return report_wsi_contract(
             context:        context,

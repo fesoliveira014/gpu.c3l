@@ -100,11 +100,12 @@ load extension entry points
 install a persistent debug-utils messenger for validation or callback routing
 ```
 
-Runtime creation enables available platform surface extensions and loads a
-compact instance dispatch. Devices copy that immutable value and load a compact
-device dispatch only after logical-device creation. Missing platform support
-faults only when that platform constructor is called. The direct-device path is
-headless.
+Runtime creation enables available platform surface extensions and owns the
+surface dispatch. A device retains surface procedures only for a presentation
+request and loads only the selected device dispatch groups after logical-device
+creation. Headless devices create no presentation state. Missing platform
+support faults when that platform constructor is called. The direct-device path
+is headless.
 
 `VK_EXT_debug_utils` is requested when validation, Vulkan debug names, or a
 structured callback needs it. `enable_debug_names` remains independent of

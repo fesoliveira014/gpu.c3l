@@ -474,9 +474,12 @@ fn void swapchain_sharing_aliases_the_main_family() @test {
     vk::Queue queue = (vk::Queue)(uptr)0x10;
     vk::VkDeviceState state = {
         .graphics_family = 4,
-        .present_family  = 4,
         .graphics_queue  = queue,
-        .present_queue   = queue,
+        .presentation    = {
+            .enabled = true,
+            .family  = 4,
+            .queue   = queue,
+        },
     };
     uint[2] families;
     uint family_count = vk::swapchain_queue_families(&state, families[..]);
@@ -494,9 +497,12 @@ fn void swapchain_sharing_includes_a_separate_present_family() @test {
     vk::Queue present_queue = (vk::Queue)(uptr)0x20;
     vk::VkDeviceState state = {
         .graphics_family = 4,
-        .present_family  = 7,
         .graphics_queue  = graphics_queue,
-        .present_queue   = present_queue,
+        .presentation    = {
+            .enabled = true,
+            .family  = 7,
+            .queue   = present_queue,
+        },
     };
     uint[2] families;
     uint family_count = vk::swapchain_queue_families(&state, families[..]);

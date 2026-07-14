@@ -8,6 +8,7 @@ import std::io;
 struct VkRuntimeState {
     vk::Instance               instance;
     VkInstanceDispatch         dispatch;
+    VkInstanceCapabilities     instance_capabilities;
     vk::DebugUtilsMessengerEXT messenger;
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;
@@ -73,7 +74,7 @@ fn bool create_runtime_debug_messenger(
 ) {
     if (state.instance == null || create_info == null) return false;
     if (!instance_dispatch_supports_debug_messenger(&state.dispatch)) return false;
-    vk::Result result = state.dispatch.create_debug_messenger(
+    vk::Result result = state.dispatch.debug.create_debug_messenger(
         state.instance,
         create_info,
         null,
@@ -86,8 +87,8 @@ fn bool create_runtime_debug_messenger(
 
 fn void destroy_runtime_debug_messenger(VkRuntimeState* state) {
     if (state.messenger == null) return;
-    if (state.dispatch.destroy_debug_messenger != null) {
-        state.dispatch.destroy_debug_messenger(state.instance, state.messenger, null);
+    if (state.dispatch.debug.destroy_debug_messenger != null) {
+        state.dispatch.debug.destroy_debug_messenger(state.instance, state.messenger, null);
     }
     state.messenger = (vk::DebugUtilsMessengerEXT)null;
 }
@@ -156,12 +157,26 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
             ? &messenger_info
             : null,
     };
-    state.instance = create_vk_instance(&instance_desc)!;
+    VkInstanceCreateResult instance_result =
+        create_vk_instance(&instance_desc)!;
+    state.instance = instance_result.instance;
+    state.instance_capabilities = instance_result.capabilities;
+    VkInstanceDispatchPlan dispatch_plan = {
+        .debug           = state.instance_capabilities.debug_utils,
+        .surface         = state.instance_capabilities.surface,
+        .win32_surface   = state.instance_capabilities.win32_surface,
+        .wayland_surface = state.instance_capabilities.wayland_surface,
+        .xlib_surface    = state.instance_capabilities.xlib_surface,
+    };
     state.dispatch = load_vk_instance_dispatch(
         state.instance,
         &vk::get_instance_proc_addr,
+        dispatch_plan,
     );
-    if (instance_desc.enable_debug_utils) {
+    if (should_create_debug_messenger(
+        state.instance_capabilities,
+        instance_desc.enable_debug_utils,
+    )) {
         if (!create_runtime_debug_messenger(state, &messenger_info)) {
             report_runtime_debug_messenger_failure(state);
         }
