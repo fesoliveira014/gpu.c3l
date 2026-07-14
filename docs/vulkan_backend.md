@@ -27,7 +27,7 @@ No `vk::` or `vma::` type should appear in public `gpu` API signatures.
 ## 2. Backend files
 
 ```text
-gpu/vk/backend.c3              loader/VMA link probes, backend availability
+gpu/vk/backend.c3              instance/device dispatch loading, loader/VMA link probes
 gpu/vk/runtime.c3              per-runtime instance, diagnostics, adapter ownership
 gpu/vk/surface.c3              per-runtime WSI dispatch and VkSurfaceKHR operations
 gpu/vk/adapter.c3              semantic adapter metadata and diagnostic snapshots
@@ -83,7 +83,9 @@ Device creation should fail with `UNSUPPORTED_FEATURE` if required features are 
 
 ## 4. Runtime and instance creation
 
-Each `VkRuntimeState` owns one instance, one optional debug messenger, and a stable adapter cache. Runtime creation publishes its public slot only after instance creation and adapter enumeration succeed.
+Each `VkRuntimeState` owns one instance, its instance dispatch, one optional
+debug messenger, and a stable adapter cache. Runtime creation publishes its
+public slot only after instance creation and adapter enumeration succeed.
 
 Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact cached physical device and borrows the runtime-owned instance. Device destruction never destroys that borrowed instance; the retained runtime remains unavailable for destruction until the device is gone. The transitional `create_device_from_desc(DeviceDesc*)` path owns a separate instance and performs its own adapter selection.
 
@@ -98,9 +100,11 @@ load extension entry points
 install a persistent debug-utils messenger for validation or callback routing
 ```
 
-Runtime creation enables available platform surface extensions and loads their
-instance-local entry points. Missing platform support faults only when that
-platform constructor is called. The direct-device path is headless.
+Runtime creation enables available platform surface extensions and loads a
+compact instance dispatch. Devices copy that immutable value and load a compact
+device dispatch only after logical-device creation. Missing platform support
+faults only when that platform constructor is called. The direct-device path is
+headless.
 
 `VK_EXT_debug_utils` is requested when validation, Vulkan debug names, or a
 structured callback needs it. `enable_debug_names` remains independent of

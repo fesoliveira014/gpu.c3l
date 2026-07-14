@@ -3,29 +3,6 @@ module gpu::vk @private;
 import gpu @public;
 import vk;
 
-fn void load_runtime_surface_dispatch(VkRuntimeState* state) {
-    state.create_win32_surface = (vk::PFN_vkCreateWin32SurfaceKHR)vk::get_instance_proc_addr(
-        state.instance,
-        "vkCreateWin32SurfaceKHR",
-    );
-    state.create_wayland_surface = (vk::PFN_vkCreateWaylandSurfaceKHR)vk::get_instance_proc_addr(
-        state.instance,
-        "vkCreateWaylandSurfaceKHR",
-    );
-    state.create_xlib_surface = (vk::PFN_vkCreateXlibSurfaceKHR)vk::get_instance_proc_addr(
-        state.instance,
-        "vkCreateXlibSurfaceKHR",
-    );
-    state.destroy_surface = (vk::PFN_vkDestroySurfaceKHR)vk::get_instance_proc_addr(
-        state.instance,
-        "vkDestroySurfaceKHR",
-    );
-    state.get_surface_support = (vk::PFN_vkGetPhysicalDeviceSurfaceSupportKHR)vk::get_instance_proc_addr(
-        state.instance,
-        "vkGetPhysicalDeviceSurfaceSupportKHR",
-    );
-}
-
 fn void*? vk_create_win32_surface(
     void* backend_state,
     void* instance,
@@ -35,7 +12,7 @@ fn void*? vk_create_win32_surface(
     if (state == null || instance == null || window == null) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (state.create_win32_surface == null || state.destroy_surface == null) {
+    if (state.dispatch.create_win32_surface == null || state.dispatch.destroy_surface == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
 
@@ -45,7 +22,7 @@ fn void*? vk_create_win32_surface(
         .hwnd      = window,
     };
     vk::SurfaceKHR surface;
-    check_surface_result(state.create_win32_surface(
+    check_surface_result(state.dispatch.create_win32_surface(
         state.instance,
         &info,
         null,
@@ -63,7 +40,7 @@ fn void*? vk_create_wayland_surface(
     if (state == null || display == null || window_surface == null) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (state.create_wayland_surface == null || state.destroy_surface == null) {
+    if (state.dispatch.create_wayland_surface == null || state.dispatch.destroy_surface == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
 
@@ -73,7 +50,7 @@ fn void*? vk_create_wayland_surface(
         .surface = window_surface,
     };
     vk::SurfaceKHR surface;
-    check_surface_result(state.create_wayland_surface(
+    check_surface_result(state.dispatch.create_wayland_surface(
         state.instance,
         &info,
         null,
@@ -91,7 +68,7 @@ fn void*? vk_create_x11_surface(
     if (state == null || display == null || window == 0) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (state.create_xlib_surface == null || state.destroy_surface == null) {
+    if (state.dispatch.create_xlib_surface == null || state.dispatch.destroy_surface == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
 
@@ -101,7 +78,7 @@ fn void*? vk_create_x11_surface(
         .window = window,
     };
     vk::SurfaceKHR surface;
-    check_surface_result(state.create_xlib_surface(
+    check_surface_result(state.dispatch.create_xlib_surface(
         state.instance,
         &info,
         null,
@@ -112,10 +89,10 @@ fn void*? vk_create_x11_surface(
 
 fn void vk_destroy_surface(void* backend_state, void* backend_surface) {
     VkRuntimeState* state = (VkRuntimeState*)backend_state;
-    if (state == null || backend_surface == null || state.destroy_surface == null) {
+    if (state == null || backend_surface == null || state.dispatch.destroy_surface == null) {
         return;
     }
-    state.destroy_surface(
+    state.dispatch.destroy_surface(
         state.instance,
         (vk::SurfaceKHR)backend_surface,
         null,
@@ -131,7 +108,7 @@ fn bool? vk_supports_presentation(
     if (state == null || backend_surface == null || adapter_index >= state.adapters.len) {
         return gpu::INVALID_HANDLE~;
     }
-    if (state.get_surface_support == null) return false;
+    if (state.dispatch.get_surface_support == null) return false;
 
     vk::PhysicalDevice physical_device = state.adapters[adapter_index].physical_device;
     if (!device_supports_extension(physical_device, SWAPCHAIN_EXTENSION)) return false;

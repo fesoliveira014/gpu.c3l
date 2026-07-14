@@ -345,8 +345,10 @@ Preferred backend connection:
 public Device token -> private device state -> private backend dispatch
 ```
 
-Public functions validate the token before dispatch. Backend pointers and
-dispatch declarations are not part of the public module surface.
+Public functions validate the token before dispatch. Each Vulkan runtime owns
+its instance dispatch. Each Vulkan device copies that immutable instance
+dispatch and owns a device dispatch loaded from its logical device. Backend
+pointers and dispatch declarations are not part of the public module surface.
 
 ## 6. Resource lifetime
 

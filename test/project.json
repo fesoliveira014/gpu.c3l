@@ -93,7 +93,7 @@
     },
     "vk_device_request": {
       "type": "test",
-      "sources": [ "src/test_vk_device_request.c3" ]
+      "sources": [ "src/test_vk_device_request.c3", "src/test_vk_dispatch.c3" ]
     },
     // Vulkan bootstrap: the feature gate needs no ICD; the create/destroy test
     // needs one — pin lavapipe via VK_DRIVER_FILES when running this target.

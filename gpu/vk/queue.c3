@@ -111,7 +111,7 @@ fn QueueFamilies? select_queue_families_for_surface(
     vk::PhysicalDevice physical_device,
     vk::SurfaceKHR surface,
 ) {
-    if (runtime == null || runtime.get_surface_support == null) {
+    if (runtime == null || runtime.dispatch.get_surface_support == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     uint count = 0;
@@ -129,7 +129,7 @@ fn QueueFamilies? select_queue_families_for_surface(
         );
         for (uint index = 0; index < count; index++) {
             uint supported = 0;
-            check_surface_result(runtime.get_surface_support(
+            check_surface_result(runtime.dispatch.get_surface_support(
                 physical_device,
                 index,
                 surface,

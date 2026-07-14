@@ -143,7 +143,7 @@ fn void failed_native_device_creation_rolls_back_before_publication() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void same_runtime_devices_destroy_independently() @test {
+fn void runtime_devices_destroy_independently() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
@@ -157,18 +157,32 @@ fn void same_runtime_devices_destroy_independently() @test {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
 
-        gpu::Device first = gpu::create_device(&adapter, &request)!!;
-        gpu::Device second = gpu::create_device(&adapter, &request)!!;
-        assert((ulong)first != (ulong)second, "same-runtime devices have distinct identities");
+        gpu::Adapter second_adapter = adapter;
+        for (uint j = 0; j < adapters.count; j++) {
+            if (j == i) continue;
+            gpu::Adapter candidate = adapters.get(j)!!;
+            if (!gpu::supports_device_request(&candidate, &request)!!.supported) continue;
+            second_adapter = candidate;
+            break;
+        }
 
-        gpu::destroy_device(&first)!!;
-        assert(gpu::get_device_caps(&second)!!.strict_enabled, "destroying one device preserves its peer");
+        gpu::Device first = gpu::create_device(&adapter, &request)!!;
+        gpu::Device second = gpu::create_device(&second_adapter, &request)!!;
+        assert((ulong)first != (ulong)second, "same-runtime devices have distinct identities");
 
         gpu::BufferDesc buffer_desc = {
             .size        = 256,
             .usage       = { .storage },
             .memory_kind = gpu::MemoryKind.DEVICE,
         };
+        gpu::BufferHandle first_buffer = gpu::create_buffer(&first, &buffer_desc)!!;
+        gpu::BufferHandle second_buffer = gpu::create_buffer(&second, &buffer_desc)!!;
+        gpu::destroy_buffer(&first, first_buffer)!!;
+        gpu::destroy_buffer(&second, second_buffer)!!;
+
+        gpu::destroy_device(&first)!!;
+        assert(gpu::get_device_caps(&second)!!.strict_enabled, "destroying one device preserves its peer");
+
         gpu::BufferHandle buffer = gpu::create_buffer(&second, &buffer_desc)!!;
         gpu::destroy_buffer(&second, buffer)!!;
         gpu::destroy_device(&second)!!;
