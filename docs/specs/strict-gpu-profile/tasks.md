@@ -67,7 +67,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 1.3 Runtime-owned platform surfaces
 
-- [ ] Replace the root untyped platform-handle path with `gpu::surface::win32`, `gpu::surface::wayland`, and `gpu::surface::x11` constructors backed by shared `Surface` tokens in `gpu/surface/`, `gpu/swapchain.c3`, and `gpu/vk/surface/`.
+- [x] Replace the root untyped platform-handle path with `gpu::surface::win32`, `gpu::surface::wayland`, and `gpu::surface::x11` constructors backed by shared `Surface` tokens in `gpu/surface/`, `gpu/swapchain.c3`, and `gpu/vk/surface/`.
   - **Depends on:** 1.1 and 1.2.
   - **Contract:** a surface belongs to one runtime; presentation support is queried for an adapter and surface before device creation; importing any surface module is inert; SDL remains outside this repository.
   - **Edges:** wrong runtime, stale surface, unsupported presentation, invalid native handles, dormant surface, and runtime destruction with a live surface.

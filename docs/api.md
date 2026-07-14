@@ -136,6 +136,7 @@ gpu::destroy_runtime(&runtime)!!;
 ```
 
 Adapters and query-result strings are borrowed until runtime destruction. Borrowed strings are read-only and must not be modified. Backend and driver diagnostics are for logging; feature selection uses semantic adapter fields. Runtime destruction returns `RESOURCE_IN_USE` while a dependent surface or device is live.
+
 ### Runtime-owned surfaces
 
 `Surface` is an opaque token owned by one runtime. Each platform module uses
@@ -155,6 +156,9 @@ accepts swapchains only for the exact surface named in its request and reports
 that capability through `DeviceCaps.presentation_enabled`. Presentation may
 use a private queue distinct from graphics. Destroying a surface with a live
 swapchain returns `RESOURCE_IN_USE`; destroy surfaces before their runtime.
+Destroying a requested surface with no live swapchain succeeds. Its presentation
+device remains bound to that stale token, so future `create_swapchain` calls
+return `INVALID_HANDLE`.
 
 ### Device requests and creation
 
