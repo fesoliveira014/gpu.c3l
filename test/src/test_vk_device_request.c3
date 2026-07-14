@@ -87,3 +87,41 @@ fn void malformed_native_request_preserves_runtime_state() @test {
     );
     gpu::destroy_runtime(&runtime)!!;
 }
+
+fn void failed_native_device_creation_rolls_back_before_publication() @test {
+    gpu::RuntimeDesc desc = {
+        .backend          = gpu::BackendKind.VULKAN,
+        .application_name = "gpu_vk_device_request_rollback_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
+
+        uint initialized_before = gpu::vk::device_creation_initialized_count();
+        uint rolled_back_before = gpu::vk::device_creation_rollback_count();
+        gpu::vk::inject_device_creation_failure_before_publish(true);
+        defer gpu::vk::inject_device_creation_failure_before_publish(false);
+
+        assert(
+            @catch(gpu::create_device(&adapter, &request)) == gpu::BACKEND_ERROR,
+            "injected native creation failure returns the backend fault"
+        );
+        assert(gpu::device_slot_available(), "failed native creation publishes no device");
+        assert(
+            gpu::vk::device_creation_initialized_count() == initialized_before + 1,
+            "failure occurs after native initialization"
+        );
+        assert(
+            gpu::vk::device_creation_rollback_count() == rolled_back_before + 1,
+            "failure tears down the initialized native state"
+        );
+        gpu::destroy_runtime(&runtime)!!;
+        return;
+    }
+
+    gpu::destroy_runtime(&runtime)!!;
+}

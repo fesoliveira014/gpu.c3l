@@ -120,12 +120,11 @@ fn vk::BufferCreateInfo? make_buffer_create_info(gpu::BufferDesc* desc, uint[] q
     return info;
 }
 
-fn gpu::BufferHandle? vk_create_buffer_with_families(
-    gpu::Device* device,
+fn gpu::BufferHandle? create_buffer_with_families_for_state(
+    VkDeviceState* state,
     gpu::BufferDesc* desc,
     uint[] queue_families,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     vk::BufferCreateInfo buffer_info = make_buffer_create_info(desc, queue_families)!;
     vma::AllocationCreateInfo alloc_info = memory_kind_to_vma(desc.memory_kind);
 
@@ -169,6 +168,13 @@ fn gpu::BufferHandle? vk_create_buffer_with_families(
     return gpu::SLOT_TABLE_FULL~;
 }
 
+fn gpu::BufferHandle? create_buffer_for_state(VkDeviceState* state, gpu::BufferDesc* desc) @private {
+    if (!desc.usage.shared_queues) return create_buffer_with_families_for_state(state, desc, {});
+    uint[MAX_QUEUE_FAMILIES] families;
+    uint count = used_queue_families(state, families[..]);
+    return create_buffer_with_families_for_state(state, desc, families[:count]);
+}
+
 fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
@@ -201,10 +207,7 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
         gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
         return gpu::INVALID_ARGUMENT~;
     }
-    if (!desc.usage.shared_queues) return vk_create_buffer_with_families(device, desc, {});
-    uint[MAX_QUEUE_FAMILIES] families;
-    uint count = used_queue_families(state, families[..]);
-    return vk_create_buffer_with_families(device, desc, families[:count]);
+    return create_buffer_for_state(state, desc);
 }
 
 <* Frees the handle now; buffer + allocation release is deferred until every
@@ -249,8 +252,7 @@ fn void? vk_invalidate_buffer(gpu::Device* device, gpu::BufferHandle handle, usz
     check(state.allocator.invalidate_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
 }
 
-fn gpu::GpuSpan? vk_get_buffer_span(gpu::Device* device, gpu::BufferHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+fn gpu::GpuSpan? get_buffer_span_for_state(VkDeviceState* state, gpu::BufferHandle handle) @private {
     BufferSlot* slot = state.buffers.get(handle)!;
     return (gpu::GpuSpan){
         .gpu    = slot.gpu_base,
@@ -260,4 +262,10 @@ fn gpu::GpuSpan? vk_get_buffer_span(gpu::Device* device, gpu::BufferHandle handl
         .offset = 0,
         .kind   = slot.memory_kind,
     };
+}
+
+fn gpu::GpuSpan? vk_get_buffer_span(gpu::Device* device, gpu::BufferHandle handle) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    if (state == null) return gpu::INVALID_HANDLE~;
+    return get_buffer_span_for_state(state, handle);
 }

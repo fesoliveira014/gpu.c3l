@@ -151,6 +151,18 @@ struct CapsInputs {
     uint sampler_capacity;
 }
 
+bool fail_device_creation_before_publish @private;
+uint device_creation_initializations @private;
+uint device_creation_rollbacks @private;
+
+fn void inject_device_creation_failure_before_publish(bool fail) {
+    fail_device_creation_before_publish = fail;
+}
+
+fn uint device_creation_initialized_count() => device_creation_initializations;
+
+fn uint device_creation_rollback_count() => device_creation_rollbacks;
+
 <* Frame-boundary quiescence accounting, active only under validation. *>
 fn void enter_tracked(VkDeviceState* state) {
     if (state.validation) state.inflight_calls.add(1, AtomicOrdering.RELAXED);
@@ -292,21 +304,11 @@ fn gpu::Device? create_vk_device_with_selection(
     bool owns_instance,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
-    gpu::Device handle;
+    bool initialized_before_publish = false;
     defer catch {
-        if ((ulong)handle != 0) {
-            (void)gpu::destroy_device(&handle);
-        } else {
-            mem::free(state);
-        }
+        destroy_state(state);
+        if (initialized_before_publish) device_creation_rollbacks++;
     }
-    handle = gpu::register_device(
-        backend:       gpu::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &VK_VTABLE,
-        backend_state: (void*)state,
-    )!;
-    state.owner = handle;
     state.owns_instance = owns_instance;
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
     state.debug_callback = desc.debug_callback;
@@ -427,8 +429,16 @@ fn gpu::Device? create_vk_device_with_selection(
         physical_device: state.physical_device,
         inputs:          &caps_inputs,
     );
-    gpu::update_device_caps(&handle, state.caps)!;
-    return handle;
+    device_creation_initializations++;
+    initialized_before_publish = true;
+    if (fail_device_creation_before_publish) return gpu::BACKEND_ERROR~;
+    return gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          state.caps,
+        vtable:        &VK_VTABLE,
+        backend_state: (void*)state,
+        owner:         &state.owner,
+    );
 }
 
 fn void vk_destroy_device(gpu::Device* device) @private {

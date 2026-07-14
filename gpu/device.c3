@@ -194,7 +194,8 @@ fn Device? register_device(
     BackendKind backend,
     DeviceCaps caps,
     BackendVTable* vtable,
-    void* backend_state
+    void* backend_state,
+    Device* owner = null,
 ) @private {
     if (device_active || vtable == null || backend_state == null) return INVALID_RESOURCE_STATE~;
     next_device_generation++;
@@ -206,8 +207,10 @@ fn Device? register_device(
         .vtable        = vtable,
         .backend_state = backend_state,
     };
+    Device handle = (Device)next_device_generation;
+    if (owner != null) *owner = handle;
     device_active = true;
-    return (Device)next_device_generation;
+    return handle;
 }
 
 fn void? update_device_caps(Device* device, DeviceCaps caps) @private {
