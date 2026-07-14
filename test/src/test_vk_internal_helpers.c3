@@ -25,6 +25,32 @@ fn void descriptor_capacity_resolution() @test {
         "capacity above the packed-slot ceiling faults INVALID_ARGUMENT");
 }
 
+fn void strict_indexing_heap_capacity_support_matches_creation_limits() @test {
+    gpu::vk::IndexingHeapLimits limits = {
+        .max_sampled_images           = gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        .max_storage_images           = gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        .max_samplers                 = gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+        .max_per_stage_sampled_images = gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        .max_per_stage_storage_images = gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        .max_per_stage_samplers       = gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+        .max_per_stage_resources      = gpu::DEFAULT_TEXTURE_DESCRIPTORS * 2,
+        .max_all_pools_descriptors    = gpu::DEFAULT_TEXTURE_DESCRIPTORS * 2
+            + gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+    };
+    assert(gpu::vk::indexing_heap_fits_limits(
+        tex_capacity: gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        smp_capacity: gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+        limits:       limits,
+    ));
+
+    limits.max_sampled_images--;
+    assert(!gpu::vk::indexing_heap_fits_limits(
+        tex_capacity: gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        smp_capacity: gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+        limits:       limits,
+    ));
+}
+
 fn void resource_handle_generation_wraps_to_public_width() @test {
     assert(next_handle_generation(HANDLE_GENERATION_MAX) == 1,
         "resource handle generation wraps before exceeding its 24-bit field");

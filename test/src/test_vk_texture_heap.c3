@@ -20,7 +20,7 @@ fn void bindless_texture_write_then_sample() @test {
         .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
         .application_name     = "gpu_texture_heap_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
@@ -159,7 +159,7 @@ fn void anisotropic_sampler_caps_honest() @test {
         .backend = gpu::BackendKind.VULKAN, .enable_validation = true,
         .frames_in_flight = 2, .application_name = "gpu_aniso_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::SamplerDesc aniso = {
@@ -190,7 +190,7 @@ fn void anisotropy_range_validated() @test {
         .frames_in_flight  = 2,
         .application_name  = "gpu_aniso_range_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
     if (gpu::get_device_caps(&device)!!.max_sampler_anisotropy <= 0) return;
 

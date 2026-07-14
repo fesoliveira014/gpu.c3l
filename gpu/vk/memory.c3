@@ -69,7 +69,6 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
 
     usz frame_arena_size = desc.frame_arena_size == 0 ? gpu::DEFAULT_FRAME_ARENA_SIZE : desc.frame_arena_size;
     state.frame_arenas = mem::new_array(FrameArenaState, state.frames_in_flight);
-    gpu::Device handle = state.owner;
     uint[2] frame_families;
     uint frame_family_count = graphics_compute_queue_families(state, frame_families[..]);
     for (uint i = 0; i < state.frames_in_flight; i++) {
@@ -79,13 +78,13 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
             .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
             .debug_name  = "frame_arena",
         };
-        gpu::BufferHandle buffer = vk_create_buffer_with_families(
-            &handle,
+        gpu::BufferHandle buffer = create_buffer_with_families_for_state(
+            state,
             &arena_desc,
             frame_families[:frame_family_count],
         )!;
         mark_buffer_internal(state, buffer);
-        gpu::GpuSpan span = vk_get_buffer_span(&handle, buffer)!;
+        gpu::GpuSpan span = get_buffer_span_for_state(state, buffer)!;
         state.frame_arenas[i] = {
             .backing_buffer = buffer,
             .gpu_base       = span.gpu,
@@ -576,11 +575,14 @@ fn PersistentArenaCreatePlan persistent_arena_create_plan(VkDeviceState* state, 
    block that suballocates it. *>
 fn void? create_persistent_arena(VkDeviceState* state, gpu::DeviceDesc* device_desc) {
     usz arena_size = device_desc.persistent_arena_size == 0 ? gpu::DEFAULT_PERSISTENT_ARENA_SIZE : device_desc.persistent_arena_size;
-    gpu::Device handle = state.owner;
     PersistentArenaCreatePlan plan = persistent_arena_create_plan(state, arena_size);
-    gpu::BufferHandle buffer = vk_create_buffer_with_families(&handle, &plan.desc, plan.families[:plan.family_count])!;
+    gpu::BufferHandle buffer = create_buffer_with_families_for_state(
+        state:          state,
+        desc:           &plan.desc,
+        queue_families: plan.families[:plan.family_count],
+    )!;
     mark_buffer_internal(state, buffer);
-    gpu::GpuSpan span = vk_get_buffer_span(&handle, buffer)!;
+    gpu::GpuSpan span = get_buffer_span_for_state(state, buffer)!;
 
     vma::VirtualBlockCreateInfo block_info = { .size = (vk::DeviceSize)arena_size };
     vma::VirtualBlock block;

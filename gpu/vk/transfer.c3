@@ -188,22 +188,25 @@ fn gpu::BufferDesc staging_dedicated_desc(usz size) @private {
 }
 
 fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
-    gpu::Device shim = device_shim(state);
     usz staging_size = desc.staging_arena_size == 0 ? gpu::DEFAULT_STAGING_ARENA_SIZE : desc.staging_arena_size;
     usz readback_size = desc.readback_arena_size == 0 ? gpu::DEFAULT_READBACK_ARENA_SIZE : desc.readback_arena_size;
 
     gpu::BufferDesc staging_desc = staging_arena_desc(staging_size);
     uint[MAX_QUEUE_FAMILIES] family_storage;
     uint family_count = used_queue_families(state, family_storage[..]);
-    state.staging_arena.backing = vk_create_buffer_with_families(&shim, &staging_desc, family_storage[:family_count])!;
+    state.staging_arena.backing = create_buffer_with_families_for_state(
+        state:          state,
+        desc:           &staging_desc,
+        queue_families: family_storage[:family_count],
+    )!;
     mark_buffer_internal(state, state.staging_arena.backing);
-    state.staging_arena.span = vk_get_buffer_span(&shim, state.staging_arena.backing)!;
+    state.staging_arena.span = get_buffer_span_for_state(state, state.staging_arena.backing)!;
     state.staging_arena.size = staging_size;
 
     gpu::BufferDesc readback_desc = readback_arena_desc(readback_size);
-    state.readback_arena.backing = vk_create_buffer(&shim, &readback_desc)!;
+    state.readback_arena.backing = create_buffer_for_state(state, &readback_desc)!;
     mark_buffer_internal(state, state.readback_arena.backing);
-    state.readback_arena.span = vk_get_buffer_span(&shim, state.readback_arena.backing)!;
+    state.readback_arena.span = get_buffer_span_for_state(state, state.readback_arena.backing)!;
     state.readback_arena.size = readback_size;
 }
 

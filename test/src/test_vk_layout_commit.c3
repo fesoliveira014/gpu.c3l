@@ -14,7 +14,7 @@ fn gpu::Device make_layout_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_layout_commit_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn gpu::TextureHandle make_layout_texture(gpu::Device* device) {

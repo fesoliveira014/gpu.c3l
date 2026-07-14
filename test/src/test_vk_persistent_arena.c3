@@ -203,7 +203,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
         .persistent_arena_size = gpu::DispatchIndirectCommand::size,
         .application_name      = "persistent_reuse_cross_family",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     if (state.graphics_family == state.compute_family) {
@@ -361,7 +361,7 @@ fn void persistent_alloc_free_stats() @test {
         .enable_validation = true,
         .application_name  = "gpu_persistent_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::PersistentArenaStats empty = gpu::get_persistent_stats(&device)!!;
@@ -421,7 +421,7 @@ fn void persistent_allocation_rejections_report_contract_context() @test {
         .backend = gpu::BackendKind.VULKAN, .debug_callback = &capture_persistent_diagnostic,
         .debug_user_data = &capture, .frames_in_flight = 2,
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::PersistentAllocDesc bad_size = {
@@ -488,7 +488,7 @@ fn void persistent_diagnostic_callback_preserves_fault_parity() @test {
         .backend = gpu::BackendKind.VULKAN, .debug_callback = &capture_persistent_diagnostic,
         .debug_user_data = &capture, .frames_in_flight = 2,
     };
-    gpu::Device callback_device = gpu::create_device(&callback_desc)!!;
+    gpu::Device callback_device = gpu::create_device_from_desc(&callback_desc)!!;
     gpu::PersistentAllocDesc rejected_desc = {
         .size = 0, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
     };
@@ -499,7 +499,7 @@ fn void persistent_diagnostic_callback_preserves_fault_parity() @test {
     gpu::destroy_device(&callback_device)!!;
 
     gpu::DeviceDesc plain_desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device plain_device = gpu::create_device(&plain_desc)!!;
+    gpu::Device plain_device = gpu::create_device_from_desc(&plain_desc)!!;
     fault plain_fault = @catch(gpu::alloc_persistent_span(&plain_device, &rejected_desc));
     gpu::destroy_device(&plain_device)!!;
     assert(plain_fault == callback_fault, "callback presence does not change persistent allocation fault");
@@ -513,7 +513,7 @@ fn void custom_persistent_arena_size_reported() @test {
         .persistent_arena_size = 128 << 20,
         .application_name      = "gpu_persistent_size_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::PersistentArenaStats stats = gpu::get_persistent_stats(&device)!!;
@@ -527,7 +527,7 @@ fn gpu::Device make_persistent_usage_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_persistent_usage_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 <* A transfer-usage persistent span is a real cmd_copy_buffer endpoint: two
@@ -678,7 +678,7 @@ fn void persistent_free_rejections_report_exact_context() @test {
         .debug_user_data  = &capture,
         .frames_in_flight = 2,
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
     gpu::PersistentAllocDesc alloc_desc = {
         .size        = 64,
@@ -722,7 +722,7 @@ fn void persistent_capacity_failure_reports_backend_result() @test {
         .debug_user_data       = &capture,
         .frames_in_flight      = 2,
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
     gpu::PersistentAllocDesc full_desc = {
         .size        = 64,

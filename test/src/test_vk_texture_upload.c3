@@ -17,7 +17,7 @@ fn gpu::Device make_upload_test_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_texture_upload_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn void sampled_texture_upload_and_mip_readback() @test {

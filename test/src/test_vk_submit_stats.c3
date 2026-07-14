@@ -30,7 +30,7 @@ fn gpu::Device make_submit_stats_test_device(SubmitDiagnosticCapture* capture = 
         desc.debug_callback = &capture_submit_diagnostic;
         desc.debug_user_data = capture;
     }
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn vk::SubmitStats stats_of(gpu::Device* device) {

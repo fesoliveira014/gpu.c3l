@@ -51,7 +51,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 1.1 Explicit runtime and borrowed adapters
 
-- [ ] Add `Runtime`, `RuntimeDesc`, `Adapter`, `AdapterInfo`, and explicit create, enumerate, query, and destroy operations in `gpu/runtime.c3` and `gpu/adapter.c3`; move native discovery ownership from `gpu/vk/instance.c3` into per-runtime state in `gpu/vk/runtime.c3` and `gpu/vk/adapter.c3`.
+- [x] Add `Runtime`, `RuntimeDesc`, `Adapter`, `AdapterInfo`, and explicit create, enumerate, query, and destroy operations in `gpu/runtime.c3` and `gpu/adapter.c3`; move native discovery ownership from `gpu/vk/instance.c3` into per-runtime state in `gpu/vk/runtime.c3` and `gpu/vk/adapter.c3`.
   - **Depends on:** Gate A.
   - **Contract:** imports remain inert; adapters are borrowed from a runtime; runtime destruction rejects live surfaces or devices; backend and driver versions are diagnostic only.
   - **Edges:** no adapter, repeated enumeration, stale adapter after runtime destruction, multiple runtimes, and transactional runtime creation failure.

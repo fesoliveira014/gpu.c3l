@@ -39,7 +39,7 @@ fn int main() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_context_reset_bench",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::RecordingContextHandle[BENCH_USER_CONTEXTS] contexts;

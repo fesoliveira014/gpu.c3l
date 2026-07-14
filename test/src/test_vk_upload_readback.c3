@@ -117,7 +117,7 @@ fn gpu::Device make_transfer_test_device(
         .debug_callback     = capture == null ? null : &capture_transfer_diagnostic,
         .debug_user_data    = capture,
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn StagingReuseFixture make_staging_reuse_fixture() {

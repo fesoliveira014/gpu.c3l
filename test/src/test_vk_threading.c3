@@ -45,7 +45,7 @@ fn gpu::Device make_thr_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_threading_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn gpu::Device make_thr_device_tiny_staging(usz staging_size) {
@@ -56,7 +56,7 @@ fn gpu::Device make_thr_device_tiny_staging(usz staging_size) {
         .staging_arena_size = staging_size,
         .application_name   = "gpu_threading_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 struct StormArgs {

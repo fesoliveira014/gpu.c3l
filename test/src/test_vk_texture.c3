@@ -53,7 +53,7 @@ fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture)
         .debug_callback       = &capture_texture_diagnostic,
         .debug_user_data      = capture,
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn gpu::Device make_texture_test_device() {
@@ -63,7 +63,7 @@ fn gpu::Device make_texture_test_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_texture_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn void texture_create_destroy() @test {
@@ -295,7 +295,7 @@ fn void raised_texture_capacity_holds_more_than_default() @test {
         .texture_capacity  = 2048,
         .application_name  = "gpu_texture_capacity_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     const uint COUNT = 1500;

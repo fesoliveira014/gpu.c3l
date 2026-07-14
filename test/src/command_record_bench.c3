@@ -91,7 +91,7 @@ fn int main() {
         .frames_in_flight = 1,
         .application_name = "gpu_command_record_bench",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc buffer_desc = {

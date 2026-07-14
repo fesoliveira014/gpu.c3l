@@ -31,7 +31,7 @@ fn gpu::Device make_depth_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_depth_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn DepthCtx make_depth_ctx(gpu::Device* device) {

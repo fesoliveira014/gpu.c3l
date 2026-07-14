@@ -25,7 +25,7 @@ fn void wsi_presentation_gate_diagnostic() @test {
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
     capture = {};
 
@@ -89,7 +89,7 @@ fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
     capture = {};
 

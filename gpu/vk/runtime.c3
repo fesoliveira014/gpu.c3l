@@ -12,6 +12,7 @@ struct VkRuntimeState {
     gpu::DebugMessageCallback               debug_callback;
     void*                                   debug_user_data;
     VkAdapterState[]                        adapters;
+    bool                                    validation;
 }
 
 fn uint route_runtime_debug_message(
@@ -147,6 +148,7 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
 
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
+    state.validation = desc.enable_validation;
     vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
         runtime_debug_messenger_create_info(state);
     VkInstanceDesc instance_desc = {

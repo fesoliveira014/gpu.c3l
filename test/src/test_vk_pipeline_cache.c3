@@ -22,7 +22,7 @@ fn gpu::Device make_cache_test_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_pipeline_cache_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
@@ -33,7 +33,7 @@ fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
         .pipeline_capacity = pipeline_capacity,
         .application_name  = "gpu_pipeline_cache_capacity_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn uint cache_entry_count(gpu::Device* device) {

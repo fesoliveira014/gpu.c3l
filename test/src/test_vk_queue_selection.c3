@@ -251,7 +251,7 @@ fn gpu::Device make_queue_test_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_queue_selection_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn void queue_alias_matches_async_compute_cap() @test {

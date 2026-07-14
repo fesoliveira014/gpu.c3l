@@ -8,7 +8,7 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         .frames_in_flight = 2,
         .application_name = "gpu_null_contract_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     assert(
@@ -82,7 +82,7 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
         .frames_in_flight = 2,
         .application_name = "gpu_null_command_contract_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;

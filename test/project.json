@@ -13,7 +13,9 @@
   "wincrt": "dynamic",
   "sources": [
     "../gpu/gpu.c3", "../gpu/types.c3", "../gpu/faults.c3",
-    "../gpu/runtime.c3", "../gpu/adapter.c3", "../gpu/device.c3", "../gpu/caps.c3",
+    "../gpu/runtime.c3", "../gpu/adapter.c3", "../gpu/device.c3",
+    "../gpu/device_request.c3", "../gpu/caps.c3",
+    "../gpu/device_support.c3",
     "../gpu/memory.c3", "../gpu/buffer.c3", "../gpu/texture.c3", "../gpu/descriptor_heap.c3",
     "../gpu/pipeline.c3", "../gpu/command.c3", "../gpu/sync.c3", "../gpu/queue.c3",
     "../gpu/swapchain.c3", "../gpu/debug.c3", "../gpu/shader_abi.c3", "../gpu/vk/**"
@@ -87,6 +89,10 @@
     "async_overlap_bench": {
       "type": "executable",
       "sources": [ "src/async_overlap_bench.c3", "src/overlap_abi.c3" ]
+    },
+    "vk_device_request": {
+      "type": "test",
+      "sources": [ "src/test_vk_device_request.c3" ]
     },
     // Vulkan bootstrap: the feature gate needs no ICD; the create/destroy test
     // needs one — pin lavapipe via VK_DRIVER_FILES when running this target.

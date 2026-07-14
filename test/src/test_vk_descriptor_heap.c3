@@ -139,7 +139,7 @@ fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
         .sampler_descriptor_capacity = smp_capacity,
         .application_name            = "gpu_descriptor_heap_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn gpu::TextureHandle make_heap_texture(gpu::Device* device) {
