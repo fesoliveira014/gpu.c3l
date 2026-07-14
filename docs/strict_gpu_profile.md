@@ -20,7 +20,9 @@ Vulkan types, feature names, queue families, layouts, descriptor mechanisms, and
 
 Capability groups are explicit and immutable. A strict request enables only the strict contract. `gpu::compat` can add descriptor-set requirements to that same request. A capable device may enable both groups, but importing `gpu::compat` or detecting descriptor-set support enables nothing by itself.
 
-The library supports multiple live devices. Devices, queues, and resources use generational ownership. Active operations pin device state so concurrent destruction cannot reclaim it. Each device owns its backend state, capability state, dispatch tables, and resource tables. Queue requests and resource access domains use semantic roles rather than backend queue-family indices.
+The library supports multiple live devices. Devices, queues, and resources use generational ownership. Each device owns its backend state, capability state, dispatch tables, completion state, and resource tables. Queue requests and resource access domains use semantic roles rather than backend queue-family indices.
+
+Device destruction never waits. It faults while children, incomplete queue work, or active operations remain, and changes the device generation only after successful destruction.
 
 Backend API and driver versions are diagnostic information. Applications select semantic capabilities, not Vulkan versions.
 
@@ -31,12 +33,17 @@ Backend API and driver versions are diagnostic information. Applications select 
 - Mapped-span flush and invalidate operations define CPU/GPU visibility and are no-ops for coherent memory.
 - Generic GPU data uses addresses and spans rather than public buffer objects.
 - Copies, fills, index data, indirect arguments, uploads, and readback operate on spans or GPU addresses.
-- Textures remain explicit objects and use caller-provided placement.
-- Texture requirements are queried before creation.
+- Texture requirements are queried before creation and report whether dedicated backing is required.
+- Placed texture creation validates caller-provided memory before mutation.
+- Dedicated texture creation transactionally publishes separate texture and allocation tokens.
 - Samplers are immutable device-interned values and require no individual destruction. Strict sampler-heap publication returns a separate shader index; compatibility-only devices retain sampler identity without creating the strict heap.
 - VMA remains private.
+- Resource destruction is immediate. No live recording command list, executable command token, or incomplete submission may reference the resource.
+- Readback uses a CPU-cached span, copy, completion point, mapped-span invalidation, and direct CPU access.
 
-Allocation-owning arenas and policies are outside the strict core. A future `gpu::alloc` module may provide frame, persistent, staging, and readback allocators over the placement primitives.
+Allocation-owning arenas and policies are outside the strict core. A future `gpu::alloc` module may provide frame, persistent, staging, readback, and deferred-release utilities over allocations, spans, and completion points.
+
+The root module has no frame lifecycle, public semaphore, or readback-ticket API.
 
 ## Shader data and pipelines
 
@@ -52,13 +59,18 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 
 - Command lists are transient and one-shot.
 - Recording storage is device-managed and safe for concurrent recording.
-- Submission consumes successfully submitted command tokens.
+- Successful submission consumes command tokens and returns a compact queue-owned `CompletionPoint`.
+- Completion points support host poll/wait and cross-queue waits; same-queue order is inherent.
+- Failed submission publishes no point and preserves retryable command tokens.
+- Creating a completion point allocates no public synchronization object.
 - Allocations and textures declare admitted queue roles; cross-family resources use backend-managed concurrent sharing rather than inferred ownership transfers.
 - Buffer and pointer-visible memory hazards use global execution and memory barriers.
 - Texture representation changes use explicit semantic transitions.
 - No barrier, transition, or render-pass dependency is inferred.
 - Render passes name attachments, load/store operations, and clear values directly.
 - Vulkan 1.2 render-pass and framebuffer objects may be synthesized privately without changing public semantics.
+
+- Swapchain acquisition uses one-shot readiness; presentation consumes the acquired image and accepts its render completion point. Native synchronization remains private.
 
 ## Compatibility extension
 
@@ -72,7 +84,7 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 - descriptor-set binding commands;
 - descriptor-set shader interfaces.
 
-Compatibility pipelines use the shared device, queues, command lists, memory, textures, samplers, synchronization, render passes, and presentation APIs. Strict and compatibility pipelines may alternate in one command list when both capability groups were requested.
+Compatibility pipelines use the shared device, queues, command lists, memory, textures, samplers, completion points, lifetime rules, render passes, and presentation APIs. Strict and compatibility pipelines may alternate in one command list when both capability groups were requested.
 
 The library does not translate shaders, emulate root pointers through descriptors, or silently change binding models. Equivalent Vulkan 1.2 fallbacks remain private backend code.
 
@@ -84,4 +96,6 @@ The library does not translate shaders, emulate root pointers through descriptor
 - Device creation either enables the complete request or publishes no device.
 - Native pipeline compilation never occurs implicitly during draw or dispatch.
 - Public synchronization does not require resource lists for generic GPU memory.
+- Core resource and device destruction never hide waits or deferred release.
+- Strict completion and readback require no frame lifecycle or public synchronization objects.
 - Public documentation and generated API references remain backend-neutral.
