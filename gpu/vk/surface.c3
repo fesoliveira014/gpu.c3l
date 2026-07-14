@@ -108,7 +108,7 @@ fn bool? vk_supports_presentation(
     if (state == null || backend_surface == null || adapter_index >= state.adapters.len) {
         return gpu::INVALID_HANDLE~;
     }
-    if (state.dispatch.get_surface_support == null) return false;
+    if (!instance_dispatch_supports_presentation(&state.dispatch)) return false;
 
     vk::PhysicalDevice physical_device = state.adapters[adapter_index].physical_device;
     if (!device_supports_extension(physical_device, SWAPCHAIN_EXTENSION)) return false;

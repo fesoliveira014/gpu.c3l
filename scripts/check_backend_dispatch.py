@@ -15,7 +15,6 @@ FUNCTION_DECLARATION = re.compile(
     re.MULTILINE,
 )
 BUILD_METHOD_REFERENCE = re.compile(r"\.build\s*\(")
-LOAD_EXTENSIONS_CALL = re.compile(r"\bload_extensions\s*\(")
 
 
 def top_level_function_blocks(source: str) -> list[tuple[str, str]]:
@@ -35,9 +34,20 @@ def generated_singleton_wrappers(source: str) -> set[str]:
     }
 
 
-def instance_builder_loads_global_extensions(source: str) -> bool:
+def build_methods_use_global_dispatch(
+    source: str,
+    generated_wrappers: set[str],
+) -> bool:
+    wrapper_calls = [
+        re.compile(rf"(?<![A-Za-z0-9_]){re.escape(name)}\s*\(")
+        for name in sorted(generated_wrappers)
+    ]
     return any(
-        name == "InstanceCreateInfo.build" and LOAD_EXTENSIONS_CALL.search(block)
+        name.endswith(".build")
+        and (
+            "extensions." in block
+            or any(pattern.search(block) for pattern in wrapper_calls)
+        )
         for name, block in top_level_function_blocks(source)
     )
 
@@ -87,7 +97,7 @@ def scan_backend_sources(root: Path = ROOT) -> list[str]:
     return find_global_dispatch_references(
         load_backend_sources(root),
         wrappers,
-        reject_build_methods=instance_builder_loads_global_extensions(binding),
+        reject_build_methods=build_methods_use_global_dispatch(binding, wrappers),
     )
 
 
