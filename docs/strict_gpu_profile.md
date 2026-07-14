@@ -2,7 +2,7 @@
 
 This document defines the target architecture for `gpu`. It follows the pointer-first, bindless, explicit-synchronization model described in [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api).
 
-This is a target design, not a description of the current implementation. Detailed requirements and design are in [requirements](specs/strict-gpu-profile/requirements.md) and [design](specs/strict-gpu-profile/design.md). The [task list](specs/strict-gpu-profile/tasks.md) remains withdrawn until it is regenerated from this architecture.
+This is a target design, not a description of the current implementation. Detailed requirements and design are in [requirements](specs/strict-gpu-profile/requirements.md) and [design](specs/strict-gpu-profile/design.md). The [task list](specs/strict-gpu-profile/tasks.md) defines the implementation milestones and review gates.
 
 ## Public topology
 
@@ -69,7 +69,6 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 - No barrier, transition, or render-pass dependency is inferred.
 - Render passes name attachments, load/store operations, and clear values directly.
 - Vulkan 1.2 render-pass and framebuffer objects may be synthesized privately without changing public semantics.
-
 - Swapchain acquisition uses one-shot readiness; presentation consumes the acquired image and accepts its render completion point. Native synchronization remains private.
 
 ## Compatibility extension
