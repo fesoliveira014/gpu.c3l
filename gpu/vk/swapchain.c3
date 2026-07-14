@@ -225,7 +225,7 @@ fn void? build_swapchain(
     check_wsi_backend_result(
         context: context,
         kind:    WsiResultKind.SURFACE,
-        result:  vk::extensions.vk_get_physical_device_surface_capabilities_khr(
+        result:  state.instance_dispatch.get_surface_capabilities(
             state.physical_device,
             slot.surface,
             &caps,
@@ -242,7 +242,7 @@ fn void? build_swapchain(
     check_wsi_backend_result(
         context: context,
         kind:    WsiResultKind.SURFACE,
-        result:  vk::extensions.vk_get_physical_device_surface_formats_khr(
+        result:  state.instance_dispatch.get_surface_formats(
             state.physical_device,
             slot.surface,
             &format_count,
@@ -253,7 +253,7 @@ fn void? build_swapchain(
     check_wsi_backend_result(
         context: context,
         kind:    WsiResultKind.SURFACE,
-        result:  vk::extensions.vk_get_physical_device_surface_present_modes_khr(
+        result:  state.instance_dispatch.get_surface_present_modes(
             state.physical_device,
             slot.surface,
             &mode_count,
@@ -273,7 +273,7 @@ fn void? build_swapchain(
         check_wsi_backend_result(
             context: context,
             kind:    WsiResultKind.SURFACE_ENUMERATION,
-            result:  vk::extensions.vk_get_physical_device_surface_formats_khr(
+            result:  state.instance_dispatch.get_surface_formats(
                 state.physical_device,
                 slot.surface,
                 &format_count,
@@ -284,7 +284,7 @@ fn void? build_swapchain(
         check_wsi_backend_result(
             context: context,
             kind:    WsiResultKind.SURFACE_ENUMERATION,
-            result:  vk::extensions.vk_get_physical_device_surface_present_modes_khr(
+            result:  state.instance_dispatch.get_surface_present_modes(
                 state.physical_device,
                 slot.surface,
                 &mode_count,
@@ -339,7 +339,7 @@ fn void? build_swapchain(
         check_wsi_backend_result(
             context: context,
             kind:    WsiResultKind.SWAPCHAIN_CREATE,
-            result:  vk::extensions.vk_create_swapchain_khr(
+            result:  state.device_dispatch.create_swapchain(
                 state.device,
                 &create_info,
                 null,
@@ -351,7 +351,7 @@ fn void? build_swapchain(
         check_wsi_backend_result(
             context: context,
             kind:    WsiResultKind.ENUMERATION,
-            result:  vk::extensions.vk_get_swapchain_images_khr(
+            result:  state.device_dispatch.get_swapchain_images(
                 state.device,
                 slot.swapchain,
                 &got,
@@ -369,7 +369,7 @@ fn void? build_swapchain(
         check_wsi_backend_result(
             context: context,
             kind:    WsiResultKind.ENUMERATION,
-            result:  vk::extensions.vk_get_swapchain_images_khr(
+            result:  state.device_dispatch.get_swapchain_images(
                 state.device,
                 slot.swapchain,
                 &got,
@@ -516,7 +516,7 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
     check_wsi_backend_result(
         context: &context,
         kind:    WsiResultKind.SURFACE,
-        result:  vk::extensions.vk_get_physical_device_surface_support_khr(
+        result:  state.instance_dispatch.get_surface_support(
             state.physical_device,
             state.present_family,
             slot.surface,
@@ -568,7 +568,7 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
 fn void destroy_swapchain_slot(VkDeviceState* state, SwapchainSlot* slot) @private {
     release_swapchain_images(state, slot);
     if (slot.swapchain != null) {
-        vk::extensions.vk_destroy_swapchain_khr(state.device, slot.swapchain, null);
+        state.device_dispatch.destroy_swapchain(state.device, slot.swapchain, null);
         slot.swapchain = (vk::SwapchainKHR)null;
     }
     if (slot.acquire_semaphores.ptr != null) {
@@ -636,14 +636,14 @@ fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, u
         old:     old,
         context: &context,
     ));
-    if (old != null) vk::extensions.vk_destroy_swapchain_khr(state.device, old, null);
+    if (old != null) state.device_dispatch.destroy_swapchain(state.device, old, null);
     if (build_fault) {
         // Never leave a half-built slot live: tear down whatever the failed
         // build produced and park the slot dormant so the next acquire gets
         // SWAPCHAIN_OUT_OF_DATE instead of undefined state.
         release_swapchain_images(state, slot);
         if (slot.swapchain != null) {
-            vk::extensions.vk_destroy_swapchain_khr(state.device, slot.swapchain, null);
+            state.device_dispatch.destroy_swapchain(state.device, slot.swapchain, null);
             slot.swapchain = (vk::SwapchainKHR)null;
         }
         publish_dormant_swapchain_info(slot);
@@ -666,7 +666,7 @@ fn gpu::AcquiredImage? vk_acquire_next_image(gpu::Device* device, gpu::Swapchain
 
     vk::Semaphore acquire_semaphore = slot.acquire_semaphores[state.frame_index];
     uint image_index = 0;
-    vk::Result result = vk::extensions.vk_acquire_next_image_khr(
+    vk::Result result = state.device_dispatch.acquire_next_image(
         state.device,
         slot.swapchain,
         ACQUIRE_TIMEOUT_NS,
@@ -723,7 +723,7 @@ fn void? vk_present(gpu::Device* device, gpu::PresentDesc* desc) @private {
     Mutex* queue_mutex = present_queue_mutex_for(state);
     queue_mutex.lock()!!;
     defer queue_mutex.unlock();
-    vk::Result result = vk::extensions.vk_queue_present_khr(state.present_queue, &info);
+    vk::Result result = state.device_dispatch.queue_present(state.present_queue, &info);
     return check_wsi_backend_result(
         context: &context,
         kind:    WsiResultKind.PRESENT,
@@ -740,7 +740,7 @@ fn gpu::PresentModeSupport? vk_get_present_mode_support(gpu::Device* device, gpu
     check_wsi_backend_result(
         context: &context,
         kind:    WsiResultKind.SURFACE,
-        result:  vk::extensions.vk_get_physical_device_surface_present_modes_khr(
+        result:  state.instance_dispatch.get_surface_present_modes(
             state.physical_device,
             slot.surface,
             &mode_count,
@@ -755,7 +755,7 @@ fn gpu::PresentModeSupport? vk_get_present_mode_support(gpu::Device* device, gpu
         check_wsi_backend_result(
             context: &context,
             kind:    WsiResultKind.SURFACE_ENUMERATION,
-            result:  vk::extensions.vk_get_physical_device_surface_present_modes_khr(
+            result:  state.instance_dispatch.get_surface_present_modes(
                 state.physical_device,
                 slot.surface,
                 &mode_count,

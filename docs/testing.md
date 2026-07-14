@@ -334,8 +334,9 @@ c3c build import_surface_wayland --path test/cpu
 c3c build import_surface_x11 --path test/cpu
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
-python -m unittest scripts.test_check_public_api
+python -m unittest scripts.test_check_public_api scripts.test_check_backend_dispatch
 python scripts/check_public_api.py
+python scripts/check_backend_dispatch.py
 ```
 
 Smoke target, as CI runs it:

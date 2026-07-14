@@ -110,10 +110,11 @@ jobs:
           done
           exit $FAIL
 
-      - name: Check public API boundary
+      - name: Check API and backend boundaries
         run: |
-          python -m unittest scripts.test_check_public_api
+          python -m unittest scripts.test_check_public_api scripts.test_check_backend_dispatch
           python scripts/check_public_api.py
+          python scripts/check_backend_dispatch.py
 
       # Whole-compile reference (public module gpu + gpu::vk internals; a
       # scoped docgen needs a closed source set, which only the whitebox test
@@ -296,6 +297,11 @@ jobs:
           c3c build import_surface_x11 --path test/cpu
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
+
+      - name: Check backend dispatch ownership
+        run: |
+          python -m unittest scripts.test_check_backend_dispatch
+          python scripts/check_backend_dispatch.py
 
       - name: Install lavapipe (mesa-dist-win)
         run: |

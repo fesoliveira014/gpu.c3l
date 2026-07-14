@@ -205,14 +205,15 @@ fn bool report_resource_lifetime(
 }
 
 fn bool create_debug_messenger(
-    vk::Instance instance,
+    VkDeviceState* state,
     vk::DebugUtilsMessengerCreateInfoEXT* create_info,
     vk::DebugUtilsMessengerEXT* out_messenger,
 ) {
-    if (instance == null || create_info == null || out_messenger == null) return false;
-    if (vk::extensions.vk_create_debug_utils_messenger_ext == null) return false;
-    vk::Result result = vk::extensions.vk_create_debug_utils_messenger_ext(
-        instance,
+    if (state == null || state.instance == null
+        || create_info == null || out_messenger == null) return false;
+    if (!instance_dispatch_supports_debug_messenger(&state.instance_dispatch)) return false;
+    vk::Result result = state.instance_dispatch.create_debug_messenger(
+        state.instance,
         create_info,
         null,
         out_messenger,
@@ -226,7 +227,7 @@ fn bool create_debug_messenger(
 fn void setup_debug_messenger(VkDeviceState* state) @private {
     vk::DebugUtilsMessengerCreateInfoEXT create_info =
         debug_messenger_create_info(state);
-    if (!create_debug_messenger(state.instance, &create_info, &state.messenger)) {
+    if (!create_debug_messenger(state, &create_info, &state.messenger)) {
         report_debug_messenger_failure(state, "debug-utils messenger unavailable");
     }
 }
@@ -236,18 +237,18 @@ fn void setup_debug_messenger(VkDeviceState* state) @private {
 fn void set_object_name(VkDeviceState* state, vk::ObjectType object_type, ulong object_handle, ZString name) {
     if (!state.debug_names) return;
     if (name == null) return;
-    if (vk::extensions.vk_set_debug_utils_object_name_ext == null) return;
+    if (state.device_dispatch.set_object_name == null) return;
     vk::DebugUtilsObjectNameInfoEXT info = vk::debug_utils_object_name_info_ext();
     info.object_type = object_type;
     info.object_handle = object_handle;
     info.p_object_name = (char*)name;
-    if (catch vk::try_set_debug_utils_object_name_ext(state.device, &info)) return;
+    if (state.device_dispatch.set_object_name(state.device, &info) != vk::Result.SUCCESS) return;
 }
 
 fn void destroy_debug_messenger(VkDeviceState* state) @private {
     if (state.messenger == null) return;
-    if (vk::extensions.vk_destroy_debug_utils_messenger_ext != null) {
-        vk::extensions.vk_destroy_debug_utils_messenger_ext(
+    if (state.instance_dispatch.destroy_debug_messenger != null) {
+        state.instance_dispatch.destroy_debug_messenger(
             state.instance,
             state.messenger,
             null,
@@ -435,20 +436,22 @@ fn uint report_resource_leaks(VkDeviceState* state) {
 }
 
 fn void? vk_cmd_begin_label(gpu::CommandList* commands, ZString label, float[4] color) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING
         && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    if (vk::extensions.vk_cmd_begin_debug_utils_label_ext == null) return;
+    if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     vk::DebugUtilsLabelEXT info = vk::debug_utils_label_ext();
     info.p_label_name = (char*)label;
     info.color = color;
-    vk::extensions.vk_cmd_begin_debug_utils_label_ext(record.command_buffer, &info);
+    state.device_dispatch.cmd_begin_label(record.command_buffer, &info);
 }
 
 fn void? vk_cmd_end_label(gpu::CommandList* commands) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING
         && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    if (vk::extensions.vk_cmd_end_debug_utils_label_ext == null) return;
-    vk::extensions.vk_cmd_end_debug_utils_label_ext(record.command_buffer);
+    if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
+    state.device_dispatch.cmd_end_label(record.command_buffer);
 }

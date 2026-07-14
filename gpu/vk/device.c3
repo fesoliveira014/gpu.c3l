@@ -17,10 +17,12 @@ const ZString SWAPCHAIN_EXTENSION = "VK_KHR_swapchain";
 struct VkDeviceState {
     gpu::Device                 owner;
     vk::Instance               instance;
+    VkInstanceDispatch         instance_dispatch;
     vk::DebugUtilsMessengerEXT messenger;
-    bool                        owns_instance;
+    bool                       owns_instance;
     vk::PhysicalDevice         physical_device;
     vk::Device                 device;
+    VkDeviceDispatch           device_dispatch;
     vma::Allocator             allocator;
     uint                       graphics_family;
     uint                       compute_family;
@@ -364,17 +366,20 @@ fn gpu::Device? create_vk_device_with_selection(
                 : null,
         };
         state.instance = create_vk_instance(&instance_desc)!;
-        vk::load_extensions(state.instance);
+        state.instance_dispatch = load_vk_instance_dispatch(
+            state.instance,
+            &vk::get_instance_proc_addr,
+        );
         if (state.validation || state.debug_callback != null) setup_debug_messenger(state);
 
         PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
         state.physical_device = selection.physical_device;
         families = selection.families;
     } else {
-        if (instance == null || physical_device == null) return gpu::INVALID_ARGUMENT~;
+        if (instance == null || physical_device == null || runtime_state == null) return gpu::INVALID_ARGUMENT~;
         state.instance = instance;
+        state.instance_dispatch = runtime_state.dispatch;
         state.physical_device = physical_device;
-        vk::load_extensions(state.instance);
         families = presentation_surface == null
             ? select_queue_families(state.physical_device)!
             : select_queue_families_for_surface(
@@ -414,6 +419,19 @@ fn gpu::Device? create_vk_device_with_selection(
     state.present_family      = families.present;
 
     create_logical_device(state, &families, line_polygon_mode)!;
+    state.device_dispatch = load_vk_device_dispatch(
+        state.device,
+        &vk::get_device_proc_addr,
+    );
+    if (state.presentation_enabled
+        && (!instance_dispatch_supports_presentation(&state.instance_dispatch)
+            || !device_dispatch_supports_presentation(&state.device_dispatch))) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER
+        && !device_dispatch_supports_descriptor_buffer(&state.device_dispatch)) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     vk::get_device_queue(state.device, state.graphics_family, 0, &state.graphics_queue);
     state.compute_queue_distinct = families.async_compute;
     if (families.async_compute) {
