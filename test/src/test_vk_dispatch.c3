@@ -33,6 +33,11 @@ fn bool supports_no_instance_extensions(ZString name) => false;
 
 fn bool supports_all_instance_extensions(ZString name) => true;
 
+fn bool supports_win32_instance_extensions(ZString name) {
+    return name.str_view() == gpu::vk::SURFACE_EXTENSION.str_view()
+        || name.str_view() == gpu::vk::WIN32_SURFACE_EXTENSION.str_view();
+}
+
 fn void instance_capabilities_require_request_and_support() @test {
     gpu::vk::VkInstanceDesc desc = {
         .enable_debug_utils        = true,
@@ -59,6 +64,15 @@ fn void instance_capabilities_require_request_and_support() @test {
     assert(capabilities.wayland_surface, "available Wayland surface support is enabled");
     assert(capabilities.xlib_surface, "available Xlib surface support is enabled");
 
+    capabilities = gpu::vk::resolve_instance_capabilities(
+        &desc,
+        &supports_win32_instance_extensions,
+    );
+    assert(capabilities.surface, "supported base surface discovery is enabled");
+    assert(capabilities.win32_surface, "supported Win32 surface support is enabled");
+    assert(!capabilities.wayland_surface, "unsupported Wayland surface support remains disabled");
+    assert(!capabilities.xlib_surface, "unsupported Xlib surface support remains disabled");
+
     desc.enable_available_surfaces = false;
     capabilities = gpu::vk::resolve_instance_capabilities(
         &desc,
@@ -77,6 +91,14 @@ fn void debug_messenger_requires_resolved_capability() @test {
         !gpu::vk::should_create_debug_messenger(capabilities, true),
         "unsupported debug utils skip messenger creation"
     );
+    assert(
+        gpu::vk::should_report_debug_messenger_unavailable(capabilities, true),
+        "requested unavailable debug utils require a diagnostic"
+    );
+    assert(
+        !gpu::vk::should_report_debug_messenger_unavailable(capabilities, false),
+        "unrequested debug utils remain silent"
+    );
 
     capabilities.debug_utils = true;
     assert(
@@ -86,6 +108,10 @@ fn void debug_messenger_requires_resolved_capability() @test {
     assert(
         !gpu::vk::should_create_debug_messenger(capabilities, false),
         "unrequested messenger creation remains disabled"
+    );
+    assert(
+        !gpu::vk::should_report_debug_messenger_unavailable(capabilities, true),
+        "available debug utils do not report unavailability"
     );
 }
 

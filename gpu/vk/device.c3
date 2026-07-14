@@ -385,7 +385,14 @@ fn gpu::Device? create_vk_device_with_selection(
         if (should_create_debug_messenger(
             instance_result.capabilities,
             state.validation || state.debug_callback != null,
-        )) setup_debug_messenger(state);
+        )) {
+            setup_debug_messenger(state);
+        } else if (should_report_debug_messenger_unavailable(
+            instance_result.capabilities,
+            state.validation || state.debug_callback != null,
+        )) {
+            report_debug_messenger_failure(state, "debug-utils messenger unavailable");
+        }
 
         PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
         state.physical_device = selection.physical_device;

@@ -126,7 +126,8 @@ fn VkInstanceDispatch load_vk_instance_dispatch(
             instance,
             "vkCreateXlibSurfaceKHR",
         );
-    }    return dispatch;
+    }
+    return dispatch;
 }
 
 fn VkDeviceDispatch load_vk_device_dispatch(

@@ -9,12 +9,9 @@ alias InstanceExtensionQuery = fn bool(ZString name);
 const ZString VALIDATION_LAYER      = "VK_LAYER_KHRONOS_validation";
 const ZString DEBUG_UTILS_EXTENSION = "VK_EXT_debug_utils";
 const ZString SURFACE_EXTENSION     = "VK_KHR_surface";
-
-const ZString[3] PLATFORM_SURFACE_EXTENSIONS = {
-    "VK_KHR_wayland_surface",
-    "VK_KHR_xlib_surface",
-    "VK_KHR_win32_surface",
-};
+const ZString WAYLAND_SURFACE_EXTENSION = "VK_KHR_wayland_surface";
+const ZString XLIB_SURFACE_EXTENSION    = "VK_KHR_xlib_surface";
+const ZString WIN32_SURFACE_EXTENSION   = "VK_KHR_win32_surface";
 const uint MAX_INSTANCE_EXTENSIONS = 8;
 
 struct VkInstanceDesc {
@@ -72,11 +69,11 @@ fn VkInstanceCapabilities resolve_instance_capabilities(
         && supports(SURFACE_EXTENSION);
     if (capabilities.surface) {
         capabilities.wayland_surface =
-            supports(PLATFORM_SURFACE_EXTENSIONS[0]);
+            supports(WAYLAND_SURFACE_EXTENSION);
         capabilities.xlib_surface =
-            supports(PLATFORM_SURFACE_EXTENSIONS[1]);
+            supports(XLIB_SURFACE_EXTENSION);
         capabilities.win32_surface =
-            supports(PLATFORM_SURFACE_EXTENSIONS[2]);
+            supports(WIN32_SURFACE_EXTENSION);
     }
     return capabilities;
 }
@@ -85,6 +82,11 @@ fn bool should_create_debug_messenger(
     VkInstanceCapabilities capabilities,
     bool requested,
 ) => requested && capabilities.debug_utils;
+
+fn bool should_report_debug_messenger_unavailable(
+    VkInstanceCapabilities capabilities,
+    bool requested,
+) => requested && !capabilities.debug_utils;
 
 <* Create one Vulkan 1.3 discovery instance from backend-owned configuration. *>
 fn VkInstanceCreateResult? create_vk_instance(VkInstanceDesc* desc) {
@@ -117,13 +119,13 @@ fn VkInstanceCreateResult? create_vk_instance(VkInstanceDesc* desc) {
         if (capabilities.surface) {
             extensions[extension_count++] = SURFACE_EXTENSION;
             if (capabilities.wayland_surface) {
-                extensions[extension_count++] = PLATFORM_SURFACE_EXTENSIONS[0];
+                extensions[extension_count++] = WAYLAND_SURFACE_EXTENSION;
             }
             if (capabilities.xlib_surface) {
-                extensions[extension_count++] = PLATFORM_SURFACE_EXTENSIONS[1];
+                extensions[extension_count++] = XLIB_SURFACE_EXTENSION;
             }
             if (capabilities.win32_surface) {
-                extensions[extension_count++] = PLATFORM_SURFACE_EXTENSIONS[2];
+                extensions[extension_count++] = WIN32_SURFACE_EXTENSION;
             }
         }
         if (extension_count > 0) {
