@@ -31,7 +31,7 @@ fn void? try_create_swapchain_khr(Device device) {
         )
 
     def test_rejects_generated_global_dispatch(self) -> None:
-        wrappers = {"try_create_swapchain_khr"}
+        wrappers = {"load_extensions", "try_create_swapchain_khr"}
         sources = {
             "gpu/vk/compat/swapchain.c3": "Callback fn = vk::try_create_swapchain_khr;",
             "gpu/vk/device.c3": "vk::load_extensions(state.instance);",
@@ -45,6 +45,73 @@ fn void? try_create_swapchain_khr(Device device) {
                 "gpu/vk/swapchain.c3:1: vk::extensions",
             ],
         )
+
+    def test_rejects_build_when_instance_builder_loads_global_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binding = root / "lib" / "vk.c3l"
+            backend = root / "gpu" / "vk"
+            binding.mkdir(parents=True)
+            backend.mkdir(parents=True)
+            (binding / "commands.c3").write_text(
+                """
+fn void get_descriptor_ext() => extensions.vk_get_descriptor_ext();
+fn Instance? InstanceCreateInfo.build(&self) {
+    Instance created_instance;
+    load_extensions(created_instance);
+    return created_instance;
+}
+""",
+                encoding="utf-8",
+            )
+            (backend / "runtime.c3").write_text(
+                "module gpu::vk;\nInstance instance = create_info.build();\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                check_backend_dispatch.scan_backend_sources(root),
+                ["gpu/vk/runtime.c3:2: .build("],
+            )
+
+    def test_accepts_build_when_instance_builder_avoids_global_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binding = root / "lib" / "vk.c3l"
+            backend = root / "gpu" / "vk"
+            binding.mkdir(parents=True)
+            backend.mkdir(parents=True)
+            (binding / "commands.c3").write_text(
+                """
+fn void get_descriptor_ext() => extensions.vk_get_descriptor_ext();
+fn Instance? InstanceCreateInfo.build(&self) {
+    return try_create_instance(self);
+}
+""",
+                encoding="utf-8",
+            )
+            (backend / "runtime.c3").write_text(
+                "module gpu::vk;\nInstance instance = create_info.build();\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_backend_dispatch.scan_backend_sources(root), [])
+
+    def test_scan_fails_closed_without_generated_singleton_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binding = root / "lib" / "vk.c3l"
+            backend = root / "gpu" / "vk"
+            binding.mkdir(parents=True)
+            backend.mkdir(parents=True)
+            (binding / "commands.c3").write_text(
+                "fn InstanceCreateInfo instance_create_info() => {};\n",
+                encoding="utf-8",
+            )
+            (backend / "runtime.c3").write_text("module gpu::vk;\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "no generated singleton-backed wrappers"):
+                check_backend_dispatch.scan_backend_sources(root)
 
     def test_scan_loads_nested_backend_sources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
