@@ -6,18 +6,18 @@ import std::core::mem;
 import std::io;
 
 struct VkRuntimeState {
-    vk::Instance                            instance;
-    vk::DebugUtilsMessengerEXT              messenger;
-    vk::PFN_vkDestroyDebugUtilsMessengerEXT destroy_messenger;
-    vk::PFN_vkCreateWin32SurfaceKHR          create_win32_surface;
-    vk::PFN_vkCreateWaylandSurfaceKHR        create_wayland_surface;
-    vk::PFN_vkCreateXlibSurfaceKHR           create_xlib_surface;
-    vk::PFN_vkDestroySurfaceKHR              destroy_surface;
+    vk::Instance                                instance;
+    vk::DebugUtilsMessengerEXT                  messenger;
+    vk::PFN_vkDestroyDebugUtilsMessengerEXT     destroy_messenger;
+    vk::PFN_vkCreateWin32SurfaceKHR             create_win32_surface;
+    vk::PFN_vkCreateWaylandSurfaceKHR           create_wayland_surface;
+    vk::PFN_vkCreateXlibSurfaceKHR              create_xlib_surface;
+    vk::PFN_vkDestroySurfaceKHR                 destroy_surface;
     vk::PFN_vkGetPhysicalDeviceSurfaceSupportKHR get_surface_support;
-    gpu::DebugMessageCallback               debug_callback;
-    void*                                   debug_user_data;
-    VkAdapterState[]                        adapters;
-    bool                                    validation;
+    gpu::DebugMessageCallback                   debug_callback;
+    void*                                       debug_user_data;
+    VkAdapterState[]                            adapters;
+    bool                                        validation;
 }
 
 fn uint route_runtime_debug_message(
@@ -144,7 +144,7 @@ const gpu::RuntimeBackendVTable VK_RUNTIME_VTABLE @private = {
     .get_adapter_info        = &vk_get_adapter_info,
     .get_adapter_diagnostics = &vk_get_adapter_diagnostics,
     .create_win32_surface    = &vk_create_win32_surface,
-    .create_wayland_surface = &vk_create_wayland_surface,
+    .create_wayland_surface  = &vk_create_wayland_surface,
     .create_x11_surface      = &vk_create_x11_surface,
     .destroy_surface         = &vk_destroy_surface,
     .supports_presentation   = &vk_supports_presentation,

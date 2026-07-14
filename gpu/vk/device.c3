@@ -629,7 +629,6 @@ fn gpu::DescriptorHeapMode? resolve_heap_mode(gpu::DescriptorHeapMode requested,
     }
 }
 
-
 <* The feature struct is only chained once the extension is confirmed. *>
 fn bool query_descriptor_buffer_support(vk::PhysicalDevice physical_device) @private {
     if (!device_supports_extension(physical_device, "VK_EXT_descriptor_buffer")) return false;

@@ -18,6 +18,28 @@ fn void surface_tokens_are_compact() @test {
     assert(Surface::size == ulong::size, "Surface is one opaque 64-bit token");
 }
 
+fn void forged_surface_tokens_are_rejected() @test {
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface first = create_test_surface(&runtime);
+    gpu::destroy_surface(&first)!!;
+
+    Surface surface = create_test_surface(&runtime);
+    Surface reserved = surface;
+    reserved.reserved = 1;
+    Surface out_of_range = surface;
+    out_of_range.index = gpu::MAX_SURFACES;
+    Surface wrong_generation = surface;
+    wrong_generation.generation--;
+
+    assert(@catch(gpu::destroy_surface(&reserved)) == gpu::INVALID_HANDLE);
+    assert(@catch(gpu::destroy_surface(&out_of_range)) == gpu::INVALID_HANDLE);
+    assert(@catch(gpu::destroy_surface(&wrong_generation)) == gpu::INVALID_HANDLE);
+
+    gpu::destroy_surface(&surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
 fn void surfaces_retain_their_runtime_and_expire_on_destroy() @test {
     gpu::vk::stub_reset_surface_counts();
     RuntimeDesc desc = runtime_desc();
@@ -148,6 +170,7 @@ fn void live_swapchains_block_surface_destruction() @test {
     gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
+
 fn void swapchains_borrow_runtime_owned_surfaces() @test {
     gpu::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();

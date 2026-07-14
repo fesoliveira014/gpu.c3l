@@ -99,6 +99,20 @@ fn void presentation_support_must_cover_every_queue_family() @test {
     assert(result == gpu::INVALID_ARGUMENT, "mismatched presentation support is rejected");
 }
 
+fn void presentation_requires_a_capable_queue_family() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 1),
+    };
+    bool[1] present_support = { false };
+
+    fault result = @catch(vk::pick_queue_families_for_surface(
+        table[..],
+        present_support[..],
+    ));
+
+    assert(result == gpu::UNSUPPORTED_FEATURE, "no presentation-capable family faults");
+}
+
 fn void presentation_queue_selection_requires_instance_dispatch() @test {
     vk::VkRuntimeState runtime;
     fault result = @catch(vk::select_queue_families_for_surface(
