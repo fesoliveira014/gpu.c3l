@@ -851,7 +851,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         next_hazard: gpu::Hazard.TRANSFER_READ,
     )!!;
 
-    assert(!gpu::poll_readback(&device, &ticket), "an unrelated blocking helper must not retire an unsubmitted ticket");
+    assert(!gpu::poll_readback(&device, &ticket)!!, "an unrelated blocking helper must not retire an unsubmitted ticket");
 
     char[256] dest;
     before = capture.calls;

@@ -79,21 +79,19 @@ fn bool range_fits(usz limit, usz offset, usz size) @private {
     return size <= limit - offset;
 }
 
-fn BackendVTable*? frame_vtable(FrameToken* frame) @private {
+fn DeviceOperation? frame_operation(FrameToken* frame) @private {
     if (frame == null || frame.generation == 0) return INVALID_HANDLE~;
-    BackendVTable* vtable = device_vtable(&frame.device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable;
+    return begin_device_operation(&frame.device);
 }
 
 <* Enter an idle frame. Double begin faults `INVALID_RESOURCE_STATE`; a retire
    wait may fault `WAIT_TIMEOUT`. Those rejections leave lifecycle and arena
    state unchanged. *>
 fn FrameToken? begin_frame(Device* device) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
     FrameToken frame;
-    vtable.begin_frame(device, &frame)!;
+    operation.vtable.begin_frame(device, &frame)!;
     return frame;
 }
 
@@ -101,16 +99,18 @@ fn FrameToken? begin_frame(Device* device) {
    capacity faults `ARENA_FULL`, invalid or stale tokens `INVALID_HANDLE`.
    Faults do not advance the arena; spans remain valid until its reset. *>
 fn GpuSpan? alloc_frame_span(FrameToken* frame, usz size, usz align) {
-    BackendVTable* vtable = frame_vtable(frame)!;
-    return vtable.alloc_frame_span(frame, size, align);
+    DeviceOperation operation = frame_operation(frame)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.alloc_frame_span(frame, size, align);
 }
 
 <* End the identified frame. Invalid, stale, or consumed tokens fault
    `INVALID_HANDLE` without mutation; a failed end retains the token and
    lifecycle state for retry. *>
 fn void? end_frame(FrameToken* frame) {
-    BackendVTable* vtable = frame_vtable(frame)!;
-    vtable.end_frame(frame)!;
+    DeviceOperation operation = frame_operation(frame)!;
+    defer end_device_operation(&operation);
+    operation.vtable.end_frame(frame)!;
     *frame = {};
 }
 
@@ -161,48 +161,50 @@ struct TextureUploadDesc {
    (INVALID_ARGUMENT). Its GPU address is stable until freed. Ownership: free
    with free_persistent_span. *>
 fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.alloc_persistent_span(device, desc);
+    return operation.vtable.alloc_persistent_span(device, desc);
 }
 
 <* Counterpart of alloc_persistent_span. *>
 fn void? free_persistent_span(Device* device, GpuSpan span) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.free_persistent_span(device, span);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.free_persistent_span(device, span);
 }
 
 <* Snapshot of persistent-arena usage and fragmentation counters. *>
 fn PersistentArenaStats? get_persistent_stats(Device* device) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.get_persistent_stats(device);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.get_persistent_stats(device);
 }
 
 <* Record an upload into `dst` through the staging arena: staging span,
    memcpy, flush, copy. Records no barriers — destination preconditions and
    next-use transitions stay with the caller, exactly as with raw copies. *>
 fn void? cmd_upload_buffer(CommandList* commands, BufferHandle dst, usz offset, char[] data) {
-    BackendVTable* vtable = command_vtable(commands)!;
-    return vtable.cmd_upload_buffer(commands, dst, offset, data);
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.cmd_upload_buffer(commands, dst, offset, data);
 }
 
 <* Texture flavor of cmd_upload_buffer. The region follows the copy-desc rules
    (extent 0 = full mip); the tracked layout must be TRANSFER_DST. *>
 fn void? cmd_upload_texture(CommandList* commands, TextureUploadDesc* desc, char[] data) {
-    BackendVTable* vtable = command_vtable(commands)!;
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_upload_texture(commands, desc, data);
+    return operation.vtable.cmd_upload_texture(commands, desc, data);
 }
 
 <* One-call blocking upload: own submission on the graphics queue, then the
    caller-named next-use barrier. Setup/tooling ergonomics — not a hot path. *>
 fn void? upload_buffer_data(Device* device, BufferHandle dst, usz offset, char[] data, Stage next_stage, Hazard next_hazard) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.upload_buffer_data(device, dst, offset, data, next_stage, next_hazard);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.upload_buffer_data(device, dst, offset, data, next_stage, next_hazard);
 }
 
 <* Blocking full-mip texture upload. The texture must be tracked UNDEFINED
@@ -210,25 +212,25 @@ fn void? upload_buffer_data(Device* device, BufferHandle dst, usz offset, char[]
    INVALID_RESOURCE_STATE — re-uploading an in-use texture belongs in a
    command stream with explicit barriers. Ends at the named next-use. *>
 fn void? upload_texture_data(Device* device, TextureHandle dst, uint mip, char[] data, Stage next_stage, Hazard next_hazard, TextureLayout next_layout) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.upload_texture_data(device, dst, mip, data, next_stage, next_hazard, next_layout);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.upload_texture_data(device, dst, mip, data, next_stage, next_hazard, next_layout);
 }
 
 <* One-call blocking readback. The from trio orders prior GPU writes before
    the copy; bytes land in `out` after an internal wait + invalidate. *>
 fn void? readback_buffer_data(Device* device, BufferHandle src, usz offset, char[] out_data, Stage from_stage, Hazard from_hazard) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.readback_buffer_data(device, src, offset, out_data, from_stage, from_hazard);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.readback_buffer_data(device, src, offset, out_data, from_stage, from_hazard);
 }
 
 <* Blocking full-mip texture readback; round-trips from_layout → TRANSFER_SRC
    → from_layout, leaving the texture as found. *>
 fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char[] out_data, Stage from_stage, Hazard from_hazard, TextureLayout from_layout) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.readback_texture_data(device, src, mip, out_data, from_stage, from_hazard, from_layout);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.readback_texture_data(device, src, mip, out_data, from_stage, from_hazard, from_layout);
 }
 
 <* Record a non-blocking buffer readback into the caller's command list.
@@ -236,23 +238,26 @@ fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char
    after the recording frame ends (the device timeline advances at end_frame).
    Ownership: the range is held until resolve_readback releases it. *>
 fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) {
-    BackendVTable* vtable = command_vtable(commands)!;
-    return vtable.cmd_readback_buffer(commands, src, offset, size);
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.cmd_readback_buffer(commands, src, offset, size);
 }
 
 <* Record a non-blocking full-mip texture readback. The texture must carry
    transfer_src usage and sit in the TRANSFER_SRC tracked layout; the caller
    owns the barriers on both sides. *>
 fn ReadbackTicket? cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) {
-    BackendVTable* vtable = command_vtable(commands)!;
-    return vtable.cmd_readback_texture(commands, src, mip);
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.cmd_readback_texture(commands, src, mip);
 }
 
 <* True once the ticket's data is resolvable; false for resolved tickets.
-   Never faults. *>
-fn bool poll_readback(Device* device, ReadbackTicket* ticket) {
-    BackendVTable* vtable = device_vtable(device);
-    return vtable == null ? false : vtable.poll_readback(device, ticket);
+   Invalid or closing devices fault before reading backend state. *>
+fn bool? poll_readback(Device* device, ReadbackTicket* ticket) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.poll_readback(device, ticket);
 }
 
 <* Copy the ticket's bytes into `dest` and release the underlying range.
@@ -260,9 +265,9 @@ fn bool poll_readback(Device* device, ReadbackTicket* ticket) {
    INVALID_ARGUMENT on a consumed ticket or short `dest`; stale aliases fault
    INVALID_HANDLE. *>
 fn void? resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.resolve_readback(device, ticket, dest);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.resolve_readback(device, ticket, dest);
 }
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the

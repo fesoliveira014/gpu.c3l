@@ -71,13 +71,15 @@ fn void dispatch_debug_message(DebugMessageCallback callback, void* user_data, D
    Valid while recording, including inside render passes; balance is the
    caller's responsibility. *>
 fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
-    BackendVTable* vtable = command_vtable(commands)!;
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
     if (label == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_begin_label(commands, label, color);
+    return operation.vtable.cmd_begin_label(commands, label, color);
 }
 
 <* Counterpart of cmd_begin_label. *>
 fn void? cmd_end_label(CommandList* commands) {
-    BackendVTable* vtable = command_vtable(commands)!;
-    return vtable.cmd_end_label(commands);
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.cmd_end_label(commands);
 }

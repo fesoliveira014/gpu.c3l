@@ -269,6 +269,13 @@ transactionally by private composition helpers.
 
 Multiple live devices may coexist. `Device` is a compact slot and generation
 token; destroying it invalidates stale copies without affecting other devices.
+Public device operations other than destruction take a short-lived atomic pin
+before reading backend state. An operation that observes a closing device
+faults `DEVICE_BUSY`.
+`destroy_device` never waits for active operations: it restores the live state,
+returns `DEVICE_BUSY`, and preserves the token and generation for retry. Backend
+teardown begins only when no operation pins remain.
+
 Frame tokens, command tokens, resource handles, descriptor indices, GPU
 addresses/spans, and synchronization values are scoped to their owning device.
 Passing one to another device is invalid; table- and index-backed values without
@@ -297,8 +304,8 @@ validate current ownership and liveness.
 A valid handle packs slot index and generation. Public code should not inspect the packed representation.
 
 Handles, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
-command tokens, and synchronization values are runtime-only and scoped to the
-sole device that created them. Do not persist, serialize, reconstruct, or pass
+command tokens, and synchronization values are runtime-only and scoped to its
+owning device. Do not persist, serialize, reconstruct, or pass
 them across device or process lifetimes. `FrameToken` and `CommandList` embed a
 copy of their owning `Device` token; they do not borrow caller variable storage.
 
@@ -357,6 +364,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan explicitly returned `VK_ERROR_DEVICE_LOST`; unrecoverable |
+| `DEVICE_BUSY` | public device operations; `destroy_device` | the operation observed a closing device, or destruction found an active host operation; retry without replacing the device token |
 | `RESOURCE_IN_USE` | `destroy_runtime`, `destroy_surface`, `destroy_texture` | a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture. |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
 | `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands` | the runtime or device registry, adapter token, handle table, or command-record table is at capacity |
@@ -1044,7 +1052,7 @@ ReadbackTicket                   (generation-checked token)
 
 cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) -> ReadbackTicket?
 cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) -> ReadbackTicket?
-poll_readback(Device* device, ReadbackTicket* ticket) -> bool
+poll_readback(Device* device, ReadbackTicket* ticket) -> bool?
 resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) -> void?
 ```
 
@@ -1068,6 +1076,8 @@ faults `READBACK_NOT_READY` before the timeline signals, and
 `INVALID_ARGUMENT` on a consumed token or a `dest` smaller than the copied
 range. A stale alias faults `INVALID_HANDLE`. Each ticket resolves exactly
 once; device teardown releases unresolved tickets.
+An invalid or closing device faults `INVALID_HANDLE` or `DEVICE_BUSY` before the
+ticket is inspected.
 
 ### Barriers
 

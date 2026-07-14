@@ -430,7 +430,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
 
-    assert(!gpu::poll_readback(&device, &ticket), "ticket is not resolvable before the frame ends");
+    assert(!gpu::poll_readback(&device, &ticket)!!, "ticket is not resolvable before the frame ends");
     fault early = @catch(gpu::resolve_readback(&device, &ticket, (char[])((char*)&ticket)[:1]));
     assert(early == gpu::INVALID_ARGUMENT || early == gpu::READBACK_NOT_READY, "early resolve is rejected");
 
@@ -442,7 +442,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     assert(center[0] == (char)255 && center[1] == (char)255 && center[2] == (char)255,
         "compute-generated indexed indirect draw renders the triangle");
 
-    assert(gpu::poll_readback(&device, &ticket), "ticket resolvable after the recording frame ends");
+    assert(gpu::poll_readback(&device, &ticket)!!, "ticket resolvable after the recording frame ends");
     gpu::DrawIndexedIndirectCommand[2] got;
     gpu::ReadbackTicket stale_ticket = ticket;
     gpu::resolve_readback(&device, &ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size])!!;
@@ -454,10 +454,10 @@ fn void compute_generated_indexed_indirect_draw() @test {
 
     fault again = @catch(gpu::resolve_readback(&device, &ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size]));
     assert(again == gpu::INVALID_ARGUMENT, "double resolve faults INVALID_ARGUMENT");
-    assert(!gpu::poll_readback(&device, &ticket), "poll on a resolved ticket is false");
+    assert(!gpu::poll_readback(&device, &ticket)!!, "poll on a resolved ticket is false");
     fault stale = @catch(gpu::resolve_readback(&device, &stale_ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size]));
     assert(stale == gpu::INVALID_HANDLE, "stale ticket alias faults INVALID_HANDLE");
-    assert(!gpu::poll_readback(&device, &stale_ticket), "poll on a stale ticket alias is false");
+    assert(!gpu::poll_readback(&device, &stale_ticket)!!, "poll on a stale ticket alias is false");
 }
 
 fn void plain_indirect_draw_from_frame_span() @test {
@@ -739,7 +739,7 @@ fn void ticket_hybrid_and_short_dest() @test {
     assert(short_dest == gpu::INVALID_ARGUMENT, "short dest faults INVALID_ARGUMENT");
 
     for (uint i = 0; i < TICKETS; i++) {
-        assert(gpu::poll_readback(&device, &tickets[i]), "all tickets resolvable after the frame");
+        assert(gpu::poll_readback(&device, &tickets[i])!!, "all tickets resolvable after the frame");
         gpu::resolve_readback(&device, &tickets[i], dest[..])!!;
         for (usz b = 0; b < CHUNK; b++) {
             assert(dest[b] == (char)(b % 251), "ticket bytes intact on both arena and dedicated paths");
@@ -766,7 +766,8 @@ fn void outstanding_readback_ticket_does_not_block_teardown() @test {
     gpu::end_commands(&commands)!!;
 
     gpu::destroy_device(&device)!!;
-    assert(!gpu::poll_readback(&device, &ticket), "poll rejects a ticket after owner teardown");
+    fault poll_fault = @catch(gpu::poll_readback(&device, &ticket));
+    assert(poll_fault == gpu::INVALID_HANDLE, "poll rejects a ticket after owner teardown");
     char[1024] dest;
     fault resolve_fault = @catch(gpu::resolve_readback(&device, &ticket, dest[..]));
     assert(resolve_fault == gpu::INVALID_HANDLE, "resolve rejects a ticket after owner teardown");

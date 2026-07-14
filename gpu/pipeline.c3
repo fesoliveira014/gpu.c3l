@@ -143,27 +143,27 @@ struct GraphicsPipelineDesc {
 
 <* Create a shader module from SPIR-V bytes. Ownership: release with destroy_shader. *>
 fn ShaderHandle? create_shader(Device* device, ShaderDesc* desc) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.create_shader(device, desc);
+    return operation.vtable.create_shader(device, desc);
 }
 
 <* Counterpart of create_shader; pipelines already built from it stay valid. *>
 fn void? destroy_shader(Device* device, ShaderHandle shader) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.destroy_shader(device, shader);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.destroy_shader(device, shader);
 }
 
 <* Create a compute pipeline. Identical descriptors may alias one backend
    pipeline under distinct handles. Ownership: release with destroy_pipeline,
    once per create. *>
 fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* desc) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.create_compute_pipeline(device, desc);
+    return operation.vtable.create_compute_pipeline(device, desc);
 }
 
 <* Create a graphics pipeline targeting dynamic rendering. The layout is fixed:
@@ -173,26 +173,26 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
    at draw time. At most MAX_COLOR_ATTACHMENTS color formats. Ownership:
    release with destroy_pipeline, once per create. *>
 fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.create_graphics_pipeline(device, desc);
+    return operation.vtable.create_graphics_pipeline(device, desc);
 }
 
 <* Counterpart of the pipeline creates, once per returned handle; descriptors aliasing one backend pipeline are refcounted. *>
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.destroy_pipeline(device, pipeline);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.destroy_pipeline(device, pipeline);
 }
 
 <* Byte size of the driver pipeline cache blob. The cache grows as pipelines
    are built — re-query before each export. Must not be called concurrently
    with pipeline creation. *>
 fn usz? get_pipeline_cache_size(Device* device) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.get_pipeline_cache_size(device);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.get_pipeline_cache_size(device);
 }
 
 <* Fill `out` with the driver pipeline cache blob and return the bytes
@@ -200,7 +200,7 @@ fn usz? get_pipeline_cache_size(Device* device) {
    blob. Feed the blob to DeviceDesc.pipeline_cache_data to warm-start a
    later device. Must not be called concurrently with pipeline creation. *>
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.get_pipeline_cache_data(device, out);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.get_pipeline_cache_data(device, out);
 }
