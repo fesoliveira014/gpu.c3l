@@ -67,6 +67,7 @@ jobs:
 
       - name: CPU-only tests (no native libs)
         run: |
+          c3c run import_gpu --path test/cpu
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
 
@@ -284,6 +285,7 @@ jobs:
 
       - name: CPU test targets
         run: |
+          c3c run import_gpu --path test/cpu
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
 

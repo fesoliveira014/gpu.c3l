@@ -51,6 +51,8 @@ gpu.c3l/
 │   ├── gpu.c3
 │   ├── types.c3
 │   ├── faults.c3
+│   ├── runtime.c3
+│   ├── adapter.c3
 │   ├── caps.c3
 │   ├── device.c3
 │   ├── queue.c3
@@ -100,6 +102,32 @@ Samples are standalone consumers and may declare their own sample modules.
 The library ships **no application shaders**. Shader entry points are written and owned by the consuming project. The only shader-side artifacts the library publishes are ABI includes under `include/shaders/` (descriptor-heap helpers and generated ABI structs/offsets) that a consumer's shaders `#include`. Samples and tests own their shaders inside their own trees, because they are consumers like any other.
 
 ## 4. Public object model
+
+### Runtime and adapters
+
+`Runtime` owns backend discovery, diagnostics, and borrowed adapters. Creating one is the first operation that may initialize native backend state. Multiple runtimes may coexist.
+
+Public shape:
+
+```text
+RuntimeDesc
+    BackendKind backend
+    bool enable_validation
+    ZString application_name
+    DebugMessageCallback debug_callback
+    void* debug_user_data
+
+create_runtime(RuntimeDesc*)       -> Runtime?
+enumerate_adapters(Runtime*)       -> AdapterList?
+AdapterList.get(uint)              -> Adapter?
+get_adapter_info(Adapter*)         -> AdapterInfo?
+get_adapter_diagnostics(Adapter*)  -> AdapterDiagnostics?
+destroy_runtime(Runtime*)          -> void?
+```
+
+`AdapterList` is an allocation-free view. Its adapters and the read-only strings in adapter query results are borrowed until their runtime is destroyed. Destroying a runtime consumes its token, invalidates its adapter views and handles, and returns `RESOURCE_IN_USE` while a dependent surface or device is live.
+
+The current `create_device(DeviceDesc*)` path remains independent of runtime discovery and does not accept an adapter.
 
 ### Device
 

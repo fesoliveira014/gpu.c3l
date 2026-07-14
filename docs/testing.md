@@ -14,8 +14,9 @@ Pure CPU tests require no Vulkan loader, VMA static library, SDL3, or window sys
 
 The supported test matrix covers one live `Device` per process. Tests that
 replace a destroyed device exercise stale-owner rejection; they do not establish
-multi-device resource ownership as a supported contract. Token coverage includes
-generation, aliases, consumption, retry, and scoped-worker fault semantics.
+multi-device resource ownership as a supported contract. Multiple discovery
+runtimes may coexist. Token coverage includes generation, aliases, consumption,
+retry, and scoped-worker fault semantics.
 
 ## 2. Pure CPU tests
 
@@ -23,12 +24,14 @@ Project and sources:
 
 ```text
 test/cpu/project.json
+test/cpu/import_gpu.c3
 test/src/test_*.c3
 ```
 
 Examples:
 
 ```text
+test_runtime.c3
 test_handles.c3
 test_ranges.c3
 test_texture_support.c3
@@ -42,6 +45,9 @@ test_barrier_desc_validation.c3
 Coverage:
 
 ```text
+importing gpu performs no runtime initialization
+runtime and adapter token packing and stale-owner rejection
+multiple runtimes, stable enumeration, no-adapter discovery, and publication rollback
 handle pack/unpack
 generation mismatch
 invalid handle values
@@ -73,6 +79,7 @@ Headless tests validate backend behavior without SDL3 or swapchains.
 Examples:
 
 ```text
+test_vk_runtime.c3
 test_vk_bootstrap.c3
 test_vk_vma_allocator.c3
 test_vk_buffer.c3
@@ -89,6 +96,7 @@ test_vk_offscreen_triangle.c3
 Coverage:
 
 ```text
+two independent Vulkan runtimes and borrowed-adapter invalidation
 create/destroy Vulkan device
 create/destroy VMA allocator
 query memory budget and stats
@@ -310,6 +318,14 @@ lists the library sources directly (mirroring `manifest.json`) and declares
 name, no symlink directory. Consumer-style resolution of `gpu` is exercised by
 the `gpu.c3l-samples` repository.
 
+CPU targets:
+
+```sh
+c3c run import_gpu --path test/cpu
+c3c test unit --path test/cpu
+c3c test shader_abi --path test/cpu
+```
+
 Smoke target, as CI runs it:
 
 ```sh
@@ -375,7 +391,7 @@ C3 0.8.0 constraints:
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
   a `project.json` key); dependencies are declared per-target and resolved by
   the consumer's search path.
-- `manifest.json` `sources` must list files explicitly — all 17 public source
+- `manifest.json` `sources` must list files explicitly — all 19 public source
   files under `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the default does not
   recurse into `gpu/vk/`.
 

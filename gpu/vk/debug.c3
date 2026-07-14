@@ -204,21 +204,30 @@ fn bool report_resource_lifetime(
     return true;
 }
 
-<* Install the debug-utils messenger. Best-effort: a missing entry point or
-   create failure leaves messenger null and falls back to layer stderr. *>
+fn bool create_debug_messenger(
+    vk::Instance instance,
+    vk::DebugUtilsMessengerCreateInfoEXT* create_info,
+    vk::DebugUtilsMessengerEXT* out_messenger,
+) {
+    if (instance == null || create_info == null || out_messenger == null) return false;
+    if (vk::extensions.vk_create_debug_utils_messenger_ext == null) return false;
+    vk::Result result = vk::extensions.vk_create_debug_utils_messenger_ext(
+        instance,
+        create_info,
+        null,
+        out_messenger,
+    );
+    if (result == vk::Result.SUCCESS) return true;
+    *out_messenger = (vk::DebugUtilsMessengerEXT)null;
+    return false;
+}
+
+<* Install the device debug messenger when debug-utils is available. *>
 fn void setup_debug_messenger(VkDeviceState* state) @private {
-    vk::load_extensions(state.instance);
-    if (vk::extensions.vk_create_debug_utils_messenger_ext == null) {
-        report_debug_messenger_failure(state, "debug-utils messenger entry point unavailable");
-        return;
-    }
-
-    vk::DebugUtilsMessengerCreateInfoEXT create_info = debug_messenger_create_info(state);
-
-    vk::Result result = vk::extensions.vk_create_debug_utils_messenger_ext(state.instance, &create_info, null, &state.messenger);
-    if (result != vk::Result.SUCCESS) {
-        report_debug_messenger_failure(state, "vkCreateDebugUtilsMessengerEXT failed");
-        state.messenger = (vk::DebugUtilsMessengerEXT)null;
+    vk::DebugUtilsMessengerCreateInfoEXT create_info =
+        debug_messenger_create_info(state);
+    if (!create_debug_messenger(state.instance, &create_info, &state.messenger)) {
+        report_debug_messenger_failure(state, "debug-utils messenger unavailable");
     }
 }
 
@@ -238,7 +247,11 @@ fn void set_object_name(VkDeviceState* state, vk::ObjectType object_type, ulong 
 fn void destroy_debug_messenger(VkDeviceState* state) @private {
     if (state.messenger == null) return;
     if (vk::extensions.vk_destroy_debug_utils_messenger_ext != null) {
-        vk::extensions.vk_destroy_debug_utils_messenger_ext(state.instance, state.messenger, null);
+        vk::extensions.vk_destroy_debug_utils_messenger_ext(
+            state.instance,
+            state.messenger,
+            null,
+        );
     }
     state.messenger = (vk::DebugUtilsMessengerEXT)null;
 }
