@@ -180,6 +180,11 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
         if (!create_runtime_debug_messenger(state, &messenger_info)) {
             report_runtime_debug_messenger_failure(state);
         }
+    } else if (should_report_debug_messenger_unavailable(
+        state.instance_capabilities,
+        instance_desc.enable_debug_utils,
+    )) {
+        report_runtime_debug_messenger_failure(state);
     }
 
     enumerate_vk_adapters(state)!;
