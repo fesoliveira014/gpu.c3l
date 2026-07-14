@@ -62,11 +62,6 @@ struct HeapLimits {
     vk::DeviceSize layout_size;
 }
 
-struct HeapDescriptorTotals {
-    ulong per_stage_resources;
-    ulong all_pools_descriptors;
-}
-
 struct DescriptorHeapState {
     TextureDescriptorCell[] texture_cells;
     SamplerDescriptorCell[] sampler_cells;
@@ -179,29 +174,26 @@ fn ushort bump_generation(ushort generation) @private {
     return next == 0 ? (ushort)1 : (ushort)next;
 }
 
-fn HeapDescriptorTotals descriptor_heap_totals(uint tex_capacity, uint smp_capacity) @private {
-    return {
-        .per_stage_resources   = (ulong)tex_capacity * 2,
-        .all_pools_descriptors = (ulong)tex_capacity * 2 + (ulong)smp_capacity,
-    };
-}
-
 <* Texture capacity binds both SAMPLED_IMAGE and STORAGE_IMAGE, so on the
    indexing path it must satisfy both image limits. On the buffer path the
    bound quantity is the descriptor set's byte layout, not slot counts. *>
 fn bool heap_fits_limits(gpu::DescriptorHeapMode mode, uint tex_capacity, uint smp_capacity, HeapLimits limits) {
     if (mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
-        HeapDescriptorTotals totals = descriptor_heap_totals(tex_capacity, smp_capacity);
-        // Bindings use ALL stages, so per-stage limits bind alongside the
-        // set-level ones.
-        return tex_capacity <= limits.max_sampled_images
-            && tex_capacity <= limits.max_storage_images
-            && tex_capacity <= limits.max_per_stage_sampled_images
-            && tex_capacity <= limits.max_per_stage_storage_images
-            && smp_capacity <= limits.max_samplers
-            && smp_capacity <= limits.max_per_stage_samplers
-            && totals.per_stage_resources <= (ulong)limits.max_per_stage_resources
-            && totals.all_pools_descriptors <= (ulong)limits.max_all_pools_descriptors;
+        IndexingHeapLimits indexing_limits = {
+            .max_sampled_images           = limits.max_sampled_images,
+            .max_storage_images           = limits.max_storage_images,
+            .max_samplers                 = limits.max_samplers,
+            .max_per_stage_sampled_images = limits.max_per_stage_sampled_images,
+            .max_per_stage_storage_images = limits.max_per_stage_storage_images,
+            .max_per_stage_samplers       = limits.max_per_stage_samplers,
+            .max_per_stage_resources      = limits.max_per_stage_resources,
+            .max_all_pools_descriptors    = limits.max_all_pools_descriptors,
+        };
+        return indexing_heap_fits_limits(
+            tex_capacity,
+            smp_capacity,
+            indexing_limits,
+        );
     }
     // One buffer carries both usage bits, so it counts against each per-type
     // address space as well as the combined budget.
@@ -218,24 +210,11 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
     uint smp_capacity = state.sampler_descriptor_capacity;
 
     if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
-        vk::PhysicalDeviceVulkan12Properties v12_props = vk::physical_device_vulkan12properties();
-        vk::PhysicalDeviceProperties2 v12_props2 = vk::physical_device_properties2().set_next(&v12_props);
-        vk::get_physical_device_properties2(state.physical_device, &v12_props2);
-        HeapLimits limits = {
-            .max_sampled_images           = v12_props.max_descriptor_set_update_after_bind_sampled_images,
-            .max_storage_images           = v12_props.max_descriptor_set_update_after_bind_storage_images,
-            .max_samplers                 = v12_props.max_descriptor_set_update_after_bind_samplers,
-            .max_per_stage_sampled_images = v12_props.max_per_stage_descriptor_update_after_bind_sampled_images,
-            .max_per_stage_storage_images = v12_props.max_per_stage_descriptor_update_after_bind_storage_images,
-            .max_per_stage_samplers       = v12_props.max_per_stage_descriptor_update_after_bind_samplers,
-            .max_per_stage_resources      = v12_props.max_per_stage_update_after_bind_resources,
-            .max_all_pools_descriptors    = v12_props.max_update_after_bind_descriptors_in_all_pools,
-        };
-        bool fits = heap_fits_limits(
-            mode:         state.heap_mode,
-            tex_capacity: tex_capacity,
-            smp_capacity: smp_capacity,
-            limits:       limits,
+        IndexingHeapLimits limits = query_indexing_heap_limits(state.physical_device);
+        bool fits = indexing_heap_fits_limits(
+            tex_capacity,
+            smp_capacity,
+            limits,
         );
         if (!fits) {
             if (state.debug_callback == null) {

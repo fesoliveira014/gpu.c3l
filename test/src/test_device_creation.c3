@@ -90,3 +90,31 @@ fn void device_creation_failure_rolls_back_runtime_and_backend_state() @test {
     gpu::vk::stub_fail_device_after_temporary_allocation(false);
     gpu::destroy_runtime(&runtime)!!;
 }
+
+fn void invalid_retained_runtime_metadata_is_rejected_before_publication() @test {
+    gpu::vk::stub_set_adapter_count(1);
+    RuntimeDesc desc = device_creation_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Adapter adapter = device_creation_adapter(&runtime);
+    Adapter forged_adapter = adapter;
+    forged_adapter.runtime_generation++;
+    FrameFixture fixture;
+    Device owner;
+
+    gpu::runtime_retain_device(&runtime)!!;
+    Device? result = gpu::register_device(
+        backend:          BackendKind.VULKAN,
+        caps:             {},
+        vtable:           &frame_fixture_vtable,
+        backend_state:    &fixture,
+        retained_runtime: &runtime,
+        adapter:          &forged_adapter,
+        owner:            &owner,
+    );
+
+    assert(@catch(result) == gpu::INVALID_HANDLE);
+    assert(gpu::device_slot_available(), "invalid ownership metadata publishes no device");
+    assert((ulong)owner == 0, "invalid ownership metadata writes no backend owner");
+    gpu::runtime_release_device(&runtime)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}

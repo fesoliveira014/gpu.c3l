@@ -195,45 +195,42 @@ fn Device? register_device(
     DeviceCaps caps,
     BackendVTable* vtable,
     void* backend_state,
+    Runtime* retained_runtime = null,
+    Adapter* adapter = null,
     Device* owner = null,
 ) @private {
     if (device_active || vtable == null || backend_state == null) return INVALID_RESOURCE_STATE~;
+    bool has_runtime = retained_runtime != null;
+    if (has_runtime != (adapter != null)) return INVALID_ARGUMENT~;
+    Runtime runtime;
+    Adapter registered_adapter;
+    if (has_runtime) {
+        RuntimeData* runtime_data = resolve_runtime(retained_runtime);
+        RuntimeData* adapter_data = resolve_adapter(adapter);
+        if (runtime_data == null || adapter_data != runtime_data) {
+            return INVALID_HANDLE~;
+        }
+        if (runtime_data.live_device_count == 0) return INVALID_RESOURCE_STATE~;
+        runtime = *retained_runtime;
+        registered_adapter = *adapter;
+    }
+
     next_device_generation++;
     if (next_device_generation == 0) next_device_generation++;
-    active_device = {
-        .generation    = next_device_generation,
-        .backend       = backend,
-        .caps          = caps,
-        .vtable        = vtable,
-        .backend_state = backend_state,
-    };
     Device handle = (Device)next_device_generation;
+    active_device = {
+        .generation       = next_device_generation,
+        .backend          = backend,
+        .caps             = caps,
+        .vtable           = vtable,
+        .backend_state    = backend_state,
+        .runtime          = runtime,
+        .adapter          = registered_adapter,
+        .runtime_retained = has_runtime,
+    };
     if (owner != null) *owner = handle;
     device_active = true;
     return handle;
-}
-
-fn void? update_device_caps(Device* device, DeviceCaps caps) @private {
-    DeviceData* data = resolve_device(device);
-    if (data == null) return INVALID_HANDLE~;
-    data.caps = caps;
-}
-
-fn void? attach_device_runtime(
-    Device* device,
-    Runtime runtime,
-    Adapter adapter,
-) @private {
-    DeviceData* data = resolve_device(device);
-    RuntimeData* runtime_data = resolve_runtime(&runtime);
-    RuntimeData* adapter_data = resolve_adapter(&adapter);
-    if (data == null || runtime_data == null || adapter_data != runtime_data) {
-        return INVALID_HANDLE~;
-    }
-    if (data.runtime_retained) return INVALID_RESOURCE_STATE~;
-    data.runtime = runtime;
-    data.adapter = adapter;
-    data.runtime_retained = true;
 }
 
 fn BackendVTable* device_vtable(Device* device) @private {
@@ -306,24 +303,23 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
     runtime_retain_device(&runtime)!;
 
     Device device;
-    bool retain_attached = false;
+    bool retain_transferred = false;
     defer catch {
         if ((ulong)device != 0) {
             (void)destroy_device(&device);
         }
-        if (!retain_attached) {
+        if (!retain_transferred) {
             (void)runtime_release_device(&runtime);
         }
     }
 
     switch (runtime_data.backend) {
         case BackendKind.VULKAN:
-            device = gpu::vk::create_vk_device(adapter, request)!;
+            device = gpu::vk::create_vk_device(adapter, request, &runtime)!;
         default:
             return UNSUPPORTED_BACKEND~;
     }
-    attach_device_runtime(&device, runtime, *adapter)!;
-    retain_attached = true;
+    retain_transferred = true;
     return device;
 }
 

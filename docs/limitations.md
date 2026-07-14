@@ -98,7 +98,7 @@ Two sizing rules that bite:
   as storage images. Per-stage resource usage is `2 *
   texture_descriptor_capacity`; plain samplers are excluded. All-pools usage is
   `2 * texture_descriptor_capacity + sampler_descriptor_capacity`.
-  `create_device` returns `INVALID_ARGUMENT` rather than clamping when any
+  `create_device_from_desc` returns `INVALID_ARGUMENT` rather than clamping when any
   per-type, per-stage aggregate, or all-pools update-after-bind limit is
   exceeded.
 

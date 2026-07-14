@@ -143,30 +143,26 @@ fn gpu::Device? create_vk_device_from_desc(gpu::DeviceDesc* desc) {
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
     gpu::DeviceRequest* request,
+    gpu::Runtime* retained_runtime,
 ) {
     gpu::validate_device_request(request)!;
     StubDeviceState* state = mem::new(StubDeviceState);
     device_temporary_creates++;
-    gpu::Device device;
     defer catch {
-        if ((ulong)device != 0) {
-            (void)gpu::destroy_device(&device);
-        } else {
-            device_temporary_destroys++;
-            mem::free(state);
-        }
+        device_temporary_destroys++;
+        mem::free(state);
     }
     if (fail_device_after_temporary_allocation) return gpu::BACKEND_ERROR~;
 
     state.adapter = *adapter;
-    device = gpu::register_device(
-        backend:       gpu::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &STUB_DEVICE_VTABLE,
-        backend_state: state,
-    )!;
-    gpu::DeviceCaps caps = { .strict_enabled = true };
-    gpu::update_device_caps(&device, caps)!;
     last_device_adapter = *adapter;
-    return device;
+    gpu::DeviceCaps caps = { .strict_enabled = true };
+    return gpu::register_device(
+        backend:          gpu::BackendKind.VULKAN,
+        caps:             caps,
+        vtable:           &STUB_DEVICE_VTABLE,
+        backend_state:    state,
+        retained_runtime: retained_runtime,
+        adapter:          adapter,
+    );
 }

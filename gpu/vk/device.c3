@@ -275,6 +275,7 @@ fn gpu::Device? create_vk_device_from_desc(gpu::DeviceDesc* desc) {
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
     gpu::DeviceRequest* request,
+    gpu::Runtime* retained_runtime,
 ) {
     gpu::validate_device_request(request)!;
     gpu::RuntimeData* runtime_data = gpu::resolve_adapter(adapter);
@@ -294,6 +295,8 @@ fn gpu::Device? create_vk_device(
         instance:        runtime_state.instance,
         physical_device: adapter_state.physical_device,
         owns_instance:   false,
+        retained_runtime: retained_runtime,
+        adapter:          adapter,
     );
 }
 
@@ -302,6 +305,8 @@ fn gpu::Device? create_vk_device_with_selection(
     vk::Instance instance,
     vk::PhysicalDevice physical_device,
     bool owns_instance,
+    gpu::Runtime* retained_runtime = null,
+    gpu::Adapter* adapter = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
     bool initialized_before_publish = false;
@@ -437,6 +442,8 @@ fn gpu::Device? create_vk_device_with_selection(
         caps:          state.caps,
         vtable:        &VK_VTABLE,
         backend_state: (void*)state,
+        retained_runtime: retained_runtime,
+        adapter:          adapter,
         owner:         &state.owner,
     );
 }
@@ -614,6 +621,22 @@ fn bool query_descriptor_buffer_support(vk::PhysicalDevice physical_device) @pri
     return db_features.descriptor_buffer != 0;
 }
 
+fn IndexingHeapLimits query_indexing_heap_limits(vk::PhysicalDevice physical_device) @private {
+    vk::PhysicalDeviceVulkan12Properties props = vk::physical_device_vulkan12properties();
+    vk::PhysicalDeviceProperties2 props2 = vk::physical_device_properties2().set_next(&props);
+    vk::get_physical_device_properties2(physical_device, &props2);
+    return {
+        .max_sampled_images           = props.max_descriptor_set_update_after_bind_sampled_images,
+        .max_storage_images           = props.max_descriptor_set_update_after_bind_storage_images,
+        .max_samplers                 = props.max_descriptor_set_update_after_bind_samplers,
+        .max_per_stage_sampled_images = props.max_per_stage_descriptor_update_after_bind_sampled_images,
+        .max_per_stage_storage_images = props.max_per_stage_descriptor_update_after_bind_storage_images,
+        .max_per_stage_samplers       = props.max_per_stage_descriptor_update_after_bind_samplers,
+        .max_per_stage_resources      = props.max_per_stage_update_after_bind_resources,
+        .max_all_pools_descriptors    = props.max_update_after_bind_descriptors_in_all_pools,
+    };
+}
+
 fn bool candidate_satisfies(vk::PhysicalDevice candidate, gpu::DeviceDesc* desc) @private {
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(candidate, &props);
@@ -633,7 +656,28 @@ fn bool candidate_satisfies(vk::PhysicalDevice candidate, gpu::DeviceDesc* desc)
 
     bool indexing = heap_indexing_supported(&features2.features, &features12);
     bool buffer   = heap_shared_features_supported(&features2.features, &features12) && query_descriptor_buffer_support(candidate);
-    if (catch resolve_heap_mode(desc.descriptor_heap_mode, indexing, buffer)) return false;
+    gpu::DescriptorHeapMode? resolved_mode =
+        resolve_heap_mode(desc.descriptor_heap_mode, indexing, buffer);
+    if (catch mode_fault = resolved_mode) return false;
+    gpu::DescriptorHeapMode mode = resolved_mode;
+    if (mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+        uint? resolved_tex = resolve_descriptor_capacity(
+            desc.texture_descriptor_capacity,
+            gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        );
+        if (catch capacity_fault = resolved_tex) return false;
+        uint? resolved_smp = resolve_descriptor_capacity(
+            desc.sampler_descriptor_capacity,
+            gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+        );
+        if (catch capacity_fault = resolved_smp) return false;
+        IndexingHeapLimits limits = query_indexing_heap_limits(candidate);
+        if (!indexing_heap_fits_limits(
+            resolved_tex,
+            resolved_smp,
+            limits,
+        )) return false;
+    }
     if (!presentation_requirement_satisfied(desc.enable_presentation, candidate)) return false;
     return true;
 }
