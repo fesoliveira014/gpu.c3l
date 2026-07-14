@@ -284,7 +284,20 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
 
     state.validation = desc.enable_validation;
     state.presentation_enabled = desc.enable_presentation;
-    state.instance = create_vk_instance(desc, state)!;
+    vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
+        debug_messenger_create_info(state);
+    VkInstanceDesc instance_desc = {
+        .enable_validation      = desc.enable_validation,
+        .enable_debug_utils     = desc.enable_validation
+            || desc.enable_debug_names
+            || desc.debug_callback != null,
+        .require_surface_support = desc.enable_presentation,
+        .application_name       = desc.application_name,
+        .debug_messenger_info   = desc.enable_validation
+            ? &messenger_info
+            : null,
+    };
+    state.instance = create_vk_instance(&instance_desc)!;
     vk::load_extensions(state.instance);
     if (state.validation || state.debug_callback != null) setup_debug_messenger(state);
 

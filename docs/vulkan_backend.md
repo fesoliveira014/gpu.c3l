@@ -28,7 +28,9 @@ No `vk::` or `vma::` type should appear in public `gpu` API signatures.
 
 ```text
 gpu/vk/backend.c3              loader/VMA link probes, backend availability
-gpu/vk/instance.c3             instance creation, validation layers, debug messenger
+gpu/vk/runtime.c3              per-runtime instance, diagnostics, adapter ownership
+gpu/vk/adapter.c3              semantic adapter metadata and diagnostic snapshots
+gpu/vk/instance.c3             shared instance construction
 gpu/vk/device.c3               physical device selection, logical device, feature chain
 gpu/vk/queue.c3                queue family selection, queue handles, submit
 gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
@@ -78,7 +80,11 @@ opt-in: descriptor buffer (DescriptorHeapMode.DESCRIPTOR_BUFFER)
 
 Device creation should fail with `UNSUPPORTED_FEATURE` if required features are missing.
 
-## 4. Instance creation
+## 4. Runtime and instance creation
+
+Each `VkRuntimeState` owns one instance, one optional debug messenger, and a stable adapter cache. Runtime creation publishes its public slot only after instance creation and adapter enumeration succeed.
+
+The direct `create_device(DeviceDesc*)` path owns a separate instance and does not accept runtime adapters.
 
 Instance creation responsibilities:
 
@@ -91,7 +97,7 @@ load extension entry points
 install a persistent debug-utils messenger for validation or callback routing
 ```
 
-The backend should support a headless path with no surface extensions and a windowed path with platform-specific surface extensions.
+Runtime creation enables available surface extensions without requiring them. The direct device path requires surface support only when presentation is requested.
 
 `VK_EXT_debug_utils` is requested when validation, Vulkan debug names, or a
 structured callback needs it. `enable_debug_names` remains independent of
@@ -117,12 +123,13 @@ Device teardown runs the public-resource leak scan when validation is enabled
 or a structured callback is active. Callback delivery uses
 `WARNING`/`resource_lifetime` messages with `destroy_device` operation and
 resource identity/name where available; validation without a callback keeps
-the stderr report. This state belongs to the sole supported live `Device`;
-it does not add multi-device support.
+the stderr report. Device diagnostics remain device-owned. Runtime diagnostics use the same callback contract but have independent instance and messenger lifetimes.
 
-## 5. Physical device selection
+## 5. Adapter enumeration and device selection
 
-Selection criteria:
+Runtime creation enumerates every physical adapter once and caches semantic memory totals, queue counts, general limits, strict support, and separate backend diagnostics. Public enumeration and queries allocate nothing. Cached strings remain valid until runtime destruction.
+
+The direct device path still applies these selection criteria:
 
 ```text
 must support Vulkan 1.3

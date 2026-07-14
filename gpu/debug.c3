@@ -45,7 +45,7 @@ struct DebugResourceRef {
     ZString           debug_name;
 }
 
-<* Structured diagnostic delivered synchronously to DeviceDesc.debug_callback.
+<* Structured diagnostic delivered synchronously to the configured callback.
    All strings remain valid only for the duration of the callback. *>
 struct DebugMessage {
     DebugMessageSeverity severity;

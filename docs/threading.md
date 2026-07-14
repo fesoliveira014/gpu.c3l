@@ -18,6 +18,8 @@ library's own state, but results and validation verdicts are undefined.
 
 | Entry point | Tier | Notes |
 |---|---|---|
+| `create_runtime` / `destroy_runtime` | E | process-wide runtime registry mutation |
+| `enumerate_adapters` / `AdapterList.get` / adapter queries | S | immutable cache reads; borrowed strings are read-only |
 | `create_device` / `destroy_device` | E | |
 | `begin_frame` / `end_frame` / `@with_frame` | E | token-paired `IDLE -> ACTIVE -> IDLE`; quiescence required; helper worker is a direct call |
 | `submit` / `present` | E | queue-mutex backed, so Tier S private submits interleave safely |
@@ -44,6 +46,10 @@ library's own state, but results and validation verdicts are undefined.
 | `begin_commands` / `end_commands` | C | confined to the context's thread |
 | every `cmd_*` recording call | C | confined to the list's thread |
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
+
+Runtime creation and destruction must not overlap other runtime operations. After
+publication, enumeration and adapter queries may run concurrently; all such calls
+must finish before runtime destruction.
 
 ## Phase rule
 
@@ -136,8 +142,8 @@ library serialization.
 The callback must be nonblocking and must not call gpu.c3l. Delivery can occur
 while internal resource or queue locks are held, so reentry may deadlock. Copy
 borrowed fields into application-owned synchronized storage and return. The
-callback and `debug_user_data` remain valid from `create_device` entry through
-`destroy_device` return; no callback occurs afterward.
+callback and `debug_user_data` remain valid from runtime or device creation entry
+through the matching destroy return; no callback occurs afterward.
 
 ## Miscellany
 

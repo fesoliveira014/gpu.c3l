@@ -11,6 +11,8 @@
     "../../gpu/gpu.c3i",
     "../../gpu/types.c3",
     "../../gpu/faults.c3",
+    "../../gpu/runtime.c3",
+    "../../gpu/adapter.c3",
     "../../gpu/device.c3",
     "../../gpu/caps.c3",
     "../../gpu/memory.c3",
@@ -29,12 +31,19 @@
   ],
   "output": "build",
   "targets": {
+    "import_gpu": {
+      "type": "executable",
+      "sources": [
+        "import_gpu.c3"
+      ]
+    },
     "unit": {
       "type": "test",
       "sources": [
         "../src/test_internal_helpers.c3",
         "../src/test_vk_internal_helpers.c3",
         "../src/test_handles.c3",
+        "../src/test_runtime.c3",
         "../src/test_ranges.c3",
         "../src/test_texture_transition.c3",
         "../src/test_texture_support.c3",
