@@ -24,7 +24,7 @@ fn void copy_upload_to_readback() @test {
         .frames_in_flight  = 2,
         .application_name  = "gpu_command_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc up_desc = {
@@ -80,7 +80,7 @@ fn void copy_upload_to_readback() @test {
 
 fn void empty_command_list_submits() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -96,7 +96,7 @@ fn void empty_command_list_submits() @test {
 
 fn void command_list_owns_its_device_token_value() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::Device temporary = device;
@@ -112,7 +112,7 @@ fn void command_list_owns_its_device_token_value() @test {
 
 fn void stale_command_owner_faults_invalid_handle() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -133,7 +133,7 @@ fn void stale_command_owner_faults_invalid_handle() @test {
 
 fn void copied_alias_cannot_resubmit_after_success() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::CommandList original = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -163,7 +163,7 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
 
 fn void command_generation_wraps_without_poisoning_slot() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::CommandList nearly_wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -188,7 +188,7 @@ fn void command_generation_wraps_without_poisoning_slot() @test {
 
 fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -208,9 +208,9 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
 
 fn void second_live_device_is_rejected() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device owner = gpu::create_device(&desc)!!;
+    gpu::Device owner = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&owner)!!;
-    fault second_device = @catch(gpu::create_device(&desc));
+    fault second_device = @catch(gpu::create_device_from_desc(&desc));
     assert(second_device == gpu::INVALID_RESOURCE_STATE, "only one device may be live");
 
     gpu::CommandList cmd = gpu::begin_commands(&owner, gpu::QueueKind.GRAPHICS)!!;
@@ -223,7 +223,7 @@ fn void second_live_device_is_rejected() @test {
 
 fn void abandoned_token_invalidates_when_pool_slot_resets() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 1 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -239,7 +239,7 @@ fn void abandoned_token_invalidates_when_pool_slot_resets() @test {
 
 fn void live_command_record_blocks_context_destruction() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
     gpu::RecordingContextHandle context = gpu::create_recording_context(&device)!!;
 
@@ -257,7 +257,7 @@ fn void live_command_record_blocks_context_destruction() @test {
 
 fn void bad_command_state_rejected() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -276,7 +276,7 @@ fn void bad_command_state_rejected() @test {
 
 fn void texture_barrier_faults() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -298,7 +298,7 @@ fn void texture_barrier_faults() @test {
 
 fn void wait_timeout_zero_on_unreached_value_faults() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::SemaphoreDesc sem_desc = { .initial_value = (gpu::SemaphoreValue)0 };
@@ -319,7 +319,7 @@ fn void wait_timeout_zero_on_unreached_value_faults() @test {
 
 fn void idle_context_pools_are_never_reset() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     // Never recorded on: covers the "idle context" scenario, plus the
@@ -337,7 +337,7 @@ fn void idle_context_pools_are_never_reset() @test {
 
 fn void used_context_pool_resets_exactly_once_on_slot_wrap() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!!;
@@ -372,7 +372,7 @@ fn void used_context_pool_resets_exactly_once_on_slot_wrap() @test {
 
 fn void wait_timeout_zero_on_reached_value_succeeds() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::SemaphoreDesc sem_desc = { .initial_value = (gpu::SemaphoreValue)1 };

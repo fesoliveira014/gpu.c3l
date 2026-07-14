@@ -316,7 +316,7 @@ fn void zero_size_buffer_diagnostic_preserves_fault() @test {
         .frames_in_flight = 2,
         .application_name = "gpu_debug_contract_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     uint before = capture.calls;
@@ -398,7 +398,7 @@ fn void debug_names_do_not_require_validation() @test {
         .frames_in_flight  = 2,
         .application_name  = "gpu_debug_names_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
@@ -421,7 +421,7 @@ fn gpu::Device make_dbg_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_debug_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn void leak_reporters_count_leaks() @test {
@@ -666,7 +666,7 @@ fn void callback_reports_leaks_without_validation() @test {
         .frames_in_flight  = 2,
         .application_name  = "gpu_callback_leak_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     gpu::BufferDesc buffer_desc = {
         .size        = 128,
         .usage       = { .storage },

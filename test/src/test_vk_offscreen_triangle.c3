@@ -21,7 +21,7 @@ fn gpu::Device make_offscreen_test_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_offscreen_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn uint unorm_byte(float value) {

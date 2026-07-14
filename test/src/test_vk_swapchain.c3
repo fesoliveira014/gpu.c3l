@@ -111,7 +111,7 @@ fn void swapchain_requires_presentation() @test {
         .frames_in_flight  = 2,
         .application_name  = "gpu_swapchain_gate_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::SurfaceDesc surface = { .platform = gpu::PlatformKind.WAYLAND };
@@ -276,7 +276,7 @@ fn void swapchain_info_query_rejects_invalid_handle() @test {
         .frames_in_flight  = 2,
         .application_name  = "gpu_swapchain_info_invalid_handle_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };

@@ -195,13 +195,21 @@ fn int main() {
 }
 
 fn void? run() {
-    gpu::DeviceDesc device_desc = {
+    gpu::RuntimeDesc runtime_desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "hello_gpu",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!;
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
+    defer (void)gpu::destroy_runtime(&runtime);
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::Adapter adapter = adapters.get(0)!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+    gpu::DeviceRequestSupport support =
+        gpu::supports_device_request(&adapter, &request)!;
+    if (!support.supported) return gpu::UNSUPPORTED_FEATURE~;
+
+    gpu::Device device = gpu::create_device(&adapter, &request)!;
     defer (void)gpu::destroy_device(&device);
 
     gpu::BufferDesc io_desc = {

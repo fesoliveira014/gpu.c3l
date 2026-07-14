@@ -134,7 +134,27 @@ gpu::destroy_runtime(&runtime)!!;
 
 Adapters and query-result strings are borrowed until runtime destruction. Borrowed strings are read-only and must not be modified. Backend and driver diagnostics are for logging; feature selection uses semantic adapter fields. Runtime destruction returns `RESOURCE_IN_USE` while a dependent surface or device is live.
 
-The current device path creates directly from `DeviceDesc` and does not accept a runtime adapter.
+Strict device creation takes one exact borrowed adapter plus an immutable
+semantic request. Support detection is read-only and enables nothing;
+successful creation records strict enablement separately in `DeviceCaps`.
+The unmet-requirement label is borrowed static text and names GPU semantics
+rather than backend features.
+
+```text
+DeviceRequest                    (opaque immutable value)
+DeviceRequestSupport
+    bool supported
+    String unmet_requirement     (borrowed static semantic label)
+
+strict_device_request()          -> DeviceRequest
+supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
+create_device(Adapter*, DeviceRequest*) -> Device?
+```
+
+A live adapter-created device retains its runtime and reuses the runtime-owned
+backend instance. Destroy the device before destroying that runtime.
+`create_device_from_desc` remains as a transitional direct-device path for
+existing consumers; it performs its own discovery and owns that discovery state.
 
 ```text
 DescriptorHeapMode
@@ -160,6 +180,7 @@ DeviceDesc
     void* debug_user_data
 
 DeviceCaps
+    bool strict_enabled
     bool buffer_device_address
     bool synchronization2
     bool dynamic_rendering
@@ -192,7 +213,7 @@ For descriptor indexing, texture capacity contributes once to the sampled-image
 binding and once to the storage-image binding. Per-stage resource usage is
 `2 * texture_descriptor_capacity`; plain sampler descriptors do not count toward
 that limit. All-pools usage is `2 * texture_descriptor_capacity +
-sampler_descriptor_capacity`. `create_device` returns `INVALID_ARGUMENT` when a
+sampler_descriptor_capacity`. `create_device_from_desc` returns `INVALID_ARGUMENT` when a
 requested capacity exceeds a per-type or aggregate device limit. On success,
 `DeviceCaps.max_texture_descriptors` and
 `DeviceCaps.max_sampler_descriptors` report the capacities of the created heap.
@@ -200,12 +221,21 @@ requested capacity exceeds a per-type or aggregate device limit. On success,
 Creation:
 
 ```text
-create_device(DeviceDesc* desc) -> Device?
-destroy_device(Device* device) -> void?
+strict_device_request() -> DeviceRequest
+supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
+create_device(Adapter*, DeviceRequest*) -> Device?
+create_device_from_desc(DeviceDesc*) -> Device?    (transitional)
+destroy_device(Device*) -> void?
 ```
 
+Malformed or empty requests fault before adapter/backend work. A valid
+unsupported request returns `supported = false` with the first unmet semantic
+label; passing it to `create_device` faults `UNSUPPORTED_FEATURE` without
+selecting another adapter. Duplicate capability contribution is rejected
+transactionally by private composition helpers.
+
 The supported contract permits at most one live `Device` per process; a
-second `create_device` call faults `INVALID_RESOURCE_STATE`.
+second creation call faults `INVALID_RESOURCE_STATE`.
 Frame tokens, command tokens, resource handles, descriptor indices, GPU
 addresses/spans, and synchronization values are scoped to that sole device.
 Multi-device operation is deferred; the current handle and descriptor-index
@@ -287,11 +317,11 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 
 | Fault | Fired by | Typical cause |
 |---|---|---|
-| `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device` | no Vulkan 1.3 driver / loader found no ICD |
-| `UNSUPPORTED_FEATURE` | `create_runtime`, `create_device`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation off; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
+| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation off; an adapter does not satisfy the requested strict semantics; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `resolve_readback` | zero, destroyed, or stale runtime, adapter, device, or resource token; consumed or stale command-list alias, `FrameToken`, or `ReadbackTicket` |
-| `INVALID_RESOURCE_STATE` | `create_device`, `create_swapchain`, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | a device is already live; the native window is already bound to another Vulkan surface; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
+| `INVALID_RESOURCE_STATE` | device creation, `create_swapchain`, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | a device is already live; the native window is already bound to another Vulkan surface; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan explicitly returned `VK_ERROR_DEVICE_LOST`; unrecoverable |
@@ -1342,16 +1372,21 @@ struct ComputeWork {
 }
 
 fn void? run_compute() {
-    gpu::DeviceDesc device_desc = {
-        .backend = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc runtime_desc = {
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .enable_debug_names = true,
-        .frames_in_flight = 2,
-        .descriptor_heap_mode = gpu::DescriptorHeapMode.AUTO,
-        .application_name = "root_pointer_compute",
+        .application_name  = "root_pointer_compute",
     };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::Adapter adapter = adapters.get(0)!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+    gpu::DeviceRequestSupport support =
+        gpu::supports_device_request(&adapter, &request)!;
+    if (!support.supported) return gpu::UNSUPPORTED_FEATURE~;
 
-    gpu::Device device = gpu::create_device(&device_desc)!;
+    gpu::Device device = gpu::create_device(&adapter, &request)!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc input_desc = {

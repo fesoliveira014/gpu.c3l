@@ -173,6 +173,9 @@ struct DeviceData @private {
     DeviceCaps     caps;
     BackendVTable* vtable;
     void*          backend_state;
+    Runtime        runtime;
+    Adapter        adapter;
+    bool           runtime_retained;
 }
 
 DeviceData active_device @private;
@@ -213,6 +216,23 @@ fn void? update_device_caps(Device* device, DeviceCaps caps) @private {
     data.caps = caps;
 }
 
+fn void? attach_device_runtime(
+    Device* device,
+    Runtime runtime,
+    Adapter adapter,
+) @private {
+    DeviceData* data = resolve_device(device);
+    RuntimeData* runtime_data = resolve_runtime(&runtime);
+    RuntimeData* adapter_data = resolve_adapter(&adapter);
+    if (data == null || runtime_data == null || adapter_data != runtime_data) {
+        return INVALID_HANDLE~;
+    }
+    if (data.runtime_retained) return INVALID_RESOURCE_STATE~;
+    data.runtime = runtime;
+    data.adapter = adapter;
+    data.runtime_retained = true;
+}
+
 fn BackendVTable* device_vtable(Device* device) @private {
     DeviceData* data = resolve_device(device);
     return data == null ? null : data.vtable;
@@ -243,17 +263,17 @@ fn DeviceCaps? get_device_caps(Device* device) {
 
 <* Create a device for the requested backend.
    Ownership: the caller must release the returned device with destroy_device. *>
-fn Device? create_device(DeviceDesc* desc) {
+fn Device? create_device_from_desc(DeviceDesc* desc) {
     if (desc == null) return INVALID_ARGUMENT~;
     if (!device_slot_available()) return INVALID_RESOURCE_STATE~;
     switch (desc.backend) {
         case BackendKind.VULKAN:
-            return gpu::vk::create_vk_device(desc);
+            return gpu::vk::create_vk_device_from_desc(desc);
         default:
             DebugMessage message = {
                 .severity       = DebugMessageSeverity.ERROR,
                 .category       = { .public_contract },
-                .operation      = "create_device",
+                .operation      = "create_device_from_desc",
                 .has_fault      = true,
                 .public_fault   = UNSUPPORTED_BACKEND,
                 .rejected_field = "DeviceDesc.backend",
@@ -265,17 +285,59 @@ fn Device? create_device(DeviceDesc* desc) {
     }
 }
 
+<* Create a strict device from one exact borrowed adapter.
+   Ownership: the caller must release the returned device with destroy_device. *>
+fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
+    validate_device_request(request)!;
+    RuntimeData* runtime_data = resolve_adapter(adapter);
+    if (runtime_data == null) return INVALID_HANDLE~;
+    if (!device_slot_available()) return INVALID_RESOURCE_STATE~;
+
+    DeviceRequestSupport support = supports_device_request(adapter, request)!;
+    if (!support.supported) return UNSUPPORTED_FEATURE~;
+
+    Runtime runtime = {
+        .index      = adapter.runtime_index,
+        .generation = adapter.runtime_generation,
+    };
+    runtime_retain_device(&runtime)!;
+
+    Device device;
+    bool retain_attached = false;
+    defer catch {
+        if ((ulong)device != 0) {
+            (void)destroy_device(&device);
+        }
+        if (!retain_attached) {
+            (void)runtime_release_device(&runtime);
+        }
+    }
+
+    switch (runtime_data.backend) {
+        case BackendKind.VULKAN:
+            device = gpu::vk::create_vk_device(adapter, request)!;
+        default:
+            return UNSUPPORTED_BACKEND~;
+    }
+    attach_device_runtime(&device, runtime, *adapter)!;
+    retain_attached = true;
+    return device;
+}
+
 <* Destroy a device, releasing all backend resources. *>
 fn void? destroy_device(Device* device) {
     DeviceData* data = resolve_device(device);
     if (data == null) return INVALID_HANDLE~;
     BackendVTable* vtable = data.vtable;
+    Runtime runtime = data.runtime;
+    bool runtime_retained = data.runtime_retained;
     vtable.destroy_device(device);
     active_device = {};
     device_active = false;
     next_device_generation++;
     if (next_device_generation == 0) next_device_generation++;
     *device = {};
+    if (runtime_retained) runtime_release_device(&runtime)!;
 }
 
 <* Snapshot per-heap memory usage and live allocation counts. *>

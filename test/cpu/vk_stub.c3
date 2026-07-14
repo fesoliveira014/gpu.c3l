@@ -8,7 +8,17 @@ struct StubRuntimeState {
     uint         adapter_count;
 }
 
+struct StubDeviceState {
+    gpu::Adapter adapter;
+}
+
 uint configured_adapter_count @private = 1;
+bool configured_strict_support @private = true;
+uint device_support_queries @private;
+uint device_temporary_creates @private;
+uint device_temporary_destroys @private;
+bool fail_device_after_temporary_allocation @private;
+gpu::Adapter last_device_adapter @private;
 uint runtime_creates @private;
 uint runtime_destroys @private;
 bool probe_destroy_visibility @private;
@@ -26,6 +36,7 @@ fn void destroy_stub_runtime(void* backend_state) {
 
 fn gpu::AdapterInfo? get_stub_adapter_info(void* backend_state, uint index) {
     StubRuntimeState* state = (StubRuntimeState*)backend_state;
+    device_support_queries++;
     if (state == null || index >= state.adapter_count) return gpu::INVALID_HANDLE~;
     return {
         .name             = index == 0 ? "stub adapter 0" : "stub adapter 1",
@@ -39,7 +50,7 @@ fn gpu::AdapterInfo? get_stub_adapter_info(void* backend_state, uint index) {
             .compute_count  = 1,
             .transfer_count = 1,
         },
-        .strict_supported = true,
+        .strict_supported = configured_strict_support,
     };
 }
 
@@ -73,7 +84,32 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     return runtime;
 }
 
-fn void stub_set_adapter_count(uint count) => configured_adapter_count = count;
+fn void stub_set_adapter_count(uint count) {
+    configured_adapter_count = count;
+    configured_strict_support = true;
+}
+
+fn void stub_set_strict_support(bool supported) => configured_strict_support = supported;
+
+fn void stub_reset_device_counts() {
+    device_support_queries = 0;
+    device_temporary_creates = 0;
+    device_temporary_destroys = 0;
+    fail_device_after_temporary_allocation = false;
+    last_device_adapter = {};
+}
+
+fn uint stub_device_support_query_count() => device_support_queries;
+
+fn uint stub_device_temporary_create_count() => device_temporary_creates;
+
+fn uint stub_device_temporary_destroy_count() => device_temporary_destroys;
+
+fn void stub_fail_device_after_temporary_allocation(bool fail) {
+    fail_device_after_temporary_allocation = fail;
+}
+
+fn gpu::Adapter stub_last_device_adapter() => last_device_adapter;
 
 fn void stub_probe_destroy_visibility() {
     probe_destroy_visibility = true;
@@ -90,9 +126,47 @@ fn uint stub_runtime_create_count() => runtime_creates;
 
 fn uint stub_runtime_destroy_count() => runtime_destroys;
 
-// CPU-lane stub: satisfies the public module's backend routing so it
-// compiles without the real backend or native libraries. Creating a device
-// through it faults; the CPU tests never do.
-fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
+fn void destroy_stub_device(gpu::Device* device) {
+    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    device_temporary_destroys++;
+    mem::free(state);
+}
+
+const gpu::BackendVTable STUB_DEVICE_VTABLE @private = {
+    .destroy_device = &destroy_stub_device,
+};
+
+fn gpu::Device? create_vk_device_from_desc(gpu::DeviceDesc* desc) {
     return gpu::UNSUPPORTED_BACKEND~;
+}
+
+fn gpu::Device? create_vk_device(
+    gpu::Adapter* adapter,
+    gpu::DeviceRequest* request,
+) {
+    gpu::validate_device_request(request)!;
+    StubDeviceState* state = mem::new(StubDeviceState);
+    device_temporary_creates++;
+    gpu::Device device;
+    defer catch {
+        if ((ulong)device != 0) {
+            (void)gpu::destroy_device(&device);
+        } else {
+            device_temporary_destroys++;
+            mem::free(state);
+        }
+    }
+    if (fail_device_after_temporary_allocation) return gpu::BACKEND_ERROR~;
+
+    state.adapter = *adapter;
+    device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &STUB_DEVICE_VTABLE,
+        backend_state: state,
+    )!;
+    gpu::DeviceCaps caps = { .strict_enabled = true };
+    gpu::update_device_caps(&device, caps)!;
+    last_device_adapter = *adapter;
+    return device;
 }

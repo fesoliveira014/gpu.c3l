@@ -17,7 +17,7 @@ fn void device_create_destroy() @test {
         .application_name     = "gpu_vk_bootstrap_test",
     };
 
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
 
     assert(gpu::get_device_backend(&device)!! == gpu::BackendKind.VULKAN, "backend recorded");
     assert(gpu::device_backend_state(device) != null, "backend state allocated");
@@ -81,7 +81,7 @@ fn void device_heap_mode_and_capacities() @test {
         .application_name            = "gpu_vk_heap_mode_test",
     };
 
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     assert(gpu::get_device_caps(&device)!!.descriptor_indexing, "indexing support reported");
     assert(gpu::get_device_caps(&device)!!.max_texture_descriptors == 64, "texture capacity reflects the desc");
     assert(gpu::get_device_caps(&device)!!.max_sampler_descriptors == 8, "sampler capacity reflects the desc");
@@ -95,7 +95,7 @@ fn void device_capacity_over_ceiling_rejected() @test {
         .application_name            = "gpu_vk_capacity_test",
     };
 
-    fault capacity_fault = @catch(gpu::create_device(&desc));
+    fault capacity_fault = @catch(gpu::create_device_from_desc(&desc));
     assert(capacity_fault == gpu::INVALID_ARGUMENT, "capacity above the packed-slot ceiling fails with INVALID_ARGUMENT");
 }
 

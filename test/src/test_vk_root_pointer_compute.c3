@@ -15,7 +15,7 @@ fn void root_pointer_compute_readback() @test {
         .backend = gpu::BackendKind.VULKAN, .enable_validation = true,
         .frames_in_flight = 2, .application_name = "gpu_root_pointer_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc io_desc = {

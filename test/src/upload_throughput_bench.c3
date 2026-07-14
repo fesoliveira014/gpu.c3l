@@ -58,7 +58,7 @@ fn gpu::Device make_bench_device(usz staging_size) {
         .staging_arena_size = staging_size,
         .application_name   = "gpu_upload_throughput_bench",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn void print_upload_bench_context(gpu::vk::VkDeviceState* state) {

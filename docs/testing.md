@@ -80,6 +80,7 @@ Examples:
 
 ```text
 test_vk_runtime.c3
+test_vk_device_request.c3
 test_vk_bootstrap.c3
 test_vk_vma_allocator.c3
 test_vk_buffer.c3
@@ -97,6 +98,7 @@ Coverage:
 
 ```text
 two independent Vulkan runtimes and borrowed-adapter invalidation
+exact-adapter request creation with runtime-instance reuse and retention
 create/destroy Vulkan device
 create/destroy VMA allocator
 query memory budget and stats
@@ -348,7 +350,7 @@ The blocking headless matrix is shared by Linux and Windows:
 vk_bootstrap vk_command vk_texture vk_descriptor_heap vk_root_pointer
 vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
 vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading
-vk_queue vk_debug upload_bench_observation
+vk_queue vk_debug upload_bench_observation vk_device_request
 ```
 
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.

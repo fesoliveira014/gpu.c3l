@@ -127,7 +127,7 @@ destroy_runtime(Runtime*)          -> void?
 
 `AdapterList` is an allocation-free view. Its adapters and the read-only strings in adapter query results are borrowed until their runtime is destroyed. Destroying a runtime consumes its token, invalidates its adapter views and handles, and returns `RESOURCE_IN_USE` while a dependent surface or device is live.
 
-The current `create_device(DeviceDesc*)` path remains independent of runtime discovery and does not accept an adapter.
+Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact borrowed adapter, retains its runtime, and reuses the runtime-owned backend instance. `supports_device_request` is read-only and does not enable state. The transitional `create_device_from_desc(DeviceDesc*)` path remains independent of runtime discovery and owns a separate backend instance.
 
 ### Device
 

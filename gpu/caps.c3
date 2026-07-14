@@ -21,8 +21,8 @@ enum DescriptorHeapMode : int {
     DESCRIPTOR_INDEXING,
 }
 
-<* Creation parameters for create_device; a zero-initialized desc works — every
-   zero field resolves to a backend default. *>
+<* Transitional creation parameters for create_device_from_desc; a
+   zero-initialized desc uses backend defaults. *>
 struct DeviceDesc {
     BackendKind          backend;
     bool                 enable_validation;
@@ -49,6 +49,7 @@ struct DeviceDesc {
 <* Capabilities of the created device. Query with get_device_caps instead of
    hardcoding limits. *>
 struct DeviceCaps {
+    bool strict_enabled;
     bool buffer_device_address;
     bool synchronization2;
     bool dynamic_rendering;
@@ -61,10 +62,10 @@ struct DeviceCaps {
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
     // Configured heap capacity (DeviceDesc.texture_descriptor_capacity), not
-    // the device's hardware maximum — see create_device's limit rejection.
+    // the hardware maximum; see create_device_from_desc's limit rejection.
     uint max_texture_descriptors;
     // Configured heap capacity (DeviceDesc.sampler_descriptor_capacity), not
-    // the device's hardware maximum — see create_device's limit rejection.
+    // the hardware maximum; see create_device_from_desc's limit rejection.
     uint max_sampler_descriptors;
     // Effective MRT limit: the lesser of the library and selected device caps.
     uint max_color_attachments;

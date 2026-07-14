@@ -11,7 +11,7 @@ fn void buffer_create_address_span() @test {
         .enable_validation = true,
         .application_name  = "gpu_buffer_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     // Device-local storage buffer.
@@ -65,7 +65,7 @@ fn void range_and_alignment_validation() @test {
         .frames_in_flight  = 2,
         .application_name  = "gpu_range_validation_test",
     };
-    gpu::Device device = gpu::create_device(&device_desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc zero = { .size = 0, .usage = { .storage }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD };

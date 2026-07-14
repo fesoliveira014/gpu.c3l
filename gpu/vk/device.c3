@@ -18,6 +18,7 @@ struct VkDeviceState {
     gpu::Device                 owner;
     vk::Instance               instance;
     vk::DebugUtilsMessengerEXT messenger;
+    bool                        owns_instance;
     vk::PhysicalDevice         physical_device;
     vk::Device                 device;
     vma::Allocator             allocator;
@@ -250,7 +251,46 @@ const gpu::BackendVTable VK_VTABLE @private = {
 
 <* Build a Vulkan device end to end. On failure the partial state is torn down
    and freed before the fault propagates, so nothing leaks. *>
-fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
+fn gpu::Device? create_vk_device_from_desc(gpu::DeviceDesc* desc) {
+    return create_vk_device_with_selection(
+        desc:            desc,
+        instance:        (vk::Instance)null,
+        physical_device: (vk::PhysicalDevice)null,
+        owns_instance:   true,
+    );
+}
+
+fn gpu::Device? create_vk_device(
+    gpu::Adapter* adapter,
+    gpu::DeviceRequest* request,
+) {
+    gpu::validate_device_request(request)!;
+    gpu::RuntimeData* runtime_data = gpu::resolve_adapter(adapter);
+    if (runtime_data == null) return gpu::INVALID_HANDLE~;
+    VkRuntimeState* runtime_state = (VkRuntimeState*)runtime_data.backend_state;
+    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = runtime_state.validation,
+        .debug_callback    = runtime_state.debug_callback,
+        .debug_user_data   = runtime_state.debug_user_data,
+    };
+    VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
+    return create_vk_device_with_selection(
+        desc:            &desc,
+        instance:        runtime_state.instance,
+        physical_device: adapter_state.physical_device,
+        owns_instance:   false,
+    );
+}
+
+fn gpu::Device? create_vk_device_with_selection(
+    gpu::DeviceDesc* desc,
+    vk::Instance instance,
+    vk::PhysicalDevice physical_device,
+    bool owns_instance,
+) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
     gpu::Device handle;
     defer catch {
@@ -267,6 +307,7 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
         backend_state: (void*)state,
     )!;
     state.owner = handle;
+    state.owns_instance = owns_instance;
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
@@ -284,26 +325,35 @@ fn gpu::Device? create_vk_device(gpu::DeviceDesc* desc) {
 
     state.validation = desc.enable_validation;
     state.presentation_enabled = desc.enable_presentation;
-    vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
-        debug_messenger_create_info(state);
-    VkInstanceDesc instance_desc = {
-        .enable_validation      = desc.enable_validation,
-        .enable_debug_utils     = desc.enable_validation
-            || desc.enable_debug_names
-            || desc.debug_callback != null,
-        .require_surface_support = desc.enable_presentation,
-        .application_name       = desc.application_name,
-        .debug_messenger_info   = desc.enable_validation
-            ? &messenger_info
-            : null,
-    };
-    state.instance = create_vk_instance(&instance_desc)!;
-    vk::load_extensions(state.instance);
-    if (state.validation || state.debug_callback != null) setup_debug_messenger(state);
+    QueueFamilies families;
+    if (owns_instance) {
+        vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
+            debug_messenger_create_info(state);
+        VkInstanceDesc instance_desc = {
+            .enable_validation      = desc.enable_validation,
+            .enable_debug_utils     = desc.enable_validation
+                || desc.enable_debug_names
+                || desc.debug_callback != null,
+            .require_surface_support = desc.enable_presentation,
+            .application_name       = desc.application_name,
+            .debug_messenger_info   = desc.enable_validation
+                ? &messenger_info
+                : null,
+        };
+        state.instance = create_vk_instance(&instance_desc)!;
+        vk::load_extensions(state.instance);
+        if (state.validation || state.debug_callback != null) setup_debug_messenger(state);
 
-    PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
-    state.physical_device = selection.physical_device;
-    QueueFamilies families = selection.families;
+        PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
+        state.physical_device = selection.physical_device;
+        families = selection.families;
+    } else {
+        if (instance == null || physical_device == null) return gpu::INVALID_ARGUMENT~;
+        state.instance = instance;
+        state.physical_device = physical_device;
+        vk::load_extensions(state.instance);
+        families = select_queue_families(state.physical_device)!;
+    }
 
     vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
@@ -465,10 +515,10 @@ fn void destroy_state(VkDeviceState* state) @private {
         state.device = (vk::Device)null;
     }
     destroy_debug_messenger(state);
-    if (state.instance != null) {
+    if (state.owns_instance && state.instance != null) {
         vk::destroy_instance(state.instance, null);
-        state.instance = (vk::Instance)null;
     }
+    state.instance = (vk::Instance)null;
     if (state.helper_record_mutex.is_initialized())  (void)state.helper_record_mutex.destroy();
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
     if (state.command_mutex.is_initialized())        (void)state.command_mutex.destroy();
@@ -752,6 +802,7 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
     vk::get_physical_device_properties2(physical_device, &props2);
     vk::PhysicalDeviceProperties props = props2.properties;
     return (gpu::DeviceCaps){
+        .strict_enabled            = true,
         .buffer_device_address      = v12.buffer_device_address != 0,
         .synchronization2           = v13.synchronization2 != 0,
         .dynamic_rendering          = v13.dynamic_rendering != 0,

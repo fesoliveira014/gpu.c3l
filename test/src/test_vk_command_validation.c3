@@ -62,7 +62,7 @@ fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
         .debug_callback       = &capture_sync_diagnostic,
         .debug_user_data      = capture,
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn gpu::Device make_val_device() {
@@ -72,7 +72,7 @@ fn gpu::Device make_val_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_command_validation_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 <* Textured draw context, same shape as the indirect-draw tests: offscreen

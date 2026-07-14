@@ -133,7 +133,7 @@ fn int main() {
         .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_resource_create_bench",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 

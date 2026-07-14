@@ -11,7 +11,7 @@ fn void allocator_stats_and_report() @test {
         .enable_validation = true,
         .application_name  = "gpu_vma_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;

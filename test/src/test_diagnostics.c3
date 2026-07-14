@@ -19,7 +19,7 @@ fn void diagnostic_dispatch_is_null_safe() @test {
 }
 
 fn void null_device_descriptor_faults_without_dereference() @test {
-    fault result = @catch(create_device((DeviceDesc*)null));
+    fault result = @catch(create_device_from_desc((DeviceDesc*)null));
     assert(result == INVALID_ARGUMENT,
         "null device descriptor faults INVALID_ARGUMENT");
 }
@@ -108,13 +108,13 @@ fn void invalid_backend_delivers_diagnostic_before_unchanged_fault() @test {
         .debug_user_data = &capture,
     };
 
-    fault result = @catch(create_device(&desc));
+    fault result = @catch(create_device_from_desc(&desc));
 
     assert(result == UNSUPPORTED_BACKEND, "invalid backend keeps UNSUPPORTED_BACKEND");
     assert(capture.calls == 1, "invalid backend emits exactly one diagnostic");
     assert(capture.message.severity == DebugMessageSeverity.ERROR, "invalid backend is an error");
     assert(capture.message.category.public_contract, "invalid backend is a public-contract diagnostic");
-    assert(capture.message.operation.str_view() == "create_device", "device creation operation is identified");
+    assert(capture.message.operation.str_view() == "create_device_from_desc", "device creation operation is identified");
     assert(capture.message.has_fault, "invalid backend carries its public fault");
     assert(capture.message.public_fault == UNSUPPORTED_BACKEND, "diagnostic fault matches the returned fault");
     assert(capture.message.resource.kind == DebugResourceKind.NONE, "invalid backend has no resource");
@@ -126,7 +126,7 @@ fn void invalid_backend_delivers_diagnostic_before_unchanged_fault() @test {
 fn void invalid_backend_fault_is_callback_independent() @test {
     BackendKind invalid_backend = bitcast(99, BackendKind);
     DeviceDesc without_callback = { .backend = invalid_backend };
-    fault without_callback_fault = @catch(create_device(&without_callback));
+    fault without_callback_fault = @catch(create_device_from_desc(&without_callback));
 
     DiagnosticCapture capture = {};
     DeviceDesc with_callback = {
@@ -134,7 +134,7 @@ fn void invalid_backend_fault_is_callback_independent() @test {
         .debug_callback  = &capture_diagnostic,
         .debug_user_data = &capture,
     };
-    fault with_callback_fault = @catch(create_device(&with_callback));
+    fault with_callback_fault = @catch(create_device_from_desc(&with_callback));
 
     assert(without_callback_fault == UNSUPPORTED_BACKEND, "null callback keeps the original fault");
     assert(with_callback_fault == without_callback_fault, "callback presence does not alter fault identity");

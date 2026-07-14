@@ -21,7 +21,7 @@ fn int main() {
         .enable_validation = false,
         .application_name  = "gpu_benchmark_info",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 

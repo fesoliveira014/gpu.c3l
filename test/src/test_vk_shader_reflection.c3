@@ -87,7 +87,7 @@ fn gpu::Device make_diagnostic_reflection_test_device(ShaderDiagnosticCapture* c
         .debug_callback = capture == null ? null : &capture_shader_diagnostic,
         .debug_user_data = capture,
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn gpu::Device make_reflection_test_device() {
@@ -97,7 +97,7 @@ fn gpu::Device make_reflection_test_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_shader_reflection_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn void heap_conforming_shader_accepted() @test {

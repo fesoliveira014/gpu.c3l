@@ -26,7 +26,7 @@ fn int main() {
         .pipeline_capacity = BENCH_DISTINCT_COUNT + 1,
         .application_name  = "gpu_pipeline_cache_bench",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = BENCH_VERT_SPIRV[..], .entry_point = "main" };

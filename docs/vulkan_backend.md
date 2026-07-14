@@ -84,7 +84,7 @@ Device creation should fail with `UNSUPPORTED_FEATURE` if required features are 
 
 Each `VkRuntimeState` owns one instance, one optional debug messenger, and a stable adapter cache. Runtime creation publishes its public slot only after instance creation and adapter enumeration succeed.
 
-The direct `create_device(DeviceDesc*)` path owns a separate instance and does not accept runtime adapters.
+Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact cached physical device and borrows the runtime-owned instance. Device destruction never destroys that borrowed instance; the retained runtime remains unavailable for destruction until the device is gone. The transitional `create_device_from_desc(DeviceDesc*)` path owns a separate instance and performs its own adapter selection.
 
 Instance creation responsibilities:
 

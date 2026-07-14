@@ -68,7 +68,7 @@ fn int main() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_arena_allocation_bench",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     run_frame_allocations(&device);

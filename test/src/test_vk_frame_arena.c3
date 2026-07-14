@@ -45,7 +45,7 @@ fn gpu::Device make_diagnostic_frame_device(FrameDiagnosticCapture* capture, uin
         .debug_user_data   = capture,
         .application_name  = "gpu_frame_diagnostic_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn void assert_frame_diagnostic(
@@ -222,7 +222,7 @@ fn gpu::Device make_frame_lifecycle_device(uint frames_in_flight = 1) {
         .frames_in_flight  = frames_in_flight,
         .application_name  = "gpu_frame_lifecycle_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn FrameLifecycleSnapshot frame_lifecycle_snapshot(vk::VkDeviceState* state) {
@@ -424,7 +424,7 @@ fn void frame_arena_alloc_and_reset() @test {
         .frames_in_flight  = 2,
         .application_name  = "gpu_frame_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -462,7 +462,7 @@ fn void frame_arena_alloc_and_reset() @test {
 
 fn void reset_before_retire_rejected() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -485,7 +485,7 @@ fn void custom_frame_arena_size_holds_larger_spans() @test {
         .frame_arena_size  = 32 << 20,
         .application_name  = "gpu_frame_arena_size_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -502,7 +502,7 @@ fn void frame_upload_memory_is_coherent() @test {
         .frames_in_flight  = 2,
         .application_name  = "gpu_coherency_test",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc buf_desc = {

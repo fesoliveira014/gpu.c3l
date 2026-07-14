@@ -21,7 +21,7 @@ fn gpu::Device u16v_device() {
         .frames_in_flight  = 2,
         .application_name  = "gpu_u16_verify",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn gpu::BufferHandle u16v_persistent(gpu::Device* device, usz size, gpu::BufferUsage usage) {

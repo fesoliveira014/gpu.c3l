@@ -33,7 +33,7 @@ fn void descriptor_buffer_device_and_heap() @test {
     };
 
     gpu::Device device;
-    if (try dev = gpu::create_device(&desc)) {
+    if (try dev = gpu::create_device_from_desc(&desc)) {
         device = dev;
     } else {
         io::eprintfn("descriptor_buffer_device_and_heap: no capable adapter, skipping");
@@ -85,7 +85,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
         .application_name     = "gpu_descriptor_buffer_compute_to_graphics",
     };
-    gpu::Device? maybe_device = gpu::create_device(&device_desc);
+    gpu::Device? maybe_device = gpu::create_device_from_desc(&device_desc);
     if (catch err = maybe_device) {
         assert(err == gpu::UNSUPPORTED_FEATURE,
             "forced descriptor-buffer device creation failed unexpectedly: %s", err);
@@ -430,7 +430,7 @@ fn void descriptor_buffer_write_then_sample() @test {
         .application_name     = "gpu_descriptor_buffer_e2e",
     };
     gpu::Device device;
-    if (try dev = gpu::create_device(&device_desc)) {
+    if (try dev = gpu::create_device_from_desc(&device_desc)) {
         device = dev;
     } else {
         io::eprintfn("descriptor_buffer_write_then_sample: no capable adapter, skipping");

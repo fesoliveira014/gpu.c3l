@@ -94,7 +94,7 @@ fn gpu::Device make_cache_io_device(char[] blob = {}, CacheBackendCapture* captu
         .debug_user_data     = capture,
         .application_name    = "gpu_pipeline_cache_io_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 fn gpu::PipelineHandle build_cache_io_pipeline(gpu::Device* device) {

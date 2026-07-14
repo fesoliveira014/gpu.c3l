@@ -35,7 +35,7 @@ fn gpu::Device make_ind_device(usz readback_arena_size = 0) {
         .readback_arena_size = readback_arena_size,
         .application_name    = "gpu_indirect_test",
     };
-    return gpu::create_device(&desc)!!;
+    return gpu::create_device_from_desc(&desc)!!;
 }
 
 <* Textured draw context: offscreen shaders, one graphics pipeline, and a 1x1
@@ -265,7 +265,7 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
         .frames_in_flight  = 1,
         .application_name  = "frame_arena_reuse_cross_family",
     };
-    gpu::Device device = gpu::create_device(&desc)!!;
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
     if (!distinct_graphics_compute_families(&device, "reused-offset frame span")) return;
 
