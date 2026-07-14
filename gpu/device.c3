@@ -265,6 +265,7 @@ fn void end_device_operation(DeviceOperation* operation) @private {
     operation.active = false;
 }
 
+<* Caller must hold an operation pin for this device. *>
 fn DeviceData* resolve_pinned_device(Device* device) @private {
     if (device == null || !device.is_valid()) return null;
     if (device.reserved != 0 || device.index >= MAX_DEVICES) return null;
@@ -453,35 +454,41 @@ fn void? destroy_device(Device* device) {
     if (device == null || !device.is_valid()) return INVALID_HANDLE~;
     if (device.reserved != 0 || device.index >= MAX_DEVICES) return INVALID_HANDLE~;
 
-    lock_device_registry();
-    defer unlock_device_registry();
     DeviceSlot* slot = &device_slots[device.index];
-    DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-    if (control.generation != device.generation) return INVALID_HANDLE~;
-    if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
-    if (control.state != DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
+    DeviceSlotControl closing;
+    DeviceData data;
+    {
+        lock_device_registry();
+        defer unlock_device_registry();
+        DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+        if (control.generation != device.generation) return INVALID_HANDLE~;
+        if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
+        if (control.state != DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
 
-    DeviceSlotControl state_step = { .state = 1 };
-    ulong previous = slot.control.add((ulong)state_step, AtomicOrdering.ACQUIRE_RELEASE);
-    DeviceSlotControl closing = (DeviceSlotControl)previous;
-    closing.state = DEVICE_SLOT_CLOSING;
+        DeviceSlotControl state_step = { .state = 1 };
+        ulong previous = slot.control.add((ulong)state_step, AtomicOrdering.ACQUIRE_RELEASE);
+        closing = (DeviceSlotControl)previous;
+        closing.state = DEVICE_SLOT_CLOSING;
 
-    if (closing.pins > 0) {
-        (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
-        return DEVICE_BUSY~;
+        if (closing.pins > 0) {
+            (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
+            return DEVICE_BUSY~;
+        }
+
+        data = slot.data;
     }
-
-    DeviceData data = slot.data;
-    unlock_device_registry();
 
     data.vtable.destroy_device(data.backend_state);
 
-    lock_device_registry();
-    slot.data = {};
-    closing.pins = 0;
-    closing.state = closing.generation == MAX_DEVICE_GENERATION ? DEVICE_SLOT_RETIRED : DEVICE_SLOT_FREE;
-    closing.reserved = 0;
-    slot.control.store((ulong)closing, AtomicOrdering.RELEASE);
+    {
+        lock_device_registry();
+        defer unlock_device_registry();
+        slot.data = {};
+        closing.pins = 0;
+        closing.state = closing.generation == MAX_DEVICE_GENERATION ? DEVICE_SLOT_RETIRED : DEVICE_SLOT_FREE;
+        closing.reserved = 0;
+        slot.control.store((ulong)closing, AtomicOrdering.RELEASE);
+    }
 
     *device = DEVICE_INVALID;
     if (data.runtime_retained) runtime_release_device(&data.runtime)!;
