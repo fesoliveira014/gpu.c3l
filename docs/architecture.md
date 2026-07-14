@@ -347,9 +347,9 @@ public Device token -> private device state -> private backend dispatch
 
 Public functions validate the token before dispatch. Each Vulkan runtime owns
 surface discovery and optional debug instance dispatch. A device retains only
-the instance group required by its request and loads only its selected device
-groups. Headless devices create no presentation queue, mutex, table, or
-dispatch. Backend pointers and dispatch declarations remain private.
+the groups required by its request and loads only their dispatch. Headless
+devices create no presentation queue, mutex, table, or dispatch. Backend
+pointers and dispatch declarations remain private.
 
 ## 6. Resource lifetime
 
@@ -502,14 +502,14 @@ create_sampler(device, desc) -> SamplerIndex?
 destroy_sampler(device, index) -> void?
 ```
 
-Backend implementations:
+The strict request initializes one inline, device-owned heap group. Heap mode,
+capacities, descriptor objects, native features, dispatch, pipeline state, and
+published capabilities derive from that group. An unrequested group owns none
+of that state; current public request validation requires strict semantics.
 
-```text
-default (AUTO): descriptor indexing + large descriptor arrays
-opt-in: VK_EXT_descriptor_buffer (DescriptorHeapMode.DESCRIPTOR_BUFFER)
-```
-
-Neither path changes shader material records.
+`AUTO` prefers descriptor indexing and falls back to descriptor buffers when
+indexing is unavailable. Callers may force either path. Neither changes shader
+material records.
 
 ## 10. Swapchain model
 

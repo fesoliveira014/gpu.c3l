@@ -73,11 +73,12 @@ shaderDrawParameters
 Descriptor path:
 
 ```text
-default (AUTO): descriptor indexing
-opt-in: descriptor buffer (DescriptorHeapMode.DESCRIPTOR_BUFFER)
+AUTO: prefer descriptor indexing, then descriptor buffer
+forced: descriptor indexing or descriptor buffer
 ```
 
-`AUTO` prefers indexing: lavapipe (Mesa 25.0.7) miscompiles descriptor-buffer image access, so descriptor buffer is never auto-selected (`resolve_heap_mode` in `gpu/vk/device.c3`).
+Indexing is preferred because lavapipe (Mesa 25.0.7) miscompiles
+descriptor-buffer image access.
 
 Device creation should fail with `UNSUPPORTED_FEATURE` if required features are missing.
 
@@ -188,14 +189,17 @@ timelineSemaphore
 shaderInt64
 multiDrawIndirect
 shaderDrawParameters
+```
+
+`maintenance4` is always enabled. The strict request adds its heap features:
+
+```text
 runtimeDescriptorArray
 shaderSampledImageArrayNonUniformIndexing
 shaderStorageImageArrayNonUniformIndexing
 shaderStorageImageReadWithoutFormat
 shaderStorageImageWriteWithoutFormat
 ```
-
-`maintenance4` is always enabled.
 
 Optional base features are queried on the selected device and enabled only
 when advertised:
@@ -207,15 +211,10 @@ fillModeNonSolid -> DeviceCaps.line_polygon_mode
 `PolygonMode.LINE` faults `UNSUPPORTED_FEATURE` before shader or cache lookup
 when this cap is false. The feature is not a physical-device selection requirement.
 
-Heap-path-dependent features:
-
-```text
-descriptorBuffer
-descriptorBindingPartiallyBound
-descriptorBindingUpdateAfterBind
-```
-
-The exact feature structs depend on the Vulkan headers exposed by `vk.c3l`.
+The selected strict heap path adds either descriptor-buffer support or the
+indexing path's partially-bound and update-after-bind features. Unrequested
+strict state adds no heap feature chain, extension, dispatch, descriptors, or
+pipeline-shared state.
 
 ## 7. VMA allocator integration
 

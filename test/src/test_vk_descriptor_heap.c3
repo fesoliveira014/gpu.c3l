@@ -714,7 +714,7 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    vk::DescriptorHeapState* heap = &state.heap;
+    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
     assert(heap.texture_retire.count > 0, "the fixture has a ready undrained descriptor retire");
 
     vk::TextureDescriptorCell[8] cells_before;

@@ -223,7 +223,7 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         pipe_info.p_color_blend_state = &blend_state;
         pipe_info.p_dynamic_state = &dynamic_state;
         pipe_info.layout = state.graphics_layout;
-        if (state.heap_mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER) {
+        if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER) {
             pipe_info.flags = vk::PipelineCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT;
         }
 

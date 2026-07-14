@@ -240,6 +240,9 @@ get_device_backend(Device*)      -> BackendKind?
 get_device_caps(Device*)         -> DeviceCaps?
 ```
 
+`strict_enabled` and the descriptor-path flags report enabled device state,
+not adapter support. Query request support before creation.
+
 Descriptor capacities are exact creation requests, not clampable upper bounds.
 For descriptor indexing, texture capacity contributes once to the sampled-image
 binding and once to the storage-image binding. Per-stage resource usage is

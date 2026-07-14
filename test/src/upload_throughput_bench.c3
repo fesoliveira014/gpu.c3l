@@ -77,7 +77,7 @@ fn void print_upload_bench_context(gpu::vk::VkDeviceState* state) {
         driver_name,
         (uint)driver.driver_id,
     );
-    io::printfn("heap: mode=%s", upload_heap_mode_name(state.heap_mode));
+    io::printfn("heap: mode=%s", upload_heap_mode_name(state.strict_heap.mode));
     io::printfn(
         "queues: graphics=%d:0 compute=%d:%d compute_distinct=%s transfer=%d:0 transfer_distinct=%s",
         state.graphics_family,

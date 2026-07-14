@@ -40,7 +40,9 @@ fn void descriptor_buffer_device_and_heap() @test {
         return;
     }
     defer gpu::destroy_device(&device)!!;
-    assert(gpu::get_device_caps(&device)!!.descriptor_buffer, "forced buffer mode implies adapter support");
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    assert(caps.descriptor_buffer, "the forced descriptor-buffer path is enabled");
+    assert(!caps.descriptor_indexing, "the unselected indexing path is disabled");
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
