@@ -69,7 +69,6 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 - No barrier, transition, or render-pass dependency is inferred.
 - Render passes name attachments, load/store operations, and clear values directly.
 - Vulkan 1.2 render-pass and framebuffer objects may be synthesized privately without changing public semantics.
-
 - Swapchain acquisition uses one-shot readiness; presentation consumes the acquired image and accepts its render completion point. Native synchronization remains private.
 
 ## Compatibility extension

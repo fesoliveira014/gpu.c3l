@@ -7,7 +7,7 @@ This plan implements the approved [requirements](requirements.md) and [design](d
 - Target C3 0.8.0 and follow `AGENTS.md` and `docs/style.md`.
 - Deliver one reviewer-sized change per ready-for-review pull request. Do not open draft pull requests.
 - Start behavior changes with a focused failing test or compile fixture. Mark a task complete only after its verification passes and the change is merged.
-- Update affected public documentation, samples, project source lists, and benchmarks in the same task as a contract change.
+- Update affected public documentation, project source lists, and benchmarks in the same task as a contract change. For each breaking public change, update affected samples in a companion `gpu.c3l-samples` pull request and advance its pinned `gpu.c3l` submodule to that exact library commit.
 - Keep public APIs GPU-shaped. Vulkan and VMA types, feature names, layouts, queue families, result codes, and dispatch details remain private.
 - Do not introduce a parallel strict profile or move the current implementation into `gpu::compat`.
 - Do not add `gpu::compat` source before Gate C or Vulkan 1.2 fallbacks before Gate D.
@@ -112,7 +112,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 - [ ] Implement the approved live/closing/device-destroy state machine in `gpu/device.c3` and `gpu/vk/device.c3`, resolving issues #214 and the device portion of #200.
   - **Depends on:** 2.1–2.4.
   - **Contract:** live children return `RESOURCE_IN_USE`; incomplete queue work and active pins return retryable `DEVICE_BUSY`; destruction never waits; failed attempts preserve state and generation; success increments the generation.
-  - **Edges:** new pin while closing, active recording/executable token, completion racing destruction, device loss, and retry after every failure branch.
+  - **Edges:** new pin while closing, child creation between the live-child check and closing mark, active recording/executable token, completion racing destruction, device loss, and retry after every failure branch.
   - **Verify:** CPU state-machine and concurrency tests plus validation-clean native teardown tests.
 
 ## Milestone 3 — Commands and completion
@@ -121,8 +121,8 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 - [ ] Add `CompletionPoint` and queue-owned monotonic submission sequences in `gpu/sync.c3`, `gpu/queue.c3`, `gpu/vk/sync.c3`, and `gpu/vk/queue.c3`.
   - **Depends on:** 2.4.
-  - **Contract:** a point identifies one queue and sequence, fits within two machine words, allocates no public object, remains reusable until device destruction, and supports host poll and wait operations.
-  - **Edges:** zero or reserved sequence, sequence exhaustion before native submission, stale queue/device, foreign device, and already-complete points.
+  - **Contract:** a point identifies one queue and sequence, fits within two machine words, allocates no public object, remains reusable until device destruction, and supports host poll and wait operations; timeout expiry faults retryable `WAIT_TIMEOUT` without invalidating or changing the point.
+  - **Edges:** zero or reserved sequence, sequence exhaustion before native submission, stale queue/device, foreign device, already-complete points, and wait timeout expiry.
   - **Verify:** representation-size assertion; packing, monotonicity, exhaustion, stale, poll, and wait tests; allocation instrumentation proving no per-point allocation.
 
 ### 3.2 Transactional submission and cross-queue waits
@@ -188,7 +188,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 - [ ] Add pre-creation texture requirements and placed texture creation in `gpu/texture.c3`, `gpu/vk/texture.c3`, and allocation placement tracking.
   - **Depends on:** 4.1 and 2.4.
   - **Contract:** requirements precede allocation; placed creation validates compatibility, size, alignment, offset, queue access, and dedicated-only requirements before backend mutation; texture destruction never releases placement.
-  - **Edges:** wrong memory class or type, overlapping incompatible placement, out-of-range offset, alignment overflow, dedicated-required request, stale allocation, and failure after validation.
+  - **Edges:** wrong memory class or type, overlapping live placement, out-of-range offset, alignment overflow, dedicated-required request, stale allocation, and failure after validation.
   - **Verify:** table-driven requirements/placement tests and backend mutation counters for every invalid request.
 
 ### 4.5 Transactional dedicated textures
@@ -325,9 +325,9 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
   - **Edges:** recursive imports and generated interface output must not accidentally expose private backend declarations.
   - **Verify:** `scripts/check_public_api.py`, generated docs scan, compile-pass canonical fixture, compile-fail retired-symbol fixtures, and full test suite.
 
-### 7.2 Make strict samples canonical
+### 7.2 Canonicalize and audit strict samples
 
-- [ ] Migrate `gpu.c3l-samples` to runtime → adapter → request → device → queue → allocation → record → submit → completion usage, keeping allocation policy local to samples.
+- [ ] Finish and audit the incremental `gpu.c3l-samples` migration to runtime → adapter → request → device → queue → allocation → record → submit → completion usage, keep allocation policy local to samples, and pin the samples repository to the merged 7.1 library commit.
   - **Depends on:** 7.1.
   - **Contract:** getting-started material teaches strict use first; no sample imports compatibility; readback and presentation use the approved completion/lifetime flow.
   - **Edges:** headless compute, windowed rendering, upload/readback, resize, multiple devices, and cleanup after partial setup.
