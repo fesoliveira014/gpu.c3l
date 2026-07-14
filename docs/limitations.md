@@ -6,14 +6,13 @@ page doesn't explain it, that's a bug in this page — file an issue.
 
 ## 1. By design
 
-- **One live device per process.** Multi-device operation is not supported.
-  Resource handles, descriptor indices, GPU addresses/spans, frame tokens,
-  command tokens, and synchronization values are scoped to their sole creating
-  device and runtime lifetime. Table- and
-  index-backed values without owner metadata can silently resolve a
-  coincident slot and target the wrong resource; a safe fault is not
-  guaranteed after a device is replaced. Frame and command tokens embed the
-  owner token and reject stale owners.
+- **Cross-device resource misuse is not diagnosed uniformly.** Multiple
+  devices may coexist, but child handles, descriptor indices, GPU
+  addresses/spans, frame tokens, command tokens, and synchronization values
+  remain scoped to their creating device. Table- and index-backed values
+  without owner metadata can resolve a coincident slot on another device
+  instead of returning a fault. Frame and command tokens embed their owner and
+  reject stale or foreign owners.
 - **Debug callbacks are borrowed, synchronous, and non-reentrant.** Public and
   backend messages run before the originating call returns; Vulkan may invoke
   the callback concurrently on arbitrary threads. Payload pointers are valid
@@ -26,8 +25,7 @@ page doesn't explain it, that's a bug in this page — file an issue.
   changing returned faults; validation-enabled teardown retains stderr leak
   output. Descriptor/cache diagnostics are emitted by device-owned operation
   boundaries; pure lookup, range, and context-free result helpers remain
-  fault-only to prevent duplicate or context-free messages. Per-device callback
-  storage does not add multi-device support: the one-live-`Device` limit still applies.
+  fault-only to prevent duplicate or context-free messages.
 - **Frame-token aliases share one generation.** Copies may allocate until one
   alias ends successfully. That end consumes the device generation, clears the
   passed copy, and makes every other copy stale. A failed end preserves the

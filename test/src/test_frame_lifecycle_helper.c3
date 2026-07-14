@@ -47,7 +47,7 @@ fn void? fixture_rethrowing_work(gpu::FrameToken* frame, FrameFixture* fixture) 
     fail_frame_work()!;
 }
 
-fn void fixture_destroy(gpu::Device* device) {}
+fn void fixture_destroy(void* backend_state) {}
 
 gpu::BackendVTable frame_fixture_vtable = {
     .destroy_device = &fixture_destroy,
@@ -115,25 +115,33 @@ fn void stale_device_copy_is_rejected() @test {
 
     gpu::Device replacement = fixture_device(&fixture);
     defer gpu::destroy_device(&replacement)!!;
-    assert((ulong)replacement != (ulong)stale, "replacement uses a fresh device generation");
+    assert(replacement.index == stale.index, "replacement reuses the released device slot");
+    assert(replacement.generation != stale.generation, "replacement uses a fresh device generation");
     fault reused_fault = @catch(gpu::get_device_caps(&stale));
     assert(reused_fault == gpu::INVALID_HANDLE, "replacement does not revive a stale device alias");
 }
 
-fn void one_live_device_is_enforced() @test {
+fn void multiple_live_devices_coexist() @test {
     FrameFixture first_fixture;
     FrameFixture second_fixture;
     gpu::Device first = fixture_device(&first_fixture);
     defer gpu::destroy_device(&first)!!;
 
-    gpu::Device? second = gpu::register_device(
+    gpu::Device second = gpu::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          {},
         vtable:        &frame_fixture_vtable,
         backend_state: &second_fixture,
-    );
-    fault second_fault = @catch(second);
-    assert(second_fault == gpu::INVALID_RESOURCE_STATE, "second live device faults INVALID_RESOURCE_STATE");
+    )!!;
+    defer gpu::destroy_device(&second)!!;
+
+    assert((ulong)first != (ulong)second, "simultaneous devices have distinct identities");
+    gpu::FrameToken first_frame = gpu::begin_frame(&first)!!;
+    gpu::FrameToken second_frame = gpu::begin_frame(&second)!!;
+    gpu::end_frame(&first_frame)!!;
+    gpu::end_frame(&second_frame)!!;
+    assert(first_fixture.begin_calls == 1, "the first device reaches its own backend state");
+    assert(second_fixture.begin_calls == 1, "the second device reaches its own backend state");
 }
 
 fn void scoped_frame_ends_once_after_success() @test {

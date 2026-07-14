@@ -1,6 +1,9 @@
 module gpu;
 
 import gpu::vk @public;
+import std::atomic;
+import std::atomic::types;
+import std::core::mem;
 
 alias DestroyRuntimeBackendFn @private = fn void (void*);
 alias GetAdapterInfoBackendFn @private = fn AdapterInfo? (void*, uint);
@@ -50,7 +53,7 @@ struct RuntimeData @private {
     void*                 backend_state;
     uint                  adapter_count;
     uint                  live_surface_count;
-    uint                  live_device_count;
+    Atomic{uint}          live_device_count;
     bool                  used;
 }
 
@@ -85,7 +88,7 @@ fn Runtime? register_runtime(
         data.backend_state = backend_state;
         data.adapter_count = adapter_count;
         data.live_surface_count = 0;
-        data.live_device_count = 0;
+        data.live_device_count.store(0, AtomicOrdering.RELAXED);
         data.used = true;
         return (Runtime){
             .index      = i,
@@ -117,15 +120,37 @@ fn void? runtime_release_surface(Runtime* runtime) @private {
 fn void? runtime_retain_device(Runtime* runtime) @private {
     RuntimeData* data = resolve_runtime(runtime);
     if (data == null) return INVALID_HANDLE~;
-    if (data.live_device_count == uint::max) return INVALID_RESOURCE_STATE~;
-    data.live_device_count++;
+    uint count = data.live_device_count.load(AtomicOrdering.RELAXED);
+    while (true) {
+        if (count == uint::max) return INVALID_RESOURCE_STATE~;
+        uint seen = mem::compare_exchange(
+            &data.live_device_count.data,
+            count,
+            count + 1,
+            AtomicOrdering.ACQUIRE_RELEASE,
+            AtomicOrdering.RELAXED,
+        );
+        if (seen == count) return;
+        count = seen;
+    }
 }
 
 fn void? runtime_release_device(Runtime* runtime) @private {
     RuntimeData* data = resolve_runtime(runtime);
     if (data == null) return INVALID_HANDLE~;
-    if (data.live_device_count == 0) return INVALID_RESOURCE_STATE~;
-    data.live_device_count--;
+    uint count = data.live_device_count.load(AtomicOrdering.RELAXED);
+    while (true) {
+        if (count == 0) return INVALID_RESOURCE_STATE~;
+        uint seen = mem::compare_exchange(
+            &data.live_device_count.data,
+            count,
+            count - 1,
+            AtomicOrdering.ACQUIRE_RELEASE,
+            AtomicOrdering.RELAXED,
+        );
+        if (seen == count) return;
+        count = seen;
+    }
 }
 
 <* Initialize backend discovery. Importing gpu performs no initialization. *>
@@ -154,7 +179,7 @@ fn Runtime? create_runtime(RuntimeDesc* desc) {
 fn void? destroy_runtime(Runtime* runtime) {
     RuntimeData* data = resolve_runtime(runtime);
     if (data == null) return INVALID_HANDLE~;
-    if (data.live_surface_count > 0 || data.live_device_count > 0) {
+    if (data.live_surface_count > 0 || data.live_device_count.load(AtomicOrdering.ACQUIRE) > 0) {
         return RESOURCE_IN_USE~;
     }
 

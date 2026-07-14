@@ -16,6 +16,12 @@ $assert Vec4u::size == 16;
 // packed index(0..31) | generation(32..55) | reserved. A live handle has
 // generation >= 1, so raw 0 is reserved for INVALID.
 
+bitstruct Device : ulong {
+    uint index      : 0..31;
+    uint generation : 32..55;
+    uint reserved   : 56..63;
+}
+
 bitstruct BufferHandle : ulong {
     uint index      : 0..31;
     uint generation : 32..55;
@@ -86,6 +92,7 @@ bitstruct SamplerIndex : uint {
     ushort generation : 16..31;
 }
 
+const Device DEVICE_INVALID                   = {};
 const BufferHandle BUFFER_HANDLE_INVALID       = {};
 const TextureHandle TEXTURE_HANDLE_INVALID     = {};
 const PipelineHandle PIPELINE_HANDLE_INVALID   = {};
@@ -98,6 +105,8 @@ const CommandListHandle COMMAND_LIST_HANDLE_INVALID = {};
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
 
+<* True when the device handle is not the invalid zero sentinel. *>
+fn bool Device.is_valid(self)          => (ulong)self != 0;
 <* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool BufferHandle.is_valid(self)    => (ulong)self != 0;
 <* True for a live handle; the zero value is the invalid sentinel. *>

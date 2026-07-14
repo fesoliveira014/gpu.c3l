@@ -1,13 +1,13 @@
 module gpu;
 
 import gpu::vk @public;
-
-<* Opaque generation token for the process-wide device slot. *>
-typedef Device = ulong;
+import std::atomic;
+import std::atomic::types;
+import std::thread;
 
 // Backend dispatch functions. Command recording entries take the owner-bearing
 // CommandList; all other entries take the validated device token.
-alias DestroyDeviceFn @private       = fn void (Device*);
+alias DestroyDeviceFn @private       = fn void (void*);
 alias GetMemoryStatsFn @private      = fn MemoryStats? (Device*);
 alias BuildMemoryReportFn @private   = fn String? (Device*, bool detailed);
 alias CreateBufferFn @private        = fn BufferHandle? (Device*, BufferDesc*);
@@ -85,6 +85,21 @@ alias GetSwapchainInfoFn @private      = fn SwapchainInfo? (Device*, SwapchainHa
 alias AcquireNextImageFn @private      = fn AcquiredImage? (Device*, SwapchainHandle);
 alias PresentFn @private               = fn void? (Device*, PresentDesc*);
 alias GetPresentModeSupportFn @private = fn PresentModeSupport? (Device*, SwapchainHandle);
+
+const uint MAX_DEVICES @private = 64;
+const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
+
+const uint DEVICE_SLOT_FREE @private = 0;
+const uint DEVICE_SLOT_LIVE @private = 1;
+const uint DEVICE_SLOT_CLOSING @private = 2;
+const uint DEVICE_SLOT_RETIRED @private = 3;
+
+bitstruct DeviceSlotControl : ulong @private {
+    uint state      : 0..1;
+    uint pins       : 2..31;
+    uint generation : 32..55;
+    uint reserved   : 56..63;
+}
 
 // One immutable table per backend.
 struct BackendVTable @private {
@@ -168,7 +183,6 @@ struct BackendVTable @private {
 }
 
 struct DeviceData @private {
-    ulong          generation;
     BackendKind    backend;
     DeviceCaps     caps;
     BackendVTable* vtable;
@@ -179,17 +193,43 @@ struct DeviceData @private {
     bool           runtime_retained;
 }
 
-DeviceData active_device @private;
-ulong next_device_generation @private;
-bool device_active @private;
-
-fn DeviceData* resolve_device(Device* device) @private {
-    if (device == null || (ulong)*device == 0 || !device_active) return null;
-    if ((ulong)*device != active_device.generation) return null;
-    return &active_device;
+struct DeviceSlot @private {
+    Atomic{ulong} control;
+    DeviceData    data;
 }
 
-fn bool device_slot_available() @private => !device_active;
+DeviceSlot[MAX_DEVICES] device_slots @private;
+Atomic{bool} device_registry_lock @private;
+
+fn void lock_device_registry() @private {
+    while (device_registry_lock.set(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+}
+
+fn void unlock_device_registry() @private {
+    (void)device_registry_lock.clear(AtomicOrdering.RELEASE);
+}
+
+fn DeviceData* resolve_device(Device* device) @private {
+    if (device == null || !device.is_valid()) return null;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES) return null;
+
+    DeviceSlot* slot = &device_slots[device.index];
+    DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+    if (control.state != DEVICE_SLOT_LIVE || control.generation != device.generation) return null;
+    return &slot.data;
+}
+
+fn bool device_slot_available() @private {
+    lock_device_registry();
+    defer unlock_device_registry();
+    for (uint i = 0; i < MAX_DEVICES; i++) {
+        DeviceSlotControl control = (DeviceSlotControl)device_slots[i].control.load(AtomicOrdering.RELAXED);
+        if (control.state == DEVICE_SLOT_FREE && control.generation < MAX_DEVICE_GENERATION) return true;
+    }
+    return false;
+}
 
 fn Device? register_device(
     BackendKind backend,
@@ -201,7 +241,7 @@ fn Device? register_device(
     Surface* presentation_surface = null,
     Device* owner = null,
 ) @private {
-    if (device_active || vtable == null || backend_state == null) return INVALID_RESOURCE_STATE~;
+    if (vtable == null || backend_state == null || vtable.destroy_device == null) return INVALID_ARGUMENT~;
     bool has_runtime = retained_runtime != null;
     if (has_runtime != (adapter != null)) return INVALID_ARGUMENT~;
 
@@ -214,7 +254,7 @@ fn Device? register_device(
         if (runtime_data == null || adapter_data != runtime_data) {
             return INVALID_HANDLE~;
         }
-        if (runtime_data.live_device_count == 0) return INVALID_RESOURCE_STATE~;
+        if (runtime_data.live_device_count.load(AtomicOrdering.ACQUIRE) == 0) return INVALID_RESOURCE_STATE~;
         runtime = *retained_runtime;
         registered_adapter = *adapter;
     }
@@ -230,23 +270,41 @@ fn Device? register_device(
     }
     caps.presentation_enabled = registered_surface.is_valid();
 
-    next_device_generation++;
-    if (next_device_generation == 0) next_device_generation++;
-    Device handle = (Device)next_device_generation;
-    active_device = {
-        .generation           = next_device_generation,
-        .backend              = backend,
-        .caps                 = caps,
-        .vtable               = vtable,
-        .backend_state        = backend_state,
-        .runtime              = runtime,
-        .adapter              = registered_adapter,
-        .presentation_surface = registered_surface,
-        .runtime_retained     = has_runtime,
-    };
-    if (owner != null) *owner = handle;
-    device_active = true;
-    return handle;
+    lock_device_registry();
+    defer unlock_device_registry();
+    for (uint i = 0; i < MAX_DEVICES; i++) {
+        DeviceSlot* slot = &device_slots[i];
+        DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
+        if (control.state != DEVICE_SLOT_FREE) continue;
+        if (control.generation == MAX_DEVICE_GENERATION) {
+            control.state = DEVICE_SLOT_RETIRED;
+            slot.control.store((ulong)control, AtomicOrdering.RELAXED);
+            continue;
+        }
+
+        control.state = DEVICE_SLOT_LIVE;
+        control.pins = 0;
+        control.generation++;
+        control.reserved = 0;
+        Device handle = {
+            .index      = i,
+            .generation = control.generation,
+        };
+        slot.data = {
+            .backend              = backend,
+            .caps                 = caps,
+            .vtable               = vtable,
+            .backend_state        = backend_state,
+            .runtime              = runtime,
+            .adapter              = registered_adapter,
+            .presentation_surface = registered_surface,
+            .runtime_retained     = has_runtime,
+        };
+        if (owner != null) *owner = handle;
+        slot.control.store((ulong)control, AtomicOrdering.RELEASE);
+        return handle;
+    }
+    return SLOT_TABLE_FULL~;
 }
 
 fn BackendVTable* device_vtable(Device* device) @private {
@@ -281,7 +339,7 @@ fn DeviceCaps? get_device_caps(Device* device) {
    Ownership: the caller must release the returned device with destroy_device. *>
 fn Device? create_device_from_desc(DeviceDesc* desc) {
     if (desc == null) return INVALID_ARGUMENT~;
-    if (!device_slot_available()) return INVALID_RESOURCE_STATE~;
+    if (!device_slot_available()) return SLOT_TABLE_FULL~;
     switch (desc.backend) {
         case BackendKind.VULKAN:
             return gpu::vk::create_vk_device_from_desc(desc);
@@ -307,7 +365,7 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
     validate_device_request(request)!;
     RuntimeData* runtime_data = resolve_adapter(adapter);
     if (runtime_data == null) return INVALID_HANDLE~;
-    if (!device_slot_available()) return INVALID_RESOURCE_STATE~;
+    if (!device_slot_available()) return SLOT_TABLE_FULL~;
 
     DeviceRequestSupport support = supports_device_request(adapter, request)!;
     if (!support.supported) return UNSUPPORTED_FEATURE~;
@@ -341,18 +399,33 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
 
 <* Destroy a device, releasing all backend resources. *>
 fn void? destroy_device(Device* device) {
-    DeviceData* data = resolve_device(device);
-    if (data == null) return INVALID_HANDLE~;
-    BackendVTable* vtable = data.vtable;
-    Runtime runtime = data.runtime;
-    bool runtime_retained = data.runtime_retained;
-    vtable.destroy_device(device);
-    active_device = {};
-    device_active = false;
-    next_device_generation++;
-    if (next_device_generation == 0) next_device_generation++;
-    *device = {};
-    if (runtime_retained) runtime_release_device(&runtime)!;
+    if (device == null || !device.is_valid()) return INVALID_HANDLE~;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES) return INVALID_HANDLE~;
+
+    lock_device_registry();
+    DeviceSlot* slot = &device_slots[device.index];
+    DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
+    if (control.state != DEVICE_SLOT_LIVE || control.generation != device.generation) {
+        unlock_device_registry();
+        return INVALID_HANDLE~;
+    }
+    control.state = DEVICE_SLOT_CLOSING;
+    slot.control.store((ulong)control, AtomicOrdering.RELEASE);
+    DeviceData data = slot.data;
+    unlock_device_registry();
+
+    data.vtable.destroy_device(data.backend_state);
+
+    lock_device_registry();
+    slot.data = {};
+    control.pins = 0;
+    control.state = control.generation == MAX_DEVICE_GENERATION ? DEVICE_SLOT_RETIRED : DEVICE_SLOT_FREE;
+    control.reserved = 0;
+    slot.control.store((ulong)control, AtomicOrdering.RELEASE);
+    unlock_device_registry();
+
+    *device = DEVICE_INVALID;
+    if (data.runtime_retained) runtime_release_device(&data.runtime)!;
 }
 
 <* Snapshot per-heap memory usage and live allocation counts. *>
