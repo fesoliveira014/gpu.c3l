@@ -63,9 +63,11 @@ struct PresentDesc {
 <* The surface remains owned by its runtime and must outlive the swapchain. *>
 fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, SwapchainDesc* desc) {
     if (surface == null || desc == null) return INVALID_ARGUMENT~;
-    DeviceData* device_data = resolve_device(device);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    DeviceData* device_data = operation.data;
     SurfaceData* surface_data = resolve_surface(surface);
-    if (device_data == null || surface_data == null) return INVALID_HANDLE~;
+    if (surface_data == null) return INVALID_HANDLE~;
     if (!device_data.runtime_retained) return INVALID_RESOURCE_STATE~;
     if (!device_data.presentation_surface.is_valid()) return UNSUPPORTED_FEATURE~;
     if ((ulong)*surface != (ulong)device_data.presentation_surface) {
@@ -83,9 +85,9 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
 <* Counterpart of create_swapchain. Returns INVALID_RESOURCE_STATE while an
    acquired image is pending; otherwise waits for in-flight swapchain work. *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.destroy_swapchain(device, swapchain);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.destroy_swapchain(device, swapchain);
 }
 
 <* Recreate under the same handle at a new extent. A zero clamped extent or
@@ -94,17 +96,17 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
    handles become stale. Returns INVALID_RESOURCE_STATE while an acquired
    image is pending. *>
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.resize_swapchain(device, swapchain, width, height);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.resize_swapchain(device, swapchain, width, height);
 }
 
 <* Actual format, extent, image count, and present mode selected for a
    swapchain. Dormant swapchains return the dormant sentinel snapshot. *>
 fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.get_swapchain_info(device, swapchain);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.get_swapchain_info(device, swapchain);
 }
 
 <* Acquire the next image. WAIT_TIMEOUT is transient: retry the same swapchain.
@@ -114,9 +116,9 @@ fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) 
    `suboptimal` image remains usable but is a soft signal to resize soon. The
    rendering submit must name the swapchain in its SubmitDesc. *>
 fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.acquire_next_image(device, swapchain);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.acquire_next_image(device, swapchain);
 }
 
 <* Present the last acquired image. Requires the coupled GRAPHICS submit that
@@ -125,16 +127,16 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) 
    resize_swapchain; SURFACE_LOST requires destroying the swapchain and
    creating another from fresh platform handles. *>
 fn void? present(Device* device, PresentDesc* desc) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.present(device, desc);
+    return operation.vtable.present(device, desc);
 }
 
 <* Present modes the swapchain's surface supports. Unsupported requested
    modes fall back to FIFO at creation; query this to pick deliberately. *>
 fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle swapchain) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.get_present_mode_support(device, swapchain);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.get_present_mode_support(device, swapchain);
 }

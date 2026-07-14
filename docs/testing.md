@@ -52,6 +52,8 @@ generation mismatch
 invalid handle values
 range alignment
 GpuSpan checked/unchecked offset math
+device registry concurrency, generation exhaustion, closing-state rejection,
+and active-operation destruction retry
 immediate-parent exact-fit, nested, zero-size, and out-of-parent slicing
 GPU-address, CPU-pointer, backing-offset, and requested-size overflow rejection
 texture descriptor normalization and backend-profile validation

@@ -77,7 +77,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 2.1 Concurrent generational device registry
 
-- [ ] Replace the process-wide active device with a generational slot registry in `gpu/device.c3`, `gpu/types.c3`, `gpu/vk/device.c3`, and focused registry tests under `test/src/`.
+- [x] Replace the process-wide active device with a generational slot registry in `gpu/device.c3`, `gpu/types.c3`, `gpu/vk/device.c3`, and focused registry tests under `test/src/`.
   - **Depends on:** 1.2.
   - **Contract:** multiple devices coexist; steady-state resolution is a slot and generation check; registry mutation is synchronized; public operations acquire short-lived pins before dereferencing backend state.
   - **Edges:** stale generation, concurrent create/destroy, slot reuse, generation exhaustion, and operations racing a closing device.

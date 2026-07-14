@@ -37,46 +37,46 @@ struct BufferDesc {
 
 <* Create a buffer. Ownership: the caller destroys it with destroy_buffer. *>
 fn BufferHandle? create_buffer(Device* device, BufferDesc* desc) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.create_buffer(device, desc);
+    return operation.vtable.create_buffer(device, desc);
 }
 
 <* Counterpart of create_buffer; the handle is invalid afterwards. *>
 fn void? destroy_buffer(Device* device, BufferHandle buffer) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.destroy_buffer(device, buffer);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.destroy_buffer(device, buffer);
 }
 
 <* Shader-visible GPU address of an addressable buffer; faults if the buffer was
    not created with the addressable usage flag. *>
 fn GpuAddress? get_buffer_address(Device* device, BufferHandle buffer) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.get_buffer_address(device, buffer);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.get_buffer_address(device, buffer);
 }
 
 <* Host-visible view of a buffer; `cpu` is null for non-mappable memory kinds. *>
 fn GpuSpan? get_buffer_span(Device* device, BufferHandle buffer) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.get_buffer_span(device, buffer);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.get_buffer_span(device, buffer);
 }
 
 <* Make CPU writes to mapped memory visible to the GPU. No-op on coherent
    memory; size 0 means the rest of the allocation. *>
 fn void? flush_buffer(Device* device, BufferHandle buffer, usz offset, usz size) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.flush_buffer(device, buffer, offset, size);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.flush_buffer(device, buffer, offset, size);
 }
 
 <* Make GPU writes visible to CPU reads of mapped memory. No-op on coherent
    memory; size 0 means the rest of the allocation. *>
 fn void? invalidate_buffer(Device* device, BufferHandle buffer, usz offset, usz size) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.invalidate_buffer(device, buffer, offset, size);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.invalidate_buffer(device, buffer, offset, size);
 }

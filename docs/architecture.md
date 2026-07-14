@@ -184,6 +184,13 @@ get_device_caps(Device*)       -> DeviceCaps?
 
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the process-wide device registry.
+Registry mutation is synchronized. Public device operations other than
+destruction acquire an atomic pin before dereferencing backend state. A
+closing slot rejects new pins with `DEVICE_BUSY`; destruction with existing
+pins restores the live state and
+returns `DEVICE_BUSY` without changing the token or generation. Backend
+teardown runs only after a successful live-to-closing transition with no
+active pins.
 
 All child handles, indices, addresses, spans, command tokens, and
 synchronization values are scoped to their owning device and runtime lifetime.

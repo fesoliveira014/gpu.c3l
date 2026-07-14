@@ -92,7 +92,7 @@ Goal: overlap GPU work with CPU consumption.
 ```c3
 gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, buf, 0, size)!;
 // ... frames later:
-if (gpu::poll_readback(&device, &ticket)) {
+if (gpu::poll_readback(&device, &ticket)!) {
     gpu::resolve_readback(&device, &ticket, out)!;   // READBACK_NOT_READY if early
 }
 ```

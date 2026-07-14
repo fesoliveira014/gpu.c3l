@@ -189,24 +189,24 @@ fn TextureBarrier? texture_transition(
 
 <* Create a timeline semaphore. Ownership: release with destroy_semaphore. *>
 fn SemaphoreHandle? create_semaphore(Device* device, SemaphoreDesc* desc) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.create_semaphore(device, desc);
+    return operation.vtable.create_semaphore(device, desc);
 }
 
 <* Counterpart of create_semaphore. *>
 fn void? destroy_semaphore(Device* device, SemaphoreHandle semaphore) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.destroy_semaphore(device, semaphore);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.destroy_semaphore(device, semaphore);
 }
 
 <* Wait on the host until the timeline reaches `value`, up to `timeout_ns`
    (0 polls without blocking). Faults WAIT_TIMEOUT — safe to retry — if
    `timeout_ns` elapses first. *>
 fn void? wait_semaphore(Device* device, SemaphoreHandle semaphore, SemaphoreValue value, ulong timeout_ns) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.wait_semaphore(device, semaphore, value, timeout_ns);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.wait_semaphore(device, semaphore, value, timeout_ns);
 }

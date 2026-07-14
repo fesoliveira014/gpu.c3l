@@ -2,6 +2,18 @@ module gpu_test;
 
 import gpu @public;
 import gpu::vk @public;
+import std::atomic;
+
+fn uint live_device_slot_count() @private {
+    uint live_count;
+    for (uint i = 0; i < gpu::MAX_DEVICES; i++) {
+        gpu::DeviceSlot* slot = &gpu::device_slots[i];
+        gpu::DeviceSlotControl control =
+            (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
+        if (control.state == gpu::DEVICE_SLOT_LIVE) live_count++;
+    }
+    return live_count;
+}
 
 fn void adapter_request_creation_reuses_runtime_discovery() @test {
     gpu::RuntimeDesc desc = {
@@ -104,6 +116,7 @@ fn void failed_native_device_creation_rolls_back_before_publication() @test {
 
         uint initialized_before = gpu::vk::device_creation_initialized_count();
         uint rolled_back_before = gpu::vk::device_creation_rollback_count();
+        uint live_slots_before = live_device_slot_count();
         gpu::vk::inject_device_creation_failure_before_publish(true);
         defer gpu::vk::inject_device_creation_failure_before_publish(false);
 
@@ -111,7 +124,10 @@ fn void failed_native_device_creation_rolls_back_before_publication() @test {
             @catch(gpu::create_device(&adapter, &request)) == gpu::BACKEND_ERROR,
             "injected native creation failure returns the backend fault"
         );
-        assert(gpu::device_slot_available(), "failed native creation publishes no device");
+        assert(
+            live_device_slot_count() == live_slots_before,
+            "failed native creation publishes no device"
+        );
         assert(
             gpu::vk::device_creation_initialized_count() == initialized_before + 1,
             "failure occurs after native initialization"

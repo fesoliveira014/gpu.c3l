@@ -10,16 +10,16 @@ const uint MAX_DESCRIPTOR_SLOTS = 65_536;
    owned by its TextureHandle. Ownership: release with
    destroy_texture_descriptor. *>
 fn TextureIndex? create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.create_texture_descriptor(device, texture, view);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.create_texture_descriptor(device, texture, view);
 }
 
 <* The slot is recycled only after in-flight frames retire. *>
 fn void? destroy_texture_descriptor(Device* device, TextureIndex index) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.destroy_texture_descriptor(device, index);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.destroy_texture_descriptor(device, index);
 }
 
 <* One create_texture_descriptors input; a zero-initialized view is the
@@ -35,23 +35,23 @@ struct TextureDescriptorDesc {
    ownership, and out_indices unchanged. Ownership on success: release each
    index with destroy_texture_descriptor. *>
 fn void? create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.create_texture_descriptors(device, descs, out_indices);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.create_texture_descriptors(device, descs, out_indices);
 }
 
 <* Samplers are pure heap entries; the descriptor is the resource.
    Ownership: release with destroy_sampler. *>
 fn SamplerIndex? create_sampler(Device* device, SamplerDesc* desc) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.create_sampler(device, desc);
+    return operation.vtable.create_sampler(device, desc);
 }
 
 <* Counterpart of create_sampler; the heap slot recycles after in-flight frames retire. *>
 fn void? destroy_sampler(Device* device, SamplerIndex index) {
-    BackendVTable* vtable = device_vtable(device);
-    if (vtable == null) return INVALID_HANDLE~;
-    return vtable.destroy_sampler(device, index);
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.destroy_sampler(device, index);
 }

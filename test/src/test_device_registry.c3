@@ -19,7 +19,18 @@ struct BlockingDestroyFixture {
     Atomic{bool} release;
 }
 
+struct BlockingOperationFixture {
+    Atomic{bool} entered;
+    Atomic{bool} release;
+    Atomic{uint} destroy_calls;
+}
+
 struct DestroyWorkerArgs {
+    gpu::Device device;
+    bool        failed;
+}
+
+struct DeviceOperationWorkerArgs {
     gpu::Device device;
     bool        failed;
 }
@@ -39,14 +50,43 @@ fn void blocking_device_destroy(void* backend_state) {
     }
 }
 
+fn void counted_device_destroy(void* backend_state) {
+    BlockingOperationFixture* fixture = (BlockingOperationFixture*)backend_state;
+    (void)fixture.destroy_calls.add(1, AtomicOrdering.RELEASE);
+}
+
+fn gpu::MemoryStats? blocking_get_memory_stats(gpu::Device* device) {
+    BlockingOperationFixture* fixture = (BlockingOperationFixture*)gpu::device_backend_state_ptr(device);
+    if (fixture == null) return gpu::INVALID_HANDLE~;
+    fixture.entered.store(true, AtomicOrdering.RELEASE);
+    while (!fixture.release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    return {};
+}
+
 gpu::BackendVTable blocking_device_vtable = {
     .destroy_device = &blocking_device_destroy,
+};
+
+gpu::BackendVTable blocking_operation_vtable = {
+    .destroy_device   = &counted_device_destroy,
+    .get_memory_stats = &blocking_get_memory_stats,
 };
 
 fn int destroy_device_worker(void* raw_args) {
     DestroyWorkerArgs* args = (DestroyWorkerArgs*)raw_args;
     if (catch destroy_fault = gpu::destroy_device(&args.device)) {
         (void)destroy_fault;
+        args.failed = true;
+    }
+    return args.failed ? 1 : 0;
+}
+
+fn int device_operation_worker(void* raw_args) {
+    DeviceOperationWorkerArgs* args = (DeviceOperationWorkerArgs*)raw_args;
+    if (catch operation_fault = gpu::get_memory_stats(&args.device)) {
+        (void)operation_fault;
         args.failed = true;
     }
     return args.failed ? 1 : 0;
@@ -139,16 +179,18 @@ fn void exhausted_device_slots_are_retired() @test {
     gpu::DeviceSlotControl control = (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
     assert(control.state == gpu::DEVICE_SLOT_FREE, "the exhaustion fixture starts from a free slot");
 
-    control.generation = gpu::MAX_DEVICE_GENERATION;
+    control.generation = gpu::MAX_DEVICE_GENERATION - 1;
     slot.control.store((ulong)control, AtomicOrdering.RELAXED);
 
     FrameFixture fixture;
     gpu::Device device = fixture_device(&fixture);
-    defer gpu::destroy_device(&device)!!;
+    assert(device.index == 0, "the final live generation publishes from the seeded slot");
+    assert(device.generation == gpu::MAX_DEVICE_GENERATION, "registration reaches the final generation naturally");
+
+    gpu::destroy_device(&device)!!;
 
     control = (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
-    assert(device.index != 0, "an exhausted slot is not reused");
-    assert(control.state == gpu::DEVICE_SLOT_RETIRED, "an exhausted slot is retired");
+    assert(control.state == gpu::DEVICE_SLOT_RETIRED, "destruction retires the exhausted slot");
 }
 
 fn void concurrent_registry_mutation_keeps_devices_distinct() @test {
@@ -210,6 +252,12 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
     while (!blocking_fixture.entered.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
+    fault closing_fault = @catch(gpu::get_device_caps(&stale));
+    gpu::ReadbackTicket ticket;
+    fault poll_fault = @catch(gpu::poll_readback(&stale, &ticket));
+    gpu::Device concurrent_destroy = stale;
+    fault concurrent_destroy_fault = @catch(gpu::destroy_device(&concurrent_destroy));
+    bool concurrent_destroy_preserved = concurrent_destroy.is_valid();
 
     FrameFixture survivor_fixture;
     gpu::Device survivor;
@@ -232,6 +280,10 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
 
     assert(survivor_created, "registration succeeds while another slot is closing");
     assert(destroy_result == 0 && !destroy_args.failed, "the closing device finishes destruction");
+    assert(closing_fault == gpu::DEVICE_BUSY, "operations reject a closing device with DEVICE_BUSY");
+    assert(poll_fault == gpu::DEVICE_BUSY, "non-blocking queries report a closing device");
+    assert(concurrent_destroy_fault == gpu::DEVICE_BUSY, "a second destruction attempt is retryable");
+    assert(concurrent_destroy_preserved, "a busy destruction attempt preserves its token");
     assert(
         @catch(gpu::get_device_caps(&stale)) == gpu::INVALID_HANDLE,
         "the destroyed device remains stale"
@@ -240,6 +292,46 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
         assert(gpu::get_device_backend(&survivor)!! == gpu::BackendKind.VULKAN, "the survivor remains resolvable");
         gpu::destroy_device(&survivor)!!;
     }
+}
+
+fn void active_operations_make_device_destruction_retryable() @test {
+    BlockingOperationFixture fixture;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &blocking_operation_vtable,
+        backend_state: &fixture,
+    )!!;
+
+    DeviceOperationWorkerArgs operation_args = { .device = device };
+    Thread operation_thread;
+    operation_thread.create(&device_operation_worker, &operation_args)!!;
+    while (!fixture.entered.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+
+    fault destroy_fault = @catch(gpu::destroy_device(&device));
+    bool handle_preserved = device.is_valid();
+    uint calls_before_retry = fixture.destroy_calls.load(AtomicOrdering.ACQUIRE);
+
+    fixture.release.store(true, AtomicOrdering.RELEASE);
+    int operation_result = operation_thread.join()!!;
+
+    bool retry_succeeded = false;
+    if (device.is_valid()) {
+        if (catch retry_fault = gpu::destroy_device(&device)) {
+            (void)retry_fault;
+        } else {
+            retry_succeeded = true;
+        }
+    }
+
+    assert(destroy_fault == gpu::DEVICE_BUSY, "active operations make destruction retryable");
+    assert(handle_preserved, "a busy destruction attempt preserves the device token");
+    assert(calls_before_retry == 0, "a busy destruction attempt does not tear down the backend");
+    assert(operation_result == 0 && !operation_args.failed, "the pinned operation completes normally");
+    assert(retry_succeeded, "destruction succeeds after the active operation releases its pin");
+    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the successful retry tears down the backend");
 }
 
 fn void runtime_device_retains_are_atomic() @test {
