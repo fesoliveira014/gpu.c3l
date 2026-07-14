@@ -24,7 +24,8 @@ library's own state, but results and validation verdicts are undefined.
 | `Surface.is_valid` / `strict_device_request` | S | pure value operations; no registry access |
 | `surface::{win32,wayland,x11}::create_surface` / `destroy_surface` | E | process-wide surface registry mutation |
 | `supports_presentation` / `request_presentation` / `supports_device_request` | E | process-wide surface registry access; a presentation request does not retain its surface |
-| `create_device` / `destroy_device` | E | process-wide device slot; presentation paths also access the surface registry |
+| `create_device` | E | per runtime; device-registry mutation is synchronized; presentation also uses the surface scope |
+| `destroy_device` | E | per target device; registry mutation is synchronized; quiesce operations on that device |
 | `begin_frame` / `end_frame` / `@with_frame` | E | token-paired `IDLE -> ACTIVE -> IDLE`; quiescence required; helper worker is a direct call |
 | `submit` / `present` | E | queue-mutex backed, so Tier S private submits interleave safely |
 | `wait_queue_idle` | E | queue-mutex backed |

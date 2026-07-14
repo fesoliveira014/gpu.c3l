@@ -105,7 +105,7 @@ const CommandListHandle COMMAND_LIST_HANDLE_INVALID = {};
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
 
-<* True for a live device handle; the zero value is the invalid sentinel. *>
+<* True when the device handle is not the invalid zero sentinel. *>
 fn bool Device.is_valid(self)          => (ulong)self != 0;
 <* True for a live handle; the zero value is the invalid sentinel. *>
 fn bool BufferHandle.is_valid(self)    => (ulong)self != 0;

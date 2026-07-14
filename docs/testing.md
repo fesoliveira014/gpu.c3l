@@ -12,11 +12,10 @@ SDL3 windowed samples (gpu.c3l-samples repository)
 
 Pure CPU tests require no Vulkan loader, VMA static library, SDL3, or window system. Headless Vulkan tests require a Vulkan ICD but no window. SDL3 windowed tests and samples require SDL3 and platform WSI support.
 
-The supported test matrix covers one live `Device` per process. Tests that
-replace a destroyed device exercise stale-owner rejection; they do not establish
-multi-device resource ownership as a supported contract. Multiple discovery
-runtimes may coexist. Token coverage includes generation, aliases, consumption,
-retry, and scoped-worker fault semantics.
+The test matrix covers simultaneous devices, synchronized registry mutation,
+closing-slot overlap, generation retirement, and stale-owner rejection. Native
+command coverage destroys one device before using another. Multiple discovery
+runtimes may coexist.
 
 ## 2. Pure CPU tests
 
@@ -132,8 +131,8 @@ and the exclusive no-list path. Validation-enabled tests use one live `Device`
 to consume one persistent span across compute and graphics, then retire, free,
 and reallocate the same buffer, offset, and GPU address before cross-family
 reuse. Distinct-family runtime cases report PASS when exercised; same-family
-hardware reports N/A and is not counted as cross-family evidence. Multi-device
-support remains outside the test contract.
+hardware reports N/A and is not counted as cross-family evidence. This case
+isolates queue-family behavior within one device.
 
 The C3 test harness captures passing-test output and has no skipped-test result,
 so the required topology audit enables output explicitly:
@@ -265,8 +264,9 @@ Leak tests verify structured `resource_lifetime` delivery and identity/name
 metadata, stderr fallback without a callback, and callback-active reporting
 when `enable_validation = false`.
 Concurrency coverage uses a synchronized application-owned sink; callbacks are
-not assumed serialized or reentrant. The entire matrix still supports exactly
-one live `Device`; multi-device remains unsupported.
+not assumed serialized or reentrant. Device-registry coverage includes
+simultaneous publication, destruction, closing overlap, and shared-runtime
+retain counts.
 
 ## 7. Test naming
 

@@ -254,7 +254,7 @@ fn Device? register_device(
         if (runtime_data == null || adapter_data != runtime_data) {
             return INVALID_HANDLE~;
         }
-        if (runtime_data.live_device_count == 0) return INVALID_RESOURCE_STATE~;
+        if (runtime_data.live_device_count.load(AtomicOrdering.ACQUIRE) == 0) return INVALID_RESOURCE_STATE~;
         runtime = *retained_runtime;
         registered_adapter = *adapter;
     }

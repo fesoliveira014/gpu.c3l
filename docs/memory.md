@@ -523,8 +523,7 @@ Concurrent sharing removes queue-family ownership transfers only. Callers must
 still flush host writes as required, record barriers, order submissions with
 semaphores, wait for completion, and keep each span live until all referencing
 work retires. `free_persistent_span` is valid only after that retirement. The
-arena and its spans remain scoped to the single supported live `Device`;
-multi-device support is outside the contract.
+arena and its spans remain scoped to their owning `Device`.
 Persistent virtual-allocation exhaustion keeps the `ARENA_FULL` fault and
 reports the originating backend result. A free whose buffer is not the arena
 backing faults `INVALID_ARGUMENT`; an unknown or already-freed offset faults
@@ -620,7 +619,8 @@ consumer.
 
 Concurrent sharing removes queue-family ownership transfers only. Host
 flushes, barriers, submission ordering, queue completion, timeline retirement,
-and ring locking remain required. This policy assumes one live `Device`.
+and ring locking remain required. Each ring remains scoped to its owning
+`Device`.
 
 ### 13.1 Which timeline retires a range
 

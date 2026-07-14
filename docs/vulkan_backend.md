@@ -283,8 +283,8 @@ three unique families select `CONCURRENT` with exactly those indices. This is an
 internal backing-buffer policy: per-span `shared_queues` is an accepted no-op,
 while explicit buffers and textures still require the flag. Concurrent sharing
 does not replace barriers, semaphore ordering, completion waits, or retirement;
-a persistent span cannot be freed while GPU work may reference it. The policy
-uses one live `Device` and does not support multi-device ownership.
+a persistent span cannot be freed while GPU work may reference it. Each arena
+remains scoped to its owning `Device`.
 
 ## 9. Texture implementation
 
@@ -345,9 +345,8 @@ excluded because transfer commands never bind or consume the descriptor heap.
 
 This internal policy does not change ownership for public resources. A buffer
 or texture consumed by graphics and compute still requires `shared_queues`.
-The descriptor-indexing path remains unchanged. All descriptor tokens and the
-internal heap remain scoped to the library's single supported live `Device`;
-concurrent sharing does not add multi-device support.
+The descriptor-indexing path remains unchanged. Descriptor tokens and the
+internal heap remain scoped to their owning `Device`.
 
 Public indices map to descriptor entries. Neither path changes the public API
 or shader material records.

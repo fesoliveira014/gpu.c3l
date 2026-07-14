@@ -177,21 +177,20 @@ debug and stats state
 Public shape:
 
 ```text
-Device                         (opaque generation token)
+Device                         (slot | generation | reserved)
 get_device_backend(Device*)    -> BackendKind?
 get_device_caps(Device*)       -> DeviceCaps?
 ```
 
-gpu.c3l currently supports at most one live `Device` per process. Multiple
-devices require ownership information that the present resource handles and
-descriptor indices do not encode, so multi-device operation is deferred.
+Multiple live `Device` values may coexist. Each is a compact slot and
+generation token resolved through the process-wide device registry.
 
-All handles, indices, addresses, spans, command tokens, and synchronization
-values are scoped to this device and its runtime lifetime. Passing them to
-another device is unsupported. Table- and index-backed values without owner
-metadata may resolve a coincident resource rather than returning a fault.
-Owner-bearing frame and command tokens embed the creating `Device` value and
-reject stale owners; this does not make multi-device operation supported.
+All child handles, indices, addresses, spans, command tokens, and
+synchronization values are scoped to their owning device and runtime lifetime.
+Passing one to another device is invalid. Table- and index-backed values without
+owner metadata may resolve a coincident resource instead of returning a fault;
+see `docs/limitations.md`. Frame and command tokens embed their owner and
+reject stale owners.
 
 ### Queues
 
@@ -430,8 +429,7 @@ Headless tests may skip swapchain-specific acquire/present steps.
 
 `begin_commands` takes an optional `RecordingContextHandle`. One context per worker thread (`create_recording_context` / `destroy_recording_context`) enables concurrent recording; see `docs/threading.md`.
 `end_commands(CommandList*)` derives the device from the owner-bearing token;
-callers do not repeat it. Defensive owner validation does not extend the
-one-live-device supported boundary.
+callers do not repeat it. The embedded owner rejects stale command-list tokens.
 
 ### Compute
 

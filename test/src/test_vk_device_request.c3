@@ -126,3 +126,39 @@ fn void failed_native_device_creation_rolls_back_before_publication() @test {
 
     gpu::destroy_runtime(&runtime)!!;
 }
+
+fn void same_runtime_devices_destroy_independently() @test {
+    gpu::RuntimeDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .application_name  = "gpu_vk_multi_device_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
+
+        gpu::Device first = gpu::create_device(&adapter, &request)!!;
+        gpu::Device second = gpu::create_device(&adapter, &request)!!;
+        assert((ulong)first != (ulong)second, "same-runtime devices have distinct identities");
+
+        gpu::destroy_device(&first)!!;
+        assert(gpu::get_device_caps(&second)!!.strict_enabled, "destroying one device preserves its peer");
+
+        gpu::BufferDesc buffer_desc = {
+            .size        = 256,
+            .usage       = { .storage },
+            .memory_kind = gpu::MemoryKind.DEVICE,
+        };
+        gpu::BufferHandle buffer = gpu::create_buffer(&second, &buffer_desc)!!;
+        gpu::destroy_buffer(&second, buffer)!!;
+        gpu::destroy_device(&second)!!;
+        gpu::destroy_runtime(&runtime)!!;
+        return;
+    }
+
+    gpu::destroy_runtime(&runtime)!!;
+}

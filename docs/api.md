@@ -235,7 +235,7 @@ DeviceCaps
     usz min_texel_buffer_alignment
     float max_sampler_anisotropy
 
-Device                           (opaque generation token)
+Device                           (slot | generation | reserved)
 get_device_backend(Device*)      -> BackendKind?
 get_device_caps(Device*)         -> DeviceCaps?
 ```
@@ -267,13 +267,12 @@ label; passing it to `create_device` faults `UNSUPPORTED_FEATURE` without
 selecting another adapter. Duplicate capability contribution is rejected
 transactionally by private composition helpers.
 
-The supported contract permits at most one live `Device` per process; a
-second creation call faults `INVALID_RESOURCE_STATE`.
+Multiple live devices may coexist. `Device` is a compact slot and generation
+token; destroying it invalidates stale copies without affecting other devices.
 Frame tokens, command tokens, resource handles, descriptor indices, GPU
-addresses/spans, and synchronization values are scoped to that sole device.
-Multi-device operation is deferred; the current handle and descriptor-index
-representations do not encode device ownership, and defensive owner checks do
-not establish multi-device support.
+addresses/spans, and synchronization values are scoped to their owning device.
+Passing one to another device is invalid; table- and index-backed values without
+owner metadata may resolve a coincident resource instead of faulting.
 
 ### Handles
 
@@ -354,13 +353,13 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `resolve_readback` | zero, destroyed, or stale runtime, adapter, device, or resource token; consumed or stale command-list alias, `FrameToken`, or `ReadbackTicket` |
-| `INVALID_RESOURCE_STATE` | device creation, swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | a device is already live; an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
+| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan explicitly returned `VK_ERROR_DEVICE_LOST`; unrecoverable |
 | `RESOURCE_IN_USE` | `destroy_runtime`, `destroy_surface`, `destroy_texture` | a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture. |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
-| `SLOT_TABLE_FULL` | runtime and resource creates, `begin_commands` | the runtime registry, adapter token, handle table, or command-record table is at capacity |
+| `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands` | the runtime or device registry, adapter token, handle table, or command-record table is at capacity |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
@@ -477,8 +476,7 @@ Concurrent sharing does not provide visibility, execution ordering, completion,
 or lifetime management. Callers must retain the required flushes, barriers,
 semaphore dependencies, and completion waits, and may call
 `free_persistent_span` only after all work referencing the span retires. Spans
-remain intra-device under the one-live-`Device` contract; multi-device use is
-unsupported.
+are scoped to their owning `Device` and cannot be passed to another device.
 
 ### Explicit buffers
 
@@ -1334,9 +1332,9 @@ Configured diagnostics preserve the public WSI operation and fault, report
 exact lifecycle or descriptor context, and include the raw signed VkResult for
 native failures. Expected recovery outcomes are silent: acquire `WAIT_TIMEOUT`
 and dormant-swapchain `SWAPCHAIN_OUT_OF_DATE` return their faults without a
-callback. Handle identity is present only after a live swapchain resolves. This
-remains an intra-device facility under the one-live-Device contract;
-multi-device is unsupported.
+callback. Handle identity is present only after a live swapchain resolves.
+Each swapchain is scoped to its creating `Device`; multiple devices may own
+independent swapchains.
 
 WSI recovery is fault-specific:
 
