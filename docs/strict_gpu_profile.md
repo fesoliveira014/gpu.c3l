@@ -2,7 +2,7 @@
 
 This document defines the target architecture for `gpu`. It follows the pointer-first, bindless, explicit-synchronization model described in [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api).
 
-This is a target design, not a description of the current implementation. Detailed requirements and design are in [requirements](specs/strict-gpu-profile/requirements.md) and [design](specs/strict-gpu-profile/design.md). The [task list](specs/strict-gpu-profile/tasks.md) remains withdrawn until it is regenerated from this architecture.
+This is a target design, not a description of the current implementation. Detailed requirements and design are in [requirements](specs/strict-gpu-profile/requirements.md) and [design](specs/strict-gpu-profile/design.md). The [task list](specs/strict-gpu-profile/tasks.md) defines the implementation milestones and review gates.
 
 ## Public topology
 
