@@ -399,6 +399,9 @@ fn Device? register_device(
         registered_surface = *presentation_surface;
     }
     caps.presentation_enabled = registered_surface.is_valid();
+    if (caps.queues.graphics == 0) caps.queues.graphics = 1;
+    if (caps.queues.compute == 0) caps.queues.compute = 1;
+    if (caps.queues.transfer == 0) caps.queues.transfer = 1;
 
     lock_device_registry();
     defer unlock_device_registry();

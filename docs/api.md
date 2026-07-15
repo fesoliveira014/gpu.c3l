@@ -222,6 +222,7 @@ DeviceCaps
     bool descriptor_buffer
     bool descriptor_indexing
     bool async_compute
+    QueueCounts queues
     bool line_polygon_mode
     uint max_texture_descriptors
     uint max_sampler_descriptors

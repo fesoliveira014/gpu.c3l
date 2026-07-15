@@ -28,9 +28,16 @@ fn void queue_queries_return_owner_bearing_tokens() @test {
     Device second = create_queue_test_device(&runtime);
 
     gpu::QueueCounts counts = gpu::get_queue_counts(&first)!!;
+    gpu::QueueCounts caps_counts = gpu::get_device_caps(&first)!!.queues;
     assert(counts.graphics == 1, "stub exposes one graphics queue");
     assert(counts.compute == 1, "stub exposes one compute queue");
     assert(counts.transfer == 1, "stub exposes one transfer queue");
+    assert(
+        counts.graphics == caps_counts.graphics
+            && counts.compute == caps_counts.compute
+            && counts.transfer == caps_counts.transfer,
+        "queue queries mirror device capabilities"
+    );
 
     gpu::Queue first_graphics = gpu::get_queue(&first, gpu::QueueKind.GRAPHICS, 0)!!;
     gpu::Queue first_compute = gpu::get_queue(&first, gpu::QueueKind.COMPUTE, 0)!!;

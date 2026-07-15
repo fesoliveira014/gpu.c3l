@@ -202,7 +202,8 @@ transitional descriptor release API still accepts raw indices; see
 
 ### Queues
 
-The API exposes queue kinds rather than raw queue handles:
+The API exposes semantic queue roles and owner-bearing `Queue` tokens, never
+raw family indices or backend queue handles:
 
 ```text
 QueueKind.GRAPHICS
@@ -210,7 +211,10 @@ QueueKind.COMPUTE
 QueueKind.TRANSFER
 ```
 
-The backend maps those kinds to Vulkan queue families and queue handles.
+`get_queue_counts` reports the selected role counts, `get_queue` returns a
+validated token for one role/index, and `get_queue_info` reads that token back.
+Command entry points still take `QueueKind`; later access-domain work will use
+`Queue` tokens to validate exact ownership.
 
 ### Command lists
 

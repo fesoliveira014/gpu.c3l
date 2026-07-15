@@ -184,6 +184,7 @@ struct CapsInputs {
     bool buffer_enabled;
     bool presentation_enabled;
     bool async_compute;
+    gpu::QueueCounts queues;
     bool line_polygon_mode;
     uint texture_capacity;
     uint sampler_capacity;
@@ -585,6 +586,11 @@ fn gpu::Device? create_vk_device_with_selection(
         .buffer_enabled       = strict_heap_uses_descriptor_buffer(&state.strict_heap),
         .presentation_enabled = state.presentation.enabled,
         .async_compute        = state.compute_queue_distinct,
+        .queues               = {
+            .graphics = 1,
+            .compute  = 1,
+            .transfer = 1,
+        },
         .line_polygon_mode    = line_polygon_mode,
         .texture_capacity     = state.strict_heap.texture_capacity,
         .sampler_capacity     = state.strict_heap.sampler_capacity,
@@ -1070,6 +1076,7 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
         .descriptor_buffer          = inputs.buffer_enabled,
         .descriptor_indexing        = inputs.indexing_enabled,
         .async_compute              = inputs.async_compute,
+        .queues                     = inputs.queues,
         .line_polygon_mode          = inputs.line_polygon_mode,
         .max_texture_descriptors    = inputs.texture_capacity,
         .max_sampler_descriptors    = inputs.sampler_capacity,

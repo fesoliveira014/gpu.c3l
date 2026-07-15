@@ -59,6 +59,7 @@ struct DeviceCaps {
     bool descriptor_buffer;
     bool descriptor_indexing;
     bool async_compute;
+    QueueCounts queues;
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
     // Configured heap capacity (DeviceDesc.texture_descriptor_capacity), not

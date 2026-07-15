@@ -22,12 +22,7 @@ const Queue QUEUE_INVALID = {};
 fn bool Queue.is_valid(self) => self.owner != 0;
 
 fn QueueCounts selected_queue_counts(DeviceCaps* caps) @private {
-    if (caps == null) return {};
-    return {
-        .graphics = 1,
-        .compute  = 1,
-        .transfer = 1,
-    };
+    return caps == null ? {} : caps.queues;
 }
 
 fn uint selected_queue_count(DeviceCaps* caps, QueueKind kind) @private {
