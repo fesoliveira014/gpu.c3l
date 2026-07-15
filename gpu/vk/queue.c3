@@ -259,7 +259,7 @@ fn SubmitInputs? resolve_submit_inputs(
         }
     }
 
-    if (desc.swapchain.is_valid()) {
+    if (desc.swapchain != gpu::SWAPCHAIN_HANDLE_INVALID) {
         inputs.swapchain = state.presentation.swapchains.get(desc.swapchain)!;
         swapchain_submit_guard(
             inputs.swapchain.acquire_pending,
@@ -293,7 +293,10 @@ fn SubmitInputs? resolve_submit_inputs(
    signal, so end_frame needs no per-queue empty submit of its own. *>
 fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;
+    if (desc.command_lists.len == 0
+        && desc.waits.len == 0
+        && desc.signals.len == 0
+        && desc.swapchain == gpu::SWAPCHAIN_HANDLE_INVALID) return;
 
     @pool() {
         SubmitInputs inputs = resolve_submit_inputs(state, device, desc)!;
