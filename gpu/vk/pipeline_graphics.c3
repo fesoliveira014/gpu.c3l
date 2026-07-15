@@ -229,6 +229,7 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
 
         vk::Pipeline pipeline;
         check_pipeline_create_device_result(
+            state: state,
             result: vk::create_graphics_pipelines(
                 device:            state.device,
                 pipeline_cache:    state.driver_cache,
@@ -237,7 +238,6 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
                 p_allocator:       null,
                 p_pipelines:       &pipeline,
             ),
-            state: state,
         )!;
         set_object_name(
             state:         state,

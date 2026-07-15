@@ -14,6 +14,23 @@ fn Surface create_test_surface(Runtime* runtime) {
     )!!;
 }
 
+fn void assert_device_ownership(
+    Device* device,
+    Adapter expected_adapter,
+    Surface expected_surface,
+) {
+    gpu::DeviceOperation operation = gpu::begin_device_operation(device)!!;
+    defer gpu::end_device_operation(&operation);
+    assert(
+        (ulong)operation.data.adapter == (ulong)expected_adapter,
+        "the device retains its exact adapter"
+    );
+    assert(
+        (ulong)operation.data.presentation_surface == (ulong)expected_surface,
+        "the device retains its exact presentation surface"
+    );
+}
+
 fn void surface_tokens_are_compact() @test {
     assert(Surface::size == ulong::size, "Surface is one opaque 64-bit token");
 }
@@ -264,46 +281,76 @@ fn void strict_only_devices_reject_swapchains_before_backend_work() @test {
 }
 
 fn void presentation_devices_accept_only_the_requested_surface() @test {
+    gpu::vk::stub_set_adapter_count(2);
+    defer gpu::vk::stub_set_adapter_count(1);
     gpu::vk::stub_reset_surface_counts();
     gpu::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
-    Surface requested = create_test_surface(&runtime);
-    Surface other = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
-    DeviceRequest request = gpu::request_presentation(
+    Surface first_surface = create_test_surface(&runtime);
+    Surface second_surface = create_test_surface(&runtime);
+    AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    Adapter first_adapter = adapters.get(0)!!;
+    Adapter second_adapter = adapters.get(1)!!;
+    DeviceRequest first_request = gpu::request_presentation(
         gpu::strict_device_request(),
-        &requested,
+        &first_surface,
     )!!;
-    Device device = gpu::create_device(&adapter, &request)!!;
+    DeviceRequest second_request = gpu::request_presentation(
+        gpu::strict_device_request(),
+        &second_surface,
+    )!!;
+    Device first = gpu::create_device(&first_adapter, &first_request)!!;
+    Device second = gpu::create_device(&second_adapter, &second_request)!!;
     SwapchainDesc swapchain_desc = {
         .width  = 640,
         .height = 480,
     };
 
-    assert(gpu::get_device_caps(&device)!!.presentation_enabled);
+    assert(gpu::get_device_caps(&first)!!.presentation_enabled);
+    assert(gpu::get_device_caps(&second)!!.presentation_enabled);
+    assert_device_ownership(&first, first_adapter, first_surface);
+    assert_device_ownership(&second, second_adapter, second_surface);
     assert(
         @catch(gpu::create_swapchain(
-            &device,
-            &other,
+            &first,
+            &second_surface,
+            &swapchain_desc,
+        )) == gpu::INVALID_HANDLE
+    );
+    assert(
+        @catch(gpu::create_swapchain(
+            &second,
+            &first_surface,
             &swapchain_desc,
         )) == gpu::INVALID_HANDLE
     );
     assert(
         gpu::vk::stub_swapchain_create_attempt_count() == 0,
-        "surface mismatch rejection precedes backend mutation"
+        "both surface mismatches reject before backend mutation"
     );
 
-    SwapchainHandle swapchain = gpu::create_swapchain(
-        &device,
-        &requested,
+    SwapchainHandle first_swapchain = gpu::create_swapchain(
+        &first,
+        &first_surface,
         &swapchain_desc,
     )!!;
-    assert(gpu::vk::stub_swapchain_create_attempt_count() == 1);
+    SwapchainHandle second_swapchain = gpu::create_swapchain(
+        &second,
+        &second_surface,
+        &swapchain_desc,
+    )!!;
+    assert(gpu::vk::stub_swapchain_create_attempt_count() == 2);
 
-    gpu::destroy_swapchain(&device, swapchain)!!;
-    gpu::destroy_device(&device)!!;
-    gpu::destroy_surface(&other)!!;
-    gpu::destroy_surface(&requested)!!;
+    gpu::destroy_swapchain(&first, first_swapchain)!!;
+    gpu::destroy_device(&first)!!;
+    gpu::destroy_surface(&first_surface)!!;
+    assert(gpu::get_device_caps(&second)!!.presentation_enabled);
+    assert_device_ownership(&second, second_adapter, second_surface);
+    assert(@catch(gpu::destroy_surface(&second_surface)) == gpu::RESOURCE_IN_USE);
+
+    gpu::destroy_swapchain(&second, second_swapchain)!!;
+    gpu::destroy_device(&second)!!;
+    gpu::destroy_surface(&second_surface)!!;
     gpu::destroy_runtime(&runtime)!!;
 }

@@ -365,6 +365,9 @@ vk_queue vk_debug upload_bench_observation vk_device_request
 ```
 
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.
+Distinct-adapter ownership is gated deterministically by the CPU stub suite.
+`vk_device_request` also uses two physical adapters when both support the strict
+profile and reports `distinct-adapter=N/A` otherwise.
 
 Prerequisites on `windows-x64`:
 

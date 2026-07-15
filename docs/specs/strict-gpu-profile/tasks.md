@@ -85,7 +85,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 2.2 One backend state per device
 
-- [ ] Split global Vulkan state into runtime-owned discovery and device-owned backend state across `gpu/vk/backend.c3`, `gpu/vk/device.c3`, `gpu/vk/internal.c3`, and resource tables.
+- [x] Split global Vulkan state into runtime-owned discovery and device-owned backend state across `gpu/vk/backend.c3`, `gpu/vk/device.c3`, `gpu/vk/internal.c3`, and resource tables.
   - **Depends on:** 2.1.
   - **Contract:** every device owns its dispatch, queues, completion state, and resource tables; optional capability state is initialized only when requested; no parallel compatibility backend exists.
   - **Edges:** partial backend initialization, device loss isolated to one device, simultaneous devices on different adapters, and cleanup after publication failure.
