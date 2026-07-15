@@ -73,20 +73,43 @@ fn void grow_deferred_queue(VkDeviceState* state) @private {
     queue.head = 0;
 }
 
+fn void drain_deferred_to_bound(VkDeviceState* state, ulong bound) @private {
+    DeferredQueue* queue = &state.deferred;
+    while (queue.count > 0) {
+        DeferredEntry* entry = &queue.entries[queue.head];
+        if (entry.timeline_value > bound) break;
+        free_deferred_entry(state, entry);
+        queue.head = (queue.head + 1) % (uint)queue.entries.len;
+        queue.count--;
+        state.deferred_stats.drained++;
+    }
+}
+
+fn void deferred_drain_shadow(VkDeviceState* state) @private {
+    state.deferred_stats.drain_calls++;
+    drain_deferred_to_bound(state, state.signaled_shadow);
+}
+
 <* Caller must hold resource_mutex; also runs an opportunistic head-drain. *>
-fn void enqueue_deferred(VkDeviceState* state, DeferredKind kind, ulong timeline_value, void* object, vma::Allocation allocation) @private {
+fn void enqueue_deferred(
+    VkDeviceState* state,
+    DeferredKind kind,
+    ulong timeline_value,
+    void* object,
+    vma::Allocation allocation,
+) @private {
     DeferredQueue* queue = &state.deferred;
     if (queue.count == queue.entries.len) grow_deferred_queue(state);
     uint idx = (queue.head + queue.count) % (uint)queue.entries.len;
     queue.entries[idx] = { .kind = kind, .timeline_value = timeline_value, .object = object, .allocation = allocation };
     queue.count++;
     state.deferred_stats.pushed++;
-    deferred_drain(state);
+    deferred_drain_shadow(state);
 }
 
 <* Caller must hold resource_mutex. Cheapest tier first; tiers 2/3 free only
    against proven-signaled bounds, tier 1 is a pure skip. *>
-fn void deferred_drain(VkDeviceState* state) @private {
+fn void? deferred_drain(VkDeviceState* state) @private {
     DeferredQueue* queue = &state.deferred;
     state.deferred_stats.drain_calls++;
     if (queue.count == 0) return;
@@ -97,20 +120,12 @@ fn void deferred_drain(VkDeviceState* state) @private {
 
     if (head.timeline_value > state.signaled_shadow) {
         ulong queried = 0;
-        vk::get_semaphore_counter_value(state.device, state.frame_timeline, &queried);
         state.deferred_stats.host_queries++;
+        check_device_result(state, vk::get_semaphore_counter_value(state.device, state.frame_timeline, &queried))!;
         if (queried > state.signaled_shadow) state.signaled_shadow = queried;
     }
 
-    ulong bound = state.signaled_shadow;
-    while (queue.count > 0) {
-        DeferredEntry* entry = &queue.entries[queue.head];
-        if (entry.timeline_value > bound) break;
-        free_deferred_entry(state, entry);
-        queue.head = (queue.head + 1) % (uint)queue.entries.len;
-        queue.count--;
-        state.deferred_stats.drained++;
-    }
+    drain_deferred_to_bound(state, state.signaled_shadow);
 }
 
 <* Teardown only: an idle device makes every entry free-able. *>

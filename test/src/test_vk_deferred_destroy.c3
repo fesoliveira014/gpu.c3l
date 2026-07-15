@@ -3,6 +3,7 @@ module gpu_test;
 import gpu @public;
 import gpu::vk @public;
 import vk;
+import std::atomic::types;
 
 // Headless (lavapipe): destroys free the handle immediately but defer the
 // backend release until the referencing frame retires; plus a whitebox check
@@ -174,6 +175,24 @@ fn void deferred_destroy_outside_frame_is_immediate() @test {
     assert(deferred_count(&device) == 0, "queue starts empty");
     gpu::destroy_buffer(&device, buffer)!!;
     assert(deferred_count(&device) == 0, "a destroy with no pending off-frame work retires through the opportunistic drain immediately");
+}
+
+fn void deferred_enqueue_uses_only_the_signaled_shadow() @test {
+    gpu::Device device = make_defer_test_device();
+    defer gpu::destroy_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+
+    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
+    state.timeline_counter.store(1, AtomicOrdering.RELAXED);
+    vk::DeferredStats before = vk::deferred_stats(state);
+
+    gpu::destroy_buffer(&device, buffer)!!;
+
+    vk::DeferredStats after = vk::deferred_stats(state);
+    assert(after.host_queries == before.host_queries, "enqueue does not query a native timeline");
+    assert(after.drain_calls == before.drain_calls + 1, "enqueue preserves opportunistic drain accounting");
+    assert(deferred_count(&device) == 1, "an unproven retirement remains queued");
 }
 
 <* An off-frame submit is sanctioned usage: destroying a buffer it

@@ -24,7 +24,8 @@ faultdef
     OUT_OF_HOST_MEMORY,
     // Device memory exhausted (VMA/driver allocation failure).
     OUT_OF_DEVICE_MEMORY,
-    // The driver reported VK_ERROR_DEVICE_LOST; the device is unrecoverable.
+    // The driver reported VK_ERROR_DEVICE_LOST. The affected device rejects
+    // later operations; peer devices remain usable.
     DEVICE_LOST,
     // A device operation encountered closing state or sustained pin
     // contention. Destruction may also return this fault. Safe to retry.

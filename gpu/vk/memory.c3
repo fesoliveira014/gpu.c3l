@@ -62,10 +62,30 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
         .set_semaphore_type(vk::SemaphoreType.TIMELINE)
         .set_initial_value(0);
     vk::SemaphoreCreateInfo semaphore_info = vk::semaphore_create_info().set_next(&type_info);
-    check(vk::create_semaphore(state.device, &semaphore_info, null, &state.frame_timeline))!;
-    check(vk::create_semaphore(state.device, &semaphore_info, null, &state.aux_compute_timeline))!;
-    check(vk::create_semaphore(state.device, &semaphore_info, null, &state.aux_transfer_timeline))!;
-    check(vk::create_semaphore(state.device, &semaphore_info, null, &state.helper_timeline))!;
+    check_device_result(state, vk::create_semaphore(
+        device:        state.device,
+        p_create_info: &semaphore_info,
+        p_allocator:   null,
+        p_semaphore:   &state.frame_timeline,
+    ))!;
+    check_device_result(state, vk::create_semaphore(
+        device:        state.device,
+        p_create_info: &semaphore_info,
+        p_allocator:   null,
+        p_semaphore:   &state.aux_compute_timeline,
+    ))!;
+    check_device_result(state, vk::create_semaphore(
+        device:        state.device,
+        p_create_info: &semaphore_info,
+        p_allocator:   null,
+        p_semaphore:   &state.aux_transfer_timeline,
+    ))!;
+    check_device_result(state, vk::create_semaphore(
+        device:        state.device,
+        p_create_info: &semaphore_info,
+        p_allocator:   null,
+        p_semaphore:   &state.helper_timeline,
+    ))!;
 
     usz frame_arena_size = desc.frame_arena_size == 0 ? gpu::DEFAULT_FRAME_ARENA_SIZE : desc.frame_arena_size;
     state.frame_arenas = mem::new_array(FrameArenaState, state.frames_in_flight);
@@ -129,7 +149,7 @@ fn ulong? frame_timeline_value_with_query(
     ulong value = 0;
     vk::Result result = query_fn(state.device, state.frame_timeline, &value);
     if (operation == null) {
-        check(result)!;
+        check_device_result(state, result)!;
         return value;
     }
     check_backend_result(
@@ -259,7 +279,7 @@ fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* ou
         defer state.resource_mutex.unlock();
         // The host wait above proved the timeline reached this value.
         if (slot.frame_timeline_value > state.signaled_shadow) state.signaled_shadow = slot.frame_timeline_value;
-        deferred_drain(state);
+        deferred_drain(state)!;
         state.frame_index = next_index;
     }
 

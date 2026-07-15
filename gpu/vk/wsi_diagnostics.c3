@@ -78,6 +78,7 @@ fn void? check_wsi_backend_result(
     WsiResultKind kind,
     vk::Result result,
 ) {
+    observe_device_result(context.state, result);
     bool stderr_fallback = context.state == null || context.state.debug_callback == null;
     fault public_fault = @catch(map_wsi_result(kind, result, stderr_fallback));
     if (!public_fault) return;

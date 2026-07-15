@@ -212,12 +212,12 @@ fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
 
 <* A ring can mix tags (mid-frame helpers interleave with recordings) but
    stays strict FIFO: the head retires before anything behind it. *>
-fn void drain_transfer_retire(VkDeviceState* state, TransferArenaState* arena) @private {
+fn void? drain_transfer_retire(VkDeviceState* state, TransferArenaState* arena) @private {
     if (arena.retire_count == 0) return;
     ulong frame_current = 0;
     ulong helper_current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &frame_current);
-    vk::get_semaphore_counter_value(state.device, state.helper_timeline, &helper_current);
+    check_device_result(state, vk::get_semaphore_counter_value(state.device, state.frame_timeline, &frame_current))!;
+    check_device_result(state, vk::get_semaphore_counter_value(state.device, state.helper_timeline, &helper_current))!;
     while (arena.retire_count > 0) {
         TransferRange* entry = &arena.retire[arena.retire_head];
         ulong current = entry.timeline_kind == TimelineKind.HELPER ? helper_current : frame_current;
@@ -281,7 +281,7 @@ fn TransferArenaRange? transfer_arena_range(
    ARENA_FULL when the request cannot fit (callers fall back to dedicated). *>
 fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, TimelineTag tag) @private {
     if (size > arena.size) return gpu::ARENA_FULL~;
-    drain_transfer_retire(state, arena);
+    drain_transfer_retire(state, arena)!;
     if (arena.retire_count == TRANSFER_RETIRE_CAP) return gpu::ARENA_FULL~;
 
     TransferArenaRange range = transfer_arena_range(
@@ -304,13 +304,13 @@ fn gpu::GpuSpan? transfer_arena_alloc(VkDeviceState* state, TransferArenaState* 
     return arena.span.unchecked_subspan(range.physical_offset, size);
 }
 
-fn void drain_dedicated_transfers(VkDeviceState* state) @private {
+fn void? drain_dedicated_transfers(VkDeviceState* state) @private {
     if (state.dedicated_staging.count == 0) return;
     gpu::Device shim = device_shim(state);
     ulong frame_current = 0;
     ulong helper_current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &frame_current);
-    vk::get_semaphore_counter_value(state.device, state.helper_timeline, &helper_current);
+    check_device_result(state, vk::get_semaphore_counter_value(state.device, state.frame_timeline, &frame_current))!;
+    check_device_result(state, vk::get_semaphore_counter_value(state.device, state.helper_timeline, &helper_current))!;
     while (state.dedicated_staging.count > 0) {
         DedicatedStaging* entry = &state.dedicated_staging.entries[state.dedicated_staging.head];
         ulong current = entry.timeline_kind == TimelineKind.HELPER ? helper_current : frame_current;
@@ -329,27 +329,31 @@ fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena,
     {
         state.transfer_mutex.lock()!!;
         defer state.transfer_mutex.unlock();
-        drain_dedicated_transfers(state);
-        if (try span = transfer_arena_alloc(
+        drain_dedicated_transfers(state)!;
+        gpu::GpuSpan? arena_span = transfer_arena_alloc(
             state: state,
             arena: arena,
             size:  size,
             align: align,
             tag:   tag,
-        )) return span;
+        );
+        if (catch allocation_fault = arena_span) {
+            if (allocation_fault != gpu::ARENA_FULL) return allocation_fault~;
+        } else {
+            return arena_span;
+        }
         if (state.dedicated_staging.count == DEDICATED_RETIRE_CAP) return gpu::ARENA_FULL~;
     }
 
     gpu::Device shim = device_shim(state);
     gpu::BufferHandle buffer = vk_create_buffer(&shim, dedicated_desc)!;
+    defer catch (void)vk_destroy_buffer(&shim, buffer);
+    gpu::GpuSpan span = vk_get_buffer_span(&shim, buffer)!;
 
     state.transfer_mutex.lock()!!;
-    drain_dedicated_transfers(state);
-    if (state.dedicated_staging.count == DEDICATED_RETIRE_CAP) {
-        state.transfer_mutex.unlock();
-        (void)vk_destroy_buffer(&shim, buffer);
-        return gpu::ARENA_FULL~;
-    }
+    defer state.transfer_mutex.unlock();
+    drain_dedicated_transfers(state)!;
+    if (state.dedicated_staging.count == DEDICATED_RETIRE_CAP) return gpu::ARENA_FULL~;
     mark_buffer_internal(state, buffer);
     state.dedicated_staging.entries[(state.dedicated_staging.head + state.dedicated_staging.count) % DEDICATED_RETIRE_CAP] = {
         .buffer         = buffer,
@@ -358,8 +362,7 @@ fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena,
     };
     state.dedicated_staging.count++;
     state.dedicated_fallbacks++;
-    state.transfer_mutex.unlock();
-    return vk_get_buffer_span(&shim, buffer);
+    return span;
 }
 
 fn gpu::GpuSpan? staging_alloc(VkDeviceState* state, usz size, usz align, TimelineTag tag) @private {
@@ -772,6 +775,7 @@ fn void? check_helper_backend_result(
     bool fault_is_public,
 ) {
     if (fault_is_public) return check_backend_result(state, operation, result);
+    observe_device_result(state, result);
     bool stderr_fallback = state == null || state.debug_callback == null;
     fault mapped = @catch(map_result(result, stderr_fallback));
     if (!mapped) return;
@@ -789,20 +793,43 @@ fn void? check_helper_backend_result(
 }
 
 <* Wait for `v - 1`, then signal `v`: signals land in reservation order.
-   Mutex-free — a mutex would deadlock the predecessor out of its own
-   signal. Callers defer this on every exit path once `v` is reserved. *>
-fn void? signal_helper_timeline(VkDeviceState* state, ulong v, ZString operation) @private {
+   Mutex-free — a mutex would deadlock the predecessor out of its own signal. *>
+fn void? signal_helper_timeline(
+    VkDeviceState* state,
+    ulong v,
+    ZString operation,
+    bool fault_is_public,
+) @private {
     ulong prior = v - 1;
     ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current);
+    check_helper_backend_result(
+        state:           state,
+        operation:       operation,
+        result:          vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current),
+        fault_is_public: fault_is_public,
+    )!;
     while (current < prior) {
         vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
             .set_semaphore_count(1)
             .set_semaphores((&state.helper_timeline)[:1])
             .set_values((&prior)[:1]);
-        if (vk::wait_semaphores(state.device, &wait_info, HELPER_TURNSTILE_ROUND_NS) == vk::Result.SUCCESS) break;
+        vk::Result wait_result = vk::wait_semaphores(state.device, &wait_info, HELPER_TURNSTILE_ROUND_NS);
+        if (wait_result == vk::Result.SUCCESS) break;
+        if (wait_result != vk::Result.TIMEOUT) {
+            return check_helper_backend_result(
+                state:           state,
+                operation:       operation,
+                result:          wait_result,
+                fault_is_public: fault_is_public,
+            );
+        }
         io::eprintfn("gpu: helper turnstile %d still waiting on %d", v, prior);
-        vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current);
+        check_helper_backend_result(
+            state:           state,
+            operation:       operation,
+            result:          vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current),
+            fault_is_public: fault_is_public,
+        )!;
     }
     vk::SemaphoreSignalInfo signal_info = vk::semaphore_signal_info()
         .set_semaphore(state.helper_timeline)
@@ -811,8 +838,37 @@ fn void? signal_helper_timeline(VkDeviceState* state, ulong v, ZString operation
         state:           state,
         operation:       operation,
         result:          vk::signal_semaphore(state.device, &signal_info),
+        fault_is_public: fault_is_public,
+    );
+}
+
+fn void signal_helper_timeline_cleanup(VkDeviceState* state, ulong v, ZString operation) @private {
+    (void)signal_helper_timeline(
+        state:           state,
+        v:               v,
+        operation:       operation,
         fault_is_public: false,
     );
+}
+
+fn void? finish_helper_timeline(VkDeviceState* state, ulong* helper_value, ZString operation) @private {
+    fault public_fault = @catch(signal_helper_timeline(
+        state:           state,
+        v:               *helper_value,
+        operation:       operation,
+        fault_is_public: true,
+    ));
+    if (!public_fault) {
+        *helper_value = 0;
+        return;
+    }
+
+    ulong retry_value = *helper_value;
+    *helper_value = 0;
+    if (public_fault != gpu::DEVICE_LOST) {
+        signal_helper_timeline_cleanup(state, retry_value, operation);
+    }
+    return public_fault~;
 }
 
 <* Call under helper_record_mutex before this call reserves: every reserved
@@ -826,7 +882,12 @@ fn void? maybe_reset_helper_pool(VkDeviceState* state, ZString operation) @priva
     ulong reserved = state.helper_counter;
     state.transfer_mutex.unlock();
     ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current);
+    check_helper_backend_result(
+        state:           state,
+        operation:       operation,
+        result:          vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current),
+        fault_is_public: true,
+    )!;
     if (current != reserved) return;
     release_commands_for_context_frame(state, state.helper_context, state.frame_index);
     check_helper_backend_result(
@@ -856,7 +917,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
     defer exit_tracked(state);
     validate_upload_buffer(state, dst, offset, data, "upload_buffer_data")!;
     ulong helper_value = 0;
-    defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value, "upload_buffer_data");
+    defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "upload_buffer_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
     gpu::CommandList commands;
@@ -893,7 +954,8 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
         vk_cmd_buffer_barrier(&commands, &next_use)!;
         vk_end_commands(&commands)!;
     }
-    return submit_and_wait(device, &commands);
+    submit_and_wait(device, &commands)!;
+    finish_helper_timeline(state, &helper_value, "upload_buffer_data")!;
 }
 
 fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uint mip, char[] data, gpu::Stage next_stage, gpu::Hazard next_hazard, gpu::TextureLayout next_layout) @private {
@@ -901,7 +963,7 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     enter_tracked(state);
     defer exit_tracked(state);
     ulong helper_value = 0;
-    defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value, "upload_texture_data");
+    defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "upload_texture_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
     TextureSlot* slot = resolve_transfer_texture(
@@ -1017,7 +1079,8 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
         vk_cmd_texture_barrier(&commands, &next_use)!;
         vk_end_commands(&commands)!;
     }
-    return submit_and_wait(device, &commands);
+    submit_and_wait(device, &commands)!;
+    finish_helper_timeline(state, &helper_value, "upload_texture_data")!;
 }
 
 fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz offset, char[] out_data, gpu::Stage from_stage, gpu::Hazard from_hazard) @private {
@@ -1025,7 +1088,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     enter_tracked(state);
     defer exit_tracked(state);
     ulong helper_value = 0;
-    defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value, "readback_buffer_data");
+    defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "readback_buffer_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
     if (out_data.len == 0) {
@@ -1160,6 +1223,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     submit_and_wait(device, &commands)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
+    finish_helper_timeline(state, &helper_value, "readback_buffer_data")!;
 }
 
 fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, uint mip, char[] out_data, gpu::Stage from_stage, gpu::Hazard from_hazard, gpu::TextureLayout from_layout) @private {
@@ -1167,7 +1231,7 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     enter_tracked(state);
     defer exit_tracked(state);
     ulong helper_value = 0;
-    defer if (helper_value != 0) (void)signal_helper_timeline(state, helper_value, "readback_texture_data");
+    defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "readback_texture_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
@@ -1300,6 +1364,7 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     submit_and_wait(device, &commands)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
+    finish_helper_timeline(state, &helper_value, "readback_texture_data")!;
 }
 
 <* Submits an already-ended command list, blocks until queue idle. Touches
@@ -1354,21 +1419,25 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
     {
         state.transfer_mutex.lock()!!;
         defer state.transfer_mutex.unlock();
-        if (try alloc = ticket_arena_alloc(
+        TicketAlloc? arena_alloc = ticket_arena_alloc(
             state: state,
             arena: &state.readback_arena,
             size:  size,
             tag:   tag,
-        )) {
+        );
+        if (catch allocation_fault = arena_alloc) {
+            if (allocation_fault != gpu::ARENA_FULL) return allocation_fault~;
+        } else {
+            TicketAlloc alloc = arena_alloc;
             ReadbackTicketState data = {
                 .span      = alloc.span,
                 .value     = (gpu::SemaphoreValue)tag.value,
                 .range_end = alloc.range_end,
             };
             gpu::ReadbackTicket? ticket = state.readback_tickets.alloc(data);
-            if (catch allocation_fault = ticket) {
+            if (catch ticket_fault = ticket) {
                 unpin_ticket_range(&state.readback_arena, alloc.range_end);
-                return allocation_fault~;
+                return ticket_fault~;
             }
             return ticket;
         }
@@ -1625,7 +1694,7 @@ fn void? record_ticket_host_barrier(gpu::CommandList* commands, ReadbackTicketSt
     return vk_cmd_buffer_barrier(commands, &host_read);
 }
 
-fn bool vk_poll_readback(gpu::Device* device, gpu::ReadbackTicket* ticket) @private {
+fn bool? vk_poll_readback(gpu::Device* device, gpu::ReadbackTicket* ticket) @private {
     if (ticket == null || !ticket.is_valid()) return false;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     gpu::SemaphoreValue value;
@@ -1638,7 +1707,7 @@ fn bool vk_poll_readback(gpu::Device* device, gpu::ReadbackTicket* ticket) @priv
     }
     state.transfer_mutex.unlock();
     ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+    check_device_result(state, vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current))!;
     return current >= (ulong)value;
 }
 
@@ -1698,7 +1767,11 @@ fn void? vk_resolve_readback(gpu::Device* device, gpu::ReadbackTicket* ticket, c
         )~;
     }
     ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+    check_backend_result(
+        state:     state,
+        operation: "resolve_readback",
+        result:    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current),
+    )!;
     if (current < (ulong)data.value) {
         return report_contract_failure(
             state:               state,
