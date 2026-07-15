@@ -36,6 +36,12 @@ fn bool queue_roles_are_compute(gpu::QueueRoles roles) {
     return !roles.graphics && roles.compute && !roles.transfer;
 }
 
+fn bool queue_counts_equal(gpu::QueueCounts first, gpu::QueueCounts second) {
+    return first.graphics == second.graphics
+        && first.compute == second.compute
+        && first.transfer == second.transfer;
+}
+
 fn void queue_tokens_are_compact_device_owned_tokens() @test {
     assert(gpu::Queue::size <= ulong::size * 2, "gpu::Queue fits in two machine words");
     assert(!gpu::QUEUE_INVALID.is_valid(), "zero queue token is invalid");
@@ -48,9 +54,11 @@ fn void queue_queries_return_device_owned_identities() @test {
     Device second = create_queue_test_device(&runtime);
 
     gpu::QueueCounts counts = gpu::get_queue_counts(&first)!!;
+    gpu::QueueCounts caps_counts = gpu::get_device_caps(&first)!!.queues;
     assert(counts.graphics == 1, "stub exposes one graphics queue");
     assert(counts.compute == 1, "stub exposes one compute queue");
     assert(counts.transfer == 1, "stub exposes one transfer queue");
+    assert(queue_counts_equal(counts, caps_counts), "queue query mirrors device capabilities");
 
     gpu::Queue first_graphics = gpu::get_queue(&first, gpu::QueueKind.GRAPHICS, 0)!!;
     gpu::Queue first_compute = gpu::get_queue(&first, gpu::QueueKind.COMPUTE, 0)!!;
