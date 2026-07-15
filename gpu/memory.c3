@@ -264,6 +264,7 @@ fn bool? poll_readback(Device* device, ReadbackTicket* ticket) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (ticket == null) return INVALID_HANDLE~;
+    if (!ticket.is_valid()) return false;
     validate_resource_owner(&operation, ticket.owner, ResourceOwnerKind.READBACK_TICKET)!;
     return operation.vtable.poll_readback(device, ticket);
 }

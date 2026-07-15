@@ -1437,7 +1437,7 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
     assert(batch_retire == gpu::DEVICE_LOST && capture.calls == 4 && capture.matched,
         "batch texture-retire query reports its backend fault once");
 
-    gpu::TextureHandle texture = { .index = 7, .generation = 11 };
+    gpu::TextureHandle texture = { .owner = 1, .index = 7, .generation = 11 };
     vk::TextureSlot texture_slot;
     capture = {
         .calls               = capture.calls,
