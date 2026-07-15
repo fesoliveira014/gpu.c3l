@@ -50,3 +50,49 @@ fn void request_composition_rejects_duplicate_and_malformed_inputs() @test {
         "malformed request composition is rejected"
     );
 }
+
+fn void queue_requirements_are_immutable_and_round_trip() @test {
+    gpu::DeviceRequest strict = gpu::strict_device_request();
+    gpu::DeviceRequest original = strict;
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1 },
+        .distinct = { .compute },
+    };
+
+    gpu::DeviceRequest configured = gpu::request_queues(strict, requirements)!!;
+    gpu::QueueRequirements decoded = gpu::requested_queue_requirements(configured);
+
+    assert((uint128)strict == (uint128)original, "queue composition preserves its input");
+    assert((uint128)configured != (uint128)strict, "queue composition returns a new value");
+    assert(decoded.counts.graphics == 1, "graphics count round-trips");
+    assert(decoded.counts.compute == 1, "compute count round-trips");
+    assert(decoded.counts.transfer == 0, "omitted transfer count round-trips");
+    assert(decoded.distinct.compute, "distinct compute requirement round-trips");
+}
+
+fn void strict_request_has_default_queue_requirements() @test {
+    gpu::QueueRequirements requirements =
+        gpu::requested_queue_requirements(gpu::strict_device_request());
+
+    assert(requirements.counts.graphics == 1, "strict defaults to one graphics queue");
+    assert(requirements.counts.compute == 1, "strict defaults to one compute queue");
+    assert(requirements.counts.transfer == 1, "strict defaults to one transfer queue");
+    assert((uint)requirements.distinct == 0, "strict defaults permit queue aliases");
+}
+
+fn void queue_requirement_composition_rejects_invalid_groups() @test {
+    gpu::DeviceRequest strict = gpu::strict_device_request();
+    gpu::QueueRequirements none;
+    gpu::QueueRequirements too_many = { .counts = { .graphics = 256 } };
+    gpu::QueueRequirements missing_role = {
+        .counts   = { .graphics = 1 },
+        .distinct = { .compute },
+    };
+    gpu::QueueRequirements valid = { .counts = { .compute = 1 } };
+    gpu::DeviceRequest configured = gpu::request_queues(strict, valid)!!;
+
+    assert(@catch(gpu::request_queues(strict, none)) == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::request_queues(strict, too_many)) == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::request_queues(strict, missing_role)) == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::request_queues(configured, valid)) == gpu::INVALID_ARGUMENT);
+}

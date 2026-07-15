@@ -520,3 +520,34 @@ fn void swapchain_sharing_includes_a_separate_present_family() @test {
         "idle waits preserve graphics then presentation order"
     );
 }
+
+fn void distinct_compute_requirement_uses_a_second_native_queue() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 2),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1 },
+        .distinct = { .compute },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(picked.graphics == picked.compute, "both roles use the capable family");
+    assert(picked.compute_index == 1, "compute uses a distinct queue index");
+}
+
+fn void unavailable_distinct_queue_requirement_faults() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1 },
+        .distinct = { .compute },
+    };
+
+    assert(
+        @catch(vk::pick_queue_families_for_requirements(table[..], requirements))
+            == gpu::UNSUPPORTED_FEATURE,
+        "an unavailable distinct queue is rejected"
+    );
+}

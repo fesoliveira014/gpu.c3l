@@ -162,8 +162,8 @@ return `INVALID_HANDLE`.
 
 ### Device requests and creation
 
-Presentation is an explicit addition to the immutable strict request. It binds
-queue selection and swapchain enablement to one surface.
+Presentation and queue requirements are explicit additions to the immutable
+strict request.
 
 Strict device creation takes one exact borrowed adapter plus an immutable
 semantic request. Support detection is read-only and enables nothing;
@@ -177,11 +177,23 @@ DeviceRequestSupport
     bool supported
     String unmet_requirement     (borrowed static semantic label)
 
+QueueRequirements
+    QueueCounts counts
+    QueueRoles distinct
+
 strict_device_request()          -> DeviceRequest
 request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
+request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
 supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
 create_device(Adapter*, DeviceRequest*) -> Device?
 ```
+
+The strict request defaults to one graphics, compute, and transfer queue; one
+native queue may satisfy several roles. `request_queues` replaces that implicit
+default with one explicit group. At least one count must be nonzero, and a role
+marked `distinct` must have a nonzero count and may not alias another requested
+role. Invalid or duplicate queue groups return `INVALID_ARGUMENT`. Support
+queries report unavailable counts or topology without enabling device state.
 
 A live adapter-created device retains its runtime and reuses the runtime-owned
 backend instance. Destroy the device before destroying that runtime.
@@ -260,6 +272,7 @@ Creation:
 strict_device_request() -> DeviceRequest
 supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
 request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
+request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
 create_device(Adapter*, DeviceRequest*) -> Device?
 create_device_from_desc(DeviceDesc*) -> Device?    (transitional)
 destroy_device(Device*) -> void?

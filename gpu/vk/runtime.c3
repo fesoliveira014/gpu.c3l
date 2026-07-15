@@ -134,6 +134,7 @@ const gpu::RuntimeBackendVTable VK_RUNTIME_VTABLE @private = {
     .create_x11_surface      = &vk_create_x11_surface,
     .destroy_surface         = &vk_destroy_surface,
     .supports_presentation   = &vk_supports_presentation,
+    .supports_queue_requirements = &vk_supports_queue_requirements,
 };
 
 fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {

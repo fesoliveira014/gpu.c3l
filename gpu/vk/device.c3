@@ -349,6 +349,8 @@ fn gpu::Device? create_vk_device_with_probe(
     };
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = gpu::requested_surface(*request);
+    gpu::QueueRequirements queue_requirements =
+        gpu::requested_queue_requirements(*request);
     vk::SurfaceKHR presentation_surface = requested_surface.is_valid()
         ? (vk::SurfaceKHR)gpu::surface_backend_handle(&requested_surface)!
         : (vk::SurfaceKHR)null;
@@ -365,6 +367,7 @@ fn gpu::Device? create_vk_device_with_probe(
         presentation_surface_owner: requested_surface.is_valid()
             ? &requested_surface
             : null,
+        queue_requirements:         &queue_requirements,
         probe:                      probe,
     );
 }
@@ -380,6 +383,7 @@ fn gpu::Device? create_vk_device_with_selection(
     VkRuntimeState* runtime_state = null,
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null,
     gpu::Surface* presentation_surface_owner = null,
+    gpu::QueueRequirements* queue_requirements = null,
     DeviceCreationProbe* probe = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
@@ -459,11 +463,15 @@ fn gpu::Device? create_vk_device_with_selection(
         }
         state.physical_device = physical_device;
         families = presentation_surface == null
-            ? select_queue_families(state.physical_device)!
+            ? select_queue_families(
+                physical_device: state.physical_device,
+                requirements:    queue_requirements,
+            )!
             : select_queue_families_for_surface(
-                runtime_state,
-                state.physical_device,
-                presentation_surface,
+                runtime:         runtime_state,
+                physical_device: state.physical_device,
+                surface:         presentation_surface,
+                requirements:    queue_requirements,
             )!;
     }
 
@@ -597,11 +605,16 @@ fn gpu::Device? create_vk_device_with_selection(
         inputs:          &caps_inputs,
     );
 
-    gpu::QueueSelection queue_selection = gpu::queue_selection_for_aliases(
-        compute_aliases_graphics:  state.compute_queue == state.graphics_queue,
-        transfer_aliases_graphics: state.transfer_queue == state.graphics_queue,
-        transfer_aliases_compute:  state.transfer_queue == state.compute_queue,
-    );
+    gpu::QueueRequirements requirements = queue_requirements == null
+        ? gpu::default_queue_requirements()
+        : *queue_requirements;
+    gpu::QueueSelection queue_selection =
+        gpu::queue_selection_for_requirements(
+            requirements:              requirements,
+            compute_aliases_graphics:  state.compute_queue == state.graphics_queue,
+            transfer_aliases_graphics: state.transfer_queue == state.graphics_queue,
+            transfer_aliases_compute:  state.transfer_queue == state.compute_queue,
+        )!;
     state.caps.queues = queue_selection.counts;
 
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;

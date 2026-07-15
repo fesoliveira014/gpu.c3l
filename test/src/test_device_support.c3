@@ -70,3 +70,48 @@ fn void invalid_requests_and_stale_adapters_fault_before_backend_work() @test {
     assert(@catch(gpu::supports_device_request(&adapter, &valid)) == gpu::INVALID_HANDLE);
     assert(gpu::vk::stub_device_support_query_count() == 0, "stale adapters bypass backend work");
 }
+
+fn void unavailable_queue_count_is_reported_semantically() @test {
+    gpu::vk::stub_set_adapter_count(1);
+    gpu::vk::stub_set_strict_support(true);
+    gpu::vk::stub_reset_device_counts();
+    RuntimeDesc desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    QueueRequirements requirements = { .counts = { .graphics = 2 } };
+    DeviceRequest request = gpu::request_queues(
+        gpu::strict_device_request(),
+        requirements,
+    )!!;
+
+    DeviceRequestSupport support = gpu::supports_device_request(&adapter, &request)!!;
+    assert(!support.supported, "an unavailable queue count is rejected");
+    assert(support.unmet_requirement == "graphics queues", "the unmet label stays semantic");
+}
+
+fn void unavailable_queue_topology_is_reported_semantically() @test {
+    gpu::vk::stub_set_adapter_count(1);
+    gpu::vk::stub_set_strict_support(true);
+    gpu::vk::stub_reset_device_counts();
+    RuntimeDesc desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1 },
+        .distinct = { .compute },
+    };
+    DeviceRequest request = gpu::request_queues(
+        gpu::strict_device_request(),
+        requirements,
+    )!!;
+
+    DeviceRequestSupport support =
+        gpu::supports_device_request(&adapter, &request)!!;
+    assert(!support.supported, "an unavailable queue topology is rejected");
+    assert(
+        support.unmet_requirement == "queue topology",
+        "the unmet label stays semantic"
+    );
+}

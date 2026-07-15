@@ -91,6 +91,60 @@ fn QueueFamilies? pick_queue_families_impl(
     return picked;
 }
 
+fn void? validate_queue_requirements(
+    QueueFamilies families,
+    gpu::QueueRequirements requirements,
+) @private {
+    if (!gpu::queue_requirements_are_valid(requirements)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (requirements.counts.graphics > 1
+        || requirements.counts.compute > 1
+        || requirements.counts.transfer > 1) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+
+    bool graphics_compute_alias = requirements.counts.graphics > 0
+        && requirements.counts.compute > 0
+        && families.graphics == families.compute
+        && families.compute_index == 0;
+    bool graphics_transfer_alias = requirements.counts.graphics > 0
+        && requirements.counts.transfer > 0
+        && families.graphics == families.transfer;
+    bool compute_transfer_alias = requirements.counts.compute > 0
+        && requirements.counts.transfer > 0
+        && families.compute == families.transfer
+        && families.compute_index == 0;
+    if ((requirements.distinct.graphics
+            && (graphics_compute_alias || graphics_transfer_alias))
+        || (requirements.distinct.compute
+            && (graphics_compute_alias || compute_transfer_alias))
+        || (requirements.distinct.transfer
+            && (graphics_transfer_alias || compute_transfer_alias))) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+}
+
+fn QueueFamilies? pick_queue_families_for_requirements(
+    vk::QueueFamilyProperties[] families,
+    gpu::QueueRequirements requirements,
+) {
+    QueueFamilies picked = pick_queue_families_impl(families, {}, false)!;
+    validate_queue_requirements(picked, requirements)!;
+    return picked;
+}
+
+fn QueueFamilies? pick_queue_families_for_surface_requirements(
+    vk::QueueFamilyProperties[] families,
+    bool[] presentation_support,
+    gpu::QueueRequirements requirements,
+) {
+    QueueFamilies picked =
+        pick_queue_families_impl(families, presentation_support, true)!;
+    validate_queue_requirements(picked, requirements)!;
+    return picked;
+}
+
 fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
     return pick_queue_families_impl(families, {}, false);
 }
@@ -102,7 +156,10 @@ fn QueueFamilies? pick_queue_families_for_surface(
     return pick_queue_families_impl(families, presentation_support, true);
 }
 
-fn QueueFamilies? select_queue_families(vk::PhysicalDevice physical_device) {
+fn QueueFamilies? select_queue_families(
+    vk::PhysicalDevice physical_device,
+    gpu::QueueRequirements* requirements = null,
+) {
     uint count = 0;
     vk::get_physical_device_queue_family_properties(physical_device, &count, null);
     if (count == 0) return gpu::UNSUPPORTED_FEATURE~;
@@ -110,7 +167,9 @@ fn QueueFamilies? select_queue_families(vk::PhysicalDevice physical_device) {
     @pool() {
         vk::QueueFamilyProperties[] families = mem::talloc_array(vk::QueueFamilyProperties, (sz)count);
         vk::get_physical_device_queue_family_properties(physical_device, &count, families.ptr);
-        return pick_queue_families(families[:count]);
+        return requirements == null
+            ? pick_queue_families(families[:count])
+            : pick_queue_families_for_requirements(families[:count], *requirements);
     };
 }
 
@@ -118,6 +177,7 @@ fn QueueFamilies? select_queue_families_for_surface(
     VkRuntimeState* runtime,
     vk::PhysicalDevice physical_device,
     vk::SurfaceKHR surface,
+    gpu::QueueRequirements* requirements = null,
 ) {
     if (runtime == null || runtime.dispatch.surface.get_surface_support == null) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -145,8 +205,41 @@ fn QueueFamilies? select_queue_families_for_surface(
             ))!;
             presentation_support[index] = supported != 0;
         }
-        return pick_queue_families_for_surface(families[:count], presentation_support);
+        return requirements == null
+            ? pick_queue_families_for_surface(families[:count], presentation_support)
+            : pick_queue_families_for_surface_requirements(
+                families[:count],
+                presentation_support,
+                *requirements,
+            );
     };
+}
+
+fn bool? vk_supports_queue_requirements(
+    void* backend_state,
+    uint adapter_index,
+    gpu::QueueRequirements* requirements,
+    void* backend_surface,
+) {
+    VkRuntimeState* state = (VkRuntimeState*)backend_state;
+    if (state == null || requirements == null || adapter_index >= state.adapters.len) {
+        return gpu::INVALID_HANDLE~;
+    }
+
+    vk::PhysicalDevice physical_device = state.adapters[adapter_index].physical_device;
+    QueueFamilies? selection = backend_surface == null
+        ? select_queue_families(physical_device, requirements)
+        : select_queue_families_for_surface(
+            runtime:         state,
+            physical_device: physical_device,
+            surface:         (vk::SurfaceKHR)backend_surface,
+            requirements:    requirements,
+        );
+    if (catch selection_fault = selection) {
+        if (selection_fault == gpu::UNSUPPORTED_FEATURE) return false;
+        return selection_fault~;
+    }
+    return true;
 }
 
 <* Distinct queue families in use, for CONCURRENT-shared resources. *>
