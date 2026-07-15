@@ -1717,7 +1717,7 @@ fn bool? vk_poll_readback(gpu::Device* device, gpu::ReadbackTicket* ticket) @pri
         value = data.value;
     } else {
         state.transfer_mutex.unlock();
-        return false;
+        return gpu::INVALID_HANDLE~;
     }
     state.transfer_mutex.unlock();
     ulong current = 0;

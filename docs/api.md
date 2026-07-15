@@ -361,8 +361,8 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors` | null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
-| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `resolve_readback` | zero, destroyed, or stale runtime, adapter, device, or resource token; consumed or stale command-list alias, `FrameToken`, or `ReadbackTicket` |
+| `INVALID_ARGUMENT` | runtime adapter indexing; any create/upload/export; `GpuSpan.checked_subspan`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, or stale runtime, adapter, device, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
@@ -1077,8 +1077,9 @@ ticket blocks arena reclamation behind it (FIFO); when the arena is full,
 tickets fall back to dedicated buffers destroyed at resolve. `resolve_readback`
 faults `READBACK_NOT_READY` before the timeline signals, and
 `INVALID_ARGUMENT` on a consumed token or a `dest` smaller than the copied
-range. A stale alias faults `INVALID_HANDLE`. Each ticket resolves exactly
-once; device teardown releases unresolved tickets.
+range. `poll_readback` returns false for the consumed original token. A stale
+alias faults `INVALID_HANDLE` in both calls. Each ticket resolves exactly once;
+device teardown releases unresolved tickets.
 An invalid or closing device faults `INVALID_HANDLE` or `DEVICE_BUSY` before the
 ticket is inspected.
 
