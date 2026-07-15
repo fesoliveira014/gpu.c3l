@@ -14,6 +14,25 @@ alias DeviceExtensionQuery = fn bool(vk::PhysicalDevice physical_device, ZString
 
 const ZString SWAPCHAIN_EXTENSION = "VK_KHR_swapchain";
 
+enum DeviceCreationCheckpoint : uint {
+    NONE,
+    LOGICAL_DEVICE,
+    ALLOCATOR,
+    FRAME_RESOURCES,
+    PERSISTENT_ARENA,
+    RECORDING_CONTEXTS,
+    TRANSFER_ARENAS,
+    DESCRIPTOR_HEAP,
+    PIPELINE_SHARED,
+    BEFORE_PUBLICATION,
+}
+
+struct DeviceCreationProbe {
+    DeviceCreationCheckpoint fail_at;
+    DeviceCreationCheckpoint reached;
+    uint                     rollback_count;
+}
+
 struct VkPresentationState {
     bool           enabled;
     uint           family;
@@ -167,17 +186,14 @@ struct CapsInputs {
     uint sampler_capacity;
 }
 
-bool fail_device_creation_before_publish @private;
-uint device_creation_initializations @private;
-uint device_creation_rollbacks @private;
-
-fn void inject_device_creation_failure_before_publish(bool fail) {
-    fail_device_creation_before_publish = fail;
+fn void? reach_device_creation_checkpoint(
+    DeviceCreationProbe* probe,
+    DeviceCreationCheckpoint checkpoint,
+) @private {
+    if (probe == null) return;
+    probe.reached = checkpoint;
+    if (probe.fail_at == checkpoint) return gpu::BACKEND_ERROR~;
 }
-
-fn uint device_creation_initialized_count() => device_creation_initializations;
-
-fn uint device_creation_rollback_count() => device_creation_rollbacks;
 
 <* Frame-boundary quiescence accounting, active only under validation. *>
 fn void enter_tracked(VkDeviceState* state) {
@@ -294,6 +310,20 @@ fn gpu::Device? create_vk_device(
     gpu::DeviceRequest* request,
     gpu::Runtime* retained_runtime,
 ) {
+    return create_vk_device_with_probe(
+        adapter:          adapter,
+        request:          request,
+        retained_runtime: retained_runtime,
+        probe:            null,
+    );
+}
+
+fn gpu::Device? create_vk_device_with_probe(
+    gpu::Adapter* adapter,
+    gpu::DeviceRequest* request,
+    gpu::Runtime* retained_runtime,
+    DeviceCreationProbe* probe,
+) {
     gpu::validate_device_request(request)!;
     gpu::RuntimeData* runtime_data = gpu::resolve_adapter(adapter);
     if (runtime_data == null) return gpu::INVALID_HANDLE~;
@@ -324,6 +354,7 @@ fn gpu::Device? create_vk_device(
         presentation_surface_owner: requested_surface.is_valid()
             ? &requested_surface
             : null,
+        probe:                      probe,
     );
 }
 
@@ -338,12 +369,12 @@ fn gpu::Device? create_vk_device_with_selection(
     VkRuntimeState* runtime_state = null,
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null,
     gpu::Surface* presentation_surface_owner = null,
+    DeviceCreationProbe* probe = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
-    bool initialized_before_publish = false;
     defer catch {
         destroy_state(state);
-        if (initialized_before_publish) device_creation_rollbacks++;
+        if (probe != null) probe.rollback_count++;
     }
     state.owns_instance = owns_instance;
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
@@ -463,6 +494,7 @@ fn gpu::Device? create_vk_device_with_selection(
     if (state.presentation.enabled) state.presentation.family = families.present;
 
     create_logical_device(state, &families, line_polygon_mode)!;
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.LOGICAL_DEVICE)!;
     VkDeviceDispatchPlan dispatch_plan = {
         .debug             = debug_utils_enabled,
         .presentation      = state.presentation.enabled,
@@ -495,14 +527,18 @@ fn gpu::Device? create_vk_device_with_selection(
     }
 
     create_vk_allocator(state)!;
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.ALLOCATOR)!;
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
     state.readback_tickets.slots = mem::new_array(ReadbackTicketCell, READBACK_TICKET_CAPACITY);
     create_frame_resources(state, desc)!;
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.FRAME_RESOURCES)!;
     create_persistent_arena(state, desc)!;
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PERSISTENT_ARENA)!;
     state.recording_contexts.slots = mem::new_array(RecordingContextCell, gpu::MAX_RECORDING_CONTEXTS);
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
     state.default_context = create_builtin_recording_context(state)!;
     state.helper_context = create_builtin_recording_context(state)!;
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.RECORDING_CONTEXTS)!;
     state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     uint pipeline_capacity;
     if (state.strict_heap.enabled) {
@@ -516,9 +552,12 @@ fn gpu::Device? create_vk_device_with_selection(
     }
     state.deferred.entries = alloc::new_array(state.host_allocator, DeferredEntry, DEFERRED_QUEUE_INITIAL_CAP);
     create_transfer_arenas(state, desc)!;
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.TRANSFER_ARENAS)!;
     if (state.strict_heap.enabled) {
         create_descriptor_heap(state)!;
+        reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;
         create_pipeline_shared(state, desc.pipeline_cache_data, pipeline_capacity)!;
+        reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PIPELINE_SHARED)!;
     }
     CapsInputs caps_inputs = {
         .strict_enabled       = state.strict_heap.enabled,
@@ -537,9 +576,7 @@ fn gpu::Device? create_vk_device_with_selection(
         physical_device: state.physical_device,
         inputs:          &caps_inputs,
     );
-    device_creation_initializations++;
-    initialized_before_publish = true;
-    if (fail_device_creation_before_publish) return gpu::BACKEND_ERROR~;
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
     return gpu::register_device(
         backend:              gpu::BackendKind.VULKAN,
         caps:                 state.caps,
