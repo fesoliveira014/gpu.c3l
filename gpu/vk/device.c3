@@ -16,6 +16,7 @@ const ZString SWAPCHAIN_EXTENSION = "VK_KHR_swapchain";
 
 enum DeviceCreationCheckpoint : uint {
     NONE,
+    OWNED_INSTANCE,
     LOGICAL_DEVICE,
     ALLOCATOR,
     FRAME_RESOURCES,
@@ -31,6 +32,7 @@ struct DeviceCreationProbe {
     DeviceCreationCheckpoint fail_at;
     DeviceCreationCheckpoint reached;
     uint                     rollback_count;
+    uint                     owned_instance_teardown_count;
 }
 
 struct VkPresentationState {
@@ -296,12 +298,20 @@ const gpu::BackendVTable VK_VTABLE @private = {
 <* Build a Vulkan device end to end. On failure the partial state is torn down
    and freed before the fault propagates, so nothing leaks. *>
 fn gpu::Device? create_vk_device_from_desc(gpu::DeviceDesc* desc) {
+    return create_vk_device_from_desc_with_probe(desc, null);
+}
+
+fn gpu::Device? create_vk_device_from_desc_with_probe(
+    gpu::DeviceDesc* desc,
+    DeviceCreationProbe* probe,
+) {
     return create_vk_device_with_selection(
         desc:             desc,
         instance:         (vk::Instance)null,
         physical_device:  (vk::PhysicalDevice)null,
         owns_instance:    true,
         strict_requested: true,
+        probe:            probe,
     );
 }
 
@@ -373,7 +383,7 @@ fn gpu::Device? create_vk_device_with_selection(
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
     defer catch {
-        destroy_state(state);
+        destroy_state(state, probe);
         if (probe != null) probe.rollback_count++;
     }
     state.owns_instance = owns_instance;
@@ -436,6 +446,7 @@ fn gpu::Device? create_vk_device_with_selection(
         PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
         state.physical_device = selection.physical_device;
         families = selection.families;
+        reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.OWNED_INSTANCE)!;
     } else {
         if (instance == null || physical_device == null || runtime_state == null) return gpu::INVALID_ARGUMENT~;
         state.instance = instance;
@@ -594,7 +605,7 @@ fn void vk_destroy_device(void* backend_state) @private {
 }
 
 <* Reverse-order teardown; safe on a partial or zeroed state. *>
-fn void destroy_state(VkDeviceState* state) @private {
+fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @private {
     if (state == null) return;
     if (state.device != null) {
         vk::device_wait_idle(state.device);
@@ -675,6 +686,7 @@ fn void destroy_state(VkDeviceState* state) @private {
     destroy_debug_messenger(state);
     if (state.owns_instance && state.instance != null) {
         vk::destroy_instance(state.instance, null);
+        if (probe != null) probe.owned_instance_teardown_count++;
     }
     state.instance = (vk::Instance)null;
     if (state.helper_record_mutex.is_initialized())  (void)state.helper_record_mutex.destroy();
