@@ -310,8 +310,10 @@ construct the representation.
 Handles, `Queue`, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
 command tokens, and synchronization values are runtime-only and scoped to their
 owning device. Do not persist, serialize, reconstruct, or pass them across
-device or process lifetimes. `FrameToken` and `CommandList` embed a copy of
-their owning `Device` token; they do not borrow caller variable storage.
+device or process lifetimes. Compare `Queue` values as wholes and use
+`get_queue_info` for inspection; do not construct or mutate queue fields.
+`FrameToken` and `CommandList` embed a copy of their owning `Device` token; they
+do not borrow caller variable storage.
 
 ### GPU addresses
 
@@ -363,7 +365,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
-| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue_info`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
+| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
@@ -836,6 +838,11 @@ end_commands(CommandList* commands) -> void?
 submit(Device* device, SubmitDesc* desc) -> void?
 wait_queue_idle(Device* device, QueueKind queue) -> void?
 
+Queue
+    Device device
+    uint id
+    QueueRoles roles
+
 QueueCounts
     uint graphics
     uint compute
@@ -876,15 +883,17 @@ execute. The caller orders pending signals across queues and keeps waits and
 signals within `DeviceCaps.max_timeline_semaphore_value_difference` of current
 and pending values. Waits may target future values.
 
-`Queue` is a small owner-bearing identity for a selected device-local queue.
-`get_queue_counts` reports selected queue counts by semantic role. `get_queue`
-faults `INVALID_ARGUMENT` for an unavailable role index and returns the same
-`Queue` token when multiple roles alias one selected queue. `get_queue_info`
-faults `INVALID_HANDLE` for zero, stale, foreign-device, or representation-
-forged tokens and returns the queue identity and supported semantic roles
-without exposing backend family indices or native handles. Current command
-entry points still take `QueueKind`; later submission and access-domain work
-will use `Queue` for exact ownership validation.
+`Queue` is a small device-owned identity for a selected queue. Its `device`
+field is a copied `Device` token used for exact ownership validation; it does not
+borrow caller storage. `get_queue_counts` reports selected counts by semantic
+role. `get_queue` faults `INVALID_HANDLE` for a non-live device and
+`INVALID_ARGUMENT` for an unavailable role index, and
+returns the same `Queue` value when several roles alias one queue.
+`get_queue_info` faults `INVALID_HANDLE` for zero, stale, foreign-device, or
+malformed tokens and returns the stable device-local ID and supported roles.
+Backend family indices and native handles remain private. Current command entry
+points still take `QueueKind`; later submission and access-domain work will use
+`Queue` for exact ownership validation.
 
 `QueueKind.COMPUTE` routes to a real compute queue when
 `DeviceCaps.async_compute` is true; resources used by both GRAPHICS and

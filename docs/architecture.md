@@ -209,11 +209,11 @@ family indices or backend queue handles:
 QueueKind.GRAPHICS
 QueueKind.COMPUTE
 QueueKind.TRANSFER
-Queue { owner, id, roles }
+Queue { device, id, roles }
 ```
 
 `get_queue_counts` reports selected counts by role. `get_queue` returns an
-owner-bearing identity for a role/index pair, and aliased roles return the same
+device-owned identity for a role/index pair, and aliased roles return the same
 identity with a role mask such as `{ graphics, compute, transfer }`. The backend
 maps roles to Vulkan queues privately; public tokens never expose family indices
 or native handles. Command entry points still take `QueueKind` until the access-

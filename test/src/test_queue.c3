@@ -36,12 +36,12 @@ fn bool queue_roles_are_compute(gpu::QueueRoles roles) {
     return !roles.graphics && roles.compute && !roles.transfer;
 }
 
-fn void queue_tokens_are_compact_owner_tokens() @test {
+fn void queue_tokens_are_compact_device_owned_tokens() @test {
     assert(gpu::Queue::size <= ulong::size * 2, "gpu::Queue fits in two machine words");
     assert(!gpu::QUEUE_INVALID.is_valid(), "zero queue token is invalid");
 }
 
-fn void queue_queries_return_owner_bearing_identities() @test {
+fn void queue_queries_return_device_owned_identities() @test {
     RuntimeDesc desc = queue_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Device first = create_queue_test_device(&runtime);
@@ -94,8 +94,8 @@ fn void queue_queries_preserve_distinct_compute_identity() @test {
     gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS, 0)!!;
     gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE, 0)!!;
     gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER, 0)!!;
-    assert(graphics.id != compute.id, "distinct compute receives its own queue identity");
-    assert(graphics.id == transfer.id, "aliased transfer shares the graphics queue identity");
+    assert(graphics != compute, "distinct compute receives its own queue identity");
+    assert(graphics == transfer, "aliased transfer shares the graphics queue identity");
     assert(queue_roles_are_graphics_transfer(graphics.roles), "graphics identity reports aliased transfer role");
     assert(queue_roles_are_compute(compute.roles), "compute identity reports only compute role");
 

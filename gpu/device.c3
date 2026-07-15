@@ -224,7 +224,6 @@ enum ResourceOwnerKind @private {
     SEMAPHORE,
     RECORDING_CONTEXT,
     READBACK_TICKET,
-    QUEUE,
     COMPLETION_POINT,
 }
 

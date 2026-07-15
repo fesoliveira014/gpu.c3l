@@ -21,11 +21,13 @@ struct Queue {
     QueueRoles roles;
 }
 
+<* Stable device-local identity and supported roles for a live queue. *>
 struct QueueInfo {
     uint       id;
     QueueRoles roles;
 }
 
+<* Selected queue count under each semantic role. *>
 struct QueueCounts {
     uint graphics;
     uint compute;
@@ -163,7 +165,8 @@ fn QueueCounts? get_queue_counts(Device* device) {
 }
 
 <* Return a device-owned queue identity for a semantic role and index. Aliased
-   roles return the same token; an unavailable index faults INVALID_ARGUMENT. *>
+   roles return the same token. A dead device faults INVALID_HANDLE; an
+   unavailable index faults INVALID_ARGUMENT. *>
 fn Queue? get_queue(Device* device, QueueKind kind, uint index = 0) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
