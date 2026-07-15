@@ -271,6 +271,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
 
 fn void persistent_arena_desc_has_exact_backing_contract() @test {
     vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
         .graphics_family = 4,
         .compute_family  = 4,
         .transfer_family = 4,
@@ -295,6 +296,7 @@ fn void persistent_arena_desc_has_exact_backing_contract() @test {
 
 fn void persistent_arena_create_info_is_exclusive_when_families_alias() @test {
     vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
         .graphics_family = 4,
         .compute_family  = 4,
         .transfer_family = 4,
@@ -318,6 +320,7 @@ fn void persistent_arena_create_info_uses_two_exact_families() @test {
     uint[3] expected_second = { 5, 7, 5 };
     foreach (index, topology : topologies) {
         vk::VkDeviceState state = {
+            .selected_queue_roles = { .graphics, .compute, .transfer },
             .graphics_family = topology[0],
             .compute_family  = topology[1],
             .transfer_family = topology[2],
@@ -337,6 +340,7 @@ fn void persistent_arena_create_info_uses_two_exact_families() @test {
 
 fn void persistent_arena_create_info_uses_three_exact_families() @test {
     vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
         .graphics_family = 4,
         .compute_family  = 5,
         .transfer_family = 7,

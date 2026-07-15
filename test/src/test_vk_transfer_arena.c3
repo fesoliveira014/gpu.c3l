@@ -14,6 +14,7 @@ fn void staging_buffer_create_info_covers_selected_families() @test {
     uint[4] expected_counts = { 1, 2, 2, 3 };
     foreach (index, topology : topologies) {
         vk::VkDeviceState state = {
+            .selected_queue_roles = { .graphics, .compute, .transfer },
             .graphics_family = topology[0],
             .compute_family  = topology[1],
             .transfer_family = topology[2],

@@ -169,22 +169,33 @@ fn void? create_context_pools_with_ops(
     *context = {};
     defer catch destroy_context_pools_with_ops(state, context, ops);
 
-    context.graphics_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
-    context.transfer_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
-    context.compute_pools_distinct = state.compute_family != state.graphics_family;
-    if (context.compute_pools_distinct) {
-        context.compute_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+    if (state.selected_queue_roles.graphics) {
+        context.graphics_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+    }
+    context.compute_pools_distinct = state.selected_queue_roles.compute
+        && (!state.selected_queue_roles.graphics
+            || state.compute_family != state.graphics_family);
+    if (state.selected_queue_roles.compute) {
+        context.compute_pools = context.compute_pools_distinct
+            ? mem::new_array(vk::CommandPool, state.frames_in_flight)
+            : context.graphics_pools;
+    }
+    if (state.selected_queue_roles.transfer) {
+        context.transfer_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
     }
     context.pool_dirty = mem::new_array(PoolDirtyMask, state.frames_in_flight);
 
     for (uint i = 0; i < state.frames_in_flight; i++) {
-        context.graphics_pools[i] = ops.create(ops.user_data, state.device, state.graphics_family)!;
+        if (state.selected_queue_roles.graphics) {
+            context.graphics_pools[i] = ops.create(ops.user_data, state.device, state.graphics_family)!;
+        }
         if (context.compute_pools_distinct) {
             context.compute_pools[i] = ops.create(ops.user_data, state.device, state.compute_family)!;
         }
-        context.transfer_pools[i] = ops.create(ops.user_data, state.device, state.transfer_family)!;
+        if (state.selected_queue_roles.transfer) {
+            context.transfer_pools[i] = ops.create(ops.user_data, state.device, state.transfer_family)!;
+        }
     }
-    if (!context.compute_pools_distinct) context.compute_pools = context.graphics_pools;
 }
 
 fn void? create_context_pools(VkDeviceState* state, RecordingContextState* context) @private {

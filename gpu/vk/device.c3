@@ -62,6 +62,7 @@ struct VkDeviceState {
     vk::PhysicalDevice         physical_device;
     vk::Device                 device;
     VkDeviceDispatch           device_dispatch;
+    gpu::QueueRoles            selected_queue_roles;
     vma::Allocator             allocator;
     uint                       graphics_family;
     uint                       graphics_queue_index;
@@ -509,12 +510,19 @@ fn gpu::Device? create_vk_device_with_selection(
         )!;
     }
 
-    state.graphics_family      = families.graphics;
-    state.graphics_queue_index = families.graphics_index;
-    state.compute_family       = families.compute;
-    state.compute_queue_index  = families.compute_index;
-    state.transfer_family      = families.transfer;
-    state.transfer_queue_index = families.transfer_index;
+    state.selected_queue_roles = families.selected;
+    if (families.selected.graphics) {
+        state.graphics_family = families.graphics;
+        state.graphics_queue_index = families.graphics_index;
+    }
+    if (families.selected.compute) {
+        state.compute_family = families.compute;
+        state.compute_queue_index = families.compute_index;
+    }
+    if (families.selected.transfer) {
+        state.transfer_family = families.transfer;
+        state.transfer_queue_index = families.transfer_index;
+    }
     if (state.presentation.enabled) {
         state.presentation.family = families.present;
         state.presentation.queue_index = families.present_index;
@@ -541,29 +549,41 @@ fn gpu::Device? create_vk_device_with_selection(
         && !device_dispatch_supports_descriptor_buffer(&state.device_dispatch)) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    vk::get_device_queue(
-        device:             state.device,
-        queue_family_index: state.graphics_family,
-        queue_index:        state.graphics_queue_index,
-        p_queue:            &state.graphics_queue,
-    );
-    state.compute_queue_distinct = families.async_compute;
-    if (families.async_compute) {
+    if (families.selected.graphics) {
         vk::get_device_queue(
             device:             state.device,
-            queue_family_index: families.compute,
-            queue_index:        families.compute_index,
-            p_queue:            &state.compute_queue,
+            queue_family_index: state.graphics_family,
+            queue_index:        state.graphics_queue_index,
+            p_queue:            &state.graphics_queue,
         );
-    } else {
-        state.compute_queue = state.graphics_queue;
     }
-    vk::get_device_queue(
-        device:             state.device,
-        queue_family_index: state.transfer_family,
-        queue_index:        state.transfer_queue_index,
-        p_queue:            &state.transfer_queue,
-    );
+    state.compute_queue_distinct = families.async_compute;
+    if (families.selected.compute) {
+        if (graphics_compute_alias(families)) {
+            state.compute_queue = state.graphics_queue;
+        } else {
+            vk::get_device_queue(
+                device:             state.device,
+                queue_family_index: families.compute,
+                queue_index:        families.compute_index,
+                p_queue:            &state.compute_queue,
+            );
+        }
+    }
+    if (families.selected.transfer) {
+        if (graphics_transfer_alias(families)) {
+            state.transfer_queue = state.graphics_queue;
+        } else if (compute_transfer_alias(families)) {
+            state.transfer_queue = state.compute_queue;
+        } else {
+            vk::get_device_queue(
+                device:             state.device,
+                queue_family_index: state.transfer_family,
+                queue_index:        state.transfer_queue_index,
+                p_queue:            &state.transfer_queue,
+            );
+        }
+    }
     if (state.presentation.enabled) {
         vk::get_device_queue(
             device:             state.device,

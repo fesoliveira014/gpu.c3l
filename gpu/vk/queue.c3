@@ -9,6 +9,7 @@ const uint MAX_QUEUE_FAMILIES = 4;
 const uint MAX_SELECTED_QUEUE_INDICES = 3;
 
 struct QueueFamilies {
+    gpu::QueueRoles selected;
     uint graphics;
     uint graphics_index;
     uint compute;
@@ -17,6 +18,7 @@ struct QueueFamilies {
     uint transfer_index;
     uint present;
     uint present_index;
+    bool presentation;
     bool async_compute;
 }
 
@@ -74,17 +76,23 @@ fn uint selectable_queue_count(uint count) @private {
 }
 
 fn bool graphics_compute_alias(QueueFamilies selection) @private {
-    return selection.graphics == selection.compute
+    return selection.selected.graphics
+        && selection.selected.compute
+        && selection.graphics == selection.compute
         && selection.graphics_index == selection.compute_index;
 }
 
 fn bool graphics_transfer_alias(QueueFamilies selection) @private {
-    return selection.graphics == selection.transfer
+    return selection.selected.graphics
+        && selection.selected.transfer
+        && selection.graphics == selection.transfer
         && selection.graphics_index == selection.transfer_index;
 }
 
 fn bool compute_transfer_alias(QueueFamilies selection) @private {
-    return selection.compute == selection.transfer
+    return selection.selected.compute
+        && selection.selected.transfer
+        && selection.compute == selection.transfer
         && selection.compute_index == selection.transfer_index;
 }
 
@@ -116,25 +124,32 @@ fn bool assign_presentation_queue(
     QueueFamilies* selection,
     bool[] presentation_support,
 ) @private {
-    if (presentation_support[selection.graphics]) {
+    if (selection.selected.graphics
+        && presentation_support[selection.graphics]) {
         selection.present = selection.graphics;
         selection.present_index = selection.graphics_index;
+        selection.presentation = true;
         return true;
     }
-    if (presentation_support[selection.compute]) {
+    if (selection.selected.compute
+        && presentation_support[selection.compute]) {
         selection.present = selection.compute;
         selection.present_index = selection.compute_index;
+        selection.presentation = true;
         return true;
     }
-    if (presentation_support[selection.transfer]) {
+    if (selection.selected.transfer
+        && presentation_support[selection.transfer]) {
         selection.present = selection.transfer;
         selection.present_index = selection.transfer_index;
+        selection.presentation = true;
         return true;
     }
     foreach (family, supported : presentation_support) {
         if (!supported) continue;
         selection.present = (uint)family;
         selection.present_index = 0;
+        selection.presentation = true;
         return true;
     }
     return false;
@@ -144,35 +159,45 @@ fn uint compute_selection_tier(
     QueueFamilies selection,
     vk::QueueFamilyProperties[] families,
 ) @private {
-    if (selection.graphics == selection.compute) {
+    if (!selection.selected.compute) return 0;
+    if (selection.selected.graphics
+        && selection.graphics == selection.compute) {
         return selection.graphics_index == selection.compute_index ? 2 : 0;
     }
     uint compute_flags = (uint)families[selection.compute].queue_flags;
-    return (compute_flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) == 0 ? 1 : 3;
+    bool graphics_capable =
+        (compute_flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0;
+    if (!selection.selected.graphics) return graphics_capable ? 1 : 0;
+    return graphics_capable ? 3 : 1;
 }
 
 fn uint transfer_selection_tier(
     QueueFamilies selection,
     vk::QueueFamilyProperties[] families,
 ) @private {
+    if (!selection.selected.transfer) return 0;
     if (queue_family_is_transfer_only(families[selection.transfer])) return 0;
     if (graphics_transfer_alias(selection)) return 1;
     if (compute_transfer_alias(selection)) return 2;
-    if (selection.graphics == selection.transfer) return 3;
-    if (selection.compute == selection.transfer) return 4;
+    if (selection.selected.graphics && selection.graphics == selection.transfer) return 3;
+    if (selection.selected.compute && selection.compute == selection.transfer) return 4;
     return 5;
 }
 
 fn uint presentation_selection_tier(QueueFamilies selection) @private {
-    if (selection.present == selection.graphics
+    if (!selection.presentation) return 0;
+    if (selection.selected.graphics
+        && selection.present == selection.graphics
         && selection.present_index == selection.graphics_index) {
         return 0;
     }
-    if (selection.present == selection.compute
+    if (selection.selected.compute
+        && selection.present == selection.compute
         && selection.present_index == selection.compute_index) {
         return 1;
     }
-    if (selection.present == selection.transfer
+    if (selection.selected.transfer
+        && selection.present == selection.transfer
         && selection.present_index == selection.transfer_index) {
         return 2;
     }
@@ -196,22 +221,38 @@ fn bool selection_is_preferred(
     current_tier = presentation_selection_tier(current);
     if (candidate_tier != current_tier) return candidate_tier < current_tier;
 
-    if (candidate.graphics != current.graphics) {
+    if (candidate.selected.graphics
+        && candidate.graphics != current.graphics) {
         return candidate.graphics < current.graphics;
     }
-    if (candidate.graphics_index != current.graphics_index) {
+    if (candidate.selected.graphics
+        && candidate.graphics_index != current.graphics_index) {
         return candidate.graphics_index < current.graphics_index;
     }
-    if (candidate.compute != current.compute) {
+    if (candidate.selected.compute
+        && candidate.compute != current.compute) {
         return candidate.compute < current.compute;
     }
-    if (candidate.compute_index != current.compute_index) {
+    if (candidate.selected.compute
+        && candidate.compute_index != current.compute_index) {
         return candidate.compute_index < current.compute_index;
     }
-    if (candidate.transfer != current.transfer) {
+    if (candidate.selected.transfer
+        && candidate.transfer != current.transfer) {
         return candidate.transfer < current.transfer;
     }
-    return candidate.transfer_index < current.transfer_index;
+    if (candidate.selected.transfer
+        && candidate.transfer_index != current.transfer_index) {
+        return candidate.transfer_index < current.transfer_index;
+    }
+    if (candidate.presentation && candidate.present != current.present) {
+        return candidate.present < current.present;
+    }
+    if (candidate.presentation
+        && candidate.present_index != current.present_index) {
+        return candidate.present_index < current.present_index;
+    }
+    return false;
 }
 
 fn QueueFamilies? pick_queue_families_impl(
@@ -232,46 +273,74 @@ fn QueueFamilies? pick_queue_families_impl(
         return gpu::INVALID_ARGUMENT~;
     }
 
+    QueueFamilies base = {
+        .selected = {
+            .graphics = requirements.counts.graphics > 0,
+            .compute  = requirements.counts.compute > 0,
+            .transfer = requirements.counts.transfer > 0,
+        },
+    };
     QueueFamilies best;
     bool found;
-    foreach (graphics_family, graphics_properties : families) {
-        if (!queue_family_supports_graphics(graphics_properties)) {
+    usz graphics_family_count = base.selected.graphics ? families.len : 1;
+    for (usz graphics_family = 0;
+        graphics_family < graphics_family_count;
+        graphics_family++) {
+        if (base.selected.graphics
+            && !queue_family_supports_graphics(families[graphics_family])) {
             continue;
         }
-        uint graphics_count =
-            selectable_queue_count(graphics_properties.queue_count);
+        uint graphics_count = base.selected.graphics
+            ? selectable_queue_count(families[graphics_family].queue_count)
+            : 1;
         for (uint graphics_index = 0;
             graphics_index < graphics_count;
             graphics_index++) {
-            foreach (compute_family, compute_properties : families) {
-                if (!queue_family_supports_compute(compute_properties)) continue;
-                uint compute_count =
-                    selectable_queue_count(compute_properties.queue_count);
+            usz compute_family_count = base.selected.compute ? families.len : 1;
+            for (usz compute_family = 0;
+                compute_family < compute_family_count;
+                compute_family++) {
+                if (base.selected.compute
+                    && !queue_family_supports_compute(families[compute_family])) {
+                    continue;
+                }
+                uint compute_count = base.selected.compute
+                    ? selectable_queue_count(families[compute_family].queue_count)
+                    : 1;
                 for (uint compute_index = 0;
                     compute_index < compute_count;
                     compute_index++) {
-                    foreach (transfer_family, transfer_properties : families) {
-                        if (!queue_family_supports_transfer(
-                            transfer_properties,
-                        )) {
+                    usz transfer_family_count = base.selected.transfer ? families.len : 1;
+                    for (usz transfer_family = 0;
+                        transfer_family < transfer_family_count;
+                        transfer_family++) {
+                        if (base.selected.transfer
+                            && !queue_family_supports_transfer(families[transfer_family])) {
                             continue;
                         }
-                        uint transfer_count = selectable_queue_count(
-                            transfer_properties.queue_count,
-                        );
+                        uint transfer_count = base.selected.transfer
+                            ? selectable_queue_count(families[transfer_family].queue_count)
+                            : 1;
                         for (uint transfer_index = 0;
                             transfer_index < transfer_count;
                             transfer_index++) {
-                            QueueFamilies candidate = {
-                                .graphics       = (uint)graphics_family,
-                                .graphics_index = graphics_index,
-                                .compute        = (uint)compute_family,
-                                .compute_index  = compute_index,
-                                .transfer       = (uint)transfer_family,
-                                .transfer_index = transfer_index,
-                            };
+                            QueueFamilies candidate = base;
+                            if (candidate.selected.graphics) {
+                                candidate.graphics = (uint)graphics_family;
+                                candidate.graphics_index = graphics_index;
+                            }
+                            if (candidate.selected.compute) {
+                                candidate.compute = (uint)compute_family;
+                                candidate.compute_index = compute_index;
+                            }
+                            if (candidate.selected.transfer) {
+                                candidate.transfer = (uint)transfer_family;
+                                candidate.transfer_index = transfer_index;
+                            }
                             candidate.async_compute =
-                                !graphics_compute_alias(candidate);
+                                candidate.selected.graphics
+                                && candidate.selected.compute
+                                && !graphics_compute_alias(candidate);
                             if (!selection_satisfies_requirements(
                                 candidate,
                                 requirements,
@@ -285,10 +354,6 @@ fn QueueFamilies? pick_queue_families_impl(
                                 )) {
                                     continue;
                                 }
-                            } else {
-                                candidate.present = candidate.graphics;
-                                candidate.present_index =
-                                    candidate.graphics_index;
                             }
                             if (!found || selection_is_preferred(
                                 candidate,
@@ -356,16 +421,21 @@ fn uint requested_queue_count(
     bool include_presentation,
 ) {
     uint count;
-    if (selection.graphics == family) {
+    if (selection.selected.graphics && selection.graphics == family) {
         count = selection.graphics_index + 1;
     }
-    if (selection.compute == family && count <= selection.compute_index) {
+    if (selection.selected.compute
+        && selection.compute == family
+        && count <= selection.compute_index) {
         count = selection.compute_index + 1;
     }
-    if (selection.transfer == family && count <= selection.transfer_index) {
+    if (selection.selected.transfer
+        && selection.transfer == family
+        && count <= selection.transfer_index) {
         count = selection.transfer_index + 1;
     }
     if (include_presentation
+        && selection.presentation
         && selection.present == family
         && count <= selection.present_index) {
         count = selection.present_index + 1;
@@ -391,10 +461,16 @@ fn uint selected_device_queue_families(
     uint[] out_families,
 ) {
     uint count;
-    count = append_queue_family(out_families, count, selection.graphics);
-    count = append_queue_family(out_families, count, selection.compute);
-    count = append_queue_family(out_families, count, selection.transfer);
-    if (include_presentation) {
+    if (selection.selected.graphics) {
+        count = append_queue_family(out_families, count, selection.graphics);
+    }
+    if (selection.selected.compute) {
+        count = append_queue_family(out_families, count, selection.compute);
+    }
+    if (selection.selected.transfer) {
+        count = append_queue_family(out_families, count, selection.transfer);
+    }
+    if (include_presentation && selection.presentation) {
         count = append_queue_family(out_families, count, selection.present);
     }
     return count;
@@ -488,47 +564,70 @@ fn bool? vk_supports_queue_requirements(
 
 <* Distinct queue families in use, for CONCURRENT-shared resources. *>
 fn uint used_queue_families(VkDeviceState* state, uint[] out_families) {
-    uint count = 0;
-    out_families[count++] = state.graphics_family;
-    if (state.compute_family != state.graphics_family) out_families[count++] = state.compute_family;
-    if (state.transfer_family != state.graphics_family && state.transfer_family != state.compute_family) {
-        out_families[count++] = state.transfer_family;
+    uint count;
+    if (state.selected_queue_roles.graphics) {
+        count = append_queue_family(out_families, count, state.graphics_family);
+    }
+    if (state.selected_queue_roles.compute) {
+        count = append_queue_family(out_families, count, state.compute_family);
+    }
+    if (state.selected_queue_roles.transfer) {
+        count = append_queue_family(out_families, count, state.transfer_family);
     }
     return count;
 }
 
-<* Selected graphics and compute families, graphics first and deduplicated. *>
+<* Selected shader families, or transfer when it is the only admitted role. *>
 fn uint graphics_compute_queue_families(VkDeviceState* state, uint[] out_families) @private {
-    uint count = 0;
-    out_families[count++] = state.graphics_family;
-    if (state.compute_family != state.graphics_family) out_families[count++] = state.compute_family;
+    uint count;
+    if (state.selected_queue_roles.graphics) {
+        count = append_queue_family(out_families, count, state.graphics_family);
+    }
+    if (state.selected_queue_roles.compute) {
+        count = append_queue_family(out_families, count, state.compute_family);
+    }
+    if (count == 0 && state.selected_queue_roles.transfer) {
+        count = append_queue_family(out_families, count, state.transfer_family);
+    }
     return count;
 }
 
-<* Graphics and presentation families for swapchain image sharing. *>
+<* Selected graphics and private presentation families for swapchain sharing. *>
 fn uint swapchain_queue_families(
     VkDeviceState* state,
     uint[] out_families,
 ) {
     uint count = 0;
-    out_families[count++] = state.graphics_family;
-    if (state.presentation.family != state.graphics_family) {
+    if (state.selected_queue_roles.graphics) {
+        out_families[count++] = state.graphics_family;
+    }
+    if (!state.selected_queue_roles.graphics
+        || state.presentation.family != state.graphics_family) {
         out_families[count++] = state.presentation.family;
     }
     return count;
 }
 
-<* Graphics and presentation queues that must be idle before teardown. *>
+<* Selected graphics and private presentation queues used by a swapchain. *>
 fn uint swapchain_idle_queues(
     VkDeviceState* state,
     vk::Queue[] out_queues,
 ) {
     uint count = 0;
-    out_queues[count++] = state.graphics_queue;
-    if (state.presentation.family != state.graphics_family) {
+    if (state.selected_queue_roles.graphics) {
+        out_queues[count++] = state.graphics_queue;
+    }
+    if (!state.selected_queue_roles.graphics
+        || state.presentation.family != state.graphics_family) {
         out_queues[count++] = state.presentation.queue;
     }
     return count;
+}
+
+fn gpu::QueueKind frame_queue_kind(VkDeviceState* state) @private {
+    if (state.selected_queue_roles.graphics) return gpu::QueueKind.GRAPHICS;
+    if (state.selected_queue_roles.compute) return gpu::QueueKind.COMPUTE;
+    return gpu::QueueKind.TRANSFER;
 }
 
 fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
@@ -539,37 +638,69 @@ fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
     }
 }
 
+fn vk::Queue frame_queue_for(VkDeviceState* state) @private {
+    return queue_for(state, frame_queue_kind(state));
+}
+
+fn bool queue_uses_frame_aux(VkDeviceState* state, gpu::QueueKind kind) @private {
+    return kind != frame_queue_kind(state)
+        && queue_for(state, kind) != frame_queue_for(state);
+}
+
 <* Aliased semantic roles share the mutex for their native queue. *>
 fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
     switch (kind) {
         case gpu::QueueKind.TRANSFER:
-            if (state.transfer_queue == state.graphics_queue) {
+            if (state.selected_queue_roles.graphics
+                && state.transfer_queue == state.graphics_queue) {
                 return &state.graphics_queue_mutex;
             }
-            if (state.transfer_queue == state.compute_queue) {
-                return state.compute_queue_distinct
-                    ? &state.compute_queue_mutex
-                    : &state.graphics_queue_mutex;
+            if (state.selected_queue_roles.compute
+                && state.transfer_queue == state.compute_queue) {
+                return queue_mutex_for(state, gpu::QueueKind.COMPUTE);
             }
             return &state.transfer_queue_mutex;
         case gpu::QueueKind.COMPUTE:
-            return state.compute_queue_distinct ? &state.compute_queue_mutex : &state.graphics_queue_mutex;
+            return state.selected_queue_roles.graphics
+                && state.compute_queue == state.graphics_queue
+                ? &state.graphics_queue_mutex
+                : &state.compute_queue_mutex;
         default:
             return &state.graphics_queue_mutex;
     }
 }
 
+fn Mutex* frame_queue_mutex_for(VkDeviceState* state) @private {
+    return queue_mutex_for(state, frame_queue_kind(state));
+}
+
 fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
-    if (state.presentation.family == state.graphics_family) {
+    if (state.selected_queue_roles.graphics
+        && state.presentation.family == state.graphics_family) {
         return &state.graphics_queue_mutex;
     }
-    if (state.presentation.family == state.compute_family) {
+    if (state.selected_queue_roles.compute
+        && state.presentation.family == state.compute_family) {
         return queue_mutex_for(state, gpu::QueueKind.COMPUTE);
     }
-    if (state.presentation.family == state.transfer_family) {
+    if (state.selected_queue_roles.transfer
+        && state.presentation.family == state.transfer_family) {
         return queue_mutex_for(state, gpu::QueueKind.TRANSFER);
     }
     return &state.presentation.queue_mutex;
+}
+
+fn Mutex* native_queue_mutex_for(VkDeviceState* state, vk::Queue queue) @private {
+    if (state.selected_queue_roles.graphics && queue == state.graphics_queue) {
+        return &state.graphics_queue_mutex;
+    }
+    if (state.selected_queue_roles.compute && queue == state.compute_queue) {
+        return queue_mutex_for(state, gpu::QueueKind.COMPUTE);
+    }
+    if (state.selected_queue_roles.transfer && queue == state.transfer_queue) {
+        return queue_mutex_for(state, gpu::QueueKind.TRANSFER);
+    }
+    return present_queue_mutex_for(state);
 }
 
 fn SubmitInputs? resolve_submit_inputs(
@@ -577,7 +708,7 @@ fn SubmitInputs? resolve_submit_inputs(
     gpu::Device* device,
     gpu::SubmitDesc* desc,
 ) {
-    SubmitInputs inputs = { .kind = gpu::QueueKind.GRAPHICS };
+    SubmitInputs inputs = { .kind = frame_queue_kind(state) };
 
     if (desc.command_lists.len > 0) {
         inputs.records = mem::talloc_array(CommandRecord*, (sz)desc.command_lists.len);
@@ -633,8 +764,8 @@ fn SubmitInputs? resolve_submit_inputs(
    command arrays are left unset so the slice setters are never handed a
    zero-length slice. Queue-used flags and the off-frame marker are set
    unconditionally so retirement also covers off-frame submissions. A submit
-   on a distinct compute/transfer queue also piggybacks one internal aux
-   signal, so end_frame needs no per-queue empty submit of its own. *>
+   on a non-anchor compute/transfer queue piggybacks one internal aux signal,
+   so end_frame needs no per-queue empty submit of its own. *>
 fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;
@@ -684,9 +815,9 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
         }
 
         bool piggyback_compute = kind == gpu::QueueKind.COMPUTE
-            && state.compute_queue_distinct;
+            && queue_uses_frame_aux(state, kind);
         bool piggyback_transfer = kind == gpu::QueueKind.TRANSFER
-            && state.transfer_queue != state.graphics_queue;
+            && queue_uses_frame_aux(state, kind);
         bool piggyback = piggyback_compute || piggyback_transfer;
 
         SwapchainSlot* swapchain = inputs.swapchain;

@@ -362,6 +362,7 @@ fn void shared_queues_alone_is_invalid() @test {
 
 fn void frame_arena_families_alias_without_transfer() @test {
     vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute },
         .graphics_family = 4,
         .compute_family  = 4,
         .transfer_family = 7,
@@ -374,6 +375,7 @@ fn void frame_arena_families_alias_without_transfer() @test {
 
 fn void frame_arena_families_are_graphics_compute_only() @test {
     vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute },
         .graphics_family = 4,
         .compute_family  = 5,
         .transfer_family = 7,
@@ -414,6 +416,7 @@ fn void frame_arena_create_info_uses_exact_distinct_families() @test {
 
 fn void public_shared_families_keep_distinct_transfer() @test {
     vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
         .graphics_family = 4,
         .compute_family  = 5,
         .transfer_family = 7,
@@ -473,6 +476,7 @@ fn void tri_queue_frame_retires_cleanly() @test {
 fn void swapchain_sharing_aliases_the_main_family() @test {
     vk::Queue queue = (vk::Queue)(uptr)0x10;
     vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics },
         .graphics_family = 4,
         .graphics_queue  = queue,
         .presentation    = {
@@ -496,6 +500,7 @@ fn void swapchain_sharing_includes_a_separate_present_family() @test {
     vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
     vk::Queue present_queue = (vk::Queue)(uptr)0x20;
     vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics },
         .graphics_family = 4,
         .graphics_queue  = graphics_queue,
         .presentation    = {
@@ -634,10 +639,220 @@ fn void supported_selection_requests_every_selected_queue_index() @test {
     );
 }
 
+fn void graphics_only_selection_has_no_hidden_roles() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G, 1),
+        family(QF_C, 1),
+        family(QF_T, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = { .graphics = 1 },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(picked.selected.graphics);
+    assert(!picked.selected.compute && !picked.selected.transfer);
+
+    uint[4] device_families;
+    uint device_count = vk::selected_device_queue_families(
+        &picked,
+        false,
+        device_families[..],
+    );
+    assert(device_count == 1 && device_families[0] == 0);
+    assert(vk::requested_queue_count(&picked, 1, false) == 0);
+    assert(vk::requested_queue_count(&picked, 2, false) == 0);
+
+    vk::VkDeviceState state = {
+        .selected_queue_roles = picked.selected,
+        .graphics_family      = picked.graphics,
+        .compute_family       = picked.compute,
+        .transfer_family      = picked.transfer,
+    };
+    uint[3] shared_families;
+    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
+    assert(shared_count == 1 && shared_families[0] == 0);
+}
+
+fn void compute_only_selection_has_no_hidden_roles() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G, 1),
+        family(QF_C, 1),
+        family(QF_T, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = { .compute = 1 },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(!picked.selected.graphics && picked.selected.compute);
+    assert(!picked.selected.transfer && !picked.async_compute);
+
+    uint[4] device_families;
+    uint device_count = vk::selected_device_queue_families(
+        &picked,
+        false,
+        device_families[..],
+    );
+    assert(device_count == 1 && device_families[0] == 1);
+    assert(vk::requested_queue_count(&picked, 0, false) == 0);
+    assert(vk::requested_queue_count(&picked, 2, false) == 0);
+
+    vk::VkDeviceState state = {
+        .selected_queue_roles = picked.selected,
+        .graphics_family      = picked.graphics,
+        .compute_family       = picked.compute,
+        .transfer_family      = picked.transfer,
+    };
+    uint[3] shared_families;
+    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
+    assert(shared_count == 1 && shared_families[0] == 1);
+}
+
+fn void transfer_only_selection_has_no_hidden_roles() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G, 1),
+        family(QF_C, 1),
+        family(QF_T, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = { .transfer = 1 },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(!picked.selected.graphics && !picked.selected.compute);
+    assert(picked.selected.transfer && !picked.async_compute);
+
+    uint[4] device_families;
+    uint device_count = vk::selected_device_queue_families(
+        &picked,
+        false,
+        device_families[..],
+    );
+    assert(device_count == 1 && device_families[0] == 2);
+    assert(vk::requested_queue_count(&picked, 0, false) == 0);
+    assert(vk::requested_queue_count(&picked, 1, false) == 0);
+
+    vk::VkDeviceState state = {
+        .selected_queue_roles = picked.selected,
+        .graphics_family      = picked.graphics,
+        .compute_family       = picked.compute,
+        .transfer_family      = picked.transfer,
+    };
+    uint[3] shared_families;
+    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
+    assert(shared_count == 1 && shared_families[0] == 2);
+}
+
+fn void presentation_without_graphics_adds_only_a_private_queue() @test {
+    vk::QueueFamilyProperties[4] table = {
+        family(QF_G, 1),
+        family(QF_C, 1),
+        family(QF_T, 1),
+        family(0, 1),
+    };
+    bool[4] present_support = { false, false, false, true };
+    gpu::QueueRequirements requirements = {
+        .counts = { .compute = 1 },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_surface_requirements(
+            table[..],
+            present_support[..],
+            requirements,
+        )!!;
+    assert(!picked.selected.graphics && picked.selected.compute);
+    assert(!picked.selected.transfer && picked.present == 3);
+
+    uint[4] device_families;
+    uint device_count = vk::selected_device_queue_families(
+        &picked,
+        true,
+        device_families[..],
+    );
+    assert(device_count == 2);
+    assert(device_families[0] == 1 && device_families[1] == 3);
+    assert(vk::requested_queue_count(&picked, 0, true) == 0);
+    assert(vk::requested_queue_count(&picked, 2, true) == 0);
+
+    vk::Queue compute_queue = (vk::Queue)(uptr)0x20;
+    vk::Queue present_queue = (vk::Queue)(uptr)0x30;
+    vk::VkDeviceState state = {
+        .selected_queue_roles = picked.selected,
+        .compute_family       = picked.compute,
+        .compute_queue        = compute_queue,
+        .presentation         = {
+            .family = picked.present,
+            .queue  = present_queue,
+        },
+    };
+    uint[3] shared_families;
+    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
+    assert(shared_count == 1 && shared_families[0] == 1);
+
+    vk::Queue[2] idle_queues;
+    uint idle_count = vk::swapchain_idle_queues(&state, idle_queues[..]);
+    assert(idle_count == 1 && idle_queues[0] == present_queue);
+    assert(
+        vk::native_queue_mutex_for(&state, idle_queues[0])
+            == vk::present_queue_mutex_for(&state),
+        "presentation-only teardown uses the presentation mutex"
+    );
+}
+
+fn void frame_anchor_uses_first_admitted_role() @test {
+    vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
+    vk::Queue compute_queue = (vk::Queue)(uptr)0x20;
+    vk::Queue transfer_queue = (vk::Queue)(uptr)0x30;
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
+        .graphics_queue       = graphics_queue,
+        .compute_queue        = compute_queue,
+        .transfer_queue       = transfer_queue,
+    };
+
+    assert(vk::frame_queue_kind(&state) == gpu::QueueKind.GRAPHICS);
+    assert(!vk::queue_uses_frame_aux(&state, gpu::QueueKind.GRAPHICS));
+    assert(vk::queue_uses_frame_aux(&state, gpu::QueueKind.COMPUTE));
+    assert(vk::queue_uses_frame_aux(&state, gpu::QueueKind.TRANSFER));
+
+    state = {
+        .selected_queue_roles = { .compute, .transfer },
+        .compute_queue        = compute_queue,
+        .transfer_queue       = transfer_queue,
+    };
+    assert(vk::frame_queue_kind(&state) == gpu::QueueKind.COMPUTE);
+    assert(!vk::queue_uses_frame_aux(&state, gpu::QueueKind.COMPUTE));
+    assert(vk::queue_uses_frame_aux(&state, gpu::QueueKind.TRANSFER));
+
+    gpu::Device device;
+    gpu::SubmitDesc desc;
+    vk::SubmitInputs inputs = vk::resolve_submit_inputs(&state, &device, &desc)!!;
+    assert(inputs.kind == gpu::QueueKind.COMPUTE);
+
+    state.transfer_queue = compute_queue;
+    assert(
+        !vk::queue_uses_frame_aux(&state, gpu::QueueKind.TRANSFER),
+        "an aliased transfer role is ordered on the compute anchor"
+    );
+
+    state = {
+        .selected_queue_roles = { .transfer },
+        .transfer_queue       = transfer_queue,
+    };
+    assert(vk::frame_queue_kind(&state) == gpu::QueueKind.TRANSFER);
+    assert(!vk::queue_uses_frame_aux(&state, gpu::QueueKind.TRANSFER));
+}
+
 fn void aliased_compute_and_transfer_share_one_queue_mutex() @test {
     vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
     vk::Queue compute_queue = (vk::Queue)(uptr)0x20;
     vk::VkDeviceState state = {
+        .selected_queue_roles  = { .graphics, .compute, .transfer },
         .graphics_queue         = graphics_queue,
         .compute_queue          = compute_queue,
         .transfer_queue         = compute_queue,
