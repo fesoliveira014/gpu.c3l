@@ -200,7 +200,6 @@ fn void? destroy_recording_context(Device* device, RecordingContextHandle ctx) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    validate_resource_owner(&operation, ctx.owner, ResourceOwnerKind.RECORDING_CONTEXT)!;
     return vtable.destroy_recording_context(device, ctx);
 }
 
@@ -212,9 +211,6 @@ fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContext
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    if (ctx != RECORDING_CONTEXT_HANDLE_INVALID) {
-        validate_resource_owner(&operation, ctx.owner, ResourceOwnerKind.RECORDING_CONTEXT)!;
-    }
     CommandList commands;
     vtable.begin_commands(device, queue, ctx, &commands)!;
     return commands;
@@ -234,8 +230,6 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, desc.src.owner, ResourceOwnerKind.BUFFER)!;
-    validate_resource_owner(&operation, desc.dst.owner, ResourceOwnerKind.BUFFER)!;
     return vtable.cmd_copy_buffer(commands, desc);
 }
 
@@ -244,7 +238,6 @@ fn void? cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset,
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    validate_resource_owner(&operation, buffer.owner, ResourceOwnerKind.BUFFER)!;
     return vtable.cmd_fill_buffer(commands, buffer, offset, size, value);
 }
 
@@ -255,8 +248,6 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, desc.src.buffer.owner, ResourceOwnerKind.BUFFER)!;
-    validate_resource_owner(&operation, desc.texture.owner, ResourceOwnerKind.TEXTURE)!;
     return vtable.cmd_copy_buffer_to_texture(commands, desc);
 }
 
@@ -266,8 +257,6 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, desc.texture.owner, ResourceOwnerKind.TEXTURE)!;
-    validate_resource_owner(&operation, desc.dst.buffer.owner, ResourceOwnerKind.BUFFER)!;
     return vtable.cmd_copy_texture_to_buffer(commands, desc);
 }
 
@@ -277,7 +266,6 @@ fn void? cmd_buffer_barrier(CommandList* commands, BufferBarrier* barrier) {
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     if (barrier == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, barrier.buffer.owner, ResourceOwnerKind.BUFFER)!;
     return vtable.cmd_buffer_barrier(commands, barrier);
 }
 
@@ -296,7 +284,6 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     if (barrier == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, barrier.texture.owner, ResourceOwnerKind.TEXTURE)!;
     return vtable.cmd_texture_barrier(commands, barrier);
 }
 
@@ -307,7 +294,6 @@ fn void? cmd_dispatch(CommandList* commands, PipelineHandle pipeline, GpuAddress
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
     return vtable.cmd_dispatch(commands, pipeline, root, groups);
 }
 
@@ -320,12 +306,6 @@ fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     if (desc == null) return INVALID_ARGUMENT~;
-    foreach (&color : desc.colors) {
-        validate_resource_owner(&operation, color.texture.owner, ResourceOwnerKind.TEXTURE)!;
-    }
-    if (desc.depth != null) {
-        validate_resource_owner(&operation, desc.depth.texture.owner, ResourceOwnerKind.TEXTURE)!;
-    }
     return vtable.cmd_begin_render_pass(commands, desc);
 }
 
@@ -362,7 +342,6 @@ fn void? cmd_draw(CommandList* commands, PipelineHandle pipeline, GpuAddress ver
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
     return vtable.cmd_draw(commands, pipeline, vertex_root, fragment_root, vertex_count, instance_count);
 }
 
@@ -371,8 +350,6 @@ fn void? cmd_draw_indexed(CommandList* commands, PipelineHandle pipeline, GpuAdd
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
-    validate_resource_owner(&operation, index_span.buffer.owner, ResourceOwnerKind.BUFFER)!;
     return vtable.cmd_draw_indexed(commands, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count, index_type);
 }
 
@@ -385,8 +362,6 @@ fn void? cmd_draw_indirect(CommandList* commands, PipelineHandle pipeline, GpuAd
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
-    validate_resource_owner(&operation, args.buffer.owner, ResourceOwnerKind.BUFFER)!;
     return vtable.cmd_draw_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count);
 }
 
@@ -398,9 +373,6 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, PipelineHandle pipelin
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
-    validate_resource_owner(&operation, args.buffer.owner, ResourceOwnerKind.BUFFER)!;
-    validate_resource_owner(&operation, index_span.buffer.owner, ResourceOwnerKind.BUFFER)!;
     return vtable.cmd_draw_indexed_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count, index_span, index_type);
 }
 
@@ -412,10 +384,6 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, PipelineHandle p
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
-    validate_resource_owner(&operation, args.buffer.owner, ResourceOwnerKind.BUFFER)!;
-    validate_resource_owner(&operation, count_span.buffer.owner, ResourceOwnerKind.BUFFER)!;
-    validate_resource_owner(&operation, index_span.buffer.owner, ResourceOwnerKind.BUFFER)!;
     return vtable.cmd_draw_indexed_indirect_count(commands, pipeline, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type);
 }
 
@@ -426,7 +394,5 @@ fn void? cmd_dispatch_indirect(CommandList* commands, PipelineHandle pipeline, G
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
-    validate_resource_owner(&operation, args.buffer.owner, ResourceOwnerKind.BUFFER)!;
     return vtable.cmd_dispatch_indirect(commands, pipeline, root, args);
 }

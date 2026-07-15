@@ -164,7 +164,6 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, desc.shader.owner, ResourceOwnerKind.SHADER)!;
     return operation.vtable.create_compute_pipeline(device, desc);
 }
 
@@ -178,8 +177,6 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, desc.vertex_shader.owner, ResourceOwnerKind.SHADER)!;
-    validate_resource_owner(&operation, desc.fragment_shader.owner, ResourceOwnerKind.SHADER)!;
     return operation.vtable.create_graphics_pipeline(device, desc);
 }
 

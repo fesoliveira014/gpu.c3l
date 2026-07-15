@@ -87,7 +87,6 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
     return operation.vtable.destroy_swapchain(device, swapchain);
 }
 
@@ -99,7 +98,6 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
     return operation.vtable.resize_swapchain(device, swapchain, width, height);
 }
 
@@ -108,7 +106,6 @@ fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width,
 fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
     return operation.vtable.get_swapchain_info(device, swapchain);
 }
 
@@ -121,7 +118,6 @@ fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) 
 fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
     return operation.vtable.acquire_next_image(device, swapchain);
 }
 
@@ -134,7 +130,6 @@ fn void? present(Device* device, PresentDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, desc.swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
     return operation.vtable.present(device, desc);
 }
 
@@ -143,6 +138,5 @@ fn void? present(Device* device, PresentDesc* desc) {
 fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle swapchain) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
     return operation.vtable.get_present_mode_support(device, swapchain);
 }

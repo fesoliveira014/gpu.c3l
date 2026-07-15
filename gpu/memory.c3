@@ -177,7 +177,6 @@ fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
 fn void? free_persistent_span(Device* device, GpuSpan span) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, span.buffer.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.free_persistent_span(device, span);
 }
 
@@ -194,7 +193,6 @@ fn PersistentArenaStats? get_persistent_stats(Device* device) {
 fn void? cmd_upload_buffer(CommandList* commands, BufferHandle dst, usz offset, char[] data) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, dst.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.cmd_upload_buffer(commands, dst, offset, data);
 }
 
@@ -204,7 +202,6 @@ fn void? cmd_upload_texture(CommandList* commands, TextureUploadDesc* desc, char
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, desc.texture.owner, ResourceOwnerKind.TEXTURE)!;
     return operation.vtable.cmd_upload_texture(commands, desc, data);
 }
 
@@ -213,7 +210,6 @@ fn void? cmd_upload_texture(CommandList* commands, TextureUploadDesc* desc, char
 fn void? upload_buffer_data(Device* device, BufferHandle dst, usz offset, char[] data, Stage next_stage, Hazard next_hazard) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, dst.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.upload_buffer_data(device, dst, offset, data, next_stage, next_hazard);
 }
 
@@ -224,7 +220,6 @@ fn void? upload_buffer_data(Device* device, BufferHandle dst, usz offset, char[]
 fn void? upload_texture_data(Device* device, TextureHandle dst, uint mip, char[] data, Stage next_stage, Hazard next_hazard, TextureLayout next_layout) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, dst.owner, ResourceOwnerKind.TEXTURE)!;
     return operation.vtable.upload_texture_data(device, dst, mip, data, next_stage, next_hazard, next_layout);
 }
 
@@ -233,7 +228,6 @@ fn void? upload_texture_data(Device* device, TextureHandle dst, uint mip, char[]
 fn void? readback_buffer_data(Device* device, BufferHandle src, usz offset, char[] out_data, Stage from_stage, Hazard from_hazard) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, src.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.readback_buffer_data(device, src, offset, out_data, from_stage, from_hazard);
 }
 
@@ -242,7 +236,6 @@ fn void? readback_buffer_data(Device* device, BufferHandle src, usz offset, char
 fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char[] out_data, Stage from_stage, Hazard from_hazard, TextureLayout from_layout) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, src.owner, ResourceOwnerKind.TEXTURE)!;
     return operation.vtable.readback_texture_data(device, src, mip, out_data, from_stage, from_hazard, from_layout);
 }
 
@@ -253,7 +246,6 @@ fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char
 fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, src.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.cmd_readback_buffer(commands, src, offset, size);
 }
 
@@ -263,7 +255,6 @@ fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, BufferHandle src, 
 fn ReadbackTicket? cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
-    validate_resource_owner(&operation, src.owner, ResourceOwnerKind.TEXTURE)!;
     return operation.vtable.cmd_readback_texture(commands, src, mip);
 }
 
@@ -285,6 +276,7 @@ fn void? resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (ticket == null) return INVALID_HANDLE~;
+    if (!ticket.is_valid()) return INVALID_ARGUMENT~;
     validate_resource_owner(&operation, ticket.owner, ResourceOwnerKind.READBACK_TICKET)!;
     return operation.vtable.resolve_readback(device, ticket, dest);
 }
