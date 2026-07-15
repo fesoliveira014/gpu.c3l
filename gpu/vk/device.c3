@@ -596,6 +596,28 @@ fn gpu::Device? create_vk_device_with_selection(
         physical_device: state.physical_device,
         inputs:          &caps_inputs,
     );
+
+    gpu::QueueSelection queue_selection = gpu::default_queue_selection(&state.caps);
+    if (state.compute_queue_distinct) {
+        queue_selection.graphics_roles.compute = false;
+        queue_selection.compute_id = 1;
+        queue_selection.compute_roles = { .compute };
+    }
+    if (state.transfer_queue == state.graphics_queue) {
+        queue_selection.graphics_roles.transfer = true;
+        queue_selection.transfer_id = queue_selection.graphics_id;
+        queue_selection.transfer_roles = queue_selection.graphics_roles;
+    } else if (state.transfer_queue == state.compute_queue) {
+        queue_selection.compute_roles.transfer = true;
+        queue_selection.transfer_id = queue_selection.compute_id;
+        queue_selection.transfer_roles = queue_selection.compute_roles;
+    } else {
+        queue_selection.graphics_roles.transfer = false;
+        queue_selection.transfer_id = 2;
+        queue_selection.transfer_roles = { .transfer };
+    }
+    state.caps.queues = queue_selection.counts;
+
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
     return gpu::register_device(
         backend:              gpu::BackendKind.VULKAN,
@@ -606,6 +628,7 @@ fn gpu::Device? create_vk_device_with_selection(
         retained_runtime:     retained_runtime,
         adapter:              adapter,
         presentation_surface: presentation_surface_owner,
+        queues:               queue_selection,
         owner:                &state.owner,
     );
 }
