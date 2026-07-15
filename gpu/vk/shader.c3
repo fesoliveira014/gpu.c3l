@@ -284,12 +284,15 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
         vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
             .set_code_size(desc.spirv.len)
             .set_code(code.ptr);
-        check_shader_create_result(vk::create_shader_module(
-            device:          state.device,
-            p_create_info:   &info,
-            p_allocator:     null,
-            p_shader_module: &slot.shader_module,
-        ))!;
+        check_shader_create_device_result(
+            result: vk::create_shader_module(
+                device:          state.device,
+                p_create_info:   &info,
+                p_allocator:     null,
+                p_shader_module: &slot.shader_module,
+            ),
+            state: state,
+        )!;
     };
     set_object_name(
         state:         state,
@@ -321,5 +324,11 @@ fn void? vk_destroy_shader(gpu::Device* device, gpu::ShaderHandle handle) @priva
     vk::ShaderModule sh_module = slot.shader_module;
     ulong retire = retire_timeline_value(state);
     state.shaders.free(handle)!;
-    enqueue_deferred(state, DeferredKind.SHADER_MODULE, retire, (void*)sh_module, (vma::Allocation)null);
+    enqueue_deferred(
+        state:          state,
+        kind:           DeferredKind.SHADER_MODULE,
+        timeline_value: retire,
+        object:         (void*)sh_module,
+        allocation:     (vma::Allocation)null,
+    );
 }

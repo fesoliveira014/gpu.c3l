@@ -165,7 +165,7 @@ fn void? check_descriptor_retire_backend_result(
     ZString operation,
     vk::Result result,
 ) {
-    if (operation == null) return check(result);
+    if (operation == null) return check_device_result(state, result);
     return check_backend_result(state, operation, result);
 }
 
@@ -572,11 +572,11 @@ fn void drain_texture_retire_prefix(VkDeviceState* state, uint ready_count) @pri
 
 <* Recycles ready ring slots under the caller's lock; the ready handles land
    in `drained` for destruction after unlock. Returns the count. *>
-fn uint drain_sampler_retire(VkDeviceState* state, vk::Sampler[] drained) @private {
+fn uint? drain_sampler_retire(VkDeviceState* state, vk::Sampler[] drained) @private {
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
     if (heap.sampler_retire.count == 0) return 0;
     ulong current = 0;
-    vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current);
+    check_device_result(state, vk::get_semaphore_counter_value(state.device, state.frame_timeline, &current))!;
     uint drained_count = 0;
     while (heap.sampler_retire.count > 0) {
         DescriptorRetireEntry* entry = &heap.sampler_retire.entries[heap.sampler_retire.head];
@@ -830,7 +830,7 @@ fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::Tex
         usage_field:   "TextureDesc.usage",
     )!;
 
-    uint ready_retires = count_ready_texture_retires(state, null) ?? 0;
+    uint ready_retires = count_ready_texture_retires(state, "create_texture_descriptor")!;
     uint headroom = heap.texture_free_count + ready_retires
         + (uint)heap.texture_cells.len - heap.texture_next_new;
     if (headroom == 0) {
@@ -1101,7 +1101,7 @@ fn gpu::SamplerIndex? publish_sampler(VkDeviceState* state, vk::Sampler sampler)
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
 
-        drained_count = drain_sampler_retire(state, drained);
+        drained_count = drain_sampler_retire(state, drained)!;
         uint slot;
         if (heap.sampler_free_count > 0) {
             slot = heap.sampler_free[--heap.sampler_free_count];

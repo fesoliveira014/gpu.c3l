@@ -133,7 +133,13 @@ fn gpu::BufferHandle? create_buffer_with_families_for_state(
         .usage       = desc.usage,
         .memory_kind = desc.memory_kind,
     };
-    check(state.allocator.create_buffer(&buffer_info, &alloc_info, &slot.buffer, &slot.allocation, &slot.allocation_info))!;
+    check_device_result(state, state.allocator.create_buffer(
+        buffer_info:    &buffer_info,
+        alloc_info:     &alloc_info,
+        out_buffer:     &slot.buffer,
+        out_allocation: &slot.allocation,
+        out_info:       &slot.allocation_info,
+    ))!;
     slot.cpu_base = slot.allocation_info.mapped_data;
 
     copy_debug_name(&slot.debug_name[0], desc.debug_name);
@@ -223,7 +229,13 @@ fn void? vk_destroy_buffer(gpu::Device* device, gpu::BufferHandle handle) @priva
     vma::Allocation allocation = slot.allocation;
     ulong retire = retire_timeline_value(state);
     state.buffers.free(handle)!;
-    enqueue_deferred(state, DeferredKind.BUFFER, retire, (void*)buffer, allocation);
+    enqueue_deferred(
+        state:          state,
+        kind:           DeferredKind.BUFFER,
+        timeline_value: retire,
+        object:         (void*)buffer,
+        allocation:     allocation,
+    );
 }
 
 fn gpu::GpuAddress? vk_get_buffer_address(gpu::Device* device, gpu::BufferHandle handle) @private {
@@ -240,7 +252,7 @@ fn void? vk_flush_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offs
     // WHOLE_SIZE requires offset strictly inside the buffer.
     if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
-    check(state.allocator.flush_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
+    check_device_result(state, state.allocator.flush_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
 }
 
 fn void? vk_invalidate_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offset, usz size) @private {
@@ -249,7 +261,7 @@ fn void? vk_invalidate_buffer(gpu::Device* device, gpu::BufferHandle handle, usz
     if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
     if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
     vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
-    check(state.allocator.invalidate_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
+    check_device_result(state, state.allocator.invalidate_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
 }
 
 fn gpu::GpuSpan? get_buffer_span_for_state(VkDeviceState* state, gpu::BufferHandle handle) @private {

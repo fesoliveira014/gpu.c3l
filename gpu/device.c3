@@ -77,7 +77,7 @@ alias ReadbackBufferDataFn @private    = fn void? (Device*, BufferHandle, usz, c
 alias ReadbackTextureDataFn @private   = fn void? (Device*, TextureHandle, uint, char[], Stage, Hazard, TextureLayout);
 alias CmdReadbackBufferFn @private     = fn ReadbackTicket? (CommandList*, BufferHandle, usz, usz);
 alias CmdReadbackTextureFn @private    = fn ReadbackTicket? (CommandList*, TextureHandle, uint);
-alias PollReadbackFn @private          = fn bool (Device*, ReadbackTicket*);
+alias PollReadbackFn @private          = fn bool? (Device*, ReadbackTicket*);
 alias ResolveReadbackFn @private       = fn void? (Device*, ReadbackTicket*, char[]);
 alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
@@ -198,6 +198,7 @@ struct DeviceData @private {
 
 struct DeviceSlot @private {
     Atomic{ulong} control;
+    Atomic{bool}  lost;
     DeviceData    data;
 }
 
@@ -247,6 +248,11 @@ fn DeviceOperation? begin_device_operation(Device* device) @private {
             packed = seen;
             continue;
         }
+        if (slot.lost.load(AtomicOrdering.ACQUIRE)) {
+            DeviceSlotControl pin = { .pins = 1 };
+            (void)slot.control.sub((ulong)pin, AtomicOrdering.RELEASE);
+            return DEVICE_LOST~;
+        }
         return {
             .slot       = slot,
             .data       = &slot.data,
@@ -263,6 +269,17 @@ fn void end_device_operation(DeviceOperation* operation) @private {
     DeviceSlotControl pin = { .pins = 1 };
     (void)operation.slot.control.sub((ulong)pin, AtomicOrdering.RELEASE);
     operation.active = false;
+}
+
+fn void mark_device_lost(Device* device) @private {
+    if (device == null || !device.is_valid()) return;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES) return;
+
+    DeviceSlot* slot = &device_slots[device.index];
+    DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+    if (control.generation != device.generation) return;
+    if (control.state != DEVICE_SLOT_LIVE && control.state != DEVICE_SLOT_CLOSING) return;
+    slot.lost.store(true, AtomicOrdering.RELEASE);
 }
 
 <* Caller must hold an operation pin for this device. *>
@@ -347,6 +364,7 @@ fn Device? register_device(
             .index      = i,
             .generation = control.generation,
         };
+        slot.lost.store(false, AtomicOrdering.RELAXED);
         slot.data = {
             .backend              = backend,
             .caps                 = caps,
@@ -484,6 +502,7 @@ fn void? destroy_device(Device* device) {
         lock_device_registry();
         defer unlock_device_registry();
         slot.data = {};
+        slot.lost.store(false, AtomicOrdering.RELAXED);
         closing.pins = 0;
         closing.state = closing.generation == MAX_DEVICE_GENERATION ? DEVICE_SLOT_RETIRED : DEVICE_SLOT_FREE;
         closing.reserved = 0;

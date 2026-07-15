@@ -174,6 +174,35 @@ fn void forged_device_tokens_are_rejected() @test {
     );
 }
 
+fn void device_loss_isolated_to_marked_slot() @test {
+    FrameFixture first_fixture;
+    FrameFixture second_fixture;
+    gpu::Device first = fixture_device(&first_fixture);
+    gpu::Device second = fixture_device(&second_fixture);
+
+    gpu::mark_device_lost(&first);
+
+    assert(
+        @catch(gpu::get_device_caps(&first)) == gpu::DEVICE_LOST,
+        "the affected device stays lost"
+    );
+    gpu::FrameToken second_frame = gpu::begin_frame(&second)!!;
+    gpu::end_frame(&second_frame)!!;
+    assert(second_fixture.begin_calls == 1, "a peer device remains usable");
+
+    gpu::Device stale = first;
+    gpu::destroy_device(&first)!!;
+    FrameFixture replacement_fixture;
+    gpu::Device replacement = fixture_device(&replacement_fixture);
+    gpu::mark_device_lost(&stale);
+    gpu::FrameToken replacement_frame = gpu::begin_frame(&replacement)!!;
+    gpu::end_frame(&replacement_frame)!!;
+    assert(replacement_fixture.begin_calls == 1, "slot reuse clears lost state");
+
+    gpu::destroy_device(&second)!!;
+    gpu::destroy_device(&replacement)!!;
+}
+
 fn void exhausted_device_slots_are_retired() @test {
     gpu::DeviceSlot* slot = &gpu::device_slots[0];
     gpu::DeviceSlotControl control = (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);

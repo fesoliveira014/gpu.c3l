@@ -237,7 +237,12 @@ fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::Semaphore
         .set_initial_value((ulong)desc.initial_value);
     vk::SemaphoreCreateInfo info = vk::semaphore_create_info().set_next(&type_info);
     vk::Semaphore semaphore;
-    check(vk::create_semaphore(state.device, &info, null, &semaphore))!;
+    check_device_result(state, vk::create_semaphore(
+        device:        state.device,
+        p_create_info: &info,
+        p_allocator:   null,
+        p_semaphore:   &semaphore,
+    ))!;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.SEMAPHORE,
@@ -268,7 +273,13 @@ fn void? vk_destroy_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle) 
     vk::Semaphore semaphore = slot.semaphore;
     ulong retire = retire_timeline_value(state);
     state.semaphores.free(handle)!;
-    enqueue_deferred(state, DeferredKind.SEMAPHORE, retire, (void*)semaphore, (vma::Allocation)null);
+    enqueue_deferred(
+        state:          state,
+        kind:           DeferredKind.SEMAPHORE,
+        timeline_value: retire,
+        object:         (void*)semaphore,
+        allocation:     (vma::Allocation)null,
+    );
 }
 
 fn void? vk_wait_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle, gpu::SemaphoreValue value, ulong timeout_ns) @private {
@@ -279,5 +290,9 @@ fn void? vk_wait_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle, gpu
         .set_semaphore_count(1)
         .set_semaphores((&slot.semaphore)[:1])
         .set_values((&wait_value)[:1]);
-    check_wait(vk::wait_semaphores(state.device, &wait_info, timeout_ns))!;
+    check_wait_backend_result(
+        state:     state,
+        operation: "wait_semaphore",
+        result:    vk::wait_semaphores(state.device, &wait_info, timeout_ns),
+    )!;
 }

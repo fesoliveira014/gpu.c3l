@@ -4,9 +4,27 @@ import gpu;
 import gpu::vk @public;
 import vk;
 
+const gpu::BackendVTable DEVICE_LOSS_VTABLE = {
+    .destroy_device = &destroy_device_loss_fixture,
+};
+
 struct BackendResultCapture {
     uint calls;
     bool fields_match;
+}
+
+fn void destroy_device_loss_fixture(void* backend_state) {
+    (void)backend_state;
+}
+
+fn gpu::Device device_loss_fixture(gpu::vk::VkDeviceState* state) {
+    return gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          { .strict_enabled = true },
+        vtable:        &DEVICE_LOSS_VTABLE,
+        backend_state: state,
+        owner:         &state.owner,
+    )!!;
 }
 
 fn void capture_backend_result(gpu::DebugMessage* message, void* user_data) {
@@ -47,6 +65,90 @@ fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
     ));
     assert(fallback_fault == configured_fault, "stderr fallback preserves exact fault parity");
     assert(capture.calls == 1, "null callback does not dispatch a structured duplicate");
+}
+
+fn void explicit_device_loss_invalidates_only_its_owner() @test {
+    gpu::vk::VkDeviceState first_state;
+    gpu::vk::VkDeviceState second_state;
+    gpu::Device first = device_loss_fixture(&first_state);
+    gpu::Device second = device_loss_fixture(&second_state);
+
+    assert(
+        @catch(gpu::vk::check_backend_result(
+            state:     &first_state,
+            operation: "submit",
+            result:    (vk::Result)-999,
+        )) == gpu::BACKEND_ERROR,
+        "an unknown native result remains a backend error"
+    );
+    assert(gpu::get_device_caps(&first)!!.strict_enabled, "an unknown result leaves its owner usable");
+    assert(gpu::get_device_caps(&second)!!.strict_enabled, "an unknown result leaves a peer usable");
+
+    assert(
+        @catch(gpu::vk::check_backend_result(
+            state:     &first_state,
+            operation: "submit",
+            result:    vk::Result.ERROR_DEVICE_LOST,
+        )) == gpu::DEVICE_LOST,
+        "explicit native loss remains exact"
+    );
+    assert(
+        @catch(gpu::get_device_caps(&first)) == gpu::DEVICE_LOST,
+        "the reporting device becomes unusable"
+    );
+    assert(gpu::get_device_caps(&second)!!.strict_enabled, "a peer device remains usable");
+
+    gpu::destroy_device(&first)!!;
+    gpu::destroy_device(&second)!!;
+}
+
+fn void custom_result_routes_mark_the_reporting_device() @test {
+    gpu::vk::VkDeviceState texture_state;
+    gpu::Device texture_device = device_loss_fixture(&texture_state);
+    gpu::vk::TextureSlot texture_slot;
+    assert(
+        @catch(gpu::vk::check_texture_view_backend_result(
+            state:     &texture_state,
+            operation: null,
+            texture:   {},
+            slot:      &texture_slot,
+            result:    vk::Result.ERROR_DEVICE_LOST,
+        )) == gpu::DEVICE_LOST,
+        "texture-view loss remains exact"
+    );
+    assert(@catch(gpu::get_device_caps(&texture_device)) == gpu::DEVICE_LOST, "texture-view loss marks its owner");
+    gpu::destroy_device(&texture_device)!!;
+
+    gpu::vk::VkDeviceState helper_state;
+    gpu::Device helper_device = device_loss_fixture(&helper_state);
+    assert(
+        @catch(gpu::vk::check_helper_backend_result(
+            state:           &helper_state,
+            operation:       "upload_buffer_data",
+            result:          vk::Result.ERROR_DEVICE_LOST,
+            fault_is_public: false,
+        )) == gpu::DEVICE_LOST,
+        "swallowed-helper loss remains exact"
+    );
+    assert(@catch(gpu::get_device_caps(&helper_device)) == gpu::DEVICE_LOST, "helper loss marks its owner");
+    gpu::destroy_device(&helper_device)!!;
+
+    gpu::vk::VkDeviceState wsi_state;
+    gpu::Device wsi_device = device_loss_fixture(&wsi_state);
+    gpu::vk::WsiDiagnosticContext context = {
+        .state     = &wsi_state,
+        .operation = "present",
+    };
+    assert(
+        @catch(gpu::vk::check_wsi_backend_result(
+            context: &context,
+            kind:    gpu::vk::WsiResultKind.PRESENT,
+            result:  vk::Result.ERROR_DEVICE_LOST,
+        )) == gpu::DEVICE_LOST,
+        "presentation loss remains exact"
+    );
+    assert(@catch(gpu::get_device_caps(&wsi_device)) == gpu::DEVICE_LOST, "presentation loss marks its owner");
+    gpu::destroy_device(&wsi_device)!!;
 }
 
 fn void generic_result_mapping_is_truthful() @test {

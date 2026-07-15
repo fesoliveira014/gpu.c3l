@@ -179,7 +179,7 @@ fn bool? texture_desc_supported(VkDeviceState* state, gpu::TextureDesc* desc) @p
         case vk::Result.SUCCESS:
             break;
         default:
-            check(result)!;
+            check_device_result(state, result)!;
     }
 
     uint mip_levels = desc.mip_levels == 0 ? 1 : desc.mip_levels;
@@ -287,6 +287,7 @@ fn void? check_texture_view_backend_result(
     TextureSlot* slot,
     vk::Result result,
 ) {
+    observe_device_result(state, result);
     if (operation == null) return check(result);
     bool stderr_fallback = state.debug_callback == null;
     fault public_fault = @catch(map_result(result, stderr_fallback));
@@ -431,7 +432,13 @@ fn void destroy_cached_views(VkDeviceState* state, TextureSlot* slot) {
 fn void enqueue_cached_views(VkDeviceState* state, TextureSlot* slot, ulong retire) @private {
     foreach (&cached : slot.views) {
         if (cached.used) {
-            enqueue_deferred(state, DeferredKind.IMAGE_VIEW, retire, (void*)cached.view, (vma::Allocation)null);
+            enqueue_deferred(
+                state:          state,
+                kind:           DeferredKind.IMAGE_VIEW,
+                timeline_value: retire,
+                object:         (void*)cached.view,
+                allocation:     (vma::Allocation)null,
+            );
             cached.used = false;
         }
     }
@@ -502,14 +509,15 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .array_layers   = array_layers,
     };
     vma::AllocationInfo allocation_info;
-    check_texture_create_result(
-        state.allocator.create_image(
+    check_texture_create_device_result(
+        result: state.allocator.create_image(
             image_info:     &image_info,
             alloc_info:     &alloc_info,
             out_image:      &slot.image,
             out_allocation: &slot.allocation,
             out_info:       &allocation_info,
-        )
+        ),
+        state: state,
     )!;
     slot.allocation_size = (usz)allocation_info.size;
 
@@ -535,7 +543,12 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
             .base_array_layer = 0,
             .layer_count      = array_layers,
         });
-    if (catch err = check(vk::create_image_view(state.device, &view_info, null, &slot.default_view))) {
+    if (catch err = check_device_result(state, vk::create_image_view(
+        device:        state.device,
+        p_create_info: &view_info,
+        p_allocator:   null,
+        p_view:        &slot.default_view,
+    ))) {
         state.allocator.destroy_image(slot.image, slot.allocation);
         return err~;
     }
@@ -572,6 +585,18 @@ fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @pri
     vk::ImageView default_view = slot.default_view;
     enqueue_cached_views(state, slot, retire);
     state.textures.free(handle)!;
-    enqueue_deferred(state, DeferredKind.IMAGE_VIEW, retire, (void*)default_view, (vma::Allocation)null);
-    enqueue_deferred(state, DeferredKind.IMAGE, retire, (void*)image, allocation);
+    enqueue_deferred(
+        state:          state,
+        kind:           DeferredKind.IMAGE_VIEW,
+        timeline_value: retire,
+        object:         (void*)default_view,
+        allocation:     (vma::Allocation)null,
+    );
+    enqueue_deferred(
+        state:          state,
+        kind:           DeferredKind.IMAGE,
+        timeline_value: retire,
+        object:         (void*)image,
+        allocation:     allocation,
+    );
 }

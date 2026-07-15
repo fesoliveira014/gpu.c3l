@@ -46,6 +46,17 @@ fn void? check(vk::Result result) @private {
     return map_result(result, true);
 }
 
+fn void observe_device_result(VkDeviceState* state, vk::Result result) @private {
+    if (state != null && result == vk::Result.ERROR_DEVICE_LOST) {
+        gpu::mark_device_lost(&state.owner);
+    }
+}
+
+fn void? check_device_result(VkDeviceState* state, vk::Result result) @private {
+    observe_device_result(state, result);
+    return check(result);
+}
+
 fn ZString backend_result_text(vk::Result result) @private {
     switch (result) {
         case vk::Result.ERROR_OUT_OF_HOST_MEMORY:   return "Vulkan host memory exhausted";
@@ -60,6 +71,7 @@ fn ZString backend_result_text(vk::Result result) @private {
 }
 
 fn void? check_backend_result(VkDeviceState* state, ZString operation, vk::Result result) {
+    observe_device_result(state, result);
     bool stderr_fallback = state == null || state.debug_callback == null;
     fault public_fault = @catch(map_result(result, stderr_fallback));
     if (!public_fault) return;
@@ -235,6 +247,16 @@ fn void? check_texture_create_result(vk::Result result) @private {
     }
 }
 
+fn void? check_texture_create_device_result(vk::Result result, VkDeviceState* state) @private {
+    switch (result) {
+        case vk::Result.ERROR_FORMAT_NOT_SUPPORTED:
+        case vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
+            return gpu::UNSUPPORTED_FEATURE~;
+        default:
+            return check_device_result(state, result);
+    }
+}
+
 fn void? check_shader_create_result(vk::Result result) @private {
     switch (result) {
         case vk::Result.ERROR_INVALID_SHADER_NV:
@@ -242,6 +264,16 @@ fn void? check_shader_create_result(vk::Result result) @private {
             return gpu::SHADER_INVALID~;
         default:
             return check(result);
+    }
+}
+
+fn void? check_shader_create_device_result(vk::Result result, VkDeviceState* state) @private {
+    switch (result) {
+        case vk::Result.ERROR_INVALID_SHADER_NV:
+        case vk::Result.ERROR_VALIDATION_FAILED_EXT:
+            return gpu::SHADER_INVALID~;
+        default:
+            return check_device_result(state, result);
     }
 }
 
@@ -253,6 +285,19 @@ fn void? check_pipeline_create_result(vk::Result result) @private {
         case vk::Result.ERROR_OUT_OF_DEVICE_MEMORY:
         case vk::Result.ERROR_DEVICE_LOST:
             return check(result);
+        default:
+            return gpu::PIPELINE_CREATE_FAILED~;
+    }
+}
+
+fn void? check_pipeline_create_device_result(vk::Result result, VkDeviceState* state) @private {
+    switch (result) {
+        case vk::Result.SUCCESS:
+            return;
+        case vk::Result.ERROR_OUT_OF_HOST_MEMORY:
+        case vk::Result.ERROR_OUT_OF_DEVICE_MEMORY:
+        case vk::Result.ERROR_DEVICE_LOST:
+            return check_device_result(state, result);
         default:
             return gpu::PIPELINE_CREATE_FAILED~;
     }

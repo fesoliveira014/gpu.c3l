@@ -83,11 +83,17 @@ fn void? RecordingContextTable.free(&self, gpu::RecordingContextHandle h) {
 }
 
 fn vk::CommandPool? create_context_pool_real(void* user_data, vk::Device device, uint family) @private {
+    VkDeviceState* state = (VkDeviceState*)user_data;
     vk::CommandPoolCreateInfo info = vk::command_pool_create_info()
         .set_queue_family_index(family)
         .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
     vk::CommandPool pool;
-    check(vk::create_command_pool(device, &info, null, &pool))!;
+    check_device_result(state, vk::create_command_pool(
+        device:        device,
+        p_create_info: &info,
+        p_allocator:   null,
+        p_command_pool: &pool,
+    ))!;
     return pool;
 }
 
@@ -95,10 +101,11 @@ fn void destroy_context_pool_real(void* user_data, vk::Device device, vk::Comman
     vk::destroy_command_pool(device, pool, null);
 }
 
-fn ContextPoolOps context_pool_ops_real() @private {
+fn ContextPoolOps context_pool_ops_real(VkDeviceState* state) @private {
     return {
-        .create = &create_context_pool_real,
-        .destroy = &destroy_context_pool_real,
+        .user_data = state,
+        .create    = &create_context_pool_real,
+        .destroy   = &destroy_context_pool_real,
     };
 }
 
@@ -164,12 +171,12 @@ fn void? create_context_pools_with_ops(
 }
 
 fn void? create_context_pools(VkDeviceState* state, RecordingContextState* context) @private {
-    ContextPoolOps ops = context_pool_ops_real();
+    ContextPoolOps ops = context_pool_ops_real(state);
     return create_context_pools_with_ops(state, context, &ops);
 }
 
 fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* context) @private {
-    ContextPoolOps ops = context_pool_ops_real();
+    ContextPoolOps ops = context_pool_ops_real(state);
     destroy_context_pools_with_ops(state, context, &ops);
 }
 
@@ -188,7 +195,7 @@ fn gpu::RecordingContextHandle? create_builtin_recording_context_with_ops(
 }
 
 fn gpu::RecordingContextHandle? create_builtin_recording_context(VkDeviceState* state) @private {
-    ContextPoolOps ops = context_pool_ops_real();
+    ContextPoolOps ops = context_pool_ops_real(state);
     return create_builtin_recording_context_with_ops(state, &ops);
 }
 
@@ -273,11 +280,11 @@ fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::Recor
         .set_level(vk::CommandBufferLevel.PRIMARY)
         .set_command_buffer_count(1);
     vk::CommandBuffer cmd;
-    check(vk::allocate_command_buffers(state.device, &alloc, &cmd))!;
+    check_device_result(state, vk::allocate_command_buffers(state.device, &alloc, &cmd))!;
 
     vk::CommandBufferBeginInfo begin = vk::command_buffer_begin_info()
         .set_flags(vk::CommandBufferUsageFlagBits.ONE_TIME_SUBMIT_BIT);
-    check(vk::begin_command_buffer(cmd, &begin))!;
+    check_device_result(state, vk::begin_command_buffer(cmd, &begin))!;
 
     CommandRecord record = {
         .command_buffer = cmd,
@@ -306,7 +313,8 @@ fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::Recor
 fn void? vk_end_commands(gpu::CommandList* commands) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    check(vk::end_command_buffer(record.command_buffer))!;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    check_device_result(state, vk::end_command_buffer(record.command_buffer))!;
     record.state = CommandState.EXECUTABLE;
 }
 
