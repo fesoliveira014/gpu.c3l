@@ -213,7 +213,7 @@ fn void malformed_native_request_preserves_runtime_state() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void failed_native_device_creation_rolls_back_before_publication() @test {
+fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "gpu_vk_device_request_rollback_test",
@@ -222,33 +222,52 @@ fn void failed_native_device_creation_rolls_back_before_publication() @test {
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::DeviceRequest request = gpu::strict_device_request();
+    gpu::vk::DeviceCreationCheckpoint[9] checkpoints = {
+        gpu::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE,
+        gpu::vk::DeviceCreationCheckpoint.ALLOCATOR,
+        gpu::vk::DeviceCreationCheckpoint.FRAME_RESOURCES,
+        gpu::vk::DeviceCreationCheckpoint.PERSISTENT_ARENA,
+        gpu::vk::DeviceCreationCheckpoint.RECORDING_CONTEXTS,
+        gpu::vk::DeviceCreationCheckpoint.TRANSFER_ARENAS,
+        gpu::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP,
+        gpu::vk::DeviceCreationCheckpoint.PIPELINE_SHARED,
+        gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
+    };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
 
-        uint initialized_before = gpu::vk::device_creation_initialized_count();
-        uint rolled_back_before = gpu::vk::device_creation_rollback_count();
-        uint live_slots_before = live_device_slot_count();
-        gpu::vk::inject_device_creation_failure_before_publish(true);
-        defer gpu::vk::inject_device_creation_failure_before_publish(false);
+        foreach (checkpoint : checkpoints) {
+            gpu::Runtime retained_runtime = runtime;
+            gpu::runtime_retain_device(&retained_runtime)!!;
+            gpu::vk::DeviceCreationProbe probe = { .fail_at = checkpoint };
+            uint live_slots_before = live_device_slot_count();
 
-        assert(
-            @catch(gpu::create_device(&adapter, &request)) == gpu::BACKEND_ERROR,
-            "injected native creation failure returns the backend fault"
-        );
-        assert(
-            live_device_slot_count() == live_slots_before,
-            "failed native creation publishes no device"
-        );
-        assert(
-            gpu::vk::device_creation_initialized_count() == initialized_before + 1,
-            "failure occurs after native initialization"
-        );
-        assert(
-            gpu::vk::device_creation_rollback_count() == rolled_back_before + 1,
-            "failure tears down the initialized native state"
-        );
+            assert(
+                @catch(gpu::vk::create_vk_device_with_probe(
+                    adapter:          &adapter,
+                    request:          &request,
+                    retained_runtime: &retained_runtime,
+                    probe:            &probe,
+                )) == gpu::BACKEND_ERROR,
+                "a checkpoint failure returns the backend fault"
+            );
+            gpu::runtime_release_device(&retained_runtime)!!;
+            assert(probe.reached == checkpoint, "creation reaches the requested checkpoint");
+            assert(probe.rollback_count == 1, "creation rolls back exactly once");
+            assert(
+                live_device_slot_count() == live_slots_before,
+                "failed creation publishes no device"
+            );
+            assert(
+                gpu::get_adapter_info(&adapter)!!.name.len > 0,
+                "failed creation leaves its adapter usable"
+            );
+        }
+
+        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::destroy_device(&device)!!;
         gpu::destroy_runtime(&runtime)!!;
         return;
     }
