@@ -4,6 +4,9 @@ import gpu @public;
 import gpu::vk @public;
 import std::atomic;
 
+const gpu::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
+    .destroy_device = &destroy_registry_blocker,
+};
 fn uint live_device_slot_count() @private {
     uint live_count;
     for (uint i = 0; i < gpu::MAX_DEVICES; i++) {
@@ -14,6 +17,17 @@ fn uint live_device_slot_count() @private {
     }
     return live_count;
 }
+
+fn void destroy_registry_blocker(void* backend_state) @private {
+    (void)backend_state;
+}
+
+fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
+    foreach (&blocker : blockers) {
+        if (blocker.is_valid()) (void)gpu::destroy_device(blocker);
+    }
+}
+
 
 fn void strict_heap_state_follows_request_and_mode() @test {
     gpu::DeviceDesc desc = {
@@ -222,23 +236,18 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::DeviceRequest request = gpu::strict_device_request();
-    gpu::vk::DeviceCreationCheckpoint[9] checkpoints = {
-        gpu::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE,
-        gpu::vk::DeviceCreationCheckpoint.ALLOCATOR,
-        gpu::vk::DeviceCreationCheckpoint.FRAME_RESOURCES,
-        gpu::vk::DeviceCreationCheckpoint.PERSISTENT_ARENA,
-        gpu::vk::DeviceCreationCheckpoint.RECORDING_CONTEXTS,
-        gpu::vk::DeviceCreationCheckpoint.TRANSFER_ARENAS,
-        gpu::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP,
-        gpu::vk::DeviceCreationCheckpoint.PIPELINE_SHARED,
-        gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
-    };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
 
-        foreach (checkpoint : checkpoints) {
+        for (
+            uint checkpoint_ordinal = gpu::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal;
+            checkpoint_ordinal <= gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal;
+            checkpoint_ordinal++
+        ) {
+            gpu::vk::DeviceCreationCheckpoint checkpoint =
+                (gpu::vk::DeviceCreationCheckpoint)checkpoint_ordinal;
             gpu::Runtime retained_runtime = runtime;
             gpu::runtime_retain_device(&retained_runtime)!!;
             gpu::vk::DeviceCreationProbe probe = { .fail_at = checkpoint };
@@ -273,6 +282,116 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     }
 
     gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void owned_instance_creation_rolls_back_after_bootstrap() @test {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .application_name  = "gpu_vk_owned_instance_rollback_test",
+        .enable_validation = true,
+    };
+    gpu::vk::DeviceCreationProbe probe = {
+        .fail_at = gpu::vk::DeviceCreationCheckpoint.OWNED_INSTANCE,
+    };
+    uint live_slots_before = live_device_slot_count();
+
+    assert(
+        @catch(gpu::vk::create_vk_device_from_desc_with_probe(&desc, &probe))
+            == gpu::BACKEND_ERROR,
+        "an owned-instance checkpoint failure returns the backend fault"
+    );
+    assert(
+        probe.reached == gpu::vk::DeviceCreationCheckpoint.OWNED_INSTANCE,
+        "owned-instance creation reaches its checkpoint"
+    );
+    assert(probe.rollback_count == 1, "owned-instance creation rolls back once");
+    assert(
+        probe.owned_instance_teardown_count == 1,
+        "owned-instance rollback destroys the instance once"
+    );
+    assert(
+        live_device_slot_count() == live_slots_before,
+        "owned-instance failure publishes no device"
+    );
+}
+
+fn void publication_failure_rolls_back_native_state() @test {
+    gpu::RuntimeDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .application_name  = "gpu_vk_publication_rollback_test",
+        .enable_validation = true,
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer {
+        if (runtime.is_valid()) (void)gpu::destroy_runtime(&runtime);
+    }
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+    bool exercised;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
+        exercised = true;
+
+        uint blocker_state;
+        gpu::Device[gpu::MAX_DEVICES] blockers;
+        defer destroy_registry_blockers(blockers[..]);
+        foreach (&blocker : blockers) {
+            *blocker = gpu::register_device(
+                backend:       gpu::BackendKind.VULKAN,
+                caps:          {},
+                vtable:        &REGISTRY_BLOCKER_VTABLE,
+                backend_state: &blocker_state,
+            )!!;
+        }
+
+        gpu::Runtime retained_runtime = runtime;
+        gpu::runtime_retain_device(&retained_runtime)!!;
+        bool retain_live = true;
+        defer {
+            if (retain_live) (void)gpu::runtime_release_device(&retained_runtime);
+        }
+        gpu::vk::DeviceCreationProbe probe;
+        uint live_slots_before = live_device_slot_count();
+
+        assert(
+            @catch(gpu::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                request:          &request,
+                retained_runtime: &retained_runtime,
+                probe:            &probe,
+            )) == gpu::SLOT_TABLE_FULL,
+            "registration reports a full device registry"
+        );
+        gpu::runtime_release_device(&retained_runtime)!!;
+        retain_live = false;
+        assert(
+            probe.reached == gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
+            "registry exhaustion occurs after native initialization"
+        );
+        assert(probe.rollback_count == 1, "registry exhaustion rolls back once");
+        assert(
+            live_device_slot_count() == live_slots_before,
+            "registry exhaustion publishes no additional device"
+        );
+        assert(
+            @catch(gpu::create_device(&adapter, &request)) == gpu::SLOT_TABLE_FULL,
+            "public creation reports a full registry without retaining the runtime"
+        );
+
+        destroy_registry_blockers(blockers[..]);
+        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::destroy_device(&device)!!;
+        assert(
+            gpu::get_adapter_info(&adapter)!!.name.len > 0,
+            "registry recovery leaves the adapter usable"
+        );
+        gpu::destroy_runtime(&runtime)!!;
+        break;
+    }
+
+    assert(exercised, "the controlled native target has a compatible strict adapter");
 }
 
 fn void runtime_devices_destroy_independently() @test {
