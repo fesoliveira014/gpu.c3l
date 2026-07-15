@@ -222,9 +222,8 @@ unsupported.
 
 `get_queue_counts` reports selected counts by role. `get_queue` returns a
 device-owned identity for a role/index pair, and aliased roles return the same
-identity with a shared role mask. The Vulkan backend returns
-`UNSUPPORTED_FEATURE` when a role count exceeds one. Command entry points take
-`QueueKind`.
+identity with a shared role mask. The Vulkan backend allocates every selected
+native identity. Command entry points take `QueueKind`.
 
 ### Command lists
 

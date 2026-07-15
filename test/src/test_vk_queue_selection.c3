@@ -526,6 +526,53 @@ fn void swapchain_sharing_includes_a_separate_present_family() @test {
     );
 }
 
+fn void same_family_presentation_keeps_its_exact_queue() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_T, 4),
+    };
+    bool[1] presentation_support = { true };
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 2, .transfer = 2 },
+        .distinct = { .transfer },
+    };
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_surface_requirements(
+            table[..],
+            presentation_support[..],
+            requirements,
+        )!!;
+    assert(picked.graphics == picked.present);
+    assert(picked.graphics_index != picked.present_index);
+
+    vk::Queue graphics_queue = (vk::Queue)(uptr)0x20;
+    vk::Queue transfer_queue = (vk::Queue)(uptr)0x30;
+    vk::Queue present_queue = (vk::Queue)(uptr)0x10;
+    vk::VkDeviceState state = {
+        .selected_queue_roles = picked.selected,
+        .graphics_family      = picked.graphics,
+        .graphics_queue       = graphics_queue,
+        .transfer_family      = picked.transfer,
+        .transfer_queue       = transfer_queue,
+        .presentation         = {
+            .enabled = true,
+            .family  = picked.present,
+            .queue   = present_queue,
+        },
+    };
+    vk::Queue[2] queues;
+    uint queue_count = vk::swapchain_idle_queues(&state, queues[..]);
+    assert(queue_count == 2);
+    assert(queues[0] == graphics_queue && queues[1] == present_queue);
+    assert(
+        vk::present_queue_mutex_for(&state)
+            != vk::queue_mutex_for(&state, gpu::QueueKind.GRAPHICS)
+    );
+    assert(
+        vk::native_queue_mutex_for(&state, present_queue)
+            == vk::present_queue_mutex_for(&state)
+    );
+}
+
 fn void distinct_compute_requirement_uses_a_second_native_queue() @test {
     vk::QueueFamilyProperties[1] table = {
         family(QF_G | QF_C | QF_T, 2),
@@ -845,4 +892,292 @@ fn void unavailable_distinct_queue_requirement_faults() @test {
             == gpu::UNSUPPORTED_FEATURE,
         "an unavailable distinct queue is rejected"
     );
+}
+
+fn void multiple_queues_per_role_share_available_native_queues() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 2),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = 2,
+            .compute  = 2,
+            .transfer = 2,
+        },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(
+        vk::requested_queue_count(&picked, picked.graphics, false) == 2,
+        "two native queues satisfy all three semantic roles"
+    );
+}
+
+fn void compute_only_multi_count_keeps_exact_families() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_C, 1),
+        family(QF_C, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = { .compute = 2 },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(!picked.selected.graphics && picked.selected.compute);
+    assert(!picked.selected.transfer && picked.counts.compute == 2);
+
+    uint[2] device_families;
+    uint device_count = vk::selected_device_queue_families(
+        &picked,
+        false,
+        device_families[..],
+    );
+    assert(device_count == 2);
+    assert(device_families[0] == 0 && device_families[1] == 1);
+
+    vk::VkDeviceState state = {
+        .selected_queue_roles = picked.selected,
+        .compute_family       = picked.compute,
+        .queues               = picked,
+    };
+    uint[2] shared_families;
+    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
+    assert(shared_count == 2);
+    assert(shared_families[0] == 0 && shared_families[1] == 1);
+}
+
+fn void transfer_only_multi_count_reaches_every_frame_family() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_T, 1),
+        family(QF_T, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = { .transfer = 2 },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(!picked.selected.graphics && !picked.selected.compute);
+    assert(picked.selected.transfer && picked.counts.transfer == 2);
+
+    vk::VkDeviceState state = {
+        .selected_queue_roles = picked.selected,
+        .transfer_family      = picked.transfer,
+        .queues               = picked,
+    };
+    uint[2] frame_families;
+    uint frame_count =
+        vk::graphics_compute_queue_families(&state, frame_families[..]);
+    assert(frame_count == 2);
+    assert(frame_families[0] == 0 && frame_families[1] == 1);
+}
+
+fn void private_presentation_preserves_graphics_multi_count() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G, 1),
+        family(QF_G, 1),
+        family(0, 1),
+    };
+    bool[3] presentation_support = { false, false, true };
+    gpu::QueueRequirements requirements = {
+        .counts = { .graphics = 2 },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_surface_requirements(
+            table[..],
+            presentation_support[..],
+            requirements,
+        )!!;
+    assert(picked.selected.graphics && !picked.selected.compute);
+    assert(picked.presentation && picked.present == 2);
+
+    uint[3] device_families;
+    uint device_count = vk::selected_device_queue_families(
+        &picked,
+        true,
+        device_families[..],
+    );
+    assert(device_count == 3);
+    assert(
+        device_families[0] == 0
+            && device_families[1] == 1
+            && device_families[2] == 2
+    );
+}
+
+fn void unavailable_queue_count_faults() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = 2,
+            .compute  = 1,
+            .transfer = 1,
+        },
+    };
+
+    assert(
+        @catch(vk::pick_queue_families_for_requirements(table[..], requirements))
+            == gpu::UNSUPPORTED_FEATURE
+    );
+}
+
+fn void distinct_role_counts_request_disjoint_native_queues() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 3),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = 2,
+            .compute  = 1,
+        },
+        .distinct = { .compute },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(
+        vk::requested_queue_count(&picked, picked.graphics, false) == 3,
+        "distinct compute and two graphics queues require three native queues"
+    );
+}
+
+fn void multiple_distinct_roles_preserve_constrained_capacity() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 3),
+        family(QF_G, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = 2,
+            .compute  = 2,
+        },
+        .distinct = { .graphics, .compute },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(picked.counts.graphics == 2 && picked.counts.compute == 2);
+    for (uint graphics = 0; graphics < picked.counts.graphics; graphics++) {
+        for (uint compute = 0; compute < picked.counts.compute; compute++) {
+            assert(
+                vk::selected_native_queue(&picked, gpu::QueueKind.GRAPHICS, graphics)
+                    != vk::selected_native_queue(&picked, gpu::QueueKind.COMPUTE, compute),
+                "distinct role identities do not overlap"
+            );
+        }
+    }
+}
+
+fn void one_distinct_role_preserves_other_role_capacity() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 3),
+        family(QF_G, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = 2,
+            .compute  = 2,
+        },
+        .distinct = { .graphics },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(picked.counts.graphics == 2 && picked.counts.compute == 2);
+    for (uint graphics = 0; graphics < picked.counts.graphics; graphics++) {
+        for (uint compute = 0; compute < picked.counts.compute; compute++) {
+            assert(
+                vk::selected_native_queue(&picked, gpu::QueueKind.GRAPHICS, graphics)
+                    != vk::selected_native_queue(&picked, gpu::QueueKind.COMPUTE, compute),
+                "the distinct graphics role leaves both compute queues available"
+            );
+        }
+    }
+}
+
+fn void device_queue_families_include_multi_count_selections() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 1),
+        family(QF_G, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = 2,
+            .compute  = 1,
+            .transfer = 1,
+        },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    uint[4] families;
+    uint count = vk::selected_device_queue_families(
+        &picked,
+        false,
+        families[..],
+    );
+    assert(count == 2, "logical device creation includes both graphics families");
+    assert(families[0] == 0 && families[1] == 1);
+}
+
+fn void maximum_queue_counts_share_full_native_range() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, gpu::MAX_REQUESTED_QUEUES_PER_ROLE),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .compute  = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .transfer = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+        },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(picked.counts.graphics == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.compute == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.transfer == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(
+        vk::requested_queue_count(&picked, 0, false)
+            == gpu::MAX_REQUESTED_QUEUES_PER_ROLE
+    );
+    assert(
+        vk::selected_native_queue(&picked, gpu::QueueKind.GRAPHICS, 254)
+            == vk::selected_native_queue(&picked, gpu::QueueKind.COMPUTE, 254)
+    );
+    assert(
+        vk::selected_native_queue(&picked, gpu::QueueKind.COMPUTE, 254)
+            == vk::selected_native_queue(&picked, gpu::QueueKind.TRANSFER, 254)
+    );
+}
+
+fn void maximum_distinct_queue_counts_use_disjoint_native_ranges() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, gpu::MAX_SELECTED_QUEUE_IDENTITIES),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .compute  = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .transfer = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+        },
+        .distinct = {
+            .graphics,
+            .compute,
+            .transfer,
+        },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(picked.counts.graphics == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.compute == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.transfer == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(vk::requested_queue_count(&picked, 0, false)
+        == gpu::MAX_SELECTED_QUEUE_IDENTITIES);
 }

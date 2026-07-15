@@ -70,6 +70,7 @@ struct VkDeviceState {
     uint                       compute_queue_index;
     uint                       transfer_family;
     uint                       transfer_queue_index;
+    QueueFamilies              queues;
     vk::Queue                  graphics_queue;
     vk::Queue                  compute_queue;
     vk::Queue                  transfer_queue;
@@ -523,6 +524,7 @@ fn gpu::Device? create_vk_device_with_selection(
         state.transfer_family = families.transfer;
         state.transfer_queue_index = families.transfer_index;
     }
+    state.queues = families;
     if (state.presentation.enabled) {
         state.presentation.family = families.present;
         state.presentation.queue_index = families.present_index;
@@ -657,11 +659,11 @@ fn gpu::Device? create_vk_device_with_selection(
         ? gpu::default_queue_requirements()
         : *queue_requirements;
     gpu::QueueSelection queue_selection =
-        gpu::queue_selection_for_requirements(
-            requirements:              requirements,
-            compute_aliases_graphics:  state.compute_queue == state.graphics_queue,
-            transfer_aliases_graphics: state.transfer_queue == state.graphics_queue,
-            transfer_aliases_compute:  state.transfer_queue == state.compute_queue,
+        gpu::queue_selection_from_native_ids(
+            requirements: requirements,
+            graphics:     families.graphics_ids[:families.counts.graphics],
+            compute:      families.compute_ids[:families.counts.compute],
+            transfer:     families.transfer_ids[:families.counts.transfer],
         )!;
     state.caps.queues = queue_selection.counts;
 
@@ -1008,25 +1010,65 @@ fn int score_device(int device_type) @private {
 }
 
 <* Enable requested feature groups and deduplicate queue families. *>
-fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families, bool line_polygon_mode) @private {
-    float[MAX_SELECTED_QUEUE_INDICES] priorities = { 1.0, 1.0, 1.0 };
-    vk::DeviceQueueCreateInfo[MAX_QUEUE_FAMILIES] queue_infos;
-    uint[MAX_QUEUE_FAMILIES] selected_families;
-    uint queue_info_count = selected_device_queue_families(
-        families,
-        state.presentation.enabled,
-        selected_families[..],
-    );
-    foreach (index, family : selected_families[:queue_info_count]) {
-        uint queue_count = requested_queue_count(
+fn void? create_logical_device(
+    VkDeviceState* state,
+    QueueFamilies* families,
+    bool line_polygon_mode,
+) @private {
+    @pool() {
+        uint family_capacity = families.counts.graphics
+            + families.counts.compute
+            + families.counts.transfer
+            + (state.presentation.enabled ? 1 : 0);
+        uint[] selected_families =
+            mem::talloc_array(uint, (sz)family_capacity);
+        uint queue_info_count = selected_device_queue_families(
             families,
-            family,
             state.presentation.enabled,
+            selected_families,
         );
-        queue_infos[index] = vk::device_queue_create_info()
-            .set_queue_family_index(family)
-            .set_queue_priorities(priorities[:queue_count]);
-    }
+
+        uint max_queue_count;
+        foreach (family : selected_families[:queue_info_count]) {
+            uint queue_count = requested_queue_count(
+                families,
+                family,
+                state.presentation.enabled,
+            );
+            if (queue_count > max_queue_count) {
+                max_queue_count = queue_count;
+            }
+        }
+        float[] priorities = mem::talloc_array(float, (sz)max_queue_count);
+        foreach (&priority : priorities) {
+            *priority = 1.0f;
+        }
+
+        vk::DeviceQueueCreateInfo[] queue_infos =
+            mem::talloc_array(vk::DeviceQueueCreateInfo, (sz)queue_info_count);
+        foreach (index, family : selected_families[:queue_info_count]) {
+            uint queue_count = requested_queue_count(
+                families,
+                family,
+                state.presentation.enabled,
+            );
+            queue_infos[index] = vk::device_queue_create_info()
+                .set_queue_family_index(family)
+                .set_queue_priorities(priorities[:queue_count]);
+        }
+        return create_logical_device_with_queue_infos(
+            state,
+            queue_infos,
+            line_polygon_mode,
+        );
+    };
+}
+
+fn void? create_logical_device_with_queue_infos(
+    VkDeviceState* state,
+    vk::DeviceQueueCreateInfo[] queue_infos,
+    bool line_polygon_mode,
+) @private {
 
     vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features = vk::physical_device_descriptor_buffer_features_ext()
         .set_descriptor_buffer(vk::TRUE);
@@ -1084,7 +1126,7 @@ fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families, bo
 
     vk::DeviceCreateInfo device_info = vk::device_create_info()
         .set_next(&features2)
-        .set_queue_create_infos(queue_infos[:queue_info_count]);
+        .set_queue_create_infos(queue_infos);
     if (extension_count > 0) {
         device_info = device_info.set_enabled_extension_names(extensions[:extension_count]);
     }
