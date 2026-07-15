@@ -6,14 +6,17 @@ const uint QUEUE_ID_TRANSFER @private = 2;
 
 const Queue QUEUE_INVALID = {};
 
+<* Semantic roles supported by one selected queue. *>
 bitstruct QueueRoles : uint {
     bool graphics : 0;
     bool compute  : 1;
     bool transfer : 2;
 }
 
+<* Device-owned selected queue token. Copy or compare it as a whole; use
+   get_queue_info to inspect its identity and supported roles. *>
 struct Queue {
-    ulong      owner;
+    Device     device;
     uint       id;
     QueueRoles roles;
 }
@@ -48,7 +51,12 @@ struct SubmitDesc {
     SwapchainHandle   swapchain;
 }
 
-fn bool Queue.is_valid(self) => self.owner != 0;
+fn bool Queue.is_valid(self) => self.device.is_valid();
+fn bool Queue.equals(self, Queue other) @operator(==) {
+    return self.device == other.device
+        && self.id == other.id
+        && (uint)self.roles == (uint)other.roles;
+}
 
 fn bool queue_roles_equal(QueueRoles first, QueueRoles second) @private {
     return (uint)first == (uint)second;
@@ -133,38 +141,46 @@ fn bool queue_id_is_selected(DeviceOperation* operation, Queue queue) @private {
         && queue_roles_equal(queue.roles, selection.transfer_roles);
 }
 
-fn void? validate_queue(DeviceOperation* operation, Queue queue) @private {
-    if (operation == null || !operation.active || !queue.is_valid()) return INVALID_HANDLE~;
-    validate_resource_owner(operation, queue.owner, ResourceOwnerKind.QUEUE)!;
-    if (!queue_id_is_selected(operation, queue)) return INVALID_HANDLE~;
+fn void? validate_queue(
+    DeviceOperation* operation,
+    Device* device,
+    Queue queue,
+) @private {
+    if (operation == null || !operation.active || device == null || !queue.is_valid()) {
+        return INVALID_HANDLE~;
+    }
+    if (queue.device != *device || !queue_id_is_selected(operation, queue)) {
+        return INVALID_HANDLE~;
+    }
 }
 
-<* Return selected queue counts by semantic role. Aliased roles count the same
-   device-local queue under each supported role. *>
+<* Return selected queue counts by semantic role; aliased roles count the same
+   queue. INVALID_HANDLE if the device is not live. *>
 fn QueueCounts? get_queue_counts(Device* device) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     return selected_queue_counts(&operation);
 }
 
-<* Return an owner-bearing queue identity for a semantic role and index. Aliased
-   roles return the same token. *>
+<* Return a device-owned queue identity for a semantic role and index. Aliased
+   roles return the same token; an unavailable index faults INVALID_ARGUMENT. *>
 fn Queue? get_queue(Device* device, QueueKind kind, uint index = 0) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (index >= selected_queue_count(&operation, kind)) return INVALID_ARGUMENT~;
     return {
-        .owner = resource_owner_tag(operation.data.resource_owner, ResourceOwnerKind.QUEUE),
-        .id    = selected_queue_id(&operation, kind) + index,
-        .roles = selected_queue_roles(&operation, kind),
+        .device = *device,
+        .id     = selected_queue_id(&operation, kind) + index,
+        .roles  = selected_queue_roles(&operation, kind),
     };
 }
 
-<* Return a live queue token's device-local identity and supported roles. *>
+<* Return a live queue's device-local identity and supported roles.
+   INVALID_HANDLE if the token is stale, foreign, or malformed. *>
 fn QueueInfo? get_queue_info(Device* device, Queue queue) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    validate_queue(&operation, queue)!;
+    validate_queue(&operation, device, queue)!;
     return {
         .id    = queue.id,
         .roles = queue.roles,

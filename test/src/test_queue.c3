@@ -35,6 +35,7 @@ fn bool queue_roles_are_graphics_transfer(gpu::QueueRoles roles) {
 fn bool queue_roles_are_compute(gpu::QueueRoles roles) {
     return !roles.graphics && roles.compute && !roles.transfer;
 }
+
 fn void queue_tokens_are_compact_owner_tokens() @test {
     assert(gpu::Queue::size <= ulong::size * 2, "gpu::Queue fits in two machine words");
     assert(!gpu::QUEUE_INVALID.is_valid(), "zero queue token is invalid");
@@ -59,7 +60,8 @@ fn void queue_queries_return_owner_bearing_identities() @test {
     assert(first_graphics.is_valid(), "queried queue token is valid");
     assert(first_graphics == first_compute, "aliased graphics and compute roles share one queue identity");
     assert(first_compute == first_transfer, "aliased compute and transfer roles share one queue identity");
-    assert(first_graphics != second_graphics, "queue tokens retain exact device ownership");`r`n    assert(first_graphics.device == first, "queue token names its owning device");
+    assert(first_graphics != second_graphics, "queue tokens retain exact device ownership");
+    assert(first_graphics.device == first, "queue token names its owning device");
     assert(first_graphics.id == 0, "queue token records its device-local index");
     assert(queue_roles_are_all(first_graphics.roles), "queue token reports all supported semantic roles");
 
@@ -103,6 +105,7 @@ fn void queue_queries_preserve_distinct_compute_identity() @test {
 
     gpu::destroy_device(&device)!!;
 }
+
 fn void queue_queries_reject_unavailable_and_foreign_tokens() @test {
     RuntimeDesc desc = queue_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
