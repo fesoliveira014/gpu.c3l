@@ -199,6 +199,7 @@ fn SemaphoreHandle? create_semaphore(Device* device, SemaphoreDesc* desc) {
 fn void? destroy_semaphore(Device* device, SemaphoreHandle semaphore) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, semaphore.owner, ResourceOwnerKind.SEMAPHORE)!;
     return operation.vtable.destroy_semaphore(device, semaphore);
 }
 
@@ -208,5 +209,6 @@ fn void? destroy_semaphore(Device* device, SemaphoreHandle semaphore) {
 fn void? wait_semaphore(Device* device, SemaphoreHandle semaphore, SemaphoreValue value, ulong timeout_ns) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, semaphore.owner, ResourceOwnerKind.SEMAPHORE)!;
     return operation.vtable.wait_semaphore(device, semaphore, value, timeout_ns);
 }

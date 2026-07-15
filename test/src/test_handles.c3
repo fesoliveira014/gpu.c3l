@@ -3,7 +3,7 @@ module gpu_test;
 import gpu @public;
 
 fn void handle_pack_unpack() @test {
-    BufferHandle h = { .index = 42, .generation = 7 };
+    BufferHandle h = { .owner = 1, .index = 42, .generation = 7 };
     assert(h.index == 42, "index round-trips");
     assert(h.generation == 7, "generation round-trips");
     assert(h.is_valid(), "non-zero handle is valid");
@@ -11,15 +11,34 @@ fn void handle_pack_unpack() @test {
 }
 
 fn void handle_kinds_distinct_raw() @test {
-    // index 0 + generation 1 is the smallest valid handle: never raw 0.
-    BufferHandle h = { .index = 0, .generation = 1 };
-    assert((ulong)h != 0, "live handle is never all-zero");
+    BufferHandle h = {
+        .owner      = 1,
+        .index      = 0,
+        .generation = 1,
+    };
+    assert(h.is_valid(), "the smallest owner-bearing local token is valid");
 }
 
+fn void child_handles_retain_exact_owner_identity() @test {
+    BufferHandle first = {
+        .owner      = 17,
+        .index      = 0,
+        .generation = 1,
+    };
+    BufferHandle second = {
+        .owner      = 18,
+        .index      = first.index,
+        .generation = first.generation,
+    };
+
+    assert(first.is_valid(), "an owner-bearing local token is valid");
+    assert(first.owner != second.owner, "coincident local tokens retain distinct owners");
+    assert(BufferHandle::size <= ulong::size * 2, "child handles fit in two machine words");
+}
 
 fn void public_state_tokens_are_compact() @test {
     assert(Device::size == ulong::size, "Device is one opaque 64-bit token");
-    assert(ReadbackTicket::size == ulong::size, "ReadbackTicket is one generation-checked token");
+    assert(ReadbackTicket::size <= ulong::size * 2, "ReadbackTicket fits in two machine words");
 }
 
 fn void index_pack_unpack() @test {
@@ -53,6 +72,7 @@ struct IntCell {
 
 struct IntTable {
     IntCell[] slots;
+    ulong     owner;
     uint      free_head;
     uint      next_new;
 }
@@ -71,10 +91,11 @@ fn BufferHandle? IntTable.alloc(&self, int value) {
     self.slots[idx].value = value;
     self.slots[idx].generation++;
     self.slots[idx].used = true;
-    return (BufferHandle){ .index = idx, .generation = self.slots[idx].generation };
+    return (BufferHandle){ .owner = self.owner, .index = idx, .generation = self.slots[idx].generation };
 }
 
 fn int*? IntTable.get(&self, BufferHandle h) {
+    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
@@ -92,7 +113,7 @@ fn void? IntTable.free(&self, BufferHandle h) {
 
 fn void slot_alloc_get_free() @test {
     IntCell[8] storage;
-    IntTable t = { .slots = storage[..] };
+    IntTable t = { .slots = storage[..], .owner = 1 };
 
     BufferHandle a = t.alloc(100)!!;
     assert(a.is_valid(), "alloc returns a valid handle");
@@ -105,7 +126,7 @@ fn void slot_alloc_get_free() @test {
 
 fn void generation_mismatch_rejected() @test {
     IntCell[8] storage;
-    IntTable t = { .slots = storage[..] };
+    IntTable t = { .slots = storage[..], .owner = 1 };
 
     BufferHandle stale = t.alloc(1)!!;
     t.free(stale)!!;
@@ -121,7 +142,7 @@ fn void generation_mismatch_rejected() @test {
 
 fn void slot_table_full() @test {
     IntCell[2] storage;
-    IntTable t = { .slots = storage[..] };
+    IntTable t = { .slots = storage[..], .owner = 1 };
 
     t.alloc(1)!!;
     t.alloc(2)!!;

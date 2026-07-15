@@ -45,6 +45,7 @@ struct RecordingContextCell {
 
 struct RecordingContextTable {
     RecordingContextCell[] slots;
+    ulong                  owner;
     uint                   free_head;
     uint                   next_new;
 }
@@ -63,10 +64,15 @@ fn gpu::RecordingContextHandle? RecordingContextTable.alloc(&self, RecordingCont
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
-    return (gpu::RecordingContextHandle){ .index = idx, .generation = self.slots[idx].generation };
+    return (gpu::RecordingContextHandle){
+        .owner      = self.owner,
+        .index      = idx,
+        .generation = self.slots[idx].generation,
+    };
 }
 
 fn RecordingContextState*? RecordingContextTable.get(&self, gpu::RecordingContextHandle h) {
+    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
@@ -227,8 +233,8 @@ fn void? vk_destroy_recording_context(gpu::Device* device, gpu::RecordingContext
     defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    if ((ulong)handle == (ulong)state.default_context) return gpu::INVALID_ARGUMENT~;
-    if ((ulong)handle == (ulong)state.helper_context) return gpu::INVALID_ARGUMENT~;
+    if (handle == state.default_context) return gpu::INVALID_ARGUMENT~;
+    if (handle == state.helper_context) return gpu::INVALID_ARGUMENT~;
     RecordingContextState* context = state.recording_contexts.get(handle)!;
     if (context_has_live_commands(state, handle)) return gpu::INVALID_RESOURCE_STATE~;
     destroy_context_pools(state, context);
@@ -558,7 +564,7 @@ fn void? bind_compute_and_push(VkDeviceState* state, CommandRecord* record, gpu:
     validate_descriptor_heap_binding(state)!;
     vk::CommandBuffer cb = record.command_buffer;
     PipelineSlot* slot = state.pipelines.get(handle)!;
-    if ((ulong)handle != (ulong)record.last_pipeline) {
+    if (handle != record.last_pipeline) {
         vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
         bind_descriptor_heap(
             state:      state,

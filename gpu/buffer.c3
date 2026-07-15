@@ -47,6 +47,7 @@ fn BufferHandle? create_buffer(Device* device, BufferDesc* desc) {
 fn void? destroy_buffer(Device* device, BufferHandle buffer) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, buffer.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.destroy_buffer(device, buffer);
 }
 
@@ -55,6 +56,7 @@ fn void? destroy_buffer(Device* device, BufferHandle buffer) {
 fn GpuAddress? get_buffer_address(Device* device, BufferHandle buffer) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, buffer.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.get_buffer_address(device, buffer);
 }
 
@@ -62,6 +64,7 @@ fn GpuAddress? get_buffer_address(Device* device, BufferHandle buffer) {
 fn GpuSpan? get_buffer_span(Device* device, BufferHandle buffer) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, buffer.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.get_buffer_span(device, buffer);
 }
 
@@ -70,6 +73,7 @@ fn GpuSpan? get_buffer_span(Device* device, BufferHandle buffer) {
 fn void? flush_buffer(Device* device, BufferHandle buffer, usz offset, usz size) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, buffer.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.flush_buffer(device, buffer, offset, size);
 }
 
@@ -78,5 +82,6 @@ fn void? flush_buffer(Device* device, BufferHandle buffer, usz offset, usz size)
 fn void? invalidate_buffer(Device* device, BufferHandle buffer, usz offset, usz size) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, buffer.owner, ResourceOwnerKind.BUFFER)!;
     return operation.vtable.invalidate_buffer(device, buffer, offset, size);
 }

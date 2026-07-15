@@ -263,7 +263,7 @@ fn void acquired_image_reports_committed_prior_layout() @test {
     );
     assert(first.prior_layout == gpu::TextureLayout.UNDEFINED,
         "newly wrapped image reports undefined prior layout");
-    assert((ulong)first.texture == (ulong)handle && first.index == 1 && !first.suboptimal,
+    assert(first.texture == handle && first.index == 1 && !first.suboptimal,
         "acquired-image construction preserves existing fields");
 
     gpu::vk::set_texture_layout(&texture, gpu::TextureLayout.PRESENT);

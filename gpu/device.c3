@@ -190,6 +190,7 @@ struct DeviceData @private {
     DeviceCaps     caps;
     BackendVTable* vtable;
     void*          backend_state;
+    ulong          resource_owner;
     Runtime        runtime;
     Adapter        adapter;
     Surface        presentation_surface;
@@ -209,8 +210,29 @@ struct DeviceOperation @private {
     bool           active;
 }
 
+enum ResourceOwnerKind @private {
+    ALLOCATION,
+    BUFFER,
+    TEXTURE,
+    TEXTURE_VIEW,
+    SAMPLER,
+    PIPELINE,
+    SWAPCHAIN,
+    COMMAND,
+    SHADER,
+    SEMAPHORE,
+    RECORDING_CONTEXT,
+    READBACK_TICKET,
+    QUEUE,
+    COMPLETION_POINT,
+}
+
+const ulong RESOURCE_OWNER_KIND_COUNT = (ulong)ResourceOwnerKind.COMPLETION_POINT + 1;
+const ulong MAX_DEVICE_RESOURCE_OWNER = ulong::max / RESOURCE_OWNER_KIND_COUNT;
+
 DeviceSlot[MAX_DEVICES] device_slots @private;
 Atomic{bool} device_registry_lock @private;
+Atomic{ulong} device_resource_owner_counter @private;
 
 fn void lock_device_registry() @private {
     while (device_registry_lock.set(AtomicOrdering.ACQUIRE)) {
@@ -220,6 +242,22 @@ fn void lock_device_registry() @private {
 
 fn void unlock_device_registry() @private {
     (void)device_registry_lock.clear(AtomicOrdering.RELEASE);
+}
+
+fn ulong? allocate_device_resource_owner() @private {
+    ulong current = device_resource_owner_counter.load(AtomicOrdering.RELAXED);
+    while (true) {
+        if (current == MAX_DEVICE_RESOURCE_OWNER) return SLOT_TABLE_FULL~;
+        ulong seen = mem::compare_exchange(
+            &device_resource_owner_counter.data,
+            current,
+            current + 1,
+            AtomicOrdering.ACQUIRE_RELEASE,
+            AtomicOrdering.RELAXED,
+        );
+        if (seen == current) return current + 1;
+        current = seen;
+    }
 }
 
 fn DeviceOperation? begin_device_operation(Device* device) @private {
@@ -271,6 +309,21 @@ fn void end_device_operation(DeviceOperation* operation) @private {
     operation.active = false;
 }
 
+fn ulong resource_owner_tag(ulong device_owner, ResourceOwnerKind kind) @private {
+    return (device_owner - 1) * RESOURCE_OWNER_KIND_COUNT + (ulong)kind + 1;
+}
+
+fn void? validate_resource_owner(
+    DeviceOperation* operation,
+    ulong owner,
+    ResourceOwnerKind kind,
+) @private {
+    if (operation == null || !operation.active) return INVALID_HANDLE~;
+    if (owner != resource_owner_tag(operation.data.resource_owner, kind)) {
+        return INVALID_HANDLE~;
+    }
+}
+
 <* Caller must hold an operation pin or be this device's destroying thread. *>
 fn void mark_device_lost(Device* device) @private {
     if (device == null || !device.is_valid()) return;
@@ -311,12 +364,14 @@ fn Device? register_device(
     DeviceCaps caps,
     BackendVTable* vtable,
     void* backend_state,
+    ulong resource_owner = 0,
     Runtime* retained_runtime = null,
     Adapter* adapter = null,
     Surface* presentation_surface = null,
     Device* owner = null,
 ) @private {
     if (vtable == null || backend_state == null || vtable.destroy_device == null) return INVALID_ARGUMENT~;
+    if (resource_owner == 0) resource_owner = allocate_device_resource_owner()!;
     bool has_runtime = retained_runtime != null;
     if (has_runtime != (adapter != null)) return INVALID_ARGUMENT~;
 
@@ -371,6 +426,7 @@ fn Device? register_device(
             .caps                 = caps,
             .vtable               = vtable,
             .backend_state        = backend_state,
+            .resource_owner       = resource_owner,
             .runtime              = runtime,
             .adapter              = registered_adapter,
             .presentation_surface = registered_surface,

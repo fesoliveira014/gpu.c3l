@@ -158,7 +158,7 @@ fn void disabled_heap_preflights_pipeline_binds() @test {
         root:   (gpu::GpuAddress)0,
     ));
     assert(compute_fault == gpu::UNSUPPORTED_FEATURE, "compute binding preflights a disabled heap");
-    assert((ulong)record.last_pipeline == (ulong)cached, "rejected compute binding preserves the cached pipeline");
+    assert(record.last_pipeline == cached, "rejected compute binding preserves the cached pipeline");
     assert(record.last_entry == 19, "rejected compute binding preserves the cached pipeline entry");
 
     fault graphics_fault = @catch(gpu::vk::bind_graphics_and_push(
@@ -169,7 +169,7 @@ fn void disabled_heap_preflights_pipeline_binds() @test {
         fragment_root: (gpu::GpuAddress)0,
     ));
     assert(graphics_fault == gpu::UNSUPPORTED_FEATURE, "graphics binding preflights a disabled heap");
-    assert((ulong)record.last_pipeline == (ulong)cached, "rejected graphics binding preserves the cached pipeline");
+    assert(record.last_pipeline == cached, "rejected graphics binding preserves the cached pipeline");
     assert(record.last_entry == 19, "rejected graphics binding preserves the cached pipeline entry");
 }
 

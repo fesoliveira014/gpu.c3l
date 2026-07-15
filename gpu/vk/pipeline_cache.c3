@@ -176,11 +176,15 @@ fn void? create_driver_pipeline_cache(VkDeviceState* state, char[] cache_data) @
     return create_driver_pipeline_cache_with_ops(state, cache_data, &ops);
 }
 
+fn ulong shader_local_key(gpu::ShaderHandle shader) @private {
+    return (ulong)shader.index | ((ulong)shader.generation << 32);
+}
+
 fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
     PipelineKey key;
     key.kind               = (int)PipelineKind.GRAPHICS;
-    key.vertex_shader      = (ulong)desc.vertex_shader;
-    key.fragment_shader    = (ulong)desc.fragment_shader;
+    key.vertex_shader      = shader_local_key(desc.vertex_shader);
+    key.fragment_shader    = shader_local_key(desc.fragment_shader);
     key.topology           = (int)desc.topology;
     key.polygon_mode       = (int)desc.raster.polygon_mode;
     key.bias_constant      = desc.raster.depth_bias_constant;
@@ -202,7 +206,7 @@ fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
 fn PipelineKey build_compute_key(gpu::ComputePipelineDesc* desc) @private {
     PipelineKey key;
     key.kind               = (int)PipelineKind.COMPUTE;
-    key.vertex_shader      = (ulong)desc.shader;
+    key.vertex_shader      = shader_local_key(desc.shader);
     key.push_constant_size = desc.push_constant_size;
     return key;
 }

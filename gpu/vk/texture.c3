@@ -52,6 +52,7 @@ struct TextureCell {
 
 struct TextureTable {
     TextureCell[] slots;
+    ulong         owner;
     uint          free_head;
     uint          next_new;
 }
@@ -70,10 +71,15 @@ fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
-    return (gpu::TextureHandle){ .index = idx, .generation = self.slots[idx].generation };
+    return (gpu::TextureHandle){
+        .owner      = self.owner,
+        .index      = idx,
+        .generation = self.slots[idx].generation,
+    };
 }
 
 fn TextureSlot*? TextureTable.get(&self, gpu::TextureHandle h) {
+    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
@@ -577,7 +583,7 @@ fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @pri
     if (slot.swapchain_owned) return gpu::INVALID_ARGUMENT~;
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
     foreach (&cell : heap.texture_cells[:heap.texture_next_new]) {
-        if (cell.used && (ulong)cell.owner == (ulong)handle) return gpu::RESOURCE_IN_USE~;
+        if (cell.used && cell.owner == handle) return gpu::RESOURCE_IN_USE~;
     }
     ulong retire = retire_timeline_value(state);
     vk::Image image = slot.image;

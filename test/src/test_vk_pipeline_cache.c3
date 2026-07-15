@@ -79,7 +79,7 @@ fn void identical_descs_alias_one_entry() @test {
 
     gpu::PipelineHandle first = gpu::create_graphics_pipeline(&device, &desc)!!;
     gpu::PipelineHandle second = gpu::create_graphics_pipeline(&device, &desc)!!;
-    assert((ulong)first != (ulong)second, "aliases are distinct handles");
+    assert(first != second, "aliases are distinct handles");
     assert(cache_entry_count(&device) == 1, "identical descriptors share one cache entry");
 
     gpu::destroy_pipeline(&device, first)!!;
@@ -182,7 +182,7 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
     defer gpu::destroy_pipeline(&device, first)!!;
     gpu::PipelineHandle second = gpu::create_compute_pipeline(&device, &desc)!!;
     defer gpu::destroy_pipeline(&device, second)!!;
-    assert((ulong)first != (ulong)second, "compute aliases are distinct handles");
+    assert(first != second, "compute aliases are distinct handles");
     assert(cache_entry_count(&device) == 1, "identical compute descriptors share one entry");
 
     gpu::ComputePipelineDesc wider = { .shader = comp, .push_constant_size = 16 };

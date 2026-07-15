@@ -267,7 +267,7 @@ fn void? bind_graphics_and_push(VkDeviceState* state, CommandRecord* record, gpu
     validate_descriptor_heap_binding(state)!;
     vk::CommandBuffer cb = record.command_buffer;
     PipelineSlot* slot = state.pipelines.get(handle)!;
-    if ((ulong)handle != (ulong)record.last_pipeline) {
+    if (handle != record.last_pipeline) {
         if (slot.entry != record.last_entry) {
             vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.GRAPHICS, slot.pipeline);
             bind_descriptor_heap(

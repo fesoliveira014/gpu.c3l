@@ -32,6 +32,7 @@ struct BufferCell {
 
 struct BufferTable {
     BufferCell[] slots;
+    ulong        owner;
     uint         free_head;
     uint         next_new;
 }
@@ -50,10 +51,15 @@ fn gpu::BufferHandle? BufferTable.alloc(&self, BufferSlot value) {
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
-    return (gpu::BufferHandle){ .index = idx, .generation = self.slots[idx].generation };
+    return (gpu::BufferHandle){
+        .owner      = self.owner,
+        .index      = idx,
+        .generation = self.slots[idx].generation,
+    };
 }
 
 fn BufferSlot*? BufferTable.get(&self, gpu::BufferHandle h) {
+    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;

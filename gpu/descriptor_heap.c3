@@ -12,6 +12,7 @@ const uint MAX_DESCRIPTOR_SLOTS = 65_536;
 fn TextureIndex? create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, texture.owner, ResourceOwnerKind.TEXTURE)!;
     return operation.vtable.create_texture_descriptor(device, texture, view);
 }
 
@@ -37,6 +38,9 @@ struct TextureDescriptorDesc {
 fn void? create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    foreach (&desc : descs) {
+        validate_resource_owner(&operation, desc.texture.owner, ResourceOwnerKind.TEXTURE)!;
+    }
     return operation.vtable.create_texture_descriptors(device, descs, out_indices);
 }
 

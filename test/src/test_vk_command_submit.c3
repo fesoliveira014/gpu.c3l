@@ -14,7 +14,7 @@ fn ulong command_submit_count(gpu::Device* device) {
 
 
 fn void command_list_is_small_owner_token() @test {
-    assert(gpu::CommandList::size <= 16, "CommandList stays within two machine words");
+    assert(gpu::CommandList::size <= 24, "CommandList stays within three machine words");
 }
 
 fn void copy_upload_to_readback() @test {

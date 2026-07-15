@@ -53,6 +53,7 @@ struct VkStrictHeapState {
 
 struct VkDeviceState {
     gpu::Device                 owner;
+    ulong                       resource_owner;
     vk::Instance               instance;
     VkInstanceDispatch         instance_dispatch;
     vk::DebugUtilsMessengerEXT messenger;
@@ -382,6 +383,7 @@ fn gpu::Device? create_vk_device_with_selection(
     DeviceCreationProbe* probe = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
+    state.resource_owner = gpu::allocate_device_resource_owner()!;
     defer catch {
         destroy_state(state, probe);
         if (probe != null) probe.rollback_count++;
@@ -537,26 +539,35 @@ fn gpu::Device? create_vk_device_with_selection(
 
     create_vk_allocator(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.ALLOCATOR)!;
+    state.buffers.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.BUFFER);
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
+    state.readback_tickets.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.READBACK_TICKET);
     state.readback_tickets.slots = mem::new_array(ReadbackTicketCell, READBACK_TICKET_CAPACITY);
     create_frame_resources(state, desc)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.FRAME_RESOURCES)!;
     create_persistent_arena(state, desc)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PERSISTENT_ARENA)!;
+    state.recording_contexts.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.RECORDING_CONTEXT);
     state.recording_contexts.slots = mem::new_array(RecordingContextCell, gpu::MAX_RECORDING_CONTEXTS);
+    state.commands.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.COMMAND);
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
     state.default_context = create_builtin_recording_context(state)!;
     state.helper_context = create_builtin_recording_context(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.RECORDING_CONTEXTS)!;
+    state.semaphores.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SEMAPHORE);
     state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     uint pipeline_capacity;
     if (state.strict_heap.enabled) {
+        state.shaders.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SHADER);
         state.shaders.slots = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
         pipeline_capacity = resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
+        state.pipelines.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.PIPELINE);
         state.pipelines.slots = mem::new_array(PipelineCell, pipeline_capacity);
     }
-    state.textures.slots   = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
+    state.textures.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.TEXTURE);
+    state.textures.slots = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
     if (state.presentation.enabled) {
+        state.presentation.swapchains.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN);
         state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     }
     state.deferred.entries = alloc::new_array(state.host_allocator, DeferredEntry, DEFERRED_QUEUE_INITIAL_CAP);
@@ -591,6 +602,7 @@ fn gpu::Device? create_vk_device_with_selection(
         caps:                 state.caps,
         vtable:               &VK_VTABLE,
         backend_state:        (void*)state,
+        resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
         adapter:              adapter,
         presentation_surface: presentation_surface_owner,

@@ -724,7 +724,7 @@ fn void? vk_free_persistent_span(gpu::Device* device, gpu::GpuSpan span) @privat
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     PersistentArenaState* arena = &state.persistent_arena;
-    if ((ulong)span.buffer != (ulong)arena.backing_buffer) {
+    if (span.buffer != arena.backing_buffer) {
         return report_contract_failure(
             state:               state,
             operation:           "free_persistent_span",

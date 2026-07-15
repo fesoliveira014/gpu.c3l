@@ -45,6 +45,7 @@ struct CommandCell {
 
 struct CommandTable {
     CommandCell[] slots;
+    ulong         owner;
     uint          free_head;
     uint          next_new;
 }
@@ -64,12 +65,14 @@ fn gpu::CommandListHandle? CommandTable.alloc(&self, CommandRecord value) {
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
     return (gpu::CommandListHandle){
+        .owner = self.owner,
         .index = idx,
         .generation = self.slots[idx].generation,
     };
 }
 
 fn CommandRecord*? CommandTable.get(&self, gpu::CommandListHandle handle) {
+    if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = handle.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != handle.generation) return gpu::INVALID_HANDLE~;
@@ -115,6 +118,7 @@ fn void release_commands_for_frame(VkDeviceState* state, uint frame_index) {
         CommandCell* cell = &state.commands.slots[i];
         if (!cell.used || cell.value.frame_index != frame_index) continue;
         gpu::CommandListHandle handle = {
+            .owner = state.commands.owner,
             .index = i,
             .generation = cell.generation,
         };
@@ -132,8 +136,9 @@ fn void release_commands_for_context_frame(
     for (uint i = 0; i < state.commands.next_new; i++) {
         CommandCell* cell = &state.commands.slots[i];
         if (!cell.used || cell.value.frame_index != frame_index) continue;
-        if ((ulong)cell.value.context != (ulong)context) continue;
+        if (cell.value.context != context) continue;
         gpu::CommandListHandle handle = {
+            .owner = state.commands.owner,
             .index = i,
             .generation = cell.generation,
         };
@@ -145,7 +150,7 @@ fn bool context_has_live_commands(VkDeviceState* state, gpu::RecordingContextHan
     state.command_mutex.lock()!!;
     defer state.command_mutex.unlock();
     foreach (&cell : state.commands.slots[:state.commands.next_new]) {
-        if (cell.used && (ulong)cell.value.context == (ulong)context) return true;
+        if (cell.used && cell.value.context == context) return true;
     }
     return false;
 }

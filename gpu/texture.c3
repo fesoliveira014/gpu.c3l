@@ -244,5 +244,6 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, texture.owner, ResourceOwnerKind.TEXTURE)!;
     return operation.vtable.destroy_texture(device, texture);
 }

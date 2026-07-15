@@ -79,6 +79,69 @@ fn void distinct_adapter_devices_preserve_exact_owners() @test {
     );
 }
 
+fn void foreign_buffer_owner_rejects_before_backend_mutation() @test {
+    gpu::vk::stub_reset_buffer_counts();
+    RuntimeDesc desc = device_creation_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Adapter adapter = device_creation_adapter(&runtime, 0);
+    DeviceRequest request = gpu::strict_device_request();
+    Device first = gpu::create_device(&adapter, &request)!!;
+    Device second = gpu::create_device(&adapter, &request)!!;
+    BufferDesc buffer_desc = {
+        .size        = 256,
+        .usage       = { .transfer_dst },
+        .memory_kind = MemoryKind.DEVICE,
+    };
+    BufferHandle first_buffer = gpu::create_buffer(&first, &buffer_desc)!!;
+    BufferHandle second_buffer = gpu::create_buffer(&second, &buffer_desc)!!;
+
+    assert(first_buffer.index == second_buffer.index, "stub devices use coincident local slots");
+    assert(first_buffer.generation == second_buffer.generation, "stub devices use coincident local generations");
+    assert(first_buffer.owner != second_buffer.owner, "coincident buffers retain distinct owners");
+    uint before = gpu::vk::stub_buffer_destroy_attempt_count();
+    assert(@catch(gpu::destroy_buffer(&second, first_buffer)) == gpu::INVALID_HANDLE);
+    assert(
+        gpu::vk::stub_buffer_destroy_attempt_count() == before,
+        "foreign ownership rejects before backend mutation"
+    );
+
+    gpu::destroy_buffer(&first, first_buffer)!!;
+    gpu::destroy_buffer(&second, second_buffer)!!;
+    gpu::destroy_device(&first)!!;
+    gpu::destroy_device(&second)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
+    gpu::vk::stub_reset_texture_counts();
+    RuntimeDesc desc = device_creation_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Adapter adapter = device_creation_adapter(&runtime, 0);
+    DeviceRequest request = gpu::strict_device_request();
+    Device device = gpu::create_device(&adapter, &request)!!;
+    BufferDesc buffer_desc = {
+        .size        = 256,
+        .usage       = { .transfer_dst },
+        .memory_kind = MemoryKind.DEVICE,
+    };
+    BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    TextureHandle forged = {
+        .owner      = buffer.owner,
+        .index      = buffer.index,
+        .generation = buffer.generation,
+    };
+
+    uint before = gpu::vk::stub_texture_destroy_attempt_count();
+    assert(@catch(gpu::destroy_texture(&device, forged)) == gpu::INVALID_HANDLE);
+    assert(
+        gpu::vk::stub_texture_destroy_attempt_count() == before,
+        "resource-kind ownership rejects before backend mutation"
+    );
+
+    gpu::destroy_buffer(&device, buffer)!!;
+    gpu::destroy_device(&device)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
 fn void unsupported_and_stale_adapter_creation_faults_before_allocation() @test {
     gpu::vk::stub_set_adapter_count(1);
     gpu::vk::stub_set_strict_support(false);

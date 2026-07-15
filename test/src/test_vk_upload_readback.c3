@@ -757,6 +757,7 @@ fn void readback_ticket_generation_wraps_without_poisoning_slot() @test {
     cells[0].generation = vk::HANDLE_GENERATION_MAX;
     vk::ReadbackTicketTable table = {
         .slots     = cells[..],
+        .owner     = 1,
         .free_head = 1,
         .next_new  = 1,
     };

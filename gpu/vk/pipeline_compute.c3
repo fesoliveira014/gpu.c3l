@@ -24,6 +24,7 @@ struct PipelineCell {
 
 struct PipelineTable {
     PipelineCell[] slots;
+    ulong          owner;
     uint           free_head;
     uint           next_new;
 }
@@ -42,10 +43,15 @@ fn gpu::PipelineHandle? PipelineTable.alloc(&self, PipelineSlot value) {
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
-    return (gpu::PipelineHandle){ .index = idx, .generation = self.slots[idx].generation };
+    return (gpu::PipelineHandle){
+        .owner      = self.owner,
+        .index      = idx,
+        .generation = self.slots[idx].generation,
+    };
 }
 
 fn PipelineSlot*? PipelineTable.get(&self, gpu::PipelineHandle h) {
+    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;

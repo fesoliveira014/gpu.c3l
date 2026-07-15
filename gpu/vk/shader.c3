@@ -27,6 +27,7 @@ struct ShaderCell {
 
 struct ShaderTable {
     ShaderCell[] slots;
+    ulong        owner;
     uint         free_head;
     uint         next_new;
 }
@@ -45,10 +46,15 @@ fn gpu::ShaderHandle? ShaderTable.alloc(&self, ShaderSlot value) {
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
-    return (gpu::ShaderHandle){ .index = idx, .generation = self.slots[idx].generation };
+    return (gpu::ShaderHandle){
+        .owner      = self.owner,
+        .index      = idx,
+        .generation = self.slots[idx].generation,
+    };
 }
 
 fn ShaderSlot*? ShaderTable.get(&self, gpu::ShaderHandle h) {
+    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
