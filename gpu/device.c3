@@ -405,6 +405,7 @@ fn Device? register_device(
         && queues.counts.transfer == 0) {
         queues = default_queue_selection(&caps);
     }
+    if (!queue_selection_is_well_formed(queues)) return INVALID_ARGUMENT~;
     caps.queues = queues.counts;
 
     lock_device_registry();

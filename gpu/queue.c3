@@ -1,8 +1,6 @@
 module gpu;
 
 const uint QUEUE_ID_GRAPHICS @private = 0;
-const uint QUEUE_ID_COMPUTE @private = 1;
-const uint QUEUE_ID_TRANSFER @private = 2;
 
 const Queue QUEUE_INVALID = {};
 
@@ -72,27 +70,74 @@ fn QueueCounts default_queue_counts() @private {
     };
 }
 
-fn QueueSelection default_queue_selection(DeviceCaps* caps = null) @private {
-    QueueCounts counts = caps == null ? default_queue_counts() : caps.queues;
-    if (counts.graphics == 0) counts.graphics = 1;
-    if (counts.compute == 0) counts.compute = 1;
-    if (counts.transfer == 0) counts.transfer = 1;
-
+fn QueueSelection queue_selection_for_aliases(
+    bool compute_aliases_graphics,
+    bool transfer_aliases_graphics,
+    bool transfer_aliases_compute,
+) @private {
     QueueSelection selection = {
-        .counts         = counts,
-        .graphics_id    = QUEUE_ID_GRAPHICS,
-        .compute_id     = QUEUE_ID_GRAPHICS,
-        .transfer_id    = QUEUE_ID_GRAPHICS,
-        .graphics_roles = { .graphics, .compute, .transfer },
-        .compute_roles  = { .graphics, .compute, .transfer },
-        .transfer_roles = { .graphics, .compute, .transfer },
+        .counts      = default_queue_counts(),
+        .graphics_id = QUEUE_ID_GRAPHICS,
     };
-    if (caps != null && caps.async_compute) {
-        selection.graphics_roles.compute = false;
-        selection.compute_id = QUEUE_ID_COMPUTE;
-        selection.compute_roles = { .compute };
+    QueueRoles[3] identity_roles;
+    identity_roles[selection.graphics_id].graphics = true;
+    uint next_id = 1;
+
+    selection.compute_id = compute_aliases_graphics
+        ? selection.graphics_id
+        : next_id++;
+    identity_roles[selection.compute_id].compute = true;
+
+    if (transfer_aliases_graphics) {
+        selection.transfer_id = selection.graphics_id;
+    } else if (transfer_aliases_compute) {
+        selection.transfer_id = selection.compute_id;
+    } else {
+        selection.transfer_id = next_id;
     }
+    identity_roles[selection.transfer_id].transfer = true;
+
+    selection.graphics_roles = identity_roles[selection.graphics_id];
+    selection.compute_roles = identity_roles[selection.compute_id];
+    selection.transfer_roles = identity_roles[selection.transfer_id];
     return selection;
+}
+
+fn QueueSelection default_queue_selection(DeviceCaps* caps = null) @private {
+    bool async_compute = caps != null && caps.async_compute;
+    return queue_selection_for_aliases(
+        compute_aliases_graphics:  !async_compute,
+        transfer_aliases_graphics: true,
+        transfer_aliases_compute:  !async_compute,
+    );
+}
+
+fn bool queue_selection_is_well_formed(QueueSelection selection) @private {
+    if (selection.counts.graphics != 1
+        || selection.counts.compute != 1
+        || selection.counts.transfer != 1) {
+        return false;
+    }
+    QueueSelection canonical = queue_selection_for_aliases(
+        compute_aliases_graphics:  selection.compute_id == selection.graphics_id,
+        transfer_aliases_graphics: selection.transfer_id == selection.graphics_id,
+        transfer_aliases_compute:  selection.transfer_id == selection.compute_id,
+    );
+    return selection.graphics_id == canonical.graphics_id
+        && selection.compute_id == canonical.compute_id
+        && selection.transfer_id == canonical.transfer_id
+        && queue_roles_equal(
+            selection.graphics_roles,
+            canonical.graphics_roles,
+        )
+        && queue_roles_equal(
+            selection.compute_roles,
+            canonical.compute_roles,
+        )
+        && queue_roles_equal(
+            selection.transfer_roles,
+            canonical.transfer_roles,
+        );
 }
 
 fn QueueSelection selected_queues(DeviceOperation* operation) @private {

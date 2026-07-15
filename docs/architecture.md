@@ -212,11 +212,13 @@ QueueKind.TRANSFER
 Queue { device, id, roles }
 ```
 
-`get_queue_counts` reports selected counts by role. `get_queue` returns an
+`get_queue_counts` reports selected counts by role. `get_queue` returns a
 device-owned identity for a role/index pair, and aliased roles return the same
 identity with a role mask such as `{ graphics, compute, transfer }`. The backend
 maps roles to Vulkan queues privately; public tokens never expose family indices
-or native handles. Command entry points still take `QueueKind` until the access-
+or native handles. It currently stores one identity per role; counts remain one
+until queue selection stores every additional identity. Command entry points
+still take `QueueKind` until the access-
 domain work moves submission validation to `Queue`.
 
 ### Command lists

@@ -887,9 +887,10 @@ and pending values. Waits may target future values.
 `Queue` is a small device-owned identity for a selected queue. Its `device`
 field is a copied `Device` token used for exact ownership validation; it does not
 borrow caller storage. `get_queue_counts` reports selected counts by semantic
-role. `get_queue` faults `INVALID_HANDLE` for a non-live device and
-`INVALID_ARGUMENT` for an unavailable role index, and
-returns the same `Queue` value when several roles alias one queue.
+role. The current scalar selection reports one identity per role; aliased roles
+still count separately but name one canonical identity. `get_queue` faults
+`INVALID_HANDLE` for a non-live device and `INVALID_ARGUMENT` for an
+unavailable role index.
 `get_queue_info` faults `INVALID_HANDLE` for zero, stale, foreign-device, or
 malformed tokens and returns the stable device-local ID and supported roles.
 Backend family indices and native handles remain private. Current command entry

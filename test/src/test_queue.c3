@@ -142,3 +142,52 @@ fn void queue_queries_reject_stale_devices() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
+fn void selected_queue_counts_are_constrained_to_stored_identities() @test {
+    int backend_state;
+    gpu::DeviceCaps caps = {
+        .queues = {
+            .graphics = 2,
+            .compute  = 2,
+            .transfer = 2,
+        },
+    };
+    gpu::QueueSelection selection = gpu::default_queue_selection(&caps);
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          caps,
+        vtable:        &queue_test_vtable,
+        backend_state: &backend_state,
+        queues:        selection,
+    )!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::QueueCounts counts = gpu::get_queue_counts(&device)!!;
+    gpu::Queue first = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS, 0)!!;
+    gpu::QueueInfo info = gpu::get_queue_info(&device, first)!!;
+    assert(counts.graphics == 1, "scalar selection exposes one graphics identity");
+    assert(counts.compute == 1, "scalar selection exposes one compute identity");
+    assert(counts.transfer == 1, "scalar selection exposes one transfer identity");
+    assert(queue_roles_are_all(info.roles), "the stored identity remains queryable");
+    assert(
+        @catch(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS, 1))
+            == gpu::INVALID_ARGUMENT,
+        "an unstored second identity is unavailable"
+    );
+}
+
+fn void queue_registration_rejects_unstored_counts() @test {
+    int backend_state;
+    gpu::QueueSelection selection = gpu::default_queue_selection();
+    selection.counts.graphics = 2;
+
+    assert(
+        @catch(gpu::register_device(
+            backend:       gpu::BackendKind.VULKAN,
+            caps:          {},
+            vtable:        &queue_test_vtable,
+            backend_state: &backend_state,
+            queues:        selection,
+        )) == gpu::INVALID_ARGUMENT,
+        "a scalar selection cannot publish a second queue"
+    );
+}
