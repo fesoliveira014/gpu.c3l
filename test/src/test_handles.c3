@@ -10,7 +10,7 @@ fn void handle_pack_unpack() @test {
     assert(!gpu::BUFFER_HANDLE_INVALID.is_valid(), "INVALID handle is not valid");
 }
 
-fn void handle_kinds_distinct_raw() @test {
+fn void smallest_owner_bearing_handle_is_valid() @test {
     BufferHandle h = {
         .owner      = 1,
         .index      = 0,

@@ -193,8 +193,8 @@ teardown runs only after a successful live-to-closing transition with no
 active pins.
 
 Device-owned table handles carry an opaque device-and-kind owner plus a local slot and
-generation. Public entry points reject foreign owners before backend dispatch;
-backend tables then validate liveness and generation. Frame and command tokens
+generation. Backend tables reject foreign owners before resolving or mutating
+resource state, then validate liveness and generation. Frame and command tokens
 derive the same ownership from their device. Shader-visible indices and GPU
 addresses remain caller-lifetime values rather than ownership tokens. The
 transitional descriptor release API still accepts raw indices; see

@@ -132,12 +132,22 @@ fn void stale_child_handle_rejects_after_device_slot_reuse() @test {
     gpu::destroy_device(&old_device)!!;
 
     Device replacement = gpu::create_device(&adapter, &request)!!;
+    BufferHandle replacement_buffer = gpu::create_buffer(&replacement, &buffer_desc)!!;
     assert(replacement.index == old_index, "freed registry slot is reused");
     assert(replacement.generation != old_generation, "replacement has a distinct device generation");
+    assert(replacement_buffer.index == old_buffer.index, "replacement reuses the same child slot");
+    assert(replacement_buffer.generation == old_buffer.generation, "replacement reuses the same child generation");
+    assert(replacement_buffer.owner != old_buffer.owner, "replacement has a distinct child owner");
+    uint before = gpu::vk::stub_buffer_destroy_attempt_count();
     assert(@catch(gpu::destroy_buffer(&replacement, old_buffer)) == gpu::INVALID_HANDLE);
     assert(
-        gpu::vk::stub_buffer_destroy_attempt_count() == 1,
+        gpu::vk::stub_buffer_destroy_attempt_count() == before,
         "stale child owner rejects before the new tenant backend mutates"
+    );
+    gpu::destroy_buffer(&replacement, replacement_buffer)!!;
+    assert(
+        gpu::vk::stub_buffer_destroy_attempt_count() == before + 1,
+        "rejection preserves the replacement child"
     );
 
     gpu::destroy_device(&replacement)!!;

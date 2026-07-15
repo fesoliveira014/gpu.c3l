@@ -281,7 +281,7 @@ teardown begins only when no operation pins remain.
 
 Frame tokens, command tokens, resource handles, descriptor indices, GPU
 addresses/spans, and synchronization values are scoped to their owning device.
-Table-backed handles reject a foreign device before backend dispatch.
+Backend table resolution rejects foreign handle owners before resource mutation.
 Shader-visible indices and GPU addresses remain caller-lifetime values.
 
 ### Handles
