@@ -258,8 +258,8 @@ fn ReadbackTicket? cmd_readback_texture(CommandList* commands, TextureHandle src
     return operation.vtable.cmd_readback_texture(commands, src, mip);
 }
 
-<* True once the ticket's data is resolvable; false for resolved tickets.
-   Invalid or closing devices fault before reading backend state. *>
+<* True once the ticket's data is resolvable; false for the consumed
+   original token. Stale aliases and invalid devices fault INVALID_HANDLE. *>
 fn bool? poll_readback(Device* device, ReadbackTicket* ticket) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);

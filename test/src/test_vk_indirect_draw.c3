@@ -457,7 +457,8 @@ fn void compute_generated_indexed_indirect_draw() @test {
     assert(!gpu::poll_readback(&device, &ticket)!!, "poll on a resolved ticket is false");
     fault stale = @catch(gpu::resolve_readback(&device, &stale_ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size]));
     assert(stale == gpu::INVALID_HANDLE, "stale ticket alias faults INVALID_HANDLE");
-    assert(!gpu::poll_readback(&device, &stale_ticket)!!, "poll on a stale ticket alias is false");
+    fault stale_poll = @catch(gpu::poll_readback(&device, &stale_ticket));
+    assert(stale_poll == gpu::INVALID_HANDLE, "poll on a stale ticket alias faults INVALID_HANDLE");
 }
 
 fn void plain_indirect_draw_from_frame_span() @test {
