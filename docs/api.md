@@ -827,10 +827,22 @@ one thread at a time. Create one context per recording thread with
 ### Command lifecycle
 
 ```text
+get_queue_counts(Device* device) -> QueueCounts?
+get_queue(Device* device, QueueKind kind, uint index = 0) -> Queue?
+get_queue_info(Device* device, Queue queue) -> QueueInfo?
 begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) -> CommandList?
 end_commands(CommandList* commands) -> void?
 submit(Device* device, SubmitDesc* desc) -> void?
 wait_queue_idle(Device* device, QueueKind queue) -> void?
+
+QueueCounts
+    uint graphics
+    uint compute
+    uint transfer
+
+QueueInfo
+    QueueKind kind
+    uint index
 
 SubmitDesc
     CommandList[] command_lists
@@ -857,6 +869,11 @@ Timeline signal values must be greater than the semaphore counter when they
 execute. The caller orders pending signals across queues and keeps waits and
 signals within `DeviceCaps.max_timeline_semaphore_value_difference` of current
 and pending values. Waits may target future values.
+
+`Queue` is a small owner-bearing token for a selected semantic role and index.
+Current command entry points still take `QueueKind`; `Queue` exists so later
+submission and access-domain work can validate exact queue ownership without
+exposing backend family indices.
 
 `QueueKind.COMPUTE` routes to a real compute queue when
 `DeviceCaps.async_compute` is true; resources used by both GRAPHICS and

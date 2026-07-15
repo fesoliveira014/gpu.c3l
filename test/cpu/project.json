@@ -69,6 +69,7 @@
         "../src/test_device_request.c3",
         "../src/test_device_support.c3",
         "../src/test_device_creation.c3",
+        "../src/test_queue.c3",
         "../src/test_surface.c3",
         "../src/test_ranges.c3",
         "../src/test_texture_transition.c3",
