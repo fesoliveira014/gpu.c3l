@@ -89,18 +89,24 @@ struct ReadbackTicketTable @private {
 
 fn gpu::ReadbackTicket? ReadbackTicketTable.alloc(&self, ReadbackTicketState value) {
     uint index;
-    if (self.free_head != READBACK_TICKET_FREE_NONE) {
+    bool found = false;
+    while (self.free_head != READBACK_TICKET_FREE_NONE) {
         index = self.free_head - 1;
         self.free_head = self.slots[index].next_free;
-    } else if (self.next_new < self.slots.len) {
+        if (can_allocate_handle_generation(self.slots[index].generation)) {
+            found = true;
+            break;
+        }
+        self.slots[index].next_free = READBACK_TICKET_FREE_NONE;
+    }
+    if (!found) {
+        if (self.next_new >= self.slots.len) return gpu::SLOT_TABLE_FULL~;
         index = self.next_new++;
         self.slots[index].generation = 0;
-    } else {
-        return gpu::SLOT_TABLE_FULL~;
     }
 
     self.slots[index].value = value;
-    self.slots[index].generation = next_handle_generation(self.slots[index].generation);
+    self.slots[index].generation = next_handle_generation(self.slots[index].generation)!;
     self.slots[index].used = true;
     return (gpu::ReadbackTicket){
         .owner      = self.owner,
@@ -121,7 +127,12 @@ fn void? ReadbackTicketTable.free(&self, gpu::ReadbackTicket ticket) {
     self.get(ticket)!;
     uint index = ticket.index;
     self.slots[index].used = false;
-    self.slots[index].generation = next_handle_generation(self.slots[index].generation);
+    if (!should_recycle_handle_generation(self.slots[index].generation)) {
+        self.slots[index].generation = HANDLE_GENERATION_MAX;
+        self.slots[index].next_free = READBACK_TICKET_FREE_NONE;
+        return;
+    }
+    self.slots[index].generation = next_handle_generation(self.slots[index].generation)!;
     self.slots[index].next_free = self.free_head;
     self.free_head = index + 1;
 }

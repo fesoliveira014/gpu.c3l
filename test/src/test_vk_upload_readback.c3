@@ -752,7 +752,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     );
 }
 
-fn void readback_ticket_generation_wraps_without_poisoning_slot() @test {
+fn void readback_ticket_generation_exhaustion_retires_slot() @test {
     vk::ReadbackTicketCell[1] cells;
     cells[0].generation = vk::HANDLE_GENERATION_MAX;
     vk::ReadbackTicketTable table = {
@@ -763,14 +763,10 @@ fn void readback_ticket_generation_wraps_without_poisoning_slot() @test {
     };
     vk::ReadbackTicketState state = { .range_end = 7 };
 
-    gpu::ReadbackTicket ticket = table.alloc(state)!!;
+    fault exhausted = @catch(table.alloc(state));
 
-    assert(ticket.generation == 1, "readback ticket generation wraps to the first valid value");
-    assert(table.get(ticket)!!.range_end == 7, "wrapped readback ticket resolves its state");
-
-    table.free(ticket)!!;
-    fault stale = @catch(table.get(ticket));
-    assert(stale == gpu::INVALID_HANDLE, "free still invalidates the wrapped ticket");
+    assert(exhausted == gpu::SLOT_TABLE_FULL, "exhausted readback ticket slot is not reused");
+    assert(table.free_head == vk::READBACK_TICKET_FREE_NONE, "exhausted readback ticket slot is retired");
 }
 
 <* An unrelated blocking helper's completion must never make an unsubmitted

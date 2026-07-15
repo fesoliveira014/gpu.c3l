@@ -43,8 +43,17 @@ fn bool indexing_heap_fits_limits(
         && totals.all_pools_descriptors <= (ulong)limits.max_all_pools_descriptors;
 }
 
-fn uint next_handle_generation(uint generation) {
-    return generation >= HANDLE_GENERATION_MAX ? 1 : generation + 1;
+fn uint? next_handle_generation(uint generation) {
+    if (generation >= HANDLE_GENERATION_MAX) return gpu::SLOT_TABLE_FULL~;
+    return generation + 1;
+}
+
+fn bool can_allocate_handle_generation(uint generation) {
+    return generation < HANDLE_GENERATION_MAX;
+}
+
+fn bool should_recycle_handle_generation(uint generation) {
+    return generation < HANDLE_GENERATION_MAX - 1;
 }
 
 fn bool is_pow2(usz value) {

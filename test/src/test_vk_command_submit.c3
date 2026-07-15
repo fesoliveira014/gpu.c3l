@@ -161,28 +161,28 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void command_generation_wraps_without_poisoning_slot() @test {
+fn void command_generation_exhaustion_retires_slot() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::CommandList nearly_wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_commands(&nearly_wrapped)!!;
+    gpu::CommandList final_generation = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&final_generation)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    state.commands.slots[nearly_wrapped.handle.index].generation = vk::HANDLE_GENERATION_MAX - 1;
-    nearly_wrapped.handle.generation = vk::HANDLE_GENERATION_MAX - 1;
+    state.commands.slots[final_generation.handle.index].generation = vk::HANDLE_GENERATION_MAX - 1;
+    final_generation.handle.generation = vk::HANDLE_GENERATION_MAX - 1;
 
-    gpu::CommandList[1] first_lists = { nearly_wrapped };
+    gpu::CommandList[1] first_lists = { final_generation };
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
     gpu::submit(&device, &first_submit)!!;
 
-    gpu::CommandList wrapped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    assert(wrapped.handle.index == nearly_wrapped.handle.index, "wrapped slot is reused");
-    assert(wrapped.handle.generation == 1, "command generation wraps to the first valid value");
-    gpu::end_commands(&wrapped)!!;
-    gpu::CommandList[1] wrapped_lists = { wrapped };
-    gpu::SubmitDesc wrapped_submit = { .command_lists = wrapped_lists[..] };
-    gpu::submit(&device, &wrapped_submit)!!;
+    gpu::CommandList next = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    assert(next.handle.index != final_generation.handle.index, "exhausted command slot is retired");
+    assert(next.handle.generation == 1, "replacement uses a different slot's first generation");
+    gpu::end_commands(&next)!!;
+    gpu::CommandList[1] next_lists = { next };
+    gpu::SubmitDesc next_submit = { .command_lists = next_lists[..] };
+    gpu::submit(&device, &next_submit)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 

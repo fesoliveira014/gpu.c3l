@@ -34,17 +34,23 @@ struct ShaderTable {
 
 fn gpu::ShaderHandle? ShaderTable.alloc(&self, ShaderSlot value) {
     uint idx;
-    if (self.free_head != SHADER_FREE_NONE) {
+    bool found = false;
+    while (self.free_head != SHADER_FREE_NONE) {
         idx = self.free_head - 1;
         self.free_head = self.slots[idx].next_free;
-    } else if (self.next_new < self.slots.len) {
+        if (can_allocate_handle_generation(self.slots[idx].generation)) {
+            found = true;
+            break;
+        }
+        self.slots[idx].next_free = SHADER_FREE_NONE;
+    }
+    if (!found) {
+        if (self.next_new >= self.slots.len) return gpu::SLOT_TABLE_FULL~;
         idx = self.next_new++;
         self.slots[idx].generation = 0;
-    } else {
-        return gpu::SLOT_TABLE_FULL~;
     }
     self.slots[idx].value = value;
-    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
+    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
     self.slots[idx].used = true;
     return (gpu::ShaderHandle){
         .owner      = self.owner,
@@ -65,7 +71,12 @@ fn void? ShaderTable.free(&self, gpu::ShaderHandle h) {
     self.get(h)!;
     uint idx = h.index;
     self.slots[idx].used = false;
-    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
+    if (!should_recycle_handle_generation(self.slots[idx].generation)) {
+        self.slots[idx].generation = HANDLE_GENERATION_MAX;
+        self.slots[idx].next_free = SHADER_FREE_NONE;
+        return;
+    }
+    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
     self.slots[idx].next_free = self.free_head;
     self.free_head = idx + 1;
 }

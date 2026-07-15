@@ -51,7 +51,10 @@ fn void strict_indexing_heap_capacity_support_matches_creation_limits() @test {
     ));
 }
 
-fn void resource_handle_generation_wraps_to_public_width() @test {
-    assert(next_handle_generation(HANDLE_GENERATION_MAX) == 1,
-        "resource handle generation wraps before exceeding its 24-bit field");
+fn void resource_handle_generation_exhaustion_has_no_successor() @test {
+    assert(next_handle_generation(HANDLE_GENERATION_MAX - 1)!! == HANDLE_GENERATION_MAX,
+        "generation can advance to the final public value");
+    fault exhausted = @catch(next_handle_generation(HANDLE_GENERATION_MAX));
+    assert(exhausted == gpu::SLOT_TABLE_FULL,
+        "exhausted generation has no reusable successor");
 }
