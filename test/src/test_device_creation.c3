@@ -155,6 +155,7 @@ fn void stale_child_handle_rejects_after_device_slot_reuse() @test {
 }
 
 fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
+    gpu::vk::stub_reset_buffer_counts();
     gpu::vk::stub_reset_texture_counts();
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
@@ -166,21 +167,42 @@ fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
         .usage       = { .transfer_dst },
         .memory_kind = MemoryKind.DEVICE,
     };
+    TextureDesc texture_desc = {
+        .dimension = TextureDimension.TEX_2D,
+        .width     = 16,
+        .height    = 16,
+        .format    = Format.RGBA8_UNORM,
+        .usage     = { .sampled },
+    };
     BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    TextureHandle forged = {
+    TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
+    TextureHandle forged_texture = {
         .owner      = buffer.owner,
         .index      = buffer.index,
         .generation = buffer.generation,
     };
+    BufferHandle forged_buffer = {
+        .owner      = texture.owner,
+        .index      = texture.index,
+        .generation = texture.generation,
+    };
 
-    uint before = gpu::vk::stub_texture_destroy_attempt_count();
-    assert(@catch(gpu::destroy_texture(&device, forged)) == gpu::INVALID_HANDLE);
+    uint texture_before = gpu::vk::stub_texture_destroy_attempt_count();
+    assert(@catch(gpu::destroy_texture(&device, forged_texture)) == gpu::INVALID_HANDLE);
     assert(
-        gpu::vk::stub_texture_destroy_attempt_count() == before,
-        "resource-kind ownership rejects before backend mutation"
+        gpu::vk::stub_texture_destroy_attempt_count() == texture_before,
+        "buffer owner bits cannot mutate the texture table"
+    );
+
+    uint buffer_before = gpu::vk::stub_buffer_destroy_attempt_count();
+    assert(@catch(gpu::destroy_buffer(&device, forged_buffer)) == gpu::INVALID_HANDLE);
+    assert(
+        gpu::vk::stub_buffer_destroy_attempt_count() == buffer_before,
+        "texture owner bits cannot mutate the buffer table"
     );
 
     gpu::destroy_buffer(&device, buffer)!!;
+    gpu::destroy_texture(&device, texture)!!;
     gpu::destroy_device(&device)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
