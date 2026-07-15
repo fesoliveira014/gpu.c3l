@@ -259,7 +259,7 @@ fn SubmitInputs? resolve_submit_inputs(
         }
     }
 
-    if (desc.swapchain.is_valid()) {
+    if (desc.swapchain != gpu::SWAPCHAIN_HANDLE_INVALID) {
         inputs.swapchain = state.presentation.swapchains.get(desc.swapchain)!;
         swapchain_submit_guard(
             inputs.swapchain.acquire_pending,
@@ -296,7 +296,7 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     if (desc.command_lists.len == 0
         && desc.waits.len == 0
         && desc.signals.len == 0
-        && !desc.swapchain.is_valid()) return;
+        && desc.swapchain == gpu::SWAPCHAIN_HANDLE_INVALID) return;
 
     @pool() {
         SubmitInputs inputs = resolve_submit_inputs(state, device, desc)!;

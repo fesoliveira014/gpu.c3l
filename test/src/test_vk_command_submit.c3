@@ -263,6 +263,23 @@ fn void swapchain_only_submit_validates_stale_handle() @test {
     assert(command_submit_count(&device) == before, "stale swapchain rejection records no queue submit");
 }
 
+fn void swapchain_only_submit_rejects_generation_zero_handle() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::SwapchainHandle malformed = {
+        .owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN),
+    };
+    gpu::SubmitDesc submit = { .swapchain = malformed };
+
+    ulong before = command_submit_count(&device);
+    fault rejected = @catch(gpu::submit(&device, &submit));
+    assert(rejected == gpu::INVALID_HANDLE, "a generation-zero swapchain faults INVALID_HANDLE");
+    assert(command_submit_count(&device) == before, "malformed swapchain rejection records no queue submit");
+}
+
 fn void simultaneous_devices_submit_independently() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device first = gpu::create_device_from_desc(&desc)!!;
