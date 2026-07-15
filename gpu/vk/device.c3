@@ -596,6 +596,14 @@ fn gpu::Device? create_vk_device_with_selection(
         physical_device: state.physical_device,
         inputs:          &caps_inputs,
     );
+
+    gpu::QueueSelection queue_selection = gpu::queue_selection_for_aliases(
+        compute_aliases_graphics:  state.compute_queue == state.graphics_queue,
+        transfer_aliases_graphics: state.transfer_queue == state.graphics_queue,
+        transfer_aliases_compute:  state.transfer_queue == state.compute_queue,
+    );
+    state.caps.queues = queue_selection.counts;
+
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
     return gpu::register_device(
         backend:              gpu::BackendKind.VULKAN,
@@ -606,6 +614,7 @@ fn gpu::Device? create_vk_device_with_selection(
         retained_runtime:     retained_runtime,
         adapter:              adapter,
         presentation_surface: presentation_surface_owner,
+        queues:               queue_selection,
         owner:                &state.owner,
     );
 }

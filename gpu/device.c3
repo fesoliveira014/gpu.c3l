@@ -188,6 +188,7 @@ struct BackendVTable @private {
 struct DeviceData @private {
     BackendKind    backend;
     DeviceCaps     caps;
+    QueueSelection queues;
     BackendVTable* vtable;
     void*          backend_state;
     ulong          resource_owner;
@@ -223,7 +224,6 @@ enum ResourceOwnerKind @private {
     SEMAPHORE,
     RECORDING_CONTEXT,
     READBACK_TICKET,
-    QUEUE,
     COMPLETION_POINT,
 }
 
@@ -368,6 +368,7 @@ fn Device? register_device(
     Runtime* retained_runtime = null,
     Adapter* adapter = null,
     Surface* presentation_surface = null,
+    QueueSelection queues = {},
     Device* owner = null,
 ) @private {
     if (vtable == null || backend_state == null || vtable.destroy_device == null) return INVALID_ARGUMENT~;
@@ -399,6 +400,13 @@ fn Device? register_device(
         registered_surface = *presentation_surface;
     }
     caps.presentation_enabled = registered_surface.is_valid();
+    if (queues.counts.graphics == 0
+        && queues.counts.compute == 0
+        && queues.counts.transfer == 0) {
+        queues = default_queue_selection(&caps);
+    }
+    if (!queue_selection_is_well_formed(queues)) return INVALID_ARGUMENT~;
+    caps.queues = queues.counts;
 
     lock_device_registry();
     defer unlock_device_registry();
@@ -424,6 +432,7 @@ fn Device? register_device(
         slot.data = {
             .backend              = backend,
             .caps                 = caps,
+            .queues               = queues,
             .vtable               = vtable,
             .backend_state        = backend_state,
             .resource_owner       = resource_owner,

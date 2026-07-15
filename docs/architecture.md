@@ -202,15 +202,24 @@ transitional descriptor release API still accepts raw indices; see
 
 ### Queues
 
-The API exposes queue kinds rather than raw queue handles:
+The API exposes semantic roles and device-local queue identities rather than raw
+family indices or backend queue handles:
 
 ```text
 QueueKind.GRAPHICS
 QueueKind.COMPUTE
 QueueKind.TRANSFER
+Queue { device, id, roles }
 ```
 
-The backend maps those kinds to Vulkan queue families and queue handles.
+`get_queue_counts` reports selected counts by role. `get_queue` returns a
+device-owned identity for a role/index pair, and aliased roles return the same
+identity with a role mask such as `{ graphics, compute, transfer }`. The backend
+maps roles to Vulkan queues privately; public tokens never expose family indices
+or native handles. It currently stores one identity per role; counts remain one
+until queue selection stores every additional identity. Command entry points
+still take `QueueKind` until the access-
+domain work moves submission validation to `Queue`.
 
 ### Command lists
 
