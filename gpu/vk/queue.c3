@@ -23,6 +23,14 @@ struct SubmitStats {
     ulong empty_signal_submits;
 }
 
+struct SubmitInputs {
+    CommandRecord*[] records;
+    SemaphoreSlot*[] waits;
+    SemaphoreSlot*[] signals;
+    SwapchainSlot*   swapchain;
+    gpu::QueueKind   kind;
+}
+
 <* Compute tiers: a second queue in the main family when it has one, else a
    compute-capable non-graphics family, else the graphics queue itself. A
    transfer-only family is used for transfer when present. *>
@@ -220,6 +228,62 @@ fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
     return &state.presentation.queue_mutex;
 }
 
+fn SubmitInputs? resolve_submit_inputs(
+    VkDeviceState* state,
+    gpu::Device* device,
+    gpu::SubmitDesc* desc,
+) {
+    SubmitInputs inputs = { .kind = gpu::QueueKind.GRAPHICS };
+
+    if (desc.command_lists.len > 0) {
+        inputs.records = mem::talloc_array(CommandRecord*, (sz)desc.command_lists.len);
+        state.command_mutex.lock()!!;
+        {
+            defer state.command_mutex.unlock();
+            foreach (i, &token : desc.command_lists) {
+                if (token.device != *device) return gpu::INVALID_HANDLE~;
+                for (sz j = 0; j < i; j++) {
+                    if (desc.command_lists[j].handle == token.handle) {
+                        return gpu::COMMAND_RECORDING_ERROR~;
+                    }
+                }
+                CommandRecord* record = state.commands.get(token.handle)!;
+                if (record.state != CommandState.EXECUTABLE) return gpu::COMMAND_RECORDING_ERROR~;
+                if (i == 0) {
+                    inputs.kind = record.queue;
+                } else if (record.queue != inputs.kind) {
+                    return gpu::INVALID_ARGUMENT~;
+                }
+                inputs.records[i] = record;
+            }
+        }
+    }
+
+    if (desc.swapchain.is_valid()) {
+        inputs.swapchain = state.presentation.swapchains.get(desc.swapchain)!;
+        swapchain_submit_guard(
+            inputs.swapchain.acquire_pending,
+            inputs.swapchain.acquire_consumed,
+            inputs.kind,
+        )!;
+    }
+
+    if (desc.waits.len > 0) {
+        inputs.waits = mem::talloc_array(SemaphoreSlot*, (sz)desc.waits.len);
+        foreach (i, wait : desc.waits) {
+            inputs.waits[i] = state.semaphores.get(wait.semaphore)!;
+        }
+    }
+
+    if (desc.signals.len > 0) {
+        inputs.signals = mem::talloc_array(SemaphoreSlot*, (sz)desc.signals.len);
+        foreach (i, signal : desc.signals) {
+            inputs.signals[i] = state.semaphores.get(signal.semaphore)!;
+        }
+    }
+
+    return inputs;
+}
 <* Submit command lists to their queue via vkQueueSubmit2, waiting on and
    signaling the requested timeline values at their stages. Empty wait/signal/
    command arrays are left unset so the slice setters are never handed a
@@ -232,30 +296,20 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
     if (desc.command_lists.len == 0 && desc.waits.len == 0 && desc.signals.len == 0) return;
 
     @pool() {
+        SubmitInputs inputs = resolve_submit_inputs(state, device, desc)!;
         vk::SubmitInfo2 submit = vk::submit_info2();
-        gpu::QueueKind kind = gpu::QueueKind.GRAPHICS;
-        CommandRecord*[] records;
+        gpu::QueueKind kind = inputs.kind;
+        CommandRecord*[] records = inputs.records;
         bool claimed = false;
 
-        if (desc.command_lists.len > 0) {
-            records = mem::talloc_array(CommandRecord*, (sz)desc.command_lists.len);
+        if (records.len > 0) {
             state.command_mutex.lock()!!;
             {
                 defer state.command_mutex.unlock();
                 foreach (i, &token : desc.command_lists) {
-                    if (token.device != *device) return gpu::INVALID_HANDLE~;
-                    for (sz j = 0; j < i; j++) {
-                        if (desc.command_lists[j].handle == token.handle) {
-                            return gpu::COMMAND_RECORDING_ERROR~;
-                        }
-                    }
                     CommandRecord* record = state.commands.get(token.handle)!;
+                    if (record != records[i]) return gpu::COMMAND_RECORDING_ERROR~;
                     if (record.state != CommandState.EXECUTABLE) return gpu::COMMAND_RECORDING_ERROR~;
-                    if (i == 0) {
-                        kind = record.queue;
-                    } else if (record.queue != kind) {
-                        return gpu::INVALID_ARGUMENT~;
-                    }
                     records[i] = record;
                 }
                 foreach (record : records) record.state = CommandState.SUBMITTING;
@@ -291,16 +345,7 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
             && state.transfer_queue != state.graphics_queue;
         bool piggyback = piggyback_compute || piggyback_transfer;
 
-        SwapchainSlot* swapchain = null;
-        if (desc.swapchain.is_valid()) {
-            swapchain = state.presentation.swapchains.get(desc.swapchain)!;
-            swapchain_submit_guard(
-                swapchain.acquire_pending,
-                swapchain.acquire_consumed,
-                kind,
-            )!;
-        }
-
+        SwapchainSlot* swapchain = inputs.swapchain;
         usz wait_count = desc.waits.len + (swapchain != null ? 1 : 0);
         if (wait_count > 0) {
             vk::SemaphoreSubmitInfo[] waits = mem::talloc_array(
@@ -308,7 +353,7 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
                 (sz)wait_count,
             );
             foreach (i, wait : desc.waits) {
-                SemaphoreSlot* slot = state.semaphores.get(wait.semaphore)!;
+                SemaphoreSlot* slot = inputs.waits[i];
                 waits[i] = vk::semaphore_submit_info()
                     .set_semaphore(slot.semaphore)
                     .set_value((ulong)wait.value)
@@ -334,7 +379,7 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
                 (sz)signal_count,
             );
             foreach (i, signal : desc.signals) {
-                SemaphoreSlot* slot = state.semaphores.get(signal.semaphore)!;
+                SemaphoreSlot* slot = inputs.signals[i];
                 signals[i] = vk::semaphore_submit_info()
                     .set_semaphore(slot.semaphore)
                     .set_value((ulong)signal.value)

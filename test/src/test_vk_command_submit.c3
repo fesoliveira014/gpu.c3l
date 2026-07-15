@@ -206,6 +206,44 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
+fn void stale_signal_prevalidation_does_not_claim_command() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::end_commands(&cmd)!!;
+
+    gpu::SemaphoreDesc sem_desc = { .initial_value = (gpu::SemaphoreValue)0 };
+    gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
+    defer gpu::destroy_semaphore(&device, sem)!!;
+    gpu::SemaphoreHandle stale = sem;
+    stale.generation++;
+
+    gpu::CommandList[1] lists = { cmd };
+    gpu::SemaphoreSignal[1] signals = {{
+        .semaphore = stale,
+        .value     = (gpu::SemaphoreValue)1,
+        .stage     = gpu::Stage.COLOR_ATTACHMENT,
+    }};
+    gpu::SubmitDesc submit = {
+        .command_lists = lists[..],
+        .signals       = signals[..],
+    };
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong before = command_submit_count(&device);
+    fault rejected = @catch(gpu::submit(&device, &submit));
+    assert(rejected == gpu::INVALID_HANDLE, "stale same-owner signal faults INVALID_HANDLE");
+    assert(command_submit_count(&device) == before, "stale-signal rejection records no queue submit");
+    assert(state.commands.slots[cmd.handle.index].value.state == vk::CommandState.EXECUTABLE,
+        "submit prevalidation does not claim executable commands");
+
+    gpu::CommandList[1] good_lists = { cmd };
+    gpu::SubmitDesc good = { .command_lists = good_lists[..] };
+    gpu::submit(&device, &good)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}
 fn void simultaneous_devices_submit_independently() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device first = gpu::create_device_from_desc(&desc)!!;
