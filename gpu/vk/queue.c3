@@ -23,6 +23,14 @@ struct SubmitStats {
     ulong empty_signal_submits;
 }
 
+struct SubmitInputs {
+    CommandRecord*[] records;
+    SemaphoreSlot*[] waits;
+    SemaphoreSlot*[] signals;
+    SwapchainSlot*   swapchain;
+    gpu::QueueKind   kind;
+}
+
 <* Compute tiers: a second queue in the main family when it has one, else a
    compute-capable non-graphics family, else the graphics queue itself. A
    transfer-only family is used for transfer when present. *>
@@ -218,14 +226,6 @@ fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
         return queue_mutex_for(state, gpu::QueueKind.TRANSFER);
     }
     return &state.presentation.queue_mutex;
-}
-
-struct SubmitInputs {
-    CommandRecord*[] records;
-    SemaphoreSlot*[] waits;
-    SemaphoreSlot*[] signals;
-    SwapchainSlot*   swapchain;
-    gpu::QueueKind   kind;
 }
 
 fn SubmitInputs? resolve_submit_inputs(

@@ -232,10 +232,10 @@ fn void stale_signal_prevalidation_does_not_claim_command() @test {
     };
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    @pool() {
-        fault rejected = @catch(vk::resolve_submit_inputs(state, &device, &submit));
-        assert(rejected == gpu::INVALID_HANDLE, "stale same-owner signal faults INVALID_HANDLE");
-    };
+    ulong before = command_submit_count(&device);
+    fault rejected = @catch(gpu::submit(&device, &submit));
+    assert(rejected == gpu::INVALID_HANDLE, "stale same-owner signal faults INVALID_HANDLE");
+    assert(command_submit_count(&device) == before, "stale-signal rejection records no queue submit");
     assert(state.commands.slots[cmd.handle.index].value.state == vk::CommandState.EXECUTABLE,
         "submit prevalidation does not claim executable commands");
 
