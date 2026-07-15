@@ -28,7 +28,6 @@ fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
     }
 }
 
-
 fn void strict_heap_state_follows_request_and_mode() @test {
     gpu::DeviceDesc desc = {
         .descriptor_heap_mode        = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
