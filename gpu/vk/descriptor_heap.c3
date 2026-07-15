@@ -696,10 +696,15 @@ fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sa
     );
 }
 
-fn void bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::PipelineLayout layout, vk::PipelineBindPoint bind_point) {
+fn void? validate_descriptor_heap_binding(VkDeviceState* state) {
+    if (!state.strict_heap.enabled) return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::PipelineLayout layout, vk::PipelineBindPoint bind_point) {
+    validate_descriptor_heap_binding(state)!;
     if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
         vk::cmd_bind_descriptor_sets(
-            command_buffer:       cb,
+            command_buffer:        cb,
             pipeline_bind_point:   bind_point,
             layout:                layout,
             first_set:             HEAP_SET,

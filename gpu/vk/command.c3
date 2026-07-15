@@ -547,11 +547,17 @@ fn BufferSlot*? resolve_indirect_span(
 }
 
 fn void? bind_compute_and_push(VkDeviceState* state, CommandRecord* record, gpu::PipelineHandle handle, gpu::GpuAddress root) @private {
+    validate_descriptor_heap_binding(state)!;
     vk::CommandBuffer cb = record.command_buffer;
     PipelineSlot* slot = state.pipelines.get(handle)!;
     if ((ulong)handle != (ulong)record.last_pipeline) {
         vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
-        bind_descriptor_heap(state, cb, slot.layout, vk::PipelineBindPoint.COMPUTE);
+        bind_descriptor_heap(
+            state:      state,
+            cb:         cb,
+            layout:     slot.layout,
+            bind_point: vk::PipelineBindPoint.COMPUTE,
+        )!;
         record.last_pipeline = handle;
         record.last_entry = slot.entry;
     }
