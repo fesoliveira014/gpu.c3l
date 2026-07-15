@@ -153,6 +153,7 @@ fn ShaderHandle? create_shader(Device* device, ShaderDesc* desc) {
 fn void? destroy_shader(Device* device, ShaderHandle shader) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, shader.owner, ResourceOwnerKind.SHADER)!;
     return operation.vtable.destroy_shader(device, shader);
 }
 
@@ -183,6 +184,7 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
     return operation.vtable.destroy_pipeline(device, pipeline);
 }
 

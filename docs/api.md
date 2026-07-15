@@ -281,12 +281,13 @@ teardown begins only when no operation pins remain.
 
 Frame tokens, command tokens, resource handles, descriptor indices, GPU
 addresses/spans, and synchronization values are scoped to their owning device.
-Passing one to another device is invalid; table- and index-backed values without
-owner metadata may resolve a coincident resource instead of faulting.
+Backend table resolution rejects foreign handle owners before resource mutation.
+Shader-visible indices and GPU addresses remain caller-lifetime values.
 
 ### Handles
 
-All handles are `bitstruct : ulong` (index | generation | reserved).
+`Device` is a compact slot-and-generation token. Device-owned table handles
+contain an opaque device-and-kind owner identity plus a local slot and generation.
 
 ```text
 BufferHandle
@@ -301,10 +302,9 @@ RecordingContextHandle
 (Samplers have no handle — they are `SamplerIndex` heap indices.)
 
 Invalid sentinels are module constants (`BUFFER_HANDLE_INVALID`, ...), all
-zero-valued. `handle.is_valid()` checks that the token is nonzero; operations
-validate current ownership and liveness.
-
-A valid handle packs slot index and generation. Public code should not inspect the packed representation.
+zero-valued. `handle.is_valid()` checks the owner and generation; operations
+also validate the local slot generation. Public code should not inspect or
+construct the representation.
 
 Handles, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
 command tokens, and synchronization values are runtime-only and scoped to their

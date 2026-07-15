@@ -37,7 +37,7 @@ fn void checked_subspan_bounds_and_nesting() @test {
         .size   = 256,
         .offset = 0,
         .kind   = MemoryKind.PERSISTENT_UPLOAD,
-        .buffer = { .index = 7, .generation = 3 },
+        .buffer = { .owner = 1, .index = 7, .generation = 3 },
     };
 
     GpuSpan parent = span.checked_subspan(32, 128)!!;

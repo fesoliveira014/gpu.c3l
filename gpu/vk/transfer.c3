@@ -82,6 +82,7 @@ struct ReadbackTicketCell @private {
 
 struct ReadbackTicketTable @private {
     ReadbackTicketCell[] slots;
+    ulong                owner;
     uint                 free_head;
     uint                 next_new;
 }
@@ -102,12 +103,14 @@ fn gpu::ReadbackTicket? ReadbackTicketTable.alloc(&self, ReadbackTicketState val
     self.slots[index].generation = next_handle_generation(self.slots[index].generation);
     self.slots[index].used = true;
     return (gpu::ReadbackTicket){
+        .owner      = self.owner,
         .index      = index,
         .generation = self.slots[index].generation,
     };
 }
 
 fn ReadbackTicketState*? ReadbackTicketTable.get(&self, gpu::ReadbackTicket ticket) {
+    if (ticket.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint index = ticket.index;
     if (index >= self.slots.len || !self.slots[index].used) return gpu::INVALID_HANDLE~;
     if (self.slots[index].generation != ticket.generation) return gpu::INVALID_HANDLE~;

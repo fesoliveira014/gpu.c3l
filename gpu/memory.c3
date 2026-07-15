@@ -19,14 +19,20 @@ enum MemoryKind : int {
 }
 
 <* Generation-checked identity for private readback state. *>
-bitstruct ReadbackTicket : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
+struct ReadbackTicket {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
+$assert ReadbackTicket::size <= ulong::size * 2;
 
 <* True while the token names readback state; resolution consumes it. *>
-fn bool ReadbackTicket.is_valid(self) => (ulong)self != 0;
+fn bool ReadbackTicket.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool ReadbackTicket.equals(self, ReadbackTicket other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
 
 // Host-side view of a GPU-visible range. `cpu` may be null for non-mappable
 // memory; `gpu` is non-zero for shader-visible memory.
@@ -257,6 +263,9 @@ fn ReadbackTicket? cmd_readback_texture(CommandList* commands, TextureHandle src
 fn bool? poll_readback(Device* device, ReadbackTicket* ticket) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    if (ticket == null) return INVALID_HANDLE~;
+    if (!ticket.is_valid()) return false;
+    validate_resource_owner(&operation, ticket.owner, ResourceOwnerKind.READBACK_TICKET)!;
     return operation.vtable.poll_readback(device, ticket);
 }
 
@@ -267,6 +276,9 @@ fn bool? poll_readback(Device* device, ReadbackTicket* ticket) {
 fn void? resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    if (ticket == null) return INVALID_HANDLE~;
+    if (!ticket.is_valid()) return INVALID_ARGUMENT~;
+    validate_resource_owner(&operation, ticket.owner, ResourceOwnerKind.READBACK_TICKET)!;
     return operation.vtable.resolve_readback(device, ticket, dest);
 }
 

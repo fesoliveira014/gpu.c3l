@@ -11,7 +11,10 @@ struct StubRuntimeState {
 struct StubDeviceState {
     gpu::Adapter         adapter;
     gpu::Surface         surface;
+    gpu::BufferHandle    buffer;
     gpu::SwapchainHandle swapchain;
+    ulong                resource_owner;
+    bool                 buffer_live;
     bool                 swapchain_live;
 }
 
@@ -31,6 +34,9 @@ uint surface_creates @private;
 uint surface_destroys @private;
 bool presentation_supported @private = true;
 uint swapchain_create_attempts @private;
+uint buffer_create_attempts @private;
+uint buffer_destroy_attempts @private;
+uint texture_destroy_attempts @private;
 
 fn void destroy_stub_runtime(void* backend_state) {
     StubRuntimeState* state = (StubRuntimeState*)backend_state;
@@ -230,6 +236,19 @@ fn uint stub_surface_destroy_count() => surface_destroys;
 
 fn uint stub_swapchain_create_attempt_count() => swapchain_create_attempts;
 
+fn void stub_reset_buffer_counts() {
+    buffer_create_attempts = 0;
+    buffer_destroy_attempts = 0;
+}
+
+fn uint stub_buffer_destroy_attempt_count() => buffer_destroy_attempts;
+
+fn void stub_reset_texture_counts() {
+    texture_destroy_attempts = 0;
+}
+
+fn uint stub_texture_destroy_attempt_count() => texture_destroy_attempts;
+
 fn void stub_set_presentation_support(bool supported) {
     presentation_supported = supported;
 }
@@ -241,6 +260,43 @@ fn void destroy_stub_device(void* backend_state) {
     }
     device_temporary_destroys++;
     mem::free(state);
+}
+
+fn gpu::BufferHandle? create_stub_buffer(
+    gpu::Device* device,
+    gpu::BufferDesc* desc,
+) {
+    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    buffer_create_attempts++;
+    if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    if (state.buffer_live) return gpu::INVALID_RESOURCE_STATE~;
+    state.buffer = {
+        .owner      = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.BUFFER),
+        .index      = 0,
+        .generation = 1,
+    };
+    state.buffer_live = true;
+    return state.buffer;
+}
+
+fn void? destroy_stub_buffer(
+    gpu::Device* device,
+    gpu::BufferHandle buffer,
+) {
+    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    buffer_destroy_attempts++;
+    if (state == null || !state.buffer_live) return gpu::INVALID_HANDLE~;
+    if (state.buffer != buffer) return gpu::INVALID_HANDLE~;
+    state.buffer = {};
+    state.buffer_live = false;
+}
+
+fn void? destroy_stub_texture(
+    gpu::Device* device,
+    gpu::TextureHandle texture,
+) {
+    texture_destroy_attempts++;
+    return gpu::INVALID_HANDLE~;
 }
 
 fn gpu::SwapchainHandle? create_stub_swapchain(
@@ -256,6 +312,7 @@ fn gpu::SwapchainHandle? create_stub_swapchain(
     gpu::surface_retain_swapchain(surface)!;
     state.surface = *surface;
     state.swapchain = {
+        .owner      = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN),
         .index      = 0,
         .generation = 1,
     };
@@ -269,7 +326,7 @@ fn void? destroy_stub_swapchain(
 ) {
     StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
     if (state == null || !state.swapchain_live) return gpu::INVALID_HANDLE~;
-    if ((ulong)state.swapchain != (ulong)swapchain) return gpu::INVALID_HANDLE~;
+    if (state.swapchain != swapchain) return gpu::INVALID_HANDLE~;
 
     gpu::surface_release_swapchain(&state.surface)!;
     state.surface = {};
@@ -279,6 +336,9 @@ fn void? destroy_stub_swapchain(
 
 const gpu::BackendVTable STUB_DEVICE_VTABLE @private = {
     .destroy_device      = &destroy_stub_device,
+    .create_buffer       = &create_stub_buffer,
+    .destroy_buffer      = &destroy_stub_buffer,
+    .destroy_texture     = &destroy_stub_texture,
     .create_swapchain    = &create_stub_swapchain,
     .destroy_swapchain   = &destroy_stub_swapchain,
 };
@@ -294,6 +354,7 @@ fn gpu::Device? create_vk_device(
 ) {
     gpu::validate_device_request(request)!;
     StubDeviceState* state = mem::new(StubDeviceState);
+    state.resource_owner = gpu::allocate_device_resource_owner()!;
     device_temporary_creates++;
     defer catch {
         device_temporary_destroys++;
@@ -313,6 +374,7 @@ fn gpu::Device? create_vk_device(
         caps:                 caps,
         vtable:               &STUB_DEVICE_VTABLE,
         backend_state:        state,
+        resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
         adapter:              adapter,
         presentation_surface: presentation_surface.is_valid()

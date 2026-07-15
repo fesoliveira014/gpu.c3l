@@ -117,7 +117,7 @@ struct CommandList {
     Device            device;
     CommandListHandle handle;
 }
-$assert CommandList::size <= 16;
+$assert CommandList::size <= ulong::size * 3;
 
 <* Byte-range copy for cmd_copy_buffer; src and dst ranges must not overlap. *>
 struct BufferCopyDesc {
@@ -178,7 +178,12 @@ fn usz? indirect_argument_bytes(
 
 fn DeviceOperation? command_operation(CommandList* commands) @private {
     if (commands == null) return INVALID_HANDLE~;
-    return begin_device_operation(&commands.device);
+    DeviceOperation operation = begin_device_operation(&commands.device)!;
+    if (commands.handle.owner != resource_owner_tag(operation.data.resource_owner, ResourceOwnerKind.COMMAND)) {
+        end_device_operation(&operation);
+        return INVALID_HANDLE~;
+    }
+    return operation;
 }
 
 <* Create a recording context: per-frame command pools confined to one

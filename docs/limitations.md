@@ -6,13 +6,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
 
 ## 1. By design
 
-- **Cross-device resource misuse is not diagnosed uniformly.** Multiple
-  devices may coexist, but child handles, descriptor indices, GPU
-  addresses/spans, frame tokens, command tokens, and synchronization values
-  remain scoped to their creating device. Table- and index-backed values
-  without owner metadata can resolve a coincident slot on another device
-  instead of returning a fault. Frame and command tokens embed their owner and
-  reject stale or foreign owners.
+- **Descriptor indices still double as release tokens.** `TextureIndex` and
+  `SamplerIndex` have no device owner metadata. Passing one to another device
+  can release a coincident slot. Tasks 5.1 and 5.2 split CPU ownership from raw
+  shader indices. `GpuAddress` is also device-local and must not be persisted
+  or transferred between devices.
 - **Debug callbacks are borrowed, synchronous, and non-reentrant.** Public and
   backend messages run before the originating call returns; Vulkan may invoke
   the callback concurrently on arbitrary threads. Payload pointers are valid

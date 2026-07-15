@@ -12,9 +12,8 @@ $assert Vec2f::size == 8;
 $assert Vec4f::size == 16;
 $assert Vec4u::size == 16;
 
-// Strongly-typed resource handles: one distinct bitstruct per kind over ulong,
-// packed index(0..31) | generation(32..55) | reserved. A live handle has
-// generation >= 1, so raw 0 is reserved for INVALID.
+// Device handles are compact registry tokens. Device-owned resources also
+// carry an exact owner identity so coincident local slots cannot alias.
 
 bitstruct Device : ulong {
     uint index      : 0..31;
@@ -22,60 +21,61 @@ bitstruct Device : ulong {
     uint reserved   : 56..63;
 }
 
-bitstruct BufferHandle : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
+struct BufferHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
+$assert BufferHandle::size <= ulong::size * 2;
 
-// Same packing as BufferHandle.
-bitstruct TextureHandle : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
+struct TextureHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
+$assert TextureHandle::size <= ulong::size * 2;
 
-// Same packing as BufferHandle.
-bitstruct PipelineHandle : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
+struct PipelineHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
+$assert PipelineHandle::size <= ulong::size * 2;
 
-// Same packing as BufferHandle.
-bitstruct SemaphoreHandle : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
+struct SemaphoreHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
+$assert SemaphoreHandle::size <= ulong::size * 2;
 
-// Same packing as BufferHandle.
-bitstruct SwapchainHandle : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
+struct SwapchainHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
+$assert SwapchainHandle::size <= ulong::size * 2;
 
-// Same packing as BufferHandle.
-bitstruct ShaderHandle : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
+struct ShaderHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
+$assert ShaderHandle::size <= ulong::size * 2;
 
-// Same packing as BufferHandle.
-bitstruct RecordingContextHandle : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
+struct RecordingContextHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
+$assert RecordingContextHandle::size <= ulong::size * 2;
 
-// Same packing as BufferHandle; identity for a device-owned command record.
-bitstruct CommandListHandle : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
+struct CommandListHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
+$assert CommandListHandle::size <= ulong::size * 2;
 
 // Shader-visible heap indices, packed slot(0..15) | generation(16..31).
 // Embedded in GPU records as 32-bit scalars; shaders mask with `& 0xFFFFu`.
@@ -107,22 +107,55 @@ const SamplerIndex SAMPLER_INDEX_INVALID = {};
 
 <* True when the device handle is not the invalid zero sentinel. *>
 fn bool Device.is_valid(self)          => (ulong)self != 0;
-<* True for a live handle; the zero value is the invalid sentinel. *>
-fn bool BufferHandle.is_valid(self)    => (ulong)self != 0;
-<* True for a live handle; the zero value is the invalid sentinel. *>
-fn bool TextureHandle.is_valid(self)   => (ulong)self != 0;
-<* True for a live handle; the zero value is the invalid sentinel. *>
-fn bool PipelineHandle.is_valid(self)  => (ulong)self != 0;
-<* True for a live handle; the zero value is the invalid sentinel. *>
-fn bool SemaphoreHandle.is_valid(self) => (ulong)self != 0;
-<* True for a live handle; the zero value is the invalid sentinel. *>
-fn bool SwapchainHandle.is_valid(self) => (ulong)self != 0;
-<* True for a live handle; the zero value is the invalid sentinel. *>
-fn bool ShaderHandle.is_valid(self)    => (ulong)self != 0;
-<* True for a live handle; the zero value is the invalid sentinel. *>
-fn bool RecordingContextHandle.is_valid(self) => (ulong)self != 0;
-<* True for a live command-list handle; the zero value is the invalid sentinel. *>
-fn bool CommandListHandle.is_valid(self) => (ulong)self != 0;
+// Owner-bearing handles require both fields to be nonzero.
+fn bool BufferHandle.is_valid(self)    => self.owner != 0 && self.generation != 0;
+fn bool BufferHandle.equals(self, BufferHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool TextureHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool PipelineHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool PipelineHandle.equals(self, PipelineHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool SemaphoreHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool SemaphoreHandle.equals(self, SemaphoreHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool SwapchainHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool ShaderHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool ShaderHandle.equals(self, ShaderHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool RecordingContextHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool RecordingContextHandle.equals(self, RecordingContextHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool CommandListHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool CommandListHandle.equals(self, CommandListHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
 
 <* True for a live heap index; the zero value is the invalid sentinel. *>
 fn bool TextureIndex.is_valid(self) => (uint)self != 0;

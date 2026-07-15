@@ -17,6 +17,19 @@ fn void? submit(Device* device, SubmitDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
+    foreach (&commands : desc.command_lists) {
+        if (commands.device != *device) return INVALID_HANDLE~;
+        validate_resource_owner(&operation, commands.handle.owner, ResourceOwnerKind.COMMAND)!;
+    }
+    foreach (&wait : desc.waits) {
+        validate_resource_owner(&operation, wait.semaphore.owner, ResourceOwnerKind.SEMAPHORE)!;
+    }
+    foreach (&signal : desc.signals) {
+        validate_resource_owner(&operation, signal.semaphore.owner, ResourceOwnerKind.SEMAPHORE)!;
+    }
+    if (desc.swapchain != SWAPCHAIN_HANDLE_INVALID) {
+        validate_resource_owner(&operation, desc.swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
+    }
     return operation.vtable.submit(device, desc);
 }
 

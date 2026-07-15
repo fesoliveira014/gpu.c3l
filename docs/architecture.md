@@ -192,12 +192,13 @@ returns `DEVICE_BUSY` without changing the token or generation. Backend
 teardown runs only after a successful live-to-closing transition with no
 active pins.
 
-All child handles, indices, addresses, spans, command tokens, and
-synchronization values are scoped to their owning device and runtime lifetime.
-Passing one to another device is invalid. Table- and index-backed values without
-owner metadata may resolve a coincident resource instead of returning a fault;
-see `docs/limitations.md`. Frame and command tokens embed their owner and
-reject stale owners.
+Device-owned table handles carry an opaque device-and-kind owner plus a local slot and
+generation. Backend tables reject foreign owners before resolving or mutating
+resource state, then validate liveness and generation. Frame and command tokens
+derive the same ownership from their device. Shader-visible indices and GPU
+addresses remain caller-lifetime values rather than ownership tokens. The
+transitional descriptor release API still accepts raw indices; see
+`docs/limitations.md`.
 
 ### Queues
 

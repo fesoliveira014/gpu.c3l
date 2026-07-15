@@ -38,6 +38,7 @@ struct SwapchainCell {
 
 struct SwapchainTable {
     SwapchainCell[] slots;
+    ulong           owner;
     uint            free_head;
     uint            next_new;
 }
@@ -56,10 +57,15 @@ fn gpu::SwapchainHandle? SwapchainTable.alloc(&self, SwapchainSlot value) {
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
-    return (gpu::SwapchainHandle){ .index = idx, .generation = self.slots[idx].generation };
+    return (gpu::SwapchainHandle){
+        .owner      = self.owner,
+        .index      = idx,
+        .generation = self.slots[idx].generation,
+    };
 }
 
 fn SwapchainSlot*? SwapchainTable.get(&self, gpu::SwapchainHandle h) {
+    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;

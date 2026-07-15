@@ -23,6 +23,7 @@ struct SemaphoreCell {
 
 struct SemaphoreTable {
     SemaphoreCell[] slots;
+    ulong           owner;
     uint            free_head;
     uint            next_new;
 }
@@ -41,10 +42,15 @@ fn gpu::SemaphoreHandle? SemaphoreTable.alloc(&self, SemaphoreSlot value) {
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation);
     self.slots[idx].used = true;
-    return (gpu::SemaphoreHandle){ .index = idx, .generation = self.slots[idx].generation };
+    return (gpu::SemaphoreHandle){
+        .owner      = self.owner,
+        .index      = idx,
+        .generation = self.slots[idx].generation,
+    };
 }
 
 fn SemaphoreSlot*? SemaphoreTable.get(&self, gpu::SemaphoreHandle h) {
+    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
@@ -129,7 +135,7 @@ fn void? vk_cmd_global_barrier(gpu::CommandList* commands, gpu::GlobalBarrier* b
    has recorded one, else the committed tracked layout. *>
 fn gpu::TextureLayout effective_layout(CommandRecord* record, TextureSlot* slot, gpu::TextureHandle tex) @private {
     for (uint i = 0; i < record.pending_layout_count; i++) {
-        if ((ulong)record.pending_layouts[i].texture == (ulong)tex) return record.pending_layouts[i].latest;
+        if (record.pending_layouts[i].texture == tex) return record.pending_layouts[i].latest;
     }
     return texture_layout(slot);
 }
@@ -137,7 +143,7 @@ fn gpu::TextureLayout effective_layout(CommandRecord* record, TextureSlot* slot,
 <* Record or update one texture's pending transition, growing as needed. *>
 fn void record_pending_layout(VkDeviceState* state, CommandRecord* record, gpu::TextureHandle tex, gpu::TextureLayout old_layout, gpu::TextureLayout new_layout) @private {
     for (uint i = 0; i < record.pending_layout_count; i++) {
-        if ((ulong)record.pending_layouts[i].texture == (ulong)tex) {
+        if (record.pending_layouts[i].texture == tex) {
             record.pending_layouts[i].latest = new_layout;
             return;
         }
