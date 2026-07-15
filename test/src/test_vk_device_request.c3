@@ -3,6 +3,7 @@ module gpu_test;
 import gpu @public;
 import gpu::vk @public;
 import std::atomic;
+import std::io;
 
 const gpu::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
     .destroy_device = &destroy_registry_blocker,
@@ -26,6 +27,14 @@ fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
     foreach (&blocker : blockers) {
         if (blocker.is_valid()) (void)gpu::destroy_device(blocker);
     }
+}
+
+fn uptr device_physical_adapter(gpu::Device* device) @private {
+    gpu::DeviceOperation operation = gpu::begin_device_operation(device)!!;
+    defer gpu::end_device_operation(&operation);
+    gpu::vk::VkDeviceState* state =
+        (gpu::vk::VkDeviceState*)gpu::device_backend_state_ptr(device);
+    return (uptr)state.physical_device;
 }
 
 fn void strict_heap_state_follows_request_and_mode() @test {
@@ -402,23 +411,51 @@ fn void runtime_devices_destroy_independently() @test {
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::DeviceRequest request = gpu::strict_device_request();
+    bool exercised;
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
 
         gpu::Adapter second_adapter = adapter;
+        bool distinct_adapters;
         for (uint j = 0; j < adapters.count; j++) {
             if (j == i) continue;
             gpu::Adapter candidate = adapters.get(j)!!;
             if (!gpu::supports_device_request(&candidate, &request)!!.supported) continue;
             second_adapter = candidate;
+            distinct_adapters = true;
             break;
         }
+        if (!distinct_adapters) {
+            io::eprintfn("runtime_devices: distinct-adapter=N/A (one strict-compatible adapter)");
+        }
 
+        gpu::RuntimeData* runtime_data = gpu::resolve_adapter(&adapter);
+        gpu::vk::VkRuntimeState* runtime_state =
+            (gpu::vk::VkRuntimeState*)runtime_data.backend_state;
         gpu::Device first = gpu::create_device(&adapter, &request)!!;
         gpu::Device second = gpu::create_device(&second_adapter, &request)!!;
+        uptr first_physical = device_physical_adapter(&first);
+        uptr second_physical = device_physical_adapter(&second);
+
         assert((ulong)first != (ulong)second, "same-runtime devices have distinct identities");
+        assert(
+            first_physical
+                == (uptr)runtime_state.adapters[adapter.adapter_index].physical_device,
+            "the first device owns the first requested physical adapter"
+        );
+        assert(
+            second_physical
+                == (uptr)runtime_state.adapters[second_adapter.adapter_index].physical_device,
+            "the second device owns the second requested physical adapter"
+        );
+        if (distinct_adapters) {
+            assert(
+                first_physical != second_physical,
+                "distinct adapter tokens create devices on distinct physical adapters"
+            );
+        }
 
         gpu::BufferDesc buffer_desc = {
             .size        = 256,
@@ -432,13 +469,18 @@ fn void runtime_devices_destroy_independently() @test {
 
         gpu::destroy_device(&first)!!;
         assert(gpu::get_device_caps(&second)!!.strict_enabled, "destroying one device preserves its peer");
+        assert(
+            device_physical_adapter(&second) == second_physical,
+            "destroying one device preserves its peer's physical adapter"
+        );
 
         gpu::BufferHandle buffer = gpu::create_buffer(&second, &buffer_desc)!!;
         gpu::destroy_buffer(&second, buffer)!!;
         gpu::destroy_device(&second)!!;
-        gpu::destroy_runtime(&runtime)!!;
-        return;
+        exercised = true;
+        break;
     }
 
     gpu::destroy_runtime(&runtime)!!;
+    assert(exercised, "the controlled native target has a compatible strict adapter");
 }

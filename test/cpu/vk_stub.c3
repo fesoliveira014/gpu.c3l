@@ -194,6 +194,14 @@ fn void stub_set_surface_destroy_available(bool available) {
 
 fn gpu::Adapter stub_last_device_adapter() => last_device_adapter;
 
+fn gpu::Adapter? stub_device_adapter(gpu::Device* device) {
+    gpu::DeviceOperation operation = gpu::begin_device_operation(device)!;
+    defer gpu::end_device_operation(&operation);
+    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    if (state == null) return gpu::INVALID_HANDLE~;
+    return state.adapter;
+}
+
 fn void stub_probe_destroy_visibility() {
     probe_destroy_visibility = true;
 }

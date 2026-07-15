@@ -43,6 +43,42 @@ fn void adapter_device_preserves_identity_and_runtime_lifetime() @test {
     );
 }
 
+fn void distinct_adapter_devices_preserve_exact_owners() @test {
+    gpu::vk::stub_set_adapter_count(2);
+    gpu::vk::stub_set_strict_support(true);
+    gpu::vk::stub_reset_device_counts();
+    RuntimeDesc desc = device_creation_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Adapter first_adapter = device_creation_adapter(&runtime, 0);
+    Adapter second_adapter = device_creation_adapter(&runtime, 1);
+    DeviceRequest request = gpu::strict_device_request();
+
+    Device first = gpu::create_device(&first_adapter, &request)!!;
+    Device second = gpu::create_device(&second_adapter, &request)!!;
+
+    assert(
+        (ulong)gpu::vk::stub_device_adapter(&first)!! == (ulong)first_adapter,
+        "the first device keeps the first exact adapter"
+    );
+    assert(
+        (ulong)gpu::vk::stub_device_adapter(&second)!! == (ulong)second_adapter,
+        "the second device keeps the second exact adapter"
+    );
+
+    gpu::destroy_device(&first)!!;
+    assert(
+        (ulong)gpu::vk::stub_device_adapter(&second)!! == (ulong)second_adapter,
+        "destroying one adapter device preserves its peer ownership"
+    );
+    gpu::destroy_device(&second)!!;
+    gpu::destroy_runtime(&runtime)!!;
+    assert(
+        gpu::vk::stub_device_temporary_create_count()
+            == gpu::vk::stub_device_temporary_destroy_count(),
+        "both adapter-owned backend states are released"
+    );
+}
+
 fn void unsupported_and_stale_adapter_creation_faults_before_allocation() @test {
     gpu::vk::stub_set_adapter_count(1);
     gpu::vk::stub_set_strict_support(false);
