@@ -30,8 +30,9 @@ struct QueueCounts {
     uint transfer;
 }
 
-<* Semantic queues required at device creation. A marked distinct role may
-   not alias another requested role. *>
+<* Semantic queues required at device creation. Each count is 0..255 and
+   requests distinct identities within that role. A marked distinct role must
+   be requested and may not alias another requested role. *>
 struct QueueRequirements {
     QueueCounts counts;
     QueueRoles distinct;
@@ -216,6 +217,13 @@ fn uint selected_queue_count(DeviceOperation* operation, QueueKind kind) @privat
     }
 }
 
+fn void? validate_selected_queue_kind(
+    DeviceOperation* operation,
+    QueueKind kind,
+) @private {
+    if (selected_queue_count(operation, kind) == 0) return INVALID_ARGUMENT~;
+}
+
 fn uint selected_queue_id(DeviceOperation* operation, QueueKind kind) @private {
     switch (kind) {
         case QueueKind.GRAPHICS: return selected_queues(operation).graphics_id;
@@ -322,5 +330,6 @@ fn void? submit(Device* device, SubmitDesc* desc) {
 fn void? wait_queue_idle(Device* device, QueueKind queue) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_selected_queue_kind(&operation, queue)!;
     return operation.vtable.wait_queue_idle(device, queue);
 }

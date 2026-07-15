@@ -190,10 +190,11 @@ create_device(Adapter*, DeviceRequest*) -> Device?
 
 The strict request defaults to one graphics, compute, and transfer queue; one
 native queue may satisfy several roles. `request_queues` replaces that implicit
-default with one explicit group. At least one count must be nonzero, and a role
-marked `distinct` must have a nonzero count and may not alias another requested
-role. Invalid or duplicate queue groups return `INVALID_ARGUMENT`. Support
-queries report unavailable counts or topology without enabling device state.
+default with one explicit group. Each role count is 0..255 and requests distinct
+identities within that role. At least one count must be nonzero. A role marked
+`distinct` must have a nonzero count and may not alias another requested role.
+Invalid or duplicate queue groups return `INVALID_ARGUMENT`. Support queries
+report unavailable counts or topology without enabling device state.
 
 A live adapter-created device retains its runtime and reuses the runtime-owned
 backend instance. Destroy the device before destroying that runtime.
@@ -378,7 +379,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
@@ -906,8 +907,9 @@ still count separately but name one canonical identity. `get_queue` faults
 unavailable role index.
 `get_queue_info` faults `INVALID_HANDLE` for zero, stale, foreign-device, or
 malformed tokens and returns the stable device-local ID and supported roles.
-Backend family indices and native handles remain private. Current command entry
-points still take `QueueKind`; later submission and access-domain work will use
+Backend family indices and native handles remain private. Command entry points
+still take `QueueKind` and fault `INVALID_ARGUMENT` before backend work when
+that role was not requested; later submission and access-domain work will use
 `Queue` for exact ownership validation.
 
 `QueueKind.COMPUTE` routes to a real compute queue when

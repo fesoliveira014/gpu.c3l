@@ -210,6 +210,7 @@ fn void? destroy_recording_context(Device* device, RecordingContextHandle ctx) {
 fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_selected_queue_kind(&operation, queue)!;
     BackendVTable* vtable = operation.vtable;
     CommandList commands;
     vtable.begin_commands(device, queue, ctx, &commands)!;

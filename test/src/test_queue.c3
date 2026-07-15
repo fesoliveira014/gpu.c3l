@@ -216,4 +216,24 @@ fn void device_exposes_only_requested_queue_roles() @test {
         @catch(gpu::get_queue(&device, QueueKind.GRAPHICS)) == gpu::INVALID_ARGUMENT,
         "unrequested roles have no public queue"
     );
+    assert(
+        @catch(gpu::begin_commands(&device, QueueKind.GRAPHICS))
+            == gpu::INVALID_ARGUMENT,
+        "unrequested graphics recording faults before backend work"
+    );
+    assert(
+        @catch(gpu::begin_commands(&device, QueueKind.TRANSFER))
+            == gpu::INVALID_ARGUMENT,
+        "unrequested transfer recording faults before backend work"
+    );
+    assert(
+        @catch(gpu::wait_queue_idle(&device, QueueKind.GRAPHICS))
+            == gpu::INVALID_ARGUMENT,
+        "unrequested graphics idle faults before backend work"
+    );
+    assert(
+        @catch(gpu::wait_queue_idle(&device, QueueKind.TRANSFER))
+            == gpu::INVALID_ARGUMENT,
+        "unrequested transfer idle faults before backend work"
+    );
 }

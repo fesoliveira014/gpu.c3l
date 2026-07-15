@@ -50,7 +50,7 @@ fn void single_family_aliases() @test {
 fn void no_graphics_family_faults() @test {
     vk::QueueFamilyProperties[1] table = { family(QF_C | QF_T, 4) };
     fault f = @catch(vk::pick_queue_families(table[..]));
-    assert(f == gpu::UNSUPPORTED_FEATURE, "no graphics+compute family faults");
+    assert(f == gpu::UNSUPPORTED_FEATURE, "no graphics family faults");
 }
 
 fn void presentation_selects_a_surface_capable_main_family() @test {
@@ -534,6 +534,121 @@ fn void distinct_compute_requirement_uses_a_second_native_queue() @test {
         vk::pick_queue_families_for_requirements(table[..], requirements)!!;
     assert(picked.graphics == picked.compute, "both roles use the capable family");
     assert(picked.compute_index == 1, "compute uses a distinct queue index");
+}
+
+fn void distinct_graphics_requirement_uses_a_second_native_queue() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 2),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1, .transfer = 1 },
+        .distinct = { .graphics },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(picked.graphics_index == 0, "graphics keeps the first queue");
+    assert(
+        picked.compute_index == 1 && picked.transfer_index == 1,
+        "compute and transfer share the other queue"
+    );
+}
+
+fn void distinct_transfer_requirement_uses_a_second_native_queue() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 2),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1, .transfer = 1 },
+        .distinct = { .transfer },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(
+        picked.graphics_index == 0 && picked.compute_index == 0,
+        "graphics and compute share the first queue"
+    );
+    assert(picked.transfer_index == 1, "transfer uses the other queue");
+}
+
+fn void distinct_roles_use_split_capability_families() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G, 1),
+        family(QF_C, 1),
+        family(QF_T, 1),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = 1,
+            .compute  = 1,
+            .transfer = 1,
+        },
+        .distinct = { .graphics, .compute, .transfer },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(picked.graphics == 0 && picked.graphics_index == 0);
+    assert(picked.compute == 1 && picked.compute_index == 0);
+    assert(picked.transfer == 2 && picked.transfer_index == 0);
+}
+
+fn void presentation_requirements_consider_a_later_main_family() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G | QF_C | QF_T, 1),
+        family(QF_G | QF_C | QF_T, 2),
+        family(QF_T, 1),
+    };
+    bool[3] present_support = { true, false, false };
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1 },
+        .distinct = { .compute },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_surface_requirements(
+            table[..],
+            present_support[..],
+            requirements,
+        )!!;
+    assert(picked.graphics == 1, "the later family supplies two semantic queues");
+    assert(picked.compute == 1 && picked.compute_index == 1);
+    assert(picked.present == 0, "presentation stays on the supported family");
+}
+
+fn void supported_selection_requests_every_selected_queue_index() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 2),
+    };
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1, .transfer = 1 },
+        .distinct = { .transfer },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+    assert(
+        vk::requested_queue_count(&picked, picked.graphics, false) == 2,
+        "device creation requests through the highest selected index"
+    );
+}
+
+fn void aliased_compute_and_transfer_share_one_queue_mutex() @test {
+    vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
+    vk::Queue compute_queue = (vk::Queue)(uptr)0x20;
+    vk::VkDeviceState state = {
+        .graphics_queue         = graphics_queue,
+        .compute_queue          = compute_queue,
+        .transfer_queue         = compute_queue,
+        .compute_queue_distinct = true,
+    };
+
+    assert(
+        vk::queue_mutex_for(&state, gpu::QueueKind.COMPUTE)
+            == vk::queue_mutex_for(&state, gpu::QueueKind.TRANSFER),
+        "aliased semantic roles serialize one native queue"
+    );
 }
 
 fn void unavailable_distinct_queue_requirement_faults() @test {
