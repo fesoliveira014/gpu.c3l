@@ -12,9 +12,11 @@ struct StubDeviceState {
     gpu::Adapter         adapter;
     gpu::Surface         surface;
     gpu::BufferHandle    buffer;
+    gpu::TextureHandle   texture;
     gpu::SwapchainHandle swapchain;
     ulong                resource_owner;
     bool                 buffer_live;
+    bool                 texture_live;
     bool                 swapchain_live;
 }
 
@@ -291,12 +293,32 @@ fn void? destroy_stub_buffer(
     state.buffer_live = false;
 }
 
+fn gpu::TextureHandle? create_stub_texture(
+    gpu::Device* device,
+    gpu::TextureDesc* desc,
+) {
+    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    if (state.texture_live) return gpu::INVALID_RESOURCE_STATE~;
+    state.texture = {
+        .owner      = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.TEXTURE),
+        .index      = 0,
+        .generation = 1,
+    };
+    state.texture_live = true;
+    return state.texture;
+}
+
 fn void? destroy_stub_texture(
     gpu::Device* device,
     gpu::TextureHandle texture,
 ) {
+    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
     texture_destroy_attempts++;
-    return gpu::INVALID_HANDLE~;
+    if (state == null || !state.texture_live) return gpu::INVALID_HANDLE~;
+    if (state.texture != texture) return gpu::INVALID_HANDLE~;
+    state.texture = {};
+    state.texture_live = false;
 }
 
 fn gpu::SwapchainHandle? create_stub_swapchain(
@@ -338,6 +360,7 @@ const gpu::BackendVTable STUB_DEVICE_VTABLE @private = {
     .destroy_device      = &destroy_stub_device,
     .create_buffer       = &create_stub_buffer,
     .destroy_buffer      = &destroy_stub_buffer,
+    .create_texture      = &create_stub_texture,
     .destroy_texture     = &destroy_stub_texture,
     .create_swapchain    = &create_stub_swapchain,
     .destroy_swapchain   = &destroy_stub_swapchain,
