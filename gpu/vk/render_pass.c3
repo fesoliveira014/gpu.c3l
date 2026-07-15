@@ -264,12 +264,18 @@ fn void replay_dynamic_state(vk::CommandBuffer cb, PipelineSlot* slot) @private 
 <* Aliases of one cache entry can carry different dynamic-state snapshots, so
    a handle change replays state even when the pipeline bind is skipped. *>
 fn void? bind_graphics_and_push(VkDeviceState* state, CommandRecord* record, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root) @private {
+    validate_descriptor_heap_binding(state)!;
     vk::CommandBuffer cb = record.command_buffer;
     PipelineSlot* slot = state.pipelines.get(handle)!;
     if ((ulong)handle != (ulong)record.last_pipeline) {
         if (slot.entry != record.last_entry) {
             vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.GRAPHICS, slot.pipeline);
-            bind_descriptor_heap(state, cb, slot.layout, vk::PipelineBindPoint.GRAPHICS);
+            bind_descriptor_heap(
+                state:      state,
+                cb:         cb,
+                layout:     slot.layout,
+                bind_point: vk::PipelineBindPoint.GRAPHICS,
+            )!;
             record.last_entry = slot.entry;
         }
         replay_dynamic_state(cb, slot);

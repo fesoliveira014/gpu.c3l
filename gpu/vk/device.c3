@@ -473,11 +473,9 @@ fn gpu::Device? create_vk_device_with_selection(
         vk::get_physical_device_properties(state.physical_device, &anisotropy_props);
         state.max_sampler_anisotropy = anisotropy_props.limits.max_sampler_anisotropy;
     }
-    bool indexing_supported;
-    bool buffer_supported;
     if (state.strict_heap.enabled) {
-        indexing_supported = heap_indexing_supported(&features2.features, &features12);
-        buffer_supported = heap_shared_features_supported(&features2.features, &features12)
+        bool indexing_supported = heap_indexing_supported(&features2.features, &features12);
+        bool buffer_supported = heap_shared_features_supported(&features2.features, &features12)
             && query_descriptor_buffer_support(state.physical_device);
         select_strict_heap_mode(
             state:              &state.strict_heap,

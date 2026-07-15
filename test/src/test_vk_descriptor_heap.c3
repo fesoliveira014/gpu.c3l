@@ -129,6 +129,50 @@ fn void descriptor_buffer_create_info_uses_only_graphics_and_compute_families() 
     assert(info.p_queue_family_indices[1] == 2, "compute family remains second");
 }
 
+fn void disabled_descriptor_heap_bind_returns_unsupported_feature() @test {
+    gpu::vk::VkDeviceState state = {};
+    fault bind_fault = @catch(gpu::vk::bind_descriptor_heap(
+        state:      &state,
+        cb:         (vk::CommandBuffer)null,
+        layout:     (vk::PipelineLayout)null,
+        bind_point: vk::PipelineBindPoint.COMPUTE,
+    ));
+
+    assert(bind_fault == gpu::UNSUPPORTED_FEATURE, "disabled descriptor heaps cannot be bound");
+}
+
+fn void disabled_heap_preflights_pipeline_binds() @test {
+    gpu::vk::VkDeviceState state = {};
+    gpu::PipelineHandle cached = { .index = 7, .generation = 3 };
+    gpu::PipelineHandle requested = { .index = 11, .generation = 5 };
+    gpu::vk::CommandRecord record = {
+        .command_buffer = (vk::CommandBuffer)null,
+        .last_pipeline = cached,
+        .last_entry = 19,
+    };
+
+    fault compute_fault = @catch(gpu::vk::bind_compute_and_push(
+        state:  &state,
+        record: &record,
+        handle: requested,
+        root:   (gpu::GpuAddress)0,
+    ));
+    assert(compute_fault == gpu::UNSUPPORTED_FEATURE, "compute binding preflights a disabled heap");
+    assert((ulong)record.last_pipeline == (ulong)cached, "rejected compute binding preserves the cached pipeline");
+    assert(record.last_entry == 19, "rejected compute binding preserves the cached pipeline entry");
+
+    fault graphics_fault = @catch(gpu::vk::bind_graphics_and_push(
+        state:         &state,
+        record:        &record,
+        handle:        requested,
+        vertex_root:   (gpu::GpuAddress)0,
+        fragment_root: (gpu::GpuAddress)0,
+    ));
+    assert(graphics_fault == gpu::UNSUPPORTED_FEATURE, "graphics binding preflights a disabled heap");
+    assert((ulong)record.last_pipeline == (ulong)cached, "rejected graphics binding preserves the cached pipeline");
+    assert(record.last_entry == 19, "rejected graphics binding preserves the cached pipeline entry");
+}
+
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::DeviceDesc desc = {
         .backend                     = gpu::BackendKind.VULKAN,
