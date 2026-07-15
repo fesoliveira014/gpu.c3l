@@ -111,6 +111,39 @@ fn void foreign_buffer_owner_rejects_before_backend_mutation() @test {
     gpu::destroy_device(&second)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
+
+fn void stale_child_handle_rejects_after_device_slot_reuse() @test {
+    gpu::vk::stub_reset_buffer_counts();
+    RuntimeDesc desc = device_creation_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Adapter adapter = device_creation_adapter(&runtime, 0);
+    DeviceRequest request = gpu::strict_device_request();
+    BufferDesc buffer_desc = {
+        .size        = 256,
+        .usage       = { .transfer_dst },
+        .memory_kind = MemoryKind.DEVICE,
+    };
+
+    Device old_device = gpu::create_device(&adapter, &request)!!;
+    BufferHandle old_buffer = gpu::create_buffer(&old_device, &buffer_desc)!!;
+    uint old_index = old_device.index;
+    uint old_generation = old_device.generation;
+    gpu::destroy_buffer(&old_device, old_buffer)!!;
+    gpu::destroy_device(&old_device)!!;
+
+    Device replacement = gpu::create_device(&adapter, &request)!!;
+    assert(replacement.index == old_index, "freed registry slot is reused");
+    assert(replacement.generation != old_generation, "replacement has a distinct device generation");
+    assert(@catch(gpu::destroy_buffer(&replacement, old_buffer)) == gpu::INVALID_HANDLE);
+    assert(
+        gpu::vk::stub_buffer_destroy_attempt_count() == 1,
+        "stale child owner rejects before the new tenant backend mutates"
+    );
+
+    gpu::destroy_device(&replacement)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
 fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
     gpu::vk::stub_reset_texture_counts();
     RuntimeDesc desc = device_creation_runtime_desc();
