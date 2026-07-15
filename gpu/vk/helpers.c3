@@ -129,12 +129,12 @@ fn void? check_wait_backend_result(
     ZString operation,
     vk::Result result,
 ) {
-    fault public_fault = wait_result_fault(result);
+    fault public_fault = @catch(check_wait(result));
     if (!public_fault) return;
     if (public_fault != gpu::WAIT_TIMEOUT) {
         return check_backend_result(state, operation, result);
     }
-    return gpu::WAIT_TIMEOUT~;
+    return public_fault~;
 }
 
 fn void? check_virtual_allocate_backend_result(
@@ -247,14 +247,9 @@ fn void? check_texture_create_result(vk::Result result) @private {
     }
 }
 
-fn void? check_texture_create_device_result(vk::Result result, VkDeviceState* state) @private {
-    switch (result) {
-        case vk::Result.ERROR_FORMAT_NOT_SUPPORTED:
-        case vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
-            return gpu::UNSUPPORTED_FEATURE~;
-        default:
-            return check_device_result(state, result);
-    }
+fn void? check_texture_create_device_result(VkDeviceState* state, vk::Result result) @private {
+    observe_device_result(state, result);
+    return check_texture_create_result(result);
 }
 
 fn void? check_shader_create_result(vk::Result result) @private {
@@ -267,14 +262,9 @@ fn void? check_shader_create_result(vk::Result result) @private {
     }
 }
 
-fn void? check_shader_create_device_result(vk::Result result, VkDeviceState* state) @private {
-    switch (result) {
-        case vk::Result.ERROR_INVALID_SHADER_NV:
-        case vk::Result.ERROR_VALIDATION_FAILED_EXT:
-            return gpu::SHADER_INVALID~;
-        default:
-            return check_device_result(state, result);
-    }
+fn void? check_shader_create_device_result(VkDeviceState* state, vk::Result result) @private {
+    observe_device_result(state, result);
+    return check_shader_create_result(result);
 }
 
 fn void? check_pipeline_create_result(vk::Result result) @private {
@@ -290,17 +280,9 @@ fn void? check_pipeline_create_result(vk::Result result) @private {
     }
 }
 
-fn void? check_pipeline_create_device_result(vk::Result result, VkDeviceState* state) @private {
-    switch (result) {
-        case vk::Result.SUCCESS:
-            return;
-        case vk::Result.ERROR_OUT_OF_HOST_MEMORY:
-        case vk::Result.ERROR_OUT_OF_DEVICE_MEMORY:
-        case vk::Result.ERROR_DEVICE_LOST:
-            return check_device_result(state, result);
-        default:
-            return gpu::PIPELINE_CREATE_FAILED~;
-    }
+fn void? check_pipeline_create_device_result(VkDeviceState* state, vk::Result result) @private {
+    observe_device_result(state, result);
+    return check_pipeline_create_result(result);
 }
 
 fn void? check_descriptor_pool_create_result(vk::Result result) @private {
@@ -347,13 +329,11 @@ fn bool pipeline_cache_blob_retryable(vk::Result result) @private {
     }
 }
 
-<* For bounded host waits only: TIMEOUT faults WAIT_TIMEOUT, everything else
-   delegates to check(). *>
+<* Translate bounded host-wait results through the common result taxonomy. *>
 fn void? check_wait(vk::Result result) @private {
     fault public_fault = wait_result_fault(result);
     if (!public_fault) return;
-    if (public_fault == gpu::WAIT_TIMEOUT) return public_fault~;
-    return check(result);
+    return public_fault~;
 }
 
 <* Pure translation of a public execution stage to a synchronization2 stage

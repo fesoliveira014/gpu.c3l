@@ -271,6 +271,7 @@ fn void end_device_operation(DeviceOperation* operation) @private {
     operation.active = false;
 }
 
+<* Caller must hold an operation pin or be this device's destroying thread. *>
 fn void mark_device_lost(Device* device) @private {
     if (device == null || !device.is_valid()) return;
     if (device.reserved != 0 || device.index >= MAX_DEVICES) return;

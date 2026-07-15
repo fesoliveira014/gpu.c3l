@@ -510,6 +510,7 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     };
     vma::AllocationInfo allocation_info;
     check_texture_create_device_result(
+        state: state,
         result: state.allocator.create_image(
             image_info:     &image_info,
             alloc_info:     &alloc_info,
@@ -517,7 +518,6 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
             out_allocation: &slot.allocation,
             out_info:       &allocation_info,
         ),
-        state: state,
     )!;
     slot.allocation_size = (usz)allocation_info.size;
 
