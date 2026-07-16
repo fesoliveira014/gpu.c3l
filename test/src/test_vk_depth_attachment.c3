@@ -735,9 +735,8 @@ fn void depth_bias_shifts_stored_depth() @test {
     gpu::BufferHandle readback = make_readback(&device, DP_DEPTH_BYTES * 2);
     defer gpu::destroy_buffer(&device, readback)!!;
     gpu::GpuSpan rb = gpu::get_buffer_span(&device, readback)!!;
-    gpu::GpuSpan rb_plain = { .buffer = rb.buffer, .offset = 0, .size = DP_DEPTH_BYTES, .cpu = rb.cpu, .gpu = rb.gpu };
-    char* biased_cpu = (char*)rb.cpu + DP_DEPTH_BYTES;
-    gpu::GpuSpan rb_biased = { .buffer = rb.buffer, .offset = DP_DEPTH_BYTES, .size = DP_DEPTH_BYTES, .cpu = (void*)biased_cpu, .gpu = rb.gpu };
+    gpu::GpuSpan rb_plain = rb.checked_subspan(0, DP_DEPTH_BYTES)!!;
+    gpu::GpuSpan rb_biased = rb.checked_subspan(DP_DEPTH_BYTES, DP_DEPTH_BYTES)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts = write_tri(&frame_token, NEAR_Z);
