@@ -45,6 +45,13 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
             attachments = mem::talloc_array(vk::RenderingAttachmentInfo, desc.colors.len);
             foreach (i, &target : desc.colors) {
                 TextureSlot* slot = state.textures.get(target.texture)!;
+                validate_texture_recording_access(
+                    state:     state,
+                    record:    record,
+                    slot:      slot,
+                    handle:    target.texture,
+                    operation: "cmd_begin_render_pass",
+                )!;
                 color_slots[i] = slot;
                 if (!slot.usage.color_attach) {
                     return report_contract_failure(
@@ -101,6 +108,13 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
         TextureSlot* depth_slot = null;
         if (desc.depth != null) {
             depth_slot = state.textures.get(desc.depth.texture)!;
+            validate_texture_recording_access(
+                state:     state,
+                record:    record,
+                slot:      depth_slot,
+                handle:    desc.depth.texture,
+                operation: "cmd_begin_render_pass",
+            )!;
             if (!depth_slot.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
             if (desc.width > depth_slot.width || desc.height > depth_slot.height) return gpu::INVALID_ARGUMENT~;
             if (effective_layout(record, depth_slot, desc.depth.texture) != gpu::TextureLayout.DEPTH_STENCIL) return gpu::INVALID_RESOURCE_STATE~;
@@ -320,9 +334,11 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
     usz index_size = index_element_size(index_type);
     BufferSlot* buffer = resolve_index_span(
         state:      state,
+        record:     record,
         span:       &index_span,
         index_type: index_type,
         required:   (usz)index_count * index_size,
+        operation:  "cmd_draw_indexed",
     )!;
 
     vk::CommandBuffer cb = record.command_buffer;
@@ -350,12 +366,13 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
     )!;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:          state,
+        record:         record,
         span:           &args,
         arg_size:       gpu::DrawIndirectCommand::size,
         count:          draw_count,
-        max_count:      state.caps.max_draw_indirect_count,
         operation:      "cmd_draw_indirect",
         rejected_field: "draw_count",
+        max_count:      state.caps.max_draw_indirect_count,
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
@@ -368,14 +385,12 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
     vk::cmd_draw_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset, draw_count, gpu::DrawIndirectCommand::size);
 }
 
-<* Element count comes from the GPU-written args and is not checked here. *>
-fn void? bind_index_span(VkDeviceState* state, vk::CommandBuffer cb, gpu::GpuSpan* index_span, gpu::IndexType index_type) @private {
-    BufferSlot* buffer = resolve_index_span(
-        state:      state,
-        span:       index_span,
-        index_type: index_type,
-        required:   0,
-    )!;
+fn void bind_index_buffer(
+    vk::CommandBuffer cb,
+    BufferSlot* buffer,
+    gpu::GpuSpan* index_span,
+    gpu::IndexType index_type,
+) @private {
     vk::cmd_bind_index_buffer(cb, buffer.buffer, (vk::DeviceSize)index_span.offset,
         index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32);
 }
@@ -394,12 +409,21 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
     )!;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:          state,
+        record:         record,
         span:           &args,
         arg_size:       gpu::DrawIndexedIndirectCommand::size,
         count:          draw_count,
-        max_count:      state.caps.max_draw_indirect_count,
         operation:      "cmd_draw_indexed_indirect",
         rejected_field: "draw_count",
+        max_count:      state.caps.max_draw_indirect_count,
+    )!;
+    BufferSlot* index_buffer = resolve_index_span(
+        state:      state,
+        record:     record,
+        span:       &index_span,
+        index_type: index_type,
+        required:   0,
+        operation:  "cmd_draw_indexed_indirect",
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
@@ -409,12 +433,12 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
     )!;
-    bind_index_span(
-        state:      state,
+    bind_index_buffer(
         cb:         cb,
+        buffer:     index_buffer,
         index_span: &index_span,
         index_type: index_type,
-    )!;
+    );
     vk::cmd_draw_indexed_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset, draw_count, gpu::DrawIndexedIndirectCommand::size);
 }
 
@@ -431,6 +455,7 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:          state,
+        record:         record,
         span:           &args,
         arg_size:       gpu::DrawIndexedIndirectCommand::size,
         count:          max_draw_count,
@@ -439,11 +464,20 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
     )!;
     BufferSlot* count_buffer = resolve_indirect_span(
         state:          state,
+        record:         record,
         span:           &count_span,
         arg_size:       4,
         count:          1,
         operation:      "cmd_draw_indexed_indirect_count",
         rejected_field: "count_span",
+    )!;
+    BufferSlot* index_buffer = resolve_index_span(
+        state:      state,
+        record:     record,
+        span:       &index_span,
+        index_type: index_type,
+        required:   0,
+        operation:  "cmd_draw_indexed_indirect_count",
     )!;
     vk::CommandBuffer cb = record.command_buffer;
     bind_graphics_and_push(
@@ -453,12 +487,12 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
     )!;
-    bind_index_span(
-        state:      state,
+    bind_index_buffer(
         cb:         cb,
+        buffer:     index_buffer,
         index_span: &index_span,
         index_type: index_type,
-    )!;
+    );
     vk::cmd_draw_indexed_indirect_count(
         cb,
         args_buffer.buffer,

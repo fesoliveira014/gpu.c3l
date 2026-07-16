@@ -235,3 +235,13 @@ fn void scalar_queue_selection_ignores_aliases_to_absent_roles() @test {
         "an absent graphics role cannot cause an alias"
     );
 }
+
+fn void queue_access_requires_the_recording_role() @test {
+    QueueRoles graphics_and_transfer = { .graphics, .transfer };
+
+    assert(queue_access_allows(graphics_and_transfer, QueueKind.GRAPHICS));
+    assert(queue_access_allows(graphics_and_transfer, QueueKind.TRANSFER));
+    assert(!queue_access_allows(graphics_and_transfer, QueueKind.COMPUTE));
+    assert(!queue_access_allows({}, QueueKind.GRAPHICS));
+    assert(!queue_access_allows((QueueRoles)0x8, QueueKind.GRAPHICS));
+}

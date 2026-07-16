@@ -82,6 +82,13 @@ fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* b
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     BufferSlot* slot = state.buffers.get(barrier.buffer)!;
+    validate_buffer_recording_access(
+        state:     state,
+        record:    record,
+        slot:      slot,
+        handle:    barrier.buffer,
+        operation: "cmd_buffer_barrier",
+    )!;
     // size 0 is the whole-buffer convention, matching flush/invalidate/fill.
     if (!gpu::range_fits(slot.size, barrier.offset, barrier.size)) {
         return report_contract_failure(
@@ -198,6 +205,13 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     TextureSlot* slot = state.textures.get(barrier.texture)!;
+    validate_texture_recording_access(
+        state:     state,
+        record:    record,
+        slot:      slot,
+        handle:    barrier.texture,
+        operation: "cmd_texture_barrier",
+    )!;
     if (barrier.old_layout != effective_layout(record, slot, barrier.texture)) {
         return report_contract_failure(
             state:               state,

@@ -101,7 +101,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 2.4 Explicit semantic queue handles
 
-- [ ] Add queue-role/count requests, `Queue` handles, queue queries, and per-resource access domains in `gpu/queue.c3`, `gpu/device.c3`, `gpu/memory.c3`, `gpu/texture.c3`, `gpu/vk/queue.c3`, and resource creation code.
+- [x] Add queue-role/count requests, `Queue` handles, queue queries, and per-resource access domains in `gpu/queue.c3`, `gpu/device.c3`, `gpu/memory.c3`, `gpu/texture.c3`, `gpu/vk/queue.c3`, and resource creation code.
   - **Depends on:** 2.2 and 2.3.
   - **Contract:** public requests use semantic roles, never family indices; resources admitted to roles on distinct native families use private concurrent sharing; explicitly named resources reject unadmitted queues.
   - **Edges:** unavailable count, one queue serving several roles, same-family multi-role access, cross-family sharing, and GPU-pointer-only access as a documented caller precondition.

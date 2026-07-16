@@ -281,10 +281,11 @@ GpuSpan vertices = packed.checked_subspan(0, vertex_bytes)!;
 GpuSpan indices = packed.checked_subspan(vertex_bytes, index_bytes)!;
 ```
 
-Slicing preserves the span access roles. Validation is relative to the immediate
-parent. A nested child therefore cannot escape an intermediate slice even when
-it would still fit the original
-backing buffer. Bounds use `size <= parent.size - offset` after validating
+Slicing preserves the span access roles. Command validation rejects forged span
+metadata that is empty, unknown, or wider than the backing buffer. Bounds are
+relative to the immediate parent, so a nested child cannot escape an intermediate
+slice even when it would still fit the original backing buffer. Bounds use
+`size <= parent.size - offset` after validating
 the offset, avoiding `offset + size` overflow. Derived GPU, CPU, and backing
 offset additions are checked separately.
 
@@ -460,6 +461,7 @@ FrameArenaState
     GpuAddress gpu_base
     void* cpu_base
     usz size
+    QueueRoles access
     Atomic{usz} cursor
     ulong frame_timeline_value
 ```
@@ -491,7 +493,7 @@ alloc_frame_span(token, size, align)
     next_cursor = aligned + size
     if !compare_exchange(cursor, next_cursor): goto retry
     span = { gpu_base + aligned, cpu_base + aligned,
-             backing_buffer, aligned, size, FRAME_UPLOAD }
+             backing_buffer, aligned, size, FRAME_UPLOAD, access }
 ```
 
 Reset:

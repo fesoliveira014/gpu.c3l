@@ -203,10 +203,9 @@ fn void? destroy_recording_context(Device* device, RecordingContextHandle ctx) {
     return vtable.destroy_recording_context(device, ctx);
 }
 
-<* Begin recording a command list on the given queue. ctx = {} selects the
-   device's built-in context; pass a created context to record from another
-   thread. Ownership: end with end_commands, then submit; the backing command
-   buffer is freed when its frame slot's pool is reset. *>
+<* Begin recording on a semantic queue role. Every explicitly named resource
+   must admit that role. ctx = {} selects the built-in context; a created
+   context supports recording from another thread. End, then submit once. *>
 fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);

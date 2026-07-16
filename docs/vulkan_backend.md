@@ -360,9 +360,10 @@ device. One family remains `EXCLUSIVE`; two or more use `CONCURRENT` with the
 exact ordered list. Transfer is otherwise excluded because transfer commands
 never bind or consume the descriptor heap.
 
-This internal policy does not widen public resource access. A buffer or texture
-consumed by graphics and compute declares both roles in its `access` set. The
-descriptor-indexing path remains unchanged. Descriptor tokens and the
+This internal policy does not widen public resource access. Explicit command
+resources are checked against `CommandRecord.queue` before Vulkan commands,
+layout tracking, pipeline binding, or transfer allocation. Span metadata must
+remain a non-empty subset of its backing buffer. Descriptor tokens and the
 internal heap remain scoped to their owning `Device`.
 
 Public indices map to descriptor entries. Neither path changes the public API

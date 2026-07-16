@@ -209,8 +209,8 @@ fn void? cmd_upload_texture(CommandList* commands, TextureUploadDesc* desc, char
     return operation.vtable.cmd_upload_texture(commands, desc, data);
 }
 
-<* One-call blocking upload: own submission on the graphics queue, then the
-   caller-named next-use barrier. Setup/tooling ergonomics — not a hot path. *>
+<* One-call blocking upload on the device's frame queue role, followed by the
+   caller-named next-use barrier. dst must admit that role. Not a hot path. *>
 fn void? upload_buffer_data(Device* device, BufferHandle dst, usz offset, char[] data, Stage next_stage, Hazard next_hazard) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
@@ -227,8 +227,8 @@ fn void? upload_texture_data(Device* device, TextureHandle dst, uint mip, char[]
     return operation.vtable.upload_texture_data(device, dst, mip, data, next_stage, next_hazard, next_layout);
 }
 
-<* One-call blocking readback. The from trio orders prior GPU writes before
-   the copy; bytes land in `out` after an internal wait + invalidate. *>
+<* One-call blocking readback on the device's frame queue role. src must admit
+   that role. The from trio orders prior writes before copy and host read. *>
 fn void? readback_buffer_data(Device* device, BufferHandle src, usz offset, char[] out_data, Stage from_stage, Hazard from_hazard) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);

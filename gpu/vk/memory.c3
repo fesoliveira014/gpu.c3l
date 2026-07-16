@@ -42,6 +42,7 @@ struct FrameArenaState {
     gpu::GpuAddress   gpu_base;
     void*             cpu_base;
     usz               size;
+    gpu::QueueRoles   access;
     Atomic{usz}       cursor;
     ulong             frame_timeline_value;
 }
@@ -116,6 +117,7 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
             .gpu_base       = span.gpu,
             .cpu_base       = span.cpu,
             .size           = span.size,
+            .access         = span.access,
         };
     }
 }
@@ -494,6 +496,7 @@ fn gpu::GpuSpan? vk_alloc_frame_span(gpu::FrameToken* frame, usz size, usz align
                 .buffer = slot.backing_buffer,
                 .offset = range.offset,
                 .kind   = gpu::MemoryKind.FRAME_UPLOAD,
+                .access = slot.access,
             };
         }
         old = seen;

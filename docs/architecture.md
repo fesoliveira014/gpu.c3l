@@ -226,10 +226,14 @@ identity with a shared role mask. The Vulkan backend allocates every selected
 native identity. Command entry points take `QueueKind`.
 
 `BufferDesc`, `TextureDesc`, and `PersistentAllocDesc` declare a non-empty
-`QueueRoles` access set. The backend deduplicates only those roles' native
-families: one family stays exclusive; multiple families use private concurrent
-sharing. `GpuSpan` carries the declared access set through slicing. Root-addressed
-shader access remains a caller precondition because nested pointers are opaque.
+`QueueRoles` access set. Every explicitly named command resource is checked
+against the command's semantic role before backend state changes. `GpuSpan`
+access must also remain a non-empty subset of its backing buffer, so copied span
+metadata cannot widen access. Root-addressed shader access remains a caller
+precondition because nested pointers are opaque.
+
+The backend deduplicates only admitted roles' native families: one family stays
+exclusive; multiple families use private concurrent sharing.
 
 ### Command lists
 
