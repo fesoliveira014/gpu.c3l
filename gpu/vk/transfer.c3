@@ -66,11 +66,13 @@ struct DedicatedRetireState {
     uint head;
     uint count;
 }
+
 struct ReadbackTicketState @private {
-    gpu::GpuSpan        span;
-    gpu::SemaphoreValue value;
-    gpu::BufferHandle   dedicated;
-    ulong               range_end;
+    gpu::GpuSpan             span;
+    gpu::SemaphoreValue      value;
+    gpu::BufferHandle        dedicated;
+    gpu::CommandListHandle   command;
+    ulong                    range_end;
 }
 
 struct ReadbackTicketCell @private {
@@ -168,7 +170,6 @@ fn void release_readback_state(VkDeviceState* state, ReadbackTicketState* ticket
         unpin_ticket_range(&state.readback_arena, ticket.range_end);
     }
 }
-
 
 fn gpu::Device device_shim(VkDeviceState* state) @private {
     return state.owner;
@@ -883,6 +884,17 @@ fn void signal_helper_timeline_cleanup(VkDeviceState* state, ulong v, ZString op
     );
 }
 
+fn void release_helper_command_on_fault(
+    VkDeviceState* state,
+    gpu::CommandList* commands,
+) @private {
+    if (commands == null || !commands.handle.is_valid()) return;
+    state.command_mutex.lock()!!;
+    defer state.command_mutex.unlock();
+    release_command(state, commands.handle);
+    *commands = {};
+}
+
 fn void? finish_helper_timeline(VkDeviceState* state, ulong* helper_value, ZString operation) @private {
     fault public_fault = @catch(signal_helper_timeline(
         state:           state,
@@ -987,7 +999,8 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
     defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "upload_buffer_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
-    gpu::CommandList commands;
+    gpu::CommandList commands = {};
+    defer catch release_helper_command_on_fault(state, &commands);
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
@@ -1105,7 +1118,8 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
         operation: "upload_texture_data",
     )!;
 
-    gpu::CommandList commands;
+    gpu::CommandList commands = {};
+    defer catch release_helper_command_on_fault(state, &commands);
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
@@ -1227,7 +1241,8 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
         operation: "readback_buffer_data",
     )!;
 
-    gpu::CommandList commands;
+    gpu::CommandList commands = {};
+    defer catch release_helper_command_on_fault(state, &commands);
     gpu::GpuSpan readback;
     fault allocation_fault;
     {
@@ -1371,7 +1386,8 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     )!;
     usz align = format_texel_size(slot.format);
     if (align < 4) align = 4;
-    gpu::CommandList commands;
+    gpu::CommandList commands = {};
+    defer catch release_helper_command_on_fault(state, &commands);
     gpu::GpuSpan readback;
     fault allocation_fault;
     {
@@ -1509,7 +1525,11 @@ fn void unpin_ticket_range(TransferArenaState* arena, ulong range_end) @private 
    buffer's VMA creation runs outside transfer_mutex, matching transfer_alloc
    — a ticket's fallback owns its buffer directly (no shared retire ring), so
    there is nothing to re-check on relock beyond the counter bump. *>
-fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
+fn gpu::ReadbackTicket? ticket_alloc(
+    VkDeviceState* state,
+    usz size,
+    gpu::CommandListHandle command,
+) @private {
     TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
     {
         state.transfer_mutex.lock()!!;
@@ -1527,6 +1547,7 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
             ReadbackTicketState data = {
                 .span      = alloc.span,
                 .value     = (gpu::SemaphoreValue)tag.value,
+                .command   = command,
                 .range_end = alloc.range_end,
             };
             gpu::ReadbackTicket? ticket = state.readback_tickets.alloc(data);
@@ -1552,6 +1573,7 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
             .span      = span,
             .value     = (gpu::SemaphoreValue)tag.value,
             .dedicated = buffer,
+            .command   = command,
         };
         state.transfer_mutex.lock()!!;
         mark_buffer_internal(state, buffer);
@@ -1575,6 +1597,26 @@ fn void? release_ticket(VkDeviceState* state, gpu::ReadbackTicket* ticket) @priv
     release_readback_state(state, data);
     state.readback_tickets.free(*ticket)!;
     *ticket = {};
+}
+
+fn ulong cancel_command_readback_tickets_locked(
+    VkDeviceState* state,
+    gpu::CommandListHandle command,
+) @private {
+    ulong canceled;
+    for (uint i = 0; i < state.readback_tickets.next_new; i++) {
+        ReadbackTicketCell* cell = &state.readback_tickets.slots[i];
+        if (!cell.used || cell.value.command != command) continue;
+        gpu::ReadbackTicket ticket = {
+            .owner      = state.readback_tickets.owner,
+            .index      = i,
+            .generation = cell.generation,
+        };
+        release_readback_state(state, &cell.value);
+        state.readback_tickets.free(ticket)!!;
+        canceled++;
+    }
+    return canceled;
 }
 
 <* Record the copy plus the transfer→host barrier on the destination range;
@@ -1657,7 +1699,7 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
         operation: "cmd_readback_buffer",
     )!;
 
-    gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size);
+    gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size, commands.handle);
     if (catch allocation_fault = allocated_ticket) {
         return report_contract_failure(
             state:               state,
@@ -1761,7 +1803,7 @@ fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu:
         operation: "cmd_readback_texture",
     )!;
 
-    gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size);
+    gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size, commands.handle);
     if (catch allocation_fault = allocated_ticket) {
         return report_contract_failure(
             state:               state,

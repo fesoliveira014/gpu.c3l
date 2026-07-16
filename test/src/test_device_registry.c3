@@ -22,7 +22,14 @@ struct BlockingDestroyFixture {
 struct BlockingOperationFixture {
     Atomic{bool} entered;
     Atomic{bool} release;
+    Atomic{bool} check_entered;
+    Atomic{bool} check_release;
+    Atomic{uint} check_calls;
     Atomic{uint} destroy_calls;
+    gpu::Device  device;
+    bool         block_check;
+    bool         destroy_busy;
+    bool         publish_child_on_check;
 }
 
 struct DestroyWorkerArgs {
@@ -50,6 +57,23 @@ fn void blocking_device_destroy(void* backend_state) {
     }
 }
 
+fn void? check_counted_device_destroy(void* backend_state) {
+    BlockingOperationFixture* fixture = (BlockingOperationFixture*)backend_state;
+    (void)fixture.check_calls.add(1, AtomicOrdering.RELEASE);
+    fixture.check_entered.store(true, AtomicOrdering.RELEASE);
+    while (fixture.block_check
+        && !fixture.check_release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    if (fixture.publish_child_on_check) {
+        (void)gpu::device_slots[fixture.device.index].live_children.add(
+            1,
+            AtomicOrdering.RELEASE,
+        );
+    }
+    if (fixture.destroy_busy) return gpu::DEVICE_BUSY~;
+}
+
 fn void counted_device_destroy(void* backend_state) {
     BlockingOperationFixture* fixture = (BlockingOperationFixture*)backend_state;
     (void)fixture.destroy_calls.add(1, AtomicOrdering.RELEASE);
@@ -70,8 +94,9 @@ gpu::BackendVTable blocking_device_vtable = {
 };
 
 gpu::BackendVTable blocking_operation_vtable = {
-    .destroy_device   = &counted_device_destroy,
-    .get_memory_stats = &blocking_get_memory_stats,
+    .check_device_destroy = &check_counted_device_destroy,
+    .destroy_device       = &counted_device_destroy,
+    .get_memory_stats     = &blocking_get_memory_stats,
 };
 
 fn int destroy_device_worker(void* raw_args) {
@@ -191,6 +216,7 @@ fn void device_loss_isolated_to_marked_slot() @test {
     assert(second_fixture.begin_calls == 1, "a peer device remains usable");
 
     gpu::Device stale = first;
+    gpu::device_slots[first.index].live_children.store(1, AtomicOrdering.RELAXED);
     gpu::destroy_device(&first)!!;
     FrameFixture replacement_fixture;
     gpu::Device replacement = fixture_device(&replacement_fixture);
@@ -211,12 +237,21 @@ fn void exhausted_device_slots_are_retired() @test {
     control.generation = gpu::MAX_DEVICE_GENERATION - 1;
     slot.control.store((ulong)control, AtomicOrdering.RELAXED);
 
-    FrameFixture fixture;
-    gpu::Device device = fixture_device(&fixture);
-    assert(device.index == 0, "the final live generation publishes from the seeded slot");
-    assert(device.generation == gpu::MAX_DEVICE_GENERATION, "registration reaches the final generation naturally");
+    FrameFixture penultimate_fixture;
+    gpu::Device penultimate = fixture_device(&penultimate_fixture);
+    assert(penultimate.index == 0, "the seeded slot publishes its current generation");
+    assert(penultimate.generation == gpu::MAX_DEVICE_GENERATION - 1, "registration does not advance generation");
+    gpu::destroy_device(&penultimate)!!;
 
-    gpu::destroy_device(&device)!!;
+    control = (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
+    assert(control.state == gpu::DEVICE_SLOT_FREE, "the final generation remains publishable");
+    assert(control.generation == gpu::MAX_DEVICE_GENERATION, "successful destruction advances to the final generation");
+
+    FrameFixture final_fixture;
+    gpu::Device final = fixture_device(&final_fixture);
+    assert(final.index == 0, "the final generation publishes from the seeded slot");
+    assert(final.generation == gpu::MAX_DEVICE_GENERATION, "registration preserves the final generation");
+    gpu::destroy_device(&final)!!;
 
     control = (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
     assert(control.state == gpu::DEVICE_SLOT_RETIRED, "destruction retires the exhausted slot");
@@ -361,6 +396,161 @@ fn void active_operations_make_device_destruction_retryable() @test {
     assert(operation_result == 0 && !operation_args.failed, "the pinned operation completes normally");
     assert(retry_succeeded, "destruction succeeds after the active operation releases its pin");
     assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the successful retry tears down the backend");
+}
+
+fn void live_children_take_precedence_over_active_operations() @test {
+    BlockingOperationFixture fixture;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &blocking_operation_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
+    slot.live_children.store(1, AtomicOrdering.RELEASE);
+
+    DeviceOperationWorkerArgs operation_args = { .device = device };
+    Thread operation_thread;
+    operation_thread.create(&device_operation_worker, &operation_args)!!;
+    while (!fixture.entered.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+
+    fault destroy_fault = @catch(gpu::destroy_device(&device));
+    fixture.release.store(true, AtomicOrdering.RELEASE);
+    int operation_result = operation_thread.join()!!;
+    slot.live_children.store(0, AtomicOrdering.RELEASE);
+    gpu::destroy_device(&device)!!;
+
+    assert(destroy_fault == gpu::RESOURCE_IN_USE,
+        "live children take precedence over active operation pins");
+    assert(operation_result == 0 && !operation_args.failed,
+        "the active operation completes after child rejection");
+}
+
+fn void backend_busy_device_destruction_is_retryable() @test {
+    BlockingOperationFixture fixture = { .destroy_busy = true };
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &blocking_operation_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::Device original = device;
+
+    fault destroy_fault = @catch(gpu::destroy_device(&device));
+    gpu::DeviceSlotControl control = (gpu::DeviceSlotControl)gpu::device_slots[device.index].control.load(AtomicOrdering.ACQUIRE);
+
+    assert(destroy_fault == gpu::DEVICE_BUSY, "incomplete backend work makes destruction retryable");
+    assert(device == original, "backend busy preserves the device token");
+    assert(control.state == gpu::DEVICE_SLOT_LIVE, "backend busy never publishes closing state");
+    assert(control.generation == original.generation, "backend busy preserves generation");
+    assert(fixture.check_calls.load(AtomicOrdering.ACQUIRE) == 1, "the readiness check runs once");
+    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 0, "backend busy prevents teardown");
+
+    fixture.destroy_busy = false;
+    gpu::destroy_device(&device)!!;
+    assert(fixture.check_calls.load(AtomicOrdering.ACQUIRE) == 2, "the retry checks readiness again");
+    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the ready retry tears down the backend");
+}
+
+fn void readiness_check_runs_after_new_operations_are_closed() @test {
+    BlockingOperationFixture fixture = { .block_check = true };
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &blocking_operation_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::Device stale = device;
+
+    DestroyWorkerArgs destroy_args = { .device = device };
+    Thread destroyer;
+    destroyer.create(&destroy_device_worker, &destroy_args)!!;
+    while (!fixture.check_entered.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+
+    fault operation_fault = @catch(gpu::get_device_caps(&stale));
+    fixture.check_release.store(true, AtomicOrdering.RELEASE);
+    int destroy_result = destroyer.join()!!;
+
+    assert(operation_fault == gpu::DEVICE_BUSY,
+        "the readiness check runs only after new operations are closed");
+    assert(destroy_result == 0 && !destroy_args.failed,
+        "destruction completes after the readiness check");
+    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
+        "the backend tears down once after readiness succeeds");
+}
+
+fn void child_published_while_closing_blocks_destruction() @test {
+    BlockingOperationFixture fixture = { .publish_child_on_check = true };
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &blocking_operation_vtable,
+        backend_state: &fixture,
+    )!!;
+    fixture.device = device;
+    gpu::Device original = device;
+
+    fault destroy_fault = @catch(gpu::destroy_device(&device));
+    gpu::DeviceSlot* slot = &gpu::device_slots[original.index];
+    gpu::DeviceSlotControl control = (gpu::DeviceSlotControl)slot.control.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    ulong live_children = slot.live_children.load(AtomicOrdering.ACQUIRE);
+
+    if (destroy_fault == gpu::RESOURCE_IN_USE) {
+        (void)slot.live_children.sub(1, AtomicOrdering.RELEASE);
+        fixture.publish_child_on_check = false;
+        gpu::destroy_device(&device)!!;
+    }
+
+    assert(destroy_fault == gpu::RESOURCE_IN_USE,
+        "a child published before closing completes blocks destruction");
+    assert(device == gpu::DEVICE_INVALID,
+        "the retry succeeds after the raced child is released");
+    assert(control.state == gpu::DEVICE_SLOT_LIVE,
+        "the failed attempt restores the live state");
+    assert(control.generation == original.generation,
+        "the failed attempt preserves generation");
+    assert(live_children == 1,
+        "the late child publication remains owned by the live device");
+}
+
+fn void live_frames_block_device_destruction_without_closing() @test {
+    FrameFixture fixture;
+    gpu::Device device = fixture_device(&fixture);
+    gpu::Device original = device;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+
+    fault destroy_fault = @catch(gpu::destroy_device(&device));
+    gpu::DeviceSlot* slot = &gpu::device_slots[original.index];
+    gpu::DeviceSlotControl control = (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+
+    assert(destroy_fault == gpu::RESOURCE_IN_USE, "a live frame blocks device destruction");
+    assert(device == original, "child rejection preserves the device token");
+    assert(control.state == gpu::DEVICE_SLOT_LIVE, "child rejection never publishes closing state");
+    assert(control.generation == original.generation, "child rejection preserves generation");
+
+    if (destroy_fault == gpu::RESOURCE_IN_USE) {
+        gpu::end_frame(&frame)!!;
+        gpu::destroy_device(&device)!!;
+    }
+}
+
+fn void successful_device_destruction_advances_generation() @test {
+    FrameFixture fixture;
+    gpu::Device device = fixture_device(&fixture);
+    uint index = device.index;
+    uint generation = device.generation;
+
+    gpu::destroy_device(&device)!!;
+
+    gpu::DeviceSlotControl control = (gpu::DeviceSlotControl)gpu::device_slots[index].control.load(AtomicOrdering.ACQUIRE);
+    assert(control.state == gpu::DEVICE_SLOT_FREE, "successful destruction releases the slot");
+    assert(control.generation == generation + 1, "successful destruction advances generation exactly once");
 }
 
 fn void runtime_device_retains_are_atomic() @test {

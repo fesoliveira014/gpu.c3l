@@ -192,7 +192,9 @@ fn RecordingContextHandle? create_recording_context(Device* device) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    return vtable.create_recording_context(device);
+    RecordingContextHandle context = vtable.create_recording_context(device)!;
+    retain_device_children(&operation);
+    return context;
 }
 
 <* Counterpart of create_recording_context; the context's command lists must be retired first. *>
@@ -200,7 +202,8 @@ fn void? destroy_recording_context(Device* device, RecordingContextHandle ctx) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    return vtable.destroy_recording_context(device, ctx);
+    vtable.destroy_recording_context(device, ctx)!;
+    release_device_children(&operation);
 }
 
 <* Begin recording on a semantic queue role. Every explicitly named resource
@@ -213,6 +216,7 @@ fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContext
     BackendVTable* vtable = operation.vtable;
     CommandList commands;
     vtable.begin_commands(device, queue, ctx, &commands)!;
+    retain_device_children(&operation);
     return commands;
 }
 
@@ -222,6 +226,15 @@ fn void? end_commands(CommandList* commands) {
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     return vtable.end_commands(commands);
+}
+
+<* Consume a recording or executable list and cancel its readback tickets. *>
+fn void? discard_commands(CommandList* commands) {
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
+    BackendVTable* vtable = operation.vtable;
+    ulong canceled_tickets = vtable.discard_commands(commands)!;
+    release_device_children(&operation, canceled_tickets + 1);
 }
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>

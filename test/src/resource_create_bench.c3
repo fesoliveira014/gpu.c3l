@@ -136,7 +136,7 @@ fn int main() {
         .application_name = "gpu_resource_create_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     run_phase(&device, state, BenchPhase.BUFFER);

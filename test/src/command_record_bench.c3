@@ -23,6 +23,7 @@ fn double record_global_barriers(gpu::Device* device) {
     }
     long elapsed_ns = (long)start.to_now();
     gpu::end_commands(&commands)!!;
+    gpu::discard_commands(&commands)!!;
     gpu::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
@@ -44,6 +45,7 @@ fn double record_buffer_barriers(gpu::Device* device, gpu::BufferHandle buffer) 
     }
     long elapsed_ns = (long)start.to_now();
     gpu::end_commands(&commands)!!;
+    gpu::discard_commands(&commands)!!;
     gpu::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
@@ -67,6 +69,7 @@ fn double record_indirect_dispatches(
     }
     long elapsed_ns = (long)start.to_now();
     gpu::end_commands(&commands)!!;
+    gpu::discard_commands(&commands)!!;
     gpu::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
@@ -92,7 +95,7 @@ fn int main() {
         .application_name = "gpu_command_record_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_bench_device(&device)!!;
 
     gpu::BufferDesc buffer_desc = {
         .size        = 64,

@@ -195,7 +195,7 @@ fn float* dp_center_depth(gpu::GpuSpan* rb_span) {
 
 fn void depth_test_occludes_both_orders() @test {
     gpu::Device device = make_depth_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     DepthCtx ctx = make_depth_ctx(&device);
     defer destroy_depth_ctx(&device, &ctx);
 
@@ -223,6 +223,7 @@ fn void depth_test_occludes_both_orders() @test {
         gpu::GpuSpan green = write_color(&frame_token, { 0.0f, 1.0f, 0.0f, 1.0f });
 
         gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+        defer discard_test_commands(&cmd)!!;
         record_color_to_attach(&cmd, target);
         record_depth_to_attach(&cmd, depth);
 
@@ -280,7 +281,7 @@ fn void depth_test_occludes_both_orders() @test {
 
 fn void depth_write_toggle_honored() @test {
     gpu::Device device = make_depth_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     DepthCtx ctx = make_depth_ctx(&device);
     defer destroy_depth_ctx(&device, &ctx);
     gpu::TextureHandle target = make_color_target(&device);
@@ -308,6 +309,7 @@ fn void depth_write_toggle_honored() @test {
     gpu::GpuSpan green = write_color(&frame_token, { 0.0f, 1.0f, 0.0f, 1.0f });
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_color_to_attach(&cmd, target);
     record_depth_to_attach(&cmd, depth);
     gpu::ColorTargetDesc[1] colors = {{
@@ -350,7 +352,7 @@ fn void depth_write_toggle_honored() @test {
 
 fn void depth_state_variants_share_entry() @test {
     gpu::Device device = make_depth_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     DepthCtx ctx = make_depth_ctx(&device);
     defer destroy_depth_ctx(&device, &ctx);
     gpu::TextureHandle target = make_color_target(&device);
@@ -378,6 +380,7 @@ fn void depth_state_variants_share_entry() @test {
     gpu::GpuSpan green = write_color(&frame_token, { 0.0f, 1.0f, 0.0f, 1.0f });
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_color_to_attach(&cmd, target);
     record_depth_to_attach(&cmd, depth);
     gpu::ColorTargetDesc[1] colors = {{
@@ -417,7 +420,7 @@ fn void depth_state_variants_share_entry() @test {
 
 fn void depth_only_pass_renders_footprint() @test {
     gpu::Device device = make_depth_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     DepthCtx ctx = make_depth_ctx(&device);
     defer destroy_depth_ctx(&device, &ctx);
     gpu::TextureHandle depth = make_depth_texture(&device);
@@ -440,6 +443,7 @@ fn void depth_only_pass_renders_footprint() @test {
     gpu::GpuSpan color = write_color(&frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, depth);
     gpu::DepthTargetDesc depth_target = {
         .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
@@ -468,7 +472,7 @@ fn void depth_only_pass_renders_footprint() @test {
 
 fn void sampled_depth_matches_readback() @test {
     gpu::Device device = make_depth_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     DepthCtx ctx = make_depth_ctx(&device);
     defer destroy_depth_ctx(&device, &ctx);
     gpu::TextureHandle depth = make_depth_texture(&device, sampled: true);
@@ -515,6 +519,7 @@ fn void sampled_depth_matches_readback() @test {
     root.v = 0.5f;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, depth);
     gpu::DepthTargetDesc depth_target = {
         .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
@@ -564,7 +569,7 @@ fn void sampled_depth_matches_readback() @test {
 
 fn void depth_pass_validation_faults() @test {
     gpu::Device device = make_depth_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc sampled_only_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -582,6 +587,7 @@ fn void depth_pass_validation_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::DepthTargetDesc no_usage = { .texture = sampled_only, .load_op = gpu::LoadOp.CLEAR, .clear = { .depth = 1.0f } };
     gpu::RenderPassDesc no_usage_pass = { .depth = &no_usage, .width = DP_RT, .height = DP_RT };
@@ -605,7 +611,7 @@ const char[*] SHADOW_PROBE_SPIRV = $embed("shaders/shadow_probe.comp.spv");
 
 fn void compare_sampler_exact_results() @test {
     gpu::Device device = make_depth_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     DepthCtx ctx = make_depth_ctx(&device);
     defer destroy_depth_ctx(&device, &ctx);
     gpu::TextureHandle depth = make_depth_texture(&device, sampled: true);
@@ -656,6 +662,7 @@ fn void compare_sampler_exact_results() @test {
     root.ref_hi = NEAR_Z + 0.1f;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, depth);
     gpu::DepthTargetDesc depth_target = {
         .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
@@ -718,7 +725,7 @@ fn gpu::PipelineHandle make_biased_pipeline(gpu::Device* device, DepthCtx* ctx, 
 
 fn void depth_bias_shifts_stored_depth() @test {
     gpu::Device device = make_depth_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     DepthCtx ctx = make_depth_ctx(&device);
     defer destroy_depth_ctx(&device, &ctx);
 
@@ -743,6 +750,7 @@ fn void depth_bias_shifts_stored_depth() @test {
     gpu::GpuSpan color = write_color(&frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::TextureHandle[2] targets = { plain_depth, biased_depth };
     gpu::PipelineHandle[2] pipelines = { plain, biased };
     gpu::GpuSpan*[2] readbacks = { &rb_plain, &rb_biased };

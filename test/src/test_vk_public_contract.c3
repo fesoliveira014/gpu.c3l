@@ -9,7 +9,7 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         .application_name = "gpu_null_contract_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     assert(
         @catch(gpu::create_buffer(&device, (gpu::BufferDesc*)null))
@@ -83,13 +83,14 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
         .application_name = "gpu_null_command_contract_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    defer discard_test_commands(&commands)!!;
 
     assert(
         @catch(gpu::cmd_copy_buffer(&commands, (gpu::BufferCopyDesc*)null))
@@ -156,5 +157,9 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
     );
 
     gpu::end_commands(&commands)!!;
+    gpu::CommandList[1] lists = { commands };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
     gpu::end_frame(&frame)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }

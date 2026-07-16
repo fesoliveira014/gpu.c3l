@@ -145,7 +145,7 @@ fn int main() {
         .application_name  = "gpu_async_overlap_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     bool families_distinct = state.graphics_family != state.compute_family;

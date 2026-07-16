@@ -146,7 +146,9 @@ fn ShaderHandle? create_shader(Device* device, ShaderDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return operation.vtable.create_shader(device, desc);
+    ShaderHandle shader = operation.vtable.create_shader(device, desc)!;
+    retain_device_children(&operation);
+    return shader;
 }
 
 <* Counterpart of create_shader; pipelines already built from it stay valid. *>
@@ -154,7 +156,8 @@ fn void? destroy_shader(Device* device, ShaderHandle shader) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     validate_resource_owner(&operation, shader.owner, ResourceOwnerKind.SHADER)!;
-    return operation.vtable.destroy_shader(device, shader);
+    operation.vtable.destroy_shader(device, shader)!;
+    release_device_children(&operation);
 }
 
 <* Create a compute pipeline. Identical descriptors may alias one backend
@@ -164,7 +167,9 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return operation.vtable.create_compute_pipeline(device, desc);
+    PipelineHandle pipeline = operation.vtable.create_compute_pipeline(device, desc)!;
+    retain_device_children(&operation);
+    return pipeline;
 }
 
 <* Create a graphics pipeline targeting dynamic rendering. The layout is fixed:
@@ -177,7 +182,9 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return operation.vtable.create_graphics_pipeline(device, desc);
+    PipelineHandle pipeline = operation.vtable.create_graphics_pipeline(device, desc)!;
+    retain_device_children(&operation);
+    return pipeline;
 }
 
 <* Counterpart of the pipeline creates, once per returned handle; descriptors aliasing one backend pipeline are refcounted. *>
@@ -185,7 +192,8 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
-    return operation.vtable.destroy_pipeline(device, pipeline);
+    operation.vtable.destroy_pipeline(device, pipeline)!;
+    release_device_children(&operation);
 }
 
 <* Byte size of the driver pipeline cache blob. The cache grows as pipelines

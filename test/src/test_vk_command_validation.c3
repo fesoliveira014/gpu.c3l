@@ -280,12 +280,14 @@ fn void record_val_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle ta
 
 fn void mixed_queue_submit_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList gfx = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&gfx)!!;
     gpu::end_commands(&gfx)!!;
     gpu::CommandList xfer = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    defer discard_test_commands(&xfer)!!;
     gpu::end_commands(&xfer)!!;
 
     gpu::CommandList[2] lists = { gfx, xfer };
@@ -302,7 +304,7 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
         .expected_invariant      = "",
     };
     gpu::Device device = make_sync_diagnostic_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc buffer_desc = {
         .size        = 64,
@@ -379,6 +381,7 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
         device: &device,
         queue:  gpu::QueueKind.GRAPHICS,
     )!!;
+    defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::CommandRecord* record = state.commands.get(commands.handle)!!;
 
@@ -493,7 +496,7 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
 
 fn void render_pass_access_preflight_precedes_view_creation() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc admitted_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
@@ -517,6 +520,7 @@ fn void render_pass_access_preflight_precedes_view_creation() @test {
         device: &device,
         queue:  gpu::QueueKind.GRAPHICS,
     )!!;
+    defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, admitted);
 
     gpu::ColorTargetDesc[2] colors = {
@@ -544,7 +548,7 @@ fn void render_pass_access_preflight_precedes_view_creation() @test {
 
 fn void copy_without_transfer_usage_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc plain_desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
@@ -558,6 +562,7 @@ fn void copy_without_transfer_usage_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::BufferCopyDesc no_src_usage_copy = { .src = plain, .dst = dst, .size = 64 };
     fault no_src_usage = @catch(gpu::cmd_copy_buffer(&cmd, &no_src_usage_copy));
@@ -573,7 +578,7 @@ fn void copy_without_transfer_usage_faults() @test {
 
 fn void texture_copy_without_buffer_transfer_usage_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -593,6 +598,7 @@ fn void texture_copy_without_buffer_transfer_usage_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    defer discard_test_commands(&cmd)!!;
 
     // Buffer usage is checked before the texture's tracked layout, so no
     // barrier is needed to reach either fault.
@@ -610,7 +616,7 @@ fn void texture_copy_without_buffer_transfer_usage_faults() @test {
 
 fn void fill_without_transfer_dst_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
@@ -618,6 +624,7 @@ fn void fill_without_transfer_dst_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    defer discard_test_commands(&cmd)!!;
     fault no_usage = @catch(gpu::cmd_fill_buffer(&cmd, buffer, 0, 64, 0));
     assert(no_usage == gpu::INVALID_ARGUMENT, "fill on a buffer without transfer_dst faults INVALID_ARGUMENT");
     gpu::end_commands(&cmd)!!;
@@ -626,7 +633,7 @@ fn void fill_without_transfer_dst_faults() @test {
 
 fn void indexed_draw_without_index_usage_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
@@ -644,6 +651,7 @@ fn void indexed_draw_without_index_usage_faults() @test {
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
@@ -667,7 +675,7 @@ fn void indexed_draw_without_index_usage_faults() @test {
 
 fn void indexed_draw_misaligned_offset_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
@@ -683,6 +691,7 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     gpu::GpuSpan misaligned = index_span.checked_subspan(2, 8)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
@@ -706,13 +715,14 @@ fn void indexed_draw_misaligned_offset_faults() @test {
 
 fn void dispatch_with_graphics_pipeline_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     fault wrong_kind = @catch(gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: ctx.graphics,
@@ -726,7 +736,7 @@ fn void dispatch_with_graphics_pipeline_faults() @test {
 
 fn void draw_with_compute_pipeline_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
@@ -739,6 +749,7 @@ fn void draw_with_compute_pipeline_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
@@ -761,7 +772,7 @@ fn void draw_with_compute_pipeline_faults() @test {
 
 fn void compute_pipeline_from_vertex_shader_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle vert_shader = gpu::create_shader(&device, &vert_sd)!!;
@@ -774,7 +785,7 @@ fn void compute_pipeline_from_vertex_shader_faults() @test {
 
 fn void graphics_pipeline_from_swapped_shader_stages_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle vert_shader = gpu::create_shader(&device, &vert_sd)!!;
@@ -796,7 +807,7 @@ fn void graphics_pipeline_from_swapped_shader_stages_faults() @test {
 
 fn void valid_copy_fill_and_draw_succeed() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
@@ -821,6 +832,7 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     frag_root.sampler_index = ctx.smp_index;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = { .src = upload, .dst = readback, .size = 64 };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
     gpu::cmd_fill_buffer(&cmd, fill_target, 0, 64, 0)!!;
@@ -848,7 +860,7 @@ fn void valid_copy_fill_and_draw_succeed() @test {
 
 fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     ValComputeCtx ctx = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &ctx);
 
@@ -860,6 +872,7 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     fault beyond = @catch(gpu::cmd_dispatch_indirect(
         commands: &cmd,
         pipeline: ctx.pipeline,
@@ -874,7 +887,7 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
 
 fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     ValComputeCtx ctx = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &ctx);
 
@@ -886,6 +899,7 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch_indirect(
         commands: &cmd,
         pipeline: ctx.pipeline,
@@ -899,7 +913,7 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
 
 fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
@@ -919,6 +933,7 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
@@ -945,7 +960,7 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
 fn void indirect_draw_count_limits_follow_command_contract() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
@@ -984,6 +999,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
         .texture  = target,
@@ -1055,7 +1071,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
 
 fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
@@ -1069,6 +1085,7 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
@@ -1092,7 +1109,7 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
 
 fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
@@ -1106,6 +1123,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
@@ -1128,7 +1146,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
 
 fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -1149,6 +1167,7 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_texture_transition(&cmd, texture, gpu::TextureLayout.TRANSFER_DST, gpu::Stage.TRANSFER, gpu::Hazard.TRANSFER_WRITE);
 
     gpu::BufferTextureCopyDesc up = { .src = escaped, .texture = texture, .width = 4, .height = 4 };
@@ -1161,7 +1180,7 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
 
 fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -1182,6 +1201,7 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_texture_transition(&cmd, texture, gpu::TextureLayout.TRANSFER_SRC, gpu::Stage.TRANSFER, gpu::Hazard.TRANSFER_READ);
 
     gpu::TextureBufferCopyDesc down = { .texture = texture, .dst = escaped, .width = 4, .height = 4 };
@@ -1194,7 +1214,7 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
 
 fn void texture_copy_span_boundary_exact_succeeds() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -1215,6 +1235,7 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_texture_transition(&cmd, texture, gpu::TextureLayout.TRANSFER_DST, gpu::Stage.TRANSFER, gpu::Hazard.TRANSFER_WRITE);
 
     gpu::BufferTextureCopyDesc up = { .src = boundary, .texture = texture, .width = 4, .height = 4 };
@@ -1226,7 +1247,7 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
 
 fn void buffer_barrier_range_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
@@ -1234,6 +1255,7 @@ fn void buffer_barrier_range_beyond_buffer_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
         .buffer = buffer, .offset = 48, .size = 32,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
@@ -1248,7 +1270,7 @@ fn void buffer_barrier_range_beyond_buffer_faults() @test {
 
 fn void buffer_barrier_boundary_exact_succeeds() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
@@ -1256,6 +1278,7 @@ fn void buffer_barrier_boundary_exact_succeeds() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
         .buffer = buffer, .offset = 32, .size = 32,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
@@ -1269,7 +1292,7 @@ fn void buffer_barrier_boundary_exact_succeeds() @test {
 
 fn void buffer_barrier_zero_size_whole_buffer_succeeds() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
@@ -1277,6 +1300,7 @@ fn void buffer_barrier_zero_size_whole_buffer_succeeds() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
         .buffer = buffer, .offset = 0, .size = 0,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
@@ -1290,7 +1314,7 @@ fn void buffer_barrier_zero_size_whole_buffer_succeeds() @test {
 
 fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle large = make_val_color_target(
         device:     &device,
         width:      16,
@@ -1324,6 +1348,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, large);
     record_val_target_to_attach(&cmd, small);
     record_val_depth_to_attach(&cmd, depth);
@@ -1391,11 +1416,12 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
 
 fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::ColorTargetDesc[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
     gpu::RenderPassDesc library_limit = { .colors = too_many[..], .width = 1, .height = 1 };
@@ -1419,7 +1445,7 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
 fn void selected_device_dispatch_limit_validates_before_recording() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     ValComputeCtx ctx = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &ctx);
 
@@ -1432,6 +1458,7 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::cmd_dispatch(
         commands: &cmd,
@@ -1476,7 +1503,7 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
 
 fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
     gpu::Device device = make_val_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle first = make_val_color_target(
         device:     &device,
         width:      16,
@@ -1507,6 +1534,7 @@ fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, first);
     record_val_target_to_attach(&cmd, saturated);
 
@@ -1545,7 +1573,7 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
         .expected_invariant      = "offset and size must fit the buffer",
     };
     gpu::Device device = make_sync_diagnostic_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = {
         .size        = 64,
@@ -1559,6 +1587,7 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&commands)!!;
     gpu::BufferBarrier barrier = {
         .buffer        = buffer,
         .offset        = 48,
@@ -1667,7 +1696,7 @@ fn void assert_sync_contract_diagnostic(
 fn void tranche_b_command_and_render_diagnostics() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferDesc plain_desc = {
@@ -1719,6 +1748,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::GpuSpan root = gpu::alloc_frame_span(&frame, 16, 16)!!;
     gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&commands)!!;
 
     gpu::BufferCopyDesc copy = { .src = plain, .dst = dst, .size = 16 };
     reset_sync_diagnostic(

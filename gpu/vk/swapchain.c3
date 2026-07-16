@@ -619,6 +619,7 @@ fn void? wait_swapchain_queues_idle(
                 kind:    WsiResultKind.COMMON,
                 result:  vk::queue_wait_idle(queues[index]),
             )!;
+            clear_off_frame_queue_markers(state, queues[index]);
         }
     }
 }

@@ -184,14 +184,17 @@ get_device_caps(Device*)       -> DeviceCaps?
 ```
 
 Multiple live `Device` values may coexist. Each is a compact slot and
-generation token resolved through the process-wide device registry.
-Registry mutation is synchronized. Public device operations other than
-destruction acquire an atomic pin before dereferencing backend state. A
-closing slot rejects new pins with `DEVICE_BUSY`; destruction with existing
-pins restores the live state and
-returns `DEVICE_BUSY` without changing the token or generation. Backend
-teardown runs only after a successful live-to-closing transition with no
-active pins.
+generation token resolved through the synchronized process-wide registry.
+Public device operations other than destruction pin the slot before reading
+backend state.
+
+Destruction first rejects known live children, then closes the slot. Closing
+blocks new pins while active pins, a second child check, and queue completion
+are evaluated. Live children return `RESOURCE_IN_USE`; active pins or incomplete
+queue work return `DEVICE_BUSY`. Every failure restores the live state without
+changing the token or generation. Successful teardown increments the generation
+and invalidates the passed token. Device loss bypasses child and progress checks
+so the backend can release otherwise unreachable state.
 
 Device-owned table handles carry an opaque device-and-kind owner plus a local slot and
 generation. Backend tables reject foreign owners before resolving or mutating
@@ -254,7 +257,8 @@ RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> c
 `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes
 the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
 batch as `SUBMITTING`; a pre-queue fault restores it, while success invalidates
-every alias. Frame-slot pool reset also invalidates abandoned records. Invalid
+every alias. Frame-slot reuse is rejected while abandoned records remain;
+callers must submit or discard them. Invalid
 transitions return faults, and render-pass command constraints remain enforced.
 
 ### Buffers
@@ -583,7 +587,8 @@ leaked descriptors
 leaked backend objects
 ```
 
-`destroy_device` reports live resources before destroying the backend.
+`destroy_device` rejects live public resources. Validation diagnostics during
+accepted teardown cover internal, partial-initialization, and device-loss state.
 
 ## 12. Supported baseline
 

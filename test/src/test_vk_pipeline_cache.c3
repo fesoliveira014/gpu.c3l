@@ -69,7 +69,7 @@ fn gpu::GraphicsPipelineDesc base_graphics_desc(CacheShaders* shaders, gpu::Form
 
 fn void identical_descs_alias_one_entry() @test {
     gpu::Device device = make_cache_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders(&device);
     defer gpu::destroy_shader(&device, shaders.vert)!!;
     defer gpu::destroy_shader(&device, shaders.frag)!!;
@@ -95,7 +95,7 @@ fn void identical_descs_alias_one_entry() @test {
 
 fn void dynamic_state_and_blend_normalization_share_entries() @test {
     gpu::Device device = make_cache_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders(&device);
     defer gpu::destroy_shader(&device, shaders.vert)!!;
     defer gpu::destroy_shader(&device, shaders.frag)!!;
@@ -140,7 +140,7 @@ fn void dynamic_state_and_blend_normalization_share_entries() @test {
 
 fn void formats_split_entries_and_limits_enforced() @test {
     gpu::Device device = make_cache_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders(&device);
     defer gpu::destroy_shader(&device, shaders.vert)!!;
     defer gpu::destroy_shader(&device, shaders.frag)!!;
@@ -171,7 +171,7 @@ fn void formats_split_entries_and_limits_enforced() @test {
 
 fn void compute_pipelines_dedup_and_share_layouts() @test {
     gpu::Device device = make_cache_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
@@ -201,7 +201,7 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
 
 fn void cull_replay_renders_per_alias() @test {
     gpu::Device device = make_cache_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders(&device);
     defer gpu::destroy_shader(&device, shaders.vert)!!;
     defer gpu::destroy_shader(&device, shaders.frag)!!;
@@ -294,6 +294,7 @@ fn void cull_replay_renders_per_alias() @test {
     frag_root.sampler_index = smp_index;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::TextureHandle[3] targets = { target_culled, target_drawn, target_reset };
     gpu::PipelineHandle[3] pipelines = { culled, no_cull, no_cull };
@@ -395,7 +396,7 @@ fn void cull_replay_renders_per_alias() @test {
 
 fn void alias_survives_peer_destroy() @test {
     gpu::Device device = make_cache_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders(&device);
     defer gpu::destroy_shader(&device, shaders.vert)!!;
     defer gpu::destroy_shader(&device, shaders.frag)!!;
@@ -422,6 +423,7 @@ fn void alias_survives_peer_destroy() @test {
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_attach = {
         .texture       = target,
         .before_stage  = gpu::Stage.HOST,
@@ -465,7 +467,7 @@ const uint CHURN_ROUNDS = 4;
 
 fn void index_survives_create_alias_destroy_churn() @test {
     gpu::Device device = make_cache_test_device_with_capacity(CHURN_DEVICE_CAPACITY);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders(&device);
     defer gpu::destroy_shader(&device, shaders.vert)!!;
     defer gpu::destroy_shader(&device, shaders.frag)!!;
@@ -510,7 +512,7 @@ fn void index_survives_create_alias_destroy_churn() @test {
 fn void small_pipeline_capacity_faults_at_limit() @test {
     const uint CAPACITY = 3;
     gpu::Device device = make_cache_test_device_with_capacity(CAPACITY);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders(&device);
     defer gpu::destroy_shader(&device, shaders.vert)!!;
     defer gpu::destroy_shader(&device, shaders.frag)!!;
@@ -535,7 +537,7 @@ fn void small_pipeline_capacity_faults_at_limit() @test {
 
 fn void line_polygon_mode_respects_optional_feature() @test {
     gpu::Device device = make_cache_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders(&device);
     defer gpu::destroy_shader(&device, shaders.vert)!!;
     defer gpu::destroy_shader(&device, shaders.frag)!!;
@@ -568,7 +570,7 @@ fn void line_polygon_mode_respects_optional_feature() @test {
 
 fn void compute_push_constant_sizes_validate_before_vulkan() @test {
     gpu::Device device = make_cache_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
     defer gpu::destroy_shader(&device, comp)!!;
@@ -594,7 +596,7 @@ fn void compute_push_constant_sizes_validate_before_vulkan() @test {
 
 fn void compute_layout_cache_grows_beyond_pipeline_capacity_hint() @test {
     gpu::Device device = make_cache_test_device_with_capacity(1);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
     defer gpu::destroy_shader(&device, comp)!!;

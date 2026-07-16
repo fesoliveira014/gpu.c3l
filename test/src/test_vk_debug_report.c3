@@ -317,7 +317,7 @@ fn void zero_size_buffer_diagnostic_preserves_fault() @test {
         .application_name = "gpu_debug_contract_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     uint before = capture.calls;
     gpu::BufferDesc desc = {
@@ -400,7 +400,7 @@ fn void debug_names_do_not_require_validation() @test {
         .application_name  = "gpu_debug_names_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     assert(state.debug_names, "backend retains the debug-name opt-in without validation");
@@ -535,7 +535,7 @@ fn void leak_reporters_count_leaks() @test {
 
 fn void debug_name_copy_is_independent() @test {
     gpu::Device device = make_dbg_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     char[16] volatile_name;
@@ -562,7 +562,7 @@ fn void debug_name_copy_is_independent() @test {
 
 fn void stats_counts_populated() @test {
     gpu::Device device = make_dbg_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferHandle[3] buffers;
     for (uint i = 0; i < 3; i++) {
@@ -595,7 +595,7 @@ fn void stats_counts_populated() @test {
 
 fn void labels_record_validation_clean() @test {
     gpu::Device device = make_dbg_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc rt_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -610,6 +610,7 @@ fn void labels_record_validation_clean() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::cmd_begin_label(&cmd, "frame_setup")!!;
     gpu::TextureBarrier to_attach = {
@@ -648,7 +649,7 @@ fn void labels_record_validation_clean() @test {
     assert(end_stale == gpu::INVALID_HANDLE, "ending a label on a consumed list faults INVALID_HANDLE");
 }
 
-fn void destroy_reports_leaks_before_sweeping() @test {
+fn void live_resource_report_precedes_retryable_destruction() @test {
     gpu::Device device = make_dbg_device();
     gpu::BufferDesc desc = {
         .size        = 128,
@@ -657,9 +658,12 @@ fn void destroy_reports_leaks_before_sweeping() @test {
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "canary_buffer",
     };
-    (void)gpu::create_buffer(&device, &desc)!!;
-    // Teardown must print the canary's leak line (visible in test stderr)
-    // and still destroy everything without faulting.
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(vk::report_resource_leaks(state) == 1, "the live buffer is reported");
+    assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
+        "a reported live resource still blocks destruction");
+    gpu::destroy_buffer(&device, buffer)!!;
     gpu::destroy_device(&device)!!;
 }
 
@@ -683,12 +687,14 @@ fn void callback_reports_leaks_without_validation() @test {
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "leaky_buffer",
     };
-    (void)gpu::create_buffer(&device, &buffer_desc)!!;
-
-    gpu::destroy_device(&device)!!;
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(vk::report_resource_leaks(state) == 1, "the live buffer is reported");
 
     assert(capture.total == 1 && capture.buffers == 1,
         "callback receives one leaked-buffer warning without validation");
     assert(capture.metadata_valid && capture.named_resources_valid,
-        "validation-disabled teardown preserves structured leak metadata");
+        "the report preserves structured leak metadata");
+    gpu::destroy_buffer(&device, buffer)!!;
+    gpu::destroy_device(&device)!!;
 }

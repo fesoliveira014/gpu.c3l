@@ -7,21 +7,21 @@ page doesn't explain it, that's a bug in this page — file an issue.
 ## 1. By design
 
 - **Descriptor indices still double as release tokens.** `TextureIndex` and
-  `SamplerIndex` have no device owner metadata. Passing one to another device
-  can release a coincident slot. Tasks 5.1 and 5.2 split CPU ownership from raw
-  shader indices. `GpuAddress` is also device-local and must not be persisted
-  or transferred between devices.
+  `SamplerIndex` have no device owner metadata, so passing one to another device
+  can release a coincident slot. `GpuAddress` is also device-local and must not
+  be persisted or transferred between devices.
 - **Debug callbacks are borrowed, synchronous, and non-reentrant.** Public and
   backend messages run before the originating call returns; Vulkan may invoke
   the callback concurrently on arbitrary threads. Payload pointers are valid
   only during the callback. The callback must be nonblocking, synchronize its
   own userdata, and must not call gpu.c3l because internal locks may be held.
   Userdata lives through `destroy_device`; no callback occurs after it returns.
-  A configured callback also enables structured teardown leak reporting even
-  when validation is disabled. Each leak is reported synchronously before its
-  backing table is swept. A null callback disables structured delivery without
-  changing returned faults; validation-enabled teardown retains stderr leak
-  output. Descriptor/cache diagnostics are emitted by device-owned operation
+  A configured callback also enables structured teardown diagnostics when
+  validation is disabled. Normal live children are rejected before teardown;
+  diagnostics cover internal, partial-initialization, and device-loss state.
+  A null callback disables structured delivery without changing returned
+  faults; validation-enabled teardown retains stderr output. Descriptor/cache
+  diagnostics are emitted by device-owned operation
   boundaries; pure lookup, range, and context-free result helpers remain
   fault-only to prevent duplicate or context-free messages.
 - **Frame-token aliases share one generation.** Copies may allocate until one
@@ -106,8 +106,8 @@ Two sizing rules that bite:
   persistent buffers you rewrite (see `deferred_shading`'s lights).
 - **Pending texture transitions grow with the command record.** There is no
   16-texture recording cap; the backend starts at 16 entries and doubles the
-  host allocation as distinct textures are added. The allocation is released
-  when the token submits or its frame-slot pool resets.
+  host allocation as distinct textures are added. Submit or discard the token
+  to release that state; a live token prevents its frame-slot pool reset.
 
 ## 3. Driver and environment quirks
 

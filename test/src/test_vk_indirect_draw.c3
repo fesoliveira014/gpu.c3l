@@ -200,7 +200,7 @@ fn gpu::GpuSpan alloc_empty_compute_root(gpu::FrameToken* frame) {
 
 fn void frame_span_same_range_crosses_compute_and_graphics_families_when_available() @test {
     gpu::Device device = make_ind_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     if (!distinct_graphics_compute_families(&device, "same-range frame span")) return;
 
     gpu::ShaderHandle shader;
@@ -217,6 +217,7 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
     gpu::GpuSpan graphics_root = alloc_empty_compute_root(&frame_token);
 
     gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&compute)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
         pipeline: pipeline,
@@ -237,6 +238,7 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
     gpu::submit(&device, &compute_submit)!!;
 
     gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&graphics)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
         pipeline: pipeline,
@@ -268,7 +270,7 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
         .application_name  = "frame_arena_reuse_cross_family",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     if (!distinct_graphics_compute_families(&device, "reused-offset frame span")) return;
 
     gpu::ShaderHandle shader;
@@ -281,6 +283,7 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
     assert(compute_args.offset == 0, "first slot use starts at offset zero");
     gpu::GpuSpan compute_root = alloc_empty_compute_root(&first_frame);
     gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&compute)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
         pipeline: pipeline,
@@ -299,6 +302,7 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
     assert(graphics_args.offset == 0, "retired slot reuses offset zero");
     gpu::GpuSpan graphics_root = alloc_empty_compute_root(&second_frame);
     gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&graphics)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
         pipeline: pipeline,
@@ -315,7 +319,7 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
 
 fn void compute_generated_indexed_indirect_draw() @test {
     gpu::Device device = make_ind_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_ind_target(&device);
@@ -372,6 +376,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     root.count_value      = 1;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: build_pipeline,
@@ -466,7 +471,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
 
 fn void plain_indirect_draw_from_frame_span() @test {
     gpu::Device device = make_ind_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_ind_target(&device);
@@ -493,6 +498,7 @@ fn void plain_indirect_draw_from_frame_span() @test {
     *args = { .vertex_count = 3, .instance_count = 1 };
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
         .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
@@ -524,7 +530,7 @@ fn void plain_indirect_draw_from_frame_span() @test {
 
 fn void indirect_dispatch_executes_gpu_counts() @test {
     gpu::Device device = make_ind_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle build_shader = gpu::create_shader(&device, &build_sd)!!;
@@ -568,6 +574,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     double_root.count      = COUNT;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: build_pipeline,
@@ -612,7 +619,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
 
 fn void count_buffer_limits_draws() @test {
     gpu::Device device = make_ind_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
 
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
@@ -655,6 +662,7 @@ fn void count_buffer_limits_draws() @test {
     gpu::GpuSpan count_one = counts.checked_subspan(4, 4)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::TextureHandle[2] targets = { target_zero, target_one };
     gpu::GpuSpan[2] count_spans = { count_zero, count_one };
     gpu::GpuSpan[2] rb_spans = { rb_zero_span, rb_one_span };
@@ -699,7 +707,7 @@ fn void ticket_hybrid_and_short_dest() @test {
     // 4 KB readback arena: a few 1 KB tickets pin it full, forcing the
     // dedicated fallback.
     gpu::Device device = make_ind_device(readback_arena_size: 4096);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     const usz CHUNK = 1024;
     const uint TICKETS = 6;
@@ -718,6 +726,7 @@ fn void ticket_hybrid_and_short_dest() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::ReadbackTicket[TICKETS] tickets;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     ulong fallbacks_before = vk::dedicated_fallback_count(state);
@@ -752,7 +761,35 @@ fn void ticket_hybrid_and_short_dest() @test {
     }
 }
 
-fn void outstanding_readback_ticket_does_not_block_teardown() @test {
+fn void discard_consumes_active_render_pass_recording() @test {
+    gpu::Device device = make_ind_device();
+    gpu::TextureHandle target = make_ind_target(&device);
+
+    gpu::CommandList commands = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    record_target_to_attach(&commands, target);
+    gpu::ColorTargetDesc[1] colors = {{
+        .texture  = target,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = IND_RT,
+        .height = IND_RT,
+    };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+
+    gpu::discard_commands(&commands)!!;
+    assert(!commands.handle.is_valid(),
+        "discard consumes a recording with an active render pass");
+    gpu::destroy_texture(&device, target)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void discard_cancels_command_readback_tickets() @test {
     gpu::Device device = make_ind_device(readback_arena_size: 1);
     gpu::BufferDesc src_desc = {
         .size        = 1024,
@@ -770,18 +807,56 @@ fn void outstanding_readback_ticket_does_not_block_teardown() @test {
         size:     1024,
     )!!;
     gpu::end_commands(&commands)!!;
+    gpu::discard_commands(&commands)!!;
 
-    gpu::destroy_device(&device)!!;
     fault poll_fault = @catch(gpu::poll_readback(&device, &ticket));
-    assert(poll_fault == gpu::INVALID_HANDLE, "poll rejects a ticket after owner teardown");
+    assert(poll_fault == gpu::INVALID_HANDLE,
+        "discard makes attached readback tickets stale");
     char[1024] dest;
     fault resolve_fault = @catch(gpu::resolve_readback(&device, &ticket, dest[..]));
-    assert(resolve_fault == gpu::INVALID_HANDLE, "resolve rejects a ticket after owner teardown");
+    assert(resolve_fault == gpu::INVALID_HANDLE,
+        "discard releases attached readback state");
+
+    gpu::destroy_buffer(&device, src)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void unresolved_readback_ticket_blocks_device_destruction() @test {
+    gpu::Device device = make_ind_device(readback_arena_size: 1);
+    gpu::BufferDesc src_desc = {
+        .size        = 1024,
+        .usage       = { .transfer_src, .transfer_dst },
+        .memory_kind = gpu::MemoryKind.STAGING,
+        .access      = { .graphics, .compute, .transfer },
+    };
+    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(
+        commands: &commands,
+        src:      src,
+        offset:   0,
+        size:     1024,
+    )!!;
+    gpu::end_commands(&commands)!!;
+    gpu::CommandList[1] lists = { commands };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(&device, &submit)!!;
+    gpu::end_frame(&frame)!!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::destroy_buffer(&device, src)!!;
+
+    assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
+        "an unresolved readback ticket blocks device destruction");
+    char[1024] dest;
+    gpu::resolve_readback(&device, &ticket, dest[..])!!;
+    gpu::destroy_device(&device)!!;
 }
 
 fn void indirect_argument_validation() @test {
     gpu::Device device = make_ind_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_ind_target(&device);
@@ -805,6 +880,7 @@ fn void indirect_argument_validation() @test {
     gpu::GpuSpan args_span = gpu::alloc_frame_span(&frame_token, 64, 16)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
         .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,

@@ -44,7 +44,7 @@ fn void record_layout_barrier(gpu::CommandList* cmd, gpu::TextureHandle tex, gpu
 
 fn void dropped_list_leaves_layout_uncommitted() @test {
     gpu::Device device = make_layout_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle tex = make_layout_texture(&device);
     defer gpu::destroy_texture(&device, tex)!!;
 
@@ -52,6 +52,7 @@ fn void dropped_list_leaves_layout_uncommitted() @test {
 
     // Record a transition and end the list, but never submit it.
     gpu::CommandList dropped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&dropped)!!;
     record_layout_barrier(
         cmd:        &dropped,
         tex:        tex,
@@ -63,6 +64,7 @@ fn void dropped_list_leaves_layout_uncommitted() @test {
     // A fresh list must still see the pre-recording layout: the dropped
     // list's transition never committed.
     gpu::CommandList next = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&next)!!;
     record_layout_barrier(
         cmd:        &next,
         tex:        tex,
@@ -81,13 +83,14 @@ fn void dropped_list_leaves_layout_uncommitted() @test {
 
 fn void two_lists_submitted_in_order_validate() @test {
     gpu::Device device = make_layout_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle tex = make_layout_texture(&device);
     defer gpu::destroy_texture(&device, tex)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     gpu::CommandList first = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&first)!!;
     record_layout_barrier(
         cmd:        &first,
         tex:        tex,
@@ -102,6 +105,7 @@ fn void two_lists_submitted_in_order_validate() @test {
     // Depends on the first list's commit having already landed: its
     // old_layout only matches if commit-at-submit ran before this validates.
     gpu::CommandList second = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&second)!!;
     record_layout_barrier(
         cmd:        &second,
         tex:        tex,
@@ -119,7 +123,7 @@ fn void two_lists_submitted_in_order_validate() @test {
 
 fn void same_list_barrier_then_copy_validates() @test {
     gpu::Device device = make_layout_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle tex = make_layout_texture(&device);
     defer gpu::destroy_texture(&device, tex)!!;
 
@@ -129,6 +133,7 @@ fn void same_list_barrier_then_copy_validates() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     record_layout_barrier(
         cmd:        &cmd,
         tex:        tex,
@@ -150,7 +155,7 @@ fn void same_list_barrier_then_copy_validates() @test {
 
 fn void more_than_sixteen_pending_layouts_submit() @test {
     gpu::Device device = make_layout_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     const uint TEXTURE_COUNT = 17;
     gpu::TextureHandle[TEXTURE_COUNT] textures;
@@ -161,6 +166,7 @@ fn void more_than_sixteen_pending_layouts_submit() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     for (uint i = 0; i < TEXTURE_COUNT; i++) {
         record_layout_barrier(
             cmd:        &cmd,
@@ -175,6 +181,7 @@ fn void more_than_sixteen_pending_layouts_submit() @test {
     gpu::submit(&device, &submit)!!;
 
     gpu::CommandList verify = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&verify)!!;
     for (uint i = 0; i < TEXTURE_COUNT; i++) {
         record_layout_barrier(
             cmd:        &verify,

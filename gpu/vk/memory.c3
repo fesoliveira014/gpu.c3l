@@ -156,8 +156,8 @@ fn PersistentSpanAllocationMatch persistent_span_allocation_match(
 }
 
 <* Create the frame timeline semaphore and one arena buffer per frame-in-flight.
-   Arena buffers are real device buffers, so the device's buffer sweep frees
-   them; only the host array and the semaphore are released here. *>
+   Teardown's internal-buffer pass frees the arena allocations; this function's
+   counterpart releases the host array and semaphore. *>
 fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
     state.frames_in_flight = desc.frames_in_flight == 0 ? 2 : desc.frames_in_flight;
     state.frame_index = 0;
@@ -311,7 +311,7 @@ fn void? report_unretired_frame(VkDeviceState* state) @private {
    outside both, reclaim is immediate. *>
 fn ulong retire_timeline_value(VkDeviceState* state) {
     ulong counter = state.timeline_counter.load(AtomicOrdering.RELAXED);
-    return (state.frame_active || state.off_frame_pending.load(AtomicOrdering.RELAXED)) ? counter + 1 : counter;
+    return (state.frame_active || state.off_frame_pending_queues.load(AtomicOrdering.RELAXED) != 0) ? counter + 1 : counter;
 }
 
 <* Reset an arena slot's cursor. Rejects if the slot has not yet retired. *>
@@ -363,6 +363,9 @@ fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* ou
     // WAIT_TIMEOUT must leave frame_index untouched so retry is clean.
     uint next_index = (state.frame_index + 1) % state.frames_in_flight;
     FrameArenaState* slot = &state.frame_arenas[next_index];
+    if (frame_has_live_commands(state, next_index)) {
+        return gpu::INVALID_RESOURCE_STATE~;
+    }
 
     if (slot.frame_timeline_value > 0) {
         ulong wait_value = slot.frame_timeline_value;
@@ -395,7 +398,6 @@ fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* ou
     }
 
     slot.cursor.store(0, AtomicOrdering.RELAXED);
-    release_commands_for_frame(state, state.frame_index);
     // Only pools dirtied since this slot last reset pay
     // the driver call; idle contexts cost nothing per frame.
     state.pools_reset_last_frame = 0;
@@ -688,7 +690,7 @@ fn void? end_frame_with_submit(gpu::FrameToken* frame, QueueSubmit2Fn submit_fn)
     slot.frame_timeline_value = frame_value;
     state.compute_used_since_frame = false;
     state.transfer_used_since_frame = false;
-    state.off_frame_pending.store(false, AtomicOrdering.RELAXED);
+    state.off_frame_pending_queues.store(0, AtomicOrdering.RELAXED);
     state.frame_active = false;
     state.active_frame_generation = 0;
     *frame = {};

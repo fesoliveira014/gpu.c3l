@@ -135,7 +135,7 @@ fn gpu::TextureHandle[BENCH_MAX_WORKERS] make_texture_pool(gpu::Device* device) 
 
 fn void run_bench_suite(gpu::DeviceDesc* desc, ZString label) {
     gpu::Device device = gpu::create_device_from_desc(desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::TextureHandle[BENCH_MAX_WORKERS] textures = make_texture_pool(&device);

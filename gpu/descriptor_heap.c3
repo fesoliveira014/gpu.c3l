@@ -13,14 +13,17 @@ fn TextureIndex? create_texture_descriptor(Device* device, TextureHandle texture
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     validate_resource_owner(&operation, texture.owner, ResourceOwnerKind.TEXTURE)!;
-    return operation.vtable.create_texture_descriptor(device, texture, view);
+    TextureIndex index = operation.vtable.create_texture_descriptor(device, texture, view)!;
+    retain_device_children(&operation);
+    return index;
 }
 
 <* The slot is recycled only after in-flight frames retire. *>
 fn void? destroy_texture_descriptor(Device* device, TextureIndex index) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    return operation.vtable.destroy_texture_descriptor(device, index);
+    operation.vtable.destroy_texture_descriptor(device, index)!;
+    release_device_children(&operation);
 }
 
 <* One create_texture_descriptors input; a zero-initialized view is the
@@ -41,7 +44,8 @@ fn void? create_texture_descriptors(Device* device, TextureDescriptorDesc[] desc
     foreach (&desc : descs) {
         validate_resource_owner(&operation, desc.texture.owner, ResourceOwnerKind.TEXTURE)!;
     }
-    return operation.vtable.create_texture_descriptors(device, descs, out_indices);
+    operation.vtable.create_texture_descriptors(device, descs, out_indices)!;
+    retain_device_children(&operation, (ulong)descs.len);
 }
 
 <* Samplers are pure heap entries; the descriptor is the resource.
@@ -50,12 +54,15 @@ fn SamplerIndex? create_sampler(Device* device, SamplerDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return operation.vtable.create_sampler(device, desc);
+    SamplerIndex index = operation.vtable.create_sampler(device, desc)!;
+    retain_device_children(&operation);
+    return index;
 }
 
 <* Counterpart of create_sampler; the heap slot recycles after in-flight frames retire. *>
 fn void? destroy_sampler(Device* device, SamplerIndex index) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    return operation.vtable.destroy_sampler(device, index);
+    operation.vtable.destroy_sampler(device, index)!;
+    release_device_children(&operation);
 }

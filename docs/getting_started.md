@@ -252,6 +252,7 @@ fn void? run() {
         if (frame.is_valid()) gpu::end_frame(&frame)!;
         return frame_err~;
     }
+    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!;
     gpu::invalidate_buffer(&device, output, 0, 0)!;
@@ -269,6 +270,7 @@ fn void? run_frame(gpu::FrameToken* frame, FrameWork* work) {
     root.count      = COUNT;
 
     gpu::CommandList cmd = gpu::begin_commands(work.device, gpu::QueueKind.COMPUTE)!;
+    defer (void)gpu::discard_commands(&cmd);
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: work.pipeline,

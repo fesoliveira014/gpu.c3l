@@ -101,6 +101,7 @@ fn FrameToken? begin_frame(Device* device) {
     defer end_device_operation(&operation);
     FrameToken frame;
     operation.vtable.begin_frame(device, &frame)!;
+    retain_device_children(&operation);
     return frame;
 }
 
@@ -120,6 +121,7 @@ fn void? end_frame(FrameToken* frame) {
     DeviceOperation operation = frame_operation(frame)!;
     defer end_device_operation(&operation);
     operation.vtable.end_frame(frame)!;
+    release_device_children(&operation);
     *frame = {};
 }
 
@@ -176,14 +178,17 @@ fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     validate_queue_access(&operation, desc.access)!;
-    return operation.vtable.alloc_persistent_span(device, desc);
+    GpuSpan span = operation.vtable.alloc_persistent_span(device, desc)!;
+    retain_device_children(&operation);
+    return span;
 }
 
 <* Counterpart of alloc_persistent_span. *>
 fn void? free_persistent_span(Device* device, GpuSpan span) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    return operation.vtable.free_persistent_span(device, span);
+    operation.vtable.free_persistent_span(device, span)!;
+    release_device_children(&operation);
 }
 
 <* Snapshot of persistent-arena usage and fragmentation counters. *>
@@ -246,13 +251,19 @@ fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char
 }
 
 <* Record a non-blocking buffer readback into the caller's command list.
-   Source-side synchronization is the caller's barrier; data is resolvable
-   after the recording frame ends (the device timeline advances at end_frame).
-   Ownership: the range is held until resolve_readback releases it. *>
+   Source-side synchronization is the caller's barrier. The ticket holds its
+   range until resolve_readback, or until discard cancels the command. *>
 fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
-    return operation.vtable.cmd_readback_buffer(commands, src, offset, size);
+    ReadbackTicket ticket = operation.vtable.cmd_readback_buffer(
+        commands,
+        src,
+        offset,
+        size,
+    )!;
+    retain_device_children(&operation);
+    return ticket;
 }
 
 <* Record a non-blocking full-mip texture readback. The texture must carry
@@ -261,7 +272,13 @@ fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, BufferHandle src, 
 fn ReadbackTicket? cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
-    return operation.vtable.cmd_readback_texture(commands, src, mip);
+    ReadbackTicket ticket = operation.vtable.cmd_readback_texture(
+        commands,
+        src,
+        mip,
+    )!;
+    retain_device_children(&operation);
+    return ticket;
 }
 
 <* True once the ticket's data is resolvable; false for the consumed
@@ -285,7 +302,8 @@ fn void? resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) {
     if (ticket == null) return INVALID_HANDLE~;
     if (!ticket.is_valid()) return INVALID_ARGUMENT~;
     validate_resource_owner(&operation, ticket.owner, ResourceOwnerKind.READBACK_TICKET)!;
-    return operation.vtable.resolve_readback(device, ticket, dest);
+    operation.vtable.resolve_readback(device, ticket, dest)!;
+    release_device_children(&operation);
 }
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the

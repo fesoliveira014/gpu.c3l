@@ -471,7 +471,9 @@ fn void? submit(Device* device, SubmitDesc* desc) {
     if (desc.swapchain != SWAPCHAIN_HANDLE_INVALID) {
         validate_resource_owner(&operation, desc.swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
     }
-    return operation.vtable.submit(device, desc);
+    operation.vtable.submit(device, desc)!;
+    foreach (&commands : desc.command_lists) commands = {};
+    release_device_children(&operation, (ulong)desc.command_lists.len);
 }
 
 <* Block until the queue drains — a heavyweight sync for shutdown and one-shot work, not per-frame pacing. *>

@@ -21,7 +21,7 @@ fn void bindless_texture_write_then_sample() @test {
         .application_name     = "gpu_texture_heap_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
@@ -93,6 +93,7 @@ fn void bindless_texture_write_then_sample() @test {
     sample_root.height        = TEX_SIZE;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_general = gpu::texture_transition(
         texture: texture,
@@ -162,7 +163,7 @@ fn void anisotropic_sampler_caps_honest() @test {
         .frames_in_flight = 2, .application_name = "gpu_aniso_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::SamplerDesc aniso = {
         .min_filter = gpu::Filter.LINEAR,
@@ -193,7 +194,7 @@ fn void anisotropy_range_validated() @test {
         .application_name  = "gpu_aniso_range_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     if (gpu::get_device_caps(&device)!!.max_sampler_anisotropy <= 0) return;
 
     float[3] bad = { 0.0f, -1.0f, 0.5f };

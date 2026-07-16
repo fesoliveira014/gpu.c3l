@@ -39,7 +39,7 @@ fn void descriptor_buffer_device_and_heap() @test {
         io::eprintfn("descriptor_buffer_device_and_heap: no capable adapter, skipping");
         return;
     }
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
     assert(caps.descriptor_buffer, "the forced descriptor-buffer path is enabled");
     assert(!caps.descriptor_indexing, "the unselected indexing path is disabled");
@@ -96,7 +96,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         return;
     }
     gpu::Device device = maybe_device;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
     io::eprintfn(
         "descriptor_buffer_compute_to_graphics: graphics_family=%d compute_family=%d topology=%s",
@@ -273,6 +273,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     gpu::CommandList compute_commands = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&compute_commands)!!;
     gpu::TextureBarrier to_general = {
         .texture       = shared_texture,
         .before_stage  = gpu::Stage.HOST,
@@ -327,6 +328,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::submit(&device, &compute_submit)!!;
 
     gpu::CommandList graphics_commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&graphics_commands)!!;
     gpu::TextureBarrier target_to_attachment = {
         .texture       = target,
         .before_stage  = gpu::Stage.HOST,
@@ -446,7 +448,7 @@ fn void descriptor_buffer_write_then_sample() @test {
         io::eprintfn("descriptor_buffer_write_then_sample: no capable adapter, skipping");
         return;
     }
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -511,6 +513,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     sample_root.height        = TEX;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture       = texture,
         .before_stage  = gpu::Stage.HOST,

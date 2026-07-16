@@ -40,7 +40,7 @@ fn int main() {
         .application_name  = "gpu_context_reset_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_bench_device(&device)!!;
 
     gpu::RecordingContextHandle[BENCH_USER_CONTEXTS] contexts;
     foreach (&ctx : contexts) *ctx = gpu::create_recording_context(&device)!!;

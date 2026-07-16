@@ -8,6 +8,7 @@ import std::core::mem;
 
 // Backend dispatch functions. Command recording entries take the owner-bearing
 // CommandList; all other entries take the validated device token.
+alias CheckDeviceDestroyFn @private  = fn void? (void*);
 alias DestroyDeviceFn @private       = fn void (void*);
 alias GetMemoryStatsFn @private      = fn MemoryStats? (Device*);
 alias BuildMemoryReportFn @private   = fn String? (Device*, bool detailed);
@@ -26,6 +27,7 @@ alias BeginCommandsFn @private       = fn void? (Device*, QueueKind, RecordingCo
 alias CreateRecordingContextFn @private  = fn RecordingContextHandle? (Device*);
 alias DestroyRecordingContextFn @private = fn void? (Device*, RecordingContextHandle);
 alias EndCommandsFn @private         = fn void? (CommandList*);
+alias DiscardCommandsFn @private     = fn ulong? (CommandList*);
 alias SubmitFn @private              = fn void? (Device*, SubmitDesc*);
 alias WaitQueueIdleFn @private       = fn void? (Device*, QueueKind);
 alias CmdCopyBufferFn @private       = fn void? (CommandList*, BufferCopyDesc*);
@@ -106,6 +108,7 @@ bitstruct DeviceSlotControl : ulong @private {
 
 // One immutable table per backend.
 struct BackendVTable @private {
+    CheckDeviceDestroyFn    check_device_destroy;
     DestroyDeviceFn         destroy_device;
     GetMemoryStatsFn        get_memory_stats;
     BuildMemoryReportFn     build_memory_report;
@@ -123,6 +126,7 @@ struct BackendVTable @private {
     CreateRecordingContextFn  create_recording_context;
     DestroyRecordingContextFn destroy_recording_context;
     EndCommandsFn           end_commands;
+    DiscardCommandsFn       discard_commands;
     SubmitFn                submit;
     WaitQueueIdleFn         wait_queue_idle;
     CmdCopyBufferFn         cmd_copy_buffer;
@@ -200,6 +204,7 @@ struct DeviceData @private {
 
 struct DeviceSlot @private {
     Atomic{ulong} control;
+    Atomic{ulong} live_children;
     Atomic{bool}  lost;
     DeviceData    data;
 }
@@ -309,6 +314,16 @@ fn void end_device_operation(DeviceOperation* operation) @private {
     operation.active = false;
 }
 
+fn void retain_device_children(DeviceOperation* operation, ulong count = 1) @private {
+    if (count == 0) return;
+    (void)operation.slot.live_children.add(count, AtomicOrdering.RELEASE);
+}
+
+fn void release_device_children(DeviceOperation* operation, ulong count = 1) @private {
+    if (count == 0) return;
+    (void)operation.slot.live_children.sub(count, AtomicOrdering.RELEASE);
+}
+
 fn ulong resource_owner_tag(ulong device_owner, ResourceOwnerKind kind) @private {
     return (device_owner - 1) * RESOURCE_OWNER_KIND_COUNT + (ulong)kind + 1;
 }
@@ -354,7 +369,7 @@ fn bool device_slot_available() @private {
     defer unlock_device_registry();
     for (uint i = 0; i < MAX_DEVICES; i++) {
         DeviceSlotControl control = (DeviceSlotControl)device_slots[i].control.load(AtomicOrdering.RELAXED);
-        if (control.state == DEVICE_SLOT_FREE && control.generation < MAX_DEVICE_GENERATION) return true;
+        if (control.state == DEVICE_SLOT_FREE) return true;
     }
     return false;
 }
@@ -414,20 +429,16 @@ fn Device? register_device(
         DeviceSlot* slot = &device_slots[i];
         DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
         if (control.state != DEVICE_SLOT_FREE) continue;
-        if (control.generation == MAX_DEVICE_GENERATION) {
-            control.state = DEVICE_SLOT_RETIRED;
-            slot.control.store((ulong)control, AtomicOrdering.RELAXED);
-            continue;
-        }
 
         control.state = DEVICE_SLOT_LIVE;
         control.pins = 0;
-        control.generation++;
+        if (control.generation == 0) control.generation = 1;
         control.reserved = 0;
         Device handle = {
             .index      = i,
             .generation = control.generation,
         };
+        slot.live_children.store(0, AtomicOrdering.RELAXED);
         slot.lost.store(false, AtomicOrdering.RELAXED);
         slot.data = {
             .backend              = backend,
@@ -533,7 +544,8 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
     return device;
 }
 
-<* Destroy a device, releasing all backend resources. *>
+<* Destroy a quiescent device. Live children fault RESOURCE_IN_USE; active
+   host or queue work faults DEVICE_BUSY without consuming the token. *>
 fn void? destroy_device(Device* device) {
     if (device == null || !device.is_valid()) return INVALID_HANDLE~;
     if (device.reserved != 0 || device.index >= MAX_DEVICES) return INVALID_HANDLE~;
@@ -548,6 +560,10 @@ fn void? destroy_device(Device* device) {
         if (control.generation != device.generation) return INVALID_HANDLE~;
         if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
         if (control.state != DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
+        bool lost = slot.lost.load(AtomicOrdering.ACQUIRE);
+        if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
+            return RESOURCE_IN_USE~;
+        }
 
         DeviceSlotControl state_step = { .state = 1 };
         ulong previous = slot.control.add((ulong)state_step, AtomicOrdering.ACQUIRE_RELEASE);
@@ -557,6 +573,23 @@ fn void? destroy_device(Device* device) {
         if (closing.pins > 0) {
             (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
             return DEVICE_BUSY~;
+        }
+        if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
+            (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
+            return RESOURCE_IN_USE~;
+        }
+        if (!lost && slot.data.vtable.check_device_destroy != null) {
+            if (catch readiness_fault = slot.data.vtable.check_device_destroy(
+                slot.data.backend_state,
+            )) {
+                (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
+                return readiness_fault~;
+            }
+            lost = slot.lost.load(AtomicOrdering.ACQUIRE);
+            if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
+                (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
+                return RESOURCE_IN_USE~;
+            }
         }
 
         data = slot.data;
@@ -568,9 +601,15 @@ fn void? destroy_device(Device* device) {
         lock_device_registry();
         defer unlock_device_registry();
         slot.data = {};
+        slot.live_children.store(0, AtomicOrdering.RELAXED);
         slot.lost.store(false, AtomicOrdering.RELAXED);
         closing.pins = 0;
-        closing.state = closing.generation == MAX_DEVICE_GENERATION ? DEVICE_SLOT_RETIRED : DEVICE_SLOT_FREE;
+        if (closing.generation == MAX_DEVICE_GENERATION) {
+            closing.state = DEVICE_SLOT_RETIRED;
+        } else {
+            closing.generation++;
+            closing.state = DEVICE_SLOT_FREE;
+        }
         closing.reserved = 0;
         slot.control.store((ulong)closing, AtomicOrdering.RELEASE);
     }

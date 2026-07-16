@@ -122,19 +122,13 @@ fn void release_command(VkDeviceState* state, gpu::CommandListHandle handle) {
     }
 }
 
-fn void release_commands_for_frame(VkDeviceState* state, uint frame_index) {
+fn bool frame_has_live_commands(VkDeviceState* state, uint frame_index) {
     state.command_mutex.lock()!!;
     defer state.command_mutex.unlock();
-    for (uint i = 0; i < state.commands.next_new; i++) {
-        CommandCell* cell = &state.commands.slots[i];
-        if (!cell.used || cell.value.frame_index != frame_index) continue;
-        gpu::CommandListHandle handle = {
-            .owner = state.commands.owner,
-            .index = i,
-            .generation = cell.generation,
-        };
-        release_command(state, handle);
+    foreach (&cell : state.commands.slots[:state.commands.next_new]) {
+        if (cell.used && cell.value.frame_index == frame_index) return true;
     }
+    return false;
 }
 
 fn void release_commands_for_context_frame(

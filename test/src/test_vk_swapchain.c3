@@ -112,7 +112,7 @@ fn void swapchain_requires_a_presentation_request() @test {
         .application_name  = "gpu_swapchain_gate_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::Surface surface;
     gpu::SwapchainDesc sc_desc = { .width = 640, .height = 480 };
@@ -286,7 +286,7 @@ fn void swapchain_info_query_rejects_invalid_handle() @test {
         .application_name  = "gpu_swapchain_info_invalid_handle_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
     fault query_fault = @catch(gpu::get_swapchain_info(&device, bogus));

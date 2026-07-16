@@ -203,7 +203,7 @@ struct FrameLifecycleSnapshot {
 
 fn void frame_token_owns_its_device_token_value() @test {
     gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::Device temporary = device;
     gpu::FrameToken frame = gpu::begin_frame(&temporary)!!;
@@ -254,7 +254,7 @@ fn FrameLifecycleSnapshot frame_lifecycle_snapshot(vk::VkDeviceState* state) {
         .frame_active               = state.frame_active,
         .compute_used               = state.compute_used_since_frame,
         .transfer_used              = state.transfer_used_since_frame,
-        .off_frame_pending          = state.off_frame_pending.load(AtomicOrdering.RELAXED),
+        .off_frame_pending          = state.off_frame_pending_queues.load(AtomicOrdering.RELAXED) != 0,
         .graphics_pool_dirty        = dirty.graphics,
         .compute_pool_dirty         = dirty.compute,
         .transfer_pool_dirty        = dirty.transfer,
@@ -288,7 +288,7 @@ fn void assert_frame_lifecycle_unchanged(FrameLifecycleSnapshot before, FrameLif
 
 fn void frame_span_allocation_requires_active_frame() @test {
     gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame;
@@ -332,7 +332,7 @@ fn void frame_span_allocation_requires_active_frame() @test {
 
 fn void frame_generation_wraps_without_revalidating_stale_token() @test {
     gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.frame_generation = ulong::max;
 
@@ -353,11 +353,11 @@ fn void frame_generation_wraps_without_revalidating_stale_token() @test {
 
 fn void end_before_begin_is_atomic() @test {
     gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.compute_used_since_frame = true;
     state.transfer_used_since_frame = true;
-    state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
+    state.off_frame_pending_queues.store(1, AtomicOrdering.RELAXED);
 
     gpu::FrameToken frame;
     FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
@@ -371,7 +371,7 @@ fn void end_before_begin_is_atomic() @test {
 
 fn void double_end_is_atomic() @test {
     gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -387,7 +387,7 @@ fn void double_end_is_atomic() @test {
 
 fn void double_begin_single_slot_is_atomic() @test {
     gpu::Device device = make_frame_lifecycle_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -406,7 +406,7 @@ fn void double_begin_single_slot_is_atomic() @test {
 
 fn void double_begin_default_slots_is_atomic() @test {
     gpu::Device device = make_frame_lifecycle_device(2);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -429,7 +429,7 @@ fn void frame_arena_alloc_and_reset() @test {
         .application_name  = "gpu_frame_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
 
@@ -467,7 +467,7 @@ fn void frame_arena_alloc_and_reset() @test {
 fn void reset_before_retire_rejected() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
@@ -490,7 +490,7 @@ fn void custom_frame_arena_size_holds_larger_spans() @test {
         .application_name  = "gpu_frame_arena_size_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     // Well past the old 1 MiB default and the 16 MiB current default.
@@ -507,7 +507,7 @@ fn void frame_upload_memory_is_coherent() @test {
         .application_name  = "gpu_coherency_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc buf_desc = {
         .size        = 256,
@@ -529,7 +529,7 @@ fn void frame_upload_memory_is_coherent() @test {
 fn void frame_contract_rejections_report_exact_context() @test {
     FrameDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_frame_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
 
@@ -628,7 +628,7 @@ fn void frame_contract_rejections_report_exact_context() @test {
 fn void frame_backend_result_helpers_report_without_fault_drift() @test {
     FrameDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_frame_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     uint before = capture.calls;
@@ -669,7 +669,7 @@ fn void frame_backend_result_helpers_report_without_fault_drift() @test {
 fn void failed_frame_retirement_query_preserves_begin_state() @test {
     FrameDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_frame_device(&capture, 2);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     FrameLifecycleSnapshot before_state = frame_lifecycle_snapshot(state);
     assert(state.frames_in_flight == 2 && state.frame_index == 0,

@@ -3,6 +3,7 @@ module gpu_test;
 import gpu @public;
 import gpu::vk @public;
 import vk;
+import std::atomic;
 
 // Pure selection-tier units over synthetic family tables (no device), plus
 // lavapipe integration: alias tier, caps flag, cross-queue timeline chain,
@@ -287,7 +288,7 @@ fn gpu::Device make_queue_test_device() {
 
 fn void queue_alias_matches_async_compute_cap() @test {
     gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* s = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(s.compute_queue_distinct == gpu::get_device_caps(&device)!!.async_compute, "distinct flag mirrors the cap");
     assert((s.compute_queue == s.graphics_queue) == !gpu::get_device_caps(&device)!!.async_compute, "alias iff no async compute");
@@ -297,7 +298,7 @@ fn void queue_alias_matches_async_compute_cap() @test {
 
 fn void cross_queue_timeline_chain_validates() @test {
     gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::SemaphoreDesc sem_desc = { .debug_name = "queue_chain" };
     gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
@@ -305,6 +306,7 @@ fn void cross_queue_timeline_chain_validates() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList compute_cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&compute_cmd)!!;
     gpu::end_commands(&compute_cmd)!!;
     gpu::CommandList[1] compute_lists = { compute_cmd };
     gpu::SemaphoreSignal[1] signals = {{ .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.COMPUTE_SHADER }};
@@ -312,6 +314,7 @@ fn void cross_queue_timeline_chain_validates() @test {
     gpu::submit(&device, &compute_submit)!!;
 
     gpu::CommandList gfx_cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&gfx_cmd)!!;
     gpu::end_commands(&gfx_cmd)!!;
     gpu::CommandList[1] gfx_lists = { gfx_cmd };
     gpu::SemaphoreWait[1] waits = {{ .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.COMPUTE_SHADER }};
@@ -325,7 +328,7 @@ fn void cross_queue_timeline_chain_validates() @test {
 
 fn void multi_role_access_stays_exclusive_on_single_family() @test {
     gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc buf_desc = {
         .size        = 256,
@@ -351,7 +354,7 @@ fn void multi_role_access_stays_exclusive_on_single_family() @test {
 
 fn void empty_buffer_usage_is_invalid() @test {
     gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc buf_desc = {
         .size        = 64,
@@ -497,6 +500,7 @@ fn void resource_texture_create_info_uses_exact_access_families() @test {
     assert(concurrent.p_queue_family_indices[0] == 4);
     assert(concurrent.p_queue_family_indices[1] == 5);
 }
+
 fn void pool_selection_follows_queue_family() @test {
     vk::CommandPool[2] gfx  = { (vk::CommandPool)(uptr)0x10, (vk::CommandPool)(uptr)0x11 };
     vk::CommandPool[2] comp = { (vk::CommandPool)(uptr)0x30, (vk::CommandPool)(uptr)0x31 };
@@ -522,7 +526,7 @@ fn void pool_selection_follows_queue_family() @test {
 
 fn void tri_queue_frame_retires_cleanly() @test {
     gpu::Device device = make_queue_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     for (uint frame = 0; frame < 4; frame++) {
         gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -530,6 +534,7 @@ fn void tri_queue_frame_retires_cleanly() @test {
         gpu::QueueKind[3] kinds = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE, gpu::QueueKind.TRANSFER };
         for (uint i = 0; i < 3; i++) {
             gpu::CommandList cmd = gpu::begin_commands(&device, kinds[i])!!;
+            defer discard_test_commands(&cmd)!!;
             gpu::end_commands(&cmd)!!;
             gpu::CommandList[1] one = { cmd };
             gpu::SubmitDesc submit = { .command_lists = one[..] };
@@ -538,6 +543,34 @@ fn void tri_queue_frame_retires_cleanly() @test {
         gpu::end_frame(&frame_token)!!;
     }
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn void native_queue_idle_clears_aliased_off_frame_markers() @test {
+    vk::Queue shared_queue = (vk::Queue)(uptr)0x10;
+    vk::Queue transfer_queue = (vk::Queue)(uptr)0x20;
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
+        .graphics_queue = shared_queue,
+        .compute_queue  = shared_queue,
+        .transfer_queue = transfer_queue,
+    };
+    uint all_markers = vk::OFF_FRAME_GRAPHICS_BIT
+        | vk::OFF_FRAME_COMPUTE_BIT
+        | vk::OFF_FRAME_TRANSFER_BIT;
+    state.off_frame_pending_queues.store(all_markers, AtomicOrdering.RELAXED);
+
+    vk::clear_off_frame_queue_markers(&state, shared_queue);
+    assert(
+        state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE)
+            == vk::OFF_FRAME_TRANSFER_BIT,
+        "waiting an aliased native queue clears every matching semantic marker"
+    );
+
+    vk::clear_off_frame_queue_markers(&state, transfer_queue);
+    assert(
+        state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE) == 0,
+        "waiting the remaining native queue clears destruction readiness"
+    );
 }
 
 fn void swapchain_sharing_aliases_the_main_family() @test {

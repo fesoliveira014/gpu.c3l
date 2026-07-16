@@ -168,6 +168,7 @@ fn void blocking_staging_upload(StagingReuseFixture* fixture, char[] payload) {
 fn void recorded_staging_upload(StagingReuseFixture* fixture, gpu::QueueKind queue, uint index, char[] payload) {
     gpu::FrameToken frame = gpu::begin_frame(&fixture.device)!!;
     gpu::CommandList commands = gpu::begin_commands(&fixture.device, queue)!!;
+    defer discard_test_commands(&commands)!!;
     gpu::cmd_upload_buffer(
         commands: &commands,
         dst:      fixture.buffers[index],
@@ -302,7 +303,7 @@ fn void staging_range_reuse_recorded_compute_to_recorded_transfer() @test {
 
 fn void buffer_upload_readback_round_trip() @test {
     gpu::Device device = make_transfer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = {
         .size        = 4096,
@@ -342,7 +343,7 @@ fn void buffer_upload_readback_round_trip() @test {
 fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
     TransferDiagnosticCapture capture;
     gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc buffer_desc = {
         .size        = 64,
@@ -355,6 +356,7 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
 
     char[16] data;
     gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&commands)!!;
     gpu::end_commands(&commands)!!;
     uint before = capture.calls;
     fault command_state = @catch(gpu::cmd_upload_buffer(&commands, buffer, 0, data[..]));
@@ -374,6 +376,7 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
     );
 
     gpu::CommandList lookup_commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&lookup_commands)!!;
     gpu::BufferHandle missing = { .index = gpu::MAX_BUFFERS, .generation = 1 };
     before = capture.calls;
     fault invalid_buffer = @catch(gpu::cmd_upload_buffer(&lookup_commands, missing, 0, data[..]));
@@ -396,9 +399,10 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
 fn void stale_transfer_command_owners_report_without_identity() @test {
     TransferDiagnosticCapture capture;
     gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::CommandList stale = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&stale)!!;
     gpu::end_commands(&stale)!!;
     gpu::CommandList[1] lists = { stale };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -479,7 +483,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
 fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test {
     TransferDiagnosticCapture capture;
     gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     uint before = capture.calls;
@@ -520,7 +524,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         readback_size: 64,
         capture:       &capture,
     );
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferDesc buffer_desc = {
@@ -533,6 +537,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
     gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&commands)!!;
     gpu::TextureDesc texture_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
@@ -756,6 +761,54 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     );
 }
 
+fn void helper_recording_fault_does_not_poison_frame_slot() @test {
+    TransferDiagnosticCapture capture;
+    gpu::Device device = make_transfer_test_device(
+        staging_size: 64,
+        capture:      &capture,
+    );
+    defer destroy_test_device(&device)!!;
+    gpu::vk::VkDeviceState* state =
+        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+
+    gpu::BufferDesc buffer_desc = {
+        .size        = 128,
+        .usage       = { .transfer_dst },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "helper_fault_buffer",
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+
+    usz staging_size = state.staging_arena.size;
+    uint dedicated_count = state.dedicated_staging.count;
+    state.staging_arena.size = 1;
+    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    foreach (&entry : state.dedicated_staging.entries) {
+        entry.timeline_value = ulong::max;
+    }
+
+    char[16] data;
+    fault helper_fault = @catch(gpu::upload_buffer_data(
+        device:      &device,
+        dst:         buffer,
+        offset:      0,
+        data:        data[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+    ));
+    state.staging_arena.size = staging_size;
+    state.dedicated_staging.count = dedicated_count;
+    assert(helper_fault == gpu::ARENA_FULL,
+        "helper recording fault reaches the public caller");
+
+    for (uint i = 0; i < 3; i++) {
+        gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+        gpu::end_frame(&frame)!!;
+    }
+}
+
 fn void readback_ticket_generation_exhaustion_retires_slot() @test {
     vk::ReadbackTicketCell[1] cells;
     cells[0].generation = vk::HANDLE_GENERATION_MAX;
@@ -778,7 +831,7 @@ fn void readback_ticket_generation_exhaustion_retires_slot() @test {
 fn void cmd_readback_ticket_not_ready_before_submit() @test {
     TransferDiagnosticCapture capture;
     gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     // Settle the timeline to a known baseline.
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -795,6 +848,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
     defer gpu::destroy_buffer(&device, src)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     uint before = capture.calls;
     fault zero_size = @catch(gpu::cmd_readback_buffer(&cmd, src, 0, 0));
     assert(zero_size == gpu::INVALID_ARGUMENT, "zero ticket size keeps INVALID_ARGUMENT");
@@ -900,7 +954,7 @@ fn void oversized_upload_uses_dedicated_staging() @test {
         readback_size: 1024,
         capture:       &capture,
     );
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
     ulong fallbacks = gpu::vk::dedicated_fallback_count(state);
     uint diagnostic_count = capture.calls;
@@ -947,7 +1001,7 @@ fn void oversized_upload_uses_dedicated_staging() @test {
 fn void staging_ring_reuses_across_frames() @test {
     // Arena fits ~4 allocations; 12 frames of uploads force wrap + recycle.
     gpu::Device device = make_transfer_test_device(staging_size: 4096);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = {
         .size        = 1024,
@@ -963,6 +1017,7 @@ fn void staging_ring_reuses_across_frames() @test {
         for (uint i = 0; i < 1024; i++) data[i] = (char)(frame + i);
         gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
         gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+        defer discard_test_commands(&cmd)!!;
         gpu::cmd_upload_buffer(&cmd, buffer, 0, data[..])!!;
         gpu::BufferBarrier next_use = {
             .buffer = buffer, .offset = 0, .size = 1024,
@@ -983,7 +1038,7 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
     // Two cmd-level uploads recorded outside any frame into one list: their
     // staging ranges must not alias (ranges hold until a timeline advance).
     gpu::Device device = make_transfer_test_device(staging_size: 4096);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = {
         .size        = 1024,
@@ -1004,6 +1059,7 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
     }
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::cmd_upload_buffer(&cmd, first, 0, a[..])!!;
     gpu::cmd_upload_buffer(&cmd, second, 0, b[..])!!;
     gpu::BufferBarrier next_use = {
@@ -1032,7 +1088,7 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
 
 fn void texture_upload_helper_sampled() @test {
     gpu::Device device = make_transfer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -1114,6 +1170,7 @@ fn void texture_upload_helper_sampled() @test {
     root.height        = UR_TEX;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: pipeline,
@@ -1141,7 +1198,7 @@ fn void texture_upload_helper_sampled() @test {
 
 fn void texture_readback_helper_restores_layout() @test {
     gpu::Device device = make_transfer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -1195,7 +1252,7 @@ fn void texture_readback_helper_restores_layout() @test {
 fn void upload_helper_validation_faults() @test {
     TransferDiagnosticCapture capture;
     gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::TextureDesc tex_desc = {
@@ -1433,6 +1490,7 @@ fn void upload_helper_validation_faults() @test {
     // cmd-level upload into a texture that is not TRANSFER_DST still faults.
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     char[UR_TEX_BYTES] full;
     gpu::TextureUploadDesc upload = { .texture = texture, .mip = 0 };
     gpu::TextureUploadDesc invalid_mip_upload = { .texture = texture, .mip = 1 };
@@ -1476,7 +1534,7 @@ fn void upload_helper_validation_faults() @test {
 fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
     TransferDiagnosticCapture capture;
     gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
         (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
@@ -1569,6 +1627,7 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
         device: &device,
         queue:  gpu::QueueKind.GRAPHICS,
     )!!;
+    defer discard_test_commands(&commands)!!;
     staging_before = state.staging_arena.retire_count;
     before = capture.calls;
     fault command_upload = @catch(gpu::cmd_upload_buffer(

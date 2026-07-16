@@ -57,6 +57,10 @@ struct SubmitStats {
     ulong empty_signal_submits;
 }
 
+const uint OFF_FRAME_GRAPHICS_BIT @private = 1 << 0;
+const uint OFF_FRAME_COMPUTE_BIT @private = 1 << 1;
+const uint OFF_FRAME_TRANSFER_BIT @private = 1 << 2;
+
 struct SubmitInputs {
     CommandRecord*[] records;
     SemaphoreSlot*[] waits;
@@ -1539,6 +1543,14 @@ fn gpu::QueueKind frame_queue_kind(VkDeviceState* state) @private {
     return gpu::QueueKind.TRANSFER;
 }
 
+fn uint off_frame_queue_bit(gpu::QueueKind queue) @private {
+    switch (queue) {
+        case gpu::QueueKind.GRAPHICS: return OFF_FRAME_GRAPHICS_BIT;
+        case gpu::QueueKind.COMPUTE:  return OFF_FRAME_COMPUTE_BIT;
+        case gpu::QueueKind.TRANSFER: return OFF_FRAME_TRANSFER_BIT;
+    }
+}
+
 fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
     switch (queue) {
         case gpu::QueueKind.TRANSFER: return state.transfer_queue;
@@ -1610,6 +1622,23 @@ fn Mutex* native_queue_mutex_for(VkDeviceState* state, vk::Queue queue) @private
         return queue_mutex_for(state, gpu::QueueKind.TRANSFER);
     }
     return present_queue_mutex_for(state);
+}
+
+fn void clear_off_frame_queue_markers(
+    VkDeviceState* state,
+    vk::Queue waited,
+) @private {
+    uint clear_mask;
+    if (state.selected_queue_roles.graphics && state.graphics_queue == waited) {
+        clear_mask |= OFF_FRAME_GRAPHICS_BIT;
+    }
+    if (state.selected_queue_roles.compute && state.compute_queue == waited) {
+        clear_mask |= OFF_FRAME_COMPUTE_BIT;
+    }
+    if (state.selected_queue_roles.transfer && state.transfer_queue == waited) {
+        clear_mask |= OFF_FRAME_TRANSFER_BIT;
+    }
+    state.off_frame_pending_queues.and(~clear_mask, AtomicOrdering.RELEASE);
 }
 
 fn SubmitInputs? resolve_submit_inputs(
@@ -1828,7 +1857,10 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
                 state.transfer_used_since_frame = true;
             }
             if (!state.frame_active) {
-                state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
+                state.off_frame_pending_queues.or(
+                    off_frame_queue_bit(kind),
+                    AtomicOrdering.RELAXED,
+                );
             }
             foreach (record : records) {
                 commit_pending_layouts(state, record);
@@ -1852,11 +1884,14 @@ fn void? vk_wait_queue_idle(gpu::Device* device, gpu::QueueKind queue) @private 
     Mutex* queue_mutex = queue_mutex_for(state, queue);
     queue_mutex.lock()!!;
     defer queue_mutex.unlock();
+    vk::Queue waited = queue_for(state, queue);
     check_backend_result(
         state:     state,
         operation: "wait_queue_idle",
-        result:    vk::queue_wait_idle(queue_for(state, queue)),
+        result:    vk::queue_wait_idle(waited),
     )!;
+
+    clear_off_frame_queue_markers(state, waited);
 }
 
 <* Snapshot of submit counters, exposed for whitebox accounting in tests. *>

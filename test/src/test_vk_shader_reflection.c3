@@ -102,7 +102,7 @@ fn gpu::Device make_reflection_test_device() {
 
 fn void heap_conforming_shader_accepted() @test {
     gpu::Device device = make_reflection_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_HEAP_SPIRV[..], .entry_point = "main",
@@ -114,7 +114,7 @@ fn void heap_conforming_shader_accepted() @test {
 
 fn void buffers_only_shader_accepted() @test {
     gpu::Device device = make_reflection_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "main",
@@ -126,7 +126,7 @@ fn void buffers_only_shader_accepted() @test {
 
 fn void foreign_set_rejected() @test {
     gpu::Device device = make_reflection_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BAD_SET_SPIRV[..], .entry_point = "main",
@@ -137,7 +137,7 @@ fn void foreign_set_rejected() @test {
 
 fn void convention_violating_binding_rejected() @test {
     gpu::Device device = make_reflection_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BAD_BINDING_SPIRV[..], .entry_point = "main",
@@ -148,7 +148,7 @@ fn void convention_violating_binding_rejected() @test {
 
 fn void bogus_entry_point_rejected() @test {
     gpu::Device device = make_reflection_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "not_main",
@@ -159,7 +159,7 @@ fn void bogus_entry_point_rejected() @test {
 
 fn void wrong_stage_rejected() @test {
     gpu::Device device = make_reflection_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.VERTEX, .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "main",
@@ -170,7 +170,7 @@ fn void wrong_stage_rejected() @test {
 
 fn void oversized_push_constant_rejected() @test {
     gpu::Device device = make_reflection_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_OVERSIZED_PUSH_SPIRV[..], .entry_point = "main",
@@ -181,7 +181,7 @@ fn void oversized_push_constant_rejected() @test {
 
 fn void entry_point_over_cap_rejected() @test {
     gpu::Device device = make_reflection_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = ENTRY_POINT_OVER_CAP,
@@ -193,7 +193,7 @@ fn void entry_point_over_cap_rejected() @test {
 fn void shader_contract_rejections_report_exact_context() @test {
     ShaderDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_reflection_test_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc missing_entry = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BUFFERS_SPIRV[..],
@@ -269,7 +269,7 @@ fn void shader_contract_rejections_report_exact_context() @test {
 fn void wrong_pipeline_shader_context_reports_identity_once() @test {
     ShaderDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_reflection_test_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::ShaderDesc vertex_desc = {
         .stage = gpu::ShaderStage.VERTEX, .spirv = REFLECT_VERTEX_SPIRV[..],
         .entry_point = "main", .debug_name = "vertex_in_compute",

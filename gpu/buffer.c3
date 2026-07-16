@@ -40,7 +40,9 @@ fn BufferHandle? create_buffer(Device* device, BufferDesc* desc) {
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     validate_queue_access(&operation, desc.access)!;
-    return operation.vtable.create_buffer(device, desc);
+    BufferHandle buffer = operation.vtable.create_buffer(device, desc)!;
+    retain_device_children(&operation);
+    return buffer;
 }
 
 <* Counterpart of create_buffer; the handle is invalid afterwards. *>
@@ -48,7 +50,8 @@ fn void? destroy_buffer(Device* device, BufferHandle buffer) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     validate_resource_owner(&operation, buffer.owner, ResourceOwnerKind.BUFFER)!;
-    return operation.vtable.destroy_buffer(device, buffer);
+    operation.vtable.destroy_buffer(device, buffer)!;
+    release_device_children(&operation);
 }
 
 <* Shader-visible GPU address of an addressable buffer; faults if the buffer was

@@ -70,7 +70,7 @@ fn int main() {
         .application_name  = "gpu_arena_allocation_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_bench_device(&device)!!;
 
     run_frame_allocations(&device);
     run_persistent_allocations(&device);

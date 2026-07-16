@@ -83,6 +83,7 @@ fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* 
     root.count      = DEFER_COUNT;
 
     gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier tex_bar = {
         .texture       = rig.texture,
@@ -121,6 +122,7 @@ fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* 
 
 fn void destroy_after_submit_survives_frame_cycle() @test {
     gpu::Device device = make_defer_test_device();
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     DeferRig rig = build_defer_rig(&device);
@@ -144,12 +146,11 @@ fn void destroy_after_submit_survives_frame_cycle() @test {
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 0, "destroyed handles leave no leaked slots");
-    gpu::destroy_device(&device)!!;
 }
 
 fn void deferred_queue_count_rises_then_drains() @test {
     gpu::Device device = make_defer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
@@ -169,7 +170,7 @@ fn void deferred_queue_count_rises_then_drains() @test {
 
 fn void deferred_destroy_outside_frame_is_immediate() @test {
     gpu::Device device = make_defer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
@@ -181,7 +182,7 @@ fn void deferred_destroy_outside_frame_is_immediate() @test {
 
 fn void deferred_enqueue_uses_only_the_signaled_shadow() @test {
     gpu::Device device = make_defer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
@@ -195,13 +196,14 @@ fn void deferred_enqueue_uses_only_the_signaled_shadow() @test {
     assert(after.host_queries == before.host_queries, "enqueue does not query a native timeline");
     assert(after.drain_calls == before.drain_calls + 1, "enqueue preserves opportunistic drain accounting");
     assert(deferred_count(&device) == 1, "an unproven retirement remains queued");
+    state.timeline_counter.store(0, AtomicOrdering.RELAXED);
 }
 
 <* An off-frame submit is sanctioned usage: destroying a buffer it
    referenced must defer backend release, not free under in-flight work. *>
 fn void off_frame_destroy_defers_release() @test {
     gpu::Device device = make_defer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc src_desc = {
         .size = 256, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }, .debug_name = "off_frame_src",
@@ -214,6 +216,7 @@ fn void off_frame_destroy_defers_release() @test {
     gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = { .src = src, .dst = dst, .src_offset = 0, .dst_offset = 0, .size = 256 };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
     gpu::end_commands(&cmd)!!;
@@ -227,9 +230,13 @@ fn void off_frame_destroy_defers_release() @test {
     assert(deferred_count(&device) > 0, "destroying an off-frame submission's target enqueues rather than freeing synchronously");
     gpu::destroy_buffer(&device, src)!!;
 
-    // No end_frame ever covers it; teardown must retire it validation-clean.
+    gpu::Device original = device;
+    assert(@catch(gpu::destroy_device(&device)) == gpu::DEVICE_BUSY,
+        "off-frame queue work makes device destruction retryable");
+    assert(device == original, "busy destruction preserves the device token");
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(vk::report_resource_leaks(state) == 0, "off-frame destroy leaves no leaked slots at teardown");
+    assert(vk::report_resource_leaks(state) == 0,
+        "off-frame resource destruction leaves no live public slots");
 }
 
 const uint STORM_COUNT = 128;
@@ -239,7 +246,7 @@ const uint STORM_COUNT = 128;
    driver anything. *>
 fn void mid_frame_destroy_storm_issues_no_host_queries() @test {
     gpu::Device device = make_defer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferHandle[STORM_COUNT] buffers;
     for (uint i = 0; i < STORM_COUNT; i++) {
@@ -269,7 +276,7 @@ fn void mid_frame_destroy_storm_issues_no_host_queries() @test {
    teardown sweep involved), the counters must reconcile exactly. *>
 fn void deferred_stats_reconcile_without_teardown() @test {
     gpu::Device device = make_defer_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferHandle[16] buffers;
