@@ -93,7 +93,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 2.3 Deterministic token ownership validation
 
-- [ ] Extend all runtime, surface, device, allocation, texture, view, sampler, pipeline, swapchain, and command tokens with deterministic owner validation in their public modules and backend tables.
+- [x] Extend all runtime, surface, device, allocation, texture, view, sampler, pipeline, swapchain, and command tokens with deterministic owner validation in their public modules and backend tables.
   - **Depends on:** 2.1 and 2.2.
   - **Contract:** stale and cross-device tokens fault before backend mutation even when an explicit cast defeats nominal typing; the private token representation may vary by resource kind.
   - **Edges:** same slot index on different devices, stale parent with live-looking child bits, cross-runtime surface use, and validation during device closing.
