@@ -84,12 +84,11 @@ fn void queue_queries_return_device_owned_identities() @test {
 
 fn void queue_queries_preserve_distinct_compute_identity() @test {
     int backend_state;
-    gpu::QueueSelection selection = gpu::default_queue_selection();
-    selection.graphics_roles = { .graphics, .transfer };
-    selection.compute_id = 1;
-    selection.compute_roles = { .compute };
-    selection.transfer_id = selection.graphics_id;
-    selection.transfer_roles = selection.graphics_roles;
+    gpu::QueueSelection selection = gpu::queue_selection_for_aliases(
+        compute_aliases_graphics:  false,
+        transfer_aliases_graphics: true,
+        transfer_aliases_compute:  false,
+    );
 
     gpu::Device device = gpu::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -142,19 +141,27 @@ fn void queue_queries_reject_stale_devices() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void selected_queue_counts_are_constrained_to_stored_identities() @test {
+fn void selected_queue_counts_round_trip_stored_identities() @test {
     int backend_state;
-    gpu::DeviceCaps caps = {
-        .queues = {
+    gpu::QueueRequirements requirements = {
+        .counts = {
             .graphics = 2,
-            .compute  = 2,
-            .transfer = 2,
+            .compute  = 1,
+            .transfer = 1,
         },
     };
-    gpu::QueueSelection selection = gpu::default_queue_selection(&caps);
+    ulong[2] graphics = { 10, 20 };
+    ulong[1] compute = { 20 };
+    ulong[1] transfer = { 10 };
+    gpu::QueueSelection selection = gpu::queue_selection_from_native_ids(
+        requirements: requirements,
+        graphics:     graphics[..],
+        compute:      compute[..],
+        transfer:     transfer[..],
+    )!!;
     gpu::Device device = gpu::register_device(
         backend:       gpu::BackendKind.VULKAN,
-        caps:          caps,
+        caps:          {},
         vtable:        &queue_test_vtable,
         backend_state: &backend_state,
         queues:        selection,
@@ -162,23 +169,86 @@ fn void selected_queue_counts_are_constrained_to_stored_identities() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::QueueCounts counts = gpu::get_queue_counts(&device)!!;
-    gpu::Queue first = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS, 0)!!;
-    gpu::QueueInfo info = gpu::get_queue_info(&device, first)!!;
-    assert(counts.graphics == 1, "scalar selection exposes one graphics identity");
-    assert(counts.compute == 1, "scalar selection exposes one compute identity");
-    assert(counts.transfer == 1, "scalar selection exposes one transfer identity");
-    assert(queue_roles_are_all(info.roles), "the stored identity remains queryable");
+    gpu::Queue graphics_0 = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS, 0)!!;
+    gpu::Queue graphics_1 = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS, 1)!!;
+    gpu::Queue compute_0 = gpu::get_queue(&device, gpu::QueueKind.COMPUTE, 0)!!;
+    gpu::Queue transfer_0 = gpu::get_queue(&device, gpu::QueueKind.TRANSFER, 0)!!;
+    assert(counts.graphics == 2, "both graphics identities are exposed");
+    assert(counts.compute == 1, "the compute identity is exposed");
+    assert(counts.transfer == 1, "the transfer identity is exposed");
+    assert(graphics_0 != graphics_1, "same-role queues have distinct identities");
+    assert(graphics_1 == compute_0, "compute aliases the second graphics queue");
+    assert(graphics_0 == transfer_0, "transfer aliases the first graphics queue");
+    assert(gpu::get_queue_info(&device, graphics_0)!!.id == graphics_0.id);
+    assert(gpu::get_queue_info(&device, graphics_1)!!.id == graphics_1.id);
     assert(
-        @catch(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS, 1))
+        @catch(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS, 2))
             == gpu::INVALID_ARGUMENT,
-        "an unstored second identity is unavailable"
+        "only stored indices are queryable"
     );
 }
 
-fn void queue_registration_rejects_unstored_counts() @test {
+fn void selected_queue_counts_reach_encoded_capacity() @test {
     int backend_state;
-    gpu::QueueSelection selection = gpu::default_queue_selection();
-    selection.counts.graphics = 2;
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .compute  = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .transfer = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+        },
+    };
+    ulong[gpu::MAX_REQUESTED_QUEUES_PER_ROLE] graphics;
+    ulong[gpu::MAX_REQUESTED_QUEUES_PER_ROLE] compute;
+    ulong[gpu::MAX_REQUESTED_QUEUES_PER_ROLE] transfer;
+    for (uint index = 0; index < gpu::MAX_REQUESTED_QUEUES_PER_ROLE; index++) {
+        graphics[index] = (ulong)index;
+        compute[index] = (ulong)(gpu::MAX_REQUESTED_QUEUES_PER_ROLE + index);
+        transfer[index] = (ulong)(2 * gpu::MAX_REQUESTED_QUEUES_PER_ROLE + index);
+    }
+    gpu::QueueSelection selection = gpu::queue_selection_from_native_ids(
+        requirements: requirements,
+        graphics:     graphics[..],
+        compute:      compute[..],
+        transfer:     transfer[..],
+    )!!;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &queue_test_vtable,
+        backend_state: &backend_state,
+        queues:        selection,
+    )!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::QueueCounts counts = gpu::get_queue_counts(&device)!!;
+    gpu::Queue last = gpu::get_queue(
+        &device,
+        gpu::QueueKind.TRANSFER,
+        gpu::MAX_REQUESTED_QUEUES_PER_ROLE - 1,
+    )!!;
+    gpu::QueueInfo info = gpu::get_queue_info(&device, last)!!;
+    assert(counts.graphics == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(counts.compute == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(counts.transfer == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(last.id == gpu::MAX_SELECTED_QUEUE_IDENTITIES - 1);
+    assert(info.id == last.id);
+    assert(
+        !info.roles.graphics && !info.roles.compute && info.roles.transfer,
+        "the final compact identity preserves its semantic role"
+    );
+}
+
+fn void queue_registration_rejects_duplicate_role_identity() @test {
+    int backend_state;
+    gpu::QueueRequirements requirements = { .counts = { .graphics = 2 } };
+    ulong[2] graphics = { 10, 20 };
+    gpu::QueueSelection selection = gpu::queue_selection_from_native_ids(
+        requirements: requirements,
+        graphics:     graphics[..],
+        compute:      {},
+        transfer:     {},
+    )!!;
+    selection.graphics_ids[1] = selection.graphics_ids[0];
 
     assert(
         @catch(gpu::register_device(
@@ -188,7 +258,7 @@ fn void queue_registration_rejects_unstored_counts() @test {
             backend_state: &backend_state,
             queues:        selection,
         )) == gpu::INVALID_ARGUMENT,
-        "a scalar selection cannot publish a second queue"
+        "one role cannot publish the same identity twice"
     );
 }
 

@@ -216,15 +216,15 @@ Queue { device, id, roles }
 `DeviceRequest` carries semantic queue counts and optional distinct-role
 requirements. The strict request defaults to one queue under each role, and
 `request_queues` adds one immutable explicit group. The backend chooses native
-families and indices privately; unsupported counts or alias constraints make
-the request unsupported.
+families and indices privately. The core stores every selected identity and its
+canonical role mask; unsupported counts or alias constraints make the request
+unsupported.
 
 `get_queue_counts` reports selected counts by role. `get_queue` returns a
 device-owned identity for a role/index pair, and aliased roles return the same
-identity with a shared role mask. The current Vulkan selection stores one
-identity per role; counts above one remain unsupported until every selected
-identity is stored. Command entry points still take `QueueKind` until access
-domains move recording and submission validation to `Queue`.
+identity with a shared role mask. The Vulkan backend returns
+`UNSUPPORTED_FEATURE` when a role count exceeds one. Command entry points take
+`QueueKind`.
 
 ### Command lists
 

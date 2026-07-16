@@ -1,6 +1,10 @@
 module gpu;
 
+const uint QUEUE_ROLE_COUNT @private = 3;
+const uint MAX_SELECTED_QUEUE_IDENTITIES @private =
+    MAX_REQUESTED_QUEUES_PER_ROLE * QUEUE_ROLE_COUNT;
 const Queue QUEUE_INVALID = {};
+$assert(MAX_SELECTED_QUEUE_IDENTITIES - 1 <= ushort::max);
 
 <* Semantic roles supported by one selected queue. *>
 bitstruct QueueRoles : uint {
@@ -40,12 +44,12 @@ struct QueueRequirements {
 
 struct QueueSelection @private {
     QueueCounts counts;
-    uint graphics_id;
-    uint compute_id;
-    uint transfer_id;
-    QueueRoles graphics_roles;
-    QueueRoles compute_roles;
-    QueueRoles transfer_roles;
+    QueueRoles distinct;
+    uint identity_count;
+    ushort[MAX_REQUESTED_QUEUES_PER_ROLE] graphics_ids;
+    ushort[MAX_REQUESTED_QUEUES_PER_ROLE] compute_ids;
+    ushort[MAX_REQUESTED_QUEUES_PER_ROLE] transfer_ids;
+    QueueRoles[MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
 }
 
 <* Submit command lists to their queue. A non-zero `swapchain` couples this
@@ -68,6 +72,135 @@ fn bool queue_roles_equal(QueueRoles first, QueueRoles second) @private {
     return (uint)first == (uint)second;
 }
 
+fn bool queue_roles_violate_distinct(
+    QueueRoles roles,
+    QueueRoles distinct,
+) @private {
+    return (distinct.graphics
+            && roles.graphics
+            && (roles.compute || roles.transfer))
+        || (distinct.compute
+            && roles.compute
+            && (roles.graphics || roles.transfer))
+        || (distinct.transfer
+            && roles.transfer
+            && (roles.graphics || roles.compute));
+}
+
+fn uint queue_count_for_kind(QueueCounts counts, QueueKind kind) @private {
+    switch (kind) {
+        case QueueKind.GRAPHICS: return counts.graphics;
+        case QueueKind.COMPUTE:  return counts.compute;
+        case QueueKind.TRANSFER: return counts.transfer;
+    }
+}
+
+fn uint queue_selection_id(
+    QueueSelection* selection,
+    QueueKind kind,
+    uint index,
+) @private {
+    switch (kind) {
+        case QueueKind.GRAPHICS: return (uint)selection.graphics_ids[index];
+        case QueueKind.COMPUTE:  return (uint)selection.compute_ids[index];
+        case QueueKind.TRANSFER: return (uint)selection.transfer_ids[index];
+    }
+}
+
+fn QueueRoles queue_selection_roles(
+    QueueSelection* selection,
+    QueueKind kind,
+    uint index,
+) @private {
+    return selection.identity_roles[queue_selection_id(selection, kind, index)];
+}
+
+fn void? add_queue_role_identities(
+    QueueSelection* selection,
+    QueueKind kind,
+    ulong[] native_ids,
+    ulong[] identity_keys,
+) @private {
+    foreach (index, native_id : native_ids) {
+        uint identity = selection.identity_count;
+        for (uint known = 0; known < selection.identity_count; known++) {
+            if (identity_keys[known] == native_id) {
+                identity = known;
+                break;
+            }
+        }
+        if (identity == selection.identity_count) {
+            if (selection.identity_count == MAX_SELECTED_QUEUE_IDENTITIES) {
+                return INVALID_ARGUMENT~;
+            }
+            identity_keys[identity] = native_id;
+            selection.identity_count++;
+        }
+
+        QueueRoles* roles = &selection.identity_roles[identity];
+        switch (kind) {
+            case QueueKind.GRAPHICS:
+                if (roles.graphics) return INVALID_ARGUMENT~;
+                roles.graphics = true;
+                selection.graphics_ids[index] = (ushort)identity;
+            case QueueKind.COMPUTE:
+                if (roles.compute) return INVALID_ARGUMENT~;
+                roles.compute = true;
+                selection.compute_ids[index] = (ushort)identity;
+            case QueueKind.TRANSFER:
+                if (roles.transfer) return INVALID_ARGUMENT~;
+                roles.transfer = true;
+                selection.transfer_ids[index] = (ushort)identity;
+        }
+    }
+}
+
+fn QueueSelection? queue_selection_from_native_ids(
+    QueueRequirements requirements,
+    ulong[] graphics,
+    ulong[] compute,
+    ulong[] transfer,
+) @private {
+    if (!queue_requirements_are_valid(requirements)) return INVALID_ARGUMENT~;
+    if (graphics.len != (usz)requirements.counts.graphics
+        || compute.len != (usz)requirements.counts.compute
+        || transfer.len != (usz)requirements.counts.transfer) {
+        return INVALID_ARGUMENT~;
+    }
+
+    QueueSelection selection = {
+        .counts   = requirements.counts,
+        .distinct = requirements.distinct,
+    };
+    ulong[MAX_SELECTED_QUEUE_IDENTITIES] identity_keys;
+    add_queue_role_identities(
+        selection:     &selection,
+        kind:          QueueKind.GRAPHICS,
+        native_ids:    graphics,
+        identity_keys: identity_keys[..],
+    )!;
+    add_queue_role_identities(
+        selection:     &selection,
+        kind:          QueueKind.COMPUTE,
+        native_ids:    compute,
+        identity_keys: identity_keys[..],
+    )!;
+    add_queue_role_identities(
+        selection:     &selection,
+        kind:          QueueKind.TRANSFER,
+        native_ids:    transfer,
+        identity_keys: identity_keys[..],
+    )!;
+
+    for (uint identity = 0; identity < selection.identity_count; identity++) {
+        QueueRoles roles = selection.identity_roles[identity];
+        if (queue_roles_violate_distinct(roles, requirements.distinct)) {
+            return UNSUPPORTED_FEATURE~;
+        }
+    }
+    return selection;
+}
+
 fn QueueSelection? queue_selection_for_requirements(
     QueueRequirements requirements,
     bool compute_aliases_graphics,
@@ -81,62 +214,37 @@ fn QueueSelection? queue_selection_for_requirements(
         return UNSUPPORTED_FEATURE~;
     }
 
-    QueueSelection selection = { .counts = requirements.counts };
-    QueueRoles[3] identity_roles;
-    uint next_id;
+    ulong next_native_id;
+    ulong graphics_native_id;
+    ulong compute_native_id;
+    ulong transfer_native_id;
     if (requirements.counts.graphics > 0) {
-        selection.graphics_id = next_id++;
-        identity_roles[selection.graphics_id].graphics = true;
+        graphics_native_id = next_native_id++;
     }
     if (requirements.counts.compute > 0) {
-        selection.compute_id = requirements.counts.graphics > 0
+        compute_native_id = requirements.counts.graphics > 0
             && compute_aliases_graphics
-            ? selection.graphics_id
-            : next_id++;
-        identity_roles[selection.compute_id].compute = true;
+            ? graphics_native_id
+            : next_native_id++;
     }
     if (requirements.counts.transfer > 0) {
         if (requirements.counts.graphics > 0 && transfer_aliases_graphics) {
-            selection.transfer_id = selection.graphics_id;
+            transfer_native_id = graphics_native_id;
         } else if (requirements.counts.compute > 0 && transfer_aliases_compute) {
-            selection.transfer_id = selection.compute_id;
+            transfer_native_id = compute_native_id;
         } else {
-            selection.transfer_id = next_id++;
+            transfer_native_id = next_native_id++;
         }
-        identity_roles[selection.transfer_id].transfer = true;
     }
-
-    if (requirements.counts.graphics > 0) {
-        selection.graphics_roles = identity_roles[selection.graphics_id];
-    }
-    if (requirements.counts.compute > 0) {
-        selection.compute_roles = identity_roles[selection.compute_id];
-    }
-    if (requirements.counts.transfer > 0) {
-        selection.transfer_roles = identity_roles[selection.transfer_id];
-    }
-
-    bool graphics_alias = requirements.counts.graphics > 0
-        && ((requirements.counts.compute > 0
-                && selection.graphics_id == selection.compute_id)
-            || (requirements.counts.transfer > 0
-                && selection.graphics_id == selection.transfer_id));
-    bool compute_alias = requirements.counts.compute > 0
-        && ((requirements.counts.graphics > 0
-                && selection.compute_id == selection.graphics_id)
-            || (requirements.counts.transfer > 0
-                && selection.compute_id == selection.transfer_id));
-    bool transfer_alias = requirements.counts.transfer > 0
-        && ((requirements.counts.graphics > 0
-                && selection.transfer_id == selection.graphics_id)
-            || (requirements.counts.compute > 0
-                && selection.transfer_id == selection.compute_id));
-    if ((requirements.distinct.graphics && graphics_alias)
-        || (requirements.distinct.compute && compute_alias)
-        || (requirements.distinct.transfer && transfer_alias)) {
-        return UNSUPPORTED_FEATURE~;
-    }
-    return selection;
+    ulong[1] graphics = { graphics_native_id };
+    ulong[1] compute = { compute_native_id };
+    ulong[1] transfer = { transfer_native_id };
+    return queue_selection_from_native_ids(
+        requirements: requirements,
+        graphics:     graphics[:requirements.counts.graphics],
+        compute:      compute[:requirements.counts.compute],
+        transfer:     transfer[:requirements.counts.transfer],
+    );
 }
 
 fn QueueSelection queue_selection_for_aliases(
@@ -162,46 +270,59 @@ fn QueueSelection default_queue_selection(DeviceCaps* caps = null) @private {
     )!!;
 }
 
-fn bool queue_selection_is_well_formed(QueueSelection selection) @private {
-    QueueRequirements requirements = { .counts = selection.counts };
+fn bool queue_selection_is_well_formed(QueueSelection* selection) @private {
+    if (selection == null) return false;
+    QueueRequirements requirements = {
+        .counts   = selection.counts,
+        .distinct = selection.distinct,
+    };
     if (!queue_requirements_are_valid(requirements)
-        || selection.counts.graphics > 1
-        || selection.counts.compute > 1
-        || selection.counts.transfer > 1) {
+        || selection.identity_count == 0
+        || selection.identity_count > MAX_SELECTED_QUEUE_IDENTITIES) {
         return false;
     }
-    QueueSelection canonical = queue_selection_for_requirements(
-        requirements:               requirements,
-        compute_aliases_graphics:    selection.counts.graphics > 0
-            && selection.counts.compute > 0
-            && selection.compute_id == selection.graphics_id,
-        transfer_aliases_graphics:   selection.counts.graphics > 0
-            && selection.counts.transfer > 0
-            && selection.transfer_id == selection.graphics_id,
-        transfer_aliases_compute:    selection.counts.compute > 0
-            && selection.counts.transfer > 0
-            && selection.transfer_id == selection.compute_id,
-    )!!;
-    return selection.graphics_id == canonical.graphics_id
-        && selection.compute_id == canonical.compute_id
-        && selection.transfer_id == canonical.transfer_id
-        && queue_roles_equal(
-            selection.graphics_roles,
-            canonical.graphics_roles,
-        )
-        && queue_roles_equal(
-            selection.compute_roles,
-            canonical.compute_roles,
-        )
-        && queue_roles_equal(
-            selection.transfer_roles,
-            canonical.transfer_roles,
-        );
+
+    QueueRoles[MAX_SELECTED_QUEUE_IDENTITIES] expected_roles;
+    for (uint index = 0; index < selection.counts.graphics; index++) {
+        uint identity = queue_selection_id(selection, QueueKind.GRAPHICS, index);
+        if (identity >= selection.identity_count
+            || expected_roles[identity].graphics) {
+            return false;
+        }
+        expected_roles[identity].graphics = true;
+    }
+    for (uint index = 0; index < selection.counts.compute; index++) {
+        uint identity = queue_selection_id(selection, QueueKind.COMPUTE, index);
+        if (identity >= selection.identity_count
+            || expected_roles[identity].compute) {
+            return false;
+        }
+        expected_roles[identity].compute = true;
+    }
+    for (uint index = 0; index < selection.counts.transfer; index++) {
+        uint identity = queue_selection_id(selection, QueueKind.TRANSFER, index);
+        if (identity >= selection.identity_count
+            || expected_roles[identity].transfer) {
+            return false;
+        }
+        expected_roles[identity].transfer = true;
+    }
+
+    for (uint identity = 0; identity < selection.identity_count; identity++) {
+        QueueRoles roles = expected_roles[identity];
+        if ((uint)roles == 0
+            || !queue_roles_equal(roles, selection.identity_roles[identity])) {
+            return false;
+        }
+        if (queue_roles_violate_distinct(roles, selection.distinct)) {
+            return false;
+        }
+    }
+    return true;
 }
 
-fn QueueSelection selected_queues(DeviceOperation* operation) @private {
-    if (operation == null || !operation.active) return {};
-    return operation.data.queues;
+fn QueueSelection* selected_queues(DeviceOperation* operation) @private {
+    return &operation.data.queues;
 }
 
 fn QueueCounts selected_queue_counts(DeviceOperation* operation) @private {
@@ -209,12 +330,7 @@ fn QueueCounts selected_queue_counts(DeviceOperation* operation) @private {
 }
 
 fn uint selected_queue_count(DeviceOperation* operation, QueueKind kind) @private {
-    QueueCounts counts = selected_queue_counts(operation);
-    switch (kind) {
-        case QueueKind.GRAPHICS: return counts.graphics;
-        case QueueKind.COMPUTE:  return counts.compute;
-        case QueueKind.TRANSFER: return counts.transfer;
-    }
+    return queue_count_for_kind(selected_queue_counts(operation), kind);
 }
 
 fn void? validate_selected_queue_kind(
@@ -224,37 +340,26 @@ fn void? validate_selected_queue_kind(
     if (selected_queue_count(operation, kind) == 0) return INVALID_ARGUMENT~;
 }
 
-fn uint selected_queue_id(DeviceOperation* operation, QueueKind kind) @private {
-    switch (kind) {
-        case QueueKind.GRAPHICS: return selected_queues(operation).graphics_id;
-        case QueueKind.COMPUTE:  return selected_queues(operation).compute_id;
-        case QueueKind.TRANSFER: return selected_queues(operation).transfer_id;
-    }
+fn uint selected_queue_id(
+    DeviceOperation* operation,
+    QueueKind kind,
+    uint index,
+) @private {
+    return queue_selection_id(selected_queues(operation), kind, index);
 }
 
-fn QueueRoles selected_queue_roles(DeviceOperation* operation, QueueKind kind) @private {
-    switch (kind) {
-        case QueueKind.GRAPHICS: return selected_queues(operation).graphics_roles;
-        case QueueKind.COMPUTE:  return selected_queues(operation).compute_roles;
-        case QueueKind.TRANSFER: return selected_queues(operation).transfer_roles;
-    }
+fn QueueRoles selected_queue_roles(
+    DeviceOperation* operation,
+    QueueKind kind,
+    uint index,
+) @private {
+    return queue_selection_roles(selected_queues(operation), kind, index);
 }
 
 fn bool queue_id_is_selected(DeviceOperation* operation, Queue queue) @private {
-    QueueSelection selection = selected_queues(operation);
-    if (selection.counts.graphics > 0
-        && queue.id == selection.graphics_id
-        && queue_roles_equal(queue.roles, selection.graphics_roles)) {
-        return true;
-    }
-    if (selection.counts.compute > 0
-        && queue.id == selection.compute_id
-        && queue_roles_equal(queue.roles, selection.compute_roles)) {
-        return true;
-    }
-    return selection.counts.transfer > 0
-        && queue.id == selection.transfer_id
-        && queue_roles_equal(queue.roles, selection.transfer_roles);
+    QueueSelection* selection = selected_queues(operation);
+    return queue.id < selection.identity_count
+        && queue_roles_equal(queue.roles, selection.identity_roles[queue.id]);
 }
 
 fn void? validate_queue(
@@ -287,8 +392,8 @@ fn Queue? get_queue(Device* device, QueueKind kind, uint index = 0) {
     if (index >= selected_queue_count(&operation, kind)) return INVALID_ARGUMENT~;
     return {
         .device = *device,
-        .id     = selected_queue_id(&operation, kind) + index,
-        .roles  = selected_queue_roles(&operation, kind),
+        .id     = selected_queue_id(&operation, kind, index),
+        .roles  = selected_queue_roles(&operation, kind, index),
     };
 }
 
