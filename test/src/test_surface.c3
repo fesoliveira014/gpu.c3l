@@ -165,6 +165,13 @@ fn void presentation_request_is_immutable_and_surface_bound() @test {
     );
     assert(gpu::supports_device_request(&adapter, &presentation)!!.supported);
 
+    Device device = gpu::create_device(&adapter, &presentation)!!;
+    QueueCounts counts = gpu::get_queue_counts(&device)!!;
+    Queue graphics = gpu::get_queue(&device, QueueKind.GRAPHICS)!!;
+    assert(counts.graphics == 1, "a supported presentation request admits graphics");
+    assert(graphics.roles.graphics, "the admitted graphics queue supports graphics");
+    gpu::destroy_device(&device)!!;
+
     gpu::vk::stub_set_presentation_support(false);
     DeviceRequestSupport unsupported = gpu::supports_device_request(&adapter, &presentation)!!;
     assert(!unsupported.supported);
@@ -172,6 +179,53 @@ fn void presentation_request_is_immutable_and_surface_bound() @test {
 
     gpu::destroy_surface(&surface)!!;
     assert(@catch(gpu::supports_device_request(&adapter, &presentation)) == gpu::INVALID_HANDLE);
+    gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void presentation_requests_require_graphics_in_every_composition_order() @test {
+    gpu::vk::stub_set_presentation_support(true);
+    gpu::vk::stub_reset_device_counts();
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    QueueRequirements compute_only = { .counts = { .compute = 1 } };
+    DeviceRequest strict = gpu::strict_device_request();
+    DeviceRequest queues_first = gpu::request_queues(strict, compute_only)!!;
+    DeviceRequest presentation_first = gpu::request_presentation(strict, &surface)!!;
+
+    assert(
+        @catch(gpu::request_presentation(queues_first, &surface))
+            == gpu::INVALID_ARGUMENT,
+        "presentation cannot be added to a request without graphics"
+    );
+    assert(
+        @catch(gpu::request_queues(presentation_first, compute_only))
+            == gpu::INVALID_ARGUMENT,
+        "graphics cannot be removed from a presentation request"
+    );
+
+    DeviceRequest forged = (DeviceRequest)((uint128)queues_first
+        | (uint128)presentation_first);
+    assert(
+        @catch(gpu::supports_device_request(&adapter, &forged))
+            == gpu::INVALID_ARGUMENT,
+        "support rejects forged presentation requests without graphics"
+    );
+    assert(
+        @catch(gpu::create_device(&adapter, &forged)) == gpu::INVALID_ARGUMENT,
+        "creation rejects forged presentation requests without graphics"
+    );
+    assert(
+        gpu::vk::stub_device_support_query_count() == 0,
+        "invalid presentation requests bypass support queries"
+    );
+    assert(
+        gpu::vk::stub_device_temporary_create_count() == 0,
+        "invalid presentation requests allocate no device state"
+    );
+
+    gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
 

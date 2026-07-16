@@ -264,6 +264,9 @@ fn QueueFamilies? pick_queue_families_impl(
     if (!gpu::queue_requirements_are_valid(requirements)) {
         return gpu::INVALID_ARGUMENT~;
     }
+    if (require_presentation && requirements.counts.graphics == 0) {
+        return gpu::INVALID_ARGUMENT~;
+    }
     if (requirements.counts.graphics > 1
         || requirements.counts.compute > 1
         || requirements.counts.transfer > 1) {

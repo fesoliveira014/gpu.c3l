@@ -92,11 +92,15 @@ fn bool queue_payload_is_well_formed(ulong flags) @private {
 fn bool device_request_is_well_formed(DeviceRequest request) @private {
     uint128 raw = (uint128)request;
     ulong flags = (ulong)raw;
+    QueueRequirements requirements = (flags & DEVICE_REQUEST_QUEUES_BIT) == 0
+        ? default_queue_requirements()
+        : decode_queue_requirements(flags);
     bool has_surface = (ulong)(raw >> DEVICE_REQUEST_SURFACE_SHIFT) != 0;
     bool requests_presentation = (flags & DEVICE_REQUEST_PRESENTATION_BIT) != 0;
     return (flags & DEVICE_REQUEST_HEADER) == DEVICE_REQUEST_HEADER
         && (flags & ~DEVICE_REQUEST_KNOWN_BITS) == 0
         && has_surface == requests_presentation
+        && (!requests_presentation || requirements.counts.graphics > 0)
         && queue_payload_is_well_formed(flags);
 }
 
@@ -136,6 +140,9 @@ fn DeviceRequest? compose_device_request(
         case DeviceCapability.PRESENTATION:
             if (surface == null) return INVALID_ARGUMENT~;
             if (resolve_surface(surface) == null) return INVALID_HANDLE~;
+            if (requested_queue_requirements(request).counts.graphics == 0) {
+                return INVALID_ARGUMENT~;
+            }
             contribution = DEVICE_REQUEST_PRESENTATION_BIT;
             surface_bits = (ulong)*surface;
     }
@@ -192,6 +199,10 @@ fn DeviceRequest? request_queues(
         return INVALID_ARGUMENT~;
     }
     if (((ulong)(uint128)request & DEVICE_REQUEST_QUEUES_BIT) != 0) {
+        return INVALID_ARGUMENT~;
+    }
+    if (requested_surface(request).is_valid()
+        && requirements.counts.graphics == 0) {
         return INVALID_ARGUMENT~;
     }
     return (DeviceRequest)((uint128)request

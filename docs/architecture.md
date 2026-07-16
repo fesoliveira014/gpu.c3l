@@ -152,6 +152,7 @@ request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
 Query presentation support before device creation, then add the surface to the
 immutable request. The device is bound to that exact surface and selects a
 presentation-capable private queue, which may differ from its graphics queue.
+Presentation requests require at least one public graphics queue.
 A surface must outlive its swapchains; destroying a live dependency returns
 `RESOURCE_IN_USE`.
 

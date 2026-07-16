@@ -747,7 +747,7 @@ fn void transfer_only_selection_has_no_hidden_roles() @test {
     assert(shared_count == 1 && shared_families[0] == 2);
 }
 
-fn void presentation_without_graphics_adds_only_a_private_queue() @test {
+fn void presentation_without_graphics_is_rejected() @test {
     vk::QueueFamilyProperties[4] table = {
         family(QF_G, 1),
         family(QF_C, 1),
@@ -759,48 +759,13 @@ fn void presentation_without_graphics_adds_only_a_private_queue() @test {
         .counts = { .compute = 1 },
     };
 
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_surface_requirements(
+    assert(
+        @catch(vk::pick_queue_families_for_surface_requirements(
             table[..],
             present_support[..],
             requirements,
-        )!!;
-    assert(!picked.selected.graphics && picked.selected.compute);
-    assert(!picked.selected.transfer && picked.present == 3);
-
-    uint[4] device_families;
-    uint device_count = vk::selected_device_queue_families(
-        &picked,
-        true,
-        device_families[..],
-    );
-    assert(device_count == 2);
-    assert(device_families[0] == 1 && device_families[1] == 3);
-    assert(vk::requested_queue_count(&picked, 0, true) == 0);
-    assert(vk::requested_queue_count(&picked, 2, true) == 0);
-
-    vk::Queue compute_queue = (vk::Queue)(uptr)0x20;
-    vk::Queue present_queue = (vk::Queue)(uptr)0x30;
-    vk::VkDeviceState state = {
-        .selected_queue_roles = picked.selected,
-        .compute_family       = picked.compute,
-        .compute_queue        = compute_queue,
-        .presentation         = {
-            .family = picked.present,
-            .queue  = present_queue,
-        },
-    };
-    uint[3] shared_families;
-    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
-    assert(shared_count == 1 && shared_families[0] == 1);
-
-    vk::Queue[2] idle_queues;
-    uint idle_count = vk::swapchain_idle_queues(&state, idle_queues[..]);
-    assert(idle_count == 1 && idle_queues[0] == present_queue);
-    assert(
-        vk::native_queue_mutex_for(&state, idle_queues[0])
-            == vk::present_queue_mutex_for(&state),
-        "presentation-only teardown uses the presentation mutex"
+        )) == gpu::INVALID_ARGUMENT,
+        "presentation requires a public graphics queue"
     );
 }
 
