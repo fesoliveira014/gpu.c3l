@@ -477,7 +477,7 @@ and PERSISTENT_UPLOAD keep VMA's memory-type freedom and the explicit
 Frame spans admit the selected graphics and compute roles, or transfer on a
 transfer-only device. The backing buffer uses the exact deduplicated families for
 those roles: one family stays exclusive and two or more use concurrent sharing.
-Barriers, semaphore ordering, and lifetime remain explicit.
+Barriers, completion-point ordering, and lifetime remain explicit.
 
 Allocation during `ACTIVE` is lock-free — the cursor is an atomic bumped with
 a CAS loop, so worker threads allocate concurrently (see docs/threading.md):
@@ -522,7 +522,7 @@ allocation identity whose immutable record stores its bounds and access.
 
 Concurrent sharing removes queue-family ownership transfers only. Callers must
 still flush host writes as required, record barriers, order submissions with
-semaphores, wait for completion, and keep each span live until all referencing
+completion points, wait for completion, and keep each span live until all referencing
 work retires. `free_persistent_span` is valid only after that retirement. The
 arena and its spans remain scoped to their owning `Device`.
 Persistent virtual-allocation exhaustion keeps the `ARENA_FULL` fault and

@@ -113,7 +113,7 @@ owner-derived command finalization
 format feature queries agree with adapter-backed texture creation
 persistent arena suballocation/free
 command list begin/end/submit
-timeline semaphore signaling
+completion-point signaling and waits
 copy upload -> readback
 root-pointer compute shader
 TextureIndex sampling in compute
