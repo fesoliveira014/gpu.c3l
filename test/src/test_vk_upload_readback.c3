@@ -761,6 +761,54 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     );
 }
 
+fn void helper_recording_fault_does_not_poison_frame_slot() @test {
+    TransferDiagnosticCapture capture;
+    gpu::Device device = make_transfer_test_device(
+        staging_size: 64,
+        capture:      &capture,
+    );
+    defer destroy_test_device(&device)!!;
+    gpu::vk::VkDeviceState* state =
+        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+
+    gpu::BufferDesc buffer_desc = {
+        .size        = 128,
+        .usage       = { .transfer_dst },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "helper_fault_buffer",
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+
+    usz staging_size = state.staging_arena.size;
+    uint dedicated_count = state.dedicated_staging.count;
+    state.staging_arena.size = 1;
+    state.dedicated_staging.count = gpu::vk::DEDICATED_RETIRE_CAP;
+    foreach (&entry : state.dedicated_staging.entries) {
+        entry.timeline_value = ulong::max;
+    }
+
+    char[16] data;
+    fault helper_fault = @catch(gpu::upload_buffer_data(
+        device:      &device,
+        dst:         buffer,
+        offset:      0,
+        data:        data[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_READ,
+    ));
+    state.staging_arena.size = staging_size;
+    state.dedicated_staging.count = dedicated_count;
+    assert(helper_fault == gpu::ARENA_FULL,
+        "helper recording fault reaches the public caller");
+
+    for (uint i = 0; i < 3; i++) {
+        gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+        gpu::end_frame(&frame)!!;
+    }
+}
+
 fn void readback_ticket_generation_exhaustion_retires_slot() @test {
     vk::ReadbackTicketCell[1] cells;
     cells[0].generation = vk::HANDLE_GENERATION_MAX;

@@ -884,6 +884,17 @@ fn void signal_helper_timeline_cleanup(VkDeviceState* state, ulong v, ZString op
     );
 }
 
+fn void release_helper_command_on_fault(
+    VkDeviceState* state,
+    gpu::CommandList* commands,
+) @private {
+    if (commands == null || !commands.handle.is_valid()) return;
+    state.command_mutex.lock()!!;
+    defer state.command_mutex.unlock();
+    release_command(state, commands.handle);
+    *commands = {};
+}
+
 fn void? finish_helper_timeline(VkDeviceState* state, ulong* helper_value, ZString operation) @private {
     fault public_fault = @catch(signal_helper_timeline(
         state:           state,
@@ -988,7 +999,8 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
     defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "upload_buffer_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
-    gpu::CommandList commands;
+    gpu::CommandList commands = {};
+    defer catch release_helper_command_on_fault(state, &commands);
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
@@ -1106,7 +1118,8 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
         operation: "upload_texture_data",
     )!;
 
-    gpu::CommandList commands;
+    gpu::CommandList commands = {};
+    defer catch release_helper_command_on_fault(state, &commands);
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
@@ -1228,7 +1241,8 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
         operation: "readback_buffer_data",
     )!;
 
-    gpu::CommandList commands;
+    gpu::CommandList commands = {};
+    defer catch release_helper_command_on_fault(state, &commands);
     gpu::GpuSpan readback;
     fault allocation_fault;
     {
@@ -1372,7 +1386,8 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     )!;
     usz align = format_texel_size(slot.format);
     if (align < 4) align = 4;
-    gpu::CommandList commands;
+    gpu::CommandList commands = {};
+    defer catch release_helper_command_on_fault(state, &commands);
     gpu::GpuSpan readback;
     fault allocation_fault;
     {

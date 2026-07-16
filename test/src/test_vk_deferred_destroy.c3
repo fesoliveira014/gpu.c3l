@@ -122,6 +122,7 @@ fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* 
 
 fn void destroy_after_submit_survives_frame_cycle() @test {
     gpu::Device device = make_defer_test_device();
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     DeferRig rig = build_defer_rig(&device);
@@ -145,7 +146,6 @@ fn void destroy_after_submit_survives_frame_cycle() @test {
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 0, "destroyed handles leave no leaked slots");
-    gpu::destroy_device(&device)!!;
 }
 
 fn void deferred_queue_count_rises_then_drains() @test {
