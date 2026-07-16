@@ -244,6 +244,42 @@ fn void stale_signal_prevalidation_does_not_claim_command() @test {
     gpu::submit(&device, &good)!!;
     gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
 }
+
+fn void swapchain_only_submit_validates_stale_handle() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::SwapchainHandle stale = {
+        .owner      = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN),
+        .generation = 1,
+    };
+    gpu::SubmitDesc submit = { .swapchain = stale };
+
+    ulong before = command_submit_count(&device);
+    fault rejected = @catch(gpu::submit(&device, &submit));
+    assert(rejected == gpu::INVALID_HANDLE, "a stale swapchain-only submit faults INVALID_HANDLE");
+    assert(command_submit_count(&device) == before, "stale swapchain rejection records no queue submit");
+}
+
+fn void swapchain_only_submit_rejects_generation_zero_handle() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::SwapchainHandle malformed = {
+        .owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN),
+    };
+    gpu::SubmitDesc submit = { .swapchain = malformed };
+
+    ulong before = command_submit_count(&device);
+    fault rejected = @catch(gpu::submit(&device, &submit));
+    assert(rejected == gpu::INVALID_HANDLE, "a generation-zero swapchain faults INVALID_HANDLE");
+    assert(command_submit_count(&device) == before, "malformed swapchain rejection records no queue submit");
+}
+
 fn void simultaneous_devices_submit_independently() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device first = gpu::create_device_from_desc(&desc)!!;
