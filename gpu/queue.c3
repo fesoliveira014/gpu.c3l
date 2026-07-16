@@ -351,6 +351,16 @@ fn bool queue_roles_are_subset(QueueRoles roles, QueueRoles set) @private {
     return ((uint)roles & ~(uint)set) == 0;
 }
 
+fn bool queue_access_allows(QueueRoles access, QueueKind queue) @private {
+    if ((uint)access == 0 || !queue_roles_are_known(access)) return false;
+    switch (queue) {
+        case QueueKind.GRAPHICS: return access.graphics;
+        case QueueKind.COMPUTE:  return access.compute;
+        case QueueKind.TRANSFER: return access.transfer;
+        default:                 return false;
+    }
+}
+
 fn bool queue_access_is_valid(
     DeviceOperation* operation,
     QueueRoles access,

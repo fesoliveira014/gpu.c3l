@@ -296,7 +296,7 @@ Do not include development phase labels in test names.
 | Buffers | mapped buffer, device buffer, addressable buffer. |
 | Frame arena | allocation, alignment, overflow, reset safety. |
 | Persistent arena | allocate/free/reuse, virtual allocator stats. |
-| Queue access | invalid domains stop before backend work; same-family access stays exclusive; admitted cross-family access uses the exact deduplicated family list. |
+| Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
 | Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback. |
 | Compute | root pointer shader read/write, readback. |
 | Texture heap | descriptor allocation, sampling by TextureIndex. |

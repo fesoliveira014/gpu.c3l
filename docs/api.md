@@ -342,6 +342,7 @@ GpuSpan
     void* cpu
     usz size
     BufferHandle buffer
+    AllocationHandle allocation
     usz offset
     MemoryKind kind
     QueueRoles access
@@ -354,6 +355,7 @@ GpuAddress zero is invalid for shader-visible memory.
 GpuSpan.cpu may be null.
 GpuSpan.gpu must be aligned for the intended shader layout.
 GpuSpan.buffer identifies the backing buffer for barriers/copies/debug.
+GpuSpan.allocation identifies a live persistent suballocation when applicable.
 GpuSpan.access is the non-empty set of selected roles admitted to the range.
 ```
 
@@ -383,7 +385,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; resource creation: empty, unknown, or unselected access role; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; resource creation: empty, unknown, or unselected access role; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag, an access set that omits the operation queue role, stale or forged span allocation metadata, malformed span access, or a misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
@@ -392,7 +394,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `DEVICE_BUSY` | public device operations; `destroy_device` | the operation observed a closing device or exhausted its bounded pin-acquisition retries, or destruction found an active host operation; retry without replacing the device token |
 | `RESOURCE_IN_USE` | `destroy_runtime`, `destroy_surface`, `destroy_texture` | a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture. |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
-| `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands` | the runtime or device registry, adapter token, handle table, or command-record table is at capacity |
+| `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands`; persistent allocation | the runtime or device registry, adapter token, handle table, or command-record table is at capacity |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
@@ -499,8 +501,9 @@ free_persistent_span(Device* device, GpuSpan span) -> void?
 ```
 
 `PersistentAllocDesc.access` is required and copied to the returned span. The
-arena backing remains available to all selected roles; per-span access records
-the narrow caller contract. Explicit buffers and textures derive private native
+arena backing remains available to all selected roles; a generation-checked
+allocation identity preserves each live range's bounds and narrow access.
+Explicit buffers and textures derive private native
 sharing from their own `access` fields: one unique family stays exclusive, while
 two or more use the exact ordered family list.
 
@@ -917,14 +920,16 @@ unavailable role index.
 `get_queue_info` faults `INVALID_HANDLE` for zero, stale, foreign-device, or
 malformed tokens and returns the stable device-local ID and supported roles.
 Backend family indices and native handles remain private. Resource descriptions
-require a non-empty subset of the selected roles. For allocations reached only
-through root GPU pointers, every reachable allocation must admit the recording
-role because nested pointers are not discoverable. Command entry points take
-`QueueKind` and reject roles that were not requested.
+require a non-empty subset of the selected roles. Command operations reject every
+explicitly named resource whose `access` omits the semantic operation role, even
+when that role aliases the same native queue. A `GpuSpan` also rejects empty,
+unknown, or wider-than-backing access metadata. These checks run before command,
+layout, helper-timeline, or transfer-arena mutation.
 
-`BufferDesc.access`, `TextureDesc.access`, and `PersistentAllocDesc.access` are
-non-empty subsets of the selected roles. The backend keeps same-family access
-exclusive and uses private concurrent sharing only for distinct admitted families.
+Allocations reached only through root GPU pointers remain a caller contract:
+every reachable allocation must admit the recording role because nested pointers
+are opaque. The backend keeps one admitted family exclusive and uses private
+concurrent sharing only for distinct admitted families.
 
 Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
 `TextureBufferCopyDesc`, `TextureUploadDesc`, `ClearColor`,
@@ -1327,9 +1332,10 @@ Frame and persistent-memory coverage reports double-begin and quiescence
 violations, stale frame tokens, invalid alignment before zero size, arena
 exhaustion, non-timeout frame-wait failures and retirement queries,
 end-frame signal failures, persistent virtual-allocation exhaustion, and
-invalid or repeated frees. Expected/retryable frame-wait `WAIT_TIMEOUT` outcomes remain
-silent; other diagnostics preserve `ARENA_FULL` and retry state and never
-claim public identity for frame tokens or persistent spans.
+invalid or repeated frees. Expected/retryable frame-wait `WAIT_TIMEOUT` outcomes
+remain silent; other diagnostics preserve `ARENA_FULL` and retry state. Frame
+tokens and unresolved persistent allocations have no public identity; failures
+after `AllocationHandle` resolution include its index and generation.
 
 ```text
 cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) -> void?

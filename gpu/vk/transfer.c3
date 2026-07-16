@@ -595,6 +595,13 @@ fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle ds
         )~;
     }
     BufferSlot* dst_slot = validate_upload_buffer(state, dst, offset, data, operation)!;
+    validate_buffer_recording_access(
+        state:     state,
+        record:    record,
+        slot:      dst_slot,
+        handle:    dst,
+        operation: operation,
+    )!;
 
     gpu::GpuSpan? allocated_staging = staging_alloc(
         state: state,
@@ -720,6 +727,13 @@ fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadD
             backend_text:        null,
         )~;
     }
+    validate_texture_recording_access(
+        state:     state,
+        record:    record,
+        slot:      slot,
+        handle:    desc.texture,
+        operation: operation,
+    )!;
     usz align = format_texel_size(slot.format);
     if (align < 4) align = 4;
     gpu::GpuSpan? allocated_staging = staging_alloc(
@@ -954,8 +968,21 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
-    validate_upload_buffer(state, dst, offset, data, "upload_buffer_data")!;
+    BufferSlot* dst_slot = validate_upload_buffer(
+        state:     state,
+        dst:       dst,
+        offset:    offset,
+        data:      data,
+        operation: "upload_buffer_data",
+    )!;
     gpu::QueueKind queue = frame_queue_kind(state);
+    validate_buffer_queue_access(
+        state:     state,
+        queue:     queue,
+        slot:      dst_slot,
+        handle:    dst,
+        operation: "upload_buffer_data",
+    )!;
     ulong helper_value = 0;
     defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "upload_buffer_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
@@ -1070,6 +1097,13 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
             backend_text:        null,
         )~;
     }
+    validate_texture_queue_access(
+        state:     state,
+        queue:     queue,
+        slot:      slot,
+        handle:    dst,
+        operation: "upload_texture_data",
+    )!;
 
     gpu::CommandList commands;
     {
@@ -1185,6 +1219,13 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
             backend_text:        null,
         )~;
     }
+    validate_buffer_queue_access(
+        state:     state,
+        queue:     queue,
+        slot:      src_slot,
+        handle:    src,
+        operation: "readback_buffer_data",
+    )!;
 
     gpu::CommandList commands;
     gpu::GpuSpan readback;
@@ -1321,6 +1362,13 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
             backend_text:        null,
         )~;
     }
+    validate_texture_queue_access(
+        state:     state,
+        queue:     queue,
+        slot:      slot,
+        handle:    src,
+        operation: "readback_texture_data",
+    )!;
     usz align = format_texel_size(slot.format);
     if (align < 4) align = 4;
     gpu::CommandList commands;
@@ -1601,6 +1649,13 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
             backend_text:        null,
         )~;
     }
+    validate_buffer_recording_access(
+        state:     state,
+        record:    record,
+        slot:      src_slot,
+        handle:    src,
+        operation: "cmd_readback_buffer",
+    )!;
 
     gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size);
     if (catch allocation_fault = allocated_ticket) {
@@ -1698,6 +1753,13 @@ fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu:
             backend_text:        null,
         )~;
     }
+    validate_texture_recording_access(
+        state:     state,
+        record:    record,
+        slot:      slot,
+        handle:    src,
+        operation: "cmd_readback_texture",
+    )!;
 
     gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size);
     if (catch allocation_fault = allocated_ticket) {

@@ -281,10 +281,13 @@ GpuSpan vertices = packed.checked_subspan(0, vertex_bytes)!;
 GpuSpan indices = packed.checked_subspan(vertex_bytes, index_bytes)!;
 ```
 
-Slicing preserves the span access roles. Validation is relative to the immediate
-parent. A nested child therefore cannot escape an intermediate slice even when
-it would still fit the original
-backing buffer. Bounds use `size <= parent.size - offset` after validating
+Slicing preserves access and allocation identity. Command validation rejects
+stale persistent allocations, ranges outside their allocation, any changed
+persistent allocation access, and access wider than a non-persistent backing
+buffer. Bounds are
+relative to the immediate parent, so a nested child cannot escape an intermediate
+slice even when it would still fit the original backing buffer. Bounds use
+`size <= parent.size - offset` after validating
 the offset, avoiding `offset + size` overflow. Derived GPU, CPU, and backing
 offset additions are checked separately.
 
@@ -460,6 +463,7 @@ FrameArenaState
     GpuAddress gpu_base
     void* cpu_base
     usz size
+    QueueRoles access
     Atomic{usz} cursor
     ulong frame_timeline_value
 ```
@@ -491,7 +495,7 @@ alloc_frame_span(token, size, align)
     next_cursor = aligned + size
     if !compare_exchange(cursor, next_cursor): goto retry
     span = { gpu_base + aligned, cpu_base + aligned,
-             backing_buffer, aligned, size, FRAME_UPLOAD }
+             backing_buffer, aligned, size, FRAME_UPLOAD, access }
 ```
 
 Reset:
@@ -512,8 +516,9 @@ families use the exact ordered concurrent-sharing list; one family remains
 exclusive.
 
 `PersistentAllocDesc.usage` must be a subset of that superset; empty usage is
-the storage-style default. `PersistentAllocDesc.access` is required, must be a
-subset of selected roles, and is copied to the returned span.
+the storage-style default. `PersistentAllocDesc.access` is required and must be
+a subset of selected roles. Each returned span carries a generation-checked
+allocation identity whose immutable record stores its bounds and access.
 
 Concurrent sharing removes queue-family ownership transfers only. Callers must
 still flush host writes as required, record barriers, order submissions with
@@ -521,10 +526,9 @@ semaphores, wait for completion, and keep each span live until all referencing
 work retires. `free_persistent_span` is valid only after that retirement. The
 arena and its spans remain scoped to their owning `Device`.
 Persistent virtual-allocation exhaustion keeps the `ARENA_FULL` fault and
-reports the originating backend result. A free whose buffer is not the arena
-backing faults `INVALID_ARGUMENT`; an unknown or already-freed offset faults
-`INVALID_HANDLE`. Neither case claims public identity because persistent spans
-are value ranges, not generation-checked public slots.
+reports the originating backend result. A free whose buffer or complete owning
+range was changed faults `INVALID_ARGUMENT`; an unknown, stale, or already-freed
+allocation faults `INVALID_HANDLE`.
 
 ```text
 PersistentArenaState
@@ -533,7 +537,7 @@ PersistentArenaState
     GpuAddress gpu_base
     void* cpu_base
     usz size
-    PersistentAllocMap allocations   (offset -> virtual allocation, for free-by-span)
+    PersistentAllocationTable allocations
 ```
 
 Allocation flow:
@@ -541,16 +545,15 @@ Allocation flow:
 ```text
 1. Build VirtualAllocationCreateInfo with size and alignment.
 2. Allocate from vma::VirtualBlock.
-3. Return GpuSpan using returned offset.
+3. Publish immutable range metadata and return its GpuSpan.
 ```
 
 Free flow:
 
 ```text
-1. Validate span belongs to arena.
-2. Find matching virtual allocation handle.
-3. After every referencing GPU access retires, free virtual allocation.
-4. Mark span invalid in debug tracking.
+1. Resolve the live allocation identity and exact owning range.
+2. After every referencing GPU access retires, free the virtual allocation.
+3. Retire the allocation generation.
 ```
 
 ## 12. Readback arena

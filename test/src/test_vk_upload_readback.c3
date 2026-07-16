@@ -1473,6 +1473,160 @@ fn void upload_helper_validation_faults() @test {
     gpu::end_frame(&frame_token)!!;
 }
 
+fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
+    TransferDiagnosticCapture capture;
+    gpu::Device device = make_transfer_test_device(capture: &capture);
+    defer gpu::destroy_device(&device)!!;
+    gpu::vk::VkDeviceState* state =
+        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+
+    gpu::BufferDesc upload_desc = {
+        .size        = 16,
+        .usage       = { .transfer_dst },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .compute },
+        .debug_name  = "compute_upload_only",
+    };
+    gpu::BufferHandle upload = gpu::create_buffer(&device, &upload_desc)!!;
+    defer gpu::destroy_buffer(&device, upload)!!;
+
+    gpu::BufferDesc readback_desc = {
+        .size        = 16,
+        .usage       = { .transfer_src },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .compute },
+        .debug_name  = "compute_readback_only",
+    };
+    gpu::BufferHandle readback = gpu::create_buffer(&device, &readback_desc)!!;
+    defer gpu::destroy_buffer(&device, readback)!!;
+
+    char[8] data;
+    ulong helper_before = state.helper_counter;
+    uint staging_before = state.staging_arena.retire_count;
+    ulong fallback_before = gpu::vk::dedicated_fallback_count(state);
+    uint before = capture.calls;
+    fault blocking_upload = @catch(gpu::upload_buffer_data(
+        device:      &device,
+        dst:         upload,
+        offset:      0,
+        data:        data[..],
+        next_stage:  gpu::Stage.COMPUTE_SHADER,
+        next_hazard: gpu::Hazard.SHADER_READ,
+    ));
+    assert(blocking_upload == gpu::INVALID_ARGUMENT,
+        "blocking upload rejects a resource outside the helper queue role");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            blocking_upload,
+        operation:           "upload_buffer_data",
+        rejected_field:      "BufferDesc.access",
+        invariant:           "access must include the operation queue role",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      upload.index,
+        resource_generation: upload.generation,
+        resource_name:       "compute_upload_only",
+    );
+    assert(state.helper_counter == helper_before
+        && state.staging_arena.retire_count == staging_before
+        && gpu::vk::dedicated_fallback_count(state) == fallback_before,
+        "blocking upload access rejection consumes no helper or staging state");
+
+    char[8] out_data;
+    helper_before = state.helper_counter;
+    uint readback_before = state.readback_arena.retire_count;
+    before = capture.calls;
+    fault blocking_readback = @catch(gpu::readback_buffer_data(
+        device:      &device,
+        src:         readback,
+        offset:      0,
+        out_data:    out_data[..],
+        from_stage:  gpu::Stage.COMPUTE_SHADER,
+        from_hazard: gpu::Hazard.SHADER_WRITE,
+    ));
+    assert(blocking_readback == gpu::INVALID_ARGUMENT,
+        "blocking readback rejects a resource outside the helper queue role");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            blocking_readback,
+        operation:           "readback_buffer_data",
+        rejected_field:      "BufferDesc.access",
+        invariant:           "access must include the operation queue role",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      readback.index,
+        resource_generation: readback.generation,
+        resource_name:       "compute_readback_only",
+    );
+    assert(state.helper_counter == helper_before
+        && state.readback_arena.retire_count == readback_before,
+        "blocking readback access rejection consumes no helper or arena state");
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        device: &device,
+        queue:  gpu::QueueKind.GRAPHICS,
+    )!!;
+    staging_before = state.staging_arena.retire_count;
+    before = capture.calls;
+    fault command_upload = @catch(gpu::cmd_upload_buffer(
+        commands: &commands,
+        dst:      upload,
+        offset:   0,
+        data:     data[..],
+    ));
+    assert(command_upload == gpu::INVALID_ARGUMENT,
+        "recorded upload rejects a resource outside the recording role");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            command_upload,
+        operation:           "cmd_upload_buffer",
+        rejected_field:      "BufferDesc.access",
+        invariant:           "access must include the operation queue role",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      upload.index,
+        resource_generation: upload.generation,
+        resource_name:       "compute_upload_only",
+    );
+    assert(state.staging_arena.retire_count == staging_before,
+        "recorded upload access rejection consumes no staging range");
+
+    readback_before = state.readback_arena.retire_count;
+    uint tickets_before = state.readback_tickets.next_new;
+    before = capture.calls;
+    fault command_readback = @catch(gpu::cmd_readback_buffer(
+        commands: &commands,
+        src:      readback,
+        offset:   0,
+        size:     8,
+    ));
+    assert(command_readback == gpu::INVALID_ARGUMENT,
+        "recorded readback rejects a resource outside the recording role");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            command_readback,
+        operation:           "cmd_readback_buffer",
+        rejected_field:      "BufferDesc.access",
+        invariant:           "access must include the operation queue role",
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        resource_index:      readback.index,
+        resource_generation: readback.generation,
+        resource_name:       "compute_readback_only",
+    );
+    assert(state.readback_arena.retire_count == readback_before
+        && state.readback_tickets.next_new == tickets_before,
+        "recorded readback access rejection allocates no ticket or arena range");
+
+    gpu::end_commands(&commands)!!;
+    gpu::end_frame(&frame)!!;
+}
+
 fn void transfer_callback_presence_preserves_upload_fault() @test {
     TransferDiagnosticCapture capture;
     gpu::Device callback_device = make_transfer_test_device(capture: &capture);

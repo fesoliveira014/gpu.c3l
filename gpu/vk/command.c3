@@ -366,6 +366,20 @@ fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* des
     }
     BufferSlot* src = state.buffers.get(desc.src)!;
     BufferSlot* dst = state.buffers.get(desc.dst)!;
+    validate_buffer_recording_access(
+        state:     state,
+        record:    record,
+        slot:      src,
+        handle:    desc.src,
+        operation: "cmd_copy_buffer",
+    )!;
+    validate_buffer_recording_access(
+        state:     state,
+        record:    record,
+        slot:      dst,
+        handle:    desc.dst,
+        operation: "cmd_copy_buffer",
+    )!;
     if (!src.usage.transfer_src) {
         return report_contract_failure(
             state:               state,
@@ -405,6 +419,13 @@ fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     BufferSlot* slot = state.buffers.get(buffer)!;
+    validate_buffer_recording_access(
+        state:     state,
+        record:    record,
+        slot:      slot,
+        handle:    buffer,
+        operation: "cmd_fill_buffer",
+    )!;
     if (!slot.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     // Vulkan: offset and size must be 4-byte multiples; size 0 is the
     // whole-buffer convention (translated to WHOLE_SIZE below).
@@ -474,6 +495,20 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     TextureSlot* texture = state.textures.get(desc.texture)!;
     BufferSlot* buffer = state.buffers.get(desc.src.buffer)!;
+    validate_span_recording_access(
+        state:     state,
+        record:    record,
+        slot:      buffer,
+        span:      &desc.src,
+        operation: "cmd_copy_buffer_to_texture",
+    )!;
+    validate_texture_recording_access(
+        state:     state,
+        record:    record,
+        slot:      texture,
+        handle:    desc.texture,
+        operation: "cmd_copy_buffer_to_texture",
+    )!;
     if (!buffer.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
@@ -501,6 +536,20 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     TextureSlot* texture = state.textures.get(desc.texture)!;
     BufferSlot* buffer = state.buffers.get(desc.dst.buffer)!;
+    validate_texture_recording_access(
+        state:     state,
+        record:    record,
+        slot:      texture,
+        handle:    desc.texture,
+        operation: "cmd_copy_texture_to_buffer",
+    )!;
+    validate_span_recording_access(
+        state:     state,
+        record:    record,
+        slot:      buffer,
+        span:      &desc.dst,
+        operation: "cmd_copy_texture_to_buffer",
+    )!;
     if (!buffer.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
@@ -526,12 +575,13 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
    checked argument bytes within the span, and the span within its backing buffer. *>
 fn BufferSlot*? resolve_indirect_span(
     VkDeviceState* state,
+    CommandRecord* record,
     gpu::GpuSpan* span,
     usz arg_size,
     uint count,
+    ZString operation,
+    ZString rejected_field,
     uint max_count = uint::max,
-    ZString operation = null,
-    ZString rejected_field = null,
 ) {
     if (count > max_count && operation != null) {
         return report_contract_failure(
@@ -576,6 +626,13 @@ fn BufferSlot*? resolve_indirect_span(
         required:       required,
         operation:      operation,
         rejected_field: rejected_field,
+    )!;
+    validate_span_recording_access(
+        state:     state,
+        record:    record,
+        slot:      slot,
+        span:      span,
+        operation: operation,
     )!;
     if (!slot.usage.indirect) return gpu::INVALID_ARGUMENT~;
     if (span.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
@@ -651,6 +708,7 @@ fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandl
     )!;
     BufferSlot* args_buffer = resolve_indirect_span(
         state:          state,
+        record:         record,
         span:           &args,
         arg_size:       gpu::DispatchIndirectCommand::size,
         count:          1,

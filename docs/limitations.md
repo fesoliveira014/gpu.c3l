@@ -81,10 +81,11 @@ exists (else the limit is compile-time).
 | Live command records | 4096 (`gpu/vk/command_state.c3:7`) | — | `SLOT_TABLE_FULL` |
 | Swapchains | 8 (`gpu/swapchain.c3:3`) | — | `SLOT_TABLE_FULL` |
 | Color attachments per pass | Lesser of 8 (`gpu/pipeline.c3:6`) and the selected device limit, reported by `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
-| Frame arena (per frame in flight) | 1 MiB (`gpu/memory.c3:36`) | `frame_arena_size` | `ARENA_FULL` |
-| Persistent arena | 64 MiB (`gpu/memory.c3:37`) | `persistent_arena_size` | `ARENA_FULL` |
-| Staging arena | 32 MiB default (`gpu/memory.c3:38`) | `staging_arena_size` | `ARENA_FULL` |
-| Readback arena | 8 MiB default (`gpu/memory.c3:39`) | `readback_arena_size` | `ARENA_FULL` |
+| Frame arena (per frame in flight) | 16 MiB (`gpu/memory.c3:61`) | `frame_arena_size` | `ARENA_FULL` |
+| Persistent arena | 64 MiB (`gpu/memory.c3:62`) | `persistent_arena_size` | `ARENA_FULL` |
+| Live persistent allocations | 4096 (`gpu/memory.c3:60`) | — | `SLOT_TABLE_FULL` |
+| Staging arena | 32 MiB default (`gpu/memory.c3:63`) | `staging_arena_size` | `ARENA_FULL` |
+| Readback arena | 8 MiB default (`gpu/memory.c3:64`) | `readback_arena_size` | `ARENA_FULL` |
 
 Two sizing rules that bite:
 - **Packed descriptor ceilings are not guaranteed hardware capacities.** On the

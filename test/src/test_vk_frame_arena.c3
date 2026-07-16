@@ -211,6 +211,10 @@ fn void frame_token_owns_its_device_token_value() @test {
 
     gpu::GpuSpan span = gpu::alloc_frame_span(&frame, 16, 16)!!;
     assert(span.size == 16, "frame token remains usable after source device storage changes");
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::FrameArenaState* arena = &state.frame_arenas[state.frame_index];
+    assert((uint)span.access == (uint)arena.access && (uint)span.access != 0,
+        "frame spans preserve their backing arena access roles");
 
     gpu::end_frame(&frame)!!;
 }

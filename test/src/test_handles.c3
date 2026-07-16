@@ -38,6 +38,8 @@ fn void child_handles_retain_exact_owner_identity() @test {
 
 fn void public_state_tokens_are_compact() @test {
     assert(Device::size == ulong::size, "Device is one opaque 64-bit token");
+    assert(AllocationHandle::size <= ulong::size * 2,
+        "AllocationHandle fits in two machine words");
     assert(ReadbackTicket::size <= ulong::size * 2, "ReadbackTicket fits in two machine words");
 }
 

@@ -711,6 +711,17 @@ fn void persistent_free_rejections_report_exact_context() @test {
     assert(((ZString)&capture.rejected_field[0]).str_view() == "GpuSpan.buffer",
         "wrong backing diagnostic identifies GpuSpan.buffer");
 
+    gpu::GpuSpan wrong_range = span;
+    wrong_range.size /= 2;
+    before = capture.calls;
+    fault range_fault = @catch(gpu::free_persistent_span(&device, wrong_range));
+    assert(range_fault == gpu::INVALID_ARGUMENT, "changed persistent range keeps INVALID_ARGUMENT");
+    assert(capture.calls == before + 1, "changed persistent range emits exactly once");
+    assert(capture.has_public_identity
+        && capture.resource_index == span.allocation.index
+        && capture.resource_generation == span.allocation.generation,
+        "resolved persistent range diagnostic preserves allocation identity");
+
     gpu::free_persistent_span(&device, span)!!;
     before = capture.calls;
     fault double_free = @catch(gpu::free_persistent_span(&device, span));
@@ -718,8 +729,8 @@ fn void persistent_free_rejections_report_exact_context() @test {
     assert(capture.calls == before + 1, "double persistent free emits exactly once");
     assert(capture.has_fault && capture.public_fault == double_free, "double-free diagnostic keeps its fault");
     assert(!capture.has_public_identity, "double-free diagnostic invents no identity");
-    assert(((ZString)&capture.rejected_field[0]).str_view() == "GpuSpan.offset",
-        "double-free diagnostic identifies GpuSpan.offset");
+    assert(((ZString)&capture.rejected_field[0]).str_view() == "GpuSpan.allocation",
+        "double-free diagnostic identifies GpuSpan.allocation");
 }
 
 fn void persistent_capacity_failure_reports_backend_result() @test {

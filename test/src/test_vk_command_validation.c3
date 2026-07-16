@@ -295,6 +295,253 @@ fn void mixed_queue_submit_faults() @test {
     gpu::end_frame(&frame_token)!!;
 }
 
+fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
+    SyncDiagnosticCapture capture = {
+        .expected_operation      = "",
+        .expected_rejected_field = "",
+        .expected_invariant      = "",
+    };
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::BufferDesc buffer_desc = {
+        .size        = 64,
+        .usage       = { .transfer_dst },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .compute },
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+
+    gpu::TextureDesc texture_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 1,
+        .height    = 1,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .sampled, .transfer_dst },
+        .access    = { .compute },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    gpu::BufferDesc span_buffer_desc = {
+        .size        = 4,
+        .usage       = { .transfer_src },
+        .memory_kind = gpu::MemoryKind.STAGING,
+        .access      = { .compute },
+    };
+    gpu::BufferHandle span_buffer = gpu::create_buffer(&device, &span_buffer_desc)!!;
+    defer gpu::destroy_buffer(&device, span_buffer)!!;
+    gpu::GpuSpan span = gpu::get_buffer_span(&device, span_buffer)!!;
+
+    gpu::PersistentAllocDesc persistent_desc = {
+        .size        = 8,
+        .align       = 4,
+        .usage       = { .transfer_src },
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .compute },
+    };
+    gpu::GpuSpan persistent = gpu::alloc_persistent_span(&device, &persistent_desc)!!;
+    defer gpu::free_persistent_span(&device, persistent)!!;
+
+    gpu::PersistentAllocDesc multi_access_desc = persistent_desc;
+    multi_access_desc.access = { .graphics, .compute };
+    gpu::GpuSpan multi_access = gpu::alloc_persistent_span(
+        &device,
+        &multi_access_desc,
+    )!!;
+    defer gpu::free_persistent_span(&device, multi_access)!!;
+
+    gpu::PersistentAllocDesc reusable_desc = persistent_desc;
+    reusable_desc.access = { .graphics };
+    gpu::GpuSpan stale = gpu::alloc_persistent_span(&device, &reusable_desc)!!;
+    gpu::GpuSpan stale_alias = stale;
+    gpu::free_persistent_span(&device, stale)!!;
+    gpu::GpuSpan replacement = gpu::alloc_persistent_span(&device, &reusable_desc)!!;
+    defer gpu::free_persistent_span(&device, replacement)!!;
+    assert(replacement.allocation.index == stale_alias.allocation.index
+        && replacement.allocation.generation != stale_alias.allocation.generation,
+        "persistent allocation reuse advances the generation");
+
+    gpu::TextureDesc copy_texture_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .width     = 1,
+        .height    = 1,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .sampled, .transfer_dst },
+        .access    = { .graphics },
+    };
+    gpu::TextureHandle copy_texture = gpu::create_texture(&device, &copy_texture_desc)!!;
+    defer gpu::destroy_texture(&device, copy_texture)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        device: &device,
+        queue:  gpu::QueueKind.GRAPHICS,
+    )!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandRecord* record = state.commands.get(commands.handle)!!;
+
+    assert(@catch(gpu::cmd_fill_buffer(
+        commands: &commands,
+        buffer:   buffer,
+        offset:   0,
+        size:     4,
+        value:    0,
+    )) == gpu::INVALID_ARGUMENT,
+        "compute-only buffer rejects graphics recording even when queues alias");
+
+    gpu::TextureBarrier barrier = {
+        .texture       = texture,
+        .before_stage  = gpu::Stage.NONE,
+        .after_stage   = gpu::Stage.TRANSFER,
+        .before_hazard = gpu::Hazard.NONE,
+        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
+        .old_layout    = gpu::TextureLayout.UNDEFINED,
+        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+    };
+    uint pending_before = record.pending_layout_count;
+    assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
+        == gpu::INVALID_ARGUMENT,
+        "compute-only texture rejects graphics recording even when queues alias");
+    assert(record.pending_layout_count == pending_before,
+        "access rejection precedes pending-layout mutation");
+
+    gpu::BufferTextureCopyDesc copy = {
+        .src     = span,
+        .texture = copy_texture,
+    };
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "span access, not only backing-buffer access, gates the recording role");
+
+    copy.src = persistent;
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "narrow persistent allocation access overrides its broad arena backing");
+
+    copy.src = persistent.checked_subspan(4, 4)!!;
+    copy.src.access = { .graphics };
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "a persistent subspan cannot widen its immutable allocation access");
+
+    copy.src = multi_access.checked_subspan(0, 4)!!;
+    copy.src.access = { .graphics };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     null,
+        rejected_field: "GpuSpan",
+        invariant:      "must identify one live allocation and preserve its immutable bounds and access",
+    );
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "a persistent subspan cannot narrow its immutable allocation access");
+    assert_sync_contract_diagnostic(
+        capture:            &capture,
+        expected_fault:     gpu::INVALID_ARGUMENT,
+        resource_kind:      gpu::DebugResourceKind.PERSISTENT_SPAN,
+        has_public_identity: true,
+        index:              multi_access.allocation.index,
+        generation:         multi_access.allocation.generation,
+    );
+
+    copy.src = multi_access;
+    copy.src.offset += multi_access.size;
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "persistent span bounds cannot escape their immutable allocation");
+
+    copy.src = stale_alias;
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     null,
+        rejected_field: "GpuSpan.allocation",
+        invariant:      "must identify one live allocation and preserve its immutable bounds and access",
+    );
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "a stale persistent allocation generation cannot record commands");
+    assert_sync_contract_diagnostic(
+        capture:            &capture,
+        expected_fault:     gpu::INVALID_ARGUMENT,
+        resource_kind:      gpu::DebugResourceKind.PERSISTENT_SPAN,
+        has_public_identity: false,
+        index:              0,
+        generation:         0,
+    );
+
+    copy.src = span;
+    copy.src.access = { .graphics, .compute };
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "a forged span cannot widen its backing buffer access");
+    copy.src.access = {};
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "a forged span cannot erase its access metadata");
+    copy.src.access = (gpu::QueueRoles)0x8;
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "a forged span cannot introduce unknown access bits");
+
+    gpu::end_commands(&commands)!!;
+    gpu::end_frame(&frame)!!;
+}
+
+fn void render_pass_access_preflight_precedes_view_creation() @test {
+    gpu::Device device = make_val_device();
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::TextureDesc admitted_desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .width      = 4,
+        .height     = 4,
+        .mip_levels = 2,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .color_attach },
+        .access     = { .graphics },
+    };
+    gpu::TextureHandle admitted = gpu::create_texture(&device, &admitted_desc)!!;
+    defer gpu::destroy_texture(&device, admitted)!!;
+
+    gpu::TextureDesc rejected_desc = admitted_desc;
+    rejected_desc.access = { .compute };
+    gpu::TextureHandle rejected = gpu::create_texture(&device, &rejected_desc)!!;
+    defer gpu::destroy_texture(&device, rejected)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        device: &device,
+        queue:  gpu::QueueKind.GRAPHICS,
+    )!!;
+    record_val_target_to_attach(&commands, admitted);
+
+    gpu::ColorTargetDesc[2] colors = {
+        { .texture = admitted, .mip_level = 1 },
+        { .texture = rejected, .mip_level = 1 },
+    };
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = 2,
+        .height = 2,
+    };
+    uint cached_before = val_cached_view_count(&device, admitted);
+    assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
+        == gpu::INVALID_ARGUMENT,
+        "a later attachment outside the recording role rejects the whole pass");
+    assert(val_cached_view_count(&device, admitted) == cached_before,
+        "attachment access preflight precedes view-cache mutation");
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    assert(record.state == vk::CommandState.RECORDING,
+        "attachment access rejection leaves command state reusable");
+
+    gpu::end_commands(&commands)!!;
+    gpu::end_frame(&frame)!!;
+}
+
 fn void copy_without_transfer_usage_faults() @test {
     gpu::Device device = make_val_device();
     defer gpu::destroy_device(&device)!!;
