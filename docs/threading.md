@@ -1,8 +1,10 @@
 # Threading model
 
-Every public entry point belongs to one of three tiers. Anything not
-sanctioned here is documented misuse — it will not corrupt memory through the
-library's own state, but results and validation verdicts are undefined.
+Every public entry point belongs to one of three tiers. Anything not sanctioned
+here is misuse; results and validation verdicts are undefined. The library's
+own state remains memory-safe except when concurrent use of the same Tier C
+token races its consumption and device destruction: consumption releases the
+token's retained device pin while another call can still be in flight.
 
 ## Tiers
 
@@ -53,11 +55,11 @@ library's own state, but results and validation verdicts are undefined.
 | every `cmd_*` recording call | C | confined to the list's thread |
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
-Except for `destroy_device`, each public device operation that accesses backend
-state takes a short-lived atomic pin. Pins do not serialize operations, and
-bounded pin acquisition returns `DEVICE_BUSY` under sustained contention.
-`destroy_device` closes the slot before polling backend progress, preventing
-new pins while readiness is sampled. Any retryable failure restores the live
+Most public device operations take a short-lived atomic pin. `begin_commands`
+transfers its pin to the returned recording token; `cmd_*`, `end_commands`, and
+`discard_commands` borrow it without another pin operation. `submit` takes one
+short batch pin and releases command pins only after native submission succeeds.
+Pin acquisition may return `DEVICE_BUSY`; failed destruction restores the live
 state and preserves the token and generation.
 
 Runtime creation and destruction must not overlap other runtime operations. After

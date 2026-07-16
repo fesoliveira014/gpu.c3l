@@ -4,7 +4,7 @@ import gpu @public;
 import vk;
 import std::core::mem;
 
-const uint MAX_COMMAND_LISTS = 4096;
+const uint MAX_COMMAND_LISTS = gpu::MAX_DEVICE_COMMANDS;
 const uint COMMAND_FREE_NONE = 0;
 const usz PENDING_LAYOUT_INITIAL_CAPACITY = 16;
 

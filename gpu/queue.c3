@@ -472,8 +472,15 @@ fn void? submit(Device* device, SubmitDesc* desc) {
         validate_resource_owner(&operation, desc.swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
     }
     operation.vtable.submit(device, desc)!;
-    foreach (&commands : desc.command_lists) commands = {};
+    foreach (&commands : desc.command_lists) {
+        release_command_pin_lease(&operation, commands);
+        commands = {};
+    }
     release_device_children(&operation, (ulong)desc.command_lists.len);
+    (void)release_retained_device_pins(
+        &operation,
+        (uint)desc.command_lists.len,
+    );
 }
 
 <* Block until the queue drains — a heavyweight sync for shutdown and one-shot work, not per-frame pacing. *>
