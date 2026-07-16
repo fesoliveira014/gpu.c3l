@@ -351,18 +351,11 @@ create_graphics_pipeline(device, GraphicsPipelineDesc) -> PipelineHandle?
 
 Graphics pipelines include the Vulkan-required immutable state. Viewport, scissor, cull mode, front face, and supported depth state are dynamic. The pipeline cache deduplicates the remaining blend/depth/raster state and fronts a serializable driver cache: `get_pipeline_cache_size` / `get_pipeline_cache_data` export the driver blob, and `DeviceDesc.pipeline_cache_data` warm-starts it at device creation.
 
-### Semaphores
+### Synchronization
 
-Timeline semaphores are the default synchronization primitive.
-
-Public:
-
-```text
-SemaphoreHandle
-SemaphoreValue
-```
-
-Binary semaphores are backend-internal swapchain details unless a public need appears.
+Each successful submission returns a reusable `CompletionPoint`. Cross-queue
+submission dependencies use `SubmitDesc.completion_waits`; same-queue order is
+implicit. Native timelines and swapchain semaphores remain backend-private.
 
 ### Swapchains
 

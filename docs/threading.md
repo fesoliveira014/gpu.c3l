@@ -30,7 +30,6 @@ token's retained device pin while another call can still be in flight.
 | `destroy_device` | S | per target device; success invalidates the caller's token; live children return `RESOURCE_IN_USE`, while active operations, incomplete queue work, or closing state return retryable `DEVICE_BUSY` |
 | `begin_frame` / `end_frame` / `@with_frame` | E | token-paired `IDLE -> ACTIVE -> IDLE`; quiescence required; helper worker is a direct call |
 | `submit` / `present` | E | selected-queue submission is internally serialized; public calls remain externally synchronized |
-| `wait_queue_idle` | E | queue-mutex backed |
 | `poll_completion` / `wait_completion` | S | reusable value queries; host waits do not consume the point |
 | `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction rejects a pending acquire and waits graphics/present work |
 | `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; resize rejects a pending acquire and waits graphics/present work |
@@ -42,8 +41,6 @@ token's retained device pin while another call can still be in flight.
 | `create_sampler` / `destroy_sampler` | S | |
 | `create_shader` / `destroy_shader` | S | |
 | `create_compute_pipeline` / `create_graphics_pipeline` / `destroy_pipeline` | S | driver compiles run in parallel; a same-key race compiles twice, converges to one entry |
-| `create_semaphore` / `destroy_semaphore` | S | |
-| `wait_semaphore` | S | lock-free |
 | `alloc_frame_span` | S | lock-free CAS bump through a current `FrameToken`; token copies may be shared during the active generation |
 | `alloc_persistent_span` / `free_persistent_span` | S | VMA virtual blocks are not internally synchronized; the library locks them |
 | `create_recording_context` / `destroy_recording_context` | S | destroy requires the context's lists retired |
@@ -103,9 +100,10 @@ token and boundary state for retry.
 `@with_frame(&frame, &device, named_worker, ...args)` is Tier E around the
 entire worker. It invokes the symbol directly, with no runtime callback or
 virtual dispatch, then attempts end exactly once even when the worker returns a
-fault through `!`. An end fault wins and leaves `frame` live for retry. Off-frame
-`submit` and `present` remain allowed; cover them with a later `end_frame` or an
-explicit queue idle wait before destroying the device.
+fault through `!`. An end fault wins and leaves `frame` live for retry.
+Off-frame `submit` and `present` remain allowed. Before device destruction,
+wait the latest `CompletionPoint` for each affected queue and destroy every
+swapchain.
 
 ## Lock order
 
@@ -221,8 +219,8 @@ Blocking helpers (`upload_buffer_data`, `upload_texture_data`,
 or the frame counter. Each reserves a value on a separate `helper_timeline`
 under `transfer_mutex`, before its (single) transfer allocation, and tags
 that allocation's arena range or dedicated buffer with it. At completion
-(after the helper's own queue-idle wait) it signals `helper_timeline` to
-that value — turnstiled: it first waits for `helper_timeline` to reach
+(after waiting for the helper submission's completion point) it signals
+`helper_timeline` to that value — turnstiled: it first waits for `helper_timeline` to reach
 `value - 1`, so concurrent helpers' completions land in strictly increasing
 order even when they finish out of reservation order, and one helper's
 completion can never retire another helper's or an unsubmitted list's

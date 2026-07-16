@@ -78,8 +78,6 @@ const uint OFF_FRAME_TRANSFER_BIT @private = 1 << 2;
 struct SubmitInputs {
     CommandRecord*[]        records;
     QueueCompletionState*[] completion_waits;
-    SemaphoreSlot*[]        waits;
-    SemaphoreSlot*[]        signals;
     SwapchainSlot*   swapchain;
     gpu::QueueKind   kind;
 }
@@ -1705,7 +1703,7 @@ fn void? require_queue_completion_headroom_with_query(
 
     ulong prospective = completion.next_sequence + 1;
     ulong completed = completion.observed_completed_sequence;
-    ulong limit = state.caps.max_timeline_semaphore_value_difference;
+    ulong limit = state.max_timeline_semaphore_value_difference;
     if (prospective <= completed || prospective - completed <= limit) return;
 
     vk::Result result = query_fn(
@@ -1919,6 +1917,25 @@ fn void clear_off_frame_queue_markers(
     state.off_frame_pending_queues.and(~clear_mask, AtomicOrdering.RELEASE);
 }
 
+fn void observe_queue_completion(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    ulong completed_sequence,
+) @private {
+    completion.submit_mutex.lock()!!;
+    defer completion.submit_mutex.unlock();
+
+    if (completed_sequence > completion.observed_completed_sequence) {
+        completion.observed_completed_sequence = completed_sequence;
+    }
+    ulong published_sequence = completion.published_sequence.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    if (completion.observed_completed_sequence >= published_sequence) {
+        clear_off_frame_queue_markers(state, completion.queue);
+    }
+}
+
 fn SubmitInputs? resolve_submit_inputs(
     VkDeviceState* state,
     gpu::Device* device,
@@ -1959,19 +1976,6 @@ fn SubmitInputs? resolve_submit_inputs(
         )!;
     }
 
-    if (desc.waits.len > 0) {
-        inputs.waits = mem::talloc_array(SemaphoreSlot*, (sz)desc.waits.len);
-        foreach (i, wait : desc.waits) {
-            inputs.waits[i] = state.semaphores.get(wait.semaphore)!;
-        }
-    }
-
-    if (desc.signals.len > 0) {
-        inputs.signals = mem::talloc_array(SemaphoreSlot*, (sz)desc.signals.len);
-        foreach (i, signal : desc.signals) {
-            inputs.signals[i] = state.semaphores.get(signal.semaphore)!;
-        }
-    }
 
     if (desc.completion_waits.len > 0) {
         inputs.completion_waits = mem::talloc_array(
@@ -2080,8 +2084,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         )!;
 
         SwapchainSlot* swapchain = inputs.swapchain;
-        usz wait_count = desc.waits.len
-            + desc.completion_waits.len
+        usz wait_count = desc.completion_waits.len
             + (swapchain != null ? 1 : 0);
         if (wait_count > 0) {
             vk::SemaphoreSubmitInfo[] waits = mem::talloc_array(
@@ -2089,13 +2092,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 (sz)wait_count,
             );
             usz next_wait;
-            foreach (i, wait : desc.waits) {
-                SemaphoreSlot* slot = inputs.waits[i];
-                waits[next_wait++] = vk::semaphore_submit_info()
-                    .set_semaphore(slot.semaphore)
-                    .set_value((ulong)wait.value)
-                    .set_stage_mask(stage_to_vk(wait.stage));
-            }
             next_wait = append_completion_wait_infos(
                 waits:       waits,
                 next_wait:   next_wait,
@@ -2115,22 +2111,14 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             }
         }
 
-        usz signal_count = desc.signals.len
-            + (swapchain != null ? 1 : 0)
-            + (piggyback ? 1 : 0)
+        usz signal_count = (usz)(swapchain != null ? 1 : 0)
+            + (usz)(piggyback ? 1 : 0)
             + 1;
         vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(
             vk::SemaphoreSubmitInfo,
             (sz)signal_count,
         );
         usz next_signal;
-        foreach (i, signal : desc.signals) {
-            SemaphoreSlot* slot = inputs.signals[i];
-            signals[next_signal++] = vk::semaphore_submit_info()
-                .set_semaphore(slot.semaphore)
-                .set_value((ulong)signal.value)
-                .set_stage_mask(stage_to_vk(signal.stage));
-        }
         if (swapchain != null) {
             signals[next_signal++] = vk::semaphore_submit_info()
                 .set_semaphore(
@@ -2255,20 +2243,6 @@ fn gpu::CompletionPoint? vk_submit(
     return vk_submit_with(device, desc, &real_queue_submit2);
 }
 
-fn void? vk_wait_queue_idle(gpu::Device* device, gpu::QueueKind queue) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    Mutex* queue_mutex = queue_mutex_for(state, queue);
-    queue_mutex.lock()!!;
-    defer queue_mutex.unlock();
-    vk::Queue waited = queue_for(state, queue);
-    check_backend_result(
-        state:     state,
-        operation: "wait_queue_idle",
-        result:    vk::queue_wait_idle(waited),
-    )!;
-
-    clear_off_frame_queue_markers(state, waited);
-}
 
 <* Snapshot of submit counters, exposed for whitebox accounting in tests. *>
 fn SubmitStats submit_stats(VkDeviceState* state) {

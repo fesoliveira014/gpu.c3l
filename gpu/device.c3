@@ -29,7 +29,6 @@ alias DestroyRecordingContextFn @private = fn void? (Device*, RecordingContextHa
 alias EndCommandsFn @private         = fn void? (CommandList*);
 alias DiscardCommandsFn @private     = fn ulong? (CommandList*);
 alias SubmitFn @private              = fn CompletionPoint? (Device*, SubmitDesc*);
-alias WaitQueueIdleFn @private       = fn void? (Device*, QueueKind);
 alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
 alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
 alias CmdCopyBufferFn @private       = fn void? (CommandList*, BufferCopyDesc*);
@@ -41,9 +40,6 @@ alias InvalidateBufferFn @private       = fn void? (Device*, BufferHandle, usz, 
 alias CmdBufferBarrierFn @private    = fn void? (CommandList*, BufferBarrier*);
 alias CmdGlobalBarrierFn @private    = fn void? (CommandList*, GlobalBarrier*);
 alias CmdTextureBarrierFn @private   = fn void? (CommandList*, TextureBarrier*);
-alias CreateSemaphoreFn @private     = fn SemaphoreHandle? (Device*, SemaphoreDesc*);
-alias DestroySemaphoreFn @private    = fn void? (Device*, SemaphoreHandle);
-alias WaitSemaphoreFn @private       = fn void? (Device*, SemaphoreHandle, SemaphoreValue, ulong);
 alias GetTextureFormatSupportFn @private = fn TextureFormatSupport? (Device*, Format);
 alias SupportsTextureDescFn @private     = fn bool? (Device*, TextureDesc*);
 alias CreateTextureFn @private           = fn TextureHandle? (Device*, TextureDesc*);
@@ -131,7 +127,6 @@ struct BackendVTable @private {
     EndCommandsFn           end_commands;
     DiscardCommandsFn       discard_commands;
     SubmitFn                submit;
-    WaitQueueIdleFn         wait_queue_idle;
     PollCompletionFn        poll_completion;
     WaitCompletionFn        wait_completion;
     CmdCopyBufferFn         cmd_copy_buffer;
@@ -143,9 +138,6 @@ struct BackendVTable @private {
     CmdBufferBarrierFn      cmd_buffer_barrier;
     CmdGlobalBarrierFn      cmd_global_barrier;
     CmdTextureBarrierFn     cmd_texture_barrier;
-    CreateSemaphoreFn       create_semaphore;
-    DestroySemaphoreFn      destroy_semaphore;
-    WaitSemaphoreFn         wait_semaphore;
     GetTextureFormatSupportFn get_texture_format_support;
     SupportsTextureDescFn     supports_texture_desc;
     CreateTextureFn         create_texture;
@@ -234,7 +226,6 @@ enum ResourceOwnerKind @private {
     SWAPCHAIN,
     COMMAND,
     SHADER,
-    SEMAPHORE,
     RECORDING_CONTEXT,
     READBACK_TICKET,
     COMPLETION_POINT,

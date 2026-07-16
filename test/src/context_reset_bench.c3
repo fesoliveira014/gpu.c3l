@@ -104,6 +104,6 @@ fn int main() {
     io::printfn("phase 2 (all-recording, %d frames, %d contexts): %.1f ns/begin_frame, resets=%d skips=%d",
         BENCH_RECORDING_FRAMES, BENCH_USER_CONTEXTS, rec_ns_per_frame, rec_reset_total, rec_skipped_total);
 
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_bench_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     return 0;
 }

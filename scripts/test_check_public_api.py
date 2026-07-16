@@ -88,6 +88,23 @@ class PublicApiCheckTests(unittest.TestCase):
             check_public_api.validate_document(document),
         )
 
+    def test_rejects_retired_public_synchronization(self) -> None:
+        document = valid_document()
+        document["modules"]["gpu"]["types"].append(
+            {"name": "SemaphoreHandle"}
+        )
+        document["modules"]["gpu"]["functions"].append(
+            {"name": "wait_queue_idle"}
+        )
+        document["modules"]["gpu"]["types"].append({
+            "name": "DeviceCaps",
+            "members": [{"name": "timeline_semaphore"}],
+        })
+        failures = check_public_api.validate_document(document)
+        self.assertIn("retired public semaphore", failures)
+        self.assertIn("retired wait_queue_idle", failures)
+        self.assertIn("retired timeline capability", failures)
+
 
 if __name__ == "__main__":
     unittest.main()

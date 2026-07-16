@@ -19,7 +19,6 @@ enum DeferredKind : int {
     IMAGE_VIEW,
     PIPELINE,
     SHADER_MODULE,
-    SEMAPHORE,
 }
 
 struct DeferredEntry {
@@ -55,8 +54,6 @@ fn void free_deferred_entry(VkDeviceState* state, DeferredEntry* entry) @private
             vk::destroy_pipeline(state.device, (vk::Pipeline)entry.object, null);
         case DeferredKind.SHADER_MODULE:
             vk::destroy_shader_module(state.device, (vk::ShaderModule)entry.object, null);
-        case DeferredKind.SEMAPHORE:
-            vk::destroy_semaphore(state.device, (vk::Semaphore)entry.object, null);
     }
 }
 

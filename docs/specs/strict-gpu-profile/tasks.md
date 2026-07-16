@@ -135,7 +135,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.3 Remove public synchronization objects
 
-- [ ] Remove public semaphore, caller-managed counter, and `wait_queue_idle` contracts from `gpu/sync.c3`, `gpu/queue.c3`, `gpu/gpu.c3i`, backend adapters, docs, and samples; retain native synchronization privately.
+- [x] Remove public semaphore, caller-managed counter, and `wait_queue_idle` contracts from `gpu/sync.c3`, `gpu/queue.c3`, `gpu/gpu.c3i`, backend adapters, docs, and samples; retain native synchronization privately.
   - **Depends on:** 3.2.
   - **Contract:** completion points are the only public queue-progress primitive; removal is in place rather than wrapped by a compatibility layer.
   - **Edges:** presentation and teardown call sites still needing native binary synchronization; ensure device destruction remains non-blocking.

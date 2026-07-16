@@ -54,6 +54,53 @@ fn void queue_completion_publication_rejects_gaps() @test {
         result:    vk::signal_semaphore(state.device, &signal),
     )!!;
 }
+fn void completion_observation_clears_only_fully_observed_queues() @test {
+    gpu::Device device = create_completion_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, queue.id)!!;
+
+    gpu::CompletionPoint first = vk::reserve_queue_completion(state, queue)!!;
+    vk::publish_queue_completion(state, first)!!;
+    gpu::CompletionPoint second = vk::reserve_queue_completion(state, queue)!!;
+    vk::publish_queue_completion(state, second)!!;
+    state.off_frame_pending_queues.store(1, AtomicOrdering.RELEASE);
+
+    vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
+        .set_semaphore(completion.timeline)
+        .set_value(gpu::completion_point_sequence(first));
+    gpu::vk::check_backend_result(
+        state:     state,
+        operation: "signal first test completion",
+        result:    vk::signal_semaphore(state.device, &signal),
+    )!!;
+    assert(gpu::poll_completion(first)!!, "the first point completes");
+    assert(completion.observed_completed_sequence
+        == gpu::completion_point_sequence(first),
+        "poll records the observed completion sequence");
+    assert(state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE) == 1,
+        "an older point cannot clear work published after it");
+
+    signal = signal.set_value(gpu::completion_point_sequence(second));
+    gpu::vk::check_backend_result(
+        state:     state,
+        operation: "signal second test completion",
+        result:    vk::signal_semaphore(state.device, &signal),
+    )!!;
+    gpu::wait_completion(second, 0)!!;
+    assert(completion.observed_completed_sequence
+        == gpu::completion_point_sequence(second),
+        "wait records the observed completion sequence");
+    assert(state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE) == 0,
+        "the latest completed point clears the queue marker");
+}
+
 fn void queue_completion_poll_wait_is_reusable() @test {
     gpu::Device device = create_completion_test_device();
     defer destroy_test_device(&device)!!;
@@ -84,10 +131,13 @@ fn void queue_completion_poll_wait_is_reusable() @test {
     )!!;
     assert(@catch(gpu::poll_completion(future)) == gpu::INVALID_HANDLE,
         "a later unpublished sequence is rejected");
+    completion.submit_mutex.lock()!!;
+    vk::cancel_queue_completion_locked(state, future)!!;
+    completion.submit_mutex.unlock();
 
     vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
         .set_semaphore(completion.timeline)
-        .set_value(completion.next_sequence);
+        .set_value(gpu::completion_point_sequence(point));
     gpu::vk::check_backend_result(
         state:     state,
         operation: "signal test completion",

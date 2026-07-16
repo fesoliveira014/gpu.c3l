@@ -1,12 +1,8 @@
 module gpu;
 
-// Timeline semaphore counter value.
-typedef SemaphoreValue = ulong;
-
-const uint MAX_SEMAPHORES = 256;
 const CompletionPoint COMPLETION_POINT_INVALID = {};
 
-<* Pipeline stage for barrier before/after pairs and semaphore wait/signal points. *>
+<* Pipeline stage for barriers and execution hazards. *>
 enum Stage : int {
     HOST,
     TRANSFER,
@@ -104,28 +100,6 @@ struct GlobalBarrier {
     Hazard after_hazard;
 }
 
-<* Creation parameters for a timeline semaphore (monotonic 64-bit counter). *>
-struct SemaphoreDesc {
-    SemaphoreValue initial_value;
-    ZString        debug_name;
-}
-
-<* Blocks `stage` in a submit until the timeline reaches `value`. *>
-struct SemaphoreWait {
-    SemaphoreHandle semaphore;
-    SemaphoreValue  value;
-    Stage           stage;
-}
-
-<* Sets the timeline to value once the submit's work clears stage.
-   The value must exceed the counter when the signal executes; ordering pending
-   signals across queues is the caller's responsibility. *>
-struct SemaphoreSignal {
-    SemaphoreHandle semaphore;
-    SemaphoreValue  value;
-    Stage           stage;
-}
-
 fn bool CompletionPoint.is_valid(self) => self.device.is_valid()
     && completion_point_sequence(self) != 0;
 fn bool CompletionPoint.equals(self, CompletionPoint other) @operator(==) {
@@ -216,7 +190,7 @@ fn bool? poll_completion(CompletionPoint point) {
 
 <* Wait up to timeout_ns for the queue to complete this point. A timeout leaves
    the point unchanged and faults WAIT_TIMEOUT, so the wait may be retried. *>
-fn void? wait_completion(CompletionPoint point, ulong timeout_ns) {
+fn void? wait_completion(CompletionPoint point, ulong timeout_ns = ulong::max) {
     Device device = point.device;
     DeviceOperation operation = begin_device_operation(&device)!;
     defer end_device_operation(&operation);
@@ -228,33 +202,4 @@ fn void? wait_completion(CompletionPoint point, ulong timeout_ns) {
         completion_point_sequence(point),
         timeout_ns,
     );
-}
-
-<* Create a timeline semaphore. Ownership: release with destroy_semaphore. *>
-fn SemaphoreHandle? create_semaphore(Device* device, SemaphoreDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    SemaphoreHandle semaphore = operation.vtable.create_semaphore(device, desc)!;
-    retain_device_children(&operation);
-    return semaphore;
-}
-
-<* Counterpart of create_semaphore. *>
-fn void? destroy_semaphore(Device* device, SemaphoreHandle semaphore) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(&operation, semaphore.owner, ResourceOwnerKind.SEMAPHORE)!;
-    operation.vtable.destroy_semaphore(device, semaphore)!;
-    release_device_children(&operation);
-}
-
-<* Wait on the host until the timeline reaches `value`, up to `timeout_ns`
-   (0 polls without blocking). Faults WAIT_TIMEOUT — safe to retry — if
-   `timeout_ns` elapses first. *>
-fn void? wait_semaphore(Device* device, SemaphoreHandle semaphore, SemaphoreValue value, ulong timeout_ns) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(&operation, semaphore.owner, ResourceOwnerKind.SEMAPHORE)!;
-    return operation.vtable.wait_semaphore(device, semaphore, value, timeout_ns);
 }

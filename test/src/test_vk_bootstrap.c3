@@ -85,7 +85,6 @@ fn void device_create_destroy() @test {
     assert(gpu::get_device_caps(&device)!!.buffer_device_address, "buffer_device_address cap true");
     assert(gpu::get_device_caps(&device)!!.synchronization2, "synchronization2 cap true");
     assert(gpu::get_device_caps(&device)!!.dynamic_rendering, "dynamic_rendering cap true");
-    assert(gpu::get_device_caps(&device)!!.timeline_semaphore, "timeline_semaphore cap true");
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::PhysicalDeviceFeatures features;
     vk::get_physical_device_features(state.physical_device, &features);
@@ -98,7 +97,7 @@ fn void device_create_destroy() @test {
     vk::PhysicalDeviceProperties2 props2 =
         vk::physical_device_properties2().set_next(&timeline_props);
     vk::get_physical_device_properties2(state.physical_device, &props2);
-    ulong timeline_difference = gpu::get_device_caps(&device)!!.max_timeline_semaphore_value_difference;
+    ulong timeline_difference = state.max_timeline_semaphore_value_difference;
     assert(
         timeline_difference == timeline_props.max_timeline_semaphore_value_difference,
         "reported timeline-value difference matches the selected device"

@@ -105,7 +105,7 @@ fn void offscreen_clear_works() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
     char* pixels = (char*)rb_span.cpu;
@@ -283,7 +283,7 @@ fn void offscreen_textured_triangle() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
     char* pixels = (char*)rb_span.cpu;
@@ -429,7 +429,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
     for (uint i = 0; i < 2; i++) {
@@ -510,7 +510,7 @@ fn void offscreen_render_to_mip() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
     char* pixels = (char*)rb_span.cpu;

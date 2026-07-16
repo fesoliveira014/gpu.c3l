@@ -477,7 +477,7 @@ and PERSISTENT_UPLOAD keep VMA's memory-type freedom and the explicit
 Frame spans admit the selected graphics and compute roles, or transfer on a
 transfer-only device. The backing buffer uses the exact deduplicated families for
 those roles: one family stays exclusive and two or more use concurrent sharing.
-Barriers, semaphore ordering, and lifetime remain explicit.
+Barriers, completion-point ordering, and lifetime remain explicit.
 
 Allocation during `ACTIVE` is lock-free — the cursor is an atomic bumped with
 a CAS loop, so worker threads allocate concurrently (see docs/threading.md):
@@ -522,7 +522,7 @@ allocation identity whose immutable record stores its bounds and access.
 
 Concurrent sharing removes queue-family ownership transfers only. Callers must
 still flush host writes as required, record barriers, order submissions with
-semaphores, wait for completion, and keep each span live until all referencing
+completion points, wait for completion, and keep each span live until all referencing
 work retires. `free_persistent_span` is valid only after that retirement. The
 arena and its spans remain scoped to their owning `Device`.
 Persistent virtual-allocation exhaustion keeps the `ARENA_FULL` fault and
@@ -708,8 +708,8 @@ arena:readback
 
 ## 17. Deferred destruction
 
-`destroy_buffer`, `destroy_texture`, `destroy_pipeline`, `destroy_shader`, and
-`destroy_semaphore` consume the public handle immediately, but submitted frames
+`destroy_buffer`, `destroy_texture`, `destroy_pipeline`, and `destroy_shader`
+consume the public handle immediately, but submitted frames
 may still reference the native object. The backend queues it by
 `retire_timeline_value` and drains completed entries during `begin_frame` and
 enqueue. Accepted device teardown drains the remainder only after queue progress
@@ -726,9 +726,9 @@ outside a frame bracket (threading.md Tier E, sanctioned for frame-loop-free
 apps) marks the affected semantic queue. Destroyed resources referenced by that
 work enter the deferred queue. A later `end_frame` chain covers every queue used
 since the last boundary and clears those markers only after successful submit.
-A frame-loop-free application instead calls `wait_queue_idle` for each affected
-role. Until then, `destroy_device` returns `DEVICE_BUSY` without changing its
-token or state.
+A frame-loop-free application waits on the latest `CompletionPoint` from each
+affected queue. Until those points complete, `destroy_device` returns
+`DEVICE_BUSY` without changing its token or state.
 
 ## 18. Defragmentation policy
 
@@ -766,6 +766,6 @@ readback path invalidates non-coherent memory
 staging path flushes non-coherent memory
 memory stats report VMA budget and live resources
 allocation names appear in debug reports
-destroyed buffers/textures/pipelines/shaders/semaphores free their backend
+destroyed buffers/textures/pipelines/shaders free their backend
     object only after retire_timeline_value passes
 ```

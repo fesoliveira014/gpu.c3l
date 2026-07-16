@@ -252,8 +252,6 @@ fn void? run() {
         if (frame.is_valid()) gpu::end_frame(&frame)!;
         return frame_err~;
     }
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!;
-
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!;
     gpu::invalidate_buffer(&device, output, 0, 0)!;
     float* out_data = (float*)out_span.cpu;
@@ -288,7 +286,7 @@ fn void? run_frame(gpu::FrameToken* frame, FrameWork* work) {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(work.device, &submit)!;
-    gpu::wait_completion(completion, ulong::max)!;
+    gpu::wait_completion(completion)!;
 }
 ```
 

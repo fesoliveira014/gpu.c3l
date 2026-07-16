@@ -392,7 +392,7 @@ fn void texture_descriptor_deferred_reuse() @test {
 
     gpu::end_frame(&frame_token)!!;
     // The frame fence signals GPU-side; idle so the timeline has passed.
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::TextureIndex recycled = gpu::create_texture_descriptor(&device, texture, null)!!;
     assert(recycled.slot == first_slot, "retired slot is recycled once the frame timeline passes");
@@ -755,7 +755,7 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::destroy_texture_descriptor(&device, retired)!!;
     gpu::end_frame(&frame_token)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;

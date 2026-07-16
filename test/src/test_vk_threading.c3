@@ -293,7 +293,7 @@ fn void parallel_recording_across_contexts() @test {
     for (uint i = 0; i < THR_THREADS; i++) lists[i] = args[i].list;
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     for (uint i = 0; i < THR_THREADS; i++) {
         gpu::invalidate_buffer(&device, args[i].io_span.buffer, 0, 0)!!;
@@ -376,7 +376,7 @@ fn void parallel_recording_disjoint_texture_layouts() @test {
     for (uint i = 0; i < THR_THREADS; i++) lists[i] = args[i].list;
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -784,7 +784,7 @@ fn void blocking_upload_races_default_context_recording() @test {
         gpu::CommandList[1] lists = { cmd };
         gpu::SubmitDesc submit = { .command_lists = lists[..] };
         gpu::submit(&device, &submit)!!;
-        gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+        wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     }
 
     uploader.join()!!;
@@ -931,7 +931,7 @@ fn void multi_thread_tiny_arena_fallback_hammer() @test {
     for (uint i = 0; i < FALLBACK_HAMMER_THREADS; i++) lists[i] = args[i].list;
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     foreach (ctx : contexts) gpu::destroy_recording_context(&device, ctx)!!;
     foreach (b : buffers) gpu::destroy_buffer(&device, b)!!;
@@ -1003,7 +1003,7 @@ fn void parallel_tier_c_uploads_across_contexts() @test {
     for (uint i = 0; i < THR_THREADS; i++) lists[i] = args[i].list;
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     char[PARALLEL_UPLOAD_PAYLOAD] readback;
     for (uint i = 0; i < THR_THREADS; i++) {
