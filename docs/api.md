@@ -192,8 +192,8 @@ The strict request defaults to one graphics, compute, and transfer queue; one
 native queue may satisfy several roles. Presentation requires at least one
 graphics queue in both the default and an explicit queue group.
 `request_queues` replaces that implicit default with one explicit group. Each
-role count is 0..255 and requests distinct
-identities within that role. At least one count must be nonzero. A role marked
+role count is 0..255 and requests distinct identities within that role. At
+least one count must be nonzero. A role marked
 `distinct` must have a nonzero count and may not alias another requested role.
 Invalid or duplicate queue groups return `INVALID_ARGUMENT`. Support queries
 report unavailable counts or topology without enabling device state.
