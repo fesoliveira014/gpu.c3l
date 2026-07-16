@@ -170,4 +170,4 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - Compatibility tests cover descriptor arena reset, persistent set release, batched writes, mixed strict/compat command recording, and compatibility-only devices.
 - Vulkan 1.2 and 1.3 paths that implement identical semantics pass the same public tests.
 - Samples teach strict usage first and keep compatibility samples focused.
-- Benchmarks measure allocation, descriptor work, pipeline creation, command recording, submission, barriers, and indirect execution.
+- Benchmarks measure allocation, descriptor work, pipeline creation, command recording, submission, completion polling, barriers, and indirect execution.

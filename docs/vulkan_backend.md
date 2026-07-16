@@ -592,11 +592,18 @@ operations but carries no pipeline work; use it only deliberately.
 Use timeline semaphores for:
 
 ```text
+queue-owned completion points
 frame retirement
 queue submission order
 arena reset safety
 deferred destruction safety
 ```
+
+Each selected queue identity owns one private timeline and monotonic sequence.
+The public `CompletionPoint` packs the device, queue identity, and sequence in
+two words. Reservation and publication allocate nothing; publication occurs
+only after native submission succeeds. Host poll and wait reject unpublished
+sequences and query the owning timeline directly.
 
 Public submit descriptor should support waits and signals:
 

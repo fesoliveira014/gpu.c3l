@@ -391,7 +391,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; resource creation: empty, unknown, or unselected access role; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag, an access set that omits the operation queue role, stale or forged span allocation metadata, malformed span access, or a misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
-| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, any resource-handle-taking call, `cmd_*`, `end_commands`, `discard_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
+| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, `poll_completion`, `wait_completion`, any resource-handle-taking call, `cmd_*`, `end_commands`, `discard_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
@@ -399,7 +399,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `DEVICE_BUSY` | public device operations; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
 | `RESOURCE_IN_USE` | `destroy_device`, `destroy_runtime`, `destroy_surface`, `destroy_texture` | a device has a live child, a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
-| `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands`; persistent allocation | the runtime or device registry, adapter token, handle table, or command-record table is at capacity |
+| `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands`; persistent allocation; queue submission | a registry or handle table is at capacity, or a queue completion sequence is exhausted |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
@@ -407,7 +407,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
 | `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |
-| `WAIT_TIMEOUT` | `wait_semaphore`, `begin_frame`, `acquire_next_image` | bounded wait or transient image unavailability; retry without resizing |
+| `WAIT_TIMEOUT` | `wait_completion`, `wait_semaphore`, `begin_frame`, `acquire_next_image` | bounded wait or transient image unavailability; retry with the unchanged completion point or resource |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
 Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled. `DEVICE_LOST` is reserved for an explicit native device-loss result; an unmapped native result becomes `BACKEND_ERROR`.
@@ -870,6 +870,12 @@ end_commands(CommandList* commands) -> void?
 discard_commands(CommandList* commands) -> void?
 submit(Device* device, SubmitDesc* desc) -> void?
 wait_queue_idle(Device* device, QueueKind queue) -> void?
+poll_completion(CompletionPoint point) -> bool?
+wait_completion(CompletionPoint point, ulong timeout_ns) -> void?
+
+CompletionPoint
+    Device device
+    ulong payload                     (opaque queue identity and sequence)
 
 Queue
     Device device
@@ -899,6 +905,12 @@ SubmitDesc
 create_semaphore / destroy_semaphore / wait_semaphore   (timeline; SemaphoreValue = distinct ulong)
 create_recording_context / destroy_recording_context    (one per worker thread; docs/threading.md)
 ```
+
+`CompletionPoint` is a reusable queue-progress value. It fits in two machine
+words and allocates no public synchronization object. `poll_completion` returns
+false while work is incomplete. `wait_completion` returns `WAIT_TIMEOUT` when
+the bound expires; either operation leaves the point unchanged. Zero, stale,
+foreign-device, malformed, and unpublished points fault `INVALID_HANDLE`.
 
 `CommandList` is a small owner-bearing token; mutable lifecycle, binding cache,
 pending texture layouts, and the backend command buffer are device-owned. Copies

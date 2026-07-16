@@ -259,8 +259,8 @@ cache-create seam whose retryable first attempt and successful empty second
 attempt emit no terminal diagnostic. Pure range and lookup helpers remain
 fault-only; operation-aware result helpers own specialized backend mapping and
 emit exactly once with stable operation context.
-Successful command tests exercise the actual `submit`
-and `wait_queue_idle` call sites without injecting a submit failure.
+Queue tests cover compact completion packing, monotonicity, exhaustion, stale and foreign ownership, unpublished values, native poll/wait, timeout retry, and no public child allocation.
+Successful command tests exercise the actual `submit` and `wait_queue_idle` call sites without injecting a submit failure.
 
 Leak tests verify structured `resource_lifetime` delivery and identity/name
 metadata, stderr fallback without a callback, and callback-active reporting

@@ -30,6 +30,8 @@ alias EndCommandsFn @private         = fn void? (CommandList*);
 alias DiscardCommandsFn @private     = fn ulong? (CommandList*);
 alias SubmitFn @private              = fn void? (Device*, SubmitDesc*);
 alias WaitQueueIdleFn @private       = fn void? (Device*, QueueKind);
+alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
+alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
 alias CmdCopyBufferFn @private       = fn void? (CommandList*, BufferCopyDesc*);
 alias CmdFillBufferFn @private       = fn void? (CommandList*, BufferHandle, usz, usz, uint);
 alias CmdCopyBufferToTextureFn @private = fn void? (CommandList*, BufferTextureCopyDesc*);
@@ -130,6 +132,8 @@ struct BackendVTable @private {
     DiscardCommandsFn       discard_commands;
     SubmitFn                submit;
     WaitQueueIdleFn         wait_queue_idle;
+    PollCompletionFn        poll_completion;
+    WaitCompletionFn        wait_completion;
     CmdCopyBufferFn         cmd_copy_buffer;
     CmdFillBufferFn         cmd_fill_buffer;
     CmdCopyBufferToTextureFn cmd_copy_buffer_to_texture;

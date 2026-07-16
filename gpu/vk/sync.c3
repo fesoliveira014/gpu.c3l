@@ -259,6 +259,75 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
     vk::cmd_pipeline_barrier2(record.command_buffer, &dep);
 }
 
+fn vk::Semaphore? create_private_timeline(VkDeviceState* state) @private {
+    vk::SemaphoreTypeCreateInfo type_info = vk::semaphore_type_create_info()
+        .set_semaphore_type(vk::SemaphoreType.TIMELINE)
+        .set_initial_value(0);
+    vk::SemaphoreCreateInfo info = vk::semaphore_create_info()
+        .set_next(&type_info);
+    vk::Semaphore semaphore;
+    check_device_result(state, vk::create_semaphore(
+        device:        state.device,
+        p_create_info: &info,
+        p_allocator:   null,
+        p_semaphore:   &semaphore,
+    ))!;
+    return semaphore;
+}
+
+fn bool? vk_poll_completion(
+    gpu::Device* device,
+    uint queue_id,
+    ulong sequence,
+) @private {
+    VkDeviceState* state =
+        (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    QueueCompletionState* completion = published_queue_completion_state(
+        state,
+        queue_id,
+        sequence,
+    )!;
+    ulong current;
+    check_backend_result(
+        state:     state,
+        operation: "poll_completion",
+        result:    vk::get_semaphore_counter_value(
+            state.device,
+            completion.timeline,
+            &current,
+        ),
+    )!;
+    return current >= sequence;
+}
+
+fn void? vk_wait_completion(
+    gpu::Device* device,
+    uint queue_id,
+    ulong sequence,
+    ulong timeout_ns,
+) @private {
+    VkDeviceState* state =
+        (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    QueueCompletionState* completion = published_queue_completion_state(
+        state,
+        queue_id,
+        sequence,
+    )!;
+    vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
+        .set_semaphore_count(1)
+        .set_semaphores((&completion.timeline)[:1])
+        .set_values((&sequence)[:1]);
+    check_wait_backend_result(
+        state:     state,
+        operation: "wait_completion",
+        result:    vk::wait_semaphores(
+            state.device,
+            &wait_info,
+            timeout_ns,
+        ),
+    )!;
+}
+
 fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::SemaphoreDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
