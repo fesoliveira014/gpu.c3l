@@ -4,6 +4,8 @@ import gpu @public;
 import vk;
 import std::thread;
 import std::core::mem;
+import std::atomic;
+import std::atomic::types;
 
 const uint MAX_QUEUE_FAMILIES = gpu::MAX_SELECTED_QUEUE_IDENTITIES + 4;
 const uint MAX_SELECTED_QUEUE_INDICES = 3;
@@ -55,6 +57,17 @@ struct QueueCandidatePool {
 struct SubmitStats {
     ulong queue_submits;
     ulong empty_signal_submits;
+}
+
+struct QueueCompletionState {
+    vk::Queue       queue;
+    vk::Semaphore   timeline;
+    Mutex           submit_mutex;
+    gpu::QueueRoles roles;
+    ulong           native_id;
+    ulong           next_sequence;
+    Atomic{ulong}   published_sequence;
+    bool            bound;
 }
 
 const uint OFF_FRAME_GRAPHICS_BIT @private = 1 << 0;
@@ -1519,6 +1532,186 @@ fn uint swapchain_queue_families(
         out_families[count++] = state.presentation.family;
     }
     return count;
+}
+
+fn void? bind_queue_completion_role(
+    VkDeviceState* state,
+    gpu::QueueSelection* selection,
+    gpu::QueueKind kind,
+) @private {
+    uint count = selected_native_queue_count(&state.queues, kind);
+    for (uint index = 0; index < count; index++) {
+        uint identity = gpu::queue_selection_id(selection, kind, index);
+        ulong native_id = selected_native_queue(&state.queues, kind, index);
+        QueueCompletionState* completion = &state.queue_completions[identity];
+        if (completion.bound) {
+            if (completion.native_id != native_id) return gpu::BACKEND_ERROR~;
+            continue;
+        }
+
+        completion.native_id = native_id;
+        completion.bound = true;
+        vk::get_device_queue(
+            device:             state.device,
+            queue_family_index: native_queue_family(native_id),
+            queue_index:        native_queue_index(native_id),
+            p_queue:            &completion.queue,
+        );
+    }
+}
+
+fn void? create_queue_completions(
+    VkDeviceState* state,
+    gpu::QueueSelection* selection,
+) @private {
+    if (state == null || selection == null || selection.identity_count == 0) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    state.queue_completions = mem::new_array(
+        QueueCompletionState,
+        (usz)selection.identity_count,
+    );
+    foreach (&completion : state.queue_completions) {
+        completion.submit_mutex.init()!;
+    }
+
+    bind_queue_completion_role(
+        state,
+        selection,
+        gpu::QueueKind.GRAPHICS,
+    )!;
+    bind_queue_completion_role(
+        state,
+        selection,
+        gpu::QueueKind.COMPUTE,
+    )!;
+    bind_queue_completion_role(
+        state,
+        selection,
+        gpu::QueueKind.TRANSFER,
+    )!;
+
+    foreach (identity, &completion : state.queue_completions) {
+        if (!completion.bound) return gpu::BACKEND_ERROR~;
+        completion.roles = selection.identity_roles[identity];
+        completion.timeline = create_private_timeline(state)!;
+    }
+}
+
+fn void destroy_queue_completions(VkDeviceState* state) @private {
+    if (state == null || state.queue_completions.ptr == null) return;
+    foreach (&completion : state.queue_completions) {
+        if (completion.timeline != null && state.device != null) {
+            vk::destroy_semaphore(state.device, completion.timeline, null);
+            completion.timeline = (vk::Semaphore)null;
+        }
+        if (completion.submit_mutex.is_initialized()) {
+            (void)completion.submit_mutex.destroy();
+        }
+    }
+    mem::free(state.queue_completions.ptr);
+    state.queue_completions = {};
+}
+
+fn QueueCompletionState*? queue_completion_state(
+    VkDeviceState* state,
+    uint queue_id,
+) {
+    if (state == null
+        || state.queue_completions.ptr == null
+        || queue_id >= state.queue_completions.len) {
+        return gpu::INVALID_HANDLE~;
+    }
+    QueueCompletionState* completion = &state.queue_completions[queue_id];
+    if (!completion.bound || completion.timeline == null) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return completion;
+}
+
+<* Reserve the next point while holding the queue's submission lock. *>
+fn gpu::CompletionPoint? reserve_queue_completion_locked(
+    VkDeviceState* state,
+    gpu::Queue queue,
+) @private {
+    if (state == null || queue.device != state.owner) {
+        return gpu::INVALID_HANDLE~;
+    }
+    QueueCompletionState* completion = queue_completion_state(
+        state,
+        queue.id,
+    )!;
+    if ((uint)completion.roles != (uint)queue.roles) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return gpu::next_completion_point(queue, &completion.next_sequence);
+}
+
+fn gpu::CompletionPoint? reserve_queue_completion(
+    VkDeviceState* state,
+    gpu::Queue queue,
+) {
+    QueueCompletionState* completion = queue_completion_state(
+        state,
+        queue.id,
+    )!;
+    completion.submit_mutex.lock()!!;
+    defer completion.submit_mutex.unlock();
+    return reserve_queue_completion_locked(state, queue);
+}
+
+<* Publish a point only after its native queue submission succeeds. *>
+fn void? publish_queue_completion_locked(
+    VkDeviceState* state,
+    gpu::CompletionPoint point,
+) @private {
+    if (state == null || point.device != state.owner || !point.is_valid()) {
+        return gpu::INVALID_HANDLE~;
+    }
+    uint queue_id = gpu::completion_point_queue_id(point);
+    ulong sequence = gpu::completion_point_sequence(point);
+    QueueCompletionState* completion = queue_completion_state(
+        state,
+        queue_id,
+    )!;
+    ulong published = completion.published_sequence.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    if (sequence != published + 1 || sequence > completion.next_sequence) {
+        return gpu::INVALID_HANDLE~;
+    }
+    completion.published_sequence.store(sequence, AtomicOrdering.RELEASE);
+}
+
+fn void? publish_queue_completion(
+    VkDeviceState* state,
+    gpu::CompletionPoint point,
+) {
+    QueueCompletionState* completion = queue_completion_state(
+        state,
+        gpu::completion_point_queue_id(point),
+    )!;
+    completion.submit_mutex.lock()!!;
+    defer completion.submit_mutex.unlock();
+    return publish_queue_completion_locked(state, point);
+}
+
+fn QueueCompletionState*? published_queue_completion_state(
+    VkDeviceState* state,
+    uint queue_id,
+    ulong sequence,
+) @private {
+    QueueCompletionState* completion = queue_completion_state(
+        state,
+        queue_id,
+    )!;
+    if (sequence == 0
+        || sequence > completion.published_sequence.load(
+            AtomicOrdering.ACQUIRE,
+        )) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return completion;
 }
 
 <* Selected graphics and private presentation queues used by a swapchain. *>

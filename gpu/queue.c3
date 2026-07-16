@@ -2,10 +2,17 @@ module gpu;
 
 const uint QUEUE_ROLE_COUNT @private = 3;
 const uint QUEUE_ROLE_MASK @private = 0x7;
+const uint COMPLETION_QUEUE_BITS @private = 10;
+const ulong COMPLETION_QUEUE_MASK @private =
+    (1ull << COMPLETION_QUEUE_BITS) - 1;
+const ulong MAX_COMPLETION_SEQUENCE @private =
+    ulong::max >> COMPLETION_QUEUE_BITS;
 const uint MAX_SELECTED_QUEUE_IDENTITIES @private =
     MAX_REQUESTED_QUEUES_PER_ROLE * QUEUE_ROLE_COUNT;
 const Queue QUEUE_INVALID = {};
 $assert(MAX_SELECTED_QUEUE_IDENTITIES - 1 <= ushort::max);
+$assert(MAX_SELECTED_QUEUE_IDENTITIES <= 1 << COMPLETION_QUEUE_BITS);
+$assert(CompletionPoint::size <= ulong::size * 2);
 
 <* Semantic roles supported by one selected queue. *>
 bitstruct QueueRoles : uint {
@@ -67,6 +74,45 @@ fn bool Queue.equals(self, Queue other) @operator(==) {
     return self.device == other.device
         && self.id == other.id
         && (uint)self.roles == (uint)other.roles;
+}
+
+fn Device completion_point_device(CompletionPoint point) @private {
+    return point.device;
+}
+
+fn uint completion_point_queue_id(CompletionPoint point) @private {
+    return (uint)(point.payload & COMPLETION_QUEUE_MASK);
+}
+
+fn ulong completion_point_sequence(CompletionPoint point) @private {
+    return point.payload >> COMPLETION_QUEUE_BITS;
+}
+
+fn CompletionPoint? make_completion_point(
+    Queue queue,
+    ulong sequence,
+) @private {
+    if (!queue.is_valid() || queue.id >= MAX_SELECTED_QUEUE_IDENTITIES) {
+        return INVALID_HANDLE~;
+    }
+    if (sequence == 0 || sequence > MAX_COMPLETION_SEQUENCE) {
+        return INVALID_ARGUMENT~;
+    }
+    return {
+        .device  = queue.device,
+        .payload = (sequence << COMPLETION_QUEUE_BITS) | (ulong)queue.id,
+    };
+}
+
+fn CompletionPoint? next_completion_point(
+    Queue queue,
+    ulong* sequence,
+) @private {
+    if (sequence == null) return INVALID_ARGUMENT~;
+    if (*sequence == MAX_COMPLETION_SEQUENCE) return SLOT_TABLE_FULL~;
+    CompletionPoint point = make_completion_point(queue, *sequence + 1)!;
+    (*sequence)++;
+    return point;
 }
 
 fn bool queue_roles_equal(QueueRoles first, QueueRoles second) @private {
@@ -414,6 +460,24 @@ fn void? validate_queue(
         return INVALID_HANDLE~;
     }
     if (queue.device != *device || !queue_id_is_selected(operation, queue)) {
+        return INVALID_HANDLE~;
+    }
+}
+
+fn void? validate_completion_point(
+    DeviceOperation* operation,
+    Device* device,
+    CompletionPoint point,
+) @private {
+    if (operation == null
+        || !operation.active
+        || device == null
+        || !point.is_valid()
+        || point.device != *device) {
+        return INVALID_HANDLE~;
+    }
+    if (completion_point_queue_id(point)
+        >= selected_queues(operation).identity_count) {
         return INVALID_HANDLE~;
     }
 }

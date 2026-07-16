@@ -4,6 +4,7 @@ module gpu;
 typedef SemaphoreValue = ulong;
 
 const uint MAX_SEMAPHORES = 256;
+const CompletionPoint COMPLETION_POINT_INVALID = {};
 
 <* Pipeline stage for barrier before/after pairs and semaphore wait/signal points. *>
 enum Stage : int {
@@ -64,6 +65,12 @@ enum TextureUse : int {
     PRESENT,
 }
 
+<* Queue-owned submission progress. Copy and reuse until its device is destroyed. *>
+struct CompletionPoint {
+    Device device;
+    ulong  payload;
+}
+
 <* Orders before_* access against after_* access on a range of one buffer.
    `size` 0 means the whole buffer from `offset` onward (VK_WHOLE_SIZE),
    matching the flush/invalidate/fill convention. *>
@@ -117,6 +124,12 @@ struct SemaphoreSignal {
     SemaphoreHandle semaphore;
     SemaphoreValue  value;
     Stage           stage;
+}
+
+fn bool CompletionPoint.is_valid(self) => self.device.is_valid()
+    && completion_point_sequence(self) != 0;
+fn bool CompletionPoint.equals(self, CompletionPoint other) @operator(==) {
+    return self.device == other.device && self.payload == other.payload;
 }
 
 fn void? resolve_texture_use(
@@ -185,6 +198,36 @@ fn TextureBarrier? texture_transition(
         layout: &barrier.new_layout,
     )!;
     return barrier;
+}
+
+<* Return whether the queue has completed this point. *>
+fn bool? poll_completion(CompletionPoint point) {
+    Device device = point.device;
+    DeviceOperation operation = begin_device_operation(&device)!;
+    defer end_device_operation(&operation);
+    validate_completion_point(&operation, &device, point)!;
+    if (operation.vtable.poll_completion == null) return UNSUPPORTED_FEATURE~;
+    return operation.vtable.poll_completion(
+        &device,
+        completion_point_queue_id(point),
+        completion_point_sequence(point),
+    );
+}
+
+<* Wait up to timeout_ns for the queue to complete this point. A timeout leaves
+   the point unchanged and faults WAIT_TIMEOUT, so the wait may be retried. *>
+fn void? wait_completion(CompletionPoint point, ulong timeout_ns) {
+    Device device = point.device;
+    DeviceOperation operation = begin_device_operation(&device)!;
+    defer end_device_operation(&operation);
+    validate_completion_point(&operation, &device, point)!;
+    if (operation.vtable.wait_completion == null) return UNSUPPORTED_FEATURE~;
+    return operation.vtable.wait_completion(
+        &device,
+        completion_point_queue_id(point),
+        completion_point_sequence(point),
+        timeout_ns,
+    );
 }
 
 <* Create a timeline semaphore. Ownership: release with destroy_semaphore. *>

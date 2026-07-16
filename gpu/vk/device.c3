@@ -74,6 +74,7 @@ struct VkDeviceState {
     vk::Queue                  graphics_queue;
     vk::Queue                  compute_queue;
     vk::Queue                  transfer_queue;
+    QueueCompletionState[]     queue_completions;
     gpu::DeviceCaps            caps;
     bool                       validation;
     bool                       debug_names;
@@ -243,6 +244,8 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .discard_commands    = &vk_discard_commands,
     .submit              = &vk_submit,
     .wait_queue_idle     = &vk_wait_queue_idle,
+    .poll_completion     = &vk_poll_completion,
+    .wait_completion     = &vk_wait_completion,
     .cmd_copy_buffer     = &vk_cmd_copy_buffer,
     .cmd_fill_buffer     = &vk_cmd_fill_buffer,
     .cmd_copy_buffer_to_texture = &vk_cmd_copy_buffer_to_texture,
@@ -668,6 +671,7 @@ fn gpu::Device? create_vk_device_with_selection(
             transfer:     families.transfer_ids[:families.counts.transfer],
         )!;
     state.caps.queues = queue_selection.counts;
+    create_queue_completions(state, &queue_selection)!;
 
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
     return gpu::register_device(
@@ -782,6 +786,7 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
             mem::free(state.semaphores.slots.ptr);
             state.semaphores.slots = {};
         }
+        destroy_queue_completions(state);
         destroy_frame_resources(state);
         destroy_persistent_arena(state);
         if (state.allocator != null) {

@@ -1,5 +1,55 @@
 module gpu;
 
+struct CompletionFixture {
+    ulong current;
+    fault wait_fault;
+    uint  poll_calls;
+    uint  wait_calls;
+    uint  last_queue_id;
+    ulong last_sequence;
+    ulong last_timeout_ns;
+}
+
+fn void completion_fixture_destroy(void* backend_state) {
+    (void)backend_state;
+}
+
+fn bool? completion_fixture_poll(
+    Device* device,
+    uint queue_id,
+    ulong sequence,
+) {
+    CompletionFixture* fixture =
+        (CompletionFixture*)device_backend_state_ptr(device);
+    if (fixture == null) return INVALID_HANDLE~;
+    fixture.poll_calls++;
+    fixture.last_queue_id = queue_id;
+    fixture.last_sequence = sequence;
+    return fixture.current >= sequence;
+}
+
+fn void? completion_fixture_wait(
+    Device* device,
+    uint queue_id,
+    ulong sequence,
+    ulong timeout_ns,
+) {
+    CompletionFixture* fixture =
+        (CompletionFixture*)device_backend_state_ptr(device);
+    if (fixture == null) return INVALID_HANDLE~;
+    fixture.wait_calls++;
+    fixture.last_queue_id = queue_id;
+    fixture.last_sequence = sequence;
+    fixture.last_timeout_ns = timeout_ns;
+    if (fixture.wait_fault) return fixture.wait_fault~;
+}
+
+BackendVTable completion_fixture_vtable = {
+    .destroy_device  = &completion_fixture_destroy,
+    .poll_completion = &completion_fixture_poll,
+    .wait_completion = &completion_fixture_wait,
+};
+
 fn void range_helper() @test {
     assert(range_fits(256, 0, 256), "exact fit passes");
     assert(range_fits(256, 256, 0), "to-end at limit passes offset check");
@@ -7,6 +57,171 @@ fn void range_helper() @test {
     assert(!range_fits(256, 0, 257), "oversized fails");
     assert(!range_fits(256, 200, usz::max), "overflowing size fails");
     assert(range_fits(256, 255, 1), "last byte fits");
+}
+
+fn void completion_points_pack_queue_identity_and_sequence() @test {
+    Device device = { .index = 3, .generation = 7 };
+    Queue queue = {
+        .device = device,
+        .id     = MAX_SELECTED_QUEUE_IDENTITIES - 1,
+        .roles  = { .transfer },
+    };
+
+    CompletionPoint point = make_completion_point(queue, 42)!!;
+
+    assert(CompletionPoint::size <= ulong::size * 2,
+        "a completion point fits in two machine words");
+    assert(point.is_valid(), "a non-zero queue sequence is valid");
+    assert(completion_point_device(point) == device,
+        "the point retains device ownership");
+    assert(completion_point_queue_id(point) == queue.id,
+        "the point retains the compact queue identity");
+    assert(completion_point_sequence(point) == 42,
+        "the point retains the submission sequence");
+}
+
+fn void completion_points_reject_reserved_values() @test {
+    Device device = { .index = 3, .generation = 7 };
+    Queue queue = {
+        .device = device,
+        .id     = 0,
+        .roles  = { .graphics },
+    };
+
+    assert(!COMPLETION_POINT_INVALID.is_valid(),
+        "the zero completion point is invalid");
+    assert(@catch(make_completion_point(queue, 0)) == INVALID_ARGUMENT,
+        "sequence zero remains reserved");
+    queue.id = MAX_SELECTED_QUEUE_IDENTITIES;
+    assert(@catch(make_completion_point(queue, 1)) == INVALID_HANDLE,
+        "an unencodable queue identity is rejected");
+}
+
+fn void completion_sequences_are_monotonic_and_stop_before_wrap() @test {
+    Device device = { .index = 3, .generation = 7 };
+    Queue queue = {
+        .device = device,
+        .id     = 0,
+        .roles  = { .graphics },
+    };
+    ulong sequence;
+
+    CompletionPoint first = next_completion_point(queue, &sequence)!!;
+    CompletionPoint second = next_completion_point(queue, &sequence)!!;
+    assert(completion_point_sequence(first) == 1,
+        "the first queue submission uses sequence one");
+    assert(completion_point_sequence(second) == 2,
+        "queue submission sequences increase monotonically");
+
+    sequence = MAX_COMPLETION_SEQUENCE;
+    assert(@catch(next_completion_point(queue, &sequence)) == SLOT_TABLE_FULL,
+        "sequence exhaustion faults before wrap");
+    assert(sequence == MAX_COMPLETION_SEQUENCE,
+        "sequence exhaustion does not mutate queue state");
+}
+
+fn void completion_points_poll_and_wait_without_consumption() @test {
+    CompletionFixture fixture = { .current = 6 };
+    Device device = register_device(
+        backend:       BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &completion_fixture_vtable,
+        backend_state: &fixture,
+    )!!;
+    Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
+    CompletionPoint point = make_completion_point(queue, 7)!!;
+    CompletionPoint original = point;
+
+    assert(!poll_completion(point)!!,
+        "poll reports an incomplete queue sequence without blocking");
+    fixture.current = 7;
+    assert(poll_completion(point)!!,
+        "poll reports an already-complete queue sequence");
+    fixture.wait_fault = WAIT_TIMEOUT;
+    assert(@catch(wait_completion(point, 25)) == WAIT_TIMEOUT,
+        "wait timeout remains retryable");
+    assert(point == original,
+        "poll and wait leave the reusable completion point unchanged");
+    fixture.wait_fault = {};
+    wait_completion(point, 50)!!;
+
+    assert(fixture.poll_calls == 2,
+        "both polls reach the owning backend");
+    assert(fixture.wait_calls == 2,
+        "a timed-out point can be waited again");
+    assert(fixture.last_queue_id == queue.id,
+        "host waits resolve the point's queue identity");
+    assert(fixture.last_sequence == 7,
+        "host waits preserve the point's sequence");
+    assert(fixture.last_timeout_ns == 50,
+        "host waits preserve the caller's timeout");
+
+    destroy_device(&device)!!;
+}
+
+fn void completion_points_reject_stale_and_foreign_ownership() @test {
+    CompletionFixture first_fixture;
+    CompletionFixture second_fixture;
+    Device first = register_device(
+        backend:       BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &completion_fixture_vtable,
+        backend_state: &first_fixture,
+    )!!;
+    Device second = register_device(
+        backend:       BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &completion_fixture_vtable,
+        backend_state: &second_fixture,
+    )!!;
+    Queue first_queue = get_queue(&first, QueueKind.GRAPHICS)!!;
+    CompletionPoint point = make_completion_point(first_queue, 1)!!;
+
+    DeviceOperation second_operation = begin_device_operation(&second)!!;
+    assert(
+        @catch(validate_completion_point(&second_operation, &second, point))
+            == INVALID_HANDLE,
+        "a point cannot be used with another device"
+    );
+    end_device_operation(&second_operation);
+
+    CompletionPoint malformed = make_completion_point({
+        .device = first,
+        .id     = 1,
+        .roles  = { .graphics },
+    }, 1)!!;
+    assert(@catch(poll_completion(malformed)) == INVALID_HANDLE,
+        "an unselected queue identity faults before backend work");
+    assert(first_fixture.poll_calls == 0,
+        "malformed points do not reach the backend");
+
+    destroy_device(&first)!!;
+    assert(@catch(poll_completion(point)) == INVALID_HANDLE,
+        "a point becomes stale with its device");
+    destroy_device(&second)!!;
+}
+
+fn void completion_point_creation_allocates_no_public_object() @test {
+    CompletionFixture fixture;
+    Device device = register_device(
+        backend:       BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &completion_fixture_vtable,
+        backend_state: &fixture,
+    )!!;
+    Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
+    DeviceSlot* slot = &device_slots[device.index];
+    ulong children_before = slot.live_children.load(AtomicOrdering.ACQUIRE);
+    ulong sequence;
+
+    for (uint index = 0; index < 1024; index++) {
+        (void)next_completion_point(queue, &sequence)!!;
+    }
+
+    ulong children_after = slot.live_children.load(AtomicOrdering.ACQUIRE);
+    assert(children_after == children_before,
+        "creating completion values allocates no device child");
+    destroy_device(&device)!!;
 }
 
 fn void queue_selection_aliases_roles_by_default() @test {

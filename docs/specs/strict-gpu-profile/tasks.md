@@ -119,19 +119,19 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.1 Compact queue-owned completion points
 
-- [ ] Add `CompletionPoint` and queue-owned monotonic submission sequences in `gpu/sync.c3`, `gpu/queue.c3`, `gpu/vk/sync.c3`, and `gpu/vk/queue.c3`.
+- [x] Add `CompletionPoint` and queue-owned monotonic submission sequences in `gpu/sync.c3`, `gpu/queue.c3`, `gpu/vk/sync.c3`, and `gpu/vk/queue.c3`.
   - **Depends on:** 2.4.
   - **Contract:** a point identifies one queue and sequence, fits within two machine words, allocates no public object, remains reusable until device destruction, and supports host poll and wait operations; timeout expiry faults retryable `WAIT_TIMEOUT` without invalidating or changing the point.
   - **Edges:** zero or reserved sequence, sequence exhaustion before native submission, stale queue/device, foreign device, already-complete points, and wait timeout expiry.
-  - **Verify:** representation-size assertion; packing, monotonicity, exhaustion, stale, poll, and wait tests; allocation instrumentation proving no per-point allocation.
+  - **Verify:** representation-size assertion; packing, monotonicity, exhaustion, stale, poll, and wait tests; public child-count instrumentation proving point creation allocates no public object.
 
 ### 3.2 Transactional submission and cross-queue waits
 
 - [ ] Change submission in `gpu/queue.c3`, `gpu/command.c3`, `gpu/vk/queue.c3`, and `gpu/vk/sync.c3` to consume executable command tokens only after successful native submission and return one `CompletionPoint`.
   - **Depends on:** 3.1.
-  - **Contract:** cross-queue waits accept reusable completion points; same-queue order is inherent; validation or retryable failure publishes no point and preserves retryable tokens.
+  - **Contract:** cross-queue waits accept reusable completion points; same-queue order is inherent; successful submission publishes exactly one contiguous queue sequence; validation or retryable failure publishes no point and preserves retryable tokens; destruction readiness observes completed queue timelines without requiring `wait_queue_idle`.
   - **Edges:** empty submit, duplicate token, mixed queues/devices, stale wait point, wait on a later same-queue sequence, device loss, and partial native preparation failure.
-  - **Verify:** command state-machine tests and native transfer/compute/graphics cross-queue tests, including failure injection before submit.
+  - **Verify:** command state-machine tests and native transfer/compute/graphics cross-queue tests, including failure injection before submit and completed-submission destruction readiness.
 
 ### 3.3 Remove public synchronization objects
 
