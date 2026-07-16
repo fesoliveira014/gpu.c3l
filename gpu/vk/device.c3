@@ -79,6 +79,7 @@ struct VkDeviceState {
     uint                       compute_completion_id;
     uint                       transfer_completion_id;
     gpu::DeviceCaps            caps;
+    ulong                      max_timeline_semaphore_value_difference;
     bool                       validation;
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
@@ -105,7 +106,7 @@ struct VkDeviceState {
     // Set unconditionally by vk_submit so end_frame also waits off-frame use.
     bool                       compute_used_since_frame;
     bool                       transfer_used_since_frame;
-    // Off-frame queues not yet covered by end_frame or an explicit idle wait.
+    // Off-frame queues not yet covered by end_frame or observed completion.
     Atomic{uint}               off_frame_pending_queues;
     // Lock order: helper_record_mutex -> transfer_mutex -> resource_mutex ->
     // command_mutex. Queue mutexes are never nested with command_mutex.
@@ -129,7 +130,6 @@ struct VkDeviceState {
     // Reserved for the four blocking helpers; never touched by Tier-C
     // recording, so it never races the default context's pool.
     gpu::RecordingContextHandle helper_context;
-    SemaphoreTable             semaphores;
     ShaderTable                shaders;
     PipelineTable              pipelines;
     PipelineCacheTable         pipeline_cache;
@@ -243,7 +243,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .end_commands        = &vk_end_commands,
     .discard_commands    = &vk_discard_commands,
     .submit              = &vk_submit,
-    .wait_queue_idle     = &vk_wait_queue_idle,
     .poll_completion     = &vk_poll_completion,
     .wait_completion     = &vk_wait_completion,
     .cmd_copy_buffer     = &vk_cmd_copy_buffer,
@@ -255,9 +254,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .cmd_buffer_barrier  = &vk_cmd_buffer_barrier,
     .cmd_global_barrier  = &vk_cmd_global_barrier,
     .cmd_texture_barrier = &vk_cmd_texture_barrier,
-    .create_semaphore    = &vk_create_semaphore,
-    .destroy_semaphore   = &vk_destroy_semaphore,
-    .wait_semaphore      = &vk_wait_semaphore,
     .get_texture_format_support = &vk_get_texture_format_support,
     .supports_texture_desc      = &vk_supports_texture_desc,
     .create_texture          = &vk_create_texture,
@@ -614,8 +610,6 @@ fn gpu::Device? create_vk_device_with_selection(
     state.default_context = create_builtin_recording_context(state)!;
     state.helper_context = create_builtin_recording_context(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.RECORDING_CONTEXTS)!;
-    state.semaphores.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SEMAPHORE);
-    state.semaphores.slots = mem::new_array(SemaphoreCell, gpu::MAX_SEMAPHORES);
     uint pipeline_capacity;
     if (state.strict_heap.enabled) {
         state.shaders.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SHADER);
@@ -650,11 +644,12 @@ fn gpu::Device? create_vk_device_with_selection(
         .sampler_capacity     = state.strict_heap.sampler_capacity,
     };
     state.caps = build_caps(
-        base:            &features2.features,
-        v12:             &features12,
-        v13:             &features13,
-        physical_device: state.physical_device,
-        inputs:          &caps_inputs,
+        base:                    &features2.features,
+        v12:                     &features12,
+        v13:                     &features13,
+        physical_device:         state.physical_device,
+        inputs:                  &caps_inputs,
+        max_timeline_difference: &state.max_timeline_semaphore_value_difference,
     );
 
     gpu::QueueRequirements requirements = queue_requirements == null
@@ -794,13 +789,6 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
             }
             mem::free(state.recording_contexts.slots.ptr);
             state.recording_contexts.slots = {};
-        }
-        if (state.semaphores.slots.ptr != null) {
-            foreach (&cell : state.semaphores.slots[:state.semaphores.next_new]) {
-                if (cell.used) vk::destroy_semaphore(state.device, cell.value.semaphore, null);
-            }
-            mem::free(state.semaphores.slots.ptr);
-            state.semaphores.slots = {};
         }
         destroy_queue_completions(state);
         destroy_frame_resources(state);
@@ -1200,20 +1188,28 @@ fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString na
 }
 
 <* Report enabled capability state and configured strict heap capacities. *>
-fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13, vk::PhysicalDevice physical_device, CapsInputs* inputs) @private {
+fn gpu::DeviceCaps build_caps(
+    vk::PhysicalDeviceFeatures* base,
+    vk::PhysicalDeviceVulkan12Features* v12,
+    vk::PhysicalDeviceVulkan13Features* v13,
+    vk::PhysicalDevice physical_device,
+    CapsInputs* inputs,
+    ulong* max_timeline_difference,
+) @private {
     vk::PhysicalDeviceTimelineSemaphoreProperties timeline_props =
         vk::physical_device_timeline_semaphore_properties();
     vk::PhysicalDeviceProperties2 props2 =
         vk::physical_device_properties2().set_next(&timeline_props);
     vk::get_physical_device_properties2(physical_device, &props2);
     vk::PhysicalDeviceProperties props = props2.properties;
+    *max_timeline_difference =
+        timeline_props.max_timeline_semaphore_value_difference;
     return (gpu::DeviceCaps){
         .strict_enabled            = inputs.strict_enabled,
         .presentation_enabled      = inputs.presentation_enabled,
         .buffer_device_address      = v12.buffer_device_address != 0,
         .synchronization2           = v13.synchronization2 != 0,
         .dynamic_rendering          = v13.dynamic_rendering != 0,
-        .timeline_semaphore         = v12.timeline_semaphore != 0,
         .shader_int64               = base.shader_int64 != 0,
         .draw_indirect_count        = v12.draw_indirect_count != 0,
         .descriptor_buffer          = inputs.buffer_enabled,
@@ -1231,8 +1227,6 @@ fn gpu::DeviceCaps build_caps(vk::PhysicalDeviceFeatures* base, vk::PhysicalDevi
             .z = props.limits.max_compute_work_group_count[2],
         },
         .max_draw_indirect_count    = props.limits.max_draw_indirect_count,
-        .max_timeline_semaphore_value_difference =
-            timeline_props.max_timeline_semaphore_value_difference,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,

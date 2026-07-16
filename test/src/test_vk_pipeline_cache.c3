@@ -365,7 +365,7 @@ fn void cull_replay_renders_per_alias() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, rb_culled, 0, 0)!!;
     gpu::GpuSpan culled_span = gpu::get_buffer_span(&device, rb_culled)!!;
@@ -452,7 +452,7 @@ fn void alias_survives_peer_destroy() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
     gpu::destroy_pipeline(&device, survivor)!!;

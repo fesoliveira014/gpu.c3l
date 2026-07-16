@@ -63,11 +63,9 @@ struct QueueSelection @private {
 <* Submit command lists to their queue. An empty batch targets the frame-anchor
    queue. A non-zero `swapchain` requires the graphics queue. *>
 struct SubmitDesc {
-    CommandList[]      command_lists;
-    CompletionPoint[]  completion_waits;
-    SemaphoreWait[]    waits;
-    SemaphoreSignal[]  signals;
-    SwapchainHandle    swapchain;
+    CommandList[]     command_lists;
+    CompletionPoint[] completion_waits;
+    SwapchainHandle   swapchain;
 }
 
 fn bool Queue.is_valid(self) => self.device.is_valid();
@@ -534,20 +532,6 @@ fn CompletionPoint? submit(Device* device, SubmitDesc* desc) {
     foreach (wait : desc.completion_waits) {
         validate_completion_point(&operation, device, wait)!;
     }
-    foreach (&wait : desc.waits) {
-        validate_resource_owner(
-            &operation,
-            wait.semaphore.owner,
-            ResourceOwnerKind.SEMAPHORE,
-        )!;
-    }
-    foreach (&signal : desc.signals) {
-        validate_resource_owner(
-            &operation,
-            signal.semaphore.owner,
-            ResourceOwnerKind.SEMAPHORE,
-        )!;
-    }
     if (desc.swapchain != SWAPCHAIN_HANDLE_INVALID) {
         validate_resource_owner(
             &operation,
@@ -566,12 +550,4 @@ fn CompletionPoint? submit(Device* device, SubmitDesc* desc) {
         (uint)desc.command_lists.len,
     );
     return point;
-}
-
-<* Block until the queue drains — a heavyweight sync for shutdown and one-shot work, not per-frame pacing. *>
-fn void? wait_queue_idle(Device* device, QueueKind queue) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_selected_queue_kind(&operation, queue)!;
-    return operation.vtable.wait_queue_idle(device, queue);
 }

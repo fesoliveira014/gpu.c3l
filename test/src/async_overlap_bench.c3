@@ -263,16 +263,6 @@ fn int main() {
     gpu::PipelineHandle gfx_pipeline = gpu::create_graphics_pipeline(&device, &gfx_pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, gfx_pipeline)!!;
 
-    gpu::SemaphoreDesc sem_a_desc = { .debug_name = "overlap_phase_a" };
-    gpu::SemaphoreHandle sem_a = gpu::create_semaphore(&device, &sem_a_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem_a)!!;
-    gpu::SemaphoreDesc sem_c_desc = { .debug_name = "overlap_phase_b_compute" };
-    gpu::SemaphoreHandle sem_c = gpu::create_semaphore(&device, &sem_c_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem_c)!!;
-    gpu::SemaphoreDesc sem_g_desc = { .debug_name = "overlap_phase_b_graphics" };
-    gpu::SemaphoreHandle sem_g = gpu::create_semaphore(&device, &sem_g_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem_g)!!;
-
     // One startup transition: re-recording UNDEFINED->COLOR_ATTACHMENT per rep
     // would fault INVALID_RESOURCE_STATE under the pending-layout model.
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -287,7 +277,7 @@ fn int main() {
     gpu::CommandList[1] transition_lists = { transition_cmd };
     gpu::SubmitDesc transition_submit = { .command_lists = transition_lists[..] };
     gpu::submit(&device, &transition_submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_bench_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
     // Solo baselines double as calibration: two proportional rounds nudge
@@ -311,7 +301,7 @@ fn int main() {
         gpu::CommandList[1] comp_lists = { comp_cmd };
         gpu::SubmitDesc comp_submit = { .command_lists = comp_lists[..] };
         gpu::submit(&device, &comp_submit)!!;
-        gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+        wait_bench_queue(&device, gpu::QueueKind.COMPUTE)!!;
         double comp_wall_ns = (double)(long)comp_start.to_now();
         if (timestamps_ok) {
             double begin_ns; double end_ns;
@@ -360,7 +350,7 @@ fn int main() {
         gpu::CommandList[1] frag_lists = { frag_cmd };
         gpu::SubmitDesc frag_submit = { .command_lists = frag_lists[..] };
         gpu::submit(&device, &frag_submit)!!;
-        gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+        wait_bench_queue(&device, gpu::QueueKind.GRAPHICS)!!;
         double frag_wall_ns = (double)(long)frag_start.to_now();
         if (timestamps_ok) {
             double begin_ns; double end_ns;
@@ -389,9 +379,6 @@ fn int main() {
     double[REPS] comp_parts;
     double[REPS] intersections;
 
-    ulong sem_a_counter = 0;
-    ulong sem_c_counter = 0;
-    ulong sem_g_counter = 0;
 
     for (uint rep = 0; rep < REPS; rep++) {
         frame_token = gpu::begin_frame(&device)!!;
@@ -408,8 +395,7 @@ fn int main() {
         };
         for (uint i = 0; i < 12; i++) verts[i] = fullscreen_triangle[i];
 
-        // Phase A: dependency-chained through one timeline semaphore.
-        ulong av = sem_a_counter + 1;
+        // Phase A chains graphics after compute.
         std::time::Clock a_start = std::time::clock::now();
         gpu::CommandList a_compute = record_compute(
 
@@ -425,9 +411,13 @@ fn int main() {
 
         );
         gpu::CommandList[1] a_compute_lists = { a_compute };
-        gpu::SemaphoreSignal[1] a_compute_signals = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)av, .stage = gpu::Stage.COMPUTE_SHADER }};
-        gpu::SubmitDesc a_compute_submit = { .command_lists = a_compute_lists[..], .signals = a_compute_signals[..] };
-        gpu::submit(&device, &a_compute_submit)!!;
+        gpu::SubmitDesc a_compute_submit = {
+            .command_lists = a_compute_lists[..],
+        };
+        gpu::CompletionPoint a_compute_completion = gpu::submit(
+            &device,
+            &a_compute_submit,
+        )!!;
 
         gpu::CommandList a_graphics = record_graphics(
 
@@ -455,21 +445,23 @@ fn int main() {
 
         );
         gpu::CommandList[1] a_graphics_lists = { a_graphics };
-        // Stage.PRESENT is the public all-commands wait stage.
-        gpu::SemaphoreWait[1] a_graphics_waits = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)av, .stage = gpu::Stage.PRESENT }};
-        gpu::SemaphoreSignal[1] a_graphics_signals = {{ .semaphore = sem_a, .value = (gpu::SemaphoreValue)(av + 1), .stage = gpu::Stage.COLOR_ATTACHMENT }};
-        gpu::SubmitDesc a_graphics_submit = { .command_lists = a_graphics_lists[..], .waits = a_graphics_waits[..], .signals = a_graphics_signals[..] };
-        gpu::submit(&device, &a_graphics_submit)!!;
+        gpu::CompletionPoint[1] a_graphics_waits = { a_compute_completion };
+        gpu::SubmitDesc a_graphics_submit = {
+            .command_lists    = a_graphics_lists[..],
+            .completion_waits = a_graphics_waits[..],
+        };
+        gpu::CompletionPoint a_graphics_completion = gpu::submit(
+            &device,
+            &a_graphics_submit,
+        )!!;
 
-        gpu::wait_semaphore(&device, sem_a, (gpu::SemaphoreValue)(av + 1), PHASE_WAIT_TIMEOUT_NS)!!;
+        gpu::wait_completion(
+            a_graphics_completion,
+            PHASE_WAIT_TIMEOUT_NS,
+        )!!;
         wall_a[rep] = (double)(long)a_start.to_now();
-        sem_a_counter = av + 1;
 
-        // Phase B: independent submission through two timelines (a single
-        // shared timeline would race the strictly-increasing rule across
-        // two signaling queues).
-        ulong cv = sem_c_counter + 1;
-        ulong gv = sem_g_counter + 1;
+        // Phase B submits the workloads independently.
         std::time::Clock b_start = std::time::clock::now();
         gpu::CommandList b_compute = record_compute(
 
@@ -485,9 +477,13 @@ fn int main() {
 
         );
         gpu::CommandList[1] b_compute_lists = { b_compute };
-        gpu::SemaphoreSignal[1] b_compute_signals = {{ .semaphore = sem_c, .value = (gpu::SemaphoreValue)cv, .stage = gpu::Stage.COMPUTE_SHADER }};
-        gpu::SubmitDesc b_compute_submit = { .command_lists = b_compute_lists[..], .signals = b_compute_signals[..] };
-        gpu::submit(&device, &b_compute_submit)!!;
+        gpu::SubmitDesc b_compute_submit = {
+            .command_lists = b_compute_lists[..],
+        };
+        gpu::CompletionPoint b_compute_completion = gpu::submit(
+            &device,
+            &b_compute_submit,
+        )!!;
 
         gpu::CommandList b_graphics = record_graphics(
 
@@ -515,15 +511,23 @@ fn int main() {
 
         );
         gpu::CommandList[1] b_graphics_lists = { b_graphics };
-        gpu::SemaphoreSignal[1] b_graphics_signals = {{ .semaphore = sem_g, .value = (gpu::SemaphoreValue)gv, .stage = gpu::Stage.COLOR_ATTACHMENT }};
-        gpu::SubmitDesc b_graphics_submit = { .command_lists = b_graphics_lists[..], .signals = b_graphics_signals[..] };
-        gpu::submit(&device, &b_graphics_submit)!!;
+        gpu::SubmitDesc b_graphics_submit = {
+            .command_lists = b_graphics_lists[..],
+        };
+        gpu::CompletionPoint b_graphics_completion = gpu::submit(
+            &device,
+            &b_graphics_submit,
+        )!!;
 
-        gpu::wait_semaphore(&device, sem_c, (gpu::SemaphoreValue)cv, PHASE_WAIT_TIMEOUT_NS)!!;
-        gpu::wait_semaphore(&device, sem_g, (gpu::SemaphoreValue)gv, PHASE_WAIT_TIMEOUT_NS)!!;
+        gpu::wait_completion(
+            b_compute_completion,
+            PHASE_WAIT_TIMEOUT_NS,
+        )!!;
+        gpu::wait_completion(
+            b_graphics_completion,
+            PHASE_WAIT_TIMEOUT_NS,
+        )!!;
         wall_b[rep] = (double)(long)b_start.to_now();
-        sem_c_counter = cv;
-        sem_g_counter = gv;
 
         double intersection_ns = 0.0;
         if (timestamps_ok) {

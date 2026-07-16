@@ -50,13 +50,6 @@ struct PipelineHandle {
 }
 $assert PipelineHandle::size <= ulong::size * 2;
 
-struct SemaphoreHandle {
-    ulong owner;
-    uint  index;
-    uint  generation;
-}
-$assert SemaphoreHandle::size <= ulong::size * 2;
-
 struct SwapchainHandle {
     ulong owner;
     uint  index;
@@ -105,7 +98,6 @@ const AllocationHandle ALLOCATION_HANDLE_INVALID = {};
 const BufferHandle BUFFER_HANDLE_INVALID       = {};
 const TextureHandle TEXTURE_HANDLE_INVALID     = {};
 const PipelineHandle PIPELINE_HANDLE_INVALID   = {};
-const SemaphoreHandle SEMAPHORE_HANDLE_INVALID = {};
 const SwapchainHandle SWAPCHAIN_HANDLE_INVALID = {};
 const ShaderHandle SHADER_HANDLE_INVALID       = {};
 const RecordingContextHandle RECORDING_CONTEXT_HANDLE_INVALID = {};
@@ -137,12 +129,6 @@ fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
 }
 fn bool PipelineHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 fn bool PipelineHandle.equals(self, PipelineHandle other) @operator(==) {
-    return self.owner == other.owner
-        && self.index == other.index
-        && self.generation == other.generation;
-}
-fn bool SemaphoreHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
-fn bool SemaphoreHandle.equals(self, SemaphoreHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;

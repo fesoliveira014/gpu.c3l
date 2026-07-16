@@ -69,7 +69,7 @@ struct DedicatedRetireState {
 
 struct ReadbackTicketState @private {
     gpu::GpuSpan             span;
-    gpu::SemaphoreValue      value;
+    ulong                    value;
     gpu::BufferHandle        dedicated;
     gpu::CommandListHandle   command;
     ulong                    range_end;
@@ -1034,7 +1034,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
         vk_cmd_buffer_barrier(&commands, &next_use)!;
         vk_end_commands(&commands)!;
     }
-    submit_and_wait(device, &commands, queue)!;
+    submit_and_wait(device, &commands)!;
     finish_helper_timeline(state, &helper_value, "upload_buffer_data")!;
 }
 
@@ -1168,7 +1168,7 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
         vk_cmd_texture_barrier(&commands, &next_use)!;
         vk_end_commands(&commands)!;
     }
-    submit_and_wait(device, &commands, queue)!;
+    submit_and_wait(device, &commands)!;
     finish_helper_timeline(state, &helper_value, "upload_texture_data")!;
 }
 
@@ -1318,7 +1318,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
         )~;
     }
 
-    submit_and_wait(device, &commands, queue)!;
+    submit_and_wait(device, &commands)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
     finish_helper_timeline(state, &helper_value, "readback_buffer_data")!;
@@ -1468,24 +1468,26 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
         )~;
     }
 
-    submit_and_wait(device, &commands, queue)!;
+    submit_and_wait(device, &commands)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
     finish_helper_timeline(state, &helper_value, "readback_texture_data")!;
 }
 
-<* Submits an already-ended command list, blocks until queue idle. Touches
-   no timeline — the caller owns its tag's signaling. Runs after the caller
-   releases helper_record_mutex, so a successor records while this waits. *>
+<* Submit an ended helper list and wait for its completion. The caller owns its retirement tag. *>
 fn void? submit_and_wait(
     gpu::Device* device,
     gpu::CommandList* commands,
-    gpu::QueueKind queue,
 ) @private {
     gpu::CommandList[1] lists = { *commands };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    vk_submit(device, &submit)!;
-    return vk_wait_queue_idle(device, queue);
+    gpu::CompletionPoint point = vk_submit(device, &submit)!;
+    return vk_wait_completion(
+        device,
+        gpu::completion_point_queue_id(point),
+        gpu::completion_point_sequence(point),
+        ulong::max,
+    );
 }
 
 struct TicketAlloc @private {
@@ -1546,7 +1548,7 @@ fn gpu::ReadbackTicket? ticket_alloc(
             TicketAlloc alloc = arena_alloc;
             ReadbackTicketState data = {
                 .span      = alloc.span,
-                .value     = (gpu::SemaphoreValue)tag.value,
+                .value     = tag.value,
                 .command   = command,
                 .range_end = alloc.range_end,
             };
@@ -1571,7 +1573,7 @@ fn gpu::ReadbackTicket? ticket_alloc(
     if (try span = vk_get_buffer_span(&shim, buffer)) {
         ReadbackTicketState data = {
             .span      = span,
-            .value     = (gpu::SemaphoreValue)tag.value,
+            .value     = tag.value,
             .dedicated = buffer,
             .command   = command,
         };
@@ -1849,7 +1851,7 @@ fn void? record_ticket_host_barrier(gpu::CommandList* commands, ReadbackTicketSt
 fn bool? vk_poll_readback(gpu::Device* device, gpu::ReadbackTicket* ticket) @private {
     if (ticket == null || !ticket.is_valid()) return false;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    gpu::SemaphoreValue value;
+    ulong value;
     state.transfer_mutex.lock()!!;
     if (try data = resolve_readback_ticket(state, *ticket)) {
         value = data.value;

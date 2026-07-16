@@ -190,7 +190,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
     float* texels = (float*)out_span.cpu;
@@ -306,7 +306,7 @@ fn void storage_write_direct_readback() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
     char* bytes = (char*)rb_span.cpu;
@@ -514,7 +514,7 @@ fn void mip_subset_view_sampled() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
     float* sampled = (float*)out_span.cpu;

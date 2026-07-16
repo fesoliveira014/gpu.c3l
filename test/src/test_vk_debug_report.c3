@@ -54,7 +54,6 @@ struct LeakCapture {
     uint textures;
     uint pipelines;
     uint shaders;
-    uint semaphores;
     uint contexts;
     uint texture_descriptors;
     uint samplers;
@@ -104,7 +103,6 @@ fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
             capture.pipeline_identity_valid = message.resource.has_public_identity
                 && (first || second);
         case gpu::DebugResourceKind.SHADER:             capture.shaders++;
-        case gpu::DebugResourceKind.SEMAPHORE:          capture.semaphores++;
         case gpu::DebugResourceKind.RECORDING_CONTEXT:  capture.contexts++;
         case gpu::DebugResourceKind.TEXTURE_DESCRIPTOR: capture.texture_descriptors++;
         case gpu::DebugResourceKind.SAMPLER:            capture.samplers++;
@@ -456,8 +454,6 @@ fn void leak_reporters_count_leaks() @test {
     gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
 
-    gpu::SemaphoreDesc sem_desc = { .debug_name = "leaky_semaphore" };
-    gpu::SemaphoreHandle semaphore = gpu::create_semaphore(&device, &sem_desc)!!;
     gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!!;
 
     gpu::TextureIndex texture_index = gpu::create_texture_descriptor(&device, texture, null)!!;
@@ -483,18 +479,17 @@ fn void leak_reporters_count_leaks() @test {
     assert(vk::report_texture_leaks(state) == 1, "one leaked texture counted");
     assert(vk::report_pipeline_leaks(state) == 1, "one leaked cache entry counted");
     assert(vk::report_shader_leaks(state) == 1, "one leaked shader counted");
-    assert(vk::report_semaphore_leaks(state) == 1, "one leaked semaphore counted");
     assert(vk::report_context_leaks(state) == 1, "one leaked context counted (default and helper exempt)");
     vk::report_descriptor_leaks(state);
 
-    assert(capture.total == 8, "each live resource or descriptor emits exactly one structured warning");
+    assert(capture.total == 7, "each live resource or descriptor emits exactly one structured warning");
     assert(capture.buffers == 1 && capture.textures == 1 && capture.pipelines == 1,
         "buffer, texture, and pipeline leak kinds are exact");
-    assert(capture.shaders == 1 && capture.semaphores == 1 && capture.contexts == 1,
-        "shader, semaphore, and context leak kinds are exact");
+    assert(capture.shaders == 1 && capture.contexts == 1,
+        "shader and context leak kinds are exact");
     assert(capture.texture_descriptors == 1 && capture.samplers == 1,
         "descriptor leak kinds are exact");
-    assert(capture.public_identities == 8,
+    assert(capture.public_identities == 7,
         "every slot-backed leak carries one public identity");
     assert(capture.pipeline_identity_valid, "pipeline cache leak identifies one live public alias");
     assert(capture.metadata_valid, "leak diagnostics are warning, resource-lifetime, faultless destroy-device messages");
@@ -507,7 +502,6 @@ fn void leak_reporters_count_leaks() @test {
     gpu::destroy_texture_descriptor(&device, texture_index)!!;
     gpu::destroy_sampler(&device, sampler)!!;
     gpu::destroy_recording_context(&device, ctx)!!;
-    gpu::destroy_semaphore(&device, semaphore)!!;
     gpu::destroy_pipeline(&device, first_alias)!!;
     gpu::destroy_pipeline(&device, second_alias)!!;
     gpu::destroy_shader(&device, shader)!!;
@@ -523,13 +517,13 @@ fn void leak_reporters_count_leaks() @test {
     };
     gpu::GpuSpan persistent = gpu::alloc_persistent_span(&device, &persistent_desc)!!;
     assert(vk::report_resource_leaks(state) == 1, "one persistent span leak counted");
-    assert(capture.total == 9 && capture.persistent_spans == 1,
+    assert(capture.total == 8 && capture.persistent_spans == 1,
         "persistent allocation summary emits one structured warning");
     assert(capture.metadata_valid, "persistent warning uses the same resource-lifetime contract");
     gpu::free_persistent_span(&device, persistent)!!;
 
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
-    assert(capture.total == 9, "clean leak report emits nothing");
+    assert(capture.total == 8, "clean leak report emits nothing");
     gpu::destroy_device(&device)!!;
 }
 
@@ -640,7 +634,7 @@ fn void labels_record_validation_clean() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
     fault ended = @catch(gpu::cmd_begin_label(&cmd, "too_late"));

@@ -219,37 +219,6 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     assert(stats_of(&device).empty_signal_submits == stats_before.empty_signal_submits + 1, "retry records one empty signal");
 }
 
-fn void post_claim_fault_restores_executable_token() @test {
-    gpu::Device device = make_submit_stats_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::CommandList cmd = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SemaphoreSignal[1] bad_signals = {{
-        .semaphore = gpu::SEMAPHORE_HANDLE_INVALID,
-        .value = (gpu::SemaphoreValue)1,
-        .stage = gpu::Stage.TRANSFER,
-    }};
-    gpu::SubmitDesc bad = {
-        .command_lists = lists[..],
-        .signals = bad_signals[..],
-    };
-    ulong before = stats_of(&device).queue_submits;
-    assert(@catch(gpu::submit(&device, &bad)) == gpu::INVALID_HANDLE,
-        "post-claim semaphore validation faults INVALID_HANDLE");
-    assert(stats_of(&device).queue_submits == before,
-        "post-claim rejection reaches no Vulkan queue submit");
-
-    gpu::SubmitDesc good = { .command_lists = lists[..] };
-    gpu::submit(&device, &good)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-}
-
 fn vk::Result reject_user_submit(
     vk::Queue queue,
     uint submit_count,
@@ -367,11 +336,11 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
     ulong next_before = completion.next_sequence;
     ulong observed_before = completion.observed_completed_sequence;
-    ulong limit_before = state.caps.max_timeline_semaphore_value_difference;
+    ulong limit_before = state.max_timeline_semaphore_value_difference;
 
     completion.next_sequence = 2;
     completion.observed_completed_sequence = 0;
-    state.caps.max_timeline_semaphore_value_difference = 2;
+    state.max_timeline_semaphore_value_difference = 2;
     counted_user_submit_calls = 0;
     completion_counter_query_calls = 0;
     completion_counter_value = 0;
@@ -395,7 +364,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
 
     completion.next_sequence = next_before;
     completion.observed_completed_sequence = observed_before;
-    state.caps.max_timeline_semaphore_value_difference = limit_before;
+    state.max_timeline_semaphore_value_difference = limit_before;
     gpu::CompletionPoint point = gpu::submit(&device, &desc)!!;
     gpu::wait_completion(point, 1_000_000_000)!!;
 }

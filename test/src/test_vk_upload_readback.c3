@@ -185,9 +185,9 @@ fn void recorded_staging_upload(StagingReuseFixture* fixture, gpu::QueueKind que
     gpu::CommandList[1] lists = { commands };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&fixture.device, &submit)!!;
-    gpu::wait_queue_idle(&fixture.device, queue)!!;
+    wait_test_queue(&fixture.device, queue)!!;
     gpu::end_frame(&frame)!!;
-    gpu::wait_queue_idle(&fixture.device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&fixture.device, gpu::QueueKind.GRAPHICS)!!;
     verify_staging_payload(fixture, index, payload);
 }
 
@@ -407,7 +407,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
     gpu::CommandList[1] lists = { stale };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     char[4] data;
     gpu::TextureUploadDesc texture_upload;
@@ -1031,7 +1031,7 @@ fn void staging_ring_reuses_across_frames() @test {
         gpu::submit(&device, &submit)!!;
         gpu::end_frame(&frame_token)!!;
     }
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void out_of_frame_uploads_do_not_alias_staging() @test {
@@ -1072,7 +1072,7 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     char[1024] out;
     gpu::readback_buffer_data(
@@ -1187,7 +1187,7 @@ fn void texture_upload_helper_sampled() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
     float* sampled = (float*)out_span.cpu;

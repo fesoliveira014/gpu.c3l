@@ -33,7 +33,7 @@ fn void capture_backend_result(gpu::DebugMessage* message, void* user_data) {
     capture.fields_match = message.severity == gpu::DebugMessageSeverity.ERROR
         && message.category.backend
         && message.operation != null
-        && message.operation.str_view() == "wait_queue_idle"
+        && message.operation.str_view() == "wait_completion"
         && message.has_fault
         && message.public_fault == gpu::BACKEND_ERROR
         && message.backend_text != null
@@ -49,7 +49,7 @@ fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
     };
     fault configured_fault = @catch(gpu::vk::check_backend_result(
         state:     &configured,
-        operation: "wait_queue_idle",
+        operation: "wait_completion",
         result:    (vk::Result)-999,
     ));
 
@@ -60,7 +60,7 @@ fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
     gpu::vk::VkDeviceState fallback = {};
     fault fallback_fault = @catch(gpu::vk::check_backend_result(
         state:     &fallback,
-        operation: "wait_queue_idle",
+        operation: "wait_completion",
         result:    (vk::Result)-999,
     ));
     assert(fallback_fault == configured_fault, "stderr fallback preserves exact fault parity");

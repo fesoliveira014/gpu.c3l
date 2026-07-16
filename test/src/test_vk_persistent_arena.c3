@@ -137,9 +137,6 @@ fn void persistent_span_crosses_compute_and_graphics_families_when_available() @
     gpu::PipelineHandle pipeline = make_persistent_cross_family_pipeline(&device, &shader);
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     defer gpu::destroy_shader(&device, shader)!!;
-    gpu::SemaphoreDesc semaphore_desc = { .debug_name = "persistent_cross_family" };
-    gpu::SemaphoreHandle semaphore = gpu::create_semaphore(&device, &semaphore_desc)!!;
-    defer gpu::destroy_semaphore(&device, semaphore)!!;
     gpu::GpuSpan args = alloc_persistent_indirect_args(&device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
@@ -156,16 +153,8 @@ fn void persistent_span_crosses_compute_and_graphics_families_when_available() @
     )!!;
     gpu::end_commands(&compute)!!;
     gpu::CommandList[1] compute_lists = { compute };
-    gpu::SemaphoreSignal[1] signals = {{
-        .semaphore = semaphore,
-        .value     = (gpu::SemaphoreValue)1,
-        .stage     = gpu::Stage.INDIRECT_COMMAND,
-    }};
-    gpu::SubmitDesc compute_submit = {
-        .command_lists = compute_lists[..],
-        .signals       = signals[..],
-    };
-    gpu::submit(&device, &compute_submit)!!;
+    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
+    gpu::CompletionPoint compute_completion = gpu::submit(&device, &compute_submit)!!;
 
     gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     defer discard_test_commands(&graphics)!!;
@@ -177,19 +166,14 @@ fn void persistent_span_crosses_compute_and_graphics_families_when_available() @
     )!!;
     gpu::end_commands(&graphics)!!;
     gpu::CommandList[1] graphics_lists = { graphics };
-    gpu::SemaphoreWait[1] waits = {{
-        .semaphore = semaphore,
-        .value     = (gpu::SemaphoreValue)1,
-        .stage     = gpu::Stage.INDIRECT_COMMAND,
-    }};
+    gpu::CompletionPoint[1] waits = { compute_completion };
     gpu::SubmitDesc graphics_submit = {
-        .command_lists = graphics_lists[..],
-        .waits         = waits[..],
+        .command_lists    = graphics_lists[..],
+        .completion_waits = waits[..],
     };
-    gpu::submit(&device, &graphics_submit)!!;
+    gpu::CompletionPoint graphics_completion = gpu::submit(&device, &graphics_submit)!!;
     gpu::end_frame(&frame)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::wait_completion(graphics_completion, ulong::max)!!;
     gpu::free_persistent_span(&device, args)!!;
     io::eprintfn(
         "persistent_span_crosses_compute_and_graphics: PASS graphics=%d compute=%d",
@@ -240,10 +224,9 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     gpu::end_commands(&compute)!!;
     gpu::CommandList[1] compute_lists = { compute };
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
-    gpu::submit(&device, &compute_submit)!!;
+    gpu::CompletionPoint compute_completion = gpu::submit(&device, &compute_submit)!!;
     gpu::end_frame(&compute_frame)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::wait_completion(compute_completion, ulong::max)!!;
     gpu::free_persistent_span(&device, compute_args)!!;
 
     gpu::GpuSpan graphics_args = alloc_persistent_indirect_args(&device);
@@ -263,9 +246,9 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     gpu::end_commands(&graphics)!!;
     gpu::CommandList[1] graphics_lists = { graphics };
     gpu::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..] };
-    gpu::submit(&device, &graphics_submit)!!;
+    gpu::CompletionPoint graphics_completion = gpu::submit(&device, &graphics_submit)!!;
     gpu::end_frame(&graphics_frame)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::wait_completion(graphics_completion, ulong::max)!!;
     gpu::free_persistent_span(&device, graphics_args)!!;
     io::eprintfn(
         "persistent_span_reused_offset_switches_family: PASS graphics=%d compute=%d",
@@ -584,7 +567,7 @@ fn void transfer_usage_persistent_span_copies() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
     gpu::invalidate_buffer(&device, dst.buffer, dst.offset, dst.size)!!;
@@ -656,7 +639,7 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
     gpu::invalidate_buffer(&device, io.buffer, io.offset, io.size)!!;

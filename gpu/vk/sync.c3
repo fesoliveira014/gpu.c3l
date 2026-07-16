@@ -2,80 +2,7 @@ module gpu::vk @private;
 
 import gpu @public;
 import vk;
-import vma;
-import std::thread;
 import std::io;
-
-// Concrete (non-generic) slot table for semaphores. Monomorphized twin of
-// gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
-const uint SEMAPHORE_FREE_NONE = 0;
-
-struct SemaphoreSlot {
-    vk::Semaphore semaphore;
-}
-
-struct SemaphoreCell {
-    SemaphoreSlot value;
-    uint          generation;
-    uint          next_free;
-    bool          used;
-}
-
-struct SemaphoreTable {
-    SemaphoreCell[] slots;
-    ulong           owner;
-    uint            free_head;
-    uint            next_new;
-}
-
-fn gpu::SemaphoreHandle? SemaphoreTable.alloc(&self, SemaphoreSlot value) {
-    uint idx;
-    bool found = false;
-    while (self.free_head != SEMAPHORE_FREE_NONE) {
-        idx = self.free_head - 1;
-        self.free_head = self.slots[idx].next_free;
-        if (can_allocate_handle_generation(self.slots[idx].generation)) {
-            found = true;
-            break;
-        }
-        self.slots[idx].next_free = SEMAPHORE_FREE_NONE;
-    }
-    if (!found) {
-        if (self.next_new >= self.slots.len) return gpu::SLOT_TABLE_FULL~;
-        idx = self.next_new++;
-        self.slots[idx].generation = 0;
-    }
-    self.slots[idx].value = value;
-    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
-    self.slots[idx].used = true;
-    return (gpu::SemaphoreHandle){
-        .owner      = self.owner,
-        .index      = idx,
-        .generation = self.slots[idx].generation,
-    };
-}
-
-fn SemaphoreSlot*? SemaphoreTable.get(&self, gpu::SemaphoreHandle h) {
-    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
-    uint idx = h.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
-    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
-    return &self.slots[idx].value;
-}
-
-fn void? SemaphoreTable.free(&self, gpu::SemaphoreHandle h) {
-    self.get(h)!;
-    uint idx = h.index;
-    self.slots[idx].used = false;
-    if (!should_recycle_handle_generation(self.slots[idx].generation)) {
-        self.slots[idx].generation = HANDLE_GENERATION_MAX;
-        self.slots[idx].next_free = SEMAPHORE_FREE_NONE;
-        return;
-    }
-    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
-    self.slots[idx].next_free = self.free_head;
-    self.free_head = idx + 1;
-}
 
 fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* barrier) @private {
     CommandRecord* record = resolve_command(commands)!;
@@ -297,7 +224,9 @@ fn bool? vk_poll_completion(
             &current,
         ),
     )!;
-    return current >= sequence;
+    if (current < sequence) return false;
+    observe_queue_completion(state, completion, current);
+    return true;
 }
 
 fn void? vk_wait_completion(
@@ -326,73 +255,5 @@ fn void? vk_wait_completion(
             timeout_ns,
         ),
     )!;
-}
-
-fn gpu::SemaphoreHandle? vk_create_semaphore(gpu::Device* device, gpu::SemaphoreDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
-    vk::SemaphoreTypeCreateInfo type_info = vk::semaphore_type_create_info()
-        .set_semaphore_type(vk::SemaphoreType.TIMELINE)
-        .set_initial_value((ulong)desc.initial_value);
-    vk::SemaphoreCreateInfo info = vk::semaphore_create_info().set_next(&type_info);
-    vk::Semaphore semaphore;
-    check_device_result(state, vk::create_semaphore(
-        device:        state.device,
-        p_create_info: &info,
-        p_allocator:   null,
-        p_semaphore:   &semaphore,
-    ))!;
-    set_object_name(
-        state:         state,
-        object_type:   vk::ObjectType.SEMAPHORE,
-        object_handle: (ulong)semaphore,
-        name:          desc.debug_name,
-    );
-
-    {
-        state.resource_mutex.lock()!!;
-        defer state.resource_mutex.unlock();
-        if (try handle = state.semaphores.alloc({ .semaphore = semaphore })) {
-            return handle;
-        }
-    }
-    vk::destroy_semaphore(state.device, semaphore, null);
-    return gpu::SLOT_TABLE_FULL~;
-}
-
-<* Frees the handle now; the vk semaphore release is deferred. The public
-   contract already forbids pending waits at destroy. *>
-fn void? vk_destroy_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    SemaphoreSlot* slot = state.semaphores.get(handle)!;
-    vk::Semaphore semaphore = slot.semaphore;
-    ulong retire = retire_timeline_value(state);
-    state.semaphores.free(handle)!;
-    enqueue_deferred(
-        state:          state,
-        kind:           DeferredKind.SEMAPHORE,
-        timeline_value: retire,
-        object:         (void*)semaphore,
-        allocation:     (vma::Allocation)null,
-    );
-}
-
-fn void? vk_wait_semaphore(gpu::Device* device, gpu::SemaphoreHandle handle, gpu::SemaphoreValue value, ulong timeout_ns) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    SemaphoreSlot* slot = state.semaphores.get(handle)!;
-    ulong wait_value = (ulong)value;
-    vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
-        .set_semaphore_count(1)
-        .set_semaphores((&slot.semaphore)[:1])
-        .set_values((&wait_value)[:1]);
-    check_wait_backend_result(
-        state:     state,
-        operation: "wait_semaphore",
-        result:    vk::wait_semaphores(state.device, &wait_info, timeout_ns),
-    )!;
+    observe_queue_completion(state, completion, sequence);
 }

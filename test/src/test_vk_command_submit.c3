@@ -69,10 +69,6 @@ fn void copy_upload_to_readback() @test {
     char* src = (char*)up_span.cpu;
     for (uint i = 0; i < 256; i++) src[i] = (char)i;
 
-    gpu::SemaphoreDesc sem_desc = { .initial_value = (gpu::SemaphoreValue)0 };
-    gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem)!!;
-
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
@@ -88,15 +84,9 @@ fn void copy_upload_to_readback() @test {
     gpu::end_commands(&cmd)!!;
 
     gpu::CommandList[1] lists = { cmd };
-    gpu::SemaphoreSignal[1] sigs = { { .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.TRANSFER } };
-    gpu::SubmitDesc submit = { .command_lists = lists[..], .signals = sigs[..] };
-    gpu::submit(&device, &submit)!!;
-    gpu::wait_semaphore(
-        device:     &device,
-        semaphore:  sem,
-        value:      (gpu::SemaphoreValue)1,
-        timeout_ns: 1_000_000_000,
-    )!!;
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(&device, &submit)!!;
+    gpu::wait_completion(completion, 1_000_000_000)!!;
 
     gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
     char* dst = (char*)rb_span.cpu;
@@ -118,7 +108,7 @@ fn void empty_command_list_submits() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame)!!;
 }
 
@@ -136,7 +126,7 @@ fn void command_list_owns_its_device_token_value() @test {
     gpu::CommandList[1] lists = { commands };
     gpu::SubmitDesc submit_desc = { .command_lists = lists[..] };
     gpu::submit(&device, &submit_desc)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void stale_command_owner_faults_invalid_handle() @test {
@@ -158,7 +148,7 @@ fn void stale_command_owner_faults_invalid_handle() @test {
     gpu::CommandList[1] live_lists = { live_commands };
     gpu::SubmitDesc live_submit = { .command_lists = live_lists[..] };
     gpu::submit(&device, &live_submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void copied_alias_cannot_resubmit_after_success() @test {
@@ -190,7 +180,7 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     gpu::SubmitDesc replacement_submit = { .command_lists = replacement_lists[..] };
     gpu::submit(&device, &replacement_submit)!!;
 
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void command_generation_exhaustion_retires_slot() @test {
@@ -221,7 +211,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
     gpu::CommandList[1] next_lists = { next };
     gpu::SubmitDesc next_submit = { .command_lists = next_lists[..] };
     gpu::submit(&device, &next_submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void duplicate_token_batch_rejects_without_consuming() @test {
@@ -242,47 +232,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::CommandList[1] one = { cmd };
     gpu::SubmitDesc good = { .command_lists = one[..] };
     gpu::submit(&device, &good)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-}
-
-fn void stale_signal_prevalidation_does_not_claim_command() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer destroy_test_device(&device)!!;
-
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
-
-    gpu::SemaphoreDesc sem_desc = { .initial_value = (gpu::SemaphoreValue)0 };
-    gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem)!!;
-    gpu::SemaphoreHandle stale = sem;
-    stale.generation++;
-
-    gpu::CommandList[1] lists = { cmd };
-    gpu::SemaphoreSignal[1] signals = {{
-        .semaphore = stale,
-        .value     = (gpu::SemaphoreValue)1,
-        .stage     = gpu::Stage.COLOR_ATTACHMENT,
-    }};
-    gpu::SubmitDesc submit = {
-        .command_lists = lists[..],
-        .signals       = signals[..],
-    };
-
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    ulong before = command_submit_count(&device);
-    fault rejected = @catch(gpu::submit(&device, &submit));
-    assert(rejected == gpu::INVALID_HANDLE, "stale same-owner signal faults INVALID_HANDLE");
-    assert(command_submit_count(&device) == before, "stale-signal rejection records no queue submit");
-    assert(state.commands.slots[cmd.handle.index].value.state == vk::CommandState.EXECUTABLE,
-        "submit prevalidation does not claim executable commands");
-
-    gpu::CommandList[1] good_lists = { cmd };
-    gpu::SubmitDesc good = { .command_lists = good_lists[..] };
-    gpu::submit(&device, &good)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void swapchain_only_submit_validates_stale_handle() @test {
@@ -332,7 +282,7 @@ fn void simultaneous_devices_submit_independently() @test {
     gpu::CommandList[1] first_lists = { first_cmd };
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
     gpu::submit(&first, &first_submit)!!;
-    gpu::wait_queue_idle(&first, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&first, gpu::QueueKind.GRAPHICS)!!;
     gpu::destroy_device(&first)!!;
 
     assert(gpu::get_device_caps(&second)!!.strict_enabled, "destroying one device leaves the other live");
@@ -342,7 +292,7 @@ fn void simultaneous_devices_submit_independently() @test {
     gpu::CommandList[1] second_lists = { second_cmd };
     gpu::SubmitDesc second_submit = { .command_lists = second_lists[..] };
     gpu::submit(&second, &second_submit)!!;
-    gpu::wait_queue_idle(&second, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&second, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void live_command_blocks_pool_reset_until_discard() @test {
@@ -380,7 +330,7 @@ fn void live_command_record_blocks_context_destruction() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::destroy_recording_context(&device, context)!!;
 }
 
@@ -427,27 +377,6 @@ fn void texture_barrier_faults() @test {
 // vkWaitSemaphores with timeout 0 is a spec-guaranteed poll: it returns
 // immediately, so these are deterministic on lavapipe.
 
-fn void wait_timeout_zero_on_unreached_value_faults() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer destroy_test_device(&device)!!;
-
-    gpu::SemaphoreDesc sem_desc = { .initial_value = (gpu::SemaphoreValue)0 };
-    gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem)!!;
-
-    fault timeout_fault = @catch(gpu::wait_semaphore(
-        device:     &device,
-        semaphore:  sem,
-        value:      (gpu::SemaphoreValue)1,
-        timeout_ns: 0,
-    ));
-    assert(timeout_fault == gpu::WAIT_TIMEOUT, "timeout-0 wait on an unreached value faults WAIT_TIMEOUT");
-}
-
-// Lazy pool resets: begin_frame's reset loop only pays for pools a context
-// actually dirtied since that frame slot last reset.
-
 fn void idle_context_pools_are_never_reset() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
@@ -481,8 +410,8 @@ fn void used_context_pool_resets_exactly_once_on_slot_wrap() @test {
     gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = gpu::submit(&device, &submit)!!;
+    gpu::wait_completion(completion, ulong::max)!!;
     gpu::end_frame(&frame)!!;
 
     frame = gpu::begin_frame(&device)!!; // slot 0: never touched
@@ -500,21 +429,4 @@ fn void used_context_pool_resets_exactly_once_on_slot_wrap() @test {
     frame = gpu::begin_frame(&device)!!; // slot 1 again: the bit stays cleared, nothing new recorded
     assert(vk::pool_reset_stats(state).reset == 0, "the dirty bit stays cleared until the context records again");
     gpu::end_frame(&frame)!!;
-}
-
-fn void wait_timeout_zero_on_reached_value_succeeds() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer destroy_test_device(&device)!!;
-
-    gpu::SemaphoreDesc sem_desc = { .initial_value = (gpu::SemaphoreValue)1 };
-    gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem)!!;
-
-    gpu::wait_semaphore(
-        device:     &device,
-        semaphore:  sem,
-        value:      (gpu::SemaphoreValue)1,
-        timeout_ns: 0,
-    )!!;
 }

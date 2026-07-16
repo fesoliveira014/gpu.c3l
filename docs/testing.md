@@ -231,17 +231,12 @@ driver/ICD quirks, but release gates should prefer clean output.
 Structured-debug tests verify Vulkan severity/category mapping, validation ID
 name/number, backend text, named and null objects, `VK_FALSE`, and stderr
 fallback without deliberately introducing validation errors into clean targets.
-Representative tranche A public-contract coverage includes texture,
-synchronization, persistent-span, shader, and pipeline failures. It verifies
-unchanged faults and exactly-once callback parity. Backend-result coverage
-fabricates an unmapped `wait_queue_idle` result and asserts its operation,
-callback fields, fault, and stderr-fallback parity.
-Representative tranche B1 coverage adds command-list state, copy/fill,
-render-attachment, upload/readback, descriptor/sampler, and pipeline-cache
-failures. It asserts exact operation and field context, unchanged fault
-identity, exactly-once delivery, and omission of public resource identity until
-handle resolution succeeds. B1 is not the completeness gate; remaining
-command/descriptor and queue/WSI sites are covered by subsequent tranches.
+Public-contract diagnostics cover resource creation, recording, submission,
+memory, descriptors, pipelines, queue progress, and WSI failures. They assert
+exact operation and field context, unchanged faults, exactly-once delivery, and
+no public resource identity before handle resolution. Backend-result coverage
+fabricates an unmapped `wait_completion` result and verifies callback and
+stderr-fallback parity.
 
 Frame/persistent diagnostic tests inject retirement-query and end-signal
 backend failures, exercise real virtual-arena exhaustion, and cover double
@@ -337,6 +332,7 @@ c3c test shader_abi --path test/cpu
 python -m unittest scripts.test_check_public_api scripts.test_check_backend_dispatch
 python scripts/check_public_api.py
 python scripts/check_backend_dispatch.py
+python scripts/check_retired_api.py
 ```
 
 Smoke target, as CI runs it:

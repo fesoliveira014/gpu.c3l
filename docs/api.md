@@ -231,7 +231,6 @@ DeviceCaps
     bool buffer_device_address
     bool synchronization2
     bool dynamic_rendering
-    bool timeline_semaphore
     bool shader_int64
     bool draw_indirect_count
     bool descriptor_buffer
@@ -245,7 +244,6 @@ DeviceCaps
     uint max_push_constant_size
     Vec3u max_compute_work_group_count
     uint max_draw_indirect_count
-    ulong max_timeline_semaphore_value_difference
     usz min_uniform_alignment
     usz min_storage_alignment
     usz min_texel_buffer_alignment
@@ -277,7 +275,7 @@ supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
 request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
 request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
 create_device(Adapter*, DeviceRequest*) -> Device?
-create_device_from_desc(DeviceDesc*) -> Device?    (transitional)
+create_device_from_desc(DeviceDesc*) -> Device?
 destroy_device(Device*) -> void?
 ```
 
@@ -293,7 +291,7 @@ backend state. `begin_commands` transfers its pin to the returned command token;
 recording calls borrow that pin without acquiring another one.
 
 `destroy_device` never waits. Live resources, frames, command lists, recording
-contexts, persistent spans, swapchains, descriptors, semaphores, and readback
+contexts, persistent spans, swapchains, descriptors, and readback
 tickets return `RESOURCE_IN_USE`. Active operations, incomplete queue work, or
 a closing slot return retryable `DEVICE_BUSY`. Every failed attempt preserves
 the token, generation, and backend state. Success increments the generation
@@ -302,7 +300,7 @@ checks after operation pins retire. Lost command tokens remain discardable so
 their lifetime pins cannot strand the device.
 
 Frame tokens, queue tokens, command tokens, resource handles, descriptor
-indices, GPU addresses/spans, and synchronization values are scoped to their
+indices, GPU addresses/spans, and completion points are scoped to their
 owning device. Backend table resolution rejects foreign handle owners before
 resource mutation. Shader-visible indices and GPU addresses remain
 caller-lifetime values.
@@ -317,7 +315,6 @@ BufferHandle
 TextureHandle
 PipelineHandle
 ShaderHandle
-SemaphoreHandle
 SwapchainHandle
 RecordingContextHandle
 ```
@@ -407,7 +404,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
 | `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |
-| `WAIT_TIMEOUT` | `wait_completion`, `wait_semaphore`, `begin_frame`, `acquire_next_image` | bounded wait or transient image unavailability; retry with the unchanged completion point or resource |
+| `WAIT_TIMEOUT` | `wait_completion`, `begin_frame`, `acquire_next_image` | bounded wait or transient image unavailability; retry with the unchanged completion point or resource |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
 Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled. `DEVICE_LOST` is reserved for an explicit native device-loss result; an unmapped native result becomes `BACKEND_ERROR`.
@@ -514,7 +511,7 @@ two or more use the exact ordered family list.
 
 Concurrent sharing does not provide visibility, execution ordering, completion,
 or lifetime management. Callers must retain the required flushes, barriers,
-semaphore dependencies, and completion waits, and may call
+completion-point dependencies, and host waits, and may call
 `free_persistent_span` only after all work referencing the span retires. Spans
 are scoped to their owning `Device` and cannot be passed to another device.
 
@@ -869,9 +866,8 @@ begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {})
 end_commands(CommandList* commands) -> void?
 discard_commands(CommandList* commands) -> void?
 submit(Device* device, SubmitDesc* desc) -> CompletionPoint?
-wait_queue_idle(Device* device, QueueKind queue) -> void?
 poll_completion(CompletionPoint point) -> bool?
-wait_completion(CompletionPoint point, ulong timeout_ns) -> void?
+wait_completion(CompletionPoint point, ulong timeout_ns = ulong::max) -> void?
 
 CompletionPoint
     Device device
@@ -899,11 +895,8 @@ QueueInfo
 SubmitDesc
     CommandList[] command_lists
     CompletionPoint[] completion_waits
-    SemaphoreWait[] waits           ({ semaphore, value, stage })
-    SemaphoreSignal[] signals
     SwapchainHandle swapchain       (present-linked submits)
 
-create_semaphore / destroy_semaphore / wait_semaphore   (timeline; SemaphoreValue = distinct ulong)
 create_recording_context / destroy_recording_context    (one per worker thread; docs/threading.md)
 ```
 
@@ -937,11 +930,6 @@ inherent. Stale, unpublished, malformed, and foreign-device waits fault
 `INVALID_HANDLE` before native submission and preserve every command token.
 If outstanding queue progress reaches the device's timeline-value-difference
 limit, submission faults retryable `DEVICE_BUSY` before reserving a sequence.
-
-Timeline signal values must be greater than the semaphore counter when they
-execute. The caller orders pending signals across queues and keeps waits and
-signals within `DeviceCaps.max_timeline_semaphore_value_difference` of current
-and pending values. Waits may target future values.
 
 `Queue` is a small device-owned identity for a selected queue. Its `device`
 field is a copied `Device` token used for exact ownership validation; it does not
@@ -1246,12 +1234,11 @@ cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) -> void?
 ```
 
 `Stage.NONE` is an empty execution scope. Use it only for a barrier side that
-has no pipeline work to wait for. It is legal for semaphore operations but does
-not order pipeline work. Explicit `Stage.PRESENT` and `Hazard.PRESENT_READ`
-remain the legacy broad spelling and map to all commands and memory read.
-They are retained for raw-barrier and semaphore compatibility, not used by the
-`TextureUse.PRESENT` preset. The preset uses `COLOR_ATTACHMENT` with no access
-scope so its barriers chain with the WSI wait and signal stages.
+has no pipeline work to wait for. Explicit `Stage.PRESENT` and
+`Hazard.PRESENT_READ` are broad raw-barrier spellings that map to all commands
+and memory read. The `TextureUse.PRESENT` preset instead uses
+`COLOR_ATTACHMENT` with no access scope so its barriers chain with private WSI
+wait and signal stages.
 
 `TextureLayout` values: UNDEFINED, GENERAL, COLOR_ATTACHMENT, DEPTH_STENCIL,
 SHADER_READ, TRANSFER_SRC, TRANSFER_DST, PRESENT. `old_layout` must match the
@@ -1346,19 +1333,10 @@ native result code.
 Stored public debug names remain available when validation is disabled;
 `enable_debug_names` controls best-effort Vulkan object naming independently.
 
-Representative tranche A public-contract coverage includes texture creation
-and tracked layout barriers, buffer-barrier ranges, persistent-span allocation,
-shader reflection/entry-point validation, and pipeline shader-stage validation.
-Backend failures from queue submission and idle waits use the same callback
-with `operation = "submit"` or `"wait_queue_idle"`, the unchanged public
-fault, and the native result text.
-
-Representative tranche B1 coverage adds command-list state, copy/fill and
-render-attachment validation; upload and readback planning; descriptor and
-sampler operations; and pipeline-cache I/O. Resource identity is included only
-after the corresponding public handle has been resolved successfully. The B1
-set is representative rather than exhaustive; later coverage work audits the
-remaining command, descriptor, queue, and WSI rejection sites.
+Contract diagnostics cover resource creation, recording, submission, memory,
+descriptors, pipelines, queue progress, and WSI failures. Backend failures
+preserve the public fault and report the public operation name, such as
+`submit` or `wait_completion`.
 
 Frame and persistent-memory coverage reports double-begin and quiescence
 violations, stale frame tokens, invalid alignment before zero size, arena
@@ -1545,7 +1523,6 @@ fn void? run_compute() {
     ComputeWork work = { .device = &device, .input = input, .pipeline = pipeline };
     gpu::FrameToken frame;
     gpu::@with_frame(&frame, &device, record_compute, &work)!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!;
 }
 
 fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
@@ -1564,11 +1541,10 @@ fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
     gpu::end_commands(&commands)!;
     gpu::CommandList[1] lists = { commands };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(work.device, &submit)!;
+    gpu::CompletionPoint completion = gpu::submit(work.device, &submit)!;
+    gpu::wait_completion(completion, ulong::max)!;
 }
 ```
-
-Exact C3 syntax should be verified during implementation against C3 0.8.0.
 
 ## 12. API acceptance criteria
 
@@ -1581,6 +1557,7 @@ all resources have explicit destruction or frame ownership
 root-pointer compute can be written without descriptor-set concepts
 texture sampling can be written with TextureIndex and SamplerIndex
 barriers are explicit and expressive enough for all samples
+submission dependencies use reusable CompletionPoint values
 headless tests do not depend on SDL3
 windowed samples depend on sdl3 only in sample project files
 ```

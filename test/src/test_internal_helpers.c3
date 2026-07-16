@@ -144,17 +144,18 @@ fn void completion_points_poll_and_wait_without_consumption() @test {
         "poll and wait leave the reusable completion point unchanged");
     fixture.wait_fault = {};
     wait_completion(point, 50)!!;
+    wait_completion(point)!!;
 
     assert(fixture.poll_calls == 2,
         "both polls reach the owning backend");
-    assert(fixture.wait_calls == 2,
+    assert(fixture.wait_calls == 3,
         "a timed-out point can be waited again");
     assert(fixture.last_queue_id == queue.id,
         "host waits resolve the point's queue identity");
     assert(fixture.last_sequence == 7,
         "host waits preserve the point's sequence");
-    assert(fixture.last_timeout_ns == 50,
-        "host waits preserve the caller's timeout");
+    assert(fixture.last_timeout_ns == ulong::max,
+        "the default host wait has no timeout");
 
     destroy_device(&device)!!;
 }

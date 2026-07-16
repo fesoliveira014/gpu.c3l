@@ -1,0 +1,72 @@
+{
+  "langrev": "1",
+  "warnings": [
+    "no-unused"
+  ],
+  "sources": [
+    "../../gpu/gpu.c3",
+    "../../gpu/gpu.c3i",
+    "../../gpu/types.c3",
+    "../../gpu/faults.c3",
+    "../../gpu/runtime.c3",
+    "../../gpu/adapter.c3",
+    "../../gpu/device.c3",
+    "../../gpu/device_request.c3",
+    "../../gpu/device_support.c3",
+    "../../gpu/surface.c3",
+    "../../gpu/surface/**",
+    "../../gpu/caps.c3",
+    "../../gpu/memory.c3",
+    "../../gpu/buffer.c3",
+    "../../gpu/texture.c3",
+    "../../gpu/descriptor_heap.c3",
+    "../../gpu/pipeline.c3",
+    "../../gpu/command.c3",
+    "../../gpu/sync.c3",
+    "../../gpu/queue.c3",
+    "../../gpu/swapchain.c3",
+    "../../gpu/debug.c3",
+    "../../gpu/shader_abi.c3",
+    "../../gpu/vk/internal.c3",
+    "../cpu/vk_stub.c3"
+  ],
+  "output": "build",
+  "targets": {
+    "public_semaphore": {
+      "type": "object-files",
+      "sources": [
+        "public_semaphore.c3"
+      ]
+    },
+    "queue_idle": {
+      "type": "object-files",
+      "sources": [
+        "queue_idle.c3"
+      ]
+    },
+    "timeline_caps": {
+      "type": "object-files",
+      "sources": [
+        "timeline_caps.c3"
+      ]
+    },
+    "submit_waits": {
+      "type": "object-files",
+      "sources": [
+        "submit_waits.c3"
+      ]
+    },
+    "submit_signals": {
+      "type": "object-files",
+      "sources": [
+        "submit_signals.c3"
+      ]
+    },
+    "debug_semaphore": {
+      "type": "object-files",
+      "sources": [
+        "debug_semaphore.c3"
+      ]
+    }
+  }
+}

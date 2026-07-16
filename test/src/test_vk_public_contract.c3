@@ -69,11 +69,6 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
             == gpu::INVALID_ARGUMENT,
         "present rejects a null descriptor"
     );
-    assert(
-        @catch(gpu::create_semaphore(&device, (gpu::SemaphoreDesc*)null))
-            == gpu::INVALID_ARGUMENT,
-        "create_semaphore rejects a null descriptor"
-    );
 }
 
 fn void null_command_arguments_fault_without_recording_side_effects() @test {
@@ -161,5 +156,5 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::end_frame(&frame)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }

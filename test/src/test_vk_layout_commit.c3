@@ -76,7 +76,7 @@ fn void dropped_list_leaves_layout_uncommitted() @test {
     gpu::CommandList[1] lists = { next };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::end_frame(&frame_token)!!;
 }
@@ -117,7 +117,7 @@ fn void two_lists_submitted_in_order_validate() @test {
     gpu::SubmitDesc second_submit = { .command_lists = second_lists[..] };
     gpu::submit(&device, &second_submit)!!;
 
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -149,7 +149,7 @@ fn void same_list_barrier_then_copy_validates() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -194,6 +194,6 @@ fn void more_than_sixteen_pending_layouts_submit() @test {
     gpu::CommandList[1] verify_lists = { verify };
     gpu::SubmitDesc verify_submit = { .command_lists = verify_lists[..] };
     gpu::submit(&device, &verify_submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }

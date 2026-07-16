@@ -230,10 +230,8 @@ Re-query `SwapchainInfo` after resize, rebuild pipelines if `format` changed,
 and size any per-image data from `image_count`. `prior_layout` removes the
 fixed-size seen table normally used to distinguish first acquire from a
 previously presented image. FIFO is always available; other modes remain a
-support query away. The coupled graphics submission waits and signals at
-color-attachment output; `TextureUse.PRESENT` uses the same stage with no
-presentation-facing access so both layout transitions chain with those WSI
-semaphore operations.
+support query away. The coupled graphics submission synchronizes at color-attachment output.
+`TextureUse.PRESENT` uses that stage without presentation-facing access.
 Running example: `present_mode_explorer`.
 
 ## 13. Choose a memory kind

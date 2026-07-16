@@ -94,7 +94,7 @@ fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAdd
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(device, &submit)!!;
-    gpu::wait_queue_idle(device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(device, rb_span.buffer, rb_span.offset, rb_span.size)!!;
 }
 

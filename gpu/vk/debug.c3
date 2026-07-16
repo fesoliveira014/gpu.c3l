@@ -53,7 +53,7 @@ fn gpu::DebugResourceKind debug_resource_kind(vk::ObjectType object_type) {
         case vk::ObjectType.IMAGE:
         case vk::ObjectType.IMAGE_VIEW:     return gpu::DebugResourceKind.TEXTURE;
         case vk::ObjectType.PIPELINE:       return gpu::DebugResourceKind.PIPELINE;
-        case vk::ObjectType.SEMAPHORE:      return gpu::DebugResourceKind.SEMAPHORE;
+        case vk::ObjectType.SEMAPHORE:      return gpu::DebugResourceKind.NONE;
         case vk::ObjectType.SWAPCHAIN_KHR:  return gpu::DebugResourceKind.SWAPCHAIN;
         case vk::ObjectType.SHADER_MODULE:  return gpu::DebugResourceKind.SHADER;
         case vk::ObjectType.COMMAND_BUFFER: return gpu::DebugResourceKind.COMMAND_LIST;
@@ -364,26 +364,6 @@ fn uint report_shader_leaks(VkDeviceState* state) {
     return count;
 }
 
-fn uint report_semaphore_leaks(VkDeviceState* state) {
-    uint count = 0;
-    if (state.semaphores.slots.ptr == null) return 0;
-    foreach (i, &cell : state.semaphores.slots[:state.semaphores.next_new]) {
-        if (!cell.used) continue;
-        if (!report_resource_lifetime(
-            state:               state,
-            resource_kind:       gpu::DebugResourceKind.SEMAPHORE,
-            has_public_identity: true,
-            index:               (uint)i,
-            generation:          cell.generation,
-            debug_name:          null,
-            backend_text:        "semaphore remains live",
-        )) {
-            io::eprintfn("gpu: leaked semaphore (index %d)", i);
-        }
-        count++;
-    }
-    return count;
-}
 
 <* The device-owned default and helper contexts are exempt. *>
 fn uint report_context_leaks(VkDeviceState* state) {
@@ -412,7 +392,6 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     count += report_texture_leaks(state);
     count += report_pipeline_leaks(state);
     count += report_shader_leaks(state);
-    count += report_semaphore_leaks(state);
     count += report_context_leaks(state);
     if (state.persistent_arena.virtual_block != null) {
         vma::Statistics stats;

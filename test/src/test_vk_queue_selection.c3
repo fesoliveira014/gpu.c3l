@@ -654,10 +654,10 @@ fn void tri_queue_frame_retires_cleanly() @test {
         }
         gpu::end_frame(&frame_token)!!;
     }
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void native_queue_idle_clears_aliased_off_frame_markers() @test {
+fn void native_queue_marker_clear_handles_aliased_roles() @test {
     vk::Queue shared_queue = (vk::Queue)(uptr)0x10;
     vk::Queue transfer_queue = (vk::Queue)(uptr)0x20;
     vk::VkDeviceState state = {
@@ -675,13 +675,13 @@ fn void native_queue_idle_clears_aliased_off_frame_markers() @test {
     assert(
         state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE)
             == vk::OFF_FRAME_TRANSFER_BIT,
-        "waiting an aliased native queue clears every matching semantic marker"
+        "clearing an aliased native queue removes every matching semantic marker"
     );
 
     vk::clear_off_frame_queue_markers(&state, transfer_queue);
     assert(
         state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE) == 0,
-        "waiting the remaining native queue clears destruction readiness"
+        "clearing the remaining native queue restores destruction readiness"
     );
 }
 

@@ -482,9 +482,9 @@ creation, descriptor allocation, virtual-arena allocation, and enumeration.
 Unclassified native failures are logged and surface as `BACKEND_ERROR`; they
 must never be inferred as device loss.
 
-Queue submission and `wait_queue_idle` use the state-aware result path.
+Queue submission and completion waits use the state-aware result path.
 With a callback, failures preserve the mapped public fault and emit one backend
-diagnostic with the exact operation (`submit` or `wait_queue_idle`) and native
+diagnostic with the exact operation (`submit` or `wait_completion`) and native
 result text. With a null callback, mapped results return their public faults
 silently; only unmapped results retain the stderr fallback. Surface creation and
 query, swapchain creation and enumeration, acquire, present, resize/destroy idle
@@ -619,17 +619,13 @@ publication commit only after native success.
 SubmitDesc
     CommandList[] command_lists
     CompletionPoint[] completion_waits
-    SemaphoreWait[] waits
-    SemaphoreSignal[] signals
 ```
 
 Host poll and wait reject unpublished sequences and query the owning timeline
-directly. Device destruction performs the same non-blocking query for each
-published queue sequence and returns `DEVICE_BUSY` while work is incomplete.
-
-User signal values must exceed the semaphore counter when they execute. The
-caller orders pending signals across queues and observes
-`DeviceCaps.max_timeline_semaphore_value_difference`.
+directly. Successful observation advances cached progress and clears off-frame
+queue markers only when it covers the latest published sequence. Device
+destruction performs the same non-blocking query and returns `DEVICE_BUSY`
+while work is incomplete.
 
 ## 15. Render pass implementation
 

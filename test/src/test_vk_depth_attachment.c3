@@ -180,7 +180,7 @@ fn void submit_and_finish(gpu::Device* device, gpu::CommandList* cmd) {
     gpu::CommandList[1] lists = { *cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(device, &submit)!!;
-    gpu::wait_queue_idle(device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn char* dp_center(gpu::GpuSpan* rb_span) {

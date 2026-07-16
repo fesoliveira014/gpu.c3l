@@ -207,9 +207,6 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
     gpu::PipelineHandle pipeline = make_cross_family_compute_pipeline(&device, &shader);
     defer gpu::destroy_shader(&device, shader)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-    gpu::SemaphoreDesc semaphore_desc = { .debug_name = "frame_arena_cross_family" };
-    gpu::SemaphoreHandle semaphore = gpu::create_semaphore(&device, &semaphore_desc)!!;
-    defer gpu::destroy_semaphore(&device, semaphore)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan args = alloc_cross_family_indirect_args(&frame_token);
@@ -226,16 +223,8 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
     )!!;
     gpu::end_commands(&compute)!!;
     gpu::CommandList[1] compute_lists = { compute };
-    gpu::SemaphoreSignal[1] signals = {{
-        .semaphore = semaphore,
-        .value     = (gpu::SemaphoreValue)1,
-        .stage     = gpu::Stage.INDIRECT_COMMAND,
-    }};
-    gpu::SubmitDesc compute_submit = {
-        .command_lists = compute_lists[..],
-        .signals       = signals[..],
-    };
-    gpu::submit(&device, &compute_submit)!!;
+    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
+    gpu::CompletionPoint compute_completion = gpu::submit(&device, &compute_submit)!!;
 
     gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     defer discard_test_commands(&graphics)!!;
@@ -247,19 +236,14 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
     )!!;
     gpu::end_commands(&graphics)!!;
     gpu::CommandList[1] graphics_lists = { graphics };
-    gpu::SemaphoreWait[1] waits = {{
-        .semaphore = semaphore,
-        .value     = (gpu::SemaphoreValue)1,
-        .stage     = gpu::Stage.INDIRECT_COMMAND,
-    }};
+    gpu::CompletionPoint[1] waits = { compute_completion };
     gpu::SubmitDesc graphics_submit = {
-        .command_lists = graphics_lists[..],
-        .waits         = waits[..],
+        .command_lists    = graphics_lists[..],
+        .completion_waits = waits[..],
     };
-    gpu::submit(&device, &graphics_submit)!!;
+    gpu::CompletionPoint graphics_completion = gpu::submit(&device, &graphics_submit)!!;
     gpu::end_frame(&frame_token)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::wait_completion(graphics_completion, ulong::max)!!;
 }
 
 fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
@@ -314,7 +298,7 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
     gpu::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..] };
     gpu::submit(&device, &graphics_submit)!!;
     gpu::end_frame(&second_frame)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void compute_generated_indexed_indirect_draw() @test {
@@ -443,7 +427,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     assert(early == gpu::INVALID_ARGUMENT || early == gpu::READBACK_NOT_READY, "early resolve is rejected");
 
     gpu::end_frame(&frame_token)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
     char* center = center_pixel(&rb_span);
@@ -520,7 +504,7 @@ fn void plain_indirect_draw_from_frame_span() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
     char* center = center_pixel(&rb_span);
@@ -607,7 +591,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, io_span.buffer, 0, 0)!!;
     float* doubled = &values[COUNT];
@@ -691,7 +675,7 @@ fn void count_buffer_limits_draws() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, rb_zero, 0, 0)!!;
     char* zero_center = center_pixel(&rb_zero_span);
@@ -746,7 +730,7 @@ fn void ticket_hybrid_and_short_dest() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::end_frame(&frame_token)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     char[CHUNK] dest;
     fault short_dest = @catch(gpu::resolve_readback(&device, &tickets[0], dest[:CHUNK - 1]));
@@ -844,7 +828,7 @@ fn void unresolved_readback_ticket_blocks_device_destruction() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
     gpu::end_frame(&frame)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::destroy_buffer(&device, src)!!;
 
     assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,

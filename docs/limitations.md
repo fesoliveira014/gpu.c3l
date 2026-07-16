@@ -77,7 +77,6 @@ exists (else the limit is compile-time).
 | Compute push-constant range | Selected-device `maxPushConstantsSize`, reported by `DeviceCaps.max_push_constant_size` | — | `INVALID_ARGUMENT` |
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
-| Live semaphores | 256 (`gpu/sync.c3:6`) | — | `SLOT_TABLE_FULL` |
 | Live command records | 4096 (`gpu/vk/command_state.c3:7`) | — | `SLOT_TABLE_FULL` |
 | Swapchains | 8 (`gpu/swapchain.c3:3`) | — | `SLOT_TABLE_FULL` |
 | Color attachments per pass | Lesser of 8 (`gpu/pipeline.c3:6`) and the selected device limit, reported by `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |

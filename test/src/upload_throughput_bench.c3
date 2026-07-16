@@ -160,7 +160,7 @@ fn UploadBenchObservation run_phase_a_combo(
         for (uint i = 0; i < threads; i++) lists[i] = args[i].list;
         gpu::SubmitDesc submit = { .command_lists = lists[:threads] };
         gpu::submit(&device, &submit)!!;
-        gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
+        wait_bench_queue(&device, gpu::QueueKind.GRAPHICS)!!;
         gpu::end_frame(&frame_token)!!;
     }
     long elapsed_ns = (long)start.to_now();

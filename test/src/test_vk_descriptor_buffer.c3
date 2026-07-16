@@ -267,9 +267,6 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::PipelineHandle graphics_pipeline = gpu::create_graphics_pipeline(&device, &graphics_pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, graphics_pipeline)!!;
 
-    gpu::SemaphoreDesc semaphore_desc = {};
-    gpu::SemaphoreHandle dependency = gpu::create_semaphore(&device, &semaphore_desc)!!;
-    defer gpu::destroy_semaphore(&device, dependency)!!;
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     gpu::CommandList compute_commands = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
@@ -319,13 +316,8 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::cmd_buffer_barrier(&compute_commands, &compute_output_to_host)!!;
     gpu::end_commands(&compute_commands)!!;
     gpu::CommandList[1] compute_lists = { compute_commands };
-    gpu::SemaphoreSignal[1] compute_signals = {{
-        .semaphore = dependency,
-        .value     = (gpu::SemaphoreValue)1,
-        .stage     = gpu::Stage.COMPUTE_SHADER,
-    }};
-    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..], .signals = compute_signals[..] };
-    gpu::submit(&device, &compute_submit)!!;
+    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
+    gpu::CompletionPoint compute_completion = gpu::submit(&device, &compute_submit)!!;
 
     gpu::CommandList graphics_commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     defer discard_test_commands(&graphics_commands)!!;
@@ -378,15 +370,13 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::cmd_buffer_barrier(&graphics_commands, &host_read)!!;
     gpu::end_commands(&graphics_commands)!!;
     gpu::CommandList[1] graphics_lists = { graphics_commands };
-    gpu::SemaphoreWait[1] graphics_waits = {{
-        .semaphore = dependency,
-        .value     = (gpu::SemaphoreValue)1,
-        .stage     = gpu::Stage.FRAGMENT_SHADER,
-    }};
-    gpu::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..], .waits = graphics_waits[..] };
-    gpu::submit(&device, &graphics_submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CompletionPoint[1] graphics_waits = { compute_completion };
+    gpu::SubmitDesc graphics_submit = {
+        .command_lists    = graphics_lists[..],
+        .completion_waits = graphics_waits[..],
+    };
+    gpu::CompletionPoint graphics_completion = gpu::submit(&device, &graphics_submit)!!;
+    gpu::wait_completion(graphics_completion, ulong::max)!!;
     gpu::invalidate_buffer(
         device: &device,
         buffer: readback,
@@ -561,7 +551,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::submit(&device, &submit)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;
     float* texels = (float*)out_span.cpu;

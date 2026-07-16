@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,17 @@ FORBIDDEN_TEXT = {
     "backend_state": "backend state pointer",
     "backendvtable": "backend dispatch table",
     "platformkind": "retired PlatformKind",
+    "semaphoredesc": "retired public semaphore",
+    "semaphorehandle": "retired public semaphore",
+    "semaphoresignal": "retired public semaphore",
+    "semaphorevalue": "retired public semaphore",
+    "semaphorewait": "retired public semaphore",
+    "create_semaphore": "retired public semaphore",
+    "destroy_semaphore": "retired public semaphore",
+    "wait_semaphore": "retired public semaphore",
+    "wait_queue_idle": "retired wait_queue_idle",
+    "timeline_semaphore": "retired timeline capability",
+    "max_timeline_semaphore_value_difference": "retired timeline capability",
     "probe_vulkan_version": "Vulkan loader probe",
     "probe_vma_allocator": "VMA probe",
     "range_end": "readback retirement range",
@@ -44,7 +56,27 @@ PLATFORM_HANDLE_TYPES = {
     "gpu::surface::x11": ("DisplayHandle", "WindowHandle"),
 }
 
-RETIRED_SOURCE_SYMBOLS = ("PlatformKind", "SurfaceDesc")
+RETIRED_SOURCE_SYMBOLS = (
+    "PlatformKind",
+    "SurfaceDesc",
+    "SemaphoreDesc",
+    "SemaphoreHandle",
+    "SemaphoreSignal",
+    "SemaphoreValue",
+    "SemaphoreWait",
+    "create_semaphore(",
+    "destroy_semaphore(",
+    "wait_semaphore(",
+    "wait_queue_idle",
+    "timeline_semaphore",
+    "max_timeline_semaphore_value_difference",
+    "SEMAPHORE,",
+)
+
+RETIRED_SOURCE_PATTERNS = {
+    r"struct\s+SubmitDesc\s*\{[^}]*\bwaits\b": "SubmitDesc.waits",
+    r"struct\s+SubmitDesc\s*\{[^}]*\bsignals\b": "SubmitDesc.signals",
+}
 
 
 def public_entries(module: dict) -> dict:
@@ -123,11 +155,16 @@ def validate_document(document: dict) -> list[str]:
 def scan_retired_source_symbols() -> list[str]:
     failures = []
     for path in sorted((ROOT / "gpu").rglob("*.c3")):
+        if "vk" in path.relative_to(ROOT / "gpu").parts:
+            continue
         source = path.read_text(encoding="utf-8")
         relative = path.relative_to(ROOT)
         for symbol in RETIRED_SOURCE_SYMBOLS:
             if symbol in source:
                 failures.append(f"retired {symbol} in {relative}")
+        for pattern, label in RETIRED_SOURCE_PATTERNS.items():
+            if re.search(pattern, source, re.DOTALL):
+                failures.append(f"retired {label} in {relative}")
     return failures
 
 

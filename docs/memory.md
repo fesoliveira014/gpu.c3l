@@ -708,8 +708,8 @@ arena:readback
 
 ## 17. Deferred destruction
 
-`destroy_buffer`, `destroy_texture`, `destroy_pipeline`, `destroy_shader`, and
-`destroy_semaphore` consume the public handle immediately, but submitted frames
+`destroy_buffer`, `destroy_texture`, `destroy_pipeline`, and `destroy_shader`
+consume the public handle immediately, but submitted frames
 may still reference the native object. The backend queues it by
 `retire_timeline_value` and drains completed entries during `begin_frame` and
 enqueue. Accepted device teardown drains the remainder only after queue progress
@@ -726,9 +726,9 @@ outside a frame bracket (threading.md Tier E, sanctioned for frame-loop-free
 apps) marks the affected semantic queue. Destroyed resources referenced by that
 work enter the deferred queue. A later `end_frame` chain covers every queue used
 since the last boundary and clears those markers only after successful submit.
-A frame-loop-free application instead calls `wait_queue_idle` for each affected
-role. Until then, `destroy_device` returns `DEVICE_BUSY` without changing its
-token or state.
+A frame-loop-free application waits on the latest `CompletionPoint` from each
+affected queue. Until those points complete, `destroy_device` returns
+`DEVICE_BUSY` without changing its token or state.
 
 ## 18. Defragmentation policy
 
@@ -766,6 +766,6 @@ readback path invalidates non-coherent memory
 staging path flushes non-coherent memory
 memory stats report VMA budget and live resources
 allocation names appear in debug reports
-destroyed buffers/textures/pipelines/shaders/semaphores free their backend
+destroyed buffers/textures/pipelines/shaders free their backend
     object only after retire_timeline_value passes
 ```

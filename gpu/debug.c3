@@ -15,7 +15,6 @@ enum DebugResourceKind : int {
     BUFFER,
     TEXTURE,
     PIPELINE,
-    SEMAPHORE,
     SWAPCHAIN,
     SHADER,
     RECORDING_CONTEXT,

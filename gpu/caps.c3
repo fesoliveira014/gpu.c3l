@@ -53,7 +53,6 @@ struct DeviceCaps {
     bool buffer_device_address;
     bool synchronization2;
     bool dynamic_rendering;
-    bool timeline_semaphore;
     bool shader_int64;
     bool draw_indirect_count;
     bool descriptor_buffer;
@@ -76,8 +75,6 @@ struct DeviceCaps {
     Vec3u max_compute_work_group_count;
     // Selected-device limit for one multi-draw indirect command.
     uint max_draw_indirect_count;
-    // Maximum distance from current or pending timeline semaphore values.
-    ulong max_timeline_semaphore_value_difference;
     usz  min_uniform_alignment;
     usz  min_storage_alignment;
     usz  min_texel_buffer_alignment;
