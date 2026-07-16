@@ -477,7 +477,10 @@ fn void? submit(Device* device, SubmitDesc* desc) {
         commands = {};
     }
     release_device_children(&operation, (ulong)desc.command_lists.len);
-    release_retained_device_pins(&operation, (uint)desc.command_lists.len);
+    (void)release_retained_device_pins(
+        &operation,
+        (uint)desc.command_lists.len,
+    );
 }
 
 <* Block until the queue drains — a heavyweight sync for shutdown and one-shot work, not per-frame pacing. *>

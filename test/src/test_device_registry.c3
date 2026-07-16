@@ -40,7 +40,9 @@ struct CommandPinFixture {
     uint         pins_during_submit;
     uint         next_command;
     bool         block_command;
+    bool         preserve_discarded_token;
     bool         reject_command;
+    bool         reuse_command_index;
     bool         submit_busy;
 }
 
@@ -119,8 +121,8 @@ fn void? command_pin_begin(
                 data.resource_owner,
                 gpu::ResourceOwnerKind.COMMAND,
             ),
-            .index      = fixture.next_command,
-            .generation = 1,
+            .index      = fixture.reuse_command_index ? 1 : fixture.next_command,
+            .generation = fixture.reuse_command_index ? fixture.next_command : 1,
         },
     };
 }
@@ -129,7 +131,10 @@ fn void? command_pin_end(gpu::CommandList* commands) {}
 
 fn ulong? command_pin_discard(gpu::CommandList* commands) {
     if (commands == null) return gpu::INVALID_HANDLE~;
-    *commands = {};
+    CommandPinFixture* fixture =
+        (CommandPinFixture*)gpu::device_backend_state_ptr(&commands.device);
+    if (fixture == null) return gpu::INVALID_HANDLE~;
+    if (!fixture.preserve_discarded_token) *commands = {};
     return 0;
 }
 
@@ -360,6 +365,33 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
     gpu::destroy_device(&device)!!;
 }
 
+fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
+    CommandPinFixture fixture = { .preserve_discarded_token = true };
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandList duplicate = commands;
+    gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
+
+    gpu::discard_commands(&commands)!!;
+    gpu::discard_commands(&duplicate)!!;
+    gpu::DeviceSlotControl after_duplicate =
+        (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+
+    assert(after_duplicate.pins == 0,
+        "a duplicate backend discard cannot underflow retained pins");
+    assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
+        "a duplicate backend discard cannot underflow command children");
+    gpu::destroy_device(&device)!!;
+}
+
 fn void lost_commands_can_be_discarded() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::register_device(
@@ -376,6 +408,9 @@ fn void lost_commands_can_be_discarded() @test {
 
     gpu::GlobalBarrier barrier;
     fault record_fault = @catch(gpu::cmd_global_barrier(&commands, &barrier));
+    fault destroy_fault = @catch(gpu::destroy_device(&device));
+    uint destroy_calls_before_discard =
+        fixture.destroy_calls.load(AtomicOrdering.ACQUIRE);
     gpu::discard_commands(&commands)!!;
     gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
     gpu::DeviceSlotControl after_discard =
@@ -383,6 +418,10 @@ fn void lost_commands_can_be_discarded() @test {
 
     assert(record_fault == gpu::DEVICE_LOST,
         "lost command recording faults without consuming its token");
+    assert(destroy_fault == gpu::DEVICE_BUSY,
+        "a lost device remains busy while a command retains its lifetime pin");
+    assert(destroy_calls_before_discard == 0,
+        "device teardown does not begin before the lost command is discarded");
     assert(after_discard.pins == 0,
         "discard releases a lost command lifetime pin");
     assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
@@ -470,6 +509,69 @@ fn void forged_command_owners_cannot_borrow_lifetime_pins() @test {
     assert(!fixture.command_entered.load(AtomicOrdering.ACQUIRE),
         "a forged command owner never reaches the backend");
     gpu::discard_commands(&commands)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void stale_command_generation_cannot_borrow_reused_slot_pin() @test {
+    CommandPinFixture fixture = {
+        .reject_command      = true,
+        .reuse_command_index = true,
+    };
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList first = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandList stale = first;
+    gpu::discard_commands(&first)!!;
+    gpu::CommandList live = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+
+    bool stale_borrows = gpu::has_retained_command_pin(&stale);
+    gpu::GlobalBarrier barrier;
+    fault stale_fault = @catch(gpu::cmd_global_barrier(&stale, &barrier));
+
+    assert(stale.handle.index == live.handle.index,
+        "the command slot is reused");
+    assert(stale.handle.generation != live.handle.generation,
+        "the reused command slot advances its generation");
+    assert(!stale_borrows,
+        "a stale generation cannot borrow the reused slot's lifetime pin");
+    assert(fixture.pins_during_command == 2,
+        "stale-generation validation takes a short pin beside the live lease");
+    assert(stale_fault == gpu::INVALID_HANDLE,
+        "the stale generation remains invalid");
+    gpu::discard_commands(&live)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void malformed_command_lease_index_is_rejected() @test {
+    CommandPinFixture fixture;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList malformed = {
+        .device = device,
+        .handle = {
+            .index      = gpu::MAX_DEVICE_COMMANDS,
+            .generation = 1,
+        },
+    };
+    gpu::DeviceOperation operation = gpu::begin_device_operation(&device)!!;
+    bool retained = gpu::retain_command_pin_lease(&operation, &malformed);
+
+    assert(!retained, "an out-of-range command index cannot publish a lease");
+    gpu::end_device_operation(&operation);
     gpu::destroy_device(&device)!!;
 }
 

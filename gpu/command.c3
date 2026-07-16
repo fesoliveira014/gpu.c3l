@@ -225,7 +225,10 @@ fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContext
     BackendVTable* vtable = operation.vtable;
     CommandList commands;
     vtable.begin_commands(device, queue, ctx, &commands)!;
-    retain_command_pin_lease(&operation, &commands);
+    if (!retain_command_pin_lease(&operation, &commands)) {
+        vtable.discard_commands(&commands)!;
+        return INVALID_HANDLE~;
+    }
     retain_device_children(&operation);
     transfer_device_operation_pin(&operation);
     return commands;
@@ -246,9 +249,11 @@ fn void? discard_commands(CommandList* commands) {
     BackendVTable* vtable = operation.vtable;
     CommandList consumed = *commands;
     ulong canceled_tickets = vtable.discard_commands(commands)!;
-    release_command_pin_lease(&operation, &consumed);
-    release_device_children(&operation, canceled_tickets + 1);
-    release_retained_device_pins(&operation);
+    bool released_lease = release_command_pin_lease(&operation, &consumed);
+    if (released_lease || !operation.owns_pin) {
+        release_device_children(&operation, canceled_tickets + 1);
+        (void)release_retained_device_pins(&operation);
+    }
 }
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>

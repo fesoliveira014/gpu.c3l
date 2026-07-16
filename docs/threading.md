@@ -1,8 +1,10 @@
 # Threading model
 
-Every public entry point belongs to one of three tiers. Anything not
-sanctioned here is documented misuse — it will not corrupt memory through the
-library's own state, but results and validation verdicts are undefined.
+Every public entry point belongs to one of three tiers. Anything not sanctioned
+here is misuse; results and validation verdicts are undefined. The library's
+own state remains memory-safe except when concurrent use of the same Tier C
+token races its consumption and device destruction: consumption releases the
+token's retained device pin while another call can still be in flight.
 
 ## Tiers
 

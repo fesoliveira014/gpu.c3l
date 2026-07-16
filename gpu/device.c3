@@ -359,30 +359,39 @@ fn DeviceOperation? borrow_retained_device_operation(
     };
 }
 
-fn void retain_command_pin_lease(
+fn bool retain_command_pin_lease(
     DeviceOperation* operation,
     CommandList* commands,
 ) @private {
+    if (operation == null || operation.slot == null || commands == null) {
+        return false;
+    }
+    if (commands.handle.generation == 0
+        || commands.handle.index >= MAX_DEVICE_COMMANDS) {
+        return false;
+    }
     operation.slot.command_leases[commands.handle.index].store(
         commands.handle.generation,
         AtomicOrdering.RELEASE,
     );
+    return true;
 }
 
-fn void release_command_pin_lease(
+fn bool release_command_pin_lease(
     DeviceOperation* operation,
     CommandList* commands,
 ) @private {
-    if (operation == null || commands == null) return;
-    if (commands.handle.index >= MAX_DEVICE_COMMANDS) return;
+    if (operation == null || commands == null) return false;
+    if (commands.handle.index >= MAX_DEVICE_COMMANDS) return false;
     Atomic{uint}* lease = &operation.slot.command_leases[commands.handle.index];
-    (void)mem::compare_exchange(
+    uint seen = mem::compare_exchange(
         &lease.data,
         commands.handle.generation,
         (uint)0,
         AtomicOrdering.ACQUIRE_RELEASE,
         AtomicOrdering.ACQUIRE,
     );
+    return seen == commands.handle.generation;
 }
 
 fn void end_device_operation(DeviceOperation* operation) @private {
@@ -401,13 +410,36 @@ fn void transfer_device_operation_pin(DeviceOperation* operation) @private {
     operation.owns_pin = false;
 }
 
-fn void release_retained_device_pins(
+fn bool release_retained_device_pins(
     DeviceOperation* operation,
     uint count = 1,
 ) @private {
-    if (operation == null || !operation.active || count == 0) return;
-    DeviceSlotControl pins = { .pins = count };
-    (void)operation.slot.control.sub((ulong)pins, AtomicOrdering.RELEASE);
+    if (operation == null || !operation.active || count == 0) return false;
+
+    ulong packed = operation.slot.control.load(AtomicOrdering.ACQUIRE);
+    while (true) {
+        DeviceSlotControl control = (DeviceSlotControl)packed;
+        uint operation_pins = operation.owns_pin ? 1 : 0;
+        if (control.pins < count
+            || control.pins - count < operation_pins) {
+            return false;
+        }
+
+        DeviceSlotControl released = control;
+        released.pins -= count;
+        ulong seen = mem::compare_exchange(
+            &operation.slot.control.data,
+            packed,
+            (ulong)released,
+            AtomicOrdering.ACQUIRE_RELEASE,
+            AtomicOrdering.ACQUIRE,
+        );
+        if (seen != packed) {
+            packed = seen;
+            continue;
+        }
+        return true;
+    }
 }
 
 fn void retain_device_children(DeviceOperation* operation, ulong count = 1) @private {
