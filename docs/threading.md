@@ -29,7 +29,7 @@ token's retained device pin while another call can still be in flight.
 | `create_device` | E | per runtime; device-registry mutation is synchronized; presentation also uses the surface scope |
 | `destroy_device` | S | per target device; success invalidates the caller's token; live children return `RESOURCE_IN_USE`, while active operations, incomplete queue work, or closing state return retryable `DEVICE_BUSY` |
 | `begin_frame` / `end_frame` / `@with_frame` | E | token-paired `IDLE -> ACTIVE -> IDLE`; quiescence required; helper worker is a direct call |
-| `submit` / `present` | E | queue-mutex backed, so Tier S private submits interleave safely |
+| `submit` / `present` | E | selected-queue submission is internally serialized; public calls remain externally synchronized |
 | `wait_queue_idle` | E | queue-mutex backed |
 | `poll_completion` / `wait_completion` | S | reusable value queries; host waits do not consume the point |
 | `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction rejects a pending acquire and waits graphics/present work |
@@ -117,9 +117,13 @@ direction only. Creation and destruction share a single `resource_mutex`
 (`begin_commands` through `end_commands`) and is outermost because that
 window takes `transfer_mutex` internally for its allocation.
 
-Each queue has its own mutex. Submit releases `command_mutex` before taking a
-queue mutex and releases the queue mutex before invalidating command tokens,
-so command-record and queue locks are never nested.
+Each selected queue identity owns one completion timeline and submission mutex.
+Roles that alias one native queue share that state. Submit releases
+`command_mutex` before locking the selected queue, checks completion headroom,
+reserves the next sequence immediately before the native call, and publishes only
+after success. Native failure rolls the reservation back while still locked. The
+queue mutex is released before public command tokens are invalidated, so
+command-record and queue locks are never nested.
 
 Dedicated-fallback staging/readback buffers (the arena ring miss path in
 `transfer_alloc`/`ticket_alloc`) create their VMA buffer without holding
@@ -246,6 +250,6 @@ bracket — sanctioned for frame-loop-free apps and one-shot setup work.
 Resources a command list submitted off-frame refers to must not be freed
 while that work may still be in flight: destroying such a resource enqueues
 it in the deferred-release queue (docs/memory.md §17) rather than freeing it
-synchronously. A later `end_frame` may cover all used queues; otherwise wait
-the affected queue explicitly. `destroy_device` returns `DEVICE_BUSY` while
-no covering completion is visible.
+synchronously. Keep the returned `CompletionPoint` and wait it, or cover the
+work with a later `end_frame`. `destroy_device` queries every published queue
+sequence without blocking and returns `DEVICE_BUSY` while any is incomplete.

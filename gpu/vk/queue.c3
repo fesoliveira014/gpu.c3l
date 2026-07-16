@@ -66,6 +66,7 @@ struct QueueCompletionState {
     gpu::QueueRoles roles;
     ulong           native_id;
     ulong           next_sequence;
+    ulong           observed_completed_sequence;
     Atomic{ulong}   published_sequence;
     bool            bound;
 }
@@ -75,9 +76,10 @@ const uint OFF_FRAME_COMPUTE_BIT @private = 1 << 1;
 const uint OFF_FRAME_TRANSFER_BIT @private = 1 << 2;
 
 struct SubmitInputs {
-    CommandRecord*[] records;
-    SemaphoreSlot*[] waits;
-    SemaphoreSlot*[] signals;
+    CommandRecord*[]        records;
+    QueueCompletionState*[] completion_waits;
+    SemaphoreSlot*[]        waits;
+    SemaphoreSlot*[]        signals;
     SwapchainSlot*   swapchain;
     gpu::QueueKind   kind;
 }
@@ -1591,6 +1593,28 @@ fn void? create_queue_completions(
         gpu::QueueKind.TRANSFER,
     )!;
 
+    if (selection.counts.graphics > 0) {
+        state.graphics_completion_id = gpu::queue_selection_id(
+            selection,
+            gpu::QueueKind.GRAPHICS,
+            0,
+        );
+    }
+    if (selection.counts.compute > 0) {
+        state.compute_completion_id = gpu::queue_selection_id(
+            selection,
+            gpu::QueueKind.COMPUTE,
+            0,
+        );
+    }
+    if (selection.counts.transfer > 0) {
+        state.transfer_completion_id = gpu::queue_selection_id(
+            selection,
+            gpu::QueueKind.TRANSFER,
+            0,
+        );
+    }
+
     foreach (identity, &completion : state.queue_completions) {
         if (!completion.bound) return gpu::BACKEND_ERROR~;
         completion.roles = selection.identity_roles[identity];
@@ -1629,6 +1653,79 @@ fn QueueCompletionState*? queue_completion_state(
     return completion;
 }
 
+fn uint primary_completion_id(
+    VkDeviceState* state,
+    gpu::QueueKind kind,
+) @private {
+    switch (kind) {
+        case gpu::QueueKind.COMPUTE:  return state.compute_completion_id;
+        case gpu::QueueKind.TRANSFER: return state.transfer_completion_id;
+        default:                      return state.graphics_completion_id;
+    }
+}
+
+fn QueueCompletionState*? queue_completion_for_kind(
+    VkDeviceState* state,
+    gpu::QueueKind kind,
+) @private {
+    QueueCompletionState* completion = queue_completion_state(
+        state,
+        primary_completion_id(state, kind),
+    )!;
+    bool supported;
+    switch (kind) {
+        case gpu::QueueKind.GRAPHICS: supported = completion.roles.graphics;
+        case gpu::QueueKind.COMPUTE:  supported = completion.roles.compute;
+        case gpu::QueueKind.TRANSFER: supported = completion.roles.transfer;
+    }
+    if (!supported) return gpu::INVALID_HANDLE~;
+    return completion;
+}
+
+fn gpu::Queue? queue_token_for_kind(
+    VkDeviceState* state,
+    gpu::QueueKind kind,
+) @private {
+    QueueCompletionState* completion = queue_completion_for_kind(state, kind)!;
+    return {
+        .device = state.owner,
+        .id     = primary_completion_id(state, kind),
+        .roles  = completion.roles,
+    };
+}
+
+fn void? require_queue_completion_headroom_with_query(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    FrameCounterQueryFn query_fn,
+) @private {
+    if (completion.next_sequence == gpu::MAX_COMPLETION_SEQUENCE) {
+        return gpu::SLOT_TABLE_FULL~;
+    }
+
+    ulong prospective = completion.next_sequence + 1;
+    ulong completed = completion.observed_completed_sequence;
+    ulong limit = state.caps.max_timeline_semaphore_value_difference;
+    if (prospective <= completed || prospective - completed <= limit) return;
+
+    vk::Result result = query_fn(
+        state.device,
+        completion.timeline,
+        &completed,
+    );
+    check_backend_result(
+        state:     state,
+        operation: "submit",
+        result:    result,
+    )!;
+    if (completed > completion.observed_completed_sequence) {
+        completion.observed_completed_sequence = completed;
+    }
+    if (prospective > completed && prospective - completed > limit) {
+        return gpu::DEVICE_BUSY~;
+    }
+}
+
 <* Reserve the next point while holding the queue's submission lock. *>
 fn gpu::CompletionPoint? reserve_queue_completion_locked(
     VkDeviceState* state,
@@ -1658,6 +1755,27 @@ fn gpu::CompletionPoint? reserve_queue_completion(
     completion.submit_mutex.lock()!!;
     defer completion.submit_mutex.unlock();
     return reserve_queue_completion_locked(state, queue);
+}
+
+fn void? cancel_queue_completion_locked(
+    VkDeviceState* state,
+    gpu::CompletionPoint point,
+) @private {
+    if (state == null || point.device != state.owner || !point.is_valid()) {
+        return gpu::INVALID_HANDLE~;
+    }
+    QueueCompletionState* completion = queue_completion_state(
+        state,
+        gpu::completion_point_queue_id(point),
+    )!;
+    ulong sequence = gpu::completion_point_sequence(point);
+    ulong published = completion.published_sequence.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    if (sequence != completion.next_sequence || sequence <= published) {
+        return gpu::INVALID_HANDLE~;
+    }
+    completion.next_sequence--;
 }
 
 <* Publish a point only after its native queue submission succeeds. *>
@@ -1761,60 +1879,27 @@ fn bool queue_uses_frame_aux(VkDeviceState* state, gpu::QueueKind kind) @private
         && queue_for(state, kind) != frame_queue_for(state);
 }
 
-<* Aliased semantic roles share the mutex for their native queue. *>
+<* Aliased semantic roles share the selected queue identity's submit mutex. *>
 fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
-    switch (kind) {
-        case gpu::QueueKind.TRANSFER:
-            if (state.selected_queue_roles.graphics
-                && state.transfer_queue == state.graphics_queue) {
-                return &state.graphics_queue_mutex;
-            }
-            if (state.selected_queue_roles.compute
-                && state.transfer_queue == state.compute_queue) {
-                return queue_mutex_for(state, gpu::QueueKind.COMPUTE);
-            }
-            return &state.transfer_queue_mutex;
-        case gpu::QueueKind.COMPUTE:
-            return state.selected_queue_roles.graphics
-                && state.compute_queue == state.graphics_queue
-                ? &state.graphics_queue_mutex
-                : &state.compute_queue_mutex;
-        default:
-            return &state.graphics_queue_mutex;
-    }
+    QueueCompletionState* completion = queue_completion_for_kind(state, kind)!!;
+    return &completion.submit_mutex;
 }
 
 fn Mutex* frame_queue_mutex_for(VkDeviceState* state) @private {
     return queue_mutex_for(state, frame_queue_kind(state));
 }
 
-fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
-    if (state.selected_queue_roles.graphics
-        && state.presentation.queue == state.graphics_queue) {
-        return &state.graphics_queue_mutex;
-    }
-    if (state.selected_queue_roles.compute
-        && state.presentation.queue == state.compute_queue) {
-        return queue_mutex_for(state, gpu::QueueKind.COMPUTE);
-    }
-    if (state.selected_queue_roles.transfer
-        && state.presentation.queue == state.transfer_queue) {
-        return queue_mutex_for(state, gpu::QueueKind.TRANSFER);
+fn Mutex* native_queue_mutex_for(VkDeviceState* state, vk::Queue queue) @private {
+    foreach (&completion : state.queue_completions) {
+        if (completion.bound && completion.queue == queue) {
+            return &completion.submit_mutex;
+        }
     }
     return &state.presentation.queue_mutex;
 }
 
-fn Mutex* native_queue_mutex_for(VkDeviceState* state, vk::Queue queue) @private {
-    if (state.selected_queue_roles.graphics && queue == state.graphics_queue) {
-        return &state.graphics_queue_mutex;
-    }
-    if (state.selected_queue_roles.compute && queue == state.compute_queue) {
-        return queue_mutex_for(state, gpu::QueueKind.COMPUTE);
-    }
-    if (state.selected_queue_roles.transfer && queue == state.transfer_queue) {
-        return queue_mutex_for(state, gpu::QueueKind.TRANSFER);
-    }
-    return present_queue_mutex_for(state);
+fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
+    return native_queue_mutex_for(state, state.presentation.queue);
 }
 
 fn void clear_off_frame_queue_markers(
@@ -1888,21 +1973,54 @@ fn SubmitInputs? resolve_submit_inputs(
         }
     }
 
+    if (desc.completion_waits.len > 0) {
+        inputs.completion_waits = mem::talloc_array(
+            QueueCompletionState*,
+            (sz)desc.completion_waits.len,
+        );
+        foreach (i, point : desc.completion_waits) {
+            if (point.device != *device) return gpu::INVALID_HANDLE~;
+            inputs.completion_waits[i] = published_queue_completion_state(
+                state,
+                gpu::completion_point_queue_id(point),
+                gpu::completion_point_sequence(point),
+            )!;
+        }
+    }
+
     return inputs;
 }
-<* Submit command lists to their queue via vkQueueSubmit2, waiting on and
-   signaling the requested timeline values at their stages. Empty wait/signal/
-   command arrays are left unset so the slice setters are never handed a
-   zero-length slice. Queue-used flags and the off-frame marker are set
-   unconditionally so retirement also covers off-frame submissions. A submit
-   on a non-anchor compute/transfer queue piggybacks one internal aux signal,
-   so end_frame needs no per-queue empty submit of its own. *>
-fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
+
+fn usz append_completion_wait_infos(
+    vk::SemaphoreSubmitInfo[] waits,
+    usz next_wait,
+    gpu::CompletionPoint[] points,
+    QueueCompletionState*[] completions,
+    QueueCompletionState* target,
+) @private {
+    foreach (i, point : points) {
+        QueueCompletionState* source = completions[i];
+        if (source == target) continue;
+        waits[next_wait++] = vk::semaphore_submit_info()
+            .set_semaphore(source.timeline)
+            .set_value(gpu::completion_point_sequence(point))
+            .set_stage_mask(
+                vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+            );
+    }
+    return next_wait;
+}
+
+<* Submit executable command lists and signal the queue-owned completion
+   timeline. Preparation and native failure leave every token retryable. *>
+fn gpu::CompletionPoint? vk_submit_with_queries(
+    gpu::Device* device,
+    gpu::SubmitDesc* desc,
+    QueueSubmit2Fn submit_fn,
+    FrameCounterQueryFn counter_query_fn,
+) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    if (desc.command_lists.len == 0
-        && desc.waits.len == 0
-        && desc.signals.len == 0
-        && desc.swapchain == gpu::SWAPCHAIN_HANDLE_INVALID) return;
+    gpu::CompletionPoint submitted;
 
     @pool() {
         SubmitInputs inputs = resolve_submit_inputs(state, device, desc)!;
@@ -1918,7 +2036,9 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
                 foreach (i, &token : desc.command_lists) {
                     CommandRecord* record = state.commands.get(token.handle)!;
                     if (record != records[i]) return gpu::COMMAND_RECORDING_ERROR~;
-                    if (record.state != CommandState.EXECUTABLE) return gpu::COMMAND_RECORDING_ERROR~;
+                    if (record.state != CommandState.EXECUTABLE) {
+                        return gpu::COMMAND_RECORDING_ERROR~;
+                    }
                     records[i] = record;
                 }
                 foreach (record : records) record.state = CommandState.SUBMITTING;
@@ -1953,90 +2073,129 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
         bool piggyback_transfer = kind == gpu::QueueKind.TRANSFER
             && queue_uses_frame_aux(state, kind);
         bool piggyback = piggyback_compute || piggyback_transfer;
+        gpu::Queue queue = queue_token_for_kind(state, kind)!;
+        QueueCompletionState* completion = queue_completion_state(
+            state,
+            queue.id,
+        )!;
 
         SwapchainSlot* swapchain = inputs.swapchain;
-        usz wait_count = desc.waits.len + (swapchain != null ? 1 : 0);
+        usz wait_count = desc.waits.len
+            + desc.completion_waits.len
+            + (swapchain != null ? 1 : 0);
         if (wait_count > 0) {
             vk::SemaphoreSubmitInfo[] waits = mem::talloc_array(
                 vk::SemaphoreSubmitInfo,
                 (sz)wait_count,
             );
+            usz next_wait;
             foreach (i, wait : desc.waits) {
                 SemaphoreSlot* slot = inputs.waits[i];
-                waits[i] = vk::semaphore_submit_info()
+                waits[next_wait++] = vk::semaphore_submit_info()
                     .set_semaphore(slot.semaphore)
                     .set_value((ulong)wait.value)
                     .set_stage_mask(stage_to_vk(wait.stage));
             }
+            next_wait = append_completion_wait_infos(
+                waits:       waits,
+                next_wait:   next_wait,
+                points:      desc.completion_waits,
+                completions: inputs.completion_waits,
+                target:      completion,
+            );
             if (swapchain != null) {
-                waits[desc.waits.len] = vk::semaphore_submit_info()
+                waits[next_wait++] = vk::semaphore_submit_info()
                     .set_semaphore(swapchain.pending_acquire_semaphore)
                     .set_stage_mask(
                         vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                     );
             }
-            submit = submit.set_wait_semaphore_infos(waits);
+            if (next_wait > 0) {
+                submit = submit.set_wait_semaphore_infos(waits[:next_wait]);
+            }
         }
 
         usz signal_count = desc.signals.len
             + (swapchain != null ? 1 : 0)
-            + (piggyback ? 1 : 0);
-        vk::SemaphoreSubmitInfo* aux_signal = null;
-        if (signal_count > 0) {
-            vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(
-                vk::SemaphoreSubmitInfo,
-                (sz)signal_count,
-            );
-            foreach (i, signal : desc.signals) {
-                SemaphoreSlot* slot = inputs.signals[i];
-                signals[i] = vk::semaphore_submit_info()
-                    .set_semaphore(slot.semaphore)
-                    .set_value((ulong)signal.value)
-                    .set_stage_mask(stage_to_vk(signal.stage));
-            }
-            usz next_signal = desc.signals.len;
-            if (swapchain != null) {
-                signals[next_signal++] = vk::semaphore_submit_info()
-                    .set_semaphore(
-                        swapchain.present_semaphores[swapchain.pending_image],
-                    )
-                    .set_stage_mask(
-                        vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    );
-            }
-            if (piggyback) {
-                vk::Semaphore aux_semaphore = piggyback_compute
-                    ? state.aux_compute_timeline
-                    : state.aux_transfer_timeline;
-                signals[next_signal] = vk::semaphore_submit_info()
-                    .set_semaphore(aux_semaphore)
-                    .set_stage_mask(
-                        vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
-                    );
-                aux_signal = &signals[next_signal++];
-            }
-            submit = submit.set_signal_semaphore_infos(signals);
+            + (piggyback ? 1 : 0)
+            + 1;
+        vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(
+            vk::SemaphoreSubmitInfo,
+            (sz)signal_count,
+        );
+        usz next_signal;
+        foreach (i, signal : desc.signals) {
+            SemaphoreSlot* slot = inputs.signals[i];
+            signals[next_signal++] = vk::semaphore_submit_info()
+                .set_semaphore(slot.semaphore)
+                .set_value((ulong)signal.value)
+                .set_stage_mask(stage_to_vk(signal.stage));
+        }
+        if (swapchain != null) {
+            signals[next_signal++] = vk::semaphore_submit_info()
+                .set_semaphore(
+                    swapchain.present_semaphores[swapchain.pending_image],
+                )
+                .set_stage_mask(
+                    vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                );
         }
 
-        Mutex* queue_mutex = queue_mutex_for(state, kind);
+        vk::SemaphoreSubmitInfo* aux_signal = null;
+        if (piggyback) {
+            vk::Semaphore aux_semaphore = piggyback_compute
+                ? state.aux_compute_timeline
+                : state.aux_transfer_timeline;
+            signals[next_signal] = vk::semaphore_submit_info()
+                .set_semaphore(aux_semaphore)
+                .set_stage_mask(
+                    vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+                );
+            aux_signal = &signals[next_signal++];
+        }
+
+        vk::SemaphoreSubmitInfo* completion_signal = &signals[next_signal++];
+        *completion_signal = vk::semaphore_submit_info()
+            .set_semaphore(completion.timeline)
+            .set_stage_mask(
+                vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+            );
+        submit = submit.set_signal_semaphore_infos(signals);
+
+        completion.submit_mutex.lock()!!;
         {
-            queue_mutex.lock()!!;
-            defer queue_mutex.unlock();
+            defer completion.submit_mutex.unlock();
+            require_queue_completion_headroom_with_query(
+                state,
+                completion,
+                counter_query_fn,
+            )!;
+            gpu::CompletionPoint point = reserve_queue_completion_locked(
+                state,
+                queue,
+            )!;
+            completion_signal.value = gpu::completion_point_sequence(point);
             if (aux_signal != null) {
                 aux_signal.value = (piggyback_compute
                     ? state.aux_compute_counter
                     : state.aux_transfer_counter) + 1;
             }
-            check_backend_result(
-                state:     state,
-                operation: "submit",
-                result:    vk::queue_submit2(
-                    queue_for(state, kind),
-                    1,
-                    &submit,
-                    (vk::Fence)null,
-                ),
-            )!;
+
+            vk::Result result = submit_fn(
+                completion.queue,
+                1,
+                &submit,
+                (vk::Fence)null,
+            );
+            if (result != vk::Result.SUCCESS) {
+                cancel_queue_completion_locked(state, point)!!;
+                check_backend_result(
+                    state:     state,
+                    operation: "submit",
+                    result:    result,
+                )!;
+            }
+
             state.submit_stats.queue_submits++;
             if (swapchain != null) swapchain.acquire_consumed = true;
             if (piggyback_compute) {
@@ -2059,6 +2218,8 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
                 commit_pending_layouts(state, record);
                 record.state = CommandState.SUBMITTED;
             }
+            publish_queue_completion_locked(state, point)!!;
+            submitted = point;
         }
 
         if (claimed) {
@@ -2070,6 +2231,28 @@ fn void? vk_submit(gpu::Device* device, gpu::SubmitDesc* desc) @private {
             claimed = false;
         }
     };
+
+    return submitted;
+}
+
+fn gpu::CompletionPoint? vk_submit_with(
+    gpu::Device* device,
+    gpu::SubmitDesc* desc,
+    QueueSubmit2Fn submit_fn,
+) @private {
+    return vk_submit_with_queries(
+        device:           device,
+        desc:             desc,
+        submit_fn:        submit_fn,
+        counter_query_fn: &real_frame_counter_query,
+    );
+}
+
+fn gpu::CompletionPoint? vk_submit(
+    gpu::Device* device,
+    gpu::SubmitDesc* desc,
+) @private {
+    return vk_submit_with(device, desc, &real_queue_submit2);
 }
 
 fn void? vk_wait_queue_idle(gpu::Device* device, gpu::QueueKind queue) @private {

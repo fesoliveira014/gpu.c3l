@@ -300,30 +300,142 @@ fn void cross_queue_timeline_chain_validates() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::SemaphoreDesc sem_desc = { .debug_name = "queue_chain" };
-    gpu::SemaphoreHandle sem = gpu::create_semaphore(&device, &sem_desc)!!;
-    defer gpu::destroy_semaphore(&device, sem)!!;
-
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList compute_cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList compute_cmd = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
     defer discard_test_commands(&compute_cmd)!!;
     gpu::end_commands(&compute_cmd)!!;
     gpu::CommandList[1] compute_lists = { compute_cmd };
-    gpu::SemaphoreSignal[1] signals = {{ .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.COMPUTE_SHADER }};
-    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..], .signals = signals[..] };
-    gpu::submit(&device, &compute_submit)!!;
+    gpu::SubmitDesc compute_submit = {
+        .command_lists = compute_lists[..],
+    };
+    gpu::CompletionPoint compute_done = gpu::submit(
+        &device,
+        &compute_submit,
+    )!!;
 
-    gpu::CommandList gfx_cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList gfx_cmd = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
     defer discard_test_commands(&gfx_cmd)!!;
     gpu::end_commands(&gfx_cmd)!!;
     gpu::CommandList[1] gfx_lists = { gfx_cmd };
-    gpu::SemaphoreWait[1] waits = {{ .semaphore = sem, .value = (gpu::SemaphoreValue)1, .stage = gpu::Stage.COMPUTE_SHADER }};
-    gpu::SubmitDesc gfx_submit = { .command_lists = gfx_lists[..], .waits = waits[..] };
-    gpu::submit(&device, &gfx_submit)!!;
+    gpu::CompletionPoint[1] completion_waits = { compute_done };
+    gpu::SubmitDesc gfx_submit = {
+        .command_lists   = gfx_lists[..],
+        .completion_waits = completion_waits[..],
+    };
+    gpu::CompletionPoint graphics_done = gpu::submit(
+        &device,
+        &gfx_submit,
+    )!!;
 
-    gpu::wait_queue_idle(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::wait_completion(graphics_done, 1_000_000_000)!!;
     gpu::end_frame(&frame_token)!!;
+}
+
+fn void distinct_transfer_compute_graphics_completion_chain() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .application_name  = "gpu_distinct_completion_chain_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::QueueRequirements requirements = {
+        .counts = {
+            .graphics = 1,
+            .compute  = 1,
+            .transfer = 1,
+        },
+        .distinct = { .graphics, .compute, .transfer },
+    };
+    gpu::DeviceRequest request = gpu::request_queues(
+        gpu::strict_device_request(),
+        requirements,
+    )!!;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+            continue;
+        }
+
+        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        defer destroy_test_device(&device)!!;
+        gpu::Queue graphics = gpu::get_queue(
+            &device,
+            gpu::QueueKind.GRAPHICS,
+        )!!;
+        gpu::Queue compute = gpu::get_queue(
+            &device,
+            gpu::QueueKind.COMPUTE,
+        )!!;
+        gpu::Queue transfer = gpu::get_queue(
+            &device,
+            gpu::QueueKind.TRANSFER,
+        )!!;
+        assert(graphics.id != compute.id
+            && graphics.id != transfer.id
+            && compute.id != transfer.id,
+            "the integration request owns three distinct queues");
+
+        gpu::CommandList transfer_commands = gpu::begin_commands(
+            &device,
+            gpu::QueueKind.TRANSFER,
+        )!!;
+        defer discard_test_commands(&transfer_commands)!!;
+        gpu::end_commands(&transfer_commands)!!;
+        gpu::CommandList[1] transfer_lists = { transfer_commands };
+        gpu::SubmitDesc transfer_submit = {
+            .command_lists = transfer_lists[..],
+        };
+        gpu::CompletionPoint transfer_done = gpu::submit(
+            &device,
+            &transfer_submit,
+        )!!;
+
+        gpu::CommandList compute_commands = gpu::begin_commands(
+            &device,
+            gpu::QueueKind.COMPUTE,
+        )!!;
+        defer discard_test_commands(&compute_commands)!!;
+        gpu::end_commands(&compute_commands)!!;
+        gpu::CommandList[1] compute_lists = { compute_commands };
+        gpu::CompletionPoint[1] compute_waits = { transfer_done };
+        gpu::SubmitDesc compute_submit = {
+            .command_lists    = compute_lists[..],
+            .completion_waits = compute_waits[..],
+        };
+        gpu::CompletionPoint compute_done = gpu::submit(
+            &device,
+            &compute_submit,
+        )!!;
+
+        gpu::CommandList graphics_commands = gpu::begin_commands(
+            &device,
+            gpu::QueueKind.GRAPHICS,
+        )!!;
+        defer discard_test_commands(&graphics_commands)!!;
+        gpu::end_commands(&graphics_commands)!!;
+        gpu::CommandList[1] graphics_lists = { graphics_commands };
+        gpu::CompletionPoint[1] graphics_waits = { compute_done };
+        gpu::SubmitDesc graphics_submit = {
+            .command_lists    = graphics_lists[..],
+            .completion_waits = graphics_waits[..],
+        };
+        gpu::CompletionPoint graphics_done = gpu::submit(
+            &device,
+            &graphics_submit,
+        )!!;
+
+        gpu::wait_completion(graphics_done, 1_000_000_000)!!;
+        return;
+    }
 }
 
 fn void multi_role_access_stays_exclusive_on_single_family() @test {
@@ -647,13 +759,21 @@ fn void same_family_presentation_keeps_its_exact_queue() @test {
     vk::Queue graphics_queue = (vk::Queue)(uptr)0x20;
     vk::Queue transfer_queue = (vk::Queue)(uptr)0x30;
     vk::Queue present_queue = (vk::Queue)(uptr)0x10;
+    vk::QueueCompletionState[1] completions = {{
+        .queue    = graphics_queue,
+        .timeline = (vk::Semaphore)(uptr)0x40,
+        .roles    = { .graphics },
+        .bound    = true,
+    }};
     vk::VkDeviceState state = {
-        .selected_queue_roles = picked.selected,
-        .graphics_family      = picked.graphics,
-        .graphics_queue       = graphics_queue,
-        .transfer_family      = picked.transfer,
-        .transfer_queue       = transfer_queue,
-        .presentation         = {
+        .selected_queue_roles  = picked.selected,
+        .graphics_family       = picked.graphics,
+        .graphics_queue        = graphics_queue,
+        .transfer_family       = picked.transfer,
+        .transfer_queue        = transfer_queue,
+        .queue_completions     = completions[..],
+        .graphics_completion_id = 0,
+        .presentation          = {
             .enabled = true,
             .family  = picked.present,
             .queue   = present_queue,
@@ -963,12 +1083,30 @@ fn void frame_anchor_uses_first_admitted_role() @test {
 fn void aliased_compute_and_transfer_share_one_queue_mutex() @test {
     vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
     vk::Queue compute_queue = (vk::Queue)(uptr)0x20;
+    vk::QueueCompletionState[2] completions = {
+        {
+            .queue    = graphics_queue,
+            .timeline = (vk::Semaphore)(uptr)0x30,
+            .roles    = { .graphics },
+            .bound    = true,
+        },
+        {
+            .queue    = compute_queue,
+            .timeline = (vk::Semaphore)(uptr)0x40,
+            .roles    = { .compute, .transfer },
+            .bound    = true,
+        },
+    };
     vk::VkDeviceState state = {
-        .selected_queue_roles  = { .graphics, .compute, .transfer },
-        .graphics_queue         = graphics_queue,
-        .compute_queue          = compute_queue,
-        .transfer_queue         = compute_queue,
-        .compute_queue_distinct = true,
+        .selected_queue_roles   = { .graphics, .compute, .transfer },
+        .graphics_queue          = graphics_queue,
+        .compute_queue           = compute_queue,
+        .transfer_queue          = compute_queue,
+        .queue_completions       = completions[..],
+        .graphics_completion_id  = 0,
+        .compute_completion_id   = 1,
+        .transfer_completion_id  = 1,
+        .compute_queue_distinct  = true,
     };
 
     assert(

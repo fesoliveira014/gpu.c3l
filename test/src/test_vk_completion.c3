@@ -42,6 +42,17 @@ fn void queue_completion_publication_rejects_gaps() @test {
     assert(@catch(gpu::poll_completion(second)) == gpu::INVALID_HANDLE,
         "publishing an earlier point does not publish a later point");
     vk::publish_queue_completion(state, second)!!;
+
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
+        .set_semaphore(completion.timeline)
+        .set_value(completion.next_sequence);
+    gpu::vk::check_backend_result(
+        state:     state,
+        operation: "signal test completion",
+        result:    vk::signal_semaphore(state.device, &signal),
+    )!!;
 }
 fn void queue_completion_poll_wait_is_reusable() @test {
     gpu::Device device = create_completion_test_device();

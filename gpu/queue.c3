@@ -60,13 +60,14 @@ struct QueueSelection @private {
     QueueRoles[MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
 }
 
-<* Submit command lists to their queue. A non-zero `swapchain` couples this
-   submit to the last acquired image and must use the graphics queue. *>
+<* Submit command lists to their queue. An empty batch targets the frame-anchor
+   queue. A non-zero `swapchain` requires the graphics queue. *>
 struct SubmitDesc {
-    CommandList[]     command_lists;
-    SemaphoreWait[]   waits;
-    SemaphoreSignal[] signals;
-    SwapchainHandle   swapchain;
+    CommandList[]      command_lists;
+    CompletionPoint[]  completion_waits;
+    SemaphoreWait[]    waits;
+    SemaphoreSignal[]  signals;
+    SwapchainHandle    swapchain;
 }
 
 fn bool Queue.is_valid(self) => self.device.is_valid();
@@ -516,35 +517,55 @@ fn QueueInfo? get_queue_info(Device* device, Queue queue) {
     };
 }
 
-<* Submit command lists to their queue, waiting on and signaling the requested
-   timeline values. All lists must share a queue kind and be executable. *>
-fn void? submit(Device* device, SubmitDesc* desc) {
+<* Submit executable command lists and return reusable queue progress. Completion
+   waits must belong to this device; successful submission consumes every list. *>
+fn CompletionPoint? submit(Device* device, SubmitDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     foreach (&commands : desc.command_lists) {
         if (commands.device != *device) return INVALID_HANDLE~;
-        validate_resource_owner(&operation, commands.handle.owner, ResourceOwnerKind.COMMAND)!;
+        validate_resource_owner(
+            &operation,
+            commands.handle.owner,
+            ResourceOwnerKind.COMMAND,
+        )!;
+    }
+    foreach (wait : desc.completion_waits) {
+        validate_completion_point(&operation, device, wait)!;
     }
     foreach (&wait : desc.waits) {
-        validate_resource_owner(&operation, wait.semaphore.owner, ResourceOwnerKind.SEMAPHORE)!;
+        validate_resource_owner(
+            &operation,
+            wait.semaphore.owner,
+            ResourceOwnerKind.SEMAPHORE,
+        )!;
     }
     foreach (&signal : desc.signals) {
-        validate_resource_owner(&operation, signal.semaphore.owner, ResourceOwnerKind.SEMAPHORE)!;
+        validate_resource_owner(
+            &operation,
+            signal.semaphore.owner,
+            ResourceOwnerKind.SEMAPHORE,
+        )!;
     }
     if (desc.swapchain != SWAPCHAIN_HANDLE_INVALID) {
-        validate_resource_owner(&operation, desc.swapchain.owner, ResourceOwnerKind.SWAPCHAIN)!;
+        validate_resource_owner(
+            &operation,
+            desc.swapchain.owner,
+            ResourceOwnerKind.SWAPCHAIN,
+        )!;
     }
-    operation.vtable.submit(device, desc)!;
+    CompletionPoint point = operation.vtable.submit(device, desc)!;
     foreach (&commands : desc.command_lists) {
         release_command_pin_lease(&operation, commands);
-        commands = {};
+        *commands = {};
     }
     release_device_children(&operation, (ulong)desc.command_lists.len);
     (void)release_retained_device_pins(
         &operation,
         (uint)desc.command_lists.len,
     );
+    return point;
 }
 
 <* Block until the queue drains — a heavyweight sync for shutdown and one-shot work, not per-frame pacing. *>

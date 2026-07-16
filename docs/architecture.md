@@ -227,7 +227,8 @@ unsupported.
 `get_queue_counts` reports selected counts by role. `get_queue` returns a
 device-owned identity for a role/index pair, and aliased roles return the same
 identity with a shared role mask. The Vulkan backend allocates every selected
-native identity. Command entry points take `QueueKind`.
+native identity. Each identity owns a private completion timeline and monotonic
+submission sequence. Command entry points take `QueueKind`.
 
 `BufferDesc`, `TextureDesc`, and `PersistentAllocDesc` declare a non-empty
 `QueueRoles` access set. Every explicitly named command resource is checked
@@ -257,10 +258,11 @@ RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> c
 `begin_commands` creates a record in `RECORDING`. Render passes nest into
 `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes
 the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
-batch as `SUBMITTING`; a pre-queue fault restores it, while success invalidates
-every alias. Frame-slot reuse is rejected while abandoned records remain;
-callers must submit or discard them. Invalid
-transitions return faults, and render-pass command constraints remain enforced.
+batch as `SUBMITTING`. Validation or native failure restores it without publishing
+queue progress. Success publishes one `CompletionPoint` and invalidates every
+submitted token and alias. Frame-slot reuse is rejected while abandoned records
+remain; callers must submit or discard them. Invalid transitions return faults,
+and render-pass command constraints remain enforced.
 
 ### Buffers
 

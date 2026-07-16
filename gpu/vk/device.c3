@@ -75,6 +75,9 @@ struct VkDeviceState {
     vk::Queue                  compute_queue;
     vk::Queue                  transfer_queue;
     QueueCompletionState[]     queue_completions;
+    uint                       graphics_completion_id;
+    uint                       compute_completion_id;
+    uint                       transfer_completion_id;
     gpu::DeviceCaps            caps;
     bool                       validation;
     bool                       debug_names;
@@ -112,9 +115,6 @@ struct VkDeviceState {
     Mutex                      resource_mutex;
     Mutex                      command_mutex;
     Mutex                      transfer_mutex;
-    Mutex                      graphics_queue_mutex;
-    Mutex                      compute_queue_mutex;
-    Mutex                      transfer_queue_mutex;
     bool                       compute_queue_distinct;
     Atomic{int}                inflight_calls;
     uint                       frames_in_flight;
@@ -411,9 +411,6 @@ fn gpu::Device? create_vk_device_with_selection(
     state.resource_mutex.init()!;
     state.command_mutex.init()!;
     state.transfer_mutex.init()!;
-    state.graphics_queue_mutex.init()!;
-    state.compute_queue_mutex.init()!;
-    state.transfer_queue_mutex.init()!;
 
     state.strict_heap = resolve_strict_heap_state(strict_requested, desc)!;
 
@@ -692,11 +689,30 @@ fn bool? device_destroy_ready_with_query(
     VkDeviceState* state,
     FrameCounterQueryFn query_fn,
 ) @private {
-    if (state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE) != 0) return false;
+    foreach (&completion : state.queue_completions) {
+        ulong expected = completion.published_sequence.load(
+            AtomicOrdering.ACQUIRE,
+        );
+        if (expected == 0) continue;
+
+        ulong current;
+        vk::Result result = query_fn(
+            state.device,
+            completion.timeline,
+            &current,
+        );
+        if (result == vk::Result.ERROR_DEVICE_LOST) {
+            observe_device_result(state, result);
+            return true;
+        }
+        check_device_result(state, result)!;
+        if (current < expected) return false;
+    }
+
     ulong expected = state.timeline_counter.load(AtomicOrdering.ACQUIRE);
     if (expected == 0) return true;
 
-    ulong current = 0;
+    ulong current;
     vk::Result result = query_fn(state.device, state.frame_timeline, &current);
     if (result == vk::Result.ERROR_DEVICE_LOST) {
         observe_device_result(state, result);
@@ -806,9 +822,6 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
     if (state.command_mutex.is_initialized())        (void)state.command_mutex.destroy();
     if (state.transfer_mutex.is_initialized())       (void)state.transfer_mutex.destroy();
-    if (state.graphics_queue_mutex.is_initialized()) (void)state.graphics_queue_mutex.destroy();
-    if (state.compute_queue_mutex.is_initialized())  (void)state.compute_queue_mutex.destroy();
-    if (state.transfer_queue_mutex.is_initialized()) (void)state.transfer_queue_mutex.destroy();
     if (state.presentation.queue_mutex.is_initialized()) (void)state.presentation.queue_mutex.destroy();
     mem::free(state);
 }

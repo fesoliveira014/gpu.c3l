@@ -21,17 +21,33 @@ fn vk::Result query_destroy_counter(vk::Device device, vk::Semaphore semaphore, 
 }
 
 fn void device_destroy_readiness_never_waits() @test {
-    vk::VkDeviceState state;
+    vk::QueueCompletionState[1] completions = {{
+        .timeline = (vk::Semaphore)(uptr)0x10,
+        .bound    = true,
+    }};
+    completions[0].published_sequence.store(3, AtomicOrdering.RELAXED);
+    vk::VkDeviceState state = {
+        .queue_completions = completions[..],
+    };
     state.off_frame_pending_queues.store(1, AtomicOrdering.RELAXED);
+    destroy_counter_calls = 0;
+    destroy_counter_result = vk::Result.SUCCESS;
+    destroy_counter_value = 2;
+
     assert(
         !vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
-        "uncovered off-frame work is busy without a driver query"
+        "an incomplete queue completion is busy"
     );
-    assert(destroy_counter_calls == 0, "off-frame work does not issue a blocking probe");
+    assert(destroy_counter_calls == 1,
+        "destruction probes queue progress without waiting");
 
-    state.off_frame_pending_queues.store(0, AtomicOrdering.RELAXED);
+    destroy_counter_value = 3;
+    assert(
+        vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
+        "completed off-frame work ignores stale marker bookkeeping"
+    );
+
     state.timeline_counter.store(7, AtomicOrdering.RELAXED);
-    destroy_counter_result = vk::Result.SUCCESS;
     destroy_counter_value = 6;
     assert(
         !vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
@@ -41,7 +57,7 @@ fn void device_destroy_readiness_never_waits() @test {
     destroy_counter_value = 7;
     assert(
         vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
-        "the expected retirement value makes destruction ready"
+        "completed queue and frame timelines make destruction ready"
     );
 
     destroy_counter_result = vk::Result.ERROR_DEVICE_LOST;

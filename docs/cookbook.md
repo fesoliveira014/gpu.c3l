@@ -113,19 +113,21 @@ gpu::cmd_draw_indirect(&cmd, pipeline, vroot, froot, args_span, max_draws)!;
 Shader side indexes per-draw data with `gl_DrawID`.
 Running example: `gpu_driven_draw_sdl`, `frustum_culling`.
 
-## 7. Split submits linked by a timeline
+## 7. Split submits linked by a completion point
 
 Goal: simulation and rendering as separate submits with explicit ordering.
 
 ```c3
-gpu::SemaphoreSignal[1] sim_signals = {{ .semaphore = sim_done,
-    .value = (gpu::SemaphoreValue)(frame + 1), .stage = gpu::Stage.COMPUTE_SHADER }};
-gpu::SubmitDesc sim_submit = { .command_lists = sim_lists[..], .signals = sim_signals[..] };
+gpu::SubmitDesc sim_submit = { .command_lists = sim_lists[..] };
+gpu::CompletionPoint sim_done = gpu::submit(&device, &sim_submit)!;
 
-gpu::SemaphoreWait[1] draw_waits = {{ .semaphore = sim_done,
-    .value = (gpu::SemaphoreValue)(frame + 1), .stage = gpu::Stage.VERTEX_SHADER }};
-gpu::SubmitDesc draw_submit = { .command_lists = draw_lists[..],
-    .waits = draw_waits[..], .swapchain = swapchain };
+gpu::CompletionPoint[1] draw_waits = { sim_done };
+gpu::SubmitDesc draw_submit = {
+    .command_lists    = draw_lists[..],
+    .completion_waits = draw_waits[..],
+    .swapchain        = swapchain,
+};
+gpu::CompletionPoint draw_done = gpu::submit(&device, &draw_submit)!;
 ```
 
 Real overlap happens when `caps.async_compute` is true (distinct compute

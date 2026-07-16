@@ -599,20 +599,33 @@ arena reset safety
 deferred destruction safety
 ```
 
-Each selected queue identity owns one private timeline and monotonic sequence.
+Each selected queue identity owns one private timeline, monotonic sequence, and
+submission mutex. Roles that resolve to the same native queue share that state.
 The public `CompletionPoint` packs the device, queue identity, and sequence in
-two words. Reservation and publication allocate nothing; publication occurs
-only after native submission succeeds. Host poll and wait reject unpublished
-sequences and query the owning timeline directly.
+two words. Reservation and publication allocate nothing.
 
-Public submit descriptor should support waits and signals:
+Every public `submit` signals exactly one queue-owned sequence and returns its
+point. An empty batch uses the frame-anchor queue: graphics, else compute, else
+transfer. Completion waits resolve to the owning private timeline and use
+`ALL_COMMANDS`; waits owned by the target queue are validated and elided.
+The queue mutex covers sequence reservation and `vkQueueSubmit2`, satisfying
+Vulkan external synchronization. Near the timeline-value-difference limit, the
+backend queries completed progress and returns `DEVICE_BUSY` before reservation
+if headroom remains unavailable. Native failure cancels the reservation before
+unlocking. Command records, layout commits, counters, swapchain state, and point
+publication commit only after native success.
 
 ```text
 SubmitDesc
     CommandList[] command_lists
+    CompletionPoint[] completion_waits
     SemaphoreWait[] waits
     SemaphoreSignal[] signals
 ```
+
+Host poll and wait reject unpublished sequences and query the owning timeline
+directly. Device destruction performs the same non-blocking query for each
+published queue sequence and returns `DEVICE_BUSY` while work is incomplete.
 
 User signal values must exceed the semaphore counter when they execute. The
 caller orders pending signals across queues and observes
