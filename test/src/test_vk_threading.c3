@@ -73,11 +73,13 @@ fn int creation_storm_worker(void* arg) {
             .size        = (usz)(256 + (args.seed * 64 + i) % 512),
             .usage       = { .storage, .addressable },
             .memory_kind = gpu::MemoryKind.DEVICE,
+            .access      = { .graphics, .compute, .transfer },
         };
         gpu::BufferHandle buffer = gpu::create_buffer(args.device, &buf_desc)!!;
 
         gpu::TextureDesc tex_desc = {
             .dimension = gpu::TextureDimension.TEX_2D,
+            .access    = { .graphics, .compute, .transfer },
             .width     = 4,
             .height    = 4,
             .format    = gpu::Format.RGBA8_UNORM,
@@ -348,6 +350,7 @@ fn void parallel_recording_disjoint_texture_layouts() @test {
     for (uint i = 0; i < THR_THREADS; i++) {
         gpu::TextureDesc tex_desc = {
             .dimension = gpu::TextureDimension.TEX_2D,
+            .access    = { .graphics, .compute, .transfer },
             .width     = 4,
             .height    = 4,
             .format    = gpu::Format.RGBA8_UNORM,
@@ -409,7 +412,7 @@ fn void concurrent_blocking_uploads() @test {
     Thread[THR_THREADS] threads;
     for (uint i = 0; i < THR_THREADS; i++) {
         gpu::BufferDesc desc = {
-            .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+            .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
         args[i] = { .device = &device, .buffer = buffers[i], .fill = (char)(i + 1) };
@@ -470,7 +473,7 @@ fn void concurrent_upload_hammer() @test {
     Thread[THR_THREADS] threads;
     for (uint i = 0; i < THR_THREADS; i++) {
         gpu::BufferDesc desc = {
-            .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+            .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
         args[i] = { .device = &device, .buffer = buffers[i], .fill = (char)(i + 1) };
@@ -553,7 +556,7 @@ fn void two_helper_tiny_arena_hammer() @test {
     Thread[HELPER_HAMMER_THREADS] threads;
     for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) {
         gpu::BufferDesc desc = {
-            .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+            .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
         args[i] = { .device = &device, .buffer = buffers[i], .seed = i + 1 };
@@ -595,7 +598,7 @@ fn void sequential_helper_calls_bound_the_pool_to_one_buffer() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc desc = {
-        .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+        .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
@@ -642,7 +645,7 @@ fn void failed_helpers_reclaim_command_records_on_pool_reset() @test {
     }
 
     gpu::BufferDesc desc = {
-        .size = payload.len, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+        .size = payload.len, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
@@ -693,7 +696,7 @@ fn void deferred_queue_growth_from_worker_threads() @test {
     for (uint t = 0; t < GROWTH_THREADS; t++) {
         args[t].device = &device;
         for (uint i = 0; i < GROWTH_PER_THREAD; i++) {
-            gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+            gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
             args[t].buffers[i] = gpu::create_buffer(&device, &desc)!!;
         }
     }
@@ -755,13 +758,13 @@ fn void blocking_upload_races_default_context_recording() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc upload_desc = {
-        .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+        .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle upload_buffer = gpu::create_buffer(&device, &upload_desc)!!;
     defer gpu::destroy_buffer(&device, upload_buffer)!!;
 
     gpu::BufferDesc copy_desc = {
-        .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+        .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle copy_src = gpu::create_buffer(&device, &copy_desc)!!;
     defer gpu::destroy_buffer(&device, copy_src)!!;
@@ -800,7 +803,7 @@ fn int boundary_worker(void* arg) {
     // creates until told to stop.
     while (args.release.load(AtomicOrdering.RELAXED) == 0) {
         gpu::BufferDesc desc = {
-            .size = 4096, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE,
+            .size = 4096, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         gpu::BufferHandle buffer = gpu::create_buffer(args.device, &desc)!!;
         args.entered.store(1, AtomicOrdering.RELAXED);
@@ -889,7 +892,7 @@ fn void multi_thread_tiny_arena_fallback_hammer() @test {
     gpu::BufferHandle[FALLBACK_HAMMER_THREADS] buffers;
     for (uint i = 0; i < FALLBACK_HAMMER_THREADS; i++) {
         gpu::BufferDesc desc = {
-            .size = FALLBACK_HAMMER_PAYLOAD, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+            .size = FALLBACK_HAMMER_PAYLOAD, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
     }
@@ -978,7 +981,7 @@ fn void parallel_tier_c_uploads_across_contexts() @test {
     gpu::BufferHandle[THR_THREADS] buffers;
     for (uint i = 0; i < THR_THREADS; i++) {
         gpu::BufferDesc desc = {
-            .size = PARALLEL_UPLOAD_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+            .size = PARALLEL_UPLOAD_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
     }

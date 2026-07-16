@@ -122,6 +122,7 @@ fn gpu::TextureHandle[BENCH_MAX_WORKERS] make_texture_pool(gpu::Device* device) 
     foreach (&handle : textures) {
         gpu::TextureDesc desc = {
             .dimension = gpu::TextureDimension.TEX_2D,
+            .access    = { .graphics, .compute, .transfer },
             .width     = 4,
             .height    = 4,
             .format    = gpu::Format.RGBA8_UNORM,

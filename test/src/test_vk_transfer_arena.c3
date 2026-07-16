@@ -21,7 +21,7 @@ fn void staging_buffer_create_info_covers_selected_families() @test {
         };
         uint[3] families;
         uint family_count = gpu::vk::used_queue_families(&state, families[..]);
-        gpu::BufferDesc desc = gpu::vk::staging_arena_desc(4096);
+        gpu::BufferDesc desc = gpu::vk::staging_arena_desc(4096, state.selected_queue_roles);
         vk::BufferCreateInfo info = gpu::vk::make_buffer_create_info(&desc, families[:family_count])!!;
         uint expected_count = expected_counts[index];
         assert(family_count == expected_count, "selected family count is exact");
@@ -45,8 +45,8 @@ fn void staging_buffer_create_info_covers_selected_families() @test {
 
 fn void transfer_single_family_buffers_stay_exclusive() @test {
     gpu::BufferDesc[2] descs = {
-        gpu::vk::readback_arena_desc(2048),
-        gpu::vk::staging_dedicated_desc(2048),
+        gpu::vk::readback_arena_desc(2048, { .transfer }),
+        gpu::vk::staging_dedicated_desc(2048, { .transfer }),
     };
     uint[2] expected_usage = {
         (uint)vk::BufferUsageFlagBits.TRANSFER_DST_BIT,
@@ -58,7 +58,7 @@ fn void transfer_single_family_buffers_stay_exclusive() @test {
     };
     foreach (index, &desc : descs) {
         vk::BufferCreateInfo info = gpu::vk::make_buffer_create_info(desc, {})!!;
-        assert(!desc.usage.shared_queues, "single-family transfer descriptor does not request sharing");
+        assert(desc.access.transfer && !desc.access.graphics && !desc.access.compute, "transfer descriptors admit only transfer");
         assert((uint)info.usage == expected_usage[index], "single-family transfer usage remains exact");
         assert(desc.memory_kind == expected_memory[index], "single-family transfer memory kind remains exact");
         assert(info.sharing_mode == vk::SharingMode.EXCLUSIVE, "single-family transfer buffer stays exclusive");

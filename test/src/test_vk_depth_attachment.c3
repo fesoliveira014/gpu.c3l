@@ -64,6 +64,7 @@ fn gpu::PipelineHandle make_depth_pipeline(gpu::Device* device, DepthCtx* ctx, g
 fn gpu::TextureHandle make_depth_texture(gpu::Device* device, bool sampled = false) {
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = DP_RT,
         .height    = DP_RT,
         .format    = gpu::Format.D32_FLOAT,
@@ -75,6 +76,7 @@ fn gpu::TextureHandle make_depth_texture(gpu::Device* device, bool sampled = fal
 fn gpu::TextureHandle make_color_target(gpu::Device* device) {
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = DP_RT,
         .height    = DP_RT,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -168,7 +170,7 @@ fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, g
 
 fn gpu::BufferHandle make_readback(gpu::Device* device, usz size) {
     gpu::BufferDesc desc = {
-        .size = size, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK,
+        .size = size, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
     };
     return gpu::create_buffer(device, &desc)!!;
 }
@@ -566,6 +568,7 @@ fn void depth_pass_validation_faults() @test {
 
     gpu::TextureDesc sampled_only_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = DP_RT,
         .height    = DP_RT,
         .format    = gpu::Format.D32_FLOAT,
@@ -732,9 +735,8 @@ fn void depth_bias_shifts_stored_depth() @test {
     gpu::BufferHandle readback = make_readback(&device, DP_DEPTH_BYTES * 2);
     defer gpu::destroy_buffer(&device, readback)!!;
     gpu::GpuSpan rb = gpu::get_buffer_span(&device, readback)!!;
-    gpu::GpuSpan rb_plain = { .buffer = rb.buffer, .offset = 0, .size = DP_DEPTH_BYTES, .cpu = rb.cpu, .gpu = rb.gpu };
-    char* biased_cpu = (char*)rb.cpu + DP_DEPTH_BYTES;
-    gpu::GpuSpan rb_biased = { .buffer = rb.buffer, .offset = DP_DEPTH_BYTES, .size = DP_DEPTH_BYTES, .cpu = (void*)biased_cpu, .gpu = rb.gpu };
+    gpu::GpuSpan rb_plain = rb.checked_subspan(0, DP_DEPTH_BYTES)!!;
+    gpu::GpuSpan rb_biased = rb.checked_subspan(DP_DEPTH_BYTES, DP_DEPTH_BYTES)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts = write_tri(&frame_token, NEAR_Z);

@@ -20,6 +20,7 @@ fn gpu::Device make_layout_device() {
 fn gpu::TextureHandle make_layout_texture(gpu::Device* device) {
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -122,7 +123,7 @@ fn void same_list_barrier_then_copy_validates() @test {
     gpu::TextureHandle tex = make_layout_texture(&device);
     defer gpu::destroy_texture(&device, tex)!!;
 
-    gpu::BufferDesc staging_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING };
+    gpu::BufferDesc staging_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
     defer gpu::destroy_buffer(&device, staging)!!;
 

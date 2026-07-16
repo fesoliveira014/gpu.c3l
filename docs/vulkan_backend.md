@@ -270,13 +270,13 @@ Creation flow:
 
 ```text
 public BufferDesc
-    -> validate
+    -> validate size, usage, and semantic access
     -> translate BufferUsage to vk::BufferUsageFlags
+    -> derive the admitted native queue families
     -> translate MemoryKind to vma::AllocationCreateInfo
     -> allocator.try_create_buffer
-    -> query mapped pointer from allocation info
-    -> query buffer device address if addressable
-    -> store BufferSlot
+    -> query mapped pointer and optional device address
+    -> store BufferSlot, including access roles
     -> return BufferHandle
 ```
 
@@ -287,26 +287,17 @@ VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
 ```
 
 If address query returns zero, creation should fail.
-Queue-family lists are ordered sets. The full semantic list visits the
-representative graphics, compute, and transfer queues, then every selected
-identity in the same role order; private presentation is excluded. A single
-unique family keeps `EXCLUSIVE` sharing with no family-index list. Two or more
-use `CONCURRENT` with exactly the ordered, deduplicated list.
+Queue-family lists are derived from the descriptor's semantic `QueueRoles`
+access set. The backend visits admitted roles in graphics, compute, transfer
+order and includes every selected identity for each role. Private presentation
+queues are excluded. One unique family keeps `EXCLUSIVE` sharing with no family
+list; two or more use `CONCURRENT` with the exact ordered, deduplicated list.
 
-Public buffers use the full semantic list only with
-`BufferUsage.shared_queues`; otherwise they remain `EXCLUSIVE`. Internal frame
-arenas use every selected graphics and compute identity. Transfer identities
-are excluded while either shader role exists because frame arenas carry no
-transfer usage; a transfer-only device falls back to every selected transfer
-identity. The same one-family/two-or-more sharing rule applies.
-
-The persistent arena always uses the full semantic list because its backing
-supports all three access classes. This is an internal backing-buffer policy:
-per-span `shared_queues` is an accepted no-op, while explicit buffers and
-textures still require the flag. Concurrent sharing does not replace barriers,
-semaphore ordering, completion waits, or retirement; a persistent span cannot
-be freed while GPU work may reference it. Each arena remains scoped to its
-owning `Device`.
+Frame arenas admit selected graphics and compute roles, or transfer on a
+transfer-only device. Persistent-arena backing admits every selected role;
+each returned span retains its narrower allocation access set. Concurrent
+sharing does not replace barriers, submission ordering, completion waits, or
+retirement. Every arena remains scoped to its owning `Device`.
 
 ## 9. Texture implementation
 
@@ -314,18 +305,17 @@ Creation flow:
 
 ```text
 public TextureDesc
-    -> validate dimensions and format
+    -> validate shape, format, usage, and semantic access
     -> translate usage to vk::ImageUsageFlags
+    -> derive the admitted native queue families
     -> allocator.try_create_image
-    -> create default image view
-    -> set initial layout
-    -> store TextureSlot
+    -> create default image view and set initial layout
+    -> store TextureSlot, including access roles
     -> return TextureHandle
 ```
 
-`TextureUsage.shared_queues` uses the full semantic family list and the same
-one-family `EXCLUSIVE` or two-or-more `CONCURRENT` rule as public buffers.
-Textures without the flag remain `EXCLUSIVE`.
+Textures use the same one-family `EXCLUSIVE` or multi-family `CONCURRENT`
+rule as buffers, based only on `TextureDesc.access`.
 
 The backend tracks image layout per texture. For complex subresource layout tracking, begin with whole-image layout tracking and add subresource tracking only when required.
 
@@ -370,9 +360,9 @@ device. One family remains `EXCLUSIVE`; two or more use `CONCURRENT` with the
 exact ordered list. Transfer is otherwise excluded because transfer commands
 never bind or consume the descriptor heap.
 
-This internal policy does not change ownership for public resources. A buffer
-or texture consumed by graphics and compute still requires `shared_queues`.
-The descriptor-indexing path remains unchanged. Descriptor tokens and the
+This internal policy does not widen public resource access. A buffer or texture
+consumed by graphics and compute declares both roles in its `access` set. The
+descriptor-indexing path remains unchanged. Descriptor tokens and the
 internal heap remain scoped to their owning `Device`.
 
 Public indices map to descriptor entries. Neither path changes the public API

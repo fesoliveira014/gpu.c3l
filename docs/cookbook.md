@@ -129,7 +129,7 @@ gpu::SubmitDesc draw_submit = { .command_lists = draw_lists[..],
 ```
 
 Real overlap happens when `caps.async_compute` is true (distinct compute
-queue); buffers both queues touch need the `shared_queues` usage flag.
+queue); resources used by both queues declare `{ .graphics, .compute }` access.
 Single-queue devices run the same code serialized.
 Running example: `particle_sim`.
 

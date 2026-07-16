@@ -103,6 +103,7 @@ fn gpu::GpuSpan alloc_persistent_indirect_args(gpu::Device* device) {
         .align       = 4,
         .usage       = { .indirect },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "persistent_cross_family_args",
     };
     gpu::GpuSpan span = gpu::alloc_persistent_span(device, &desc)!!;
@@ -285,12 +286,13 @@ fn void persistent_arena_desc_has_exact_backing_contract() @test {
         .addressable,
         .indirect,
         .index,
-        .shared_queues,
     };
 
     assert(plan.desc.size == 4096, "persistent arena descriptor keeps the requested size");
     assert((uint)plan.desc.usage == (uint)expected_usage, "persistent arena descriptor uses the exact backing superset");
     assert(plan.desc.memory_kind == gpu::MemoryKind.PERSISTENT_UPLOAD, "persistent arena descriptor uses persistent upload memory");
+    assert((uint)plan.desc.access == (uint)state.selected_queue_roles,
+        "persistent arena descriptor admits every selected role");
     assert(plan.desc.debug_name == "persistent_arena", "persistent arena descriptor keeps its debug name");
 }
 
@@ -374,18 +376,21 @@ fn void persistent_alloc_free_stats() @test {
 
     gpu::PersistentAllocDesc desc_a = {
         .size = 256, .align = 64, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "a",
+        .access = { .compute },
     };
     gpu::GpuSpan a = gpu::alloc_persistent_span(&device, &desc_a)!!;
     assert(a.cpu != null, "persistent span is mapped");
     assert((ulong)a.gpu != 0, "non-zero GPU address");
     assert(a.offset % 64 == 0, "offset honors alignment");
+    assert((uint)a.access == (uint)desc_a.access,
+        "persistent span retains the allocation access roles");
     ulong a_gpu = (ulong)a.gpu;
 
     gpu::PersistentArenaStats after_a = gpu::get_persistent_stats(&device)!!;
     assert(after_a.used_bytes >= 256, "used bytes rose");
     assert(after_a.allocation_count == 1, "one live allocation");
 
-    gpu::PersistentAllocDesc desc_b = { .size = 512, .align = 256, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD };
+    gpu::PersistentAllocDesc desc_b = { .size = 512, .align = 256, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
     gpu::GpuSpan b = gpu::alloc_persistent_span(&device, &desc_b)!!;
     assert((ulong)b.gpu != a_gpu, "B gets a distinct address");
     assert(gpu::get_persistent_stats(&device)!!.allocation_count == 2, "two live allocations");
@@ -398,7 +403,7 @@ fn void persistent_alloc_free_stats() @test {
     assert((ulong)a.gpu == a_gpu, "A's GPU address is stable");
 
     // Reuse: C allocates into freed space, A still distinct/stable.
-    gpu::PersistentAllocDesc desc_c = { .size = 128, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD };
+    gpu::PersistentAllocDesc desc_c = { .size = 128, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
     gpu::GpuSpan c = gpu::alloc_persistent_span(&device, &desc_c)!!;
     assert((ulong)c.gpu != a_gpu, "C distinct from live A");
 
@@ -409,7 +414,7 @@ fn void persistent_alloc_free_stats() @test {
     assert(drained.used_bytes == 0, "used back to 0");
 
     // Wrong memory kind faults.
-    gpu::PersistentAllocDesc bad_kind = { .size = 64, .align = 16, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::PersistentAllocDesc bad_kind = { .size = 64, .align = 16, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     fault kind_fault = @catch(gpu::alloc_persistent_span(&device, &bad_kind));
     assert(kind_fault == gpu::INVALID_ARGUMENT, "non-persistent memory kind faults INVALID_ARGUMENT");
 
@@ -430,6 +435,7 @@ fn void persistent_allocation_rejections_report_contract_context() @test {
 
     gpu::PersistentAllocDesc bad_size = {
         .size = 0, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "bad_size",
+        .access      = { .graphics, .compute, .transfer },
     };
     uint before = capture.calls;
     fault size_fault = @catch(gpu::alloc_persistent_span(&device, &bad_size));
@@ -444,6 +450,7 @@ fn void persistent_allocation_rejections_report_contract_context() @test {
 
     gpu::PersistentAllocDesc bad_align = {
         .size = 64, .align = 3, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "bad_align",
+        .access      = { .graphics, .compute, .transfer },
     };
     before = capture.calls;
     fault align_fault = @catch(gpu::alloc_persistent_span(&device, &bad_align));
@@ -458,6 +465,7 @@ fn void persistent_allocation_rejections_report_contract_context() @test {
 
     gpu::PersistentAllocDesc bad_kind = {
         .size = 64, .align = 16, .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "bad_kind",
+        .access      = { .graphics, .compute, .transfer },
     };
     before = capture.calls;
     fault kind_fault = @catch(gpu::alloc_persistent_span(&device, &bad_kind));
@@ -473,6 +481,7 @@ fn void persistent_allocation_rejections_report_contract_context() @test {
     gpu::PersistentAllocDesc bad_usage = {
         .size = 64, .align = 16, .usage = { .vertex },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "bad_usage",
+        .access      = { .graphics, .compute, .transfer },
     };
     before = capture.calls;
     fault usage_fault = @catch(gpu::alloc_persistent_span(&device, &bad_usage));
@@ -495,6 +504,7 @@ fn void persistent_diagnostic_callback_preserves_fault_parity() @test {
     gpu::Device callback_device = gpu::create_device_from_desc(&callback_desc)!!;
     gpu::PersistentAllocDesc rejected_desc = {
         .size = 0, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
     uint before = capture.calls;
     fault callback_fault = @catch(gpu::alloc_persistent_span(&callback_device, &rejected_desc));
@@ -541,12 +551,12 @@ fn void transfer_usage_persistent_span_copies() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::PersistentAllocDesc src_desc = {
-        .size = 64, .align = 16, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "src",
+        .size = 64, .align = 16, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "src",
     };
     gpu::GpuSpan src = gpu::alloc_persistent_span(&device, &src_desc)!!;
     defer gpu::free_persistent_span(&device, src)!!;
     gpu::PersistentAllocDesc dst_desc = {
-        .size = 64, .align = 16, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "dst",
+        .size = 64, .align = 16, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "dst",
     };
     gpu::GpuSpan dst = gpu::alloc_persistent_span(&device, &dst_desc)!!;
     defer gpu::free_persistent_span(&device, dst)!!;
@@ -594,7 +604,7 @@ fn void indirect_usage_persistent_span_dispatches() @test {
 
     const uint COUNT = 4;
     gpu::PersistentAllocDesc io_desc = {
-        .size = COUNT * 4 * 2, .align = 16, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "io",
+        .size = COUNT * 4 * 2, .align = 16, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "io",
     };
     gpu::GpuSpan io = gpu::alloc_persistent_span(&device, &io_desc)!!;
     defer gpu::free_persistent_span(&device, io)!!;
@@ -602,7 +612,7 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     for (uint i = 0; i < COUNT; i++) values[i] = (float)i;
 
     gpu::PersistentAllocDesc root_desc = {
-        .size = ComputeRoot::size, .align = 16, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "root",
+        .size = ComputeRoot::size, .align = 16, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "root",
     };
     gpu::GpuSpan root_span = gpu::alloc_persistent_span(&device, &root_desc)!!;
     defer gpu::free_persistent_span(&device, root_span)!!;
@@ -612,7 +622,7 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     root.count      = COUNT;
 
     gpu::PersistentAllocDesc args_desc = {
-        .size = gpu::DispatchIndirectCommand::size, .align = 4, .usage = { .indirect }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "dispatch_args",
+        .size = gpu::DispatchIndirectCommand::size, .align = 4, .usage = { .indirect }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "dispatch_args",
     };
     gpu::GpuSpan args_span = gpu::alloc_persistent_span(&device, &args_desc)!!;
     defer gpu::free_persistent_span(&device, args_span)!!;
@@ -657,19 +667,13 @@ fn void unsupported_usage_persistent_span_faults() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::PersistentAllocDesc vertex_desc = {
-        .size = 64, .align = 16, .usage = { .vertex }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .size = 64, .align = 16, .usage = { .vertex }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer },
     };
     fault vertex_fault = @catch(gpu::alloc_persistent_span(&device, &vertex_desc));
     assert(vertex_fault == gpu::INVALID_ARGUMENT, "vertex-bit usage request faults INVALID_ARGUMENT");
 
-    gpu::PersistentAllocDesc shared_desc = {
-        .size = 64, .align = 16, .usage = { .shared_queues }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-    };
-    gpu::GpuSpan shared_span = gpu::alloc_persistent_span(&device, &shared_desc)!!;
-    gpu::free_persistent_span(&device, shared_span)!!;
-
     // Empty usage stays valid (storage-style default).
-    gpu::PersistentAllocDesc empty_desc = { .size = 64, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD };
+    gpu::PersistentAllocDesc empty_desc = { .size = 64, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
     gpu::GpuSpan empty_span = gpu::alloc_persistent_span(&device, &empty_desc)!!;
     gpu::free_persistent_span(&device, empty_span)!!;
 }
@@ -688,6 +692,7 @@ fn void persistent_free_rejections_report_exact_context() @test {
         .size        = 64,
         .align       = 16,
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::GpuSpan span = gpu::alloc_persistent_span(&device, &alloc_desc)!!;
 
@@ -732,6 +737,7 @@ fn void persistent_capacity_failure_reports_backend_result() @test {
         .size        = 64,
         .align       = 1,
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::GpuSpan full = gpu::alloc_persistent_span(&device, &full_desc)!!;
     defer gpu::free_persistent_span(&device, full)!!;
@@ -739,6 +745,7 @@ fn void persistent_capacity_failure_reports_backend_result() @test {
         .size        = 1,
         .align       = 1,
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
 
     uint before = capture.calls;

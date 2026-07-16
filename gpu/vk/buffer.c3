@@ -18,6 +18,7 @@ struct BufferSlot {
     void*               cpu_base;
     usz                 size;
     gpu::BufferUsage    usage;
+    gpu::QueueRoles     access;
     gpu::MemoryKind     memory_kind;
     char[DEBUG_NAME_CAP] debug_name;
     bool                internal;
@@ -148,6 +149,7 @@ fn gpu::BufferHandle? create_buffer_with_families_for_state(
     BufferSlot slot = {
         .size        = desc.size,
         .usage       = desc.usage,
+        .access      = desc.access,
         .memory_kind = desc.memory_kind,
     };
     check_device_result(state, state.allocator.create_buffer(
@@ -192,9 +194,8 @@ fn gpu::BufferHandle? create_buffer_with_families_for_state(
 }
 
 fn gpu::BufferHandle? create_buffer_for_state(VkDeviceState* state, gpu::BufferDesc* desc) @private {
-    if (!desc.usage.shared_queues) return create_buffer_with_families_for_state(state, desc, {});
     uint[MAX_QUEUE_FAMILIES] families;
-    uint count = used_queue_families(state, families[..]);
+    uint count = resource_queue_families(state, desc.access, families[..]);
     return create_buffer_with_families_for_state(state, desc, families[:count]);
 }
 
@@ -225,7 +226,7 @@ fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* des
             .public_fault   = gpu::INVALID_ARGUMENT,
             .resource       = { .kind = gpu::DebugResourceKind.BUFFER, .debug_name = desc.debug_name },
             .rejected_field = "BufferDesc.usage",
-            .invariant      = "must include at least one access flag",
+            .invariant      = "must include at least one usage flag",
         };
         gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
         return gpu::INVALID_ARGUMENT~;
@@ -290,6 +291,7 @@ fn gpu::GpuSpan? get_buffer_span_for_state(VkDeviceState* state, gpu::BufferHand
         .buffer = handle,
         .offset = 0,
         .kind   = slot.memory_kind,
+        .access = slot.access,
     };
 }
 

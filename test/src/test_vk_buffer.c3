@@ -19,6 +19,7 @@ fn void buffer_create_address_span() @test {
         .size        = 4096,
         .usage       = { .storage, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "device_buffer",
     };
     gpu::BufferHandle device_buffer = gpu::create_buffer(&device, &device_desc)!!;
@@ -29,17 +30,21 @@ fn void buffer_create_address_span() @test {
         .size        = 256,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+        .access      = { .compute },
     };
     gpu::BufferHandle upload_buffer = gpu::create_buffer(&device, &upload_desc)!!;
     gpu::GpuSpan upload_span = gpu::get_buffer_span(&device, upload_buffer)!!;
     assert(upload_span.cpu != null, "upload buffer span is mapped");
     assert(upload_span.size == 256, "span reports buffer size");
+    assert((uint)upload_span.access == (uint)upload_desc.access,
+        "span retains the buffer access roles");
 
     // Addressable buffer exposes a non-zero GPU address.
     gpu::BufferDesc addressable_desc = {
         .size        = 1024,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle addressable_buffer = gpu::create_buffer(&device, &addressable_desc)!!;
     gpu::GpuAddress address = gpu::get_buffer_address(&device, addressable_buffer)!!;
@@ -68,11 +73,11 @@ fn void range_and_alignment_validation() @test {
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::BufferDesc zero = { .size = 0, .usage = { .storage }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD };
+    gpu::BufferDesc zero = { .size = 0, .usage = { .storage }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
     fault f1 = @catch(gpu::create_buffer(&device, &zero));
     assert(f1 == gpu::INVALID_ARGUMENT, "zero-size buffer faults");
 
-    gpu::BufferDesc desc = { .size = 256, .usage = { .storage, .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD };
+    gpu::BufferDesc desc = { .size = 256, .usage = { .storage, .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buf = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buf)!!;
 

@@ -38,12 +38,10 @@ page doesn't explain it, that's a bug in this page — file an issue.
   subpasses, no tile-based subpass dependencies. Render targets are
   described per pass begin (`RenderPassDesc`) and that is the whole model.
 - **Async compute is capability-gated.** A distinct compute queue is used
-  when the hardware offers one (second queue in the main family, or a
-  compute-only family); `DeviceCaps.async_compute` reports it, and resources
-  touched by both GRAPHICS and COMPUTE must then carry the `shared_queues`
-  usage flag (concurrent sharing). Single-queue devices (lavapipe) keep the
-  graphics alias — the flag is a no-op there. EXCLUSIVE cross-family
-  ownership transfers are unsupported.
+  when available and reported by `DeviceCaps.async_compute`. Resources declare
+  their semantic access roles; distinct admitted families use private concurrent
+  sharing, while aliased roles stay exclusive. Barriers and queue ordering remain
+  explicit. Exclusive cross-family ownership transfers are unsupported.
 - **Wireframe polygon rasterization is optional.** `DeviceCaps.line_polygon_mode`
   reports whether `PolygonMode.LINE` is enabled. Unsupported adapters reject
   it with `UNSUPPORTED_FEATURE`; filled rasterization and

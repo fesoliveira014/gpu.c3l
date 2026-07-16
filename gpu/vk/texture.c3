@@ -32,6 +32,7 @@ struct TextureSlot {
     vk::ImageView      default_view;
     gpu::Format        format;
     gpu::TextureUsage  usage;
+    gpu::QueueRoles    access;
     uint               width;
     uint               height;
     uint               mip_levels;
@@ -223,6 +224,7 @@ fn bool? format_supports_usage(
         .height    = 1,
         .format    = format,
         .usage     = usage,
+        .access    = state.selected_queue_roles,
     };
     if (!gpu::texture_desc_valid(&desc)) return false;
     return texture_desc_supported(state, &desc);
@@ -461,6 +463,27 @@ fn void enqueue_cached_views(VkDeviceState* state, TextureSlot* slot, ulong reti
     }
 }
 
+fn vk::ImageCreateInfo make_texture_create_info(
+    gpu::TextureDesc* desc,
+    uint[] queue_families,
+) @private {
+    vk::ImageCreateInfo info = vk::image_create_info()
+        .set_image_type(vk::ImageType.TYPE_2D)
+        .set_format(format_to_vk(desc.format))
+        .set_extent({ .width = desc.width, .height = desc.height, .depth = 1 })
+        .set_mip_levels(gpu::texture_mip_levels(desc))
+        .set_array_layers(gpu::texture_array_layers(desc))
+        .set_samples(vk::SampleCountFlagBits.COUNT_1_BIT)
+        .set_tiling(vk::ImageTiling.OPTIMAL)
+        .set_usage(texture_usage_to_vk(desc.usage))
+        .set_initial_layout(vk::ImageLayout.UNDEFINED);
+    if (queue_families.len >= 2) {
+        info = info
+            .set_sharing_mode(vk::SharingMode.CONCURRENT)
+            .set_queue_family_indices(queue_families);
+    }
+    return info;
+}
 fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
@@ -497,31 +520,16 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     }
     uint mip_levels   = gpu::texture_mip_levels(desc);
     uint array_layers = gpu::texture_array_layers(desc);
-
-    vk::ImageCreateInfo image_info = vk::image_create_info()
-        .set_image_type(vk::ImageType.TYPE_2D)
-        .set_format(format_to_vk(desc.format))
-        .set_extent({ .width = desc.width, .height = desc.height, .depth = 1 })
-        .set_mip_levels(mip_levels)
-        .set_array_layers(array_layers)
-        .set_samples(vk::SampleCountFlagBits.COUNT_1_BIT)
-        .set_tiling(vk::ImageTiling.OPTIMAL)
-        .set_usage(texture_usage_to_vk(desc.usage))
-        .set_initial_layout(vk::ImageLayout.UNDEFINED);
     uint[MAX_QUEUE_FAMILIES] share_families;
-    if (desc.usage.shared_queues) {
-        uint share_count = used_queue_families(state, share_families[..]);
-        if (share_count >= 2) {
-            image_info = image_info
-                .set_sharing_mode(vk::SharingMode.CONCURRENT)
-                .set_queue_family_indices(share_families[:share_count]);
-        }
-    }
+    uint share_count = resource_queue_families(state, desc.access, share_families[..]);
+    vk::ImageCreateInfo image_info =
+        make_texture_create_info(desc, share_families[:share_count]);
     vma::AllocationCreateInfo alloc_info = { .usage = vma::MemoryUsage.AUTO_PREFER_DEVICE };
 
     TextureSlot slot = {
         .format         = desc.format,
         .usage          = desc.usage,
+        .access         = desc.access,
         .width          = desc.width,
         .height         = desc.height,
         .mip_levels     = mip_levels,

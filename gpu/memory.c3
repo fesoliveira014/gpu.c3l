@@ -34,8 +34,8 @@ fn bool ReadbackTicket.equals(self, ReadbackTicket other) @operator(==) {
         && self.generation == other.generation;
 }
 
-// Host-side view of a GPU-visible range. `cpu` may be null for non-mappable
-// memory; `gpu` is non-zero for shader-visible memory.
+// Host-side view of a GPU-visible range. `cpu` may be null; `access` names
+// the selected queue roles admitted to the range.
 struct GpuSpan {
     GpuAddress   gpu;
     void*        cpu;
@@ -43,6 +43,7 @@ struct GpuSpan {
     BufferHandle buffer;
     usz          offset;
     MemoryKind   kind;
+    QueueRoles   access;
 }
 
 struct FrameToken {
@@ -132,13 +133,14 @@ macro void? @with_frame(FrameToken* out_frame, Device* device, #work, ...) {
     if (work_fault) return work_fault~;
 }
 
-// memory_kind must be PERSISTENT_UPLOAD; align 0 = no requirement; usage
-// must fit the arena superset (empty = storage-style default).
+// `memory_kind` must be PERSISTENT_UPLOAD; `align` 0 means no requirement;
+// `usage` must fit the arena superset; `access` must name selected roles.
 struct PersistentAllocDesc {
     usz         size;
     usz         align;
     BufferUsage usage;
     MemoryKind  memory_kind;
+    QueueRoles  access;
     ZString     debug_name;
 }
 
@@ -164,12 +166,14 @@ struct TextureUploadDesc {
 
 <* Allocate a long-lived span from the persistent arena. `size` must be
    nonzero; `align` 0 means no requirement, otherwise a power of two
-   (INVALID_ARGUMENT). Its GPU address is stable until freed. Ownership: free
-   with free_persistent_span. *>
+   (INVALID_ARGUMENT). `access` must be a non-empty subset of selected roles
+   and is preserved in the returned span. Its GPU address is stable until
+   freed. Ownership: free with free_persistent_span. *>
 fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
+    validate_queue_access(&operation, desc.access)!;
     return operation.vtable.alloc_persistent_span(device, desc);
 }
 
@@ -293,6 +297,7 @@ fn GpuSpan GpuSpan.unchecked_subspan(self, usz offset, usz size) {
         .buffer = self.buffer,
         .offset = self.offset + offset,
         .kind   = self.kind,
+        .access = self.access,
     };
 }
 

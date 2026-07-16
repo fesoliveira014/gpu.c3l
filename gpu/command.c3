@@ -289,7 +289,8 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
 }
 
 <* Dispatch a compute pipeline with a single root GPU address pushed as the
-   push constant at offset 0. Counts may be zero and may not exceed
+   push constant at offset 0. Every allocation reachable from the root must
+   admit the recording queue's role. Counts may be zero and may not exceed
    DeviceCaps.max_compute_work_group_count on any axis. *>
 fn void? cmd_dispatch(CommandList* commands, PipelineHandle pipeline, GpuAddress root, Vec3u groups) {
     DeviceOperation operation = command_operation(commands)!;
@@ -338,7 +339,9 @@ fn void? cmd_end_render_pass(CommandList* commands) {
     return vtable.cmd_end_render_pass(commands);
 }
 
-<* Draw inside a render pass, pushing the vertex and fragment root addresses. *>
+<* Draw inside a render pass, pushing the vertex and fragment root addresses.
+   Every allocation reachable from either root must admit the recording queue's
+   role. *>
 fn void? cmd_draw(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
@@ -346,7 +349,9 @@ fn void? cmd_draw(CommandList* commands, PipelineHandle pipeline, GpuAddress ver
     return vtable.cmd_draw(commands, pipeline, vertex_root, fragment_root, vertex_count, instance_count);
 }
 
-<* Draw indexed geometry; indices are read from the start of index_span. *>
+<* Draw indexed geometry; indices are read from the start of index_span.
+   Every allocation reachable from either root must admit the recording queue's
+   role. *>
 fn void? cmd_draw_indexed(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
@@ -357,7 +362,8 @@ fn void? cmd_draw_indexed(CommandList* commands, PipelineHandle pipeline, GpuAdd
 <* Draw from GPU-written DrawIndirectCommand arguments at the span's offset.
    The args buffer needs indirect usage; the root pair applies to every draw
    in the multi-draw (per-draw variation via gl_DrawID). Ordering against the
-   argument writes is the caller's barrier. draw_count may not exceed
+   argument writes is the caller's barrier. Every allocation reachable from
+   either root must admit the recording queue's role. draw_count may not exceed
    DeviceCaps.max_draw_indirect_count. *>
 fn void? cmd_draw_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
     DeviceOperation operation = command_operation(commands)!;
@@ -369,7 +375,8 @@ fn void? cmd_draw_indirect(CommandList* commands, PipelineHandle pipeline, GpuAd
 <* Indexed variant over DrawIndexedIndirectCommand arguments. Index-range
    bounds are read from GPU memory at execution time and are not validated;
    out-of-bounds indices follow device robustness. draw_count may not exceed
-   DeviceCaps.max_draw_indirect_count. *>
+   DeviceCaps.max_draw_indirect_count. Every allocation reachable from either
+   root must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
@@ -380,7 +387,8 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, PipelineHandle pipelin
 <* Count-buffer variant: the GPU-written uint at count_span limits execution
    to max_draw_count and may not exceed DeviceCaps.max_draw_indirect_count.
    The args span must hold max_draw_count entries. Requires
-   DeviceCaps.draw_indirect_count. *>
+   DeviceCaps.draw_indirect_count. Every allocation reachable from either root
+   must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
@@ -390,7 +398,8 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, PipelineHandle p
 
 <* Dispatch from GPU-written DispatchIndirectCommand arguments. Each group
    count must not exceed the corresponding
-   DeviceCaps.max_compute_work_group_count component. *>
+   DeviceCaps.max_compute_work_group_count component. Every allocation
+   reachable from the root must admit the recording queue's role. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress root, GpuSpan args) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);

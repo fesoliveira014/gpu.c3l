@@ -45,6 +45,7 @@ fn void run_buffer_op(gpu::Device* device) {
         .size        = 256,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle handle = gpu::create_buffer(device, &desc)!!;
     gpu::destroy_buffer(device, handle)!!;
@@ -53,6 +54,7 @@ fn void run_buffer_op(gpu::Device* device) {
 fn void run_texture_op(gpu::Device* device) {
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,

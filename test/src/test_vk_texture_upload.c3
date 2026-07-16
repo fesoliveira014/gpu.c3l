@@ -28,6 +28,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     // usage-implies-layout convention end to end.
     gpu::TextureDesc tex_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = UP_SIZE,
         .height     = UP_SIZE,
         .mip_levels = 2,
@@ -54,6 +55,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
         .size        = MIP0_BYTES + MIP1_BYTES,
         .usage       = { .transfer_src },
         .memory_kind = gpu::MemoryKind.STAGING,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "upload_staging",
     };
     gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
@@ -85,6 +87,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
         .size        = UP_SIZE * UP_SIZE * 16,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "sample_output",
     };
     gpu::BufferHandle sample_out = gpu::create_buffer(&device, &out_desc)!!;
@@ -94,6 +97,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
         .size        = MIP1_BYTES,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "mip1_readback",
     };
     gpu::BufferHandle mip1_readback = gpu::create_buffer(&device, &rb_desc)!!;
@@ -218,6 +222,7 @@ fn void storage_write_direct_readback() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = UP_SIZE,
         .height    = UP_SIZE,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -232,6 +237,7 @@ fn void storage_write_direct_readback() @test {
         .size        = MIP0_BYTES,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;
@@ -320,6 +326,7 @@ fn void copy_validation_faults() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = UP_SIZE,
         .height    = UP_SIZE,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -332,6 +339,7 @@ fn void copy_validation_faults() @test {
         .size        = MIP0_BYTES,
         .usage       = { .transfer_src },
         .memory_kind = gpu::MemoryKind.STAGING,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
     defer gpu::destroy_buffer(&device, staging)!!;
@@ -387,6 +395,7 @@ fn void mip_subset_view_sampled() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = UP_SIZE,
         .height     = UP_SIZE,
         .mip_levels = 2,
@@ -416,7 +425,7 @@ fn void mip_subset_view_sampled() @test {
     defer gpu::destroy_sampler(&device, smp_index)!!;
 
     gpu::BufferDesc staging_desc = {
-        .size = MIP0_BYTES + MIP1_BYTES, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING,
+        .size = MIP0_BYTES + MIP1_BYTES, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
     defer gpu::destroy_buffer(&device, staging)!!;
@@ -435,6 +444,7 @@ fn void mip_subset_view_sampled() @test {
         .size        = (UP_SIZE / 2) * (UP_SIZE / 2) * 16,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle sample_out = gpu::create_buffer(&device, &out_desc)!!;
     defer gpu::destroy_buffer(&device, sample_out)!!;
@@ -517,6 +527,7 @@ fn void flush_invalidate_stale_handle_faults() @test {
         .size        = 64,
         .usage       = { .transfer_src },
         .memory_kind = gpu::MemoryKind.STAGING,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     gpu::flush_buffer(&device, buffer, 0, 0)!!;

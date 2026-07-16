@@ -62,9 +62,6 @@ bitstruct TextureUsage : uint {
     bool transfer_src : 4;
     // Destination of uploads/copies.
     bool transfer_dst : 5;
-    // Concurrent sharing across queue families; required when GRAPHICS and
-    // COMPUTE both touch it and caps.async_compute is set.
-    bool shared_queues : 6;
 }
 
 <* Individually creatable optimal-tiling format features. Feature
@@ -105,7 +102,8 @@ struct TextureFormatSupport {
     TextureSampleCountSupport sample_counts;
 }
 
-<* Creation parameters for create_texture. *>
+<* Creation parameters for create_texture. `access` must be a non-empty subset
+   of the device's selected queue roles. *>
 struct TextureDesc {
     TextureDimension dimension;
     uint             width;
@@ -117,6 +115,7 @@ struct TextureDesc {
     uint             array_layers;
     Format           format;
     TextureUsage     usage;
+    QueueRoles       access;
     ZString          debug_name;
 }
 
@@ -228,6 +227,7 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
+    if (!queue_access_is_valid(&operation, desc.access)) return false;
     return operation.vtable.supports_texture_desc(device, desc);
 }
 
@@ -237,6 +237,7 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
+    validate_queue_access(&operation, desc.access)!;
     return operation.vtable.create_texture(device, desc);
 }
 

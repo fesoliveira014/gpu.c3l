@@ -123,7 +123,7 @@ fn gpu::Device make_transfer_test_device(
 fn StagingReuseFixture make_staging_reuse_fixture() {
     StagingReuseFixture fixture;
     fixture.device = make_transfer_test_device(staging_size: STAGING_REUSE_BYTES);
-    gpu::BufferDesc desc = { .size = STAGING_REUSE_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK };
+    gpu::BufferDesc desc = { .size = STAGING_REUSE_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer }};
     for (uint i = 0; i < 2; i++) {
         fixture.buffers[i] = gpu::create_buffer(&fixture.device, &desc)!!;
         fixture.spans[i] = gpu::get_buffer_span(&fixture.device, fixture.buffers[i])!!;
@@ -308,6 +308,7 @@ fn void buffer_upload_readback_round_trip() @test {
         .size        = 4096,
         .usage       = { .storage, .transfer_src, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "device_buffer",
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
@@ -347,6 +348,7 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
         .size        = 64,
         .usage       = { .transfer_src, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
@@ -525,6 +527,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         .size        = 128,
         .usage       = { .transfer_src, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "exhaustion_buffer",
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
@@ -532,6 +535,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::TextureDesc texture_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = 2,
         .height     = 2,
         .format     = gpu::Format.RGBA8_UNORM,
@@ -784,6 +788,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         .size        = 256,
         .usage       = { .storage, .transfer_src, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "ticket_src",
     };
     gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
@@ -832,6 +837,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         .size        = 64,
         .usage       = { .transfer_src, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "unrelated",
     };
     gpu::BufferHandle unrelated = gpu::create_buffer(&device, &unrelated_desc)!!;
@@ -904,6 +910,7 @@ fn void oversized_upload_uses_dedicated_staging() @test {
         .size        = BIG,
         .usage       = { .transfer_src, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
@@ -946,6 +953,7 @@ fn void staging_ring_reuses_across_frames() @test {
         .size        = 1024,
         .usage       = { .storage, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
@@ -981,6 +989,7 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
         .size        = 1024,
         .usage       = { .transfer_src, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle first = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, first)!!;
@@ -1027,6 +1036,7 @@ fn void texture_upload_helper_sampled() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = UR_TEX,
         .height    = UR_TEX,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -1080,6 +1090,7 @@ fn void texture_upload_helper_sampled() @test {
         .size        = UR_TEX * UR_TEX * 16,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle sample_out = gpu::create_buffer(&device, &out_desc)!!;
     defer gpu::destroy_buffer(&device, sample_out)!!;
@@ -1134,6 +1145,7 @@ fn void texture_readback_helper_restores_layout() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = UR_TEX,
         .height    = UR_TEX,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -1188,6 +1200,7 @@ fn void upload_helper_validation_faults() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = UR_TEX,
         .height    = UR_TEX,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -1253,7 +1266,7 @@ fn void upload_helper_validation_faults() @test {
     assert(state.helper_counter == helper_before, "invalid bare mip reserves no helper value");
 
     gpu::BufferDesc buf_desc = {
-        .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "helper_upload_buffer",
+        .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }, .debug_name = "helper_upload_buffer",
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buf_desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
@@ -1290,6 +1303,7 @@ fn void upload_helper_validation_faults() @test {
         .size        = 64,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "no_transfer_upload_buffer",
     };
     gpu::BufferHandle no_transfer_buffer = gpu::create_buffer(&device, &no_transfer_buffer_desc)!!;
@@ -1349,6 +1363,7 @@ fn void upload_helper_validation_faults() @test {
 
     gpu::TextureDesc no_transfer_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = UR_TEX,
         .height     = UR_TEX,
         .format     = gpu::Format.RGBA8_UNORM,
@@ -1461,7 +1476,7 @@ fn void upload_helper_validation_faults() @test {
 fn void transfer_callback_presence_preserves_upload_fault() @test {
     TransferDiagnosticCapture capture;
     gpu::Device callback_device = make_transfer_test_device(capture: &capture);
-    gpu::BufferDesc desc = { .size = 16, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc desc = { .size = 16, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle callback_buffer = gpu::create_buffer(&callback_device, &desc)!!;
     char[32] payload;
     fault callback_fault = @catch(gpu::upload_buffer_data(

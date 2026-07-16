@@ -14,7 +14,7 @@ alias QueueSubmit2Fn @private = fn vk::Result (vk::Queue, uint, vk::SubmitInfo2*
 alias FrameCounterQueryFn @private = fn vk::Result (vk::Device, vk::Semaphore, ulong*);
 
 const gpu::BufferUsage PERSISTENT_ARENA_USAGE = {
-    .transfer_src, .transfer_dst, .uniform, .storage, .addressable, .indirect, .index, .shared_queues,
+    .transfer_src, .transfer_dst, .uniform, .storage, .addressable, .indirect, .index,
 };
 
 // One persistent arena per device: a large addressable buffer suballocated by a
@@ -91,11 +91,17 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
     state.frame_arenas = mem::new_array(FrameArenaState, state.frames_in_flight);
     uint[MAX_QUEUE_FAMILIES] frame_families;
     uint frame_family_count = graphics_compute_queue_families(state, frame_families[..]);
+    gpu::QueueRoles frame_access = {
+        .graphics = state.selected_queue_roles.graphics,
+        .compute  = state.selected_queue_roles.compute,
+    };
+    if ((uint)frame_access == 0) frame_access.transfer = true;
     for (uint i = 0; i < state.frames_in_flight; i++) {
         gpu::BufferDesc arena_desc = {
             .size        = frame_arena_size,
             .usage       = { .storage, .addressable, .indirect, .index },
             .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+            .access      = frame_access,
             .debug_name  = "frame_arena",
         };
         gpu::BufferHandle buffer = create_buffer_with_families_for_state(
@@ -586,20 +592,24 @@ fn void? vk_end_frame(gpu::FrameToken* frame) @private {
     return end_frame_with_submit(frame, &real_queue_submit2);
 }
 
-fn gpu::BufferDesc persistent_arena_desc(usz arena_size) @private {
+fn gpu::BufferDesc persistent_arena_desc(
+    usz arena_size,
+    gpu::QueueRoles access,
+) @private {
     return {
         .size        = arena_size,
         .usage       = PERSISTENT_ARENA_USAGE,
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = access,
         .debug_name  = "persistent_arena",
     };
 }
 
 fn PersistentArenaCreatePlan persistent_arena_create_plan(VkDeviceState* state, usz arena_size) @private {
     PersistentArenaCreatePlan plan = {
-        .desc = persistent_arena_desc(arena_size),
+        .desc = persistent_arena_desc(arena_size, state.selected_queue_roles),
     };
-    plan.family_count = used_queue_families(state, plan.families[..]);
+    plan.family_count = resource_queue_families(state, plan.desc.access, plan.families[..]);
     return plan;
 }
 
@@ -726,6 +736,7 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
         .buffer = arena.backing_buffer,
         .offset = (usz)offset,
         .kind   = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access = desc.access,
     };
 }
 

@@ -105,6 +105,7 @@ fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 1,
         .height    = 1,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -146,6 +147,7 @@ fn void destroy_val_draw_ctx(gpu::Device* device, ValDrawCtx* ctx) {
 fn gpu::TextureHandle make_val_target(gpu::Device* device) {
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = VAL_RT,
         .height    = VAL_RT,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -157,6 +159,7 @@ fn gpu::TextureHandle make_val_target(gpu::Device* device) {
 fn gpu::TextureHandle make_val_color_target(gpu::Device* device, uint width, uint height, uint mip_levels) {
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = width,
         .height     = height,
         .mip_levels = mip_levels,
@@ -169,6 +172,7 @@ fn gpu::TextureHandle make_val_color_target(gpu::Device* device, uint width, uin
 fn gpu::TextureHandle make_val_depth_target(gpu::Device* device, uint width, uint height) {
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = width,
         .height    = height,
         .format    = gpu::Format.D32_FLOAT,
@@ -180,6 +184,7 @@ fn gpu::TextureHandle make_val_depth_target(gpu::Device* device, uint width, uin
 fn gpu::TextureHandle make_val_depth_target_mips(gpu::Device* device, uint width, uint height, uint mip_levels) {
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = width,
         .height     = height,
         .mip_levels = mip_levels,
@@ -294,13 +299,13 @@ fn void copy_without_transfer_usage_faults() @test {
     gpu::Device device = make_val_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::BufferDesc plain_desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc plain_desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
     defer gpu::destroy_buffer(&device, plain)!!;
-    gpu::BufferDesc src_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING };
+    gpu::BufferDesc src_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src)!!;
-    gpu::BufferDesc dst_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK };
+    gpu::BufferDesc dst_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
     defer gpu::destroy_buffer(&device, dst)!!;
 
@@ -325,6 +330,7 @@ fn void texture_copy_without_buffer_transfer_usage_faults() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -333,7 +339,7 @@ fn void texture_copy_without_buffer_transfer_usage_faults() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc plain_desc = { .size = 256, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc plain_desc = { .size = 256, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
     defer gpu::destroy_buffer(&device, plain)!!;
     gpu::GpuSpan plain_span = gpu::get_buffer_span(&device, plain)!!;
@@ -359,7 +365,7 @@ fn void fill_without_transfer_dst_faults() @test {
     gpu::Device device = make_val_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
 
@@ -380,7 +386,7 @@ fn void indexed_draw_without_index_usage_faults() @test {
     defer gpu::destroy_texture(&device, target)!!;
 
     // Storage-only: no index usage.
-    gpu::BufferDesc bad_index_desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc bad_index_desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle bad_index_buffer = gpu::create_buffer(&device, &bad_index_desc)!!;
     defer gpu::destroy_buffer(&device, bad_index_buffer)!!;
     gpu::GpuSpan bad_index_span = gpu::get_buffer_span(&device, bad_index_buffer)!!;
@@ -549,13 +555,13 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc up_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING };
+    gpu::BufferDesc up_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle upload = gpu::create_buffer(&device, &up_desc)!!;
     defer gpu::destroy_buffer(&device, upload)!!;
-    gpu::BufferDesc rb_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK };
+    gpu::BufferDesc rb_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;
-    gpu::BufferDesc fill_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc fill_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle fill_target = gpu::create_buffer(&device, &fill_desc)!!;
     defer gpu::destroy_buffer(&device, fill_target)!!;
 
@@ -599,7 +605,7 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     ValComputeCtx ctx = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &ctx);
 
-    gpu::BufferDesc args_desc = { .size = 16, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc args_desc = { .size = 16, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
@@ -625,7 +631,7 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     ValComputeCtx ctx = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &ctx);
 
-    gpu::BufferDesc args_desc = { .size = 16, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc args_desc = { .size = 16, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
@@ -653,12 +659,12 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc args_desc = { .size = gpu::DrawIndexedIndirectCommand::size * 2, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc args_desc = { .size = gpu::DrawIndexedIndirectCommand::size * 2, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
     gpu::GpuSpan args_span = gpu::get_buffer_span(&device, args_buffer)!!;
 
-    gpu::BufferDesc count_desc = { .size = 8, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc count_desc = { .size = 8, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle count_buffer = gpu::create_buffer(&device, &count_desc)!!;
     defer gpu::destroy_buffer(&device, count_buffer)!!;
     gpu::GpuSpan full_count_span = gpu::get_buffer_span(&device, count_buffer)!!;
@@ -703,6 +709,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
         .size        = gpu::DrawIndexedIndirectCommand::size * 2,
         .usage       = { .indirect },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
@@ -712,6 +719,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
         .size        = 4,
         .usage       = { .indirect },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle count_buffer = gpu::create_buffer(&device, &count_desc)!!;
     defer gpu::destroy_buffer(&device, count_buffer)!!;
@@ -721,6 +729,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
         .size        = 4,
         .usage       = { .index },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
     defer gpu::destroy_buffer(&device, index_buffer)!!;
@@ -805,7 +814,7 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc index_desc = { .size = 16, .usage = { .index }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc index_desc = { .size = 16, .usage = { .index }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
     defer gpu::destroy_buffer(&device, index_buffer)!!;
     gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
@@ -842,7 +851,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc index_desc = { .size = 16, .usage = { .index }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc index_desc = { .size = 16, .usage = { .index }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
     defer gpu::destroy_buffer(&device, index_buffer)!!;
     gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
@@ -876,6 +885,7 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -884,7 +894,7 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc src_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc src_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
@@ -908,6 +918,7 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -916,7 +927,7 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc dst_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc dst_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle dst_buffer = gpu::create_buffer(&device, &dst_desc)!!;
     defer gpu::destroy_buffer(&device, dst_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, dst_buffer)!!;
@@ -940,6 +951,7 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -948,7 +960,7 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc src_desc = { .size = 96, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc src_desc = { .size = 96, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src_buffer)!!;
     gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
@@ -969,7 +981,7 @@ fn void buffer_barrier_range_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
 
@@ -991,7 +1003,7 @@ fn void buffer_barrier_boundary_exact_succeeds() @test {
     gpu::Device device = make_val_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
 
@@ -1012,7 +1024,7 @@ fn void buffer_barrier_zero_size_whole_buffer_succeeds() @test {
     gpu::Device device = make_val_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
 
@@ -1292,6 +1304,7 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
         .size        = 64,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "barrier_diagnostic_buffer",
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
@@ -1413,12 +1426,14 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::BufferDesc plain_desc = {
         .size = 64, .usage = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "plain_buffer",
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
     defer gpu::destroy_buffer(&device, plain)!!;
     gpu::BufferDesc dst_desc = {
         .size = 64, .usage = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "fill_buffer",
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
     defer gpu::destroy_buffer(&device, dst)!!;
@@ -1431,6 +1446,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::BufferDesc args_desc = {
         .size = 16, .usage = { .indirect },
         .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "indirect_args",
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;
@@ -1438,6 +1454,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::GpuSpan escaped_args = args_full.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
     gpu::TextureDesc usage_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width = 8, .height = 8, .format = gpu::Format.RGBA8_UNORM,
         .usage = { .sampled }, .debug_name = "usage_target",
     };
@@ -1445,6 +1462,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     defer gpu::destroy_texture(&device, usage_target)!!;
     gpu::TextureDesc color_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width = 8, .height = 8, .format = gpu::Format.RGBA8_UNORM,
         .usage = { .color_attach }, .debug_name = "color_target",
     };

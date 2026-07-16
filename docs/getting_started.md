@@ -216,6 +216,7 @@ fn void? run() {
         .size        = COUNT * float::size,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .compute },
         .debug_name  = "io",
     };
     gpu::BufferHandle input = gpu::create_buffer(&device, &io_desc)!;

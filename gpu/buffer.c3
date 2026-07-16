@@ -21,17 +21,16 @@ bitstruct BufferUsage : uint {
     bool index        : 6;
     // Reserved for vertex-buffer interop.
     bool vertex       : 7;
-    // Concurrent sharing across queue families; required when GRAPHICS and
-    // COMPUTE both touch it and caps.async_compute is set.
-    bool shared_queues : 8;
 }
 
 // Creation parameters for create_buffer. `size` must be non-zero; `usage`
-// must include at least one access flag (shared_queues alone maps to none).
+// must include at least one usage flag; `access` must be a non-empty subset
+// of the device's selected queue roles.
 struct BufferDesc {
     usz         size;
     BufferUsage usage;
     MemoryKind  memory_kind;
+    QueueRoles  access;
     ZString     debug_name;
 }
 
@@ -40,6 +39,7 @@ fn BufferHandle? create_buffer(Device* device, BufferDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
+    validate_queue_access(&operation, desc.access)!;
     return operation.vtable.create_buffer(device, desc);
 }
 

@@ -25,13 +25,14 @@ fn gpu::Device u16v_device() {
 }
 
 fn gpu::BufferHandle u16v_persistent(gpu::Device* device, usz size, gpu::BufferUsage usage) {
-    gpu::BufferDesc desc = { .size = size, .usage = usage, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD };
+    gpu::BufferDesc desc = { .size = size, .usage = usage, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
     return gpu::create_buffer(device, &desc)!!;
 }
 
 fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAddress verts, gpu::GpuAddress color, gpu::GpuSpan index_span, gpu::IndexType index_type, gpu::GpuSpan* rb_span) {
     gpu::TextureDesc rt_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = U16V_RT,
         .height    = U16V_RT,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -169,7 +170,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
     gpu::flush_buffer(&device, ib16_off, 0, 0)!!;
     gpu::flush_buffer(&device, ib32_off, 0, 0)!!;
 
-    gpu::BufferHandle rb = gpu::create_buffer(&device, &&(gpu::BufferDesc){ .size = U16V_BYTES * 4, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK })!!;
+    gpu::BufferHandle rb = gpu::create_buffer(&device, &&(gpu::BufferDesc){ .size = U16V_BYTES * 4, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer }})!!;
     defer gpu::destroy_buffer(&device, rb)!!;
     gpu::GpuSpan rb_all = gpu::get_buffer_span(&device, rb)!!;
     gpu::GpuSpan rb_u16 = rb_all.checked_subspan(0, U16V_BYTES)!!;

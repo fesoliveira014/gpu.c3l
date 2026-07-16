@@ -1,6 +1,7 @@
 module gpu;
 
 const uint QUEUE_ROLE_COUNT @private = 3;
+const uint QUEUE_ROLE_MASK @private = 0x7;
 const uint MAX_SELECTED_QUEUE_IDENTITIES @private =
     MAX_REQUESTED_QUEUES_PER_ROLE * QUEUE_ROLE_COUNT;
 const Queue QUEUE_INVALID = {};
@@ -331,6 +332,38 @@ fn QueueCounts selected_queue_counts(DeviceOperation* operation) @private {
 
 fn uint selected_queue_count(DeviceOperation* operation, QueueKind kind) @private {
     return queue_count_for_kind(selected_queue_counts(operation), kind);
+}
+
+fn QueueRoles selected_queue_role_mask(DeviceOperation* operation) @private {
+    QueueCounts counts = selected_queue_counts(operation);
+    return {
+        .graphics = counts.graphics > 0,
+        .compute  = counts.compute > 0,
+        .transfer = counts.transfer > 0,
+    };
+}
+
+fn bool queue_roles_are_known(QueueRoles roles) @private {
+    return ((uint)roles & ~QUEUE_ROLE_MASK) == 0;
+}
+
+fn bool queue_roles_are_subset(QueueRoles roles, QueueRoles set) @private {
+    return ((uint)roles & ~(uint)set) == 0;
+}
+
+fn bool queue_access_is_valid(
+    DeviceOperation* operation,
+    QueueRoles access,
+) @private {
+    return operation != null
+        && operation.active
+        && (uint)access != 0
+        && queue_roles_are_known(access)
+        && queue_roles_are_subset(access, selected_queue_role_mask(operation));
+}
+
+fn void? validate_queue_access(DeviceOperation* operation, QueueRoles access) @private {
+    if (!queue_access_is_valid(operation, access)) return INVALID_ARGUMENT~;
 }
 
 fn void? validate_selected_queue_kind(

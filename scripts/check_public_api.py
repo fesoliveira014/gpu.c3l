@@ -16,6 +16,7 @@ FORBIDDEN_TEXT = {
     "probe_vulkan_version": "Vulkan loader probe",
     "probe_vma_allocator": "VMA probe",
     "range_end": "readback retirement range",
+    "shared_queues": "backend queue-sharing policy",
     "surfacedesc": "retired SurfaceDesc",
     "ticket.value": "readback retirement value",
     "vk::": "Vulkan type",

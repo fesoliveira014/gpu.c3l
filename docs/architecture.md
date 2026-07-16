@@ -225,6 +225,12 @@ device-owned identity for a role/index pair, and aliased roles return the same
 identity with a shared role mask. The Vulkan backend allocates every selected
 native identity. Command entry points take `QueueKind`.
 
+`BufferDesc`, `TextureDesc`, and `PersistentAllocDesc` declare a non-empty
+`QueueRoles` access set. The backend deduplicates only those roles' native
+families: one family stays exclusive; multiple families use private concurrent
+sharing. `GpuSpan` carries the declared access set through slicing. Root-addressed
+shader access remains a caller precondition because nested pointers are opaque.
+
 ### Command lists
 
 A command list is a transient, owner-bearing token for a device-owned command
