@@ -176,10 +176,18 @@ fn usz? indirect_argument_bytes(
     return argument_size * size_count;
 }
 
-fn DeviceOperation? command_operation(CommandList* commands) @private {
+fn DeviceOperation? command_operation(
+    CommandList* commands,
+    bool allow_lost = false,
+) @private {
     if (commands == null) return INVALID_HANDLE~;
-    DeviceOperation operation = begin_device_operation(&commands.device)!;
-    if (commands.handle.owner != resource_owner_tag(operation.data.resource_owner, ResourceOwnerKind.COMMAND)) {
+    DeviceOperation operation = has_retained_command_pin(commands)
+        ? borrow_retained_device_operation(&commands.device, allow_lost)!
+        : begin_device_operation(&commands.device, allow_lost)!;
+    if (commands.handle.owner != resource_owner_tag(
+        operation.data.resource_owner,
+        ResourceOwnerKind.COMMAND,
+    )) {
         end_device_operation(&operation);
         return INVALID_HANDLE~;
     }
@@ -208,7 +216,8 @@ fn void? destroy_recording_context(Device* device, RecordingContextHandle ctx) {
 
 <* Begin recording on a semantic queue role. Every explicitly named resource
    must admit that role. ctx = {} selects the built-in context; a created
-   context supports recording from another thread. End, then submit once. *>
+   context supports recording from another thread. The returned token retains
+   the device until successful submit or discard. *>
 fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
@@ -216,7 +225,9 @@ fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContext
     BackendVTable* vtable = operation.vtable;
     CommandList commands;
     vtable.begin_commands(device, queue, ctx, &commands)!;
+    retain_command_pin_lease(&operation, &commands);
     retain_device_children(&operation);
+    transfer_device_operation_pin(&operation);
     return commands;
 }
 
@@ -228,13 +239,16 @@ fn void? end_commands(CommandList* commands) {
     return vtable.end_commands(commands);
 }
 
-<* Consume a recording or executable list and cancel its readback tickets. *>
+<* Consume a recording or executable list, including after device loss. *>
 fn void? discard_commands(CommandList* commands) {
-    DeviceOperation operation = command_operation(commands)!;
+    DeviceOperation operation = command_operation(commands, true)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
+    CommandList consumed = *commands;
     ulong canceled_tickets = vtable.discard_commands(commands)!;
+    release_command_pin_lease(&operation, &consumed);
     release_device_children(&operation, canceled_tickets + 1);
+    release_retained_device_pins(&operation);
 }
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>

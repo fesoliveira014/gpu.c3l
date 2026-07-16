@@ -528,8 +528,10 @@ CommandList
 The handle resolves through a fixed 4096-entry device table to a backend
 `CommandRecord` containing the `vk::CommandBuffer`, recording context, queue,
 frame-slot index, lifecycle state, last-bound pipeline cache, and a growable
-array of pending texture-layout transitions. The public token stays within two
+array of pending texture-layout transitions. The public token stays within three
 machine words; copying it creates an alias, not an independent recorder.
+`begin_commands` transfers its device operation pin to the record. Recording
+calls borrow that pin; successful submit or discard releases it exactly once.
 
 Begin/end validate state transitions. Submit preflights a whole batch under the
 command-table mutex, rejects duplicate tokens, mixed queue kinds, and stale

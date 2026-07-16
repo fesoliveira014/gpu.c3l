@@ -145,7 +145,7 @@ Failure before publication releases all temporary state. No partial device or pa
 
 `Device` remains a compact strongly typed generational handle. Its packed representation contains a device-slot index and generation.
 
-The device registry replaces the single process-wide active device. Registry mutation during create and destroy is synchronized. Public entry points acquire a short-lived operation pin while resolving the slot, then recheck its generation and live state before dereferencing backend state.
+The device registry replaces the single process-wide active device. Registry mutation during create and destroy is synchronized. Most public entry points acquire a short-lived operation pin while resolving the slot, then recheck its generation and live state before dereferencing backend state.
 
 `destroy_device` is non-blocking and retryable:
 
@@ -157,8 +157,6 @@ The device registry replaces the single process-wide active device. Registry mut
 6. Recheck children, destroy backend state, increment the generation, and release the slot.
 
 Every failed attempt preserves the token, generation, and backend state. Device loss bypasses child and progress checks so unreachable state can be released.
-
-Recording command lists and executable command tokens retain a pin for their lifetime. Hot recording commands therefore use their already-pinned state and perform no registry lookup, atomic pin, or mutation-lock acquisition per command.
 
 A live device slot owns:
 
@@ -201,7 +199,7 @@ poll_completion(point)
 wait_completion(point, timeout)
 ```
 
-A successful submit consumes its executable command tokens and publishes the next point for that queue. A retryable failure publishes no point and preserves the tokens. Device loss invalidates affected tokens and points.
+A successful submit consumes its executable command tokens and publishes the next point for that queue. A retryable failure publishes no point and preserves the tokens. After device loss, command tokens remain discardable so their retained pins can retire.
 
 Waits accept reusable completion points from other queues on the same device. Same-queue order is inherent. Sequence exhaustion faults before native submission, so values never wrap or repeat within a live device. A point remains valid until its device is destroyed; stale or cross-device points fail deterministically.
 
@@ -337,9 +335,11 @@ Public recording uses two states:
 1. a recording `CommandList`;
 2. a one-shot executable command token returned by successful end.
 
-`begin_commands(queue)` acquires backend recording storage. Native pools are device-managed and may be cached per worker or sharded internally. They are not public resources.
+`begin_commands(queue)` acquires backend recording storage and transfers its device-operation pin to the returned token. Native pools are device-managed and may be cached per worker or sharded internally. They are not public resources.
 
-`discard_commands` consumes an unfinished recording. Successful submission consumes executable tokens and returns a completion point. Validation failure before native submission preserves retryable tokens and publishes no point. Device loss invalidates affected tokens.
+Recording calls borrow the token's exact retained pin without changing the registry pin count. A nonmatching stale or forged token cannot borrow another command's pin and takes a short validation pin before backend access.
+
+`discard_commands` consumes an unfinished recording, including after device loss, and releases its pin. Successful submission consumes executable tokens, releases their pins, and returns a completion point. A recording or submission failure preserves each token and pin for retry or discard.
 
 Concurrent workers may record for the same device. Synchronization may occur during begin, end, and submit. Individual command calls do not take a process-global lock or allocate a public recording context.
 

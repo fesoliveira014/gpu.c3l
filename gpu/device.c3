@@ -93,6 +93,7 @@ const uint MAX_DEVICES @private = 64;
 const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
 const uint MAX_DEVICE_OPERATION_PINS @private = 0x3FFF_FFFF;
 const uint MAX_DEVICE_OPERATION_PIN_ATTEMPTS @private = 64;
+const uint MAX_DEVICE_COMMANDS @private = 4096;
 
 const uint DEVICE_SLOT_FREE @private = 0;
 const uint DEVICE_SLOT_LIVE @private = 1;
@@ -203,10 +204,12 @@ struct DeviceData @private {
 }
 
 struct DeviceSlot @private {
-    Atomic{ulong} control;
-    Atomic{ulong} live_children;
-    Atomic{bool}  lost;
-    DeviceData    data;
+    Atomic{ulong}                     control;
+    Atomic{ulong}                     live_children;
+    Atomic{ulong}                     command_owner;
+    Atomic{bool}                      lost;
+    Atomic{uint}[MAX_DEVICE_COMMANDS] command_leases;
+    DeviceData                        data;
 }
 
 struct DeviceOperation @private {
@@ -214,6 +217,7 @@ struct DeviceOperation @private {
     DeviceData*    data;
     BackendVTable* vtable;
     bool           active;
+    bool           owns_pin;
 }
 
 enum ResourceOwnerKind @private {
@@ -265,7 +269,10 @@ fn ulong? allocate_device_resource_owner() @private {
     }
 }
 
-fn DeviceOperation? begin_device_operation(Device* device) @private {
+fn DeviceOperation? begin_device_operation(
+    Device* device,
+    bool allow_lost = false,
+) @private {
     if (device == null || !device.is_valid()) return INVALID_HANDLE~;
     if (device.reserved != 0 || device.index >= MAX_DEVICES) return INVALID_HANDLE~;
 
@@ -291,27 +298,116 @@ fn DeviceOperation? begin_device_operation(Device* device) @private {
             packed = seen;
             continue;
         }
-        if (slot.lost.load(AtomicOrdering.ACQUIRE)) {
+        if (!allow_lost && slot.lost.load(AtomicOrdering.ACQUIRE)) {
             DeviceSlotControl pin = { .pins = 1 };
             (void)slot.control.sub((ulong)pin, AtomicOrdering.RELEASE);
             return DEVICE_LOST~;
         }
         return {
-            .slot       = slot,
-            .data       = &slot.data,
-            .vtable     = slot.data.vtable,
-            .active     = true,
+            .slot     = slot,
+            .data     = &slot.data,
+            .vtable   = slot.data.vtable,
+            .active   = true,
+            .owns_pin = true,
         };
     }
     return DEVICE_BUSY~;
 }
 
+fn bool has_retained_command_pin(CommandList* commands) @private {
+    if (commands == null || !commands.device.is_valid()) return false;
+    if (commands.device.reserved != 0 || commands.device.index >= MAX_DEVICES) {
+        return false;
+    }
+    if (commands.handle.generation == 0
+        || commands.handle.index >= MAX_DEVICE_COMMANDS) {
+        return false;
+    }
+    DeviceSlot* slot = &device_slots[commands.device.index];
+    if (slot.command_owner.load(AtomicOrdering.ACQUIRE)
+        != commands.handle.owner) {
+        return false;
+    }
+    return slot.command_leases[commands.handle.index].load(
+        AtomicOrdering.ACQUIRE,
+    ) == commands.handle.generation;
+}
+
+fn DeviceOperation? borrow_retained_device_operation(
+    Device* device,
+    bool allow_lost = false,
+) @private {
+    if (device == null || !device.is_valid()) return INVALID_HANDLE~;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES) return INVALID_HANDLE~;
+
+    DeviceSlot* slot = &device_slots[device.index];
+    DeviceSlotControl control =
+        (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+    if (control.generation != device.generation) return INVALID_HANDLE~;
+    if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
+    if (control.state != DEVICE_SLOT_LIVE || control.pins == 0) {
+        return INVALID_HANDLE~;
+    }
+    if (!allow_lost && slot.lost.load(AtomicOrdering.ACQUIRE)) {
+        return DEVICE_LOST~;
+    }
+    return {
+        .slot   = slot,
+        .data   = &slot.data,
+        .vtable = slot.data.vtable,
+        .active = true,
+    };
+}
+
+fn void retain_command_pin_lease(
+    DeviceOperation* operation,
+    CommandList* commands,
+) @private {
+    operation.slot.command_leases[commands.handle.index].store(
+        commands.handle.generation,
+        AtomicOrdering.RELEASE,
+    );
+}
+
+fn void release_command_pin_lease(
+    DeviceOperation* operation,
+    CommandList* commands,
+) @private {
+    if (operation == null || commands == null) return;
+    if (commands.handle.index >= MAX_DEVICE_COMMANDS) return;
+    Atomic{uint}* lease = &operation.slot.command_leases[commands.handle.index];
+    (void)mem::compare_exchange(
+        &lease.data,
+        commands.handle.generation,
+        (uint)0,
+        AtomicOrdering.ACQUIRE_RELEASE,
+        AtomicOrdering.ACQUIRE,
+    );
+}
+
 fn void end_device_operation(DeviceOperation* operation) @private {
     if (operation == null || !operation.active) return;
 
-    DeviceSlotControl pin = { .pins = 1 };
-    (void)operation.slot.control.sub((ulong)pin, AtomicOrdering.RELEASE);
+    if (operation.owns_pin) {
+        DeviceSlotControl pin = { .pins = 1 };
+        (void)operation.slot.control.sub((ulong)pin, AtomicOrdering.RELEASE);
+    }
     operation.active = false;
+    operation.owns_pin = false;
+}
+
+fn void transfer_device_operation_pin(DeviceOperation* operation) @private {
+    if (operation == null || !operation.active) return;
+    operation.owns_pin = false;
+}
+
+fn void release_retained_device_pins(
+    DeviceOperation* operation,
+    uint count = 1,
+) @private {
+    if (operation == null || !operation.active || count == 0) return;
+    DeviceSlotControl pins = { .pins = count };
+    (void)operation.slot.control.sub((ulong)pins, AtomicOrdering.RELEASE);
 }
 
 fn void retain_device_children(DeviceOperation* operation, ulong count = 1) @private {
@@ -439,6 +535,10 @@ fn Device? register_device(
             .generation = control.generation,
         };
         slot.live_children.store(0, AtomicOrdering.RELAXED);
+        slot.command_owner.store(
+            resource_owner_tag(resource_owner, ResourceOwnerKind.COMMAND),
+            AtomicOrdering.RELAXED,
+        );
         slot.lost.store(false, AtomicOrdering.RELAXED);
         slot.data = {
             .backend              = backend,

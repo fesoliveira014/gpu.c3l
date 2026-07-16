@@ -2,6 +2,7 @@ module gpu_test;
 
 import gpu @public;
 import gpu::vk @public;
+import std::atomic;
 
 // Headless (lavapipe): record a buffer copy from a host-written upload buffer to
 // a readback buffer, submit signaling a timeline semaphore, wait, and verify the
@@ -203,6 +204,10 @@ fn void command_generation_exhaustion_retires_slot() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.commands.slots[final_generation.handle.index].generation = vk::HANDLE_GENERATION_MAX - 1;
     final_generation.handle.generation = vk::HANDLE_GENERATION_MAX - 1;
+    gpu::device_slots[device.index].command_leases[final_generation.handle.index].store(
+        final_generation.handle.generation,
+        AtomicOrdering.RELEASE,
+    );
 
     gpu::CommandList[1] first_lists = { final_generation };
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };

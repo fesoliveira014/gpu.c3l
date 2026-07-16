@@ -288,8 +288,9 @@ selecting another adapter. Duplicate capability contribution is rejected
 transactionally by private composition helpers.
 
 Multiple live devices may coexist. `Device` is a compact slot and generation
-token. Public device operations other than destruction take a short-lived
-atomic pin before reading backend state.
+token. Most public operations take a short-lived atomic pin before reading
+backend state. `begin_commands` transfers its pin to the returned command token;
+recording calls borrow that pin without acquiring another one.
 
 `destroy_device` never waits. Live resources, frames, command lists, recording
 contexts, persistent spans, swapchains, descriptors, semaphores, and readback
@@ -297,7 +298,8 @@ tickets return `RESOURCE_IN_USE`. Active operations, incomplete queue work, or
 a closing slot return retryable `DEVICE_BUSY`. Every failed attempt preserves
 the token, generation, and backend state. Success increments the generation
 and invalidates the passed token. A lost device bypasses child and progress
-checks so backend-owned state can still be released.
+checks after operation pins retire. Lost command tokens remain discardable so
+their lifetime pins cannot strand the device.
 
 Frame tokens, queue tokens, command tokens, resource handles, descriptor
 indices, GPU addresses/spans, and synchronization values are scoped to their
@@ -901,11 +903,11 @@ create_recording_context / destroy_recording_context    (one per worker thread; 
 `CommandList` is a small owner-bearing token; mutable lifecycle, binding cache,
 pending texture layouts, and the backend command buffer are device-owned. Copies
 alias the same record, and the embedded `Device` value does not borrow the
-variable passed to `begin_commands`. Successful submission consumes each token
-in `SubmitDesc.command_lists` and clears those slice entries; copied aliases
-then fault `INVALID_HANDLE`. `discard_commands` consumes a recording or
-executable token, including a recording inside an active render pass, and
-cancels readback tickets attached to it.
+variable passed to `begin_commands`. Recording and executable tokens retain one
+device pin. Successful submission consumes each token, releases its pin, and
+clears the corresponding `SubmitDesc.command_lists` entry; copied aliases then
+fault `INVALID_HANDLE`. `discard_commands` remains available after device loss,
+consumes a recording or executable token, and cancels attached readback tickets.
 
 A submit batch is transactional: duplicate tokens fault
 `COMMAND_RECORDING_ERROR`, mixed queue kinds fault `INVALID_ARGUMENT`, and

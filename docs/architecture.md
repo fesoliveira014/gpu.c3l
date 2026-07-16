@@ -185,8 +185,9 @@ get_device_caps(Device*)       -> DeviceCaps?
 
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
-Public device operations other than destruction pin the slot before reading
-backend state.
+Most public device operations pin the slot before reading backend state.
+`begin_commands` transfers its pin to the command token; hot recording calls
+borrow the retained pin without mutating the registry pin count.
 
 Destruction first rejects known live children, then closes the slot. Closing
 blocks new pins while active pins, a second child check, and queue completion
@@ -194,7 +195,7 @@ are evaluated. Live children return `RESOURCE_IN_USE`; active pins or incomplete
 queue work return `DEVICE_BUSY`. Every failure restores the live state without
 changing the token or generation. Successful teardown increments the generation
 and invalidates the passed token. Device loss bypasses child and progress checks
-so the backend can release otherwise unreachable state.
+after pins retire; command tokens remain discardable after loss.
 
 Device-owned table handles carry an opaque device-and-kind owner plus a local slot and
 generation. Backend tables reject foreign owners before resolving or mutating

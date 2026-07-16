@@ -32,6 +32,24 @@ struct BlockingOperationFixture {
     bool         publish_child_on_check;
 }
 
+struct CommandPinFixture {
+    Atomic{bool} command_entered;
+    Atomic{bool} command_release;
+    Atomic{uint} destroy_calls;
+    uint         pins_during_command;
+    uint         pins_during_submit;
+    uint         next_command;
+    bool         block_command;
+    bool         reject_command;
+    bool         submit_busy;
+}
+
+struct StaleCommandWorkerArgs {
+    gpu::CommandList commands;
+    fault            result;
+    bool             failed;
+}
+
 struct DestroyWorkerArgs {
     gpu::Device device;
     bool        failed;
@@ -79,6 +97,74 @@ fn void counted_device_destroy(void* backend_state) {
     (void)fixture.destroy_calls.add(1, AtomicOrdering.RELEASE);
 }
 
+fn void command_pin_device_destroy(void* backend_state) {
+    CommandPinFixture* fixture = (CommandPinFixture*)backend_state;
+    (void)fixture.destroy_calls.add(1, AtomicOrdering.RELEASE);
+}
+
+fn void? command_pin_begin(
+    gpu::Device* device,
+    gpu::QueueKind queue,
+    gpu::RecordingContextHandle context,
+    gpu::CommandList* out_commands,
+) {
+    gpu::DeviceData* data = gpu::resolve_pinned_device(device);
+    if (data == null || out_commands == null) return gpu::INVALID_HANDLE~;
+    CommandPinFixture* fixture = (CommandPinFixture*)data.backend_state;
+    fixture.next_command++;
+    *out_commands = {
+        .device = *device,
+        .handle = {
+            .owner      = gpu::resource_owner_tag(
+                data.resource_owner,
+                gpu::ResourceOwnerKind.COMMAND,
+            ),
+            .index      = fixture.next_command,
+            .generation = 1,
+        },
+    };
+}
+
+fn void? command_pin_end(gpu::CommandList* commands) {}
+
+fn ulong? command_pin_discard(gpu::CommandList* commands) {
+    if (commands == null) return gpu::INVALID_HANDLE~;
+    *commands = {};
+    return 0;
+}
+
+fn void? command_pin_global_barrier(
+    gpu::CommandList* commands,
+    gpu::GlobalBarrier* barrier,
+) {
+    CommandPinFixture* fixture =
+        (CommandPinFixture*)gpu::device_backend_state_ptr(&commands.device);
+    if (fixture == null) return gpu::INVALID_HANDLE~;
+    gpu::DeviceSlotControl control =
+        (gpu::DeviceSlotControl)gpu::device_slots[commands.device.index].control.load(
+            AtomicOrdering.ACQUIRE,
+        );
+    fixture.pins_during_command = control.pins;
+    fixture.command_entered.store(true, AtomicOrdering.RELEASE);
+    while (fixture.block_command
+        && !fixture.command_release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    if (fixture.reject_command) return gpu::INVALID_HANDLE~;
+}
+
+fn void? command_pin_submit(gpu::Device* device, gpu::SubmitDesc* desc) {
+    CommandPinFixture* fixture =
+        (CommandPinFixture*)gpu::device_backend_state_ptr(device);
+    if (fixture == null) return gpu::INVALID_HANDLE~;
+    gpu::DeviceSlotControl control =
+        (gpu::DeviceSlotControl)gpu::device_slots[device.index].control.load(
+            AtomicOrdering.ACQUIRE,
+        );
+    fixture.pins_during_submit = control.pins;
+    if (fixture.submit_busy) return gpu::DEVICE_BUSY~;
+}
+
 fn gpu::MemoryStats? blocking_get_memory_stats(gpu::Device* device) {
     BlockingOperationFixture* fixture = (BlockingOperationFixture*)gpu::device_backend_state_ptr(device);
     if (fixture == null) return gpu::INVALID_HANDLE~;
@@ -99,6 +185,15 @@ gpu::BackendVTable blocking_operation_vtable = {
     .get_memory_stats     = &blocking_get_memory_stats,
 };
 
+gpu::BackendVTable command_pin_vtable = {
+    .destroy_device     = &command_pin_device_destroy,
+    .begin_commands     = &command_pin_begin,
+    .end_commands       = &command_pin_end,
+    .discard_commands   = &command_pin_discard,
+    .submit             = &command_pin_submit,
+    .cmd_global_barrier = &command_pin_global_barrier,
+};
+
 fn int destroy_device_worker(void* raw_args) {
     DestroyWorkerArgs* args = (DestroyWorkerArgs*)raw_args;
     if (catch destroy_fault = gpu::destroy_device(&args.device)) {
@@ -112,6 +207,20 @@ fn int device_operation_worker(void* raw_args) {
     DeviceOperationWorkerArgs* args = (DeviceOperationWorkerArgs*)raw_args;
     if (catch operation_fault = gpu::get_memory_stats(&args.device)) {
         (void)operation_fault;
+        args.failed = true;
+    }
+    return args.failed ? 1 : 0;
+}
+
+fn int stale_command_worker(void* raw_args) {
+    StaleCommandWorkerArgs* args = (StaleCommandWorkerArgs*)raw_args;
+    gpu::GlobalBarrier barrier;
+    if (catch command_fault = gpu::cmd_global_barrier(
+        &args.commands,
+        &barrier,
+    )) {
+        args.result = command_fault;
+    } else {
         args.failed = true;
     }
     return args.failed ? 1 : 0;
@@ -163,6 +272,241 @@ fn int device_registry_worker(void* raw_args) {
         gpu::destroy_device(&device)!!;
     }
     return args.failed ? 1 : 0;
+}
+
+fn void command_calls_borrow_the_lifetime_pin() @test {
+    CommandPinFixture fixture;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
+    gpu::DeviceSlotControl after_begin =
+        (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+
+    gpu::GlobalBarrier barrier;
+    gpu::cmd_global_barrier(&commands, &barrier)!!;
+    gpu::end_commands(&commands)!!;
+    gpu::DeviceSlotControl after_end =
+        (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+    gpu::discard_commands(&commands)!!;
+    gpu::DeviceSlotControl after_discard =
+        (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+
+    assert(after_begin.pins == 1,
+        "begin transfers its operation pin to the recording token");
+    assert(fixture.pins_during_command == 1,
+        "hot command recording borrows without acquiring another pin");
+    assert(after_end.pins == 1,
+        "the executable token retains the same lifetime pin");
+    assert(after_discard.pins == 0,
+        "discard releases the command lifetime pin exactly once");
+    assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
+        "discard releases the command child exactly once");
+    gpu::destroy_device(&device)!!;
+}
+
+fn void failed_submit_preserves_command_lifetime_pins() @test {
+    CommandPinFixture fixture = { .submit_busy = true };
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList first = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandList second = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::end_commands(&first)!!;
+    gpu::end_commands(&second)!!;
+    gpu::CommandList[2] lists = { first, second };
+    gpu::SubmitDesc desc = { .command_lists = lists[..] };
+
+    fault submit_fault = @catch(gpu::submit(&device, &desc));
+    gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
+    gpu::DeviceSlotControl after_failure =
+        (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+    ulong children_after_failure =
+        slot.live_children.load(AtomicOrdering.ACQUIRE);
+
+    fixture.submit_busy = false;
+    gpu::submit(&device, &desc)!!;
+    gpu::DeviceSlotControl after_success =
+        (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+
+    assert(submit_fault == gpu::DEVICE_BUSY,
+        "retryable submit failure preserves executable tokens");
+    assert(fixture.pins_during_submit == 3,
+        "submit observes two command pins and its short operation pin");
+    assert(after_failure.pins == 2,
+        "failed submit preserves both command lifetime pins");
+    assert(children_after_failure == 2,
+        "failed submit preserves both command children");
+    assert(after_success.pins == 0,
+        "successful submit releases both command lifetime pins");
+    assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
+        "successful submit releases both command children");
+    gpu::destroy_device(&device)!!;
+}
+
+fn void lost_commands_can_be_discarded() @test {
+    CommandPinFixture fixture;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::mark_device_lost(&device);
+
+    gpu::GlobalBarrier barrier;
+    fault record_fault = @catch(gpu::cmd_global_barrier(&commands, &barrier));
+    gpu::discard_commands(&commands)!!;
+    gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
+    gpu::DeviceSlotControl after_discard =
+        (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+
+    assert(record_fault == gpu::DEVICE_LOST,
+        "lost command recording faults without consuming its token");
+    assert(after_discard.pins == 0,
+        "discard releases a lost command lifetime pin");
+    assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
+        "discard releases a lost command child");
+    gpu::destroy_device(&device)!!;
+}
+
+fn void stale_commands_cannot_borrow_unrelated_lifetime_pins() @test {
+    CommandPinFixture fixture = {
+        .block_command  = true,
+        .reject_command = true,
+    };
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList discarded = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandList stale = discarded;
+    gpu::discard_commands(&discarded)!!;
+    gpu::CommandList live = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+
+    StaleCommandWorkerArgs worker_args = { .commands = stale };
+    Thread worker;
+    worker.create(&stale_command_worker, &worker_args)!!;
+    while (!fixture.command_entered.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+
+    gpu::discard_commands(&live)!!;
+    fault destroy_fault = @catch(gpu::destroy_device(&device));
+    uint destroy_calls_before_release =
+        fixture.destroy_calls.load(AtomicOrdering.ACQUIRE);
+
+    fixture.command_release.store(true, AtomicOrdering.RELEASE);
+    int worker_result = worker.join()!!;
+    gpu::destroy_device(&device)!!;
+
+    assert(fixture.pins_during_command == 2,
+        "a stale command takes a short pin instead of borrowing a live command pin");
+    assert(destroy_fault == gpu::DEVICE_BUSY,
+        "the stale-command validation pin prevents concurrent device reclamation");
+    assert(destroy_calls_before_release == 0,
+        "device state remains alive while stale-command validation is active");
+    assert(worker_result == 0 && !worker_args.failed,
+        "the stale command reports its backend validation fault");
+    assert(worker_args.result == gpu::INVALID_HANDLE,
+        "the stale command remains invalid");
+    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
+        "destruction succeeds once the stale-command validation pin retires");
+}
+
+fn void forged_command_owners_cannot_borrow_lifetime_pins() @test {
+    CommandPinFixture fixture;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandList forged = commands;
+    forged.handle.owner++;
+
+    bool real_borrows = gpu::has_retained_command_pin(&commands);
+    bool forged_borrows = gpu::has_retained_command_pin(&forged);
+    gpu::GlobalBarrier barrier;
+    fault forged_fault = @catch(gpu::cmd_global_barrier(&forged, &barrier));
+
+    assert(real_borrows, "the exact command owner borrows its lifetime pin");
+    assert(!forged_borrows,
+        "a forged owner cannot borrow another command's lifetime pin");
+    assert(forged_fault == gpu::INVALID_HANDLE,
+        "a forged command owner faults before backend access");
+    assert(!fixture.command_entered.load(AtomicOrdering.ACQUIRE),
+        "a forged command owner never reaches the backend");
+    gpu::discard_commands(&commands)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void stale_lease_release_preserves_a_reused_command_slot() @test {
+    CommandPinFixture fixture;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
+    uint next_generation = commands.handle.generation + 1;
+    slot.command_leases[commands.handle.index].store(
+        next_generation,
+        AtomicOrdering.RELEASE,
+    );
+
+    gpu::DeviceOperation operation = gpu::begin_device_operation(&device)!!;
+    gpu::release_command_pin_lease(&operation, &commands);
+    uint retained_generation = slot.command_leases[commands.handle.index].load(
+        AtomicOrdering.ACQUIRE,
+    );
+    gpu::end_device_operation(&operation);
+
+    assert(retained_generation == next_generation,
+        "an old release cannot clear a reused command slot's lease");
+    slot.command_leases[commands.handle.index].store(
+        commands.handle.generation,
+        AtomicOrdering.RELEASE,
+    );
+    gpu::discard_commands(&commands)!!;
+    gpu::destroy_device(&device)!!;
 }
 
 fn void device_handles_are_compact_structured_tokens() @test {

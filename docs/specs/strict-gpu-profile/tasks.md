@@ -79,7 +79,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 - [x] Replace the process-wide active device with a generational slot registry in `gpu/device.c3`, `gpu/types.c3`, `gpu/vk/device.c3`, and focused registry tests under `test/src/`.
   - **Depends on:** 1.2.
-  - **Contract:** multiple devices coexist; steady-state resolution is a slot and generation check; registry mutation is synchronized; public operations acquire short-lived pins before dereferencing backend state.
+  - **Contract:** multiple devices coexist; steady-state resolution is a slot and generation check; registry mutation is synchronized; most public operations use short-lived pins, while command tokens retain and borrow one pin.
   - **Edges:** stale generation, concurrent create/destroy, slot reuse, generation exhaustion, and operations racing a closing device.
   - **Verify:** deterministic CPU concurrency tests, stale-handle tests, and native two-device isolation tests.
 
@@ -109,9 +109,9 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 2.5 Non-blocking retryable device destruction
 
-- [ ] Implement the approved live/closing/device-destroy state machine in `gpu/device.c3` and `gpu/vk/device.c3`, resolving issues #214 and the device portion of #200.
+- [x] Implement the approved live/closing/device-destroy state machine in `gpu/device.c3` and `gpu/vk/device.c3`, resolving issues #214 and the device portion of #200.
   - **Depends on:** 2.1–2.4.
-  - **Contract:** live children return `RESOURCE_IN_USE`; incomplete queue work and active pins return retryable `DEVICE_BUSY`; destruction never waits; failed attempts preserve state and generation; success increments the generation.
+  - **Contract:** live children return `RESOURCE_IN_USE`; incomplete queue work and active pins return retryable `DEVICE_BUSY`; destruction never waits; command tokens retain pins until submit or discard; failed attempts preserve state and generation.
   - **Edges:** new pin while closing, child creation between the live-child check and closing mark, active recording/executable token, completion racing destruction, device loss, and retry after every failure branch.
   - **Verify:** CPU state-machine and concurrency tests plus validation-clean native teardown tests.
 
