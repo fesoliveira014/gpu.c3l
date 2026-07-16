@@ -296,7 +296,12 @@ fn void mixed_queue_submit_faults() @test {
 }
 
 fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
-    gpu::Device device = make_val_device();
+    SyncDiagnosticCapture capture = {
+        .expected_operation      = "",
+        .expected_rejected_field = "",
+        .expected_invariant      = "",
+    };
+    gpu::Device device = make_sync_diagnostic_device(&capture);
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc buffer_desc = {
@@ -330,7 +335,7 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
     gpu::GpuSpan span = gpu::get_buffer_span(&device, span_buffer)!!;
 
     gpu::PersistentAllocDesc persistent_desc = {
-        .size        = 4,
+        .size        = 8,
         .align       = 4,
         .usage       = { .transfer_src },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
@@ -338,6 +343,25 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
     };
     gpu::GpuSpan persistent = gpu::alloc_persistent_span(&device, &persistent_desc)!!;
     defer gpu::free_persistent_span(&device, persistent)!!;
+
+    gpu::PersistentAllocDesc multi_access_desc = persistent_desc;
+    multi_access_desc.access = { .graphics, .compute };
+    gpu::GpuSpan multi_access = gpu::alloc_persistent_span(
+        &device,
+        &multi_access_desc,
+    )!!;
+    defer gpu::free_persistent_span(&device, multi_access)!!;
+
+    gpu::PersistentAllocDesc reusable_desc = persistent_desc;
+    reusable_desc.access = { .graphics };
+    gpu::GpuSpan stale = gpu::alloc_persistent_span(&device, &reusable_desc)!!;
+    gpu::GpuSpan stale_alias = stale;
+    gpu::free_persistent_span(&device, stale)!!;
+    gpu::GpuSpan replacement = gpu::alloc_persistent_span(&device, &reusable_desc)!!;
+    defer gpu::free_persistent_span(&device, replacement)!!;
+    assert(replacement.allocation.index == stale_alias.allocation.index
+        && replacement.allocation.generation != stale_alias.allocation.generation,
+        "persistent allocation reuse advances the generation");
 
     gpu::TextureDesc copy_texture_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -395,6 +419,59 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
     assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
         == gpu::INVALID_ARGUMENT,
         "narrow persistent allocation access overrides its broad arena backing");
+
+    copy.src = persistent.checked_subspan(4, 4)!!;
+    copy.src.access = { .graphics };
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "a persistent subspan cannot widen its immutable allocation access");
+
+    copy.src = multi_access.checked_subspan(0, 4)!!;
+    copy.src.access = { .graphics };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     null,
+        rejected_field: "GpuSpan",
+        invariant:      "must identify one live allocation and preserve its immutable bounds and access",
+    );
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "a persistent subspan cannot narrow its immutable allocation access");
+    assert_sync_contract_diagnostic(
+        capture:            &capture,
+        expected_fault:     gpu::INVALID_ARGUMENT,
+        resource_kind:      gpu::DebugResourceKind.PERSISTENT_SPAN,
+        has_public_identity: true,
+        index:              multi_access.allocation.index,
+        generation:         multi_access.allocation.generation,
+    );
+
+    copy.src = multi_access;
+    copy.src.offset += multi_access.size;
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "persistent span bounds cannot escape their immutable allocation");
+
+    copy.src = stale_alias;
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     null,
+        rejected_field: "GpuSpan.allocation",
+        invariant:      "must identify one live allocation and preserve its immutable bounds and access",
+    );
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
+        == gpu::INVALID_ARGUMENT,
+        "a stale persistent allocation generation cannot record commands");
+    assert_sync_contract_diagnostic(
+        capture:            &capture,
+        expected_fault:     gpu::INVALID_ARGUMENT,
+        resource_kind:      gpu::DebugResourceKind.PERSISTENT_SPAN,
+        has_public_identity: false,
+        index:              0,
+        generation:         0,
+    );
 
     copy.src = span;
     copy.src.access = { .graphics, .compute };

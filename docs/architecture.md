@@ -227,9 +227,11 @@ native identity. Command entry points take `QueueKind`.
 
 `BufferDesc`, `TextureDesc`, and `PersistentAllocDesc` declare a non-empty
 `QueueRoles` access set. Every explicitly named command resource is checked
-against the command's semantic role before backend state changes. `GpuSpan`
-access must also remain a non-empty subset of its backing buffer, so copied span
-metadata cannot widen access. Root-addressed shader access remains a caller
+against the command's semantic role before backend state changes. Persistent
+spans carry a generation-checked allocation identity; command validation checks
+their immutable bounds and access before the recording role. Other `GpuSpan`
+access remains a non-empty subset of its backing buffer. Root-addressed shader
+access remains a caller
 precondition because nested pointers are opaque.
 
 The backend deduplicates only admitted roles' native families: one family stays

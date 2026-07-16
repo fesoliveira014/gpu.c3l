@@ -7,26 +7,50 @@ import vma;
 import std::core::mem;
 import std::atomic;
 import std::atomic::types;
-import std::collections::map;
 
-alias PersistentAllocMap = HashMap{usz, vma::VirtualAllocation};
 alias QueueSubmit2Fn @private = fn vk::Result (vk::Queue, uint, vk::SubmitInfo2*, vk::Fence);
 alias FrameCounterQueryFn @private = fn vk::Result (vk::Device, vk::Semaphore, ulong*);
 
+const uint PERSISTENT_ALLOCATION_FREE_NONE @private = 0;
 const gpu::BufferUsage PERSISTENT_ARENA_USAGE = {
     .transfer_src, .transfer_dst, .uniform, .storage, .addressable, .indirect, .index,
 };
 
-// One persistent arena per device: a large addressable buffer suballocated by a
-// VMA virtual block. `live` maps each allocation's offset to its virtual
-// allocation handle so a span can be freed by offset.
+enum PersistentSpanAllocationMatch {
+    NOT_PERSISTENT,
+    UNRESOLVED,
+    METADATA_MISMATCH,
+    MATCH,
+}
+
+struct PersistentAllocationState {
+    vma::VirtualAllocation allocation;
+    usz                    offset;
+    usz                    size;
+    gpu::QueueRoles        access;
+}
+
+struct PersistentAllocationCell {
+    PersistentAllocationState value;
+    uint                      generation;
+    uint                      next_free;
+    bool                      used;
+}
+
+struct PersistentAllocationTable {
+    PersistentAllocationCell[] slots;
+    ulong                      owner;
+    uint                       free_head;
+    uint                       next_new;
+}
+
 struct PersistentArenaState {
-    gpu::BufferHandle  backing_buffer;
-    vma::VirtualBlock  virtual_block;
-    gpu::GpuAddress    gpu_base;
-    void*              cpu_base;
-    usz                size;
-    PersistentAllocMap live;
+    gpu::BufferHandle          backing_buffer;
+    vma::VirtualBlock          virtual_block;
+    gpu::GpuAddress            gpu_base;
+    void*                      cpu_base;
+    usz                        size;
+    PersistentAllocationTable allocations;
 }
 
 struct PersistentArenaCreatePlan @private {
@@ -50,6 +74,85 @@ struct FrameArenaState {
 struct FrameArenaRange @private {
     usz offset;
     usz next_cursor;
+}
+
+fn gpu::AllocationHandle? PersistentAllocationTable.alloc(
+    &self,
+    PersistentAllocationState value,
+) {
+    uint index;
+    bool found = false;
+    while (self.free_head != PERSISTENT_ALLOCATION_FREE_NONE) {
+        index = self.free_head - 1;
+        self.free_head = self.slots[index].next_free;
+        if (can_allocate_handle_generation(self.slots[index].generation)) {
+            found = true;
+            break;
+        }
+        self.slots[index].next_free = PERSISTENT_ALLOCATION_FREE_NONE;
+    }
+    if (!found) {
+        if (self.next_new >= self.slots.len) return gpu::SLOT_TABLE_FULL~;
+        index = self.next_new++;
+        self.slots[index].generation = 0;
+    }
+
+    self.slots[index].value = value;
+    self.slots[index].generation = next_handle_generation(self.slots[index].generation)!;
+    self.slots[index].used = true;
+    return {
+        .owner      = self.owner,
+        .index      = index,
+        .generation = self.slots[index].generation,
+    };
+}
+
+fn PersistentAllocationState*? PersistentAllocationTable.get(
+    &self,
+    gpu::AllocationHandle handle,
+) {
+    if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
+    uint index = handle.index;
+    if (index >= self.slots.len || !self.slots[index].used) return gpu::INVALID_HANDLE~;
+    if (self.slots[index].generation != handle.generation) return gpu::INVALID_HANDLE~;
+    return &self.slots[index].value;
+}
+
+fn void? PersistentAllocationTable.free(&self, gpu::AllocationHandle handle) {
+    self.get(handle)!;
+    uint index = handle.index;
+    self.slots[index].used = false;
+    if (!should_recycle_handle_generation(self.slots[index].generation)) {
+        self.slots[index].generation = HANDLE_GENERATION_MAX;
+        self.slots[index].next_free = PERSISTENT_ALLOCATION_FREE_NONE;
+        return;
+    }
+    self.slots[index].generation = next_handle_generation(self.slots[index].generation)!;
+    self.slots[index].next_free = self.free_head;
+    self.free_head = index + 1;
+}
+
+fn PersistentSpanAllocationMatch persistent_span_allocation_match(
+    VkDeviceState* state,
+    gpu::GpuSpan* span,
+) {
+    PersistentArenaState* arena = &state.persistent_arena;
+    if (span.buffer != arena.backing_buffer) {
+        return PersistentSpanAllocationMatch.NOT_PERSISTENT;
+    }
+
+    if (try allocation = arena.allocations.get(span.allocation)) {
+        if (span.kind != gpu::MemoryKind.PERSISTENT_UPLOAD
+            || span.offset < allocation.offset
+            || span.access != allocation.access) {
+            return PersistentSpanAllocationMatch.METADATA_MISMATCH;
+        }
+        usz relative_offset = span.offset - allocation.offset;
+        return gpu::range_fits(allocation.size, relative_offset, span.size)
+            ? PersistentSpanAllocationMatch.MATCH
+            : PersistentSpanAllocationMatch.METADATA_MISMATCH;
+    }
+    return PersistentSpanAllocationMatch.UNRESOLVED;
 }
 
 <* Create the frame timeline semaphore and one arena buffer per frame-in-flight.
@@ -638,14 +741,22 @@ fn void? create_persistent_arena(VkDeviceState* state, gpu::DeviceDesc* device_d
     state.persistent_arena.gpu_base       = span.gpu;
     state.persistent_arena.cpu_base       = span.cpu;
     state.persistent_arena.size           = span.size;
-    state.persistent_arena.live.init(mem);
+    state.persistent_arena.allocations.owner = gpu::resource_owner_tag(
+        state.resource_owner,
+        gpu::ResourceOwnerKind.ALLOCATION,
+    );
+    state.persistent_arena.allocations.slots = mem::new_array(
+        PersistentAllocationCell,
+        gpu::MAX_PERSISTENT_ALLOCATIONS,
+    );
 }
 
 fn void destroy_persistent_arena(VkDeviceState* state) @private {
     if (state.persistent_arena.virtual_block == null) return;
     state.persistent_arena.virtual_block.destroy();
     state.persistent_arena.virtual_block = (vma::VirtualBlock)null;
-    state.persistent_arena.live.free();
+    mem::free(state.persistent_arena.allocations.slots.ptr);
+    state.persistent_arena.allocations = {};
 }
 
 fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAllocDesc* desc) @private {
@@ -731,15 +842,23 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
         result:    arena.virtual_block.allocate(&create_info, &allocation, &offset),
     )!;
 
-    arena.live.set((usz)offset, allocation);
+    defer catch arena.virtual_block.free(allocation);
+    PersistentAllocationState allocation_state = {
+        .allocation = allocation,
+        .offset     = (usz)offset,
+        .size       = desc.size,
+        .access     = desc.access,
+    };
+    gpu::AllocationHandle handle = arena.allocations.alloc(allocation_state)!;
     return (gpu::GpuSpan){
-        .gpu    = (gpu::GpuAddress)((ulong)arena.gpu_base + offset),
-        .cpu    = arena.cpu_base == null ? null : (char*)arena.cpu_base + offset,
-        .size   = desc.size,
-        .buffer = arena.backing_buffer,
-        .offset = (usz)offset,
-        .kind   = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access = desc.access,
+        .gpu        = (gpu::GpuAddress)((ulong)arena.gpu_base + offset),
+        .cpu        = arena.cpu_base == null ? null : (char*)arena.cpu_base + offset,
+        .size       = desc.size,
+        .buffer     = arena.backing_buffer,
+        .allocation = handle,
+        .offset     = (usz)offset,
+        .kind       = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access     = desc.access,
     };
 }
 
@@ -766,24 +885,44 @@ fn void? vk_free_persistent_span(gpu::Device* device, gpu::GpuSpan span) @privat
         )~;
     }
 
-    if (try allocation = arena.live.get(span.offset)) {
-        arena.virtual_block.free(allocation);
-        arena.live.remove(span.offset)!;
-        return;
+    PersistentAllocationState*? allocation_result = arena.allocations.get(span.allocation);
+    if (catch allocation_fault = allocation_result) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "free_persistent_span",
+            public_fault:        allocation_fault,
+            resource_kind:       gpu::DebugResourceKind.PERSISTENT_SPAN,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "GpuSpan.allocation",
+            invariant:           "must identify a live persistent allocation",
+            backend_text:        null,
+        )~;
     }
-    return report_contract_failure(
-        state:               state,
-        operation:           "free_persistent_span",
-        public_fault:        gpu::INVALID_HANDLE,
-        resource_kind:       gpu::DebugResourceKind.PERSISTENT_SPAN,
-        has_public_identity: false,
-        index:               0,
-        generation:          0,
-        debug_name:          null,
-        rejected_field:      "GpuSpan.offset",
-        invariant:           "must identify a live persistent allocation",
-        backend_text:        null,
-    )~;
+    PersistentAllocationState* allocation = allocation_result;
+    if (span.offset != allocation.offset
+        || span.size != allocation.size
+        || span.kind != gpu::MemoryKind.PERSISTENT_UPLOAD
+        || span.access != allocation.access) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "free_persistent_span",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.PERSISTENT_SPAN,
+            has_public_identity: true,
+            index:               span.allocation.index,
+            generation:          span.allocation.generation,
+            debug_name:          null,
+            rejected_field:      "GpuSpan",
+            invariant:           "must preserve the complete owning allocation range",
+            backend_text:        null,
+        )~;
+    }
+
+    arena.virtual_block.free(allocation.allocation);
+    arena.allocations.free(span.allocation)!;
 }
 
 fn gpu::PersistentArenaStats? vk_get_persistent_stats(gpu::Device* device) @private {

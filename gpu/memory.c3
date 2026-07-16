@@ -37,13 +37,14 @@ fn bool ReadbackTicket.equals(self, ReadbackTicket other) @operator(==) {
 // Host-side view of a GPU-visible range. `cpu` may be null; `access` names
 // the selected queue roles admitted to the range.
 struct GpuSpan {
-    GpuAddress   gpu;
-    void*        cpu;
-    usz          size;
-    BufferHandle buffer;
-    usz          offset;
-    MemoryKind   kind;
-    QueueRoles   access;
+    GpuAddress       gpu;
+    void*            cpu;
+    usz              size;
+    BufferHandle     buffer;
+    AllocationHandle allocation;
+    usz              offset;
+    MemoryKind       kind;
+    QueueRoles       access;
 }
 
 struct FrameToken {
@@ -56,6 +57,7 @@ $assert FrameToken::size <= 16;
 fn bool FrameToken.is_valid(self) => (ulong)self.device != 0 && self.generation != 0;
 
 const usz MAX_MEMORY_HEAPS = 16;
+const usz MAX_PERSISTENT_ALLOCATIONS = 4096;
 const usz DEFAULT_FRAME_ARENA_SIZE = 16 << 20;
 const usz DEFAULT_PERSISTENT_ARENA_SIZE = 64 << 20;
 const usz DEFAULT_STAGING_ARENA_SIZE = 32 << 20;
@@ -293,11 +295,12 @@ fn GpuSpan GpuSpan.unchecked_subspan(self, usz offset, usz size) {
     return {
         .gpu    = (GpuAddress)((ulong)self.gpu + offset),
         .cpu    = self.cpu == null ? null : (char*)self.cpu + offset,
-        .size   = size,
-        .buffer = self.buffer,
-        .offset = self.offset + offset,
-        .kind   = self.kind,
-        .access = self.access,
+        .size       = size,
+        .buffer     = self.buffer,
+        .allocation = self.allocation,
+        .offset     = self.offset + offset,
+        .kind       = self.kind,
+        .access     = self.access,
     };
 }
 

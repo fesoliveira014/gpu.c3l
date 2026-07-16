@@ -109,6 +109,28 @@ fn void? validate_span_recording_access(
     gpu::GpuSpan* span,
     ZString operation,
 ) @private {
+    PersistentSpanAllocationMatch allocation_match = persistent_span_allocation_match(
+        state,
+        span,
+    );
+    if (allocation_match == PersistentSpanAllocationMatch.UNRESOLVED
+        || allocation_match == PersistentSpanAllocationMatch.METADATA_MISMATCH) {
+        bool allocation_resolved = allocation_match
+            == PersistentSpanAllocationMatch.METADATA_MISMATCH;
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.PERSISTENT_SPAN,
+            has_public_identity: allocation_resolved,
+            index:               allocation_resolved ? span.allocation.index : 0,
+            generation:          allocation_resolved ? span.allocation.generation : 0,
+            debug_name:          null,
+            rejected_field:      allocation_resolved ? "GpuSpan" : "GpuSpan.allocation",
+            invariant:           "must identify one live allocation and preserve its immutable bounds and access",
+            backend_text:        null,
+        )~;
+    }
     if ((uint)span.access == 0
         || !gpu::queue_roles_are_known(span.access)
         || !gpu::queue_roles_are_subset(span.access, slot.access)) {
