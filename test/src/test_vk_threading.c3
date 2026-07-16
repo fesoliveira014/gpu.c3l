@@ -113,7 +113,7 @@ fn int creation_storm_worker(void* arg) {
 
 fn void concurrent_creation_storm() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     StormArgs[THR_THREADS] args;
     Thread[THR_THREADS] threads;
@@ -142,7 +142,7 @@ fn int pipeline_race_worker(void* arg) {
 
 fn void same_descriptor_pipeline_race() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle shader = gpu::create_shader(&device, &comp_sd)!!;
@@ -187,7 +187,7 @@ fn int span_storm_worker(void* arg) {
 
 fn void frame_span_storm_disjoint() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     SpanArgs[THR_THREADS] args;
@@ -256,7 +256,7 @@ fn int record_worker(void* arg) {
 
 fn void parallel_recording_across_contexts() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle shader = gpu::create_shader(&device, &comp_sd)!!;
@@ -338,7 +338,7 @@ fn int layout_record_worker(void* arg) {
    must stay isolated across concurrent recorders. *>
 fn void parallel_recording_disjoint_texture_layouts() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::RecordingContextHandle[THR_THREADS] contexts;
     foreach (&ctx : contexts) *ctx = gpu::create_recording_context(&device)!!;
@@ -405,7 +405,7 @@ fn int upload_worker(void* arg) {
 
 fn void concurrent_blocking_uploads() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     UploadArgs[THR_THREADS] args;
     gpu::BufferHandle[THR_THREADS] buffers;
@@ -466,7 +466,7 @@ fn int upload_hammer_worker(void* arg) {
    timeline increment and the host signal far beyond one call each. *>
 fn void concurrent_upload_hammer() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     HammerArgs[THR_THREADS] args;
     gpu::BufferHandle[THR_THREADS] buffers;
@@ -548,7 +548,7 @@ fn int helper_hammer_worker(void* arg) {
 // reclaimed the moment the burst ends and calls go sequential.
 fn void two_helper_tiny_arena_hammer() @test {
     gpu::Device device = make_thr_device_tiny_staging(HELPER_HAMMER_TINY_STAGING);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     HelperHammerArgs[HELPER_HAMMER_THREADS] args;
@@ -595,7 +595,7 @@ const uint SEQUENTIAL_HELPER_CALLS = 20;
    never grows past one live buffer. *>
 fn void sequential_helper_calls_bound_the_pool_to_one_buffer() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = {
         .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
@@ -628,7 +628,7 @@ const uint HELPER_FAULT_ITERS = 32;
 
 fn void failed_helpers_reclaim_command_records_on_pool_reset() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     char[16] payload;
@@ -690,7 +690,7 @@ fn int growth_worker(void* arg) {
    thread. *>
 fn void deferred_queue_growth_from_worker_threads() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     GrowthArgs[GROWTH_THREADS] args;
     for (uint t = 0; t < GROWTH_THREADS; t++) {
@@ -755,7 +755,7 @@ fn int helper_race_upload_worker(void* arg) {
    validation-clean under lavapipe. *>
 fn void blocking_upload_races_default_context_recording() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc upload_desc = {
         .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
@@ -778,6 +778,7 @@ fn void blocking_upload_races_default_context_recording() @test {
     gpu::BufferCopyDesc copy = { .src = copy_src, .dst = copy_dst, .src_offset = 0, .dst_offset = 0, .size = 256 };
     for (uint i = 0; i < HELPER_RACE_ITERS; i++) {
         gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+        defer discard_test_commands(&cmd)!!;
         gpu::cmd_copy_buffer(&cmd, &copy)!!;
         gpu::end_commands(&cmd)!!;
         gpu::CommandList[1] lists = { cmd };
@@ -815,7 +816,7 @@ fn int boundary_worker(void* arg) {
 
 fn void boundary_violation_detected() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     BoundaryArgs args;
     args.device = &device;
@@ -883,7 +884,7 @@ fn int fallback_hammer_worker(void* arg) {
    window, so its coverage here is probabilistic. *>
 fn void multi_thread_tiny_arena_fallback_hammer() @test {
     gpu::Device device = make_thr_device_tiny_staging(FALLBACK_HAMMER_TINY_STAGING);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::RecordingContextHandle[FALLBACK_HAMMER_THREADS] contexts;
@@ -970,7 +971,7 @@ fn int parallel_upload_worker(void* arg) {
    the shape that shares transfer_mutex with the hoisted fallback path. *>
 fn void parallel_tier_c_uploads_across_contexts() @test {
     gpu::Device device = make_thr_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::RecordingContextHandle[THR_THREADS] contexts;
     foreach (&ctx : contexts) *ctx = gpu::create_recording_context(&device)!!;

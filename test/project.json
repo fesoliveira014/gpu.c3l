@@ -19,7 +19,8 @@
     "../gpu/surface.c3", "../gpu/surface/**",
     "../gpu/memory.c3", "../gpu/buffer.c3", "../gpu/texture.c3", "../gpu/descriptor_heap.c3",
     "../gpu/pipeline.c3", "../gpu/command.c3", "../gpu/sync.c3", "../gpu/queue.c3",
-    "../gpu/swapchain.c3", "../gpu/debug.c3", "../gpu/shader_abi.c3", "../gpu/vk/**"
+    "../gpu/swapchain.c3", "../gpu/debug.c3", "../gpu/shader_abi.c3", "../gpu/vk/**",
+    "src/test_lifetime_helpers.c3", "src/bench_lifetime.c3"
   ],
   "output": "build",
   "targets": {

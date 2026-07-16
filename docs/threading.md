@@ -25,7 +25,7 @@ library's own state, but results and validation verdicts are undefined.
 | `surface::{win32,wayland,x11}::create_surface` / `destroy_surface` | E | process-wide surface registry mutation |
 | `supports_presentation` / `request_presentation` / `supports_device_request` | E | process-wide surface registry access; a presentation request does not retain its surface |
 | `create_device` | E | per runtime; device-registry mutation is synchronized; presentation also uses the surface scope |
-| `destroy_device` | S | per target device; each thread needs its own token copy because success invalidates the caller's variable; returns `DEVICE_BUSY` instead of waiting when an operation is active or the slot is already closing |
+| `destroy_device` | S | per target device; success invalidates the caller's token; live children return `RESOURCE_IN_USE`, while active operations, incomplete queue work, or closing state return retryable `DEVICE_BUSY` |
 | `begin_frame` / `end_frame` / `@with_frame` | E | token-paired `IDLE -> ACTIVE -> IDLE`; quiescence required; helper worker is a direct call |
 | `submit` / `present` | E | queue-mutex backed, so Tier S private submits interleave safely |
 | `wait_queue_idle` | E | queue-mutex backed |
@@ -49,17 +49,16 @@ library's own state, but results and validation verdicts are undefined.
 | `poll_readback` | S | lock-free |
 | `resolve_readback` | S | |
 | `get_memory_stats` / `build_memory_report` / `get_persistent_stats` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
-| `begin_commands` / `end_commands` | C | confined to the context's thread |
+| `begin_commands` / `end_commands` / `discard_commands` | C | confined to the context's thread; discard also cancels attached readback tickets |
 | every `cmd_*` recording call | C | confined to the list's thread |
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
-Except for `destroy_device`, each public device operation that accesses
-backend state takes a short-lived atomic pin. Pins do not serialize operations.
-Pin acquisition returns `DEVICE_BUSY` after bounded contention rather than
-waiting indefinitely.
-`destroy_device` prevents new
-pins while closing and returns `DEVICE_BUSY` if an existing pin remains;
-callers may retry with the unchanged token.
+Except for `destroy_device`, each public device operation that accesses backend
+state takes a short-lived atomic pin. Pins do not serialize operations, and
+bounded pin acquisition returns `DEVICE_BUSY` under sustained contention.
+`destroy_device` closes the slot before polling backend progress, preventing
+new pins while readiness is sampled. Any retryable failure restores the live
+state and preserves the token and generation.
 
 Runtime creation and destruction must not overlap other runtime operations. After
 publication, enumeration and adapter queries may run concurrently; all such calls
@@ -88,10 +87,9 @@ No Tier S or Tier C call may be in flight across `begin_frame` / `end_frame`.
 The frame-owner thread begins and ends the token generation; workers may receive
 copies or the shared token pointer only after begin and must quiesce before end.
 With `enable_validation`, in-flight Tier S calls at the boundary fault
-`INVALID_RESOURCE_STATE`. An unsubmitted command record is reclaimed when its
-frame slot retires and its command pool resets; every alias of that token then
-faults `INVALID_HANDLE`. Without validation the phase rule is still contractual —
-Tier S calls pay nothing.
+`INVALID_RESOURCE_STATE`. A live unsubmitted command record prevents its frame
+slot from resetting; submit or discard it first. Without validation the phase
+rule is still contractual — Tier S calls pay nothing.
 
 Frame lifecycle errors are independent of validation: double begin faults
 `INVALID_RESOURCE_STATE`; malformed, consumed, and stale frame tokens fault
@@ -103,8 +101,8 @@ token and boundary state for retry.
 entire worker. It invokes the symbol directly, with no runtime callback or
 virtual dispatch, then attempts end exactly once even when the worker returns a
 fault through `!`. An end fault wins and leaves `frame` live for retry. Off-frame
-`submit` and `present` remain allowed; they are retired by the next correctly
-paired frame or by device teardown, not by an unmatched `end_frame`.
+`submit` and `present` remain allowed; cover them with a later `end_frame` or an
+explicit queue idle wait before destroying the device.
 
 ## Lock order
 
@@ -245,5 +243,6 @@ bracket — sanctioned for frame-loop-free apps and one-shot setup work.
 Resources a command list submitted off-frame refers to must not be freed
 while that work may still be in flight: destroying such a resource enqueues
 it in the deferred-release queue (docs/memory.md §17) rather than freeing it
-synchronously, and it stays queued until the next `end_frame`'s cross-queue
-chain covers it, or until device teardown if no further frame ever runs.
+synchronously. A later `end_frame` may cover all used queues; otherwise wait
+the affected queue explicitly. `destroy_device` returns `DEVICE_BUSY` while
+no covering completion is visible.

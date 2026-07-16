@@ -192,7 +192,9 @@ fn SemaphoreHandle? create_semaphore(Device* device, SemaphoreDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    return operation.vtable.create_semaphore(device, desc);
+    SemaphoreHandle semaphore = operation.vtable.create_semaphore(device, desc)!;
+    retain_device_children(&operation);
+    return semaphore;
 }
 
 <* Counterpart of create_semaphore. *>
@@ -200,7 +202,8 @@ fn void? destroy_semaphore(Device* device, SemaphoreHandle semaphore) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     validate_resource_owner(&operation, semaphore.owner, ResourceOwnerKind.SEMAPHORE)!;
-    return operation.vtable.destroy_semaphore(device, semaphore);
+    operation.vtable.destroy_semaphore(device, semaphore)!;
+    release_device_children(&operation);
 }
 
 <* Wait on the host until the timeline reaches `value`, up to `timeout_ns`

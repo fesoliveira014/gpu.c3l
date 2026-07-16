@@ -42,6 +42,7 @@ fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAdd
     defer gpu::destroy_texture(device, target)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_attach = {
         .texture       = target,
         .before_stage  = gpu::Stage.HOST,
@@ -99,7 +100,7 @@ fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAdd
 
 fn void u16_and_u32_indexed_draws_match() @test {
     gpu::Device device = u16v_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = U16V_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = U16V_FRAG_SPIRV[..], .entry_point = "main" };

@@ -571,13 +571,12 @@ Blocking flow (the `readback_buffer_data` / `readback_texture_data` helpers):
 6. Read CPU pointer.
 ```
 
-Non-blocking flow (tickets): `cmd_readback_buffer` / `cmd_readback_texture`
-record the copy into the caller's command list and return a `ReadbackTicket`
-that identifies private readback state. The caller keeps rendering;
-`poll_readback` answers readiness without blocking, and `resolve_readback`
-copies out and releases the state (faulting
-`READBACK_NOT_READY` if polled early). The ticket owns its range until
-resolved.
+Non-blocking readback records a copy with `cmd_readback_buffer` or
+`cmd_readback_texture` and returns a `ReadbackTicket`. `poll_readback` is
+non-blocking; `resolve_readback` copies and releases completed state, or faults
+`READBACK_NOT_READY`. The ticket owns its range until resolution. Discarding
+the command cancels its unsubmitted tickets. An unresolved submitted ticket
+returns `RESOURCE_IN_USE` from `destroy_device`.
 
 ## 13. Staging arena
 
@@ -709,19 +708,27 @@ arena:readback
 
 ## 17. Deferred destruction
 
-`destroy_buffer`/`destroy_texture`/`destroy_pipeline`/`destroy_shader`/`destroy_semaphore` free the public handle immediately but cannot free the backend VMA buffer/image, image view, `vk::Pipeline`, shader module, or semaphore right away — a frame already submitted may still reference it. The backend queues those objects (`gpu/vk/deferred.c3`) keyed by `retire_timeline_value` (gpu/memory.c3, the same "safe after" value the descriptor heap and transfer arenas use) and frees each once the frame timeline reaches it. The queue drains on every `begin_frame` (after its wait) and opportunistically on every enqueue; teardown drains everything unconditionally once the device is idle. Destroying a resource never faults on the frames-in-flight window alone — see `RESOURCE_IN_USE` in `gpu/faults.c3`. `destroy_texture` does fault `RESOURCE_IN_USE` when a live `TextureIndex` descriptor still owns the texture; destroy the descriptor first. Retired-but-undrained descriptors (destroyed, no frame boundary since) do not block, and device teardown stays lenient — `report_descriptor_leaks` reports leftovers instead of faulting.
+`destroy_buffer`, `destroy_texture`, `destroy_pipeline`, `destroy_shader`, and
+`destroy_semaphore` consume the public handle immediately, but submitted frames
+may still reference the native object. The backend queues it by
+`retire_timeline_value` and drains completed entries during `begin_frame` and
+enqueue. Accepted device teardown drains the remainder only after queue progress
+is complete; it never waits. Frames in flight therefore do not make individual
+resource destruction fail. A live texture descriptor still returns
+`RESOURCE_IN_USE` from `destroy_texture`.
+
+Destroyed descriptors awaiting retirement do not count as live device children.
+Live descriptors do, so `destroy_device` returns `RESOURCE_IN_USE` until they
+are explicitly destroyed.
 
 `retire_timeline_value` also defers while off-frame work is pending: `submit`
 outside a frame bracket (threading.md Tier E, sanctioned for frame-loop-free
-apps) sets an off-frame-pending marker in addition to `begin_frame`/`end_frame`'s
-`frame_active` flag, so a destroy of a resource an off-frame submit
-referenced enqueues rather than freeing synchronously. `end_frame`'s
-cross-queue chain (§ frame retirement across queues, threading.md) waits
-every queue used since the last boundary — off-frame or in-frame — before
-clearing the marker. The prospective frame value, slot retirement, queue-use
-flags, and marker commit only after that signal submit succeeds, so a rejected
-submit leaves the boundary unchanged for retry. A frame-loop-free app that
-never calls `begin_frame` again holds deferred entries safely until teardown.
+apps) marks the affected semantic queue. Destroyed resources referenced by that
+work enter the deferred queue. A later `end_frame` chain covers every queue used
+since the last boundary and clears those markers only after successful submit.
+A frame-loop-free application instead calls `wait_queue_idle` for each affected
+role. Until then, `destroy_device` returns `DEVICE_BUSY` without changing its
+token or state.
 
 ## 18. Defragmentation policy
 

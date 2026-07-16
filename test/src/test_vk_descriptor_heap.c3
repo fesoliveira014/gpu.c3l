@@ -214,7 +214,7 @@ fn gpu::TextureHandle make_heap_view_texture(gpu::Device* device) {
 
 fn void descriptor_sampler_failures_report_context() @test {
     gpu::Device device = make_heap_test_device(1, 1);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle transfer = make_heap_texture(&device);
@@ -320,7 +320,7 @@ fn uint cached_texture_view_count(vk::VkDeviceState* state, gpu::TextureHandle t
 
 fn void texture_descriptor_round_trip() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -334,7 +334,7 @@ fn void texture_descriptor_round_trip() @test {
 
 fn void texture_descriptor_exhaustion() @test {
     gpu::Device device = make_heap_test_device(2, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -351,7 +351,7 @@ fn void texture_descriptor_exhaustion() @test {
 
 fn void texture_descriptor_exhaustion_does_not_cache_failed_views() @test {
     gpu::Device device = make_heap_test_device(1, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureIndex occupied = gpu::create_texture_descriptor(&device, texture, null)!!;
@@ -377,7 +377,7 @@ fn void texture_descriptor_exhaustion_does_not_cache_failed_views() @test {
 
 fn void texture_descriptor_deferred_reuse() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -407,7 +407,7 @@ fn void texture_descriptor_deferred_reuse() @test {
 
 fn void texture_descriptor_stale_texture_rejected() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, texture)!!;
 
@@ -417,7 +417,7 @@ fn void texture_descriptor_stale_texture_rejected() @test {
 
 fn void texture_descriptor_bad_view_rejected() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -428,7 +428,7 @@ fn void texture_descriptor_bad_view_rejected() @test {
 
 fn void texture_descriptor_overflowing_view_range_rejected() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -443,7 +443,7 @@ fn void texture_descriptor_overflowing_view_range_rejected() @test {
 
 fn void destroy_texture_with_live_descriptor_faults_and_recovers() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
 
     gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
@@ -461,7 +461,7 @@ fn void destroy_texture_with_live_descriptor_faults_and_recovers() @test {
 
 fn void destroy_texture_retired_undrained_descriptor_succeeds() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
 
     gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
@@ -472,7 +472,7 @@ fn void destroy_texture_retired_undrained_descriptor_succeeds() @test {
 
 fn void destroy_texture_blocks_while_any_descriptor_live() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
 
     gpu::TextureIndex a = gpu::create_texture_descriptor(&device, texture, null)!!;
@@ -488,7 +488,7 @@ fn void destroy_texture_blocks_while_any_descriptor_live() @test {
 
 fn void destroy_texture_unaffected_by_unrelated_descriptor() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture_a = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture_a)!!;
     gpu::TextureHandle texture_b = make_heap_texture(&device);
@@ -501,7 +501,7 @@ fn void destroy_texture_unaffected_by_unrelated_descriptor() @test {
 
 fn void texture_descriptors_batch_happy_path() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -519,7 +519,7 @@ fn void texture_descriptors_batch_happy_path() @test {
 
 fn void texture_descriptors_batch_fills_capacity_exactly() @test {
     gpu::Device device = make_heap_test_device(3, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -536,7 +536,7 @@ fn void texture_descriptors_batch_fills_capacity_exactly() @test {
 
 fn void texture_descriptors_batch_zeroed_view_is_default() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -550,7 +550,7 @@ fn void texture_descriptors_batch_zeroed_view_is_default() @test {
 
 fn void texture_descriptors_mismatched_out_len_faults() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -563,7 +563,7 @@ fn void texture_descriptors_mismatched_out_len_faults() @test {
 
 fn void texture_descriptors_empty_batch_is_no_op() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDescriptorDesc[] descs;
     gpu::TextureIndex[] indices;
@@ -572,7 +572,7 @@ fn void texture_descriptors_empty_batch_is_no_op() @test {
 
 fn void texture_descriptors_batch_preflight_faults_untouched() @test {
     gpu::Device device = make_heap_test_device(4, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -601,7 +601,7 @@ fn void texture_descriptors_batch_preflight_faults_untouched() @test {
 
 fn void texture_descriptors_failed_batch_restores_full_view_capacity() @test {
     gpu::Device device = make_heap_test_device(32, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
@@ -644,7 +644,7 @@ fn void texture_descriptors_failed_batch_restores_full_view_capacity() @test {
 
 fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
@@ -696,7 +696,7 @@ fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test
 
 fn void texture_descriptors_failed_batch_preserves_existing_and_duplicate_views() @test {
     gpu::Device device = make_heap_test_device(16, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
@@ -743,7 +743,7 @@ fn void texture_descriptors_failed_batch_preserves_existing_and_duplicate_views(
 
 fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
@@ -830,7 +830,7 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
 
 fn void texture_descriptors_batch_created_descriptor_blocks_texture_destroy() @test {
     gpu::Device device = make_heap_test_device(8, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
 
     gpu::TextureDescriptorDesc[2] descs;
@@ -847,7 +847,7 @@ fn void texture_descriptors_batch_created_descriptor_blocks_texture_destroy() @t
 
 fn void sampler_round_trip_and_exhaustion() @test {
     gpu::Device device = make_heap_test_device(8, 2);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::SamplerDesc desc = {
         .min_filter = gpu::Filter.NEAREST,
@@ -872,7 +872,7 @@ fn void sampler_round_trip_and_exhaustion() @test {
 
 fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
     gpu::Device device = make_heap_test_device(8, 8);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::SamplerDesc nan_bias = { .mip_lod_bias = float::nan };
     fault bias_fault = @catch(gpu::create_sampler(&device, &nan_bias));
@@ -895,15 +895,19 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
     assert(anisotropy_fault == gpu::INVALID_ARGUMENT, "non-finite anisotropy faults INVALID_ARGUMENT");
 }
 
-fn void leaked_descriptors_survive_teardown() @test {
+fn void live_descriptors_block_device_destruction() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     gpu::TextureHandle texture = make_heap_texture(&device);
-    gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureIndex descriptor = gpu::create_texture_descriptor(&device, texture, null)!!;
 
     gpu::SamplerDesc desc = {};
-    gpu::create_sampler(&device, &desc)!!;
+    gpu::SamplerIndex sampler = gpu::create_sampler(&device, &desc)!!;
 
-    // Leaked on purpose: teardown must report and stay clean.
+    assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
+        "live descriptors block device destruction");
+    gpu::destroy_texture_descriptor(&device, descriptor)!!;
+    gpu::destroy_sampler(&device, sampler)!!;
+    gpu::destroy_texture(&device, texture)!!;
     gpu::destroy_device(&device)!!;
 }
 
@@ -969,6 +973,7 @@ fn void heap_fits_limits_indexing_excludes_samplers_from_per_stage_aggregate() @
     );
     assert(fits, "plain samplers do not count against the per-stage resource aggregate");
 }
+
 fn void heap_fits_limits_indexing_exceeds_all_pools_aggregate() @test {
     gpu::vk::HeapLimits limits = {
 
@@ -989,6 +994,7 @@ fn void heap_fits_limits_indexing_exceeds_all_pools_aggregate() @test {
     );
     assert(!fits, "aggregate all-pools limit binds when all per-type limits fit");
 }
+
 fn void heap_fits_limits_indexing_widens_aggregate_arithmetic() @test {
 
     gpu::vk::HeapLimits limits = {
@@ -1184,7 +1190,7 @@ fn void heap_fits_limits_buffer_exceeds_per_type_address_space() @test {
 // lavapipe's reported device limits, creates successfully.
 fn void descriptor_heap_raised_capacity_creates() @test {
     gpu::Device device = make_heap_test_device(8192, 512);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     assert(gpu::get_device_caps(&device)!!.max_texture_descriptors == 8192, "caps report the created texture capacity");
     assert(gpu::get_device_caps(&device)!!.max_sampler_descriptors == 512, "caps report the created sampler capacity");
@@ -1197,7 +1203,7 @@ fn void descriptor_heap_raised_capacity_creates() @test {
 
 fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
     gpu::Device device = make_heap_test_device(1, 1);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -1321,7 +1327,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
 
 fn void texture_descriptor_view_cache_exhaustion_reports_distinct_context() @test {
     gpu::Device device = make_heap_test_device(16, 4);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureIndex[vk::MAX_CACHED_VIEWS] live;

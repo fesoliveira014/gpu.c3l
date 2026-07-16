@@ -101,8 +101,8 @@ struct VkDeviceState {
     // Set unconditionally by vk_submit so end_frame also waits off-frame use.
     bool                       compute_used_since_frame;
     bool                       transfer_used_since_frame;
-    // Off-frame submission not yet covered by an end_frame chain or teardown.
-    Atomic{bool}               off_frame_pending;
+    // Off-frame queues not yet covered by end_frame or an explicit idle wait.
+    Atomic{uint}               off_frame_pending_queues;
     // Lock order: helper_record_mutex -> transfer_mutex -> resource_mutex ->
     // command_mutex. Queue mutexes are never nested with command_mutex.
     // helper_record_mutex is outermost because the blocking helpers it wraps
@@ -222,7 +222,8 @@ fn PoolResetStats pool_reset_stats(VkDeviceState* state) {
 
 // One static vtable shared by every Vulkan device.
 const gpu::BackendVTable VK_VTABLE @private = {
-    .destroy_device      = &vk_destroy_device,
+    .check_device_destroy = &vk_check_device_destroy,
+    .destroy_device       = &vk_destroy_device,
     .get_memory_stats    = &vk_get_memory_stats,
     .build_memory_report = &vk_build_memory_report,
     .create_buffer       = &vk_create_buffer,
@@ -239,6 +240,7 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .create_recording_context  = &vk_create_recording_context,
     .destroy_recording_context = &vk_destroy_recording_context,
     .end_commands        = &vk_end_commands,
+    .discard_commands    = &vk_discard_commands,
     .submit              = &vk_submit,
     .wait_queue_idle     = &vk_wait_queue_idle,
     .cmd_copy_buffer     = &vk_cmd_copy_buffer,
@@ -682,21 +684,45 @@ fn gpu::Device? create_vk_device_with_selection(
     );
 }
 
+fn bool? device_destroy_ready_with_query(
+    VkDeviceState* state,
+    FrameCounterQueryFn query_fn,
+) @private {
+    if (state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE) != 0) return false;
+    ulong expected = state.timeline_counter.load(AtomicOrdering.ACQUIRE);
+    if (expected == 0) return true;
+
+    ulong current = 0;
+    vk::Result result = query_fn(state.device, state.frame_timeline, &current);
+    if (result == vk::Result.ERROR_DEVICE_LOST) {
+        observe_device_result(state, result);
+        return true;
+    }
+    check_device_result(state, result)!;
+    return current >= expected;
+}
+
+fn void? vk_check_device_destroy(void* backend_state) @private {
+    VkDeviceState* state = (VkDeviceState*)backend_state;
+    if (!device_destroy_ready_with_query(state, &real_frame_counter_query)!) {
+        return gpu::DEVICE_BUSY~;
+    }
+}
+
 fn void vk_destroy_device(void* backend_state) @private {
     destroy_state((VkDeviceState*)backend_state);
 }
 
-<* Reverse-order teardown; safe on a partial or zeroed state. *>
+<* Reverse-order cleanup after accepted destruction, device loss, or partial creation. *>
 fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @private {
     if (state == null) return;
     if (state.device != null) {
-        vk::device_wait_idle(state.device);
         deferred_drain_all(state);
         destroy_deferred_queue(state);
-        // Leak reporting first: the sweeps below free the tables it reads.
+        // Report before cleanup clears the diagnostic tables.
         if (state.validation || state.debug_callback != null) (void)report_resource_leaks(state);
         destroy_readback_tickets(state);
-        // Destroy any buffers the caller did not, so no VMA allocation leaks.
+        // Internal buffers and device-loss leftovers remain backend-owned.
         if (state.allocator != null && state.buffers.slots.ptr != null) {
             foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {
                 if (cell.used) state.allocator.destroy_buffer(cell.value.buffer, cell.value.allocation);
@@ -716,7 +742,7 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         }
         if (state.validation || state.debug_callback != null) report_descriptor_leaks(state);
         destroy_descriptor_heap(state);
-        // Destroy any textures the caller did not, so no image or view leaks.
+        // Internal textures and device-loss leftovers remain backend-owned.
         if (state.textures.slots.ptr != null) {
             foreach (&cell : state.textures.slots[:state.textures.next_new]) {
                 if (cell.used) {

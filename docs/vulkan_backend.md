@@ -128,11 +128,12 @@ arbitrary driver/application threads. Payloads are borrowed, no diagnostic
 allocation or queue is introduced, and callback reentry into gpu.c3l is
 prohibited. Native Vulkan object handles/types never cross the public boundary.
 When no callback is configured, validation output retains the stderr fallback.
-Device teardown runs the public-resource leak scan when validation is enabled
-or a structured callback is active. Callback delivery uses
-`WARNING`/`resource_lifetime` messages with `destroy_device` operation and
-resource identity/name where available; validation without a callback keeps
-the stderr report. Device diagnostics remain device-owned. Runtime diagnostics use the same callback contract but have independent instance and messenger lifetimes.
+Accepted teardown scans backend state when validation or a structured callback
+is active. Normal live children are rejected by the public device registry;
+the scan covers internal, partial-initialization, and device-loss leftovers.
+Callback messages use `WARNING`/`resource_lifetime` with operation
+`destroy_device`; validation without a callback uses stderr. Runtime diagnostics
+use the same callback contract with independent instance and messenger lifetimes.
 
 ## 5. Adapter enumeration and device selection
 
@@ -536,9 +537,9 @@ owners, then claims every record as `SUBMITTING` before constructing the Vulkan
 submission. A fault before `vkQueueSubmit2` succeeds restores claimed records to
 `EXECUTABLE`. Success commits layout transitions in submission order and frees
 the records, invalidating all aliases.
-Frame-slot pool reset reclaims any unsubmitted records before resetting their
-Vulkan command pool. A recording context cannot be destroyed while one of its
-records remains live.
+Frame-slot pool reset is rejected while an unsubmitted record still references
+the slot. Callers must submit or discard those records before reset. A recording
+context cannot be destroyed while one of its records remains live.
 
 ## 13. Synchronization
 

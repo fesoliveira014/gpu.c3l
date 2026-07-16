@@ -12,7 +12,7 @@ fn void buffer_create_address_span() @test {
         .application_name  = "gpu_buffer_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     // Device-local storage buffer.
     gpu::BufferDesc device_desc = {
@@ -63,6 +63,29 @@ fn void buffer_create_address_span() @test {
     gpu::destroy_buffer(&device, addressable_buffer)!!;
 }
 
+fn void live_buffers_block_device_destruction() @test {
+    gpu::DeviceDesc device_desc = {
+        .backend          = gpu::BackendKind.VULKAN,
+        .application_name = "gpu_buffer_lifetime_test",
+    };
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device original = device;
+    gpu::BufferDesc buffer_desc = {
+        .size        = 256,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .compute },
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+
+    fault destroy_fault = @catch(gpu::destroy_device(&device));
+    assert(destroy_fault == gpu::RESOURCE_IN_USE, "a live buffer blocks device destruction");
+    assert(device == original, "live-child rejection preserves the device token");
+
+    gpu::destroy_buffer(&device, buffer)!!;
+    gpu::destroy_device(&device)!!;
+}
+
 fn void range_and_alignment_validation() @test {
     gpu::DeviceDesc device_desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -71,7 +94,7 @@ fn void range_and_alignment_validation() @test {
         .application_name  = "gpu_range_validation_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc zero = { .size = 0, .usage = { .storage }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
     fault f1 = @catch(gpu::create_buffer(&device, &zero));
@@ -97,6 +120,7 @@ fn void range_and_alignment_validation() @test {
     assert(f7 == gpu::INVALID_ARGUMENT, "zero-size span faults");
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     fault f8 = @catch(gpu::cmd_fill_buffer(&cmd, buf, 2, 4, 0xAB));
     assert(f8 == gpu::INVALID_ARGUMENT, "misaligned fill offset faults");
     fault f9 = @catch(gpu::cmd_fill_buffer(&cmd, buf, 0, 6, 0xAB));

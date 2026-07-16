@@ -22,7 +22,7 @@ fn gpu::Device make_upload_test_device() {
 
 fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::Device device = make_upload_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     // Sampled-only (no storage): descriptor expects SHADER_READ, proving the
     // usage-implies-layout convention end to end.
@@ -123,6 +123,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     sample_root.height        = UP_SIZE;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_dst = gpu::texture_transition(
         texture: texture,
@@ -218,7 +219,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
 
 fn void storage_write_direct_readback() @test {
     gpu::Device device = make_upload_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -259,6 +260,7 @@ fn void storage_write_direct_readback() @test {
     root.height        = UP_SIZE;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture       = texture,
         .before_stage  = gpu::Stage.HOST,
@@ -322,7 +324,7 @@ fn void storage_write_direct_readback() @test {
 
 fn void copy_validation_faults() @test {
     gpu::Device device = make_upload_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -347,6 +349,7 @@ fn void copy_validation_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&cmd)!!;
 
     // Tracked layout is UNDEFINED, not TRANSFER_DST.
     gpu::BufferTextureCopyDesc wrong_layout = { .src = span, .texture = texture };
@@ -391,7 +394,7 @@ fn void copy_validation_faults() @test {
 
 fn void mip_subset_view_sampled() @test {
     gpu::Device device = make_upload_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
@@ -468,6 +471,7 @@ fn void mip_subset_view_sampled() @test {
     root.height        = UP_SIZE / 2;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_dst = {
         .texture       = texture,
         .before_stage  = gpu::Stage.HOST,
@@ -521,7 +525,7 @@ fn void mip_subset_view_sampled() @test {
 
 fn void flush_invalidate_stale_handle_faults() @test {
     gpu::Device device = make_upload_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc desc = {
         .size        = 64,

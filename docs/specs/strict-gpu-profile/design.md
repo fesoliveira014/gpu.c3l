@@ -149,13 +149,14 @@ The device registry replaces the single process-wide active device. Registry mut
 
 `destroy_device` is non-blocking and retryable:
 
-1. Under the registry mutation lock, validate the device and check live children. If any remain, return `RESOURCE_IN_USE` without changing state.
-2. If queue work is incomplete, return `DEVICE_BUSY` without changing state.
-3. Mark the slot as closing. New pins and operations that observe it return retryable `DEVICE_BUSY`.
-4. If short-lived pins remain, restore the live state and return `DEVICE_BUSY`.
-5. Otherwise destroy backend state, increment the generation, and release the slot.
+1. Validate the live token and reject known live children with `RESOURCE_IN_USE`.
+2. Mark the slot closing so new operations return `DEVICE_BUSY`.
+3. If operation pins remain, restore the live state and return `DEVICE_BUSY`.
+4. Recheck children under the closed state; restore live and return `RESOURCE_IN_USE` if any publication raced closing.
+5. Poll queue readiness while new pins are excluded. Restore live and return `DEVICE_BUSY` if work is incomplete.
+6. Recheck children, destroy backend state, increment the generation, and release the slot.
 
-Destruction never waits for GPU or host work. Failed attempts preserve the device generation and all state.
+Every failed attempt preserves the token, generation, and backend state. Device loss bypasses child and progress checks so unreachable state can be released.
 
 Recording command lists and executable command tokens retain a pin for their lifetime. Hot recording commands therefore use their already-pinned state and perform no registry lookup, atomic pin, or mutation-lock acquisition per command.
 
@@ -486,7 +487,7 @@ Regenerated tasks retain completed stabilization work as a concise historical re
 - Recursive C3 imports may expose submodule declarations; runtime activation must remain explicit.
 - A shared public type does not make every operation valid on every device. Strict operations require the strict capability.
 - Device-request extension storage must not expose raw numeric capability identifiers.
-- Device destruction must check children and queue progress before closing, reject new pins while closing, and change generation only on success.
+- Device destruction must reject known children before closing, reject new pins while closing, then recheck children and queue progress; generation changes only on success.
 - C3 explicit casts can bypass nominal typing; runtime validation still protects ownership.
 - Generic data and texture placements may have different native memory compatibility.
 - Exposed CPU mappings do not imply coherent memory; callers must use the mapped-span visibility operations.

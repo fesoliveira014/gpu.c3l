@@ -288,13 +288,16 @@ selecting another adapter. Duplicate capability contribution is rejected
 transactionally by private composition helpers.
 
 Multiple live devices may coexist. `Device` is a compact slot and generation
-token; destroying it invalidates stale copies without affecting other devices.
-Public device operations other than destruction take a short-lived atomic pin
-before reading backend state. An operation that observes a closing device
-faults `DEVICE_BUSY`.
-`destroy_device` never waits for active operations: it restores the live state,
-returns `DEVICE_BUSY`, and preserves the token and generation for retry. Backend
-teardown begins only when no operation pins remain.
+token. Public device operations other than destruction take a short-lived
+atomic pin before reading backend state.
+
+`destroy_device` never waits. Live resources, frames, command lists, recording
+contexts, persistent spans, swapchains, descriptors, semaphores, and readback
+tickets return `RESOURCE_IN_USE`. Active operations, incomplete queue work, or
+a closing slot return retryable `DEVICE_BUSY`. Every failed attempt preserves
+the token, generation, and backend state. Success increments the generation
+and invalidates the passed token. A lost device bypasses child and progress
+checks so backend-owned state can still be released.
 
 Frame tokens, queue tokens, command tokens, resource handles, descriptor
 indices, GPU addresses/spans, and synchronization values are scoped to their
@@ -386,13 +389,13 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; resource creation: empty, unknown, or unselected access role; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag, an access set that omits the operation queue role, stale or forged span allocation metadata, malformed span access, or a misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
-| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
+| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, any resource-handle-taking call, `cmd_*`, `end_commands`, `discard_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
-| `DEVICE_BUSY` | public device operations; `destroy_device` | the operation observed a closing device or exhausted its bounded pin-acquisition retries, or destruction found an active host operation; retry without replacing the device token |
-| `RESOURCE_IN_USE` | `destroy_runtime`, `destroy_surface`, `destroy_texture` | a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture. |
+| `DEVICE_BUSY` | public device operations; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
+| `RESOURCE_IN_USE` | `destroy_device`, `destroy_runtime`, `destroy_surface`, `destroy_texture` | a device has a live child, a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
 | `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands`; persistent allocation | the runtime or device registry, adapter token, handle table, or command-record table is at capacity |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
@@ -400,7 +403,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
-| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
+| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
 | `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |
 | `WAIT_TIMEOUT` | `wait_semaphore`, `begin_frame`, `acquire_next_image` | bounded wait or transient image unavailability; retry without resizing |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
@@ -862,6 +865,7 @@ get_queue(Device* device, QueueKind kind, uint index = 0) -> Queue?
 get_queue_info(Device* device, Queue queue) -> QueueInfo?
 begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) -> CommandList?
 end_commands(CommandList* commands) -> void?
+discard_commands(CommandList* commands) -> void?
 submit(Device* device, SubmitDesc* desc) -> void?
 wait_queue_idle(Device* device, QueueKind queue) -> void?
 
@@ -897,13 +901,16 @@ create_recording_context / destroy_recording_context    (one per worker thread; 
 `CommandList` is a small owner-bearing token; mutable lifecycle, binding cache,
 pending texture layouts, and the backend command buffer are device-owned. Copies
 alias the same record, and the embedded `Device` value does not borrow the
-variable passed to `begin_commands`. A successful `submit` consumes every alias,
-so later use faults `INVALID_HANDLE`. A submit batch is validated as a
-transaction: duplicate tokens fault `COMMAND_RECORDING_ERROR`, mixed queue kinds
-fault `INVALID_ARGUMENT`, and failures before a successful Vulkan queue call
-leave all valid tokens executable. Device-token copies for the sole live device
-are accepted; stale owners fault `INVALID_HANDLE`. An unsubmitted token becomes
-stale when its frame-slot command pool resets.
+variable passed to `begin_commands`. Successful submission consumes each token
+in `SubmitDesc.command_lists` and clears those slice entries; copied aliases
+then fault `INVALID_HANDLE`. `discard_commands` consumes a recording or
+executable token, including a recording inside an active render pass, and
+cancels readback tickets attached to it.
+
+A submit batch is transactional: duplicate tokens fault
+`COMMAND_RECORDING_ERROR`, mixed queue kinds fault `INVALID_ARGUMENT`, and
+failures before a successful native queue call leave tokens executable. A live
+unsubmitted token blocks its frame-slot pool reset until submitted or discarded.
 
 Timeline signal values must be greater than the semaphore counter when they
 execute. The caller orders pending signals across queues and keeps waits and
@@ -1140,16 +1147,15 @@ unsubmitted — see docs/threading.md §Helper timeline). A ticket recorded in
 frame N resolves after frame N ends; applications that never run the frame
 loop never signal tickets.
 
-Tickets hold a pinned readback-arena range until resolved — an unresolved
-ticket blocks arena reclamation behind it (FIFO); when the arena is full,
-tickets fall back to dedicated buffers destroyed at resolve. `resolve_readback`
-faults `READBACK_NOT_READY` before the timeline signals, and
-`INVALID_ARGUMENT` on a consumed token or a `dest` smaller than the copied
-range. `poll_readback` returns false for the consumed original token. A stale
-alias faults `INVALID_HANDLE` in both calls. Each ticket resolves exactly once;
-device teardown releases unresolved tickets.
-An invalid or closing device faults `INVALID_HANDLE` or `DEVICE_BUSY` before the
-ticket is inspected.
+Tickets hold a pinned readback-arena range until resolved. An unresolved ticket
+blocks arena reclamation behind it and returns `RESOURCE_IN_USE` from
+`destroy_device`; an arena overflow uses a dedicated buffer released at
+resolution. Discarding the command that created an unsubmitted ticket cancels
+it, and later ticket use faults `INVALID_HANDLE`.
+
+`resolve_readback` faults `READBACK_NOT_READY` before completion and
+`INVALID_ARGUMENT` for a consumed token or short destination. A stale alias
+faults `INVALID_HANDLE`. Device-loss cleanup releases unresolved backend state.
 
 ### Barriers
 
@@ -1346,15 +1352,12 @@ Labels group work for capture tools; they are valid while recording,
 including inside render passes, and silently succeed when debug-utils is
 absent. Balance is the caller's responsibility.
 
-`destroy_device` scans for leaks when validation is enabled or a debug
-callback is configured. With a callback, each leak is a synchronous
-`WARNING`/`resource_lifetime` message with `operation = "destroy_device"`,
-resource identity where available, the stored debug name, and backend detail.
-Without a callback, validation-enabled teardown retains the stderr fallback.
-Coverage includes buffers, textures, pipeline cache entries, shaders,
-semaphores, recording contexts, persistent spans, and descriptor slots. Debug
-names are stored as truncating 63-byte copies — no lifetime requirement on the
-caller's string.
+Accepted destruction scans backend state when validation or a debug callback
+is enabled. Normal live children are rejected before this scan; diagnostics are
+a safety net for internal, partial-initialization, and device-loss leftovers.
+Callback messages use `WARNING`/`resource_lifetime` with operation
+`destroy_device`; validation without a callback uses stderr. Debug names are
+stored as truncating 63-byte copies.
 
 ## 10. Swapchain API
 
@@ -1516,6 +1519,7 @@ fn void? run_compute() {
     ComputeWork work = { .device = &device, .input = input, .pipeline = pipeline };
     gpu::FrameToken frame;
     gpu::@with_frame(&frame, &device, record_compute, &work)!;
+    gpu::wait_queue_idle(&device, gpu::QueueKind.COMPUTE)!;
 }
 
 fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
@@ -1524,6 +1528,7 @@ fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
     root.input = gpu::get_buffer_address(work.device, work.input)!;
     root.count = 1024;
     gpu::CommandList commands = gpu::begin_commands(work.device, gpu::QueueKind.COMPUTE)!;
+    defer (void)gpu::discard_commands(&commands);
     gpu::cmd_dispatch(
         commands: &commands,
         pipeline: work.pipeline,
@@ -1531,6 +1536,9 @@ fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
         groups:   { 16, 1, 1 },
     )!;
     gpu::end_commands(&commands)!;
+    gpu::CommandList[1] lists = { commands };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::submit(work.device, &submit)!;
 }
 ```
 

@@ -30,8 +30,8 @@ faultdef
     // A device operation encountered closing state or sustained pin
     // contention. Destruction may also return this fault. Safe to retry.
     DEVICE_BUSY,
-    // destroy_texture while a live TextureIndex still owns the texture;
-    // destroy the descriptor first. In-flight destroys defer instead.
+    // Destruction found a live owner: a device child, runtime dependent,
+    // surface swapchain, or texture descriptor. Release the owner first.
     RESOURCE_IN_USE,
     // A frame/staging/readback arena ran out for this frame; raise the
     // arena size in DeviceDesc or split the work.

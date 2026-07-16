@@ -16,7 +16,7 @@ fn void root_pointer_compute_readback() @test {
         .frames_in_flight = 2, .application_name = "gpu_root_pointer_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::BufferDesc io_desc = {
         .size = COUNT * float::size, .usage = { .storage, .addressable },
@@ -50,6 +50,7 @@ fn void root_pointer_compute_readback() @test {
     root.count      = COUNT;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: pipeline,

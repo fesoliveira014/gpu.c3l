@@ -79,7 +79,9 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
     if (device_runtime == null || surface_runtime != device_runtime) {
         return INVALID_HANDLE~;
     }
-    return device_data.vtable.create_swapchain(device, surface, desc);
+    SwapchainHandle swapchain = device_data.vtable.create_swapchain(device, surface, desc)!;
+    retain_device_children(&operation);
+    return swapchain;
 }
 
 <* Counterpart of create_swapchain. Returns INVALID_RESOURCE_STATE while an
@@ -87,7 +89,8 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    return operation.vtable.destroy_swapchain(device, swapchain);
+    operation.vtable.destroy_swapchain(device, swapchain)!;
+    release_device_children(&operation);
 }
 
 <* Recreate under the same handle at a new extent. A zero clamped extent or

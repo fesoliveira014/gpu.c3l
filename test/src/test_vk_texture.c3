@@ -68,7 +68,7 @@ fn gpu::Device make_texture_test_device() {
 
 fn void texture_create_destroy() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
@@ -91,7 +91,7 @@ fn void texture_create_destroy() @test {
 
 fn void texture_unsupported_desc_rejected() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc depth_storage = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -143,7 +143,7 @@ fn void texture_unsupported_desc_rejected() @test {
 
 fn void texture_stale_handle_rejected() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -162,7 +162,7 @@ fn void texture_stale_handle_rejected() @test {
 
 fn void texture_barrier_transitions_layout() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -177,6 +177,7 @@ fn void texture_barrier_transitions_layout() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_general = {
         .texture       = texture,
@@ -214,7 +215,7 @@ fn void texture_barrier_transitions_layout() @test {
 
 fn void texture_multi_mip_create_destroy() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
@@ -237,7 +238,7 @@ fn void texture_multi_mip_create_destroy() @test {
 
 fn void texture_multi_mip_barrier_covers_chain() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
@@ -253,6 +254,7 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture       = texture,
         .before_stage  = gpu::Stage.HOST,
@@ -274,7 +276,7 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
 
 fn void texture_barrier_stale_handle_rejected() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -289,6 +291,7 @@ fn void texture_barrier_stale_handle_rejected() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier barrier = {
         .texture    = texture,
@@ -311,7 +314,7 @@ fn void raised_texture_capacity_holds_more_than_default() @test {
         .application_name  = "gpu_texture_capacity_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     const uint COUNT = 1500;
     gpu::TextureHandle[] handles = mem::new_array(gpu::TextureHandle, COUNT);
@@ -330,7 +333,7 @@ fn void raised_texture_capacity_holds_more_than_default() @test {
 
 fn void unsupported_dimensions_fault() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDimension[3] dims = { gpu::TextureDimension.TEX_1D, gpu::TextureDimension.TEX_3D, gpu::TextureDimension.CUBE };
     foreach (dim : dims) {
@@ -349,7 +352,7 @@ fn void unsupported_dimensions_fault() @test {
 
 fn void transfer_only_texture_round_trips() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -403,7 +406,7 @@ fn bool support_feature_for_usage(
 
 fn void texture_capability_queries_match_creation() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::Format[16] formats = {
         gpu::Format.R8_UNORM,
@@ -473,7 +476,7 @@ fn void texture_capability_queries_match_creation() @test {
 
 fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
     gpu::Device device = make_texture_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureFormatSupport undefined_support =
         gpu::get_texture_format_support(&device, gpu::Format.UNDEFINED)!!;
@@ -542,7 +545,7 @@ fn void invalid_texture_descriptor_diagnostic_preserves_fault() @test {
         .expected_invariant      = "descriptor must satisfy the texture creation contract",
     };
     gpu::Device device = make_texture_diagnostic_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc invalid = {
         .dimension  = gpu::TextureDimension.TEX_2D,
@@ -582,7 +585,7 @@ fn void unsupported_texture_capability_diagnostic_preserves_fault() @test {
         .expected_invariant      = "descriptor must be supported by selected device capabilities",
     };
     gpu::Device device = make_texture_diagnostic_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc unsupported = {
         .dimension    = gpu::TextureDimension.TEX_2D,
@@ -623,7 +626,7 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
         .expected_invariant      = "old_layout must match the command list effective layout",
     };
     gpu::Device device = make_texture_diagnostic_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
@@ -639,6 +642,7 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&commands)!!;
     gpu::TextureBarrier barrier = {
         .texture       = texture,
         .before_stage  = gpu::Stage.HOST,

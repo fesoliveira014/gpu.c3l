@@ -130,6 +130,7 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     root.count      = COUNT;
 
     gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: pipeline,
@@ -181,7 +182,7 @@ fn void cache_blob_round_trip() @test {
     gpu::destroy_device(&device_a)!!;
 
     gpu::Device device_b = make_cache_io_device(blob);
-    defer gpu::destroy_device(&device_b)!!;
+    defer destroy_test_device(&device_b)!!;
     gpu::PipelineHandle pipe_b = build_cache_io_pipeline(&device_b);
     defer gpu::destroy_pipeline(&device_b, pipe_b)!!;
     run_cache_io_dispatch(&device_b, pipe_b);
@@ -189,7 +190,7 @@ fn void cache_blob_round_trip() @test {
 
 fn void cache_export_undersized_buffer_faults() @test {
     gpu::Device device = make_cache_io_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::PipelineHandle pipe = build_cache_io_pipeline(&device);
     defer gpu::destroy_pipeline(&device, pipe)!!;
 
@@ -230,7 +231,7 @@ fn void cache_corrupt_blob_tolerated() @test {
     gpu::Device device_b = make_cache_io_device(blob, &retry_capture);
     assert(retry_capture.terminal_calls == 0,
         "a successful empty-cache retry emits no terminal diagnostic for the rejected blob");
-    defer gpu::destroy_device(&device_b)!!;
+    defer destroy_test_device(&device_b)!!;
     gpu::PipelineHandle pipe_b = build_cache_io_pipeline(&device_b);
     defer gpu::destroy_pipeline(&device_b, pipe_b)!!;
     run_cache_io_dispatch(&device_b, pipe_b);
@@ -250,7 +251,7 @@ fn void cache_foreign_uuid_blob_starts_empty() @test {
         if (i >= 16 && i < 32) *b ^= (char)0xA5;
     }
     gpu::Device device_b = make_cache_io_device(blob);
-    defer gpu::destroy_device(&device_b)!!;
+    defer destroy_test_device(&device_b)!!;
     gpu::PipelineHandle pipe_b = build_cache_io_pipeline(&device_b);
     defer gpu::destroy_pipeline(&device_b, pipe_b)!!;
     run_cache_io_dispatch(&device_b, pipe_b);
@@ -258,7 +259,7 @@ fn void cache_foreign_uuid_blob_starts_empty() @test {
 
 fn void present_mode_query_requires_valid_swapchain() @test {
     gpu::Device device = make_cache_io_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
     fault f = @catch(gpu::get_present_mode_support(&device, bogus));

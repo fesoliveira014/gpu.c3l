@@ -66,11 +66,13 @@ struct DedicatedRetireState {
     uint head;
     uint count;
 }
+
 struct ReadbackTicketState @private {
-    gpu::GpuSpan        span;
-    gpu::SemaphoreValue value;
-    gpu::BufferHandle   dedicated;
-    ulong               range_end;
+    gpu::GpuSpan             span;
+    gpu::SemaphoreValue      value;
+    gpu::BufferHandle        dedicated;
+    gpu::CommandListHandle   command;
+    ulong                    range_end;
 }
 
 struct ReadbackTicketCell @private {
@@ -168,7 +170,6 @@ fn void release_readback_state(VkDeviceState* state, ReadbackTicketState* ticket
         unpin_ticket_range(&state.readback_arena, ticket.range_end);
     }
 }
-
 
 fn gpu::Device device_shim(VkDeviceState* state) @private {
     return state.owner;
@@ -1509,7 +1510,11 @@ fn void unpin_ticket_range(TransferArenaState* arena, ulong range_end) @private 
    buffer's VMA creation runs outside transfer_mutex, matching transfer_alloc
    — a ticket's fallback owns its buffer directly (no shared retire ring), so
    there is nothing to re-check on relock beyond the counter bump. *>
-fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
+fn gpu::ReadbackTicket? ticket_alloc(
+    VkDeviceState* state,
+    usz size,
+    gpu::CommandListHandle command,
+) @private {
     TimelineTag tag = { .kind = TimelineKind.FRAME, .value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1 };
     {
         state.transfer_mutex.lock()!!;
@@ -1527,6 +1532,7 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
             ReadbackTicketState data = {
                 .span      = alloc.span,
                 .value     = (gpu::SemaphoreValue)tag.value,
+                .command   = command,
                 .range_end = alloc.range_end,
             };
             gpu::ReadbackTicket? ticket = state.readback_tickets.alloc(data);
@@ -1552,6 +1558,7 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
             .span      = span,
             .value     = (gpu::SemaphoreValue)tag.value,
             .dedicated = buffer,
+            .command   = command,
         };
         state.transfer_mutex.lock()!!;
         mark_buffer_internal(state, buffer);
@@ -1575,6 +1582,26 @@ fn void? release_ticket(VkDeviceState* state, gpu::ReadbackTicket* ticket) @priv
     release_readback_state(state, data);
     state.readback_tickets.free(*ticket)!;
     *ticket = {};
+}
+
+fn ulong cancel_command_readback_tickets_locked(
+    VkDeviceState* state,
+    gpu::CommandListHandle command,
+) @private {
+    ulong canceled;
+    for (uint i = 0; i < state.readback_tickets.next_new; i++) {
+        ReadbackTicketCell* cell = &state.readback_tickets.slots[i];
+        if (!cell.used || cell.value.command != command) continue;
+        gpu::ReadbackTicket ticket = {
+            .owner      = state.readback_tickets.owner,
+            .index      = i,
+            .generation = cell.generation,
+        };
+        release_readback_state(state, &cell.value);
+        state.readback_tickets.free(ticket)!!;
+        canceled++;
+    }
+    return canceled;
 }
 
 <* Record the copy plus the transfer→host barrier on the destination range;
@@ -1657,7 +1684,7 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
         operation: "cmd_readback_buffer",
     )!;
 
-    gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size);
+    gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size, commands.handle);
     if (catch allocation_fault = allocated_ticket) {
         return report_contract_failure(
             state:               state,
@@ -1761,7 +1788,7 @@ fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu:
         operation: "cmd_readback_texture",
     )!;
 
-    gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size);
+    gpu::ReadbackTicket? allocated_ticket = ticket_alloc(state, size, commands.handle);
     if (catch allocation_fault = allocated_ticket) {
         return report_contract_failure(
             state:               state,

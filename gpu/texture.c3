@@ -238,7 +238,9 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     validate_queue_access(&operation, desc.access)!;
-    return operation.vtable.create_texture(device, desc);
+    TextureHandle texture = operation.vtable.create_texture(device, desc)!;
+    retain_device_children(&operation);
+    return texture;
 }
 
 <* Counterpart of create_texture; descriptors created from the texture must be destroyed first. *>
@@ -246,5 +248,6 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     validate_resource_owner(&operation, texture.owner, ResourceOwnerKind.TEXTURE)!;
-    return operation.vtable.destroy_texture(device, texture);
+    operation.vtable.destroy_texture(device, texture)!;
+    release_device_children(&operation);
 }

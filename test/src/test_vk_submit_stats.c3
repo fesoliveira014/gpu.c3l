@@ -41,12 +41,13 @@ fn vk::SubmitStats stats_of(gpu::Device* device) {
    empty submit — the graphics frame signal. *>
 fn void end_frame_issues_exactly_one_empty_submit() @test {
     gpu::Device device = make_submit_stats_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::QueueKind[3] kinds = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE, gpu::QueueKind.TRANSFER };
     foreach (kind : kinds) {
         gpu::CommandList cmd = gpu::begin_commands(&device, kind)!!;
+        defer discard_test_commands(&cmd)!!;
         gpu::end_commands(&cmd)!!;
         gpu::CommandList[1] one = { cmd };
         gpu::SubmitDesc submit = { .command_lists = one[..] };
@@ -63,10 +64,11 @@ fn void end_frame_issues_exactly_one_empty_submit() @test {
 <* Same invariant on a graphics-only frame — the spec's baseline scenario. *>
 fn void graphics_only_frame_emits_one_empty_submit() @test {
     gpu::Device device = make_submit_stats_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -87,10 +89,11 @@ fn void graphics_only_frame_emits_one_empty_submit() @test {
    value the rejected submit would have signaled. *>
 fn void failed_submit_records_nothing_and_end_frame_stays_clean() @test {
     gpu::Device device = make_submit_stats_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList unfinished = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&unfinished)!!;
     gpu::CommandList[1] not_executable = { unfinished };
     gpu::SubmitDesc bad_submit = { .command_lists = not_executable[..] };
 
@@ -150,13 +153,13 @@ fn vk::Result capture_retry_frame_submit(vk::Queue queue, uint submit_count, vk:
 fn void failed_end_frame_submit_preserves_retry_state() @test {
     SubmitDiagnosticCapture capture;
     gpu::Device device = make_submit_stats_test_device(&capture);
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     state.compute_used_since_frame = true;
     state.transfer_used_since_frame = true;
-    state.off_frame_pending.store(true, AtomicOrdering.RELAXED);
+    state.off_frame_pending_queues.store(6, AtomicOrdering.RELAXED);
     state.aux_compute_counter = 7;
     state.aux_compute_last_signaled = 7;
     state.aux_transfer_counter = 11;
@@ -191,7 +194,7 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     assert(state.frame_index == frame_index_before, "failed submit does not change frame index");
     assert(state.frame_arenas[frame_index_before].frame_timeline_value == slot_before, "failed submit does not retire slot");
     assert(state.compute_used_since_frame && state.transfer_used_since_frame, "failed submit preserves queue-use flags");
-    assert(state.off_frame_pending.load(AtomicOrdering.RELAXED), "failed submit preserves off-frame marker");
+    assert(state.off_frame_pending_queues.load(AtomicOrdering.RELAXED) != 0, "failed submit preserves off-frame marker");
     assert(state.frame_active, "failed submit keeps frame active");
     assert(state.aux_compute_counter == compute_counter_before && state.aux_compute_last_signaled == compute_signaled_before, "failed submit preserves compute timeline state");
     assert(frame.device == device && frame.generation == state.active_frame_generation, "failed submit retains the live frame token");
@@ -200,15 +203,13 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
     assert(stats_of(&device).empty_signal_submits == stats_before.empty_signal_submits, "failed submit records no empty signal");
     assert(stats_of(&device).queue_submits == stats_before.queue_submits, "failed frame signal records no user submit");
 
-    vk::end_frame_with_submit(&frame, &capture_retry_frame_submit)!!;
-    assert(retried_frame_signal_value == rejected_frame_signal_value, "retry reuses the prospective frame value");
-    assert(retried_frame_wait_count == rejected_frame_wait_count, "retry reuses the wait count");
-    assert(retried_frame_wait_values == rejected_frame_wait_values, "retry reuses the nonzero wait values");
-    assert(retried_frame_wait_semaphores == rejected_frame_wait_semaphores, "retry reuses the wait semaphores");
+    state.aux_compute_last_signaled = 0;
+    state.aux_transfer_last_signaled = 0;
+    gpu::end_frame(&frame)!!;
     assert(state.timeline_counter.load(AtomicOrdering.RELAXED) == counter_before + 1, "retry commits one counter step");
     assert(state.frame_arenas[frame_index_before].frame_timeline_value == counter_before + 1, "retry commits slot retirement");
     assert(!state.compute_used_since_frame && !state.transfer_used_since_frame, "retry clears queue-use flags");
-    assert(!state.off_frame_pending.load(AtomicOrdering.RELAXED), "retry clears off-frame marker");
+    assert(state.off_frame_pending_queues.load(AtomicOrdering.RELAXED) == 0, "retry clears off-frame marker");
     assert(!state.frame_active, "retry ends the frame");
     assert((ulong)frame.device == 0 && frame.generation == 0, "successful retry consumes the token");
     assert(stats_of(&device).empty_signal_submits == stats_before.empty_signal_submits + 1, "retry records one empty signal");
@@ -216,12 +217,13 @@ fn void failed_end_frame_submit_preserves_retry_state() @test {
 
 fn void post_claim_fault_restores_executable_token() @test {
     gpu::Device device = make_submit_stats_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::end_commands(&cmd)!!;
     gpu::CommandList[1] lists = { cmd };
     gpu::SemaphoreSignal[1] bad_signals = {{

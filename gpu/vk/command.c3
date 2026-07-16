@@ -248,7 +248,7 @@ fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device)
 }
 
 <* The built-in default and helper contexts cannot be destroyed; a context's
-   command lists must be retired first (device teardown sweeps leftovers). *>
+   command lists must be submitted or discarded first. *>
 fn void? vk_destroy_recording_context(gpu::Device* device, gpu::RecordingContextHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
@@ -344,6 +344,34 @@ fn void? vk_end_commands(gpu::CommandList* commands) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     check_device_result(state, vk::end_command_buffer(record.command_buffer))!;
     record.state = CommandState.EXECUTABLE;
+}
+
+fn ulong? vk_discard_commands(gpu::CommandList* commands) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    state.transfer_mutex.lock()!!;
+    defer state.transfer_mutex.unlock();
+    {
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        CommandRecord* record = state.commands.get(commands.handle)!;
+        if (record.state != CommandState.RECORDING
+            && record.state != CommandState.RECORDING_RENDER_PASS
+            && record.state != CommandState.EXECUTABLE) {
+            return gpu::COMMAND_RECORDING_ERROR~;
+        }
+    }
+
+    ulong canceled_tickets = cancel_command_readback_tickets_locked(
+        state,
+        commands.handle,
+    );
+    {
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        release_command(state, commands.handle);
+    }
+    *commands = {};
+    return canceled_tickets;
 }
 
 fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* desc) @private {

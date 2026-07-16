@@ -12,7 +12,7 @@ fn void allocator_stats_and_report() @test {
         .application_name  = "gpu_vma_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
     assert(stats.heap_count >= 1, "device reports at least one memory heap");

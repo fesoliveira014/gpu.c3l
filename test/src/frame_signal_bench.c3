@@ -52,7 +52,7 @@ fn int main() {
         .application_name  = "gpu_frame_signal_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_bench_device(&device)!!;
 
     io::printfn("queue topology: async_compute=%s", gpu::get_device_caps(&device)!!.async_compute ? "true" : "false");
     if (!gpu::get_device_caps(&device)!!.async_compute) {

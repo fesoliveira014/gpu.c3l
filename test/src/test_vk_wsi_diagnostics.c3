@@ -26,7 +26,7 @@ fn void wsi_presentation_gate_diagnostic() @test {
         .debug_user_data   = &capture,
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     capture = {};
 
     gpu::Surface surface;
@@ -90,7 +90,7 @@ fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
         .debug_user_data   = &capture,
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     capture = {};
 
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };

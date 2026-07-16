@@ -27,7 +27,7 @@ fn int main() {
         .application_name  = "gpu_pipeline_cache_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_bench_device(&device)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = BENCH_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = BENCH_FRAG_SPIRV[..], .entry_point = "main" };

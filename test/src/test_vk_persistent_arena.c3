@@ -122,7 +122,7 @@ fn gpu::GpuSpan alloc_frame_empty_root(gpu::FrameToken* frame) {
 
 fn void persistent_span_crosses_compute_and_graphics_families_when_available() @test {
     gpu::Device device = make_persistent_usage_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     if (state.graphics_family == state.compute_family) {
         io::eprintfn(
@@ -147,6 +147,7 @@ fn void persistent_span_crosses_compute_and_graphics_families_when_available() @
     gpu::GpuSpan graphics_root = alloc_frame_empty_root(&frame);
 
     gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&compute)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
         pipeline: pipeline,
@@ -167,6 +168,7 @@ fn void persistent_span_crosses_compute_and_graphics_families_when_available() @
     gpu::submit(&device, &compute_submit)!!;
 
     gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&graphics)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
         pipeline: pipeline,
@@ -205,7 +207,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
         .application_name      = "persistent_reuse_cross_family",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     if (state.graphics_family == state.compute_family) {
         io::eprintfn(
@@ -228,6 +230,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     gpu::FrameToken compute_frame = gpu::begin_frame(&device)!!;
     gpu::GpuSpan compute_root = alloc_frame_empty_root(&compute_frame);
     gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    defer discard_test_commands(&compute)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
         pipeline: pipeline,
@@ -250,6 +253,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     gpu::FrameToken graphics_frame = gpu::begin_frame(&device)!!;
     gpu::GpuSpan graphics_root = alloc_frame_empty_root(&graphics_frame);
     gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&graphics)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
         pipeline: pipeline,
@@ -368,7 +372,7 @@ fn void persistent_alloc_free_stats() @test {
         .application_name  = "gpu_persistent_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::PersistentArenaStats empty = gpu::get_persistent_stats(&device)!!;
     assert(empty.used_bytes == 0, "arena starts empty");
@@ -431,7 +435,7 @@ fn void persistent_allocation_rejections_report_contract_context() @test {
         .debug_user_data = &capture, .frames_in_flight = 2,
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::PersistentAllocDesc bad_size = {
         .size = 0, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "bad_size",
@@ -528,7 +532,7 @@ fn void custom_persistent_arena_size_reported() @test {
         .application_name      = "gpu_persistent_size_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::PersistentArenaStats stats = gpu::get_persistent_stats(&device)!!;
     assert(stats.capacity_bytes == 128 << 20, "custom persistent capacity reported in stats");
@@ -548,7 +552,7 @@ fn gpu::Device make_persistent_usage_device() {
    spans backed by the same arena buffer, copied disjointly. *>
 fn void transfer_usage_persistent_span_copies() @test {
     gpu::Device device = make_persistent_usage_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::PersistentAllocDesc src_desc = {
         .size = 64, .align = 16, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "src",
@@ -567,6 +571,7 @@ fn void transfer_usage_persistent_span_copies() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = { .src = src.buffer, .dst = dst.buffer, .src_offset = src.offset, .dst_offset = dst.offset, .size = 64 };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
@@ -593,7 +598,7 @@ fn void transfer_usage_persistent_span_copies() @test {
    fails pre-fix and passes only once the arena carries the superset. *>
 fn void indirect_usage_persistent_span_dispatches() @test {
     gpu::Device device = make_persistent_usage_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = PA_DOUBLE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle shader = gpu::create_shader(&device, &shader_desc)!!;
@@ -634,6 +639,7 @@ fn void indirect_usage_persistent_span_dispatches() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch_indirect(
         commands: &cmd,
         pipeline: pipeline,
@@ -664,7 +670,7 @@ fn void indirect_usage_persistent_span_dispatches() @test {
    of surfacing as a Vulkan validation error at bind time. *>
 fn void unsupported_usage_persistent_span_faults() @test {
     gpu::Device device = make_persistent_usage_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::PersistentAllocDesc vertex_desc = {
         .size = 64, .align = 16, .usage = { .vertex }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer },
@@ -687,7 +693,7 @@ fn void persistent_free_rejections_report_exact_context() @test {
         .frames_in_flight = 2,
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::PersistentAllocDesc alloc_desc = {
         .size        = 64,
         .align       = 16,
@@ -743,7 +749,7 @@ fn void persistent_capacity_failure_reports_backend_result() @test {
         .frames_in_flight      = 2,
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::PersistentAllocDesc full_desc = {
         .size        = 64,
         .align       = 1,

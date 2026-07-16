@@ -3,9 +3,54 @@ module gpu_test;
 import gpu @public;
 import gpu::vk @public;
 import vk;
+import std::atomic;
 
 // Headless device create/destroy. Needs a real Vulkan ICD at runtime; the test
 // target pins lavapipe via VK_DRIVER_FILES for deterministic CPU runs.
+
+vk::Result destroy_counter_result;
+ulong destroy_counter_value;
+uint destroy_counter_calls;
+
+fn vk::Result query_destroy_counter(vk::Device device, vk::Semaphore semaphore, ulong* value) {
+    (void)device;
+    (void)semaphore;
+    destroy_counter_calls++;
+    *value = destroy_counter_value;
+    return destroy_counter_result;
+}
+
+fn void device_destroy_readiness_never_waits() @test {
+    vk::VkDeviceState state;
+    state.off_frame_pending_queues.store(1, AtomicOrdering.RELAXED);
+    assert(
+        !vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
+        "uncovered off-frame work is busy without a driver query"
+    );
+    assert(destroy_counter_calls == 0, "off-frame work does not issue a blocking probe");
+
+    state.off_frame_pending_queues.store(0, AtomicOrdering.RELAXED);
+    state.timeline_counter.store(7, AtomicOrdering.RELAXED);
+    destroy_counter_result = vk::Result.SUCCESS;
+    destroy_counter_value = 6;
+    assert(
+        !vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
+        "an incomplete retirement timeline is busy"
+    );
+
+    destroy_counter_value = 7;
+    assert(
+        vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
+        "the expected retirement value makes destruction ready"
+    );
+
+    destroy_counter_result = vk::Result.ERROR_DEVICE_LOST;
+    destroy_counter_value = 0;
+    assert(
+        vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
+        "device loss permits teardown without waiting"
+    );
+}
 
 fn void device_create_destroy() @test {
     gpu::DeviceDesc desc = {

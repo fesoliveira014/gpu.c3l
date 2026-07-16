@@ -44,7 +44,7 @@ fn gpu::TextureHandle make_render_target(gpu::Device* device, uint mips = 1) {
 
 fn void offscreen_clear_works() @test {
     gpu::Device device = make_offscreen_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
@@ -56,6 +56,7 @@ fn void offscreen_clear_works() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_attach = {
         .texture       = target,
@@ -119,7 +120,7 @@ fn void offscreen_clear_works() @test {
 
 fn void offscreen_textured_triangle() @test {
     gpu::Device device = make_offscreen_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
@@ -203,6 +204,7 @@ fn void offscreen_textured_triangle() @test {
     frag_root.sampler_index = smp_index;
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier pattern_to_dst = {
         .texture       = pattern,
@@ -301,7 +303,7 @@ fn void offscreen_textured_triangle() @test {
 
 fn void dynamic_viewport_scissor_pixels() @test {
     gpu::Device device = make_offscreen_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc vert_desc = {
         .stage = gpu::ShaderStage.VERTEX, .spirv = DYNAMIC_RECT_VERT_SPIRV[..], .entry_point = "main",
@@ -351,6 +353,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
     for (uint i = 0; i < green.len; i++) ((float*)color.cpu)[i] = green[i];
 
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
             .texture       = targets[i],
@@ -445,7 +448,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
 
 fn void offscreen_render_to_mip() @test {
     gpu::Device device = make_offscreen_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device, mips: 2);
     defer gpu::destroy_texture(&device, target)!!;
 
@@ -458,6 +461,7 @@ fn void offscreen_render_to_mip() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_attach = {
         .texture       = target,
@@ -519,7 +523,7 @@ fn void offscreen_render_to_mip() @test {
 
 fn void graphics_pipeline_depth_format_validation() @test {
     gpu::Device device = make_offscreen_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle vert = gpu::create_shader(&device, &vert_sd)!!;
@@ -557,12 +561,13 @@ fn void graphics_pipeline_depth_format_validation() @test {
 
 fn void dynamic_viewport_scissor_validation() @test {
     gpu::Device device = make_offscreen_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     gpu::Viewport full_viewport = {
         .width     = (float)RT_SIZE,
@@ -655,7 +660,7 @@ fn void dynamic_viewport_scissor_validation() @test {
 
 fn void render_pass_state_machine() @test {
     gpu::Device device = make_offscreen_test_device();
-    defer gpu::destroy_device(&device)!!;
+    defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
@@ -667,6 +672,7 @@ fn void render_pass_state_machine() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    defer discard_test_commands(&cmd)!!;
 
     // Draw outside a pass.
     fault draw_fault = @catch(gpu::cmd_draw(
