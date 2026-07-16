@@ -436,7 +436,7 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
         &heap.binding_offset_samplers,
     );
 
-    uint[2] family_storage;
+    uint[MAX_QUEUE_FAMILIES] family_storage;
     uint family_count = graphics_compute_queue_families(state, family_storage[..]);
     vk::BufferCreateInfo buffer_info = make_descriptor_buffer_create_info(layout_size, family_storage[:family_count]);
     // Descriptor bytes are written mapped (vkGetDescriptorEXT) with no

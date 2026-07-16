@@ -151,7 +151,8 @@ must support multiDrawIndirect
 must support shaderDrawParameters
 must support the heap non-uniform-indexing features
 must resolve a heap mode from the requested DescriptorHeapMode
-must expose a queue family supporting graphics and compute
+must satisfy the default one-graphics, one-compute, one-transfer queue request;
+roles may alias or use separate families
 ```
 
 Scoring is by device type only (`score_device`):
@@ -169,11 +170,15 @@ pick_physical_device(instance, desc) -> PhysicalDeviceSelection?
 Each feature-compatible candidate's queue topology is resolved once during selection. The winning `PhysicalDeviceSelection` carries that cached `QueueFamilies` value into logical-device creation; queue topology remains a suitability filter rather than a scoring bonus.
 
 A presentation request names a runtime-owned surface. Device creation requires
-`VK_KHR_swapchain`, selects a graphics-and-compute queue family, and selects a
-presentation-capable family for that surface. The queues alias when possible;
-split families use concurrent swapchain-image sharing. `supports_presentation`
-performs the same semantic preflight without enabling state. Surface formats
-and present modes remain swapchain-creation concerns.
+at least one requested graphics queue, enables `VK_KHR_swapchain`, and selects a
+presentation-capable queue for that surface. It prefers the representative
+graphics queue, then compute or transfer representatives, and otherwise uses a
+private queue. Split graphics/presentation families use concurrent sharing.
+`supports_presentation` reports surface capability.
+`supports_device_request` additionally preflights the requested queue counts,
+distinct-role constraints, graphics minimum, and presentation topology without
+enabling state. Surface formats and present modes remain swapchain-creation
+concerns.
 
 ## 6. Logical device creation
 
@@ -215,6 +220,14 @@ The selected strict heap path adds either descriptor-buffer support or the
 indexing path's partially-bound and update-after-bind features. Unrequested
 strict state adds no heap feature chain, extension, dispatch, descriptors, or
 pipeline-shared state.
+
+Logical-device queue families form an ordered set. The backend visits the
+representative graphics, compute, and transfer queues, then every selected
+identity in the same role order, and finally the presentation queue when
+present. It appends only the first occurrence of each family. Vulkan
+receives one `DeviceQueueCreateInfo` per resulting family. Its `queueCount` is
+the highest selected or presentation queue index in that family plus one, with
+one priority value per allocated index.
 
 ## 7. VMA allocator integration
 
@@ -274,21 +287,26 @@ VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
 ```
 
 If address query returns zero, creation should fail.
-Public `BufferUsage.shared_queues` retains its graphics/compute/transfer family
-set. Internal frame arenas instead supply an exact graphics-first, deduplicated
-graphics/compute family list: one family keeps EXCLUSIVE creation with no index
-list, while two families select CONCURRENT with exactly those two indices.
-Transfer is excluded because frame arenas carry no transfer usage.
+Queue-family lists are ordered sets. The full semantic list visits the
+representative graphics, compute, and transfer queues, then every selected
+identity in the same role order; private presentation is excluded. A single
+unique family keeps `EXCLUSIVE` sharing with no family-index list. Two or more
+use `CONCURRENT` with exactly the ordered, deduplicated list.
 
-The persistent arena supplies the exact ordered, deduplicated graphics,
-compute, and transfer family list because its backing supports all three access
-classes. One unique family keeps `EXCLUSIVE` creation with no index list; two or
-three unique families select `CONCURRENT` with exactly those indices. This is an
-internal backing-buffer policy: per-span `shared_queues` is an accepted no-op,
-while explicit buffers and textures still require the flag. Concurrent sharing
-does not replace barriers, semaphore ordering, completion waits, or retirement;
-a persistent span cannot be freed while GPU work may reference it. Each arena
-remains scoped to its owning `Device`.
+Public buffers use the full semantic list only with
+`BufferUsage.shared_queues`; otherwise they remain `EXCLUSIVE`. Internal frame
+arenas use every selected graphics and compute identity. Transfer identities
+are excluded while either shader role exists because frame arenas carry no
+transfer usage; a transfer-only device falls back to every selected transfer
+identity. The same one-family/two-or-more sharing rule applies.
+
+The persistent arena always uses the full semantic list because its backing
+supports all three access classes. This is an internal backing-buffer policy:
+per-span `shared_queues` is an accepted no-op, while explicit buffers and
+textures still require the flag. Concurrent sharing does not replace barriers,
+semaphore ordering, completion waits, or retirement; a persistent span cannot
+be freed while GPU work may reference it. Each arena remains scoped to its
+owning `Device`.
 
 ## 9. Texture implementation
 
@@ -304,6 +322,10 @@ public TextureDesc
     -> store TextureSlot
     -> return TextureHandle
 ```
+
+`TextureUsage.shared_queues` uses the full semantic family list and the same
+one-family `EXCLUSIVE` or two-or-more `CONCURRENT` rule as public buffers.
+Textures without the flag remain `EXCLUSIVE`.
 
 The backend tracks image layout per texture. For complex subresource layout tracking, begin with whole-image layout tracking and add subresource tracking only when required.
 
@@ -342,10 +364,11 @@ sampled images
 storage images
 samplers
 ```
-The internal descriptor buffer follows the graphics/compute sharing policy
-described for frame arenas above: one family remains `EXCLUSIVE`, while two
-families use `CONCURRENT` with the exact graphics-first list. Transfer is
-excluded because transfer commands never bind or consume the descriptor heap.
+The internal descriptor buffer uses the frame-arena family list: every selected
+graphics and compute identity, or every transfer identity on a transfer-only
+device. One family remains `EXCLUSIVE`; two or more use `CONCURRENT` with the
+exact ordered list. Transfer is otherwise excluded because transfer commands
+never bind or consume the descriptor heap.
 
 This internal policy does not change ownership for public resources. A buffer
 or texture consumed by graphics and compute still requires `shared_queues`.
@@ -485,17 +508,22 @@ device allocation failure and explicit device loss propagate without retry.
 
 ## 12. Command buffers
 
-Command pool policy:
+Command pools follow the representative queue selected for each public
+`QueueKind`, not every allocated identity. Each recording context owns:
 
 ```text
-one command pool per frame per queue family
+one graphics pool per frame when graphics is requested
+one compute pool per frame when graphics is absent or uses another family
+one transfer pool per frame when transfer is requested
 reset pools when frame retires
 ```
 
 Recording-context pool sets are constructed transactionally: ownership is
-published only after every per-frame graphics, optional distinct-compute, and
-transfer pool exists. Any create fault destroys all earlier pools and releases
-the host arrays. Shared-family compute aliases graphics only after success.
+published only after every representative pool exists. Any create fault
+destroys all earlier pools and releases the host arrays. Same-family compute
+aliases the graphics pool only after success. Additional selected identities do
+not own command pools because command recording and submission take
+`QueueKind` and route through its representative native queue.
 
 Public command token:
 
