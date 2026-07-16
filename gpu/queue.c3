@@ -1,7 +1,5 @@
 module gpu;
 
-const uint QUEUE_ID_GRAPHICS @private = 0;
-
 const Queue QUEUE_INVALID = {};
 
 <* Semantic roles supported by one selected queue. *>
@@ -30,6 +28,14 @@ struct QueueCounts {
     uint graphics;
     uint compute;
     uint transfer;
+}
+
+<* Semantic queues required at device creation. Each count is 0..255 and
+   requests distinct identities within that role. A marked distinct role must
+   be requested and may not alias another requested role. *>
+struct QueueRequirements {
+    QueueCounts counts;
+    QueueRoles distinct;
 }
 
 struct QueueSelection @private {
@@ -62,12 +68,75 @@ fn bool queue_roles_equal(QueueRoles first, QueueRoles second) @private {
     return (uint)first == (uint)second;
 }
 
-fn QueueCounts default_queue_counts() @private {
-    return {
-        .graphics = 1,
-        .compute  = 1,
-        .transfer = 1,
-    };
+fn QueueSelection? queue_selection_for_requirements(
+    QueueRequirements requirements,
+    bool compute_aliases_graphics,
+    bool transfer_aliases_graphics,
+    bool transfer_aliases_compute,
+) @private {
+    if (!queue_requirements_are_valid(requirements)) return INVALID_ARGUMENT~;
+    if (requirements.counts.graphics > 1
+        || requirements.counts.compute > 1
+        || requirements.counts.transfer > 1) {
+        return UNSUPPORTED_FEATURE~;
+    }
+
+    QueueSelection selection = { .counts = requirements.counts };
+    QueueRoles[3] identity_roles;
+    uint next_id;
+    if (requirements.counts.graphics > 0) {
+        selection.graphics_id = next_id++;
+        identity_roles[selection.graphics_id].graphics = true;
+    }
+    if (requirements.counts.compute > 0) {
+        selection.compute_id = requirements.counts.graphics > 0
+            && compute_aliases_graphics
+            ? selection.graphics_id
+            : next_id++;
+        identity_roles[selection.compute_id].compute = true;
+    }
+    if (requirements.counts.transfer > 0) {
+        if (requirements.counts.graphics > 0 && transfer_aliases_graphics) {
+            selection.transfer_id = selection.graphics_id;
+        } else if (requirements.counts.compute > 0 && transfer_aliases_compute) {
+            selection.transfer_id = selection.compute_id;
+        } else {
+            selection.transfer_id = next_id++;
+        }
+        identity_roles[selection.transfer_id].transfer = true;
+    }
+
+    if (requirements.counts.graphics > 0) {
+        selection.graphics_roles = identity_roles[selection.graphics_id];
+    }
+    if (requirements.counts.compute > 0) {
+        selection.compute_roles = identity_roles[selection.compute_id];
+    }
+    if (requirements.counts.transfer > 0) {
+        selection.transfer_roles = identity_roles[selection.transfer_id];
+    }
+
+    bool graphics_alias = requirements.counts.graphics > 0
+        && ((requirements.counts.compute > 0
+                && selection.graphics_id == selection.compute_id)
+            || (requirements.counts.transfer > 0
+                && selection.graphics_id == selection.transfer_id));
+    bool compute_alias = requirements.counts.compute > 0
+        && ((requirements.counts.graphics > 0
+                && selection.compute_id == selection.graphics_id)
+            || (requirements.counts.transfer > 0
+                && selection.compute_id == selection.transfer_id));
+    bool transfer_alias = requirements.counts.transfer > 0
+        && ((requirements.counts.graphics > 0
+                && selection.transfer_id == selection.graphics_id)
+            || (requirements.counts.compute > 0
+                && selection.transfer_id == selection.compute_id));
+    if ((requirements.distinct.graphics && graphics_alias)
+        || (requirements.distinct.compute && compute_alias)
+        || (requirements.distinct.transfer && transfer_alias)) {
+        return UNSUPPORTED_FEATURE~;
+    }
+    return selection;
 }
 
 fn QueueSelection queue_selection_for_aliases(
@@ -75,54 +144,44 @@ fn QueueSelection queue_selection_for_aliases(
     bool transfer_aliases_graphics,
     bool transfer_aliases_compute,
 ) @private {
-    QueueSelection selection = {
-        .counts      = default_queue_counts(),
-        .graphics_id = QUEUE_ID_GRAPHICS,
-    };
-    QueueRoles[3] identity_roles;
-    identity_roles[selection.graphics_id].graphics = true;
-    uint next_id = 1;
-
-    selection.compute_id = compute_aliases_graphics
-        ? selection.graphics_id
-        : next_id++;
-    identity_roles[selection.compute_id].compute = true;
-
-    if (transfer_aliases_graphics) {
-        selection.transfer_id = selection.graphics_id;
-    } else if (transfer_aliases_compute) {
-        selection.transfer_id = selection.compute_id;
-    } else {
-        selection.transfer_id = next_id;
-    }
-    identity_roles[selection.transfer_id].transfer = true;
-
-    selection.graphics_roles = identity_roles[selection.graphics_id];
-    selection.compute_roles = identity_roles[selection.compute_id];
-    selection.transfer_roles = identity_roles[selection.transfer_id];
-    return selection;
+    return queue_selection_for_requirements(
+        requirements:               default_queue_requirements(),
+        compute_aliases_graphics:    compute_aliases_graphics,
+        transfer_aliases_graphics:   transfer_aliases_graphics,
+        transfer_aliases_compute:    transfer_aliases_compute,
+    )!!;
 }
 
 fn QueueSelection default_queue_selection(DeviceCaps* caps = null) @private {
     bool async_compute = caps != null && caps.async_compute;
-    return queue_selection_for_aliases(
-        compute_aliases_graphics:  !async_compute,
-        transfer_aliases_graphics: true,
-        transfer_aliases_compute:  !async_compute,
-    );
+    return queue_selection_for_requirements(
+        requirements:               default_queue_requirements(),
+        compute_aliases_graphics:    !async_compute,
+        transfer_aliases_graphics:   true,
+        transfer_aliases_compute:    !async_compute,
+    )!!;
 }
 
 fn bool queue_selection_is_well_formed(QueueSelection selection) @private {
-    if (selection.counts.graphics != 1
-        || selection.counts.compute != 1
-        || selection.counts.transfer != 1) {
+    QueueRequirements requirements = { .counts = selection.counts };
+    if (!queue_requirements_are_valid(requirements)
+        || selection.counts.graphics > 1
+        || selection.counts.compute > 1
+        || selection.counts.transfer > 1) {
         return false;
     }
-    QueueSelection canonical = queue_selection_for_aliases(
-        compute_aliases_graphics:  selection.compute_id == selection.graphics_id,
-        transfer_aliases_graphics: selection.transfer_id == selection.graphics_id,
-        transfer_aliases_compute:  selection.transfer_id == selection.compute_id,
-    );
+    QueueSelection canonical = queue_selection_for_requirements(
+        requirements:               requirements,
+        compute_aliases_graphics:    selection.counts.graphics > 0
+            && selection.counts.compute > 0
+            && selection.compute_id == selection.graphics_id,
+        transfer_aliases_graphics:   selection.counts.graphics > 0
+            && selection.counts.transfer > 0
+            && selection.transfer_id == selection.graphics_id,
+        transfer_aliases_compute:    selection.counts.compute > 0
+            && selection.counts.transfer > 0
+            && selection.transfer_id == selection.compute_id,
+    )!!;
     return selection.graphics_id == canonical.graphics_id
         && selection.compute_id == canonical.compute_id
         && selection.transfer_id == canonical.transfer_id
@@ -158,6 +217,13 @@ fn uint selected_queue_count(DeviceOperation* operation, QueueKind kind) @privat
     }
 }
 
+fn void? validate_selected_queue_kind(
+    DeviceOperation* operation,
+    QueueKind kind,
+) @private {
+    if (selected_queue_count(operation, kind) == 0) return INVALID_ARGUMENT~;
+}
+
 fn uint selected_queue_id(DeviceOperation* operation, QueueKind kind) @private {
     switch (kind) {
         case QueueKind.GRAPHICS: return selected_queues(operation).graphics_id;
@@ -176,15 +242,18 @@ fn QueueRoles selected_queue_roles(DeviceOperation* operation, QueueKind kind) @
 
 fn bool queue_id_is_selected(DeviceOperation* operation, Queue queue) @private {
     QueueSelection selection = selected_queues(operation);
-    if (queue.id == selection.graphics_id
+    if (selection.counts.graphics > 0
+        && queue.id == selection.graphics_id
         && queue_roles_equal(queue.roles, selection.graphics_roles)) {
         return true;
     }
-    if (queue.id == selection.compute_id
+    if (selection.counts.compute > 0
+        && queue.id == selection.compute_id
         && queue_roles_equal(queue.roles, selection.compute_roles)) {
         return true;
     }
-    return queue.id == selection.transfer_id
+    return selection.counts.transfer > 0
+        && queue.id == selection.transfer_id
         && queue_roles_equal(queue.roles, selection.transfer_roles);
 }
 
@@ -261,5 +330,6 @@ fn void? submit(Device* device, SubmitDesc* desc) {
 fn void? wait_queue_idle(Device* device, QueueKind queue) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    validate_selected_queue_kind(&operation, queue)!;
     return operation.vtable.wait_queue_idle(device, queue);
 }

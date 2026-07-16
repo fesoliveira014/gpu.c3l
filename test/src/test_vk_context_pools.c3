@@ -62,6 +62,7 @@ fn void assert_context_empty(gpu::vk::RecordingContextState* context) {
 
 fn void run_context_pool_failure(bool distinct, uint fail_at, uint stage_count) {
     gpu::vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
         .frames_in_flight = 2,
         .graphics_family = FIXTURE_GRAPHICS_FAMILY,
         .compute_family = distinct ? FIXTURE_COMPUTE_FAMILY : FIXTURE_GRAPHICS_FAMILY,
@@ -90,6 +91,7 @@ fn void run_context_pool_failure(bool distinct, uint fail_at, uint stage_count) 
 
 fn void run_context_pool_success(bool distinct, uint stage_count) {
     gpu::vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
         .frames_in_flight = 2,
         .graphics_family = FIXTURE_GRAPHICS_FAMILY,
         .compute_family = distinct ? FIXTURE_COMPUTE_FAMILY : FIXTURE_GRAPHICS_FAMILY,
@@ -125,6 +127,58 @@ fn void run_context_pool_success(bool distinct, uint stage_count) {
     assert(fixture.destroy_calls == stage_count, "repeated success cleanup is a no-op");
 }
 
+fn void run_single_role_context_pool_success(
+    gpu::QueueRoles selected,
+    uint expected_family,
+) {
+    gpu::vk::VkDeviceState state = {
+        .selected_queue_roles = selected,
+        .frames_in_flight      = 2,
+        .graphics_family      = FIXTURE_GRAPHICS_FAMILY,
+        .compute_family       = FIXTURE_COMPUTE_FAMILY,
+        .transfer_family      = FIXTURE_TRANSFER_FAMILY,
+    };
+    ContextPoolFixture fixture = { .fail_at = uint::max };
+    gpu::vk::ContextPoolOps ops = context_pool_ops(&fixture);
+    gpu::vk::RecordingContextState context;
+
+    gpu::vk::create_context_pools_with_ops(&state, &context, &ops)!!;
+    assert(fixture.create_calls == 2, "only the admitted role owns pools");
+    assert(
+        fixture.families[0] == expected_family
+            && fixture.families[1] == expected_family,
+        "pool creation uses only the admitted family"
+    );
+    assert(
+        (context.graphics_pools.ptr != null) == selected.graphics,
+        "graphics pool presence follows the request"
+    );
+    assert(
+        (context.compute_pools.ptr != null) == selected.compute,
+        "compute pool presence follows the request"
+    );
+    assert(
+        (context.transfer_pools.ptr != null) == selected.transfer,
+        "transfer pool presence follows the request"
+    );
+
+    gpu::vk::destroy_context_pools_with_ops(&state, &context, &ops);
+    assert(fixture.destroy_calls == 2, "only admitted pools are destroyed");
+    assert_context_empty(&context);
+}
+
+fn void graphics_only_context_pools_initialize_one_family() @test {
+    run_single_role_context_pool_success({ .graphics }, FIXTURE_GRAPHICS_FAMILY);
+}
+
+fn void compute_only_context_pools_initialize_one_family() @test {
+    run_single_role_context_pool_success({ .compute }, FIXTURE_COMPUTE_FAMILY);
+}
+
+fn void transfer_only_context_pools_initialize_one_family() @test {
+    run_single_role_context_pool_success({ .transfer }, FIXTURE_TRANSFER_FAMILY);
+}
+
 fn void shared_context_pool_failures_are_transactional() @test {
     for (uint stage = 0; stage < 4; stage++) run_context_pool_failure(false, stage, 4);
 }
@@ -140,6 +194,7 @@ fn void successful_context_pool_ownership_is_idempotent() @test {
 
 fn void built_in_context_insertion_failure_cleans_full_context() @test {
     gpu::vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
         .frames_in_flight = 2,
         .graphics_family = FIXTURE_GRAPHICS_FAMILY,
         .compute_family = FIXTURE_GRAPHICS_FAMILY,

@@ -38,6 +38,7 @@ struct DeviceCreationProbe {
 struct VkPresentationState {
     bool           enabled;
     uint           family;
+    uint           queue_index;
     vk::Queue      queue;
     Mutex          queue_mutex;
     SwapchainTable swapchains;
@@ -61,11 +62,14 @@ struct VkDeviceState {
     vk::PhysicalDevice         physical_device;
     vk::Device                 device;
     VkDeviceDispatch           device_dispatch;
+    gpu::QueueRoles            selected_queue_roles;
     vma::Allocator             allocator;
     uint                       graphics_family;
+    uint                       graphics_queue_index;
     uint                       compute_family;
     uint                       compute_queue_index;
     uint                       transfer_family;
+    uint                       transfer_queue_index;
     vk::Queue                  graphics_queue;
     vk::Queue                  compute_queue;
     vk::Queue                  transfer_queue;
@@ -349,6 +353,8 @@ fn gpu::Device? create_vk_device_with_probe(
     };
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = gpu::requested_surface(*request);
+    gpu::QueueRequirements queue_requirements =
+        gpu::requested_queue_requirements(*request);
     vk::SurfaceKHR presentation_surface = requested_surface.is_valid()
         ? (vk::SurfaceKHR)gpu::surface_backend_handle(&requested_surface)!
         : (vk::SurfaceKHR)null;
@@ -365,6 +371,7 @@ fn gpu::Device? create_vk_device_with_probe(
         presentation_surface_owner: requested_surface.is_valid()
             ? &requested_surface
             : null,
+        queue_requirements:         &queue_requirements,
         probe:                      probe,
     );
 }
@@ -380,6 +387,7 @@ fn gpu::Device? create_vk_device_with_selection(
     VkRuntimeState* runtime_state = null,
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null,
     gpu::Surface* presentation_surface_owner = null,
+    gpu::QueueRequirements* queue_requirements = null,
     DeviceCreationProbe* probe = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
@@ -459,11 +467,15 @@ fn gpu::Device? create_vk_device_with_selection(
         }
         state.physical_device = physical_device;
         families = presentation_surface == null
-            ? select_queue_families(state.physical_device)!
+            ? select_queue_families(
+                physical_device: state.physical_device,
+                requirements:    queue_requirements,
+            )!
             : select_queue_families_for_surface(
-                runtime_state,
-                state.physical_device,
-                presentation_surface,
+                runtime:         runtime_state,
+                physical_device: state.physical_device,
+                surface:         presentation_surface,
+                requirements:    queue_requirements,
             )!;
     }
 
@@ -498,11 +510,23 @@ fn gpu::Device? create_vk_device_with_selection(
         )!;
     }
 
-    state.graphics_family     = families.graphics;
-    state.compute_family      = families.compute;
-    state.compute_queue_index = families.compute_index;
-    state.transfer_family     = families.transfer;
-    if (state.presentation.enabled) state.presentation.family = families.present;
+    state.selected_queue_roles = families.selected;
+    if (families.selected.graphics) {
+        state.graphics_family = families.graphics;
+        state.graphics_queue_index = families.graphics_index;
+    }
+    if (families.selected.compute) {
+        state.compute_family = families.compute;
+        state.compute_queue_index = families.compute_index;
+    }
+    if (families.selected.transfer) {
+        state.transfer_family = families.transfer;
+        state.transfer_queue_index = families.transfer_index;
+    }
+    if (state.presentation.enabled) {
+        state.presentation.family = families.present;
+        state.presentation.queue_index = families.present_index;
+    }
 
     create_logical_device(state, &families, line_polygon_mode)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.LOGICAL_DEVICE)!;
@@ -525,16 +549,48 @@ fn gpu::Device? create_vk_device_with_selection(
         && !device_dispatch_supports_descriptor_buffer(&state.device_dispatch)) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    vk::get_device_queue(state.device, state.graphics_family, 0, &state.graphics_queue);
-    state.compute_queue_distinct = families.async_compute;
-    if (families.async_compute) {
-        vk::get_device_queue(state.device, families.compute, families.compute_index, &state.compute_queue);
-    } else {
-        state.compute_queue = state.graphics_queue;
+    if (families.selected.graphics) {
+        vk::get_device_queue(
+            device:             state.device,
+            queue_family_index: state.graphics_family,
+            queue_index:        state.graphics_queue_index,
+            p_queue:            &state.graphics_queue,
+        );
     }
-    vk::get_device_queue(state.device, state.transfer_family, 0, &state.transfer_queue);
+    state.compute_queue_distinct = families.async_compute;
+    if (families.selected.compute) {
+        if (graphics_compute_alias(families)) {
+            state.compute_queue = state.graphics_queue;
+        } else {
+            vk::get_device_queue(
+                device:             state.device,
+                queue_family_index: families.compute,
+                queue_index:        families.compute_index,
+                p_queue:            &state.compute_queue,
+            );
+        }
+    }
+    if (families.selected.transfer) {
+        if (graphics_transfer_alias(families)) {
+            state.transfer_queue = state.graphics_queue;
+        } else if (compute_transfer_alias(families)) {
+            state.transfer_queue = state.compute_queue;
+        } else {
+            vk::get_device_queue(
+                device:             state.device,
+                queue_family_index: state.transfer_family,
+                queue_index:        state.transfer_queue_index,
+                p_queue:            &state.transfer_queue,
+            );
+        }
+    }
     if (state.presentation.enabled) {
-        vk::get_device_queue(state.device, state.presentation.family, 0, &state.presentation.queue);
+        vk::get_device_queue(
+            device:             state.device,
+            queue_family_index: state.presentation.family,
+            queue_index:        state.presentation.queue_index,
+            p_queue:            &state.presentation.queue,
+        );
     }
 
     create_vk_allocator(state)!;
@@ -597,11 +653,16 @@ fn gpu::Device? create_vk_device_with_selection(
         inputs:          &caps_inputs,
     );
 
-    gpu::QueueSelection queue_selection = gpu::queue_selection_for_aliases(
-        compute_aliases_graphics:  state.compute_queue == state.graphics_queue,
-        transfer_aliases_graphics: state.transfer_queue == state.graphics_queue,
-        transfer_aliases_compute:  state.transfer_queue == state.compute_queue,
-    );
+    gpu::QueueRequirements requirements = queue_requirements == null
+        ? gpu::default_queue_requirements()
+        : *queue_requirements;
+    gpu::QueueSelection queue_selection =
+        gpu::queue_selection_for_requirements(
+            requirements:              requirements,
+            compute_aliases_graphics:  state.compute_queue == state.graphics_queue,
+            transfer_aliases_graphics: state.transfer_queue == state.graphics_queue,
+            transfer_aliases_compute:  state.transfer_queue == state.compute_queue,
+        )!;
     state.caps.queues = queue_selection.counts;
 
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
@@ -948,30 +1009,23 @@ fn int score_device(int device_type) @private {
 
 <* Enable requested feature groups and deduplicate queue families. *>
 fn void? create_logical_device(VkDeviceState* state, QueueFamilies* families, bool line_polygon_mode) @private {
-    float[2] priorities = { 1.0, 1.0 };
-    uint main_queue_count = families.async_compute && families.compute == families.graphics ? 2 : 1;
+    float[MAX_SELECTED_QUEUE_INDICES] priorities = { 1.0, 1.0, 1.0 };
     vk::DeviceQueueCreateInfo[MAX_QUEUE_FAMILIES] queue_infos;
-    uint queue_info_count = 0;
-    queue_infos[queue_info_count++] = vk::device_queue_create_info()
-        .set_queue_family_index(families.graphics)
-        .set_queue_priorities(priorities[:main_queue_count]);
-    if (families.compute != families.graphics) {
-        queue_infos[queue_info_count++] = vk::device_queue_create_info()
-            .set_queue_family_index(families.compute)
-            .set_queue_priorities(priorities[:1]);
-    }
-    if (families.transfer != families.graphics && families.transfer != families.compute) {
-        queue_infos[queue_info_count++] = vk::device_queue_create_info()
-            .set_queue_family_index(families.transfer)
-            .set_queue_priorities(priorities[:1]);
-    }
-    if (state.presentation.enabled
-        && families.present != families.graphics
-        && families.present != families.compute
-        && families.present != families.transfer) {
-        queue_infos[queue_info_count++] = vk::device_queue_create_info()
-            .set_queue_family_index(families.present)
-            .set_queue_priorities(priorities[:1]);
+    uint[MAX_QUEUE_FAMILIES] selected_families;
+    uint queue_info_count = selected_device_queue_families(
+        families,
+        state.presentation.enabled,
+        selected_families[..],
+    );
+    foreach (index, family : selected_families[:queue_info_count]) {
+        uint queue_count = requested_queue_count(
+            families,
+            family,
+            state.presentation.enabled,
+        );
+        queue_infos[index] = vk::device_queue_create_info()
+            .set_queue_family_index(family)
+            .set_queue_priorities(priorities[:queue_count]);
     }
 
     vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features = vk::physical_device_descriptor_buffer_features_ext()

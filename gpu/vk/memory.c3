@@ -292,23 +292,33 @@ fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* ou
     foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
         if (!cell.used) continue;
         PoolDirtyMask* dirty = &cell.value.pool_dirty[state.frame_index];
-        if (dirty.graphics) {
-            check_backend_result(
-                state:     state,
-                operation: "begin_frame",
-                result:    vk::reset_command_pool(state.device, cell.value.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0),
-            )!;
-            dirty.graphics = false;
-            state.pools_reset_last_frame++;
-        } else {
-            state.pools_skipped_last_frame++;
+        if (state.selected_queue_roles.graphics) {
+            if (dirty.graphics) {
+                check_backend_result(
+                    state:     state,
+                    operation: "begin_frame",
+                    result:    vk::reset_command_pool(
+                        state.device,
+                        cell.value.graphics_pools[state.frame_index],
+                        (vk::CommandPoolResetFlags)0,
+                    ),
+                )!;
+                dirty.graphics = false;
+                state.pools_reset_last_frame++;
+            } else {
+                state.pools_skipped_last_frame++;
+            }
         }
         if (cell.value.compute_pools_distinct) {
             if (dirty.compute) {
                 check_backend_result(
                     state:     state,
                     operation: "begin_frame",
-                    result:    vk::reset_command_pool(state.device, cell.value.compute_pools[state.frame_index], (vk::CommandPoolResetFlags)0),
+                    result:    vk::reset_command_pool(
+                        state.device,
+                        cell.value.compute_pools[state.frame_index],
+                        (vk::CommandPoolResetFlags)0,
+                    ),
                 )!;
                 dirty.compute = false;
                 state.pools_reset_last_frame++;
@@ -316,16 +326,22 @@ fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* ou
                 state.pools_skipped_last_frame++;
             }
         }
-        if (dirty.transfer) {
-            check_backend_result(
-                state:     state,
-                operation: "begin_frame",
-                result:    vk::reset_command_pool(state.device, cell.value.transfer_pools[state.frame_index], (vk::CommandPoolResetFlags)0),
-            )!;
-            dirty.transfer = false;
-            state.pools_reset_last_frame++;
-        } else {
-            state.pools_skipped_last_frame++;
+        if (state.selected_queue_roles.transfer) {
+            if (dirty.transfer) {
+                check_backend_result(
+                    state:     state,
+                    operation: "begin_frame",
+                    result:    vk::reset_command_pool(
+                        state.device,
+                        cell.value.transfer_pools[state.frame_index],
+                        (vk::CommandPoolResetFlags)0,
+                    ),
+                )!;
+                dirty.transfer = false;
+                state.pools_reset_last_frame++;
+            } else {
+                state.pools_skipped_last_frame++;
+            }
         }
     }
     state.allocator.set_current_frame_index(state.frame_index);
@@ -506,12 +522,8 @@ fn void? submit_timeline_signal(VkDeviceState* state, vk::Semaphore semaphore, v
     state.submit_stats.empty_signal_submits++;
 }
 
-<* The frame fence is a single queue-ordered empty submit: compute/transfer
-   queues used since the last boundary (in-frame or off) piggyback an aux
-   signal onto their own user submits (vk_submit), and the graphics
-   frame-signal submit waits each used queue's latest recorded aux value, so
-   the frame value implies every queue finished. Off-frame graphics submits
-   need no flag — this signal is queue-ordered behind them. *>
+<* The frame timeline is queue-ordered on the first admitted role. Other
+   queues piggyback auxiliary signals that the frame submit waits. *>
 fn void? end_frame_with_submit(gpu::FrameToken* frame, QueueSubmit2Fn submit_fn) @private {
     VkDeviceState* state = resolve_frame_token(frame, "end_frame")!;
     if (boundary_blocked(state)) {
@@ -553,8 +565,8 @@ fn void? end_frame_with_submit(gpu::FrameToken* frame, QueueSubmit2Fn submit_fn)
     submit_timeline_signal(
         state:      state,
         semaphore:  state.frame_timeline,
-        queue:      state.graphics_queue,
-        mutex:      &state.graphics_queue_mutex,
+        queue:      frame_queue_for(state),
+        mutex:      frame_queue_mutex_for(state),
         value:      frame_value,
         wait_infos: waits[:wait_count],
         submit_fn:  submit_fn,

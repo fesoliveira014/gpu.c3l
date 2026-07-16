@@ -610,9 +610,7 @@ fn void? wait_swapchain_queues_idle(
     uint queue_count = swapchain_idle_queues(state, queues[..]);
     for (uint index = 0; index < queue_count; index++) {
         {
-            Mutex* queue_mutex = index == 0
-                ? &state.graphics_queue_mutex
-                : present_queue_mutex_for(state);
+            Mutex* queue_mutex = native_queue_mutex_for(state, queues[index]);
             queue_mutex.lock()!!;
             defer queue_mutex.unlock();
             check_wsi_backend_result(

@@ -133,6 +133,30 @@ fn bool? supports_stub_presentation(
     return presentation_supported;
 }
 
+fn bool? supports_stub_queue_requirements(
+    void* backend_state,
+    uint adapter_index,
+    gpu::QueueRequirements* requirements,
+    void* backend_surface,
+) {
+    (void)backend_surface;
+    StubRuntimeState* state = (StubRuntimeState*)backend_state;
+    if (state == null || requirements == null || adapter_index >= state.adapter_count) {
+        return gpu::INVALID_HANDLE~;
+    }
+    gpu::QueueSelection? selection = gpu::queue_selection_for_requirements(
+        requirements:               *requirements,
+        compute_aliases_graphics:    true,
+        transfer_aliases_graphics:   true,
+        transfer_aliases_compute:    true,
+    );
+    if (catch selection_fault = selection) {
+        if (selection_fault == gpu::UNSUPPORTED_FEATURE) return false;
+        return selection_fault~;
+    }
+    return true;
+}
+
 const gpu::RuntimeBackendVTable STUB_RUNTIME_VTABLE @private = {
     .destroy_runtime         = &destroy_stub_runtime,
     .get_adapter_info        = &get_stub_adapter_info,
@@ -142,6 +166,7 @@ const gpu::RuntimeBackendVTable STUB_RUNTIME_VTABLE @private = {
     .create_x11_surface      = &create_stub_x11_surface,
     .destroy_surface         = &destroy_stub_surface,
     .supports_presentation   = &supports_stub_presentation,
+    .supports_queue_requirements = &supports_stub_queue_requirements,
 };
 
 const gpu::RuntimeBackendVTable STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY @private = {
@@ -152,6 +177,7 @@ const gpu::RuntimeBackendVTable STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY @private 
     .create_wayland_surface  = &create_stub_wayland_surface,
     .create_x11_surface      = &create_stub_x11_surface,
     .supports_presentation   = &supports_stub_presentation,
+    .supports_queue_requirements = &supports_stub_queue_requirements,
 };
 
 fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
@@ -388,6 +414,13 @@ fn gpu::Device? create_vk_device(
     state.adapter = *adapter;
     last_device_adapter = *adapter;
     gpu::Surface presentation_surface = gpu::requested_surface(*request);
+    gpu::QueueRequirements requirements = gpu::requested_queue_requirements(*request);
+    gpu::QueueSelection queues = gpu::queue_selection_for_requirements(
+        requirements:               requirements,
+        compute_aliases_graphics:    true,
+        transfer_aliases_graphics:   true,
+        transfer_aliases_compute:    true,
+    )!;
     gpu::DeviceCaps caps = {
         .strict_enabled       = true,
         .presentation_enabled = presentation_surface.is_valid(),
@@ -403,5 +436,6 @@ fn gpu::Device? create_vk_device(
         presentation_surface: presentation_surface.is_valid()
             ? &presentation_surface
             : null,
+        queues:               queues,
     );
 }

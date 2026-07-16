@@ -891,7 +891,17 @@ fn void? finish_helper_timeline(VkDeviceState* state, ulong* helper_value, ZStri
 fn void? maybe_reset_helper_pool(VkDeviceState* state, ZString operation) @private {
     RecordingContextState* context = state.recording_contexts.get(state.helper_context)!;
     PoolDirtyMask* dirty = &context.pool_dirty[state.frame_index];
-    if (!dirty.graphics) return;
+    gpu::QueueKind queue = frame_queue_kind(state);
+    bool pool_dirty;
+    switch (queue) {
+        case gpu::QueueKind.COMPUTE:
+            pool_dirty = dirty.compute;
+        case gpu::QueueKind.TRANSFER:
+            pool_dirty = dirty.transfer;
+        default:
+            pool_dirty = dirty.graphics;
+    }
+    if (!pool_dirty) return;
     state.transfer_mutex.lock()!!;
     ulong reserved = state.helper_counter;
     state.transfer_mutex.unlock();
@@ -907,10 +917,21 @@ fn void? maybe_reset_helper_pool(VkDeviceState* state, ZString operation) @priva
     check_helper_backend_result(
         state:           state,
         operation:       operation,
-        result:          vk::reset_command_pool(state.device, context.graphics_pools[state.frame_index], (vk::CommandPoolResetFlags)0),
+        result:          vk::reset_command_pool(
+            state.device,
+            pool_for(context, queue, state.frame_index),
+            (vk::CommandPoolResetFlags)0,
+        ),
         fault_is_public: true,
     )!;
-    dirty.graphics = false;
+    switch (queue) {
+        case gpu::QueueKind.COMPUTE:
+            dirty.compute = false;
+        case gpu::QueueKind.TRANSFER:
+            dirty.transfer = false;
+        default:
+            dirty.graphics = false;
+    }
     state.helper_pool_resets++;
 }
 
@@ -930,6 +951,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
     enter_tracked(state);
     defer exit_tracked(state);
     validate_upload_buffer(state, dst, offset, data, "upload_buffer_data")!;
+    gpu::QueueKind queue = frame_queue_kind(state);
     ulong helper_value = 0;
     defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "upload_buffer_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
@@ -943,7 +965,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
         tag.value = helper_value;
         vk_begin_commands(
             device:       device,
-            queue:        gpu::QueueKind.GRAPHICS,
+            queue:        queue,
             ctx:          state.helper_context,
             out_commands: &commands,
         )!;
@@ -968,7 +990,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
         vk_cmd_buffer_barrier(&commands, &next_use)!;
         vk_end_commands(&commands)!;
     }
-    submit_and_wait(device, &commands)!;
+    submit_and_wait(device, &commands, queue)!;
     finish_helper_timeline(state, &helper_value, "upload_buffer_data")!;
 }
 
@@ -979,6 +1001,7 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     ulong helper_value = 0;
     defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "upload_texture_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
+    gpu::QueueKind queue = frame_queue_kind(state);
 
     TextureSlot* slot = resolve_transfer_texture(
         state:          state,
@@ -1053,7 +1076,7 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
         tag.value = helper_value;
         vk_begin_commands(
             device:       device,
-            queue:        gpu::QueueKind.GRAPHICS,
+            queue:        queue,
             ctx:          state.helper_context,
             out_commands: &commands,
         )!;
@@ -1093,7 +1116,7 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
         vk_cmd_texture_barrier(&commands, &next_use)!;
         vk_end_commands(&commands)!;
     }
-    submit_and_wait(device, &commands)!;
+    submit_and_wait(device, &commands, queue)!;
     finish_helper_timeline(state, &helper_value, "upload_texture_data")!;
 }
 
@@ -1105,6 +1128,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "readback_buffer_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
+    gpu::QueueKind queue = frame_queue_kind(state);
     if (out_data.len == 0) {
         return report_contract_failure(
             state:               state,
@@ -1180,7 +1204,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
             readback = allocated_readback;
             vk_begin_commands(
                 device:       device,
-                queue:        gpu::QueueKind.GRAPHICS,
+                queue:        queue,
                 ctx:          state.helper_context,
                 out_commands: &commands,
             )!;
@@ -1234,7 +1258,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
         )~;
     }
 
-    submit_and_wait(device, &commands)!;
+    submit_and_wait(device, &commands, queue)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
     finish_helper_timeline(state, &helper_value, "readback_buffer_data")!;
@@ -1248,6 +1272,7 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     defer if (helper_value != 0) signal_helper_timeline_cleanup(state, helper_value, "readback_texture_data");
     TimelineTag tag = { .kind = TimelineKind.HELPER };
 
+    gpu::QueueKind queue = frame_queue_kind(state);
     gpu::TextureUploadDesc region = { .texture = src, .mip = mip };
     TextureSlot* slot = resolve_transfer_texture(
         state:          state,
@@ -1316,7 +1341,7 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
             readback = allocated_readback;
             vk_begin_commands(
                 device:       device,
-                queue:        gpu::QueueKind.GRAPHICS,
+                queue:        queue,
                 ctx:          state.helper_context,
                 out_commands: &commands,
             )!;
@@ -1375,7 +1400,7 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
         )~;
     }
 
-    submit_and_wait(device, &commands)!;
+    submit_and_wait(device, &commands, queue)!;
     vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
     mem::copy(out_data.ptr, readback.cpu, out_data.len);
     finish_helper_timeline(state, &helper_value, "readback_texture_data")!;
@@ -1384,11 +1409,15 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
 <* Submits an already-ended command list, blocks until queue idle. Touches
    no timeline — the caller owns its tag's signaling. Runs after the caller
    releases helper_record_mutex, so a successor records while this waits. *>
-fn void? submit_and_wait(gpu::Device* device, gpu::CommandList* commands) @private {
+fn void? submit_and_wait(
+    gpu::Device* device,
+    gpu::CommandList* commands,
+    gpu::QueueKind queue,
+) @private {
     gpu::CommandList[1] lists = { *commands };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     vk_submit(device, &submit)!;
-    return vk_wait_queue_idle(device, gpu::QueueKind.GRAPHICS);
+    return vk_wait_queue_idle(device, queue);
 }
 
 struct TicketAlloc @private {

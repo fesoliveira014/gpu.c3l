@@ -191,3 +191,49 @@ fn void queue_registration_rejects_unstored_counts() @test {
         "a scalar selection cannot publish a second queue"
     );
 }
+
+fn void device_exposes_only_requested_queue_roles() @test {
+    RuntimeDesc runtime_desc = queue_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    QueueRequirements requirements = { .counts = { .compute = 1 } };
+    DeviceRequest request = gpu::request_queues(
+        gpu::strict_device_request(),
+        requirements,
+    )!!;
+    Device device = gpu::create_device(&adapter, &request)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    QueueCounts counts = gpu::get_queue_counts(&device)!!;
+    Queue compute = gpu::get_queue(&device, QueueKind.COMPUTE)!!;
+    QueueInfo info = gpu::get_queue_info(&device, compute)!!;
+    assert(counts.graphics == 0, "unrequested graphics queues stay hidden");
+    assert(counts.compute == 1, "requested compute queue is exposed");
+    assert(counts.transfer == 0, "unrequested transfer queues stay hidden");
+    assert((uint)info.roles == (uint)(QueueRoles){ .compute }, "queue roles match the request");
+    assert(
+        @catch(gpu::get_queue(&device, QueueKind.GRAPHICS)) == gpu::INVALID_ARGUMENT,
+        "unrequested roles have no public queue"
+    );
+    assert(
+        @catch(gpu::begin_commands(&device, QueueKind.GRAPHICS))
+            == gpu::INVALID_ARGUMENT,
+        "unrequested graphics recording faults before backend work"
+    );
+    assert(
+        @catch(gpu::begin_commands(&device, QueueKind.TRANSFER))
+            == gpu::INVALID_ARGUMENT,
+        "unrequested transfer recording faults before backend work"
+    );
+    assert(
+        @catch(gpu::wait_queue_idle(&device, QueueKind.GRAPHICS))
+            == gpu::INVALID_ARGUMENT,
+        "unrequested graphics idle faults before backend work"
+    );
+    assert(
+        @catch(gpu::wait_queue_idle(&device, QueueKind.TRANSFER))
+            == gpu::INVALID_ARGUMENT,
+        "unrequested transfer idle faults before backend work"
+    );
+}
