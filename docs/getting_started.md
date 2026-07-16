@@ -287,8 +287,8 @@ fn void? run_frame(gpu::FrameToken* frame, FrameWork* work) {
 
     gpu::CommandList[1] lists = { cmd };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(work.device, &submit)!;
-    gpu::wait_queue_idle(work.device, gpu::QueueKind.COMPUTE)!;
+    gpu::CompletionPoint completion = gpu::submit(work.device, &submit)!;
+    gpu::wait_completion(completion, ulong::max)!;
 }
 ```
 

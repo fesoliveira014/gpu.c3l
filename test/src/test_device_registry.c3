@@ -158,7 +158,10 @@ fn void? command_pin_global_barrier(
     if (fixture.reject_command) return gpu::INVALID_HANDLE~;
 }
 
-fn void? command_pin_submit(gpu::Device* device, gpu::SubmitDesc* desc) {
+fn gpu::CompletionPoint? command_pin_submit(
+    gpu::Device* device,
+    gpu::SubmitDesc* desc,
+) {
     CommandPinFixture* fixture =
         (CommandPinFixture*)gpu::device_backend_state_ptr(device);
     if (fixture == null) return gpu::INVALID_HANDLE~;
@@ -168,6 +171,10 @@ fn void? command_pin_submit(gpu::Device* device, gpu::SubmitDesc* desc) {
         );
     fixture.pins_during_submit = control.pins;
     if (fixture.submit_busy) return gpu::DEVICE_BUSY~;
+    return {
+        .device  = *device,
+        .payload = 1ull << 10,
+    };
 }
 
 fn gpu::MemoryStats? blocking_get_memory_stats(gpu::Device* device) {

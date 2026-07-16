@@ -396,7 +396,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
-| `DEVICE_BUSY` | public device operations; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
+| `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
 | `RESOURCE_IN_USE` | `destroy_device`, `destroy_runtime`, `destroy_surface`, `destroy_texture` | a device has a live child, a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
 | `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands`; persistent allocation; queue submission | a registry or handle table is at capacity, or a queue completion sequence is exhausted |
@@ -868,7 +868,7 @@ get_queue_info(Device* device, Queue queue) -> QueueInfo?
 begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) -> CommandList?
 end_commands(CommandList* commands) -> void?
 discard_commands(CommandList* commands) -> void?
-submit(Device* device, SubmitDesc* desc) -> void?
+submit(Device* device, SubmitDesc* desc) -> CompletionPoint?
 wait_queue_idle(Device* device, QueueKind queue) -> void?
 poll_completion(CompletionPoint point) -> bool?
 wait_completion(CompletionPoint point, ulong timeout_ns) -> void?
@@ -898,6 +898,7 @@ QueueInfo
 
 SubmitDesc
     CommandList[] command_lists
+    CompletionPoint[] completion_waits
     SemaphoreWait[] waits           ({ semaphore, value, stage })
     SemaphoreSignal[] signals
     SwapchainHandle swapchain       (present-linked submits)
@@ -921,10 +922,21 @@ clears the corresponding `SubmitDesc.command_lists` entry; copied aliases then
 fault `INVALID_HANDLE`. `discard_commands` remains available after device loss,
 consumes a recording or executable token, and cancels attached readback tickets.
 
-A submit batch is transactional: duplicate tokens fault
-`COMMAND_RECORDING_ERROR`, mixed queue kinds fault `INVALID_ARGUMENT`, and
-failures before a successful native queue call leave tokens executable. A live
-unsubmitted token blocks its frame-slot pool reset until submitted or discarded.
+A submit batch is transactional. Success consumes every command token, publishes
+exactly one queue sequence, and returns its `CompletionPoint`. An empty batch
+targets the frame-anchor queue: graphics when present, otherwise compute, then
+transfer. Duplicate tokens fault `COMMAND_RECORDING_ERROR`, mixed queue kinds
+fault `INVALID_ARGUMENT`, and any failure before native acceptance publishes no
+point and leaves tokens executable. A live unsubmitted token blocks its
+frame-slot pool reset until submitted or discarded.
+
+`SubmitDesc.completion_waits` accepts published points from the same device.
+Cross-queue points become waits on their queue-owned timelines. Published points
+from the target queue are validated and then elided because queue order is
+inherent. Stale, unpublished, malformed, and foreign-device waits fault
+`INVALID_HANDLE` before native submission and preserve every command token.
+If outstanding queue progress reaches the device's timeline-value-difference
+limit, submission faults retryable `DEVICE_BUSY` before reserving a sequence.
 
 Timeline signal values must be greater than the semaphore counter when they
 execute. The caller orders pending signals across queues and keeps waits and

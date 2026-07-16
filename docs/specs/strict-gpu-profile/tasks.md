@@ -127,7 +127,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.2 Transactional submission and cross-queue waits
 
-- [ ] Change submission in `gpu/queue.c3`, `gpu/command.c3`, `gpu/vk/queue.c3`, and `gpu/vk/sync.c3` to consume executable command tokens only after successful native submission and return one `CompletionPoint`.
+- [x] Change submission in `gpu/queue.c3`, `gpu/command.c3`, `gpu/vk/queue.c3`, and `gpu/vk/sync.c3` to consume executable command tokens only after successful native submission and return one `CompletionPoint`.
   - **Depends on:** 3.1.
   - **Contract:** cross-queue waits accept reusable completion points; same-queue order is inherent; successful submission publishes exactly one contiguous queue sequence; validation or retryable failure publishes no point and preserves retryable tokens; destruction readiness observes completed queue timelines without requiring `wait_queue_idle`.
   - **Edges:** empty submit, duplicate token, mixed queues/devices, stale wait point, wait on a later same-queue sequence, device loss, and partial native preparation failure.
