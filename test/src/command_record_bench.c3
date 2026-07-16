@@ -98,6 +98,7 @@ fn int main() {
         .size        = 64,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
@@ -107,6 +108,7 @@ fn int main() {
         .size        = gpu::DispatchIndirectCommand::size,
         .usage       = { .indirect },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
     defer gpu::destroy_buffer(&device, args_buffer)!!;

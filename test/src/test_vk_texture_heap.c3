@@ -25,6 +25,7 @@ fn void bindless_texture_write_then_sample() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = TEX_SIZE,
         .height     = TEX_SIZE,
         .format     = gpu::Format.RGBA8_UNORM,
@@ -51,6 +52,7 @@ fn void bindless_texture_write_then_sample() @test {
         .size        = TEX_SIZE * TEX_SIZE * 16,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "sample_output",
     };
     gpu::BufferHandle output = gpu::create_buffer(&device, &out_desc)!!;

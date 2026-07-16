@@ -34,6 +34,7 @@ fn void run_persistent_allocations(gpu::Device* device) {
         .size        = ALLOCATION_SIZE,
         .align       = ALLOCATION_ALIGNMENT,
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
 
     std::time::Clock allocation_start = std::time::clock::now();

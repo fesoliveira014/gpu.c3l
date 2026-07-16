@@ -174,29 +174,32 @@ fn gpu::Device device_shim(VkDeviceState* state) @private {
     return state.owner;
 }
 
-fn gpu::BufferDesc staging_arena_desc(usz size) @private {
+fn gpu::BufferDesc staging_arena_desc(usz size, gpu::QueueRoles access) @private {
     return {
         .size        = size,
         .usage       = { .transfer_src },
         .memory_kind = gpu::MemoryKind.STAGING,
+        .access      = access,
         .debug_name  = "staging_arena",
     };
 }
 
-fn gpu::BufferDesc readback_arena_desc(usz size) @private {
+fn gpu::BufferDesc readback_arena_desc(usz size, gpu::QueueRoles access) @private {
     return {
         .size        = size,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = access,
         .debug_name  = "readback_arena",
     };
 }
 
-fn gpu::BufferDesc staging_dedicated_desc(usz size) @private {
+fn gpu::BufferDesc staging_dedicated_desc(usz size, gpu::QueueRoles access) @private {
     return {
         .size        = size,
         .usage       = { .transfer_src },
         .memory_kind = gpu::MemoryKind.STAGING,
+        .access      = access,
         .debug_name  = "staging_dedicated",
     };
 }
@@ -205,9 +208,9 @@ fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
     usz staging_size = desc.staging_arena_size == 0 ? gpu::DEFAULT_STAGING_ARENA_SIZE : desc.staging_arena_size;
     usz readback_size = desc.readback_arena_size == 0 ? gpu::DEFAULT_READBACK_ARENA_SIZE : desc.readback_arena_size;
 
-    gpu::BufferDesc staging_desc = staging_arena_desc(staging_size);
+    gpu::BufferDesc staging_desc = staging_arena_desc(staging_size, state.selected_queue_roles);
     uint[MAX_QUEUE_FAMILIES] family_storage;
-    uint family_count = used_queue_families(state, family_storage[..]);
+    uint family_count = resource_queue_families(state, staging_desc.access, family_storage[..]);
     state.staging_arena.backing = create_buffer_with_families_for_state(
         state:          state,
         desc:           &staging_desc,
@@ -217,7 +220,7 @@ fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
     state.staging_arena.span = get_buffer_span_for_state(state, state.staging_arena.backing)!;
     state.staging_arena.size = staging_size;
 
-    gpu::BufferDesc readback_desc = readback_arena_desc(readback_size);
+    gpu::BufferDesc readback_desc = readback_arena_desc(readback_size, state.selected_queue_roles);
     state.readback_arena.backing = create_buffer_for_state(state, &readback_desc)!;
     mark_buffer_internal(state, state.readback_arena.backing);
     state.readback_arena.span = get_buffer_span_for_state(state, state.readback_arena.backing)!;
@@ -380,7 +383,7 @@ fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena,
 }
 
 fn gpu::GpuSpan? staging_alloc(VkDeviceState* state, usz size, usz align, TimelineTag tag) @private {
-    gpu::BufferDesc desc = staging_dedicated_desc(size);
+    gpu::BufferDesc desc = staging_dedicated_desc(size, state.selected_queue_roles);
     return transfer_alloc(
         state:          state,
         arena:          &state.staging_arena,
@@ -396,6 +399,7 @@ fn gpu::GpuSpan? readback_alloc(VkDeviceState* state, usz size, usz align, Timel
         .size        = size,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = state.selected_queue_roles,
         .debug_name  = "readback_dedicated",
     };
     return transfer_alloc(
@@ -1490,6 +1494,7 @@ fn gpu::ReadbackTicket? ticket_alloc(VkDeviceState* state, usz size) @private {
         .size        = size,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = state.selected_queue_roles,
         .debug_name  = "readback_ticket",
     };
     gpu::Device shim = device_shim(state);

@@ -324,6 +324,7 @@ fn void zero_size_buffer_diagnostic_preserves_fault() @test {
         .size        = 0,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "zero_buffer",
     };
     fault rejected = @catch(gpu::create_buffer(&device, &desc));
@@ -408,6 +409,7 @@ fn void debug_names_do_not_require_validation() @test {
         .size        = 64,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "names_without_validation",
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
@@ -432,12 +434,14 @@ fn void leak_reporters_count_leaks() @test {
         .size        = 256,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "leaky_buffer",
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buf_desc)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = 8,
         .height     = 8,
         .format     = gpu::Format.RGBA8_UNORM,
@@ -514,6 +518,7 @@ fn void leak_reporters_count_leaks() @test {
         .size        = 64,
         .align       = 16,
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "leaky_persistent_span",
     };
     gpu::GpuSpan persistent = gpu::alloc_persistent_span(&device, &persistent_desc)!!;
@@ -542,6 +547,7 @@ fn void debug_name_copy_is_independent() @test {
         .size        = 64,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = (ZString)&volatile_name[0],
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
@@ -560,13 +566,14 @@ fn void stats_counts_populated() @test {
 
     gpu::BufferHandle[3] buffers;
     for (uint i = 0; i < 3; i++) {
-        gpu::BufferDesc desc = { .size = 128, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+        gpu::BufferDesc desc = { .size = 128, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
     }
     gpu::TextureHandle[2] textures;
     for (uint i = 0; i < 2; i++) {
         gpu::TextureDesc desc = {
             .dimension = gpu::TextureDimension.TEX_2D,
+            .access    = { .graphics, .compute, .transfer },
             .width     = 4,
             .height    = 4,
             .format    = gpu::Format.RGBA8_UNORM,
@@ -592,6 +599,7 @@ fn void labels_record_validation_clean() @test {
 
     gpu::TextureDesc rt_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 8,
         .height    = 8,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -646,6 +654,7 @@ fn void destroy_reports_leaks_before_sweeping() @test {
         .size        = 128,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "canary_buffer",
     };
     (void)gpu::create_buffer(&device, &desc)!!;
@@ -671,6 +680,7 @@ fn void callback_reports_leaks_without_validation() @test {
         .size        = 128,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "leaky_buffer",
     };
     (void)gpu::create_buffer(&device, &buffer_desc)!!;

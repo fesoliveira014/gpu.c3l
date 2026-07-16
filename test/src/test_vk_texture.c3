@@ -72,6 +72,7 @@ fn void texture_create_destroy() @test {
 
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics, .compute },
         .width      = 16,
         .height     = 16,
         .format     = gpu::Format.RGBA8_UNORM,
@@ -80,6 +81,11 @@ fn void texture_create_destroy() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     assert(texture.is_valid(), "created texture handle is valid");
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
+    assert((uint)slot.access == (uint)desc.access,
+        "texture slot retains the descriptor access roles");
     gpu::destroy_texture(&device, texture)!!;
 }
 
@@ -89,6 +95,7 @@ fn void texture_unsupported_desc_rejected() @test {
 
     gpu::TextureDesc depth_storage = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 16,
         .format    = gpu::Format.D32_FLOAT,
@@ -99,6 +106,7 @@ fn void texture_unsupported_desc_rejected() @test {
 
     gpu::TextureDesc color_with_depth_usage = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 16,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -109,6 +117,7 @@ fn void texture_unsupported_desc_rejected() @test {
 
     gpu::TextureDesc transfer_only = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 16,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -121,6 +130,7 @@ fn void texture_unsupported_desc_rejected() @test {
 
     gpu::TextureDesc not_2d = {
         .dimension = gpu::TextureDimension.TEX_3D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 16,
         .depth     = 16,
@@ -137,6 +147,7 @@ fn void texture_stale_handle_rejected() @test {
 
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 8,
         .height    = 8,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -155,6 +166,7 @@ fn void texture_barrier_transitions_layout() @test {
 
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 8,
         .height    = 8,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -206,6 +218,7 @@ fn void texture_multi_mip_create_destroy() @test {
 
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics, .compute },
         .width      = 16,
         .height     = 16,
         .mip_levels = 4,
@@ -228,6 +241,7 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
 
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics, .compute },
         .width      = 16,
         .height     = 16,
         .mip_levels = 5,
@@ -264,6 +278,7 @@ fn void texture_barrier_stale_handle_rejected() @test {
 
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 8,
         .height    = 8,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -303,6 +318,7 @@ fn void raised_texture_capacity_holds_more_than_default() @test {
     defer mem::free(handles.ptr);
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 1,
         .height    = 1,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -320,6 +336,7 @@ fn void unsupported_dimensions_fault() @test {
     foreach (dim : dims) {
         gpu::TextureDesc desc = {
             .dimension = dim,
+            .access    = { .graphics, .compute, .transfer },
             .width     = 4,
             .height    = 4,
             .format    = gpu::Format.RGBA8_UNORM,
@@ -336,6 +353,7 @@ fn void transfer_only_texture_round_trips() @test {
 
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -432,6 +450,7 @@ fn void texture_capability_queries_match_creation() @test {
 
             gpu::TextureDesc desc = {
                 .dimension = gpu::TextureDimension.TEX_2D,
+                .access    = { .graphics, .compute, .transfer },
                 .width     = 4,
                 .height    = 4,
                 .format    = format,
@@ -472,6 +491,7 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
 
     gpu::TextureDesc d24_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.D24_UNORM_S8_UINT,
@@ -485,6 +505,7 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
 
     gpu::TextureDesc invalid = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics, .compute },
         .width      = 16,
         .height     = 16,
         .mip_levels = 6,
@@ -499,6 +520,7 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
 
     gpu::TextureDesc beyond_adapter = {
         .dimension    = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width        = 1,
         .height       = 1,
         .array_layers = 4294967295,
@@ -524,6 +546,7 @@ fn void invalid_texture_descriptor_diagnostic_preserves_fault() @test {
 
     gpu::TextureDesc invalid = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics, .compute },
         .width      = 0,
         .height     = 16,
         .format     = gpu::Format.RGBA8_UNORM,
@@ -563,6 +586,7 @@ fn void unsupported_texture_capability_diagnostic_preserves_fault() @test {
 
     gpu::TextureDesc unsupported = {
         .dimension    = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width        = 1,
         .height       = 1,
         .array_layers = 4294967295,
@@ -603,6 +627,7 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
 
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics, .compute },
         .width      = 8,
         .height     = 8,
         .format     = gpu::Format.RGBA8_UNORM,

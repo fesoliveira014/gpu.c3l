@@ -31,6 +31,7 @@ fn uint unorm_byte(float value) {
 fn gpu::TextureHandle make_render_target(gpu::Device* device, uint mips = 1) {
     gpu::TextureDesc desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = RT_SIZE,
         .height     = RT_SIZE,
         .mip_levels = mips,
@@ -48,7 +49,7 @@ fn void offscreen_clear_works() @test {
     defer gpu::destroy_texture(&device, target)!!;
 
     gpu::BufferDesc rb_desc = {
-        .size = RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK,
+        .size = RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;
@@ -125,6 +126,7 @@ fn void offscreen_textured_triangle() @test {
     // Flat-color pattern texture, uploaded through the staging path.
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -145,7 +147,7 @@ fn void offscreen_textured_triangle() @test {
     defer gpu::destroy_sampler(&device, smp_index)!!;
 
     gpu::BufferDesc staging_desc = {
-        .size = 4 * 4 * 4, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING,
+        .size = 4 * 4 * 4, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
     defer gpu::destroy_buffer(&device, staging)!!;
@@ -160,7 +162,7 @@ fn void offscreen_textured_triangle() @test {
     gpu::flush_buffer(&device, staging, 0, 0)!!;
 
     gpu::BufferDesc rb_desc = {
-        .size = RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK,
+        .size = RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;
@@ -329,6 +331,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
         .size = RT_BYTES * targets.len,
         .usage = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle readback = gpu::create_buffer(&device, &readback_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;
@@ -448,7 +451,7 @@ fn void offscreen_render_to_mip() @test {
 
     const uint MIP1 = RT_SIZE / 2;
     gpu::BufferDesc rb_desc = {
-        .size = MIP1 * MIP1 * 4, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK,
+        .size = MIP1 * MIP1 * 4, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;
@@ -657,7 +660,7 @@ fn void render_pass_state_machine() @test {
     defer gpu::destroy_texture(&device, target)!!;
 
     gpu::BufferDesc buf_desc = {
-        .size = 64, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.STAGING,
+        .size = 64, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buf_desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;

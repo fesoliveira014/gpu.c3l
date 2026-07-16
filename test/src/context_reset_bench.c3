@@ -52,6 +52,7 @@ fn int main() {
         .size        = BENCH_USER_CONTEXTS * BENCH_FILL_STRIDE,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle target = gpu::create_buffer(&device, &buf_desc)!!;
     defer gpu::destroy_buffer(&device, target)!!;

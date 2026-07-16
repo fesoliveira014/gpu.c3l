@@ -1404,6 +1404,42 @@ fn uint append_selected_role_families(
     return count;
 }
 
+fn uint resource_queue_families(
+    VkDeviceState* state,
+    gpu::QueueRoles access,
+    uint[] out_families,
+) {
+    uint count;
+    if (access.graphics) {
+        count = append_queue_family(out_families, count, state.graphics_family);
+        count = append_selected_role_families(
+            selection:    &state.queues,
+            kind:         gpu::QueueKind.GRAPHICS,
+            out_families: out_families,
+            count:        count,
+        );
+    }
+    if (access.compute) {
+        count = append_queue_family(out_families, count, state.compute_family);
+        count = append_selected_role_families(
+            selection:    &state.queues,
+            kind:         gpu::QueueKind.COMPUTE,
+            out_families: out_families,
+            count:        count,
+        );
+    }
+    if (access.transfer) {
+        count = append_queue_family(out_families, count, state.transfer_family);
+        count = append_selected_role_families(
+            selection:    &state.queues,
+            kind:         gpu::QueueKind.TRANSFER,
+            out_families: out_families,
+            count:        count,
+        );
+    }
+    return count;
+}
+
 <* Distinct queue families in use, for CONCURRENT-shared resources. *>
 fn uint used_queue_families(VkDeviceState* state, uint[] out_families) {
     uint count;

@@ -6,7 +6,7 @@ import vk;
 
 // Pure selection-tier units over synthetic family tables (no device), plus
 // lavapipe integration: alias tier, caps flag, cross-queue timeline chain,
-// and the shared_queues no-op on a single-family device.
+// and semantic multi-role access on a single-family device.
 
 const uint QF_G = (uint)vk::QueueFlagBits.GRAPHICS_BIT;
 const uint QF_C = (uint)vk::QueueFlagBits.COMPUTE_BIT;
@@ -323,38 +323,41 @@ fn void cross_queue_timeline_chain_validates() @test {
     gpu::end_frame(&frame_token)!!;
 }
 
-fn void shared_queues_noop_on_single_family() @test {
+fn void multi_role_access_stays_exclusive_on_single_family() @test {
     gpu::Device device = make_queue_test_device();
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc buf_desc = {
         .size        = 256,
-        .usage       = { .storage, .addressable, .shared_queues },
+        .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .debug_name  = "shared_buf",
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "multi_role_buf",
     };
     gpu::BufferHandle buf = gpu::create_buffer(&device, &buf_desc)!!;
     gpu::destroy_buffer(&device, buf)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .sampled, .transfer_dst, .shared_queues },
+        .usage     = { .sampled, .transfer_dst },
     };
     gpu::TextureHandle tex = gpu::create_texture(&device, &tex_desc)!!;
     gpu::destroy_texture(&device, tex)!!;
 }
 
-fn void shared_queues_alone_is_invalid() @test {
+fn void empty_buffer_usage_is_invalid() @test {
     gpu::Device device = make_queue_test_device();
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc buf_desc = {
         .size        = 64,
-        .usage       = { .shared_queues },
+        .usage       = {},
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
     fault f = @catch(gpu::create_buffer(&device, &buf_desc));
     assert(f == gpu::INVALID_ARGUMENT, "usage with no Vulkan bits faults INVALID_ARGUMENT");
@@ -392,6 +395,7 @@ fn void frame_arena_create_info_is_exclusive_when_families_alias() @test {
         .size        = 256,
         .usage       = { .storage, .addressable, .indirect, .index },
         .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
     uint[1] families = { 4 };
     vk::BufferCreateInfo info = vk::make_buffer_create_info(&desc, families[..])!!;
@@ -405,6 +409,7 @@ fn void frame_arena_create_info_uses_exact_distinct_families() @test {
         .size        = 256,
         .usage       = { .storage, .addressable, .indirect, .index },
         .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
     uint[2] families = { 4, 5 };
     vk::BufferCreateInfo info = vk::make_buffer_create_info(&desc, families[..])!!;
@@ -414,7 +419,7 @@ fn void frame_arena_create_info_uses_exact_distinct_families() @test {
     assert(info.p_queue_family_indices[1] == 5, "concurrent creation keeps compute second");
 }
 
-fn void public_shared_families_keep_distinct_transfer() @test {
+fn void selected_queue_families_keep_distinct_transfer() @test {
     vk::VkDeviceState state = {
         .selected_queue_roles = { .graphics, .compute, .transfer },
         .graphics_family = 4,
@@ -423,13 +428,75 @@ fn void public_shared_families_keep_distinct_transfer() @test {
     };
     uint[3] families;
     uint count = vk::used_queue_families(&state, families[..]);
-    assert(count == 3, "public sharing keeps three distinct families");
+    assert(count == 3, "selected roles keep three distinct families");
     assert(
         families[0] == 4 && families[1] == 5 && families[2] == 7,
-        "public sharing keeps graphics, compute, and transfer order"
+        "selected families keep graphics, compute, and transfer order"
     );
 }
 
+fn void resource_access_families_include_only_admitted_roles() @test {
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
+        .graphics_family = 4,
+        .compute_family  = 5,
+        .transfer_family = 7,
+    };
+    uint[3] families;
+    uint count = vk::resource_queue_families(
+        &state,
+        { .graphics, .compute },
+        families[..],
+    );
+    assert(count == 2, "two admitted families are retained");
+    assert(families[0] == 4 && families[1] == 5, "unadmitted transfer is excluded");
+
+    state.compute_family = 4;
+    count = vk::resource_queue_families(
+        &state,
+        { .graphics, .compute },
+        families[..],
+    );
+    assert(count == 1 && families[0] == 4, "same-family roles remain exclusive");
+}
+
+fn void resource_access_families_include_every_identity_of_one_role() @test {
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .compute },
+        .compute_family = 5,
+    };
+    state.queues.counts.compute = 2;
+    state.queues.compute_ids[0] = vk::native_queue_id(5, 0);
+    state.queues.compute_ids[1] = vk::native_queue_id(7, 0);
+
+    uint[2] families;
+    uint count = vk::resource_queue_families(&state, { .compute }, families[..]);
+    assert(count == 2, "all admitted compute identities contribute families");
+    assert(families[0] == 5 && families[1] == 7, "compute families preserve selected order");
+}
+
+fn void resource_texture_create_info_uses_exact_access_families() @test {
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute },
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .sampled, .storage },
+    };
+
+    uint[1] aliased = { 4 };
+    vk::ImageCreateInfo exclusive = vk::make_texture_create_info(&desc, aliased[..]);
+    assert(exclusive.sharing_mode == vk::SharingMode.EXCLUSIVE);
+    assert(exclusive.queue_family_index_count == 0);
+
+    uint[2] split = { 4, 5 };
+    vk::ImageCreateInfo concurrent = vk::make_texture_create_info(&desc, split[..]);
+    assert(concurrent.sharing_mode == vk::SharingMode.CONCURRENT);
+    assert(concurrent.queue_family_index_count == 2);
+    assert(concurrent.p_queue_family_indices[0] == 4);
+    assert(concurrent.p_queue_family_indices[1] == 5);
+}
 fn void pool_selection_follows_queue_family() @test {
     vk::CommandPool[2] gfx  = { (vk::CommandPool)(uptr)0x10, (vk::CommandPool)(uptr)0x11 };
     vk::CommandPool[2] comp = { (vk::CommandPool)(uptr)0x30, (vk::CommandPool)(uptr)0x31 };

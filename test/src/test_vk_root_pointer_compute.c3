@@ -21,6 +21,7 @@ fn void root_pointer_compute_readback() @test {
     gpu::BufferDesc io_desc = {
         .size = COUNT * float::size, .usage = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "io",
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle input = gpu::create_buffer(&device, &io_desc)!!;
     defer gpu::destroy_buffer(&device, input)!!;

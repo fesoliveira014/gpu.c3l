@@ -10,6 +10,7 @@ fn void unchecked_subspan_math() @test {
         .size   = 256,
         .offset = 0,
         .kind   = MemoryKind.DEVICE,
+        .access = { .compute },
     };
 
     GpuSpan sub = s.unchecked_subspan(64, 32);
@@ -18,6 +19,7 @@ fn void unchecked_subspan_math() @test {
     assert(sub.size == 32, "size is the requested size");
     assert(sub.offset == 64, "offset accumulates");
     assert(sub.kind == MemoryKind.DEVICE, "memory kind is inherited");
+    assert(sub.access.compute, "queue access is inherited");
 }
 
 fn void checked_subspan_null_cpu() @test {
@@ -37,6 +39,7 @@ fn void checked_subspan_bounds_and_nesting() @test {
         .size   = 256,
         .offset = 0,
         .kind   = MemoryKind.PERSISTENT_UPLOAD,
+        .access = { .graphics, .compute },
         .buffer = { .owner = 1, .index = 7, .generation = 3 },
     };
 
@@ -53,6 +56,7 @@ fn void checked_subspan_bounds_and_nesting() @test {
     assert(exact.size == 32, "exact-fit nested slice keeps the requested size");
     assert(exact.kind == MemoryKind.PERSISTENT_UPLOAD, "nested slice inherits memory kind");
     assert(exact.buffer == span.buffer, "nested slice inherits backing buffer");
+    assert((uint)exact.access == (uint)span.access, "nested slice inherits queue access");
     assert(nested_escape == gpu::INVALID_ARGUMENT, "nested slice cannot escape its immediate parent");
     assert(offset_past_parent == gpu::INVALID_ARGUMENT, "offset beyond parent faults");
     assert(size_past_parent == gpu::INVALID_ARGUMENT, "size beyond parent remainder faults");

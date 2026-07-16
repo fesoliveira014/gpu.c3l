@@ -509,6 +509,7 @@ fn void frame_upload_memory_is_coherent() @test {
         .size        = 256,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "coherency_probe",
     };
     gpu::BufferHandle buf = gpu::create_buffer(&device, &buf_desc)!!;

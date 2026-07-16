@@ -216,14 +216,14 @@ fn int main() {
     }
 
     gpu::BufferDesc data_desc = {
-        .size = OVERLAP_DATA_BYTES, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE,
+        .size = OVERLAP_DATA_BYTES, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         .debug_name = "overlap_compute_data",
     };
     gpu::BufferHandle data_buffer = gpu::create_buffer(&device, &data_desc)!!;
     defer gpu::destroy_buffer(&device, data_buffer)!!;
 
     gpu::BufferDesc comp_root_desc = {
-        .size = OverlapComputeRoot::size, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .size = OverlapComputeRoot::size, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer },
         .debug_name = "overlap_compute_root",
     };
     gpu::BufferHandle comp_root_buffer = gpu::create_buffer(&device, &comp_root_desc)!!;
@@ -235,6 +235,7 @@ fn int main() {
 
     gpu::TextureDesc rt_desc = {
         .dimension = gpu::TextureDimension.TEX_2D, .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE,
+        .access    = { .graphics, .compute, .transfer },
         .format = gpu::Format.RGBA8_UNORM, .usage = { .color_attach }, .debug_name = "overlap_rt",
     };
     gpu::TextureHandle rt = gpu::create_texture(&device, &rt_desc)!!;

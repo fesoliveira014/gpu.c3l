@@ -138,7 +138,7 @@ fn UploadBenchObservation run_phase_a_combo(
     for (uint i = 0; i < threads; i++) {
         contexts[i] = gpu::create_recording_context(&device)!!;
         gpu::BufferDesc desc = {
-            .size = payload_size, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+            .size = payload_size, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         dsts[i] = gpu::create_buffer(&device, &desc)!!;
     }
@@ -240,7 +240,7 @@ fn void run_phase_b() {
     gpu::BufferHandle[UPLOAD_BENCH_MAX_THREADS] dsts;
     for (uint i = 0; i < UPLOAD_BENCH_MAX_THREADS; i++) {
         gpu::BufferDesc desc = {
-            .size = UPLOAD_BENCH_HELPER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE,
+            .size = UPLOAD_BENCH_HELPER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         dsts[i] = gpu::create_buffer(&device, &desc)!!;
     }

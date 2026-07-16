@@ -91,6 +91,7 @@ fn void foreign_buffer_owner_rejects_before_backend_mutation() @test {
         .size        = 256,
         .usage       = { .transfer_dst },
         .memory_kind = MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     BufferHandle first_buffer = gpu::create_buffer(&first, &buffer_desc)!!;
     BufferHandle second_buffer = gpu::create_buffer(&second, &buffer_desc)!!;
@@ -122,6 +123,7 @@ fn void stale_child_handle_rejects_after_device_slot_reuse() @test {
         .size        = 256,
         .usage       = { .transfer_dst },
         .memory_kind = MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
 
     Device old_device = gpu::create_device(&adapter, &request)!!;
@@ -166,9 +168,11 @@ fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
         .size        = 256,
         .usage       = { .transfer_dst },
         .memory_kind = MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
     };
     TextureDesc texture_desc = {
         .dimension = TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 16,
         .format    = Format.RGBA8_UNORM,

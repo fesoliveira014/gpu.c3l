@@ -5,6 +5,7 @@ import gpu @public;
 fn gpu::TextureDesc valid_texture_desc() {
     return {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 8,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -43,8 +44,6 @@ fn void texture_desc_profile_rejects_invalid_usage_roles() @test {
 
     desc.usage = {};
     assert(!gpu::texture_desc_valid(&desc), "empty usage is invalid");
-    desc.usage = { .shared_queues };
-    assert(!gpu::texture_desc_valid(&desc), "shared queues alone is invalid");
     desc = valid_texture_desc();
     desc.format = gpu::Format.D32_FLOAT;
     desc.usage = { .storage };

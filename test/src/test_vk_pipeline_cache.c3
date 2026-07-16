@@ -210,6 +210,7 @@ fn void cull_replay_renders_per_alias() @test {
     // texture and a sampler feed both draws.
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 1,
         .height    = 1,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -242,6 +243,7 @@ fn void cull_replay_renders_per_alias() @test {
 
     gpu::TextureDesc rt_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = CACHE_RT_SIZE,
         .height    = CACHE_RT_SIZE,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -266,7 +268,7 @@ fn void cull_replay_renders_per_alias() @test {
     assert(cache_entry_count(&device) == 1, "both draw pipelines alias one cache entry");
 
     gpu::BufferDesc rb_desc = {
-        .size = CACHE_RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK,
+        .size = CACHE_RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle rb_culled = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, rb_culled)!!;
@@ -406,6 +408,7 @@ fn void alias_survives_peer_destroy() @test {
 
     gpu::TextureDesc rt_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = CACHE_RT_SIZE,
         .height    = CACHE_RT_SIZE,
         .format    = gpu::Format.RGBA8_UNORM,

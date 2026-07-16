@@ -46,6 +46,7 @@ fn void descriptor_buffer_device_and_heap() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -106,10 +107,11 @@ fn void descriptor_buffer_compute_to_graphics() @test {
 
     gpu::TextureDesc shared_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = TEX_SIZE,
         .height    = TEX_SIZE,
         .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .sampled, .storage, .shared_queues },
+        .usage     = { .sampled, .storage },
     };
     gpu::TextureHandle shared_texture = gpu::create_texture(&device, &shared_desc)!!;
     defer gpu::destroy_texture(&device, shared_texture)!!;
@@ -130,6 +132,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .size        = WriteRoot::size,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle compute_root_buffer = gpu::create_buffer(&device, &compute_root_desc)!!;
     defer gpu::destroy_buffer(&device, compute_root_buffer)!!;
@@ -151,6 +154,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .size        = TEX_SIZE * TEX_SIZE * 16,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle compute_output = gpu::create_buffer(&device, &compute_output_desc)!!;
     defer gpu::destroy_buffer(&device, compute_output)!!;
@@ -160,6 +164,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .size        = SampleRoot::size,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle sample_root_buffer = gpu::create_buffer(&device, &sample_root_desc)!!;
     defer gpu::destroy_buffer(&device, sample_root_buffer)!!;
@@ -183,6 +188,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .size        = VERTEX_BYTES + FragRoot::size,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle graphics_root_buffer = gpu::create_buffer(&device, &graphics_root_desc)!!;
     defer gpu::destroy_buffer(&device, graphics_root_buffer)!!;
@@ -208,6 +214,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
 
     gpu::TextureDesc target_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = TARGET_SIZE,
         .height    = TARGET_SIZE,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -219,6 +226,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .size        = TARGET_BYTES,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle readback = gpu::create_buffer(&device, &readback_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;
@@ -442,6 +450,7 @@ fn void descriptor_buffer_write_then_sample() @test {
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = TEX,
         .height    = TEX,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -466,6 +475,7 @@ fn void descriptor_buffer_write_then_sample() @test {
         .size        = TEX * TEX * 16,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.READBACK,
+        .access      = { .graphics, .compute, .transfer },
     };
     gpu::BufferHandle output = gpu::create_buffer(&device, &out_desc)!!;
     defer gpu::destroy_buffer(&device, output)!!;

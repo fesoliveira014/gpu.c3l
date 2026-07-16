@@ -43,6 +43,7 @@ fn DeferRig build_defer_rig(gpu::Device* device) {
         .size        = DEFER_COUNT * float::size,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
         .debug_name  = "defer_io",
     };
     gpu::BufferHandle io = gpu::create_buffer(device, &io_desc)!!;
@@ -52,6 +53,7 @@ fn DeferRig build_defer_rig(gpu::Device* device) {
 
     gpu::TextureDesc tex_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width      = 8,
         .height     = 8,
         .format     = gpu::Format.RGBA8_UNORM,
@@ -149,7 +151,7 @@ fn void deferred_queue_count_rises_then_drains() @test {
     gpu::Device device = make_defer_test_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -169,7 +171,7 @@ fn void deferred_destroy_outside_frame_is_immediate() @test {
     gpu::Device device = make_defer_test_device();
     defer gpu::destroy_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
 
     assert(deferred_count(&device) == 0, "queue starts empty");
@@ -182,7 +184,7 @@ fn void deferred_enqueue_uses_only_the_signaled_shadow() @test {
     defer gpu::destroy_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
     state.timeline_counter.store(1, AtomicOrdering.RELAXED);
     vk::DeferredStats before = vk::deferred_stats(state);
@@ -202,12 +204,12 @@ fn void off_frame_destroy_defers_release() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc src_desc = {
-        .size = 256, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "off_frame_src",
+        .size = 256, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }, .debug_name = "off_frame_src",
     };
     gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
 
     gpu::BufferDesc dst_desc = {
-        .size = 256, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "off_frame_dst",
+        .size = 256, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }, .debug_name = "off_frame_dst",
     };
     gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
 
@@ -241,7 +243,7 @@ fn void mid_frame_destroy_storm_issues_no_host_queries() @test {
 
     gpu::BufferHandle[STORM_COUNT] buffers;
     for (uint i = 0; i < STORM_COUNT; i++) {
-        gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+        gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
     }
 
@@ -272,7 +274,7 @@ fn void deferred_stats_reconcile_without_teardown() @test {
 
     gpu::BufferHandle[16] buffers;
     for (uint i = 0; i < 16; i++) {
-        gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE };
+        gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
         buffers[i] = gpu::create_buffer(&device, &desc)!!;
     }
 

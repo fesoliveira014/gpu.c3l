@@ -423,6 +423,7 @@ fn void? build_swapchain(
                 .default_view    = view,
                 .format          = format,
                 .usage           = swapchain_image_usage(usage),
+                .access          = { .graphics },
                 .width           = extent.width,
                 .height          = extent.height,
                 .mip_levels      = 1,

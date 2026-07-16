@@ -28,13 +28,13 @@ fn void copy_upload_to_readback() @test {
     defer gpu::destroy_device(&device)!!;
 
     gpu::BufferDesc up_desc = {
-        .size = 256, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .debug_name = "upload",
+        .size = 256, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer }, .debug_name = "upload",
     };
     gpu::BufferHandle upload = gpu::create_buffer(&device, &up_desc)!!;
     defer gpu::destroy_buffer(&device, upload)!!;
 
     gpu::BufferDesc rb_desc = {
-        .size = 256, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .debug_name = "readback",
+        .size = 256, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer }, .debug_name = "readback",
     };
     gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
     defer gpu::destroy_buffer(&device, readback)!!;

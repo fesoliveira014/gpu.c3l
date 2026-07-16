@@ -281,8 +281,9 @@ GpuSpan vertices = packed.checked_subspan(0, vertex_bytes)!;
 GpuSpan indices = packed.checked_subspan(vertex_bytes, index_bytes)!;
 ```
 
-Validation is relative to the immediate parent. A nested child therefore
-cannot escape an intermediate slice even when it would still fit the original
+Slicing preserves the span access roles. Validation is relative to the immediate
+parent. A nested child therefore cannot escape an intermediate slice even when
+it would still fit the original
 backing buffer. Bounds use `size <= parent.size - offset` after validating
 the offset, avoiding `offset + size` overflow. Derived GPU, CPU, and backing
 offset additions are checked separately.
@@ -302,6 +303,7 @@ BufferDesc
     usz size
     BufferUsage usage
     MemoryKind memory_kind
+    QueueRoles access
     ZString debug_name
 ```
 
@@ -321,10 +323,10 @@ BufferUsage.VERTEX       -> VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
 Backend creation flow:
 
 ```text
-1. Validate desc.size > 0.
-2. Translate usage flags.
+1. Validate size, usage, and the semantic access set.
+2. Translate usage flags and derive the exact admitted queue families.
 3. Add required transfer/address flags.
-4. Build vk::BufferCreateInfo.
+4. Build vk::BufferCreateInfo; use concurrent sharing only for two or more families.
 5. Build vma::AllocationCreateInfo from MemoryKind.
 6. Call allocator.try_create_buffer.
 7. Store vk::Buffer, vma::Allocation, vma::AllocationInfo.
@@ -346,6 +348,7 @@ BufferSlot
     usz size
     BufferUsage usage
     MemoryKind memory_kind
+    QueueRoles access
     ushort generation
     bool used
     bool mapped
@@ -367,6 +370,7 @@ TextureDesc
     uint array_layers
     Format format
     TextureUsage usage
+    QueueRoles access
     ZString debug_name
 ```
 
@@ -405,6 +409,7 @@ TextureSlot
     vk::ImageLayout layout
     Format format
     TextureUsage usage
+    QueueRoles access
     uint width
     uint height
     uint depth
@@ -465,14 +470,10 @@ flush; the same holds for the descriptor-buffer storage. STAGING, READBACK,
 and PERSISTENT_UPLOAD keep VMA's memory-type freedom and the explicit
 `flush_buffer`/`invalidate_buffer` contract.
 
-Frame-arena backing buffers are created for exactly the selected graphics and
-compute families. When those family indices differ, the backend uses concurrent
-sharing; when they alias, the buffer remains exclusive even if transfer uses
-another family. Concurrent sharing is the correctness-first choice while frame
-spans expose no family intent; the explicit-transfer alternative remains
-unsupported. Callers do not set `BufferUsage.shared_queues` for frame
-spans. This ownership policy does not replace barriers or semaphores: callers
-still order host writes and cross-queue GPU accesses explicitly.
+Frame spans admit the selected graphics and compute roles, or transfer on a
+transfer-only device. The backing buffer uses the exact deduplicated families for
+those roles: one family stays exclusive and two or more use concurrent sharing.
+Barriers, semaphore ordering, and lifetime remain explicit.
 
 Allocation during `ACTIVE` is lock-free — the cursor is an atomic bumped with
 a CAS loop, so worker threads allocate concurrently (see docs/threading.md):
@@ -504,20 +505,15 @@ cursor = 0
 
 Persistent arenas use VMA virtual allocator to suballocate ranges from large real buffers.
 
-The backing buffer is created once with a fixed usage superset (`transfer_src`,
-`transfer_dst`, `uniform`, `storage`, `addressable`, `indirect`, `index`, and
-`shared_queues`; `vertex` is deliberately excluded). It is shared automatically
-across the exact selected graphics, compute, and transfer families. Distinct
-families use concurrent sharing with the ordered deduplicated family list; when
-all three queues alias one family, the buffer remains exclusive with no family
-list.
+The backing buffer uses the fixed usage superset `transfer_src`,
+`transfer_dst`, `uniform`, `storage`, `addressable`, `indirect`, and
+`index`; `vertex` is excluded. It admits every selected role. Distinct
+families use the exact ordered concurrent-sharing list; one family remains
+exclusive.
 
-`PersistentAllocDesc.usage` is validated as a subset of that superset at
-allocation time (`INVALID_ARGUMENT` on unsupported bits) rather than applied per
-span. `shared_queues` is accepted as a no-op because sharing belongs to the
-backing buffer, and empty usage remains a valid storage-style default. Explicit
-buffers and textures still require their own `shared_queues` flag when consumed
-across distinct queue families.
+`PersistentAllocDesc.usage` must be a subset of that superset; empty usage is
+the storage-style default. `PersistentAllocDesc.access` is required, must be a
+subset of selected roles, and is copied to the returned span.
 
 Concurrent sharing removes queue-family ownership transfers only. Callers must
 still flush host writes as required, record barriers, order submissions with

@@ -461,6 +461,7 @@ fn void runtime_devices_destroy_independently() @test {
             .size        = 256,
             .usage       = { .storage },
             .memory_kind = gpu::MemoryKind.DEVICE,
+            .access      = { .graphics, .compute, .transfer },
         };
         gpu::BufferHandle first_buffer = gpu::create_buffer(&first, &buffer_desc)!!;
         gpu::BufferHandle second_buffer = gpu::create_buffer(&second, &buffer_desc)!!;

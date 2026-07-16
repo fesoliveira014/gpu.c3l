@@ -344,6 +344,7 @@ GpuSpan
     BufferHandle buffer
     usz offset
     MemoryKind kind
+    QueueRoles access
 ```
 
 Rules:
@@ -353,6 +354,7 @@ GpuAddress zero is invalid for shader-visible memory.
 GpuSpan.cpu may be null.
 GpuSpan.gpu must be aligned for the intended shader layout.
 GpuSpan.buffer identifies the backing buffer for barriers/copies/debug.
+GpuSpan.access is the non-empty set of selected roles admitted to the range.
 ```
 
 `GpuSpan` slicing is explicit:
@@ -381,7 +383,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; resource creation: empty, unknown, or unselected access role; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag or misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, any resource-handle-taking call, `cmd_*`, `end_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
@@ -466,10 +468,9 @@ even when the worker also faulted, and caller-owned `frame` remains live for
 worker fault before returning it. The helper performs no heap allocation,
 runtime callback, virtual dispatch, or per-frame indirect call.
 
-Frame-arena backing buffers are safe on the selected graphics and compute
-families without a caller-supplied `shared_queues` flag. Concurrent sharing
-does not provide execution or memory ordering; callers must still record the
-required barriers and semaphore waits/signals.
+Frame spans admit the selected graphics and compute roles, or transfer on a
+transfer-only device. The backend uses concurrent sharing only when those roles
+map to distinct families. Barriers and submission ordering remain explicit.
 
 Use cases:
 
@@ -490,18 +491,18 @@ PersistentAllocDesc
     usz align
     BufferUsage usage
     MemoryKind memory_kind
+    QueueRoles access
     ZString debug_name
 
 alloc_persistent_span(Device* device, PersistentAllocDesc* desc) -> GpuSpan?
 free_persistent_span(Device* device, GpuSpan span) -> void?
 ```
 
-Persistent backing is shared automatically across the exact selected graphics,
-compute, and transfer queue families, remaining exclusive when those queues
-alias one family. Per-span `usage.shared_queues` is accepted but does not change
-ownership because sharing is a backing-buffer property; spans expose no queue-
-family ownership API. Explicit buffers and textures consumed across distinct
-families still require their own `shared_queues` flag.
+`PersistentAllocDesc.access` is required and copied to the returned span. The
+arena backing remains available to all selected roles; per-span access records
+the narrow caller contract. Explicit buffers and textures derive private native
+sharing from their own `access` fields: one unique family stays exclusive, while
+two or more use the exact ordered family list.
 
 Concurrent sharing does not provide visibility, execution ordering, completion,
 or lifetime management. Callers must retain the required flushes, barriers,
@@ -529,6 +530,7 @@ BufferDesc
     usz size
     BufferUsage usage
     MemoryKind memory_kind
+    QueueRoles access
     ZString debug_name
 
 create_buffer(Device* device, BufferDesc* desc) -> BufferHandle?
@@ -595,7 +597,6 @@ bitstruct TextureUsage : uint
     bool depth_attach : 3
     bool transfer_src : 4
     bool transfer_dst : 5
-    bool shared_queues : 6
 
 TextureFormatFeatures
     bool sampled
@@ -641,6 +642,7 @@ TextureDesc
     uint array_layers
     Format format
     TextureUsage usage
+    QueueRoles access
     ZString debug_name
 
 TextureViewDesc
@@ -667,9 +669,14 @@ destroy_texture_descriptor(Device* device, TextureIndex index) -> void?
 create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) -> void?
 ```
 
-`get_texture_format_support` reports library-creatable support, not every raw Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling query used by creation, but the bits are independent; use `supports_texture_desc` for a usage combination. The backend profile masks every dimension except 2D and every sample count except one. Per-format usages and linear filtering remain adapter-dependent; D24S8 reports empty support until the rendering path supports it end to end.
+`get_texture_format_support` reports library-creatable support, not every raw Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling query used by creation, but the bits are independent; use `supports_texture_desc` for a usage combination. The backend profile masks every dimension except 2D and every sample count except one. Per-format usages and linear filtering remain adapter-dependent; D24S8 reports empty support until the rendering path supports it end to end. `supports_texture_desc` returns false for an empty, unknown, or unavailable access set.
 
-`supports_texture_desc` checks the exact optimal-tiling format, combined usage (excluding the queue-sharing policy flag), normalized extent, mip and layer counts, and the required single-sample image properties without allocating. A false result caused by malformed or backend-unsupported input corresponds to `INVALID_ARGUMENT` at creation; a structurally valid descriptor rejected by the adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion can still make creation fail after a true capability result.
+`supports_texture_desc` checks the exact optimal-tiling format, combined usage,
+normalized extent, mip and layer counts, access roles, and required single-sample
+image properties without allocating. A false result caused by malformed input
+corresponds to `INVALID_ARGUMENT` at creation; a structurally valid descriptor
+rejected by the adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion
+can still make creation fail after a true capability result.
 
 `TextureHandle` owns the image. `TextureIndex` is a descriptor heap entry used by shaders.
 
@@ -909,14 +916,15 @@ several roles unless the request marks a role `distinct`. `get_queue` faults
 unavailable role index.
 `get_queue_info` faults `INVALID_HANDLE` for zero, stale, foreign-device, or
 malformed tokens and returns the stable device-local ID and supported roles.
-Backend family indices and native handles remain private. Command entry points
-take `QueueKind` and fault `INVALID_ARGUMENT` before backend work when the
-role was not requested.
+Backend family indices and native handles remain private. Resource descriptions
+require a non-empty subset of the selected roles. For allocations reached only
+through root GPU pointers, every reachable allocation must admit the recording
+role because nested pointers are not discoverable. Command entry points take
+`QueueKind` and reject roles that were not requested.
 
-`QueueKind.COMPUTE` routes to a real compute queue when
-`DeviceCaps.async_compute` is true; resources used by both GRAPHICS and
-COMPUTE must then carry the `shared_queues` usage flag (concurrent sharing;
-no-op on single-queue devices). See docs/limitations.md.
+`BufferDesc.access`, `TextureDesc.access`, and `PersistentAllocDesc.access` are
+non-empty subsets of the selected roles. The backend keeps same-family access
+exclusive and uses private concurrent sharing only for distinct admitted families.
 
 Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
 `TextureBufferCopyDesc`, `TextureUploadDesc`, `ClearColor`,
@@ -1492,6 +1500,7 @@ fn void? run_compute() {
         .size = 4096,
         .usage = { .storage, .addressable, .transfer_dst },
         .memory_kind = gpu::MemoryKind.DEVICE,
+        .access = { .compute },
         .debug_name = "input",
     };
 

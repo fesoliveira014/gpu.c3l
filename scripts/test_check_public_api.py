@@ -51,6 +51,16 @@ class PublicApiCheckTests(unittest.TestCase):
     def test_accepts_distinct_platform_handle_modules(self) -> None:
         self.assertEqual(check_public_api.validate_document(valid_document()), [])
 
+    def test_rejects_backend_sharing_flags(self) -> None:
+        document = valid_document()
+        document["modules"]["gpu"]["types"].append(
+            {"name": "BufferUsage", "members": [{"name": "shared_queues"}]}
+        )
+        self.assertIn(
+            "backend queue-sharing policy",
+            check_public_api.validate_document(document),
+        )
+
     def test_rejects_retired_root_surface_types(self) -> None:
         document = valid_document()
         document["modules"]["gpu"]["types"].append({"name": "PlatformKind"})

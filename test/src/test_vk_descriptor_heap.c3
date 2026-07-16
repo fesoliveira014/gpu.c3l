@@ -189,6 +189,7 @@ fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
 fn gpu::TextureHandle make_heap_texture(gpu::Device* device) {
     gpu::TextureDesc desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -200,6 +201,7 @@ fn gpu::TextureHandle make_heap_texture(gpu::Device* device) {
 fn gpu::TextureHandle make_heap_view_texture(gpu::Device* device) {
     gpu::TextureDesc desc = {
         .dimension    = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
         .width        = 16,
         .height       = 16,
         .mip_levels   = 5,
