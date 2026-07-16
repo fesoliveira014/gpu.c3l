@@ -9,10 +9,7 @@ import std::time;
 import std::core::mem;
 import std::core::mem::allocators;
 
-// Advisory, not gating: Phase A observes parallel Tier-C recording under
-// payload and staging-arena pressure. Phase B observes blocking-helper
-// throughput across worker counts. Results describe the selected adapter and
-// queue topology; timing and scaling are observations, never verdicts.
+// Advisory command-recording and blocking-upload measurements.
 
 const uint[3] UPLOAD_BENCH_THREAD_COUNTS = { 1, 2, 4 };
 const usz[3] UPLOAD_BENCH_PAYLOAD_SIZES = { 4 * 1024, 256 * 1024, 4 * 1024 * 1024 };
@@ -37,12 +34,11 @@ struct UploadBenchObservation {
 }
 
 struct UploadPhaseAArgs {
-    gpu::Device*                device;
-    gpu::RecordingContextHandle ctx;
-    gpu::BufferHandle           dst;
-    usz                         payload_size;
-    uint                        iters;
-    gpu::CommandList            list;
+    gpu::Device*               device;
+    gpu::BufferHandle          dst;
+    usz                        payload_size;
+    uint                       iters;
+    gpu::ExecutableCommandList executable;
 }
 
 struct UploadPhaseBArgs {
@@ -104,11 +100,13 @@ fn int upload_phase_a_worker(void* arg) {
     @pool_init(&allocators::LIBC_ALLOCATOR, UPLOAD_BENCH_POOL_SIZE) {
         char[] payload = mem::talloc_array(char, (sz)args.payload_size);
         foreach (&b : payload) *b = (char)0xAB;
-        args.list = gpu::begin_commands(args.device, gpu::QueueKind.GRAPHICS, args.ctx)!!;
+        gpu::CommandList commands = gpu::begin_commands(
+            gpu::get_queue(args.device, gpu::QueueKind.GRAPHICS)!!,
+        )!!;
         for (uint i = 0; i < args.iters; i++) {
-            gpu::cmd_upload_buffer(&args.list, args.dst, 0, payload)!!;
+            gpu::cmd_upload_buffer(&commands, args.dst, 0, payload)!!;
         }
-        gpu::end_commands(&args.list)!!;
+        args.executable = gpu::end_commands(&commands)!!;
     };
     return 0;
 }
@@ -133,10 +131,8 @@ fn UploadBenchObservation run_phase_a_combo(
         *context_printed = true;
     }
 
-    gpu::RecordingContextHandle[UPLOAD_BENCH_MAX_THREADS] contexts;
     gpu::BufferHandle[UPLOAD_BENCH_MAX_THREADS] dsts;
     for (uint i = 0; i < threads; i++) {
-        contexts[i] = gpu::create_recording_context(&device)!!;
         gpu::BufferDesc desc = {
             .size = payload_size, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
@@ -151,15 +147,20 @@ fn UploadBenchObservation run_phase_a_combo(
         UploadPhaseAArgs[UPLOAD_BENCH_MAX_THREADS] args;
         Thread[UPLOAD_BENCH_MAX_THREADS] threads_arr;
         for (uint i = 0; i < threads; i++) {
-            args[i] = { .device = &device, .ctx = contexts[i], .dst = dsts[i], .payload_size = payload_size, .iters = UPLOAD_BENCH_WAVE_SIZE };
+            args[i] = {
+                .device       = &device,
+                .dst          = dsts[i],
+                .payload_size = payload_size,
+                .iters        = UPLOAD_BENCH_WAVE_SIZE,
+            };
         }
         for (uint i = 0; i < threads; i++) threads_arr[i].create(&upload_phase_a_worker, &args[i])!!;
         for (uint i = 0; i < threads; i++) threads_arr[i].join()!!;
 
-        gpu::CommandList[UPLOAD_BENCH_MAX_THREADS] lists;
-        for (uint i = 0; i < threads; i++) lists[i] = args[i].list;
+        gpu::ExecutableCommandList[UPLOAD_BENCH_MAX_THREADS] lists;
+        for (uint i = 0; i < threads; i++) lists[i] = args[i].executable;
         gpu::SubmitDesc submit = { .command_lists = lists[:threads] };
-        gpu::submit(&device, &submit)!!;
+        submit_bench_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
         wait_bench_queue(&device, gpu::QueueKind.GRAPHICS)!!;
         gpu::end_frame(&frame_token)!!;
     }
@@ -172,7 +173,6 @@ fn UploadBenchObservation run_phase_a_combo(
 
     for (uint i = 0; i < threads; i++) {
         (void)gpu::destroy_buffer(&device, dsts[i]);
-        (void)gpu::destroy_recording_context(&device, contexts[i]);
     }
     return {
         .uploads_per_second       = uploads_per_sec,
@@ -182,7 +182,7 @@ fn UploadBenchObservation run_phase_a_combo(
 }
 
 fn void run_phase_a() {
-    io::printfn("-- phase A hypothesis: observe parallel Tier-C recording under staging pressure --");
+    io::printfn("-- phase A: parallel command recording under staging pressure --");
     bool context_printed = false;
     foreach (arena_size : UPLOAD_BENCH_ARENA_SIZES) {
         foreach (payload_size : UPLOAD_BENCH_PAYLOAD_SIZES) {
@@ -232,7 +232,7 @@ fn int upload_phase_b_worker(void* arg) {
 <* Observe blocking upload_buffer_data across worker counts; serialization
    and queue costs vary by adapter and topology. *>
 fn void run_phase_b() {
-    io::printfn("-- phase B hypothesis: observe blocking-helper throughput; serialization and queue costs vary by adapter/topology --");
+    io::printfn("-- phase B: blocking upload throughput --");
     gpu::Device device = make_bench_device(0);
     defer destroy_bench_device(&device)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);

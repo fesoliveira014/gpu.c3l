@@ -364,35 +364,12 @@ fn uint report_shader_leaks(VkDeviceState* state) {
     return count;
 }
 
-
-<* The device-owned default and helper contexts are exempt. *>
-fn uint report_context_leaks(VkDeviceState* state) {
-    uint count = 0;
-    if (state.recording_contexts.slots.ptr == null) return 0;
-    foreach (i, &cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
-        if (!cell.used || (uint)i == state.default_context.index || (uint)i == state.helper_context.index) continue;
-        if (!report_resource_lifetime(
-            state:               state,
-            resource_kind:       gpu::DebugResourceKind.RECORDING_CONTEXT,
-            has_public_identity: true,
-            index:               (uint)i,
-            generation:          cell.generation,
-            debug_name:          null,
-            backend_text:        "recording context remains live",
-        )) {
-            io::eprintfn("gpu: leaked recording context (index %d)", i);
-        }
-        count++;
-    }
-    return count;
-}
-
 fn uint report_resource_leaks(VkDeviceState* state) {
     uint count = report_buffer_leaks(state);
     count += report_texture_leaks(state);
     count += report_pipeline_leaks(state);
     count += report_shader_leaks(state);
-    count += report_context_leaks(state);
+
     if (state.persistent_arena.virtual_block != null) {
         vma::Statistics stats;
         state.persistent_arena.virtual_block.get_statistics(&stats);

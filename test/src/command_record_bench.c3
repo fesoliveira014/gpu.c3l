@@ -10,7 +10,7 @@ const uint COMMAND_RECORD_REPETITIONS = 5;
 
 fn double record_global_barriers(gpu::Device* device) {
     gpu::FrameToken frame = gpu::begin_frame(device)!!;
-    gpu::CommandList commands = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::GlobalBarrier barrier = {
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.COMPUTE_SHADER,
@@ -22,7 +22,8 @@ fn double record_global_barriers(gpu::Device* device) {
         gpu::cmd_global_barrier(&commands, &barrier)!!;
     }
     long elapsed_ns = (long)start.to_now();
-    gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_bench_executable(&commands_executable)!!;
     gpu::discard_commands(&commands)!!;
     gpu::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
@@ -30,7 +31,7 @@ fn double record_global_barriers(gpu::Device* device) {
 
 fn double record_buffer_barriers(gpu::Device* device, gpu::BufferHandle buffer) {
     gpu::FrameToken frame = gpu::begin_frame(device)!!;
-    gpu::CommandList commands = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::BufferBarrier barrier = {
         .buffer        = buffer,
         .size          = 64,
@@ -44,7 +45,8 @@ fn double record_buffer_barriers(gpu::Device* device, gpu::BufferHandle buffer) 
         gpu::cmd_buffer_barrier(&commands, &barrier)!!;
     }
     long elapsed_ns = (long)start.to_now();
-    gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_bench_executable(&commands_executable)!!;
     gpu::discard_commands(&commands)!!;
     gpu::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
@@ -57,7 +59,7 @@ fn double record_indirect_dispatches(
     gpu::GpuSpan args,
 ) {
     gpu::FrameToken frame = gpu::begin_frame(device)!!;
-    gpu::CommandList commands = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
         gpu::cmd_dispatch_indirect(
@@ -68,7 +70,8 @@ fn double record_indirect_dispatches(
         )!!;
     }
     long elapsed_ns = (long)start.to_now();
-    gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_bench_executable(&commands_executable)!!;
     gpu::discard_commands(&commands)!!;
     gpu::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;

@@ -82,7 +82,7 @@ fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* 
     root.output_gpu = root.input_gpu;
     root.count      = DEFER_COUNT;
 
-    gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier tex_bar = {
@@ -113,11 +113,12 @@ fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* 
         .after_hazard  = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &buf_bar)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
 
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(device, &submit)!!;
+    submit_test_queue(device, gpu::QueueKind.GRAPHICS, &submit)!!;
 }
 
 fn void destroy_after_submit_survives_frame_cycle() @test {
@@ -215,15 +216,16 @@ fn void off_frame_destroy_defers_release() @test {
     };
     gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = { .src = src, .dst = dst, .src_offset = 0, .dst_offset = 0, .size = 256 };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
 
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
 
     assert(deferred_count(&device) == 0, "queue starts empty");
     gpu::destroy_buffer(&device, dst)!!;

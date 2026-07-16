@@ -105,17 +105,16 @@ fn void command_pin_device_destroy(void* backend_state) {
 }
 
 fn void? command_pin_begin(
-    gpu::Device* device,
-    gpu::QueueKind queue,
-    gpu::RecordingContextHandle context,
+    gpu::Queue queue,
     gpu::CommandList* out_commands,
 ) {
-    gpu::DeviceData* data = gpu::resolve_pinned_device(device);
+    gpu::Device device = queue.device;
+    gpu::DeviceData* data = gpu::resolve_pinned_device(&device);
     if (data == null || out_commands == null) return gpu::INVALID_HANDLE~;
     CommandPinFixture* fixture = (CommandPinFixture*)data.backend_state;
     fixture.next_command++;
     *out_commands = {
-        .device = *device,
+        .device = device,
         .handle = {
             .owner      = gpu::resource_owner_tag(
                 data.resource_owner,
@@ -129,12 +128,15 @@ fn void? command_pin_begin(
 
 fn void? command_pin_end(gpu::CommandList* commands) {}
 
-fn ulong? command_pin_discard(gpu::CommandList* commands) {
-    if (commands == null) return gpu::INVALID_HANDLE~;
+fn ulong? command_pin_discard(
+    gpu::Device* device,
+    gpu::CommandListHandle handle,
+    bool executable,
+) {
+    if (device == null || !handle.is_valid()) return gpu::INVALID_HANDLE~;
     CommandPinFixture* fixture =
-        (CommandPinFixture*)gpu::device_backend_state_ptr(&commands.device);
+        (CommandPinFixture*)gpu::device_backend_state_ptr(device);
     if (fixture == null) return gpu::INVALID_HANDLE~;
-    if (!fixture.preserve_discarded_token) *commands = {};
     return 0;
 }
 
@@ -159,11 +161,12 @@ fn void? command_pin_global_barrier(
 }
 
 fn gpu::CompletionPoint? command_pin_submit(
-    gpu::Device* device,
+    gpu::Queue queue,
     gpu::SubmitDesc* desc,
 ) {
+    gpu::Device device = queue.device;
     CommandPinFixture* fixture =
-        (CommandPinFixture*)gpu::device_backend_state_ptr(device);
+        (CommandPinFixture*)gpu::device_backend_state_ptr(&device);
     if (fixture == null) return gpu::INVALID_HANDLE~;
     gpu::DeviceSlotControl control =
         (gpu::DeviceSlotControl)gpu::device_slots[device.index].control.load(
@@ -172,7 +175,7 @@ fn gpu::CompletionPoint? command_pin_submit(
     fixture.pins_during_submit = control.pins;
     if (fixture.submit_busy) return gpu::DEVICE_BUSY~;
     return {
-        .device  = *device,
+        .device  = device,
         .payload = 1ull << 10,
     };
 }
@@ -294,20 +297,17 @@ fn void command_calls_borrow_the_lifetime_pin() @test {
         vtable:        &command_pin_vtable,
         backend_state: &fixture,
     )!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
     gpu::DeviceSlotControl after_begin =
         (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
 
     gpu::GlobalBarrier barrier;
     gpu::cmd_global_barrier(&commands, &barrier)!!;
-    gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::DeviceSlotControl after_end =
         (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-    gpu::discard_commands(&commands)!!;
+    gpu::discard_executable_commands(&executable)!!;
     gpu::DeviceSlotControl after_discard =
         (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
 
@@ -332,20 +332,17 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
         vtable:        &command_pin_vtable,
         backend_state: &fixture,
     )!!;
-    gpu::CommandList first = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    gpu::CommandList second = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    gpu::end_commands(&first)!!;
-    gpu::end_commands(&second)!!;
-    gpu::CommandList[2] lists = { first, second };
+    gpu::CommandList first = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList second = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::ExecutableCommandList first_executable = gpu::end_commands(&first)!!;
+    gpu::ExecutableCommandList second_executable = gpu::end_commands(&second)!!;
+    gpu::ExecutableCommandList[2] lists = {
+        first_executable,
+        second_executable,
+    };
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
 
-    fault submit_fault = @catch(gpu::submit(&device, &desc));
+    fault submit_fault = @catch(gpu::submit(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!, &desc));
     gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
     gpu::DeviceSlotControl after_failure =
         (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
@@ -353,7 +350,7 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
         slot.live_children.load(AtomicOrdering.ACQUIRE);
 
     fixture.submit_busy = false;
-    gpu::submit(&device, &desc)!!;
+    gpu::submit(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!, &desc)!!;
     gpu::DeviceSlotControl after_success =
         (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
 
@@ -380,10 +377,7 @@ fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
         vtable:        &command_pin_vtable,
         backend_state: &fixture,
     )!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::CommandList duplicate = commands;
     gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
 
@@ -407,10 +401,7 @@ fn void lost_commands_can_be_discarded() @test {
         vtable:        &command_pin_vtable,
         backend_state: &fixture,
     )!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::mark_device_lost(&device);
 
     gpu::GlobalBarrier barrier;
@@ -447,16 +438,10 @@ fn void stale_commands_cannot_borrow_unrelated_lifetime_pins() @test {
         vtable:        &command_pin_vtable,
         backend_state: &fixture,
     )!!;
-    gpu::CommandList discarded = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList discarded = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::CommandList stale = discarded;
     gpu::discard_commands(&discarded)!!;
-    gpu::CommandList live = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList live = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
 
     StaleCommandWorkerArgs worker_args = { .commands = stale };
     Thread worker;
@@ -496,10 +481,7 @@ fn void forged_command_owners_cannot_borrow_lifetime_pins() @test {
         vtable:        &command_pin_vtable,
         backend_state: &fixture,
     )!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::CommandList forged = commands;
     forged.handle.owner++;
 
@@ -530,16 +512,10 @@ fn void stale_command_generation_cannot_borrow_reused_slot_pin() @test {
         vtable:        &command_pin_vtable,
         backend_state: &fixture,
     )!!;
-    gpu::CommandList first = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList first = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::CommandList stale = first;
     gpu::discard_commands(&first)!!;
-    gpu::CommandList live = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList live = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
 
     bool stale_borrows = gpu::has_retained_command_pin(&stale);
     gpu::GlobalBarrier barrier;
@@ -590,10 +566,7 @@ fn void stale_lease_release_preserves_a_reused_command_slot() @test {
         vtable:        &command_pin_vtable,
         backend_state: &fixture,
     )!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
     uint next_generation = commands.handle.generation + 1;
     slot.command_leases[commands.handle.index].store(

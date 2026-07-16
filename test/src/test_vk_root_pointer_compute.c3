@@ -49,7 +49,7 @@ fn void root_pointer_compute_readback() @test {
     root.output_gpu = gpu::get_buffer_address(&device, output)!!;
     root.count      = COUNT;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
@@ -63,11 +63,12 @@ fn void root_pointer_compute_readback() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &bar)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
 
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;

@@ -3,6 +3,7 @@ module gpu_test;
 import gpu;
 import gpu::vk @public;
 import vk;
+import std::core::mem::allocators;
 
 const uint CONTEXT_POOL_STAGE_CAP = 6;
 
@@ -62,6 +63,7 @@ fn void assert_context_empty(gpu::vk::RecordingContextState* context) {
 
 fn void run_context_pool_failure(bool distinct, uint fail_at, uint stage_count) {
     gpu::vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
         .selected_queue_roles = { .graphics, .compute, .transfer },
         .frames_in_flight = 2,
         .graphics_family = FIXTURE_GRAPHICS_FAMILY,
@@ -91,6 +93,7 @@ fn void run_context_pool_failure(bool distinct, uint fail_at, uint stage_count) 
 
 fn void run_context_pool_success(bool distinct, uint stage_count) {
     gpu::vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
         .selected_queue_roles = { .graphics, .compute, .transfer },
         .frames_in_flight = 2,
         .graphics_family = FIXTURE_GRAPHICS_FAMILY,
@@ -132,6 +135,7 @@ fn void run_single_role_context_pool_success(
     uint expected_family,
 ) {
     gpu::vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
         .selected_queue_roles = selected,
         .frames_in_flight      = 2,
         .graphics_family      = FIXTURE_GRAPHICS_FAMILY,
@@ -194,6 +198,7 @@ fn void successful_context_pool_ownership_is_idempotent() @test {
 
 fn void built_in_context_insertion_failure_cleans_full_context() @test {
     gpu::vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
         .selected_queue_roles = { .graphics, .compute, .transfer },
         .frames_in_flight = 2,
         .graphics_family = FIXTURE_GRAPHICS_FAMILY,

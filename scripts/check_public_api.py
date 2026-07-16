@@ -28,6 +28,10 @@ FORBIDDEN_TEXT = {
     "probe_vulkan_version": "Vulkan loader probe",
     "probe_vma_allocator": "VMA probe",
     "range_end": "readback retirement range",
+    "recordingcontexthandle": "retired recording context",
+    "recording_context": "retired recording context",
+    "create_recording_context": "retired recording context",
+    "destroy_recording_context": "retired recording context",
     "shared_queues": "backend queue-sharing policy",
     "surfacedesc": "retired SurfaceDesc",
     "ticket.value": "readback retirement value",
@@ -59,12 +63,16 @@ PLATFORM_HANDLE_TYPES = {
 RETIRED_SOURCE_SYMBOLS = (
     "PlatformKind",
     "SurfaceDesc",
+    "RecordingContextHandle",
+    "RECORDING_CONTEXT",
     "SemaphoreDesc",
     "SemaphoreHandle",
     "SemaphoreSignal",
     "SemaphoreValue",
     "SemaphoreWait",
     "create_semaphore(",
+    "create_recording_context(",
+    "destroy_recording_context(",
     "destroy_semaphore(",
     "wait_semaphore(",
     "wait_queue_idle",
@@ -108,6 +116,75 @@ def validate_document(document: dict) -> list[str]:
         for symbol in FORBIDDEN_SYMBOLS
         if f'"{symbol}"' in encoded
     )
+
+    functions = {
+        entry.get("name"): entry
+        for entry in public_surface.get("functions", [])
+    }
+    types = {
+        entry.get("name"): entry
+        for entry in public_surface.get("types", [])
+    }
+
+    begin_commands = functions.get("begin_commands")
+    if begin_commands is None:
+        failures.append("missing begin_commands")
+    else:
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in begin_commands.get("members", [])
+        )
+        if parameter_types != ("Queue",):
+            failures.append("begin_commands must take one Queue token")
+        if begin_commands.get("return_type", {}).get("name") != "CommandList?":
+            failures.append("begin_commands must return CommandList?")
+
+    end_commands = functions.get("end_commands")
+    if end_commands is None:
+        failures.append("missing end_commands")
+    else:
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in end_commands.get("members", [])
+        )
+        if parameter_types != ("CommandList*",):
+            failures.append("end_commands must consume CommandList*")
+        if (end_commands.get("return_type", {}).get("name")
+                != "ExecutableCommandList?"):
+            failures.append(
+                "end_commands must return ExecutableCommandList?"
+            )
+
+    submit = functions.get("submit")
+    if submit is None:
+        failures.append("missing submit")
+    else:
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in submit.get("members", [])
+        )
+        if parameter_types != ("Queue", "SubmitDesc*"):
+            failures.append("submit must take Queue and SubmitDesc*")
+
+    executable = types.get("ExecutableCommandList")
+    if executable is None or executable.get("kind") != "struct":
+        failures.append("missing ExecutableCommandList token")
+
+    submit_desc = types.get("SubmitDesc")
+    command_lists_type = None
+    if submit_desc is not None:
+        command_lists_type = next(
+            (
+                member.get("type", {}).get("name")
+                for member in submit_desc.get("members", [])
+                if member.get("name") == "command_lists"
+            ),
+            None,
+        )
+    if command_lists_type != "ExecutableCommandList[]":
+        failures.append(
+            "SubmitDesc.command_lists must contain executable tokens"
+        )
 
     for module_name, handle_names in PLATFORM_HANDLE_TYPES.items():
         module = modules.get(module_name)
@@ -189,7 +266,7 @@ def main() -> int:
             print(f"- {failure}", file=sys.stderr)
         return 1
 
-    print("public GPU API is backend-neutral and uses typed platform surfaces")
+    print("public GPU API matches the strict contract")
     return 0
 
 

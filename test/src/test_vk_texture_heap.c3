@@ -92,7 +92,7 @@ fn void bindless_texture_write_then_sample() @test {
     sample_root.width         = TEX_SIZE;
     sample_root.height        = TEX_SIZE;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_general = gpu::texture_transition(
@@ -131,10 +131,12 @@ fn void bindless_texture_write_then_sample() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;

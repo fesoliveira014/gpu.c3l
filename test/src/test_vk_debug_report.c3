@@ -54,7 +54,7 @@ struct LeakCapture {
     uint textures;
     uint pipelines;
     uint shaders;
-    uint contexts;
+
     uint texture_descriptors;
     uint samplers;
     uint persistent_spans;
@@ -103,7 +103,7 @@ fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
             capture.pipeline_identity_valid = message.resource.has_public_identity
                 && (first || second);
         case gpu::DebugResourceKind.SHADER:             capture.shaders++;
-        case gpu::DebugResourceKind.RECORDING_CONTEXT:  capture.contexts++;
+
         case gpu::DebugResourceKind.TEXTURE_DESCRIPTOR: capture.texture_descriptors++;
         case gpu::DebugResourceKind.SAMPLER:            capture.samplers++;
         case gpu::DebugResourceKind.PERSISTENT_SPAN:    capture.persistent_spans++;
@@ -454,7 +454,6 @@ fn void leak_reporters_count_leaks() @test {
     gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
 
-    gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!!;
 
     gpu::TextureIndex texture_index = gpu::create_texture_descriptor(&device, texture, null)!!;
     gpu::SamplerDesc sampler_desc = {
@@ -479,17 +478,17 @@ fn void leak_reporters_count_leaks() @test {
     assert(vk::report_texture_leaks(state) == 1, "one leaked texture counted");
     assert(vk::report_pipeline_leaks(state) == 1, "one leaked cache entry counted");
     assert(vk::report_shader_leaks(state) == 1, "one leaked shader counted");
-    assert(vk::report_context_leaks(state) == 1, "one leaked context counted (default and helper exempt)");
+
     vk::report_descriptor_leaks(state);
 
-    assert(capture.total == 7, "each live resource or descriptor emits exactly one structured warning");
+    assert(capture.total == 6, "each public resource or descriptor emits one warning");
     assert(capture.buffers == 1 && capture.textures == 1 && capture.pipelines == 1,
         "buffer, texture, and pipeline leak kinds are exact");
-    assert(capture.shaders == 1 && capture.contexts == 1,
-        "shader and context leak kinds are exact");
+    assert(capture.shaders == 1,
+        "private recording pools are not public resource leaks");
     assert(capture.texture_descriptors == 1 && capture.samplers == 1,
         "descriptor leak kinds are exact");
-    assert(capture.public_identities == 7,
+    assert(capture.public_identities == 6,
         "every slot-backed leak carries one public identity");
     assert(capture.pipeline_identity_valid, "pipeline cache leak identifies one live public alias");
     assert(capture.metadata_valid, "leak diagnostics are warning, resource-lifetime, faultless destroy-device messages");
@@ -501,7 +500,7 @@ fn void leak_reporters_count_leaks() @test {
 
     gpu::destroy_texture_descriptor(&device, texture_index)!!;
     gpu::destroy_sampler(&device, sampler)!!;
-    gpu::destroy_recording_context(&device, ctx)!!;
+
     gpu::destroy_pipeline(&device, first_alias)!!;
     gpu::destroy_pipeline(&device, second_alias)!!;
     gpu::destroy_shader(&device, shader)!!;
@@ -517,13 +516,13 @@ fn void leak_reporters_count_leaks() @test {
     };
     gpu::GpuSpan persistent = gpu::alloc_persistent_span(&device, &persistent_desc)!!;
     assert(vk::report_resource_leaks(state) == 1, "one persistent span leak counted");
-    assert(capture.total == 8 && capture.persistent_spans == 1,
+    assert(capture.total == 7 && capture.persistent_spans == 1,
         "persistent allocation summary emits one structured warning");
     assert(capture.metadata_valid, "persistent warning uses the same resource-lifetime contract");
     gpu::free_persistent_span(&device, persistent)!!;
 
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
-    assert(capture.total == 8, "clean leak report emits nothing");
+    assert(capture.total == 7, "clean leak report emits nothing");
     gpu::destroy_device(&device)!!;
 }
 
@@ -603,7 +602,7 @@ fn void labels_record_validation_clean() @test {
     defer gpu::destroy_texture(&device, target)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::cmd_begin_label(&cmd, "frame_setup")!!;
@@ -630,10 +629,12 @@ fn void labels_record_validation_clean() @test {
     gpu::cmd_end_label(&cmd)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 

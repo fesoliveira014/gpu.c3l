@@ -231,8 +231,17 @@ fn gpu::Device make_frame_lifecycle_device(uint frames_in_flight = 1) {
 
 fn FrameLifecycleSnapshot frame_lifecycle_snapshot(vk::VkDeviceState* state) {
     vk::FrameArenaState* arena = &state.frame_arenas[state.frame_index];
-    vk::RecordingContextState* context = state.recording_contexts.get(state.default_context)!!;
-    vk::PoolDirtyMask dirty = context.pool_dirty[state.frame_index];
+    vk::PoolDirtyMask dirty;
+    foreach (&cell : state.recording_contexts.slots[
+        :state.recording_contexts.next_new
+    ]) {
+        if (!cell.used) continue;
+        vk::PoolDirtyMask context_dirty =
+            cell.value.pool_dirty[state.frame_index];
+        dirty.graphics = dirty.graphics || context_dirty.graphics;
+        dirty.compute = dirty.compute || context_dirty.compute;
+        dirty.transfer = dirty.transfer || context_dirty.transfer;
+    }
     vk::PoolResetStats pool_stats = vk::pool_reset_stats(state);
     vk::SubmitStats submit_stats = vk::submit_stats(state);
     return {
@@ -392,15 +401,16 @@ fn void double_begin_single_slot_is_atomic() @test {
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     (void)gpu::alloc_frame_span(&frame, 64, 16)!!;
-    vk::RecordingContextState* context = state.recording_contexts.get(state.default_context)!!;
-    context.pool_dirty[state.frame_index].graphics = true;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    gpu::discard_commands(&commands)!!;
 
     FrameLifecycleSnapshot before = frame_lifecycle_snapshot(state);
     fault rejected = @catch(gpu::begin_frame(&device));
     assert(rejected == gpu::INVALID_RESOURCE_STATE, "double begin faults INVALID_RESOURCE_STATE");
     assert_frame_lifecycle_unchanged(before, frame_lifecycle_snapshot(state));
 
-    context.pool_dirty[state.frame_index].graphics = false;
     gpu::end_frame(&frame)!!;
 }
 

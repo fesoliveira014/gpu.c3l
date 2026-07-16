@@ -79,7 +79,6 @@ struct SubmitInputs {
     CommandRecord*[]        records;
     QueueCompletionState*[] completion_waits;
     SwapchainSlot*   swapchain;
-    gpu::QueueKind   kind;
 }
 
 fn bool queue_family_supports_graphics(
@@ -1852,6 +1851,12 @@ fn gpu::QueueKind frame_queue_kind(VkDeviceState* state) @private {
     return gpu::QueueKind.TRANSFER;
 }
 
+fn gpu::QueueKind queue_kind_for_roles(gpu::QueueRoles roles) @private {
+    if (roles.graphics) return gpu::QueueKind.GRAPHICS;
+    if (roles.compute) return gpu::QueueKind.COMPUTE;
+    return gpu::QueueKind.TRANSFER;
+}
+
 fn uint off_frame_queue_bit(gpu::QueueKind queue) @private {
     switch (queue) {
         case gpu::QueueKind.GRAPHICS: return OFF_FRAME_GRAPHICS_BIT;
@@ -1938,10 +1943,11 @@ fn void observe_queue_completion(
 
 fn SubmitInputs? resolve_submit_inputs(
     VkDeviceState* state,
-    gpu::Device* device,
+    gpu::Queue queue,
     gpu::SubmitDesc* desc,
 ) {
-    SubmitInputs inputs = { .kind = frame_queue_kind(state) };
+    SubmitInputs inputs;
+    gpu::Device device = queue.device;
 
     if (desc.command_lists.len > 0) {
         inputs.records = mem::talloc_array(CommandRecord*, (sz)desc.command_lists.len);
@@ -1949,7 +1955,7 @@ fn SubmitInputs? resolve_submit_inputs(
         {
             defer state.command_mutex.unlock();
             foreach (i, &token : desc.command_lists) {
-                if (token.device != *device) return gpu::INVALID_HANDLE~;
+                if (token.device != device) return gpu::INVALID_HANDLE~;
                 for (sz j = 0; j < i; j++) {
                     if (desc.command_lists[j].handle == token.handle) {
                         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1957,11 +1963,7 @@ fn SubmitInputs? resolve_submit_inputs(
                 }
                 CommandRecord* record = state.commands.get(token.handle)!;
                 if (record.state != CommandState.EXECUTABLE) return gpu::COMMAND_RECORDING_ERROR~;
-                if (i == 0) {
-                    inputs.kind = record.queue;
-                } else if (record.queue != inputs.kind) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
+                if (record.queue != queue) return gpu::INVALID_ARGUMENT~;
                 inputs.records[i] = record;
             }
         }
@@ -1972,7 +1974,7 @@ fn SubmitInputs? resolve_submit_inputs(
         swapchain_submit_guard(
             inputs.swapchain.acquire_pending,
             inputs.swapchain.acquire_consumed,
-            inputs.kind,
+            queue_kind_for_roles(queue.roles),
         )!;
     }
 
@@ -1983,7 +1985,7 @@ fn SubmitInputs? resolve_submit_inputs(
             (sz)desc.completion_waits.len,
         );
         foreach (i, point : desc.completion_waits) {
-            if (point.device != *device) return gpu::INVALID_HANDLE~;
+            if (point.device != device) return gpu::INVALID_HANDLE~;
             inputs.completion_waits[i] = published_queue_completion_state(
                 state,
                 gpu::completion_point_queue_id(point),
@@ -2018,18 +2020,19 @@ fn usz append_completion_wait_infos(
 <* Submit executable command lists and signal the queue-owned completion
    timeline. Preparation and native failure leave every token retryable. *>
 fn gpu::CompletionPoint? vk_submit_with_queries(
-    gpu::Device* device,
+    gpu::Queue queue,
     gpu::SubmitDesc* desc,
     QueueSubmit2Fn submit_fn,
     FrameCounterQueryFn counter_query_fn,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    gpu::Device device = queue.device;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&device);
     gpu::CompletionPoint submitted;
 
     @pool() {
-        SubmitInputs inputs = resolve_submit_inputs(state, device, desc)!;
+        SubmitInputs inputs = resolve_submit_inputs(state, queue, desc)!;
         vk::SubmitInfo2 submit = vk::submit_info2();
-        gpu::QueueKind kind = inputs.kind;
+        gpu::QueueKind kind = queue_kind_for_roles(queue.roles);
         CommandRecord*[] records = inputs.records;
         bool claimed = false;
 
@@ -2077,7 +2080,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         bool piggyback_transfer = kind == gpu::QueueKind.TRANSFER
             && queue_uses_frame_aux(state, kind);
         bool piggyback = piggyback_compute || piggyback_transfer;
-        gpu::Queue queue = queue_token_for_kind(state, kind)!;
         QueueCompletionState* completion = queue_completion_state(
             state,
             queue.id,
@@ -2224,12 +2226,12 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
 }
 
 fn gpu::CompletionPoint? vk_submit_with(
-    gpu::Device* device,
+    gpu::Queue queue,
     gpu::SubmitDesc* desc,
     QueueSubmit2Fn submit_fn,
 ) @private {
     return vk_submit_with_queries(
-        device:           device,
+        queue:            queue,
         desc:             desc,
         submit_fn:        submit_fn,
         counter_query_fn: &real_frame_counter_query,
@@ -2237,10 +2239,10 @@ fn gpu::CompletionPoint? vk_submit_with(
 }
 
 fn gpu::CompletionPoint? vk_submit(
-    gpu::Device* device,
+    gpu::Queue queue,
     gpu::SubmitDesc* desc,
 ) @private {
-    return vk_submit_with(device, desc, &real_queue_submit2);
+    return vk_submit_with(queue, desc, &real_queue_submit2);
 }
 
 

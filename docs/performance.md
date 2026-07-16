@@ -35,7 +35,7 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 | Resource creation | Buffer / texture / shader, one worker | 300 each | 1,726 / 2,294 / 11,225 ns/op |
 | Descriptor churn | Texture single / batch of 16 / sampler, one worker | 320 each | 523 / 330 / 563 ns/descriptor |
 | Upload recording | 256 KiB, 32 MiB arena, one / four workers | 40 per worker | 1,199 / 4,441 uploads/s |
-| Command reset | Idle / 15 recording contexts | 2,000 each | 2,208 / 118,863 ns/begin_frame |
+| Command reset | Idle / 15 worker pools | 2,000 each | 4,444 / 159,622 ns/begin_frame |
 | Command recording | Global / buffer barrier / indirect dispatch | 20,000 × 5 | 123 / 142 / 173 ns/record median |
 | Submission | Graphics / graphics+compute / all queues | 2,000 each | 45,514 / 131,617 / 149,877 ns/end_frame |
 | Pipeline creation | Cold / cached duplicate | 200 / 200,000 | 14,808 / 137 ns/create |
@@ -47,7 +47,7 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
   slower in this run, while resource creation costs microseconds.
 - Batch descriptor writes. Batches of 16 reduced one-worker texture descriptor
   cost by about 37%.
-- Keep recording contexts idle when unused. Reset cost scales with dirty pools.
+- Reuse worker threads. Recording pools are cached per worker and only dirty pools reset.
 - Avoid activating queues without useful work. End-of-frame cost increased with
   each queue participating in the frame.
 - Cache pipelines. A cached duplicate was about 108 times cheaper than a cold

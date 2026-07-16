@@ -23,12 +23,10 @@ alias AllocPersistentSpanFn @private = fn GpuSpan? (Device*, PersistentAllocDesc
 alias FreePersistentSpanFn @private  = fn void? (Device*, GpuSpan);
 alias GetPersistentStatsFn @private  = fn PersistentArenaStats? (Device*);
 // Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
-alias BeginCommandsFn @private       = fn void? (Device*, QueueKind, RecordingContextHandle, CommandList* out_commands);
-alias CreateRecordingContextFn @private  = fn RecordingContextHandle? (Device*);
-alias DestroyRecordingContextFn @private = fn void? (Device*, RecordingContextHandle);
-alias EndCommandsFn @private         = fn void? (CommandList*);
-alias DiscardCommandsFn @private     = fn ulong? (CommandList*);
-alias SubmitFn @private              = fn CompletionPoint? (Device*, SubmitDesc*);
+alias BeginCommandsFn @private   = fn void? (Queue, CommandList* out_commands);
+alias EndCommandsFn @private     = fn void? (CommandList*);
+alias DiscardCommandsFn @private = fn ulong? (Device*, CommandListHandle, bool executable);
+alias SubmitFn @private          = fn CompletionPoint? (Queue, SubmitDesc*);
 alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
 alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
 alias CmdCopyBufferFn @private       = fn void? (CommandList*, BufferCopyDesc*);
@@ -122,8 +120,6 @@ struct BackendVTable @private {
     FreePersistentSpanFn    free_persistent_span;
     GetPersistentStatsFn    get_persistent_stats;
     BeginCommandsFn         begin_commands;
-    CreateRecordingContextFn  create_recording_context;
-    DestroyRecordingContextFn destroy_recording_context;
     EndCommandsFn           end_commands;
     DiscardCommandsFn       discard_commands;
     SubmitFn                submit;
@@ -226,7 +222,6 @@ enum ResourceOwnerKind @private {
     SWAPCHAIN,
     COMMAND,
     SHADER,
-    RECORDING_CONTEXT,
     READBACK_TICKET,
     COMPLETION_POINT,
 }
@@ -309,23 +304,34 @@ fn DeviceOperation? begin_device_operation(
     return DEVICE_BUSY~;
 }
 
-fn bool has_retained_command_pin(CommandList* commands) @private {
-    if (commands == null || !commands.device.is_valid()) return false;
-    if (commands.device.reserved != 0 || commands.device.index >= MAX_DEVICES) {
+fn bool has_retained_command_pin_fields(
+    Device device,
+    CommandListHandle handle,
+) @private {
+    if (!device.is_valid()) return false;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES) return false;
+    if (handle.generation == 0 || handle.index >= MAX_DEVICE_COMMANDS) {
         return false;
     }
-    if (commands.handle.generation == 0
-        || commands.handle.index >= MAX_DEVICE_COMMANDS) {
+    DeviceSlot* slot = &device_slots[device.index];
+    if (slot.command_owner.load(AtomicOrdering.ACQUIRE) != handle.owner) {
         return false;
     }
-    DeviceSlot* slot = &device_slots[commands.device.index];
-    if (slot.command_owner.load(AtomicOrdering.ACQUIRE)
-        != commands.handle.owner) {
-        return false;
-    }
-    return slot.command_leases[commands.handle.index].load(
+    return slot.command_leases[handle.index].load(
         AtomicOrdering.ACQUIRE,
-    ) == commands.handle.generation;
+    ) == handle.generation;
+}
+
+fn bool has_retained_command_pin(CommandList* commands) @private {
+    return commands != null
+        && has_retained_command_pin_fields(commands.device, commands.handle);
+}
+
+fn bool has_retained_executable_command_pin(
+    ExecutableCommandList* commands,
+) @private {
+    return commands != null
+        && has_retained_command_pin_fields(commands.device, commands.handle);
 }
 
 fn DeviceOperation? borrow_retained_device_operation(
@@ -372,21 +378,36 @@ fn bool retain_command_pin_lease(
     return true;
 }
 
-fn bool release_command_pin_lease(
+fn bool release_command_pin_lease_fields(
     DeviceOperation* operation,
-    CommandList* commands,
+    CommandListHandle handle,
 ) @private {
-    if (operation == null || commands == null) return false;
-    if (commands.handle.index >= MAX_DEVICE_COMMANDS) return false;
-    Atomic{uint}* lease = &operation.slot.command_leases[commands.handle.index];
+    if (operation == null || handle.index >= MAX_DEVICE_COMMANDS) return false;
+    Atomic{uint}* lease = &operation.slot.command_leases[handle.index];
     uint seen = mem::compare_exchange(
         &lease.data,
-        commands.handle.generation,
+        handle.generation,
         (uint)0,
         AtomicOrdering.ACQUIRE_RELEASE,
         AtomicOrdering.ACQUIRE,
     );
-    return seen == commands.handle.generation;
+    return seen == handle.generation;
+}
+
+fn bool release_command_pin_lease(
+    DeviceOperation* operation,
+    CommandList* commands,
+) @private {
+    return commands != null
+        && release_command_pin_lease_fields(operation, commands.handle);
+}
+
+fn bool release_executable_command_pin_lease(
+    DeviceOperation* operation,
+    ExecutableCommandList* commands,
+) @private {
+    return commands != null
+        && release_command_pin_lease_fields(operation, commands.handle);
 }
 
 fn void end_device_operation(DeviceOperation* operation) @private {

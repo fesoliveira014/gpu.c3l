@@ -78,6 +78,7 @@ exists (else the limit is compile-time).
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
 | Live command records | 4096 (`gpu/vk/command_state.c3:7`) | — | `SLOT_TABLE_FULL` |
+| Worker recording-pool caches per device | 256 (`gpu/vk/command.c3:11`) | reuse a bounded worker pool | `SLOT_TABLE_FULL` |
 | Swapchains | 8 (`gpu/swapchain.c3:3`) | — | `SLOT_TABLE_FULL` |
 | Color attachments per pass | Lesser of 8 (`gpu/pipeline.c3:6`) and the selected device limit, reported by `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
 | Frame arena (per frame in flight) | 16 MiB (`gpu/memory.c3:61`) | `frame_arena_size` | `ARENA_FULL` |

@@ -60,10 +60,10 @@ struct QueueSelection @private {
     QueueRoles[MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
 }
 
-<* Submit command lists to their queue. An empty batch targets the frame-anchor
-   queue. A non-zero `swapchain` requires the graphics queue. *>
+<* Work submitted to an explicit queue. A non-zero swapchain requires a
+   graphics-capable queue. *>
 struct SubmitDesc {
-    CommandList[]     command_lists;
+    ExecutableCommandList[] command_lists;
     CompletionPoint[] completion_waits;
     SwapchainHandle   swapchain;
 }
@@ -406,6 +406,25 @@ fn bool queue_access_allows(QueueRoles access, QueueKind queue) @private {
     }
 }
 
+fn QueueRoles queue_roles_for_kind(QueueKind kind) @private {
+    switch (kind) {
+        case QueueKind.GRAPHICS: return { .graphics };
+        case QueueKind.COMPUTE:  return { .compute };
+        case QueueKind.TRANSFER: return { .transfer };
+    }
+}
+
+fn bool queue_access_intersects(
+    QueueRoles access,
+    QueueRoles queue_roles,
+) @private {
+    return (uint)access != 0
+        && queue_roles_are_known(access)
+        && (uint)queue_roles != 0
+        && queue_roles_are_known(queue_roles)
+        && ((uint)access & (uint)queue_roles) != 0;
+}
+
 fn bool queue_access_is_valid(
     DeviceOperation* operation,
     QueueRoles access,
@@ -515,14 +534,16 @@ fn QueueInfo? get_queue_info(Device* device, Queue queue) {
     };
 }
 
-<* Submit executable command lists and return reusable queue progress. Completion
-   waits must belong to this device; successful submission consumes every list. *>
-fn CompletionPoint? submit(Device* device, SubmitDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
+<* Submit executable command lists to `queue` and return reusable progress.
+   Successful submission consumes every list. *>
+fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
+    Device device = queue.device;
+    DeviceOperation operation = begin_device_operation(&device)!;
     defer end_device_operation(&operation);
+    validate_queue(&operation, &device, queue)!;
     if (desc == null) return INVALID_ARGUMENT~;
     foreach (&commands : desc.command_lists) {
-        if (commands.device != *device) return INVALID_HANDLE~;
+        if (commands.device != device) return INVALID_HANDLE~;
         validate_resource_owner(
             &operation,
             commands.handle.owner,
@@ -530,18 +551,19 @@ fn CompletionPoint? submit(Device* device, SubmitDesc* desc) {
         )!;
     }
     foreach (wait : desc.completion_waits) {
-        validate_completion_point(&operation, device, wait)!;
+        validate_completion_point(&operation, &device, wait)!;
     }
     if (desc.swapchain != SWAPCHAIN_HANDLE_INVALID) {
+        if (!queue.roles.graphics) return INVALID_ARGUMENT~;
         validate_resource_owner(
             &operation,
             desc.swapchain.owner,
             ResourceOwnerKind.SWAPCHAIN,
         )!;
     }
-    CompletionPoint point = operation.vtable.submit(device, desc)!;
+    CompletionPoint point = operation.vtable.submit(queue, desc)!;
     foreach (&commands : desc.command_lists) {
-        release_command_pin_lease(&operation, commands);
+        release_executable_command_pin_lease(&operation, commands);
         *commands = {};
     }
     release_device_children(&operation, (ulong)desc.command_lists.len);

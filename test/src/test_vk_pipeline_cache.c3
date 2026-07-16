@@ -293,7 +293,7 @@ fn void cull_replay_renders_per_alias() @test {
     frag_root.texture_index = tex_index;
     frag_root.sampler_index = smp_index;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureHandle[3] targets = { target_culled, target_drawn, target_reset };
@@ -361,10 +361,12 @@ fn void cull_replay_renders_per_alias() @test {
         gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
     }
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, rb_culled, 0, 0)!!;
@@ -422,7 +424,7 @@ fn void alias_survives_peer_destroy() @test {
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_attach = {
         .texture       = target,
@@ -448,10 +450,11 @@ fn void alias_survives_peer_destroy() @test {
         instance_count: 1,
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 

@@ -122,7 +122,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     sample_root.width         = UP_SIZE;
     sample_root.height        = UP_SIZE;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_dst = gpu::texture_transition(
@@ -186,10 +186,12 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
@@ -259,7 +261,7 @@ fn void storage_write_direct_readback() @test {
     root.width         = UP_SIZE;
     root.height        = UP_SIZE;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture       = texture,
@@ -301,11 +303,12 @@ fn void storage_write_direct_readback() @test {
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
 
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
@@ -348,7 +351,7 @@ fn void copy_validation_faults() @test {
     gpu::GpuSpan span = gpu::get_buffer_span(&device, staging)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     // Tracked layout is UNDEFINED, not TRANSFER_DST.
@@ -388,7 +391,9 @@ fn void copy_validation_faults() @test {
     fault usage_fault = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &no_src_usage));
     assert(usage_fault == gpu::INVALID_ARGUMENT, "texture without transfer_src faults INVALID_ARGUMENT on readback");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -470,7 +475,7 @@ fn void mip_subset_view_sampled() @test {
     root.width         = UP_SIZE / 2;
     root.height        = UP_SIZE / 2;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_dst = {
         .texture       = texture,
@@ -510,10 +515,11 @@ fn void mip_subset_view_sampled() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;

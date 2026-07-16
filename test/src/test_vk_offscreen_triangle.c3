@@ -55,7 +55,7 @@ fn void offscreen_clear_works() @test {
     defer gpu::destroy_buffer(&device, readback)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_attach = {
@@ -101,10 +101,12 @@ fn void offscreen_clear_works() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
@@ -203,7 +205,7 @@ fn void offscreen_textured_triangle() @test {
     frag_root.texture_index = tex_index;
     frag_root.sampler_index = smp_index;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier pattern_to_dst = {
@@ -279,10 +281,12 @@ fn void offscreen_textured_triangle() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
@@ -352,7 +356,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
     float[4] green = { 0.0f, 1.0f, 0.0f, 1.0f };
     for (uint i = 0; i < green.len; i++) ((float*)color.cpu)[i] = green[i];
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
@@ -425,10 +429,12 @@ fn void dynamic_viewport_scissor_pixels() @test {
         gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
     }
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
@@ -460,7 +466,7 @@ fn void offscreen_render_to_mip() @test {
     defer gpu::destroy_buffer(&device, readback)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_attach = {
@@ -506,10 +512,12 @@ fn void offscreen_render_to_mip() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
@@ -566,7 +574,7 @@ fn void dynamic_viewport_scissor_validation() @test {
     defer gpu::destroy_texture(&device, target)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::Viewport full_viewport = {
@@ -654,7 +662,9 @@ fn void dynamic_viewport_scissor_validation() @test {
     assert(@catch(gpu::cmd_set_scissor(&cmd, &full_scissor)) == gpu::COMMAND_RECORDING_ERROR,
         "scissor after a render pass faults COMMAND_RECORDING_ERROR");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -671,7 +681,7 @@ fn void render_pass_state_machine() @test {
     defer gpu::destroy_buffer(&device, buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     // Draw outside a pass.
@@ -720,6 +730,7 @@ fn void render_pass_state_machine() @test {
     assert(end_fault == gpu::COMMAND_RECORDING_ERROR, "ending a command list with an open render pass faults COMMAND_RECORDING_ERROR");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }

@@ -8,9 +8,29 @@ import std::core::mem;
 alias CreateContextPoolFn @private = fn vk::CommandPool? (void*, vk::Device, uint);
 alias DestroyContextPoolFn @private = fn void (void*, vk::Device, vk::CommandPool);
 
-// Concrete (non-generic) slot table for recording contexts. Monomorphized
-// twin of gpu::slots, same c3c 0.8.0 rationale as PipelineTable.
-const uint RECORDING_CONTEXT_FREE_NONE = 0;
+const uint MAX_RECORDING_CONTEXTS = 257;
+const uint MAX_THREAD_DEVICE_CONTEXTS = 64;
+
+struct RecordingContextHandle {
+    uint index;
+    uint generation;
+}
+
+struct ThreadRecordingContext {
+    gpu::Device            device;
+    RecordingContextHandle context;
+}
+
+fn bool RecordingContextHandle.is_valid(self) => self.generation != 0;
+fn bool RecordingContextHandle.equals(
+    self,
+    RecordingContextHandle other,
+) @operator(==) {
+    return self.index == other.index && self.generation == other.generation;
+}
+
+tlocal ThreadRecordingContext[MAX_THREAD_DEVICE_CONTEXTS]
+    thread_recording_contexts;
 
 // Which of a context's pools hold unreset command buffers for a frame slot.
 bitstruct PoolDirtyMask : char {
@@ -39,64 +59,37 @@ struct RecordingContextState {
 struct RecordingContextCell {
     RecordingContextState value;
     uint                  generation;
-    uint                  next_free;
     bool                  used;
 }
 
 struct RecordingContextTable {
     RecordingContextCell[] slots;
-    ulong                  owner;
-    uint                   free_head;
     uint                   next_new;
 }
 
-fn gpu::RecordingContextHandle? RecordingContextTable.alloc(&self, RecordingContextState value) {
-    uint idx;
-    bool found = false;
-    while (self.free_head != RECORDING_CONTEXT_FREE_NONE) {
-        idx = self.free_head - 1;
-        self.free_head = self.slots[idx].next_free;
-        if (can_allocate_handle_generation(self.slots[idx].generation)) {
-            found = true;
-            break;
-        }
-        self.slots[idx].next_free = RECORDING_CONTEXT_FREE_NONE;
-    }
-    if (!found) {
-        if (self.next_new >= self.slots.len) return gpu::SLOT_TABLE_FULL~;
-        idx = self.next_new++;
-        self.slots[idx].generation = 0;
-    }
-    self.slots[idx].value = value;
-    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
-    self.slots[idx].used = true;
-    return (gpu::RecordingContextHandle){
-        .owner      = self.owner,
-        .index      = idx,
-        .generation = self.slots[idx].generation,
+fn RecordingContextHandle? RecordingContextTable.alloc(&self, RecordingContextState value) {
+    if (self.next_new >= self.slots.len) return gpu::SLOT_TABLE_FULL~;
+    uint index = self.next_new++;
+    RecordingContextCell* cell = &self.slots[index];
+    cell.value = value;
+    cell.generation = next_handle_generation(0)!;
+    cell.used = true;
+    return {
+        .index      = index,
+        .generation = cell.generation,
     };
 }
 
-fn RecordingContextState*? RecordingContextTable.get(&self, gpu::RecordingContextHandle h) {
-    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
-    uint idx = h.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
-    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
-    return &self.slots[idx].value;
-}
-
-fn void? RecordingContextTable.free(&self, gpu::RecordingContextHandle h) {
-    self.get(h)!;
-    uint idx = h.index;
-    self.slots[idx].used = false;
-    if (!should_recycle_handle_generation(self.slots[idx].generation)) {
-        self.slots[idx].generation = HANDLE_GENERATION_MAX;
-        self.slots[idx].next_free = RECORDING_CONTEXT_FREE_NONE;
-        return;
+fn RecordingContextState*? RecordingContextTable.get(
+    &self,
+    RecordingContextHandle handle,
+) {
+    if (handle.index >= self.next_new) return gpu::INVALID_HANDLE~;
+    RecordingContextCell* cell = &self.slots[handle.index];
+    if (!cell.used || cell.generation != handle.generation) {
+        return gpu::INVALID_HANDLE~;
     }
-    self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
-    self.slots[idx].next_free = self.free_head;
-    self.free_head = idx + 1;
+    return &cell.value;
 }
 
 fn vk::CommandPool? create_context_pool_real(void* user_data, vk::Device device, uint family) @private {
@@ -135,25 +128,25 @@ fn void destroy_context_pools_with_ops(
         foreach (pool : context.graphics_pools) {
             if (pool != null) ops.destroy(ops.user_data, state.device, pool);
         }
-        mem::free(context.graphics_pools.ptr);
+        alloc::free(state.host_allocator, context.graphics_pools.ptr);
         context.graphics_pools = {};
     }
     if (context.compute_pools_distinct && context.compute_pools.ptr != null) {
         foreach (pool : context.compute_pools) {
             if (pool != null) ops.destroy(ops.user_data, state.device, pool);
         }
-        mem::free(context.compute_pools.ptr);
+        alloc::free(state.host_allocator, context.compute_pools.ptr);
     }
     context.compute_pools = {};
     if (context.transfer_pools.ptr != null) {
         foreach (pool : context.transfer_pools) {
             if (pool != null) ops.destroy(ops.user_data, state.device, pool);
         }
-        mem::free(context.transfer_pools.ptr);
+        alloc::free(state.host_allocator, context.transfer_pools.ptr);
         context.transfer_pools = {};
     }
     if (context.pool_dirty.ptr != null) {
-        mem::free(context.pool_dirty.ptr);
+        alloc::free(state.host_allocator, context.pool_dirty.ptr);
         context.pool_dirty = {};
     }
     context.compute_pools_distinct = false;
@@ -170,20 +163,36 @@ fn void? create_context_pools_with_ops(
     defer catch destroy_context_pools_with_ops(state, context, ops);
 
     if (state.selected_queue_roles.graphics) {
-        context.graphics_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+        context.graphics_pools = alloc::new_array(
+            state.host_allocator,
+            vk::CommandPool,
+            (sz)state.frames_in_flight,
+        );
     }
     context.compute_pools_distinct = state.selected_queue_roles.compute
         && (!state.selected_queue_roles.graphics
             || state.compute_family != state.graphics_family);
     if (state.selected_queue_roles.compute) {
         context.compute_pools = context.compute_pools_distinct
-            ? mem::new_array(vk::CommandPool, state.frames_in_flight)
+            ? alloc::new_array(
+                state.host_allocator,
+                vk::CommandPool,
+                (sz)state.frames_in_flight,
+            )
             : context.graphics_pools;
     }
     if (state.selected_queue_roles.transfer) {
-        context.transfer_pools = mem::new_array(vk::CommandPool, state.frames_in_flight);
+        context.transfer_pools = alloc::new_array(
+            state.host_allocator,
+            vk::CommandPool,
+            (sz)state.frames_in_flight,
+        );
     }
-    context.pool_dirty = mem::new_array(PoolDirtyMask, state.frames_in_flight);
+    context.pool_dirty = alloc::new_array(
+        state.host_allocator,
+        PoolDirtyMask,
+        (sz)state.frames_in_flight,
+    );
 
     for (uint i = 0; i < state.frames_in_flight; i++) {
         if (state.selected_queue_roles.graphics) {
@@ -208,13 +217,13 @@ fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* conte
     destroy_context_pools_with_ops(state, context, &ops);
 }
 
-fn gpu::RecordingContextHandle? create_builtin_recording_context_with_ops(
+fn RecordingContextHandle? create_builtin_recording_context_with_ops(
     VkDeviceState* state,
     ContextPoolOps* ops
 ) @private {
     RecordingContextState context;
     create_context_pools_with_ops(state, &context, ops)!;
-    gpu::RecordingContextHandle? handle = state.recording_contexts.alloc(context);
+    RecordingContextHandle? handle = state.recording_contexts.alloc(context);
     if (catch err = handle) {
         destroy_context_pools_with_ops(state, &context, ops);
         return err~;
@@ -222,19 +231,26 @@ fn gpu::RecordingContextHandle? create_builtin_recording_context_with_ops(
     return handle;
 }
 
-fn gpu::RecordingContextHandle? create_builtin_recording_context(VkDeviceState* state) @private {
+fn RecordingContextHandle? create_builtin_recording_context(VkDeviceState* state) @private {
     ContextPoolOps ops = context_pool_ops_real(state);
     return create_builtin_recording_context_with_ops(state, &ops);
 }
 
-fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
+fn RecordingContextHandle? thread_recording_context(
+    VkDeviceState* state,
+    gpu::Device device,
+) @private {
+    if (device.index >= MAX_THREAD_DEVICE_CONTEXTS) {
+        return gpu::INVALID_HANDLE~;
+    }
+    ThreadRecordingContext* cached = &thread_recording_contexts[device.index];
+    if (cached.device == device && cached.context.is_valid()) {
+        return cached.context;
+    }
+
     RecordingContextState context;
     create_context_pools(state, &context)!;
-
-    gpu::RecordingContextHandle? handle;
+    RecordingContextHandle? handle;
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
@@ -244,61 +260,51 @@ fn gpu::RecordingContextHandle? vk_create_recording_context(gpu::Device* device)
         destroy_context_pools(state, &context);
         return err~;
     }
+    *cached = {
+        .device  = device,
+        .context = handle,
+    };
     return handle;
 }
 
-<* The built-in default and helper contexts cannot be destroyed; a context's
-   command lists must be submitted or discarded first. *>
-fn void? vk_destroy_recording_context(gpu::Device* device, gpu::RecordingContextHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    if (handle == state.default_context) return gpu::INVALID_ARGUMENT~;
-    if (handle == state.helper_context) return gpu::INVALID_ARGUMENT~;
-    RecordingContextState* context = state.recording_contexts.get(handle)!;
-    if (context_has_live_commands(state, handle)) return gpu::INVALID_RESOURCE_STATE~;
-    destroy_context_pools(state, context);
-    state.recording_contexts.free(handle)!;
+fn vk::CommandPool pool_for(
+    RecordingContextState* context,
+    gpu::Queue queue,
+    uint frame_index,
+) {
+    if (queue.roles.graphics) return context.graphics_pools[frame_index];
+    if (queue.roles.compute) return context.compute_pools[frame_index];
+    return context.transfer_pools[frame_index];
 }
 
-<* The pool whose family matches the queue the list will submit to. *>
-fn vk::CommandPool pool_for(RecordingContextState* context, gpu::QueueKind queue, uint frame_index) {
-    switch (queue) {
-        case gpu::QueueKind.TRANSFER: return context.transfer_pools[frame_index];
-        case gpu::QueueKind.COMPUTE:  return context.compute_pools[frame_index];
-        default:                      return context.graphics_pools[frame_index];
+fn void mark_pool_dirty(
+    RecordingContextState* context,
+    gpu::Queue queue,
+    uint frame_index,
+) @private {
+    if (queue.roles.graphics) {
+        context.pool_dirty[frame_index].graphics = true;
+        return;
     }
-}
-
-<* Marks the pool pool_for(queue, frame_index) would resolve to as dirty, so
-   begin_frame's reset loop knows to reset it. COMPUTE folds into the
-   graphics bit when the compute queue shares the graphics pool (mirrors
-   pool_for's own aliasing) — one store into the caller's tier-confined
-   cell, no locks: Tier C confines a context to one thread and begin_frame
-   only reads this under the phase rule's quiescence. *>
-fn void mark_pool_dirty(RecordingContextState* context, gpu::QueueKind queue, uint frame_index) @private {
-    switch (queue) {
-        case gpu::QueueKind.TRANSFER:
-            context.pool_dirty[frame_index].transfer = true;
-        case gpu::QueueKind.COMPUTE:
-            if (context.compute_pools_distinct) {
-                context.pool_dirty[frame_index].compute = true;
-            } else {
-                context.pool_dirty[frame_index].graphics = true;
-            }
-        default:
+    if (queue.roles.compute) {
+        if (context.compute_pools_distinct) {
+            context.pool_dirty[frame_index].compute = true;
+        } else {
             context.pool_dirty[frame_index].graphics = true;
+        }
+        return;
     }
+    context.pool_dirty[frame_index].transfer = true;
 }
 
-fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::RecordingContextHandle ctx, gpu::CommandList* out_commands) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
-    gpu::RecordingContextHandle resolved = ctx.is_valid() ? ctx : state.default_context;
-    RecordingContextState* context = state.recording_contexts.get(resolved)!;
+fn void? vk_begin_commands_with_context(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    RecordingContextHandle context_handle,
+    gpu::CommandList* out_commands,
+) @private {
+    gpu::Device device = queue.device;
+    RecordingContextState* context = state.recording_contexts.get(context_handle)!;
     uint frame_index = state.frame_index;
     vk::CommandPool pool = pool_for(context, queue, frame_index);
     mark_pool_dirty(context, queue, frame_index);
@@ -316,7 +322,7 @@ fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::Recor
 
     CommandRecord record = {
         .command_buffer = cmd,
-        .context        = resolved,
+        .context        = context_handle,
         .queue          = queue,
         .frame_index    = frame_index,
         .state          = CommandState.RECORDING,
@@ -328,7 +334,7 @@ fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::Recor
         defer state.command_mutex.unlock();
         if (try handle = state.commands.alloc(record)) {
             *out_commands = {
-                .device = *device,
+                .device = device,
                 .handle = handle,
             };
             return;
@@ -336,6 +342,23 @@ fn void? vk_begin_commands(gpu::Device* device, gpu::QueueKind queue, gpu::Recor
     }
     vk::free_command_buffers(state.device, pool, 1, &cmd);
     return gpu::SLOT_TABLE_FULL~;
+}
+
+fn void? vk_begin_commands(
+    gpu::Queue queue,
+    gpu::CommandList* out_commands,
+) @private {
+    gpu::Device device = queue.device;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    enter_tracked(state);
+    defer exit_tracked(state);
+    RecordingContextHandle context = thread_recording_context(state, device)!;
+    return vk_begin_commands_with_context(
+        state:          state,
+        queue:          queue,
+        context_handle: context,
+        out_commands:   out_commands,
+    );
 }
 
 fn void? vk_end_commands(gpu::CommandList* commands) @private {
@@ -346,31 +369,34 @@ fn void? vk_end_commands(gpu::CommandList* commands) @private {
     record.state = CommandState.EXECUTABLE;
 }
 
-fn ulong? vk_discard_commands(gpu::CommandList* commands) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+fn ulong? vk_discard_commands(
+    gpu::Device* device,
+    gpu::CommandListHandle handle,
+    bool executable,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     state.transfer_mutex.lock()!!;
     defer state.transfer_mutex.unlock();
     {
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
-        CommandRecord* record = state.commands.get(commands.handle)!;
-        if (record.state != CommandState.RECORDING
-            && record.state != CommandState.RECORDING_RENDER_PASS
-            && record.state != CommandState.EXECUTABLE) {
-            return gpu::COMMAND_RECORDING_ERROR~;
-        }
+        CommandRecord* record = state.commands.get(handle)!;
+        bool state_matches = executable
+            ? record.state == CommandState.EXECUTABLE
+            : record.state == CommandState.RECORDING
+                || record.state == CommandState.RECORDING_RENDER_PASS;
+        if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
     }
 
     ulong canceled_tickets = cancel_command_readback_tickets_locked(
         state,
-        commands.handle,
+        handle,
     );
     {
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
-        release_command(state, commands.handle);
+        release_command(state, handle);
     }
-    *commands = {};
     return canceled_tickets;
 }
 

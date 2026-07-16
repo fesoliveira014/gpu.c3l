@@ -61,8 +61,8 @@ fn void read_pool(vk::VkDeviceState* state, vk::QueryPool pool, uint valid_bits,
 }
 
 <* Record the compute workload and optional timestamps. *>
-fn gpu::CommandList record_compute(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAddress root_gpu, vk::QueryPool pool, bool timestamps_ok) {
-    gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.COMPUTE)!!;
+fn gpu::ExecutableCommandList record_compute(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAddress root_gpu, vk::QueryPool pool, bool timestamps_ok) {
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.COMPUTE)!!)!!;
     vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
@@ -77,13 +77,12 @@ fn gpu::CommandList record_compute(gpu::Device* device, gpu::PipelineHandle pipe
     if (timestamps_ok) {
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT, pool, 1);
     }
-    gpu::end_commands(&cmd)!!;
-    return cmd;
+    return gpu::end_commands(&cmd)!!;
 }
 
 <* Record the graphics workload and optional timestamps. *>
-fn gpu::CommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::TextureHandle rt, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
-    gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
+fn gpu::ExecutableCommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::TextureHandle rt, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
@@ -109,8 +108,7 @@ fn gpu::CommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pip
     if (timestamps_ok) {
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT, pool, 1);
     }
-    gpu::end_commands(&cmd)!!;
-    return cmd;
+    return gpu::end_commands(&cmd)!!;
 }
 
 fn double median_of(double[REPS] values) {
@@ -266,17 +264,18 @@ fn int main() {
     // One startup transition: re-recording UNDEFINED->COLOR_ATTACHMENT per rep
     // would fault INVALID_RESOURCE_STATE under the pending-layout model.
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList transition_cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList transition_cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::TextureBarrier to_attach = {
         .texture = rt, .before_stage = gpu::Stage.HOST, .after_stage = gpu::Stage.COLOR_ATTACHMENT,
         .before_hazard = gpu::Hazard.HOST_WRITE, .after_hazard = gpu::Hazard.COLOR_WRITE,
         .old_layout = gpu::TextureLayout.UNDEFINED, .new_layout = gpu::TextureLayout.COLOR_ATTACHMENT,
     };
     gpu::cmd_texture_barrier(&transition_cmd, &to_attach)!!;
-    gpu::end_commands(&transition_cmd)!!;
-    gpu::CommandList[1] transition_lists = { transition_cmd };
+    gpu::ExecutableCommandList transition_cmd_executable = gpu::end_commands(&transition_cmd)!!;
+    defer discard_bench_executable(&transition_cmd_executable)!!;
+    gpu::ExecutableCommandList[1] transition_lists = { transition_cmd_executable };
     gpu::SubmitDesc transition_submit = { .command_lists = transition_lists[..] };
-    gpu::submit(&device, &transition_submit)!!;
+    submit_bench_queue(&device, gpu::QueueKind.GRAPHICS, &transition_submit)!!;
     wait_bench_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
@@ -290,7 +289,7 @@ fn int main() {
         comp_root.iters = comp_iters;
         gpu::flush_buffer(&device, comp_root_buffer, 0, 0)!!;
         frame_token = gpu::begin_frame(&device)!!;
-        gpu::CommandList comp_cmd = record_compute(
+        gpu::ExecutableCommandList comp_cmd = record_compute(
             device:        &device,
             pipeline:      comp_pipeline,
             root_gpu:      comp_root_span.gpu,
@@ -298,9 +297,9 @@ fn int main() {
             timestamps_ok: timestamps_ok,
         );
         std::time::Clock comp_start = std::time::clock::now();
-        gpu::CommandList[1] comp_lists = { comp_cmd };
+        gpu::ExecutableCommandList[1] comp_lists = { comp_cmd };
         gpu::SubmitDesc comp_submit = { .command_lists = comp_lists[..] };
-        gpu::submit(&device, &comp_submit)!!;
+        submit_bench_queue(&device, gpu::QueueKind.COMPUTE, &comp_submit)!!;
         wait_bench_queue(&device, gpu::QueueKind.COMPUTE)!!;
         double comp_wall_ns = (double)(long)comp_start.to_now();
         if (timestamps_ok) {
@@ -329,27 +328,19 @@ fn int main() {
             -1.0f,  3.0f, 0.0f, 2.0f,
         };
         for (uint i = 0; i < 12; i++) verts[i] = fullscreen_triangle[i];
-        gpu::CommandList frag_cmd = record_graphics(
-
+        gpu::ExecutableCommandList frag_cmd = record_graphics(
             device:        &device,
-
             pipeline:      gfx_pipeline,
-
             rt:            rt,
-
             vertex_root:   vertex_span.gpu,
-
             fragment_root: frag_span.gpu,
-
             pool:          gfx_pool,
-
             timestamps_ok: timestamps_ok,
-
         );
         std::time::Clock frag_start = std::time::clock::now();
-        gpu::CommandList[1] frag_lists = { frag_cmd };
+        gpu::ExecutableCommandList[1] frag_lists = { frag_cmd };
         gpu::SubmitDesc frag_submit = { .command_lists = frag_lists[..] };
-        gpu::submit(&device, &frag_submit)!!;
+        submit_bench_queue(&device, gpu::QueueKind.GRAPHICS, &frag_submit)!!;
         wait_bench_queue(&device, gpu::QueueKind.GRAPHICS)!!;
         double frag_wall_ns = (double)(long)frag_start.to_now();
         if (timestamps_ok) {
@@ -397,61 +388,41 @@ fn int main() {
 
         // Phase A chains graphics after compute.
         std::time::Clock a_start = std::time::clock::now();
-        gpu::CommandList a_compute = record_compute(
-
+        gpu::ExecutableCommandList a_compute = record_compute(
             device:        &device,
-
             pipeline:      comp_pipeline,
-
             root_gpu:      comp_root_span.gpu,
-
             pool:          comp_pool,
-
             timestamps_ok: timestamps_ok,
-
         );
-        gpu::CommandList[1] a_compute_lists = { a_compute };
+        gpu::ExecutableCommandList[1] a_compute_lists = { a_compute };
         gpu::SubmitDesc a_compute_submit = {
             .command_lists = a_compute_lists[..],
         };
-        gpu::CompletionPoint a_compute_completion = gpu::submit(
+        gpu::CompletionPoint a_compute_completion = submit_bench_queue(
             &device,
+            gpu::QueueKind.COMPUTE,
             &a_compute_submit,
         )!!;
 
-        gpu::CommandList a_graphics = record_graphics(
-
-
+        gpu::ExecutableCommandList a_graphics = record_graphics(
             device:        &device,
-
-
             pipeline:      gfx_pipeline,
-
-
             rt:            rt,
-
-
             vertex_root:   vertex_span.gpu,
-
-
             fragment_root: frag_span.gpu,
-
-
             pool:          gfx_pool,
-
-
             timestamps_ok: timestamps_ok,
-
-
         );
-        gpu::CommandList[1] a_graphics_lists = { a_graphics };
+        gpu::ExecutableCommandList[1] a_graphics_lists = { a_graphics };
         gpu::CompletionPoint[1] a_graphics_waits = { a_compute_completion };
         gpu::SubmitDesc a_graphics_submit = {
             .command_lists    = a_graphics_lists[..],
             .completion_waits = a_graphics_waits[..],
         };
-        gpu::CompletionPoint a_graphics_completion = gpu::submit(
+        gpu::CompletionPoint a_graphics_completion = submit_bench_queue(
             &device,
+            gpu::QueueKind.GRAPHICS,
             &a_graphics_submit,
         )!!;
 
@@ -463,59 +434,39 @@ fn int main() {
 
         // Phase B submits the workloads independently.
         std::time::Clock b_start = std::time::clock::now();
-        gpu::CommandList b_compute = record_compute(
-
+        gpu::ExecutableCommandList b_compute = record_compute(
             device:        &device,
-
             pipeline:      comp_pipeline,
-
             root_gpu:      comp_root_span.gpu,
-
             pool:          comp_pool,
-
             timestamps_ok: timestamps_ok,
-
         );
-        gpu::CommandList[1] b_compute_lists = { b_compute };
+        gpu::ExecutableCommandList[1] b_compute_lists = { b_compute };
         gpu::SubmitDesc b_compute_submit = {
             .command_lists = b_compute_lists[..],
         };
-        gpu::CompletionPoint b_compute_completion = gpu::submit(
+        gpu::CompletionPoint b_compute_completion = submit_bench_queue(
             &device,
+            gpu::QueueKind.COMPUTE,
             &b_compute_submit,
         )!!;
 
-        gpu::CommandList b_graphics = record_graphics(
-
-
+        gpu::ExecutableCommandList b_graphics = record_graphics(
             device:        &device,
-
-
             pipeline:      gfx_pipeline,
-
-
             rt:            rt,
-
-
             vertex_root:   vertex_span.gpu,
-
-
             fragment_root: frag_span.gpu,
-
-
             pool:          gfx_pool,
-
-
             timestamps_ok: timestamps_ok,
-
-
         );
-        gpu::CommandList[1] b_graphics_lists = { b_graphics };
+        gpu::ExecutableCommandList[1] b_graphics_lists = { b_graphics };
         gpu::SubmitDesc b_graphics_submit = {
             .command_lists = b_graphics_lists[..],
         };
-        gpu::CompletionPoint b_graphics_completion = gpu::submit(
+        gpu::CompletionPoint b_graphics_completion = submit_bench_queue(
             &device,
+            gpu::QueueKind.GRAPHICS,
             &b_graphics_submit,
         )!!;
 

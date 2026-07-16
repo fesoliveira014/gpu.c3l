@@ -269,7 +269,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
-    gpu::CommandList compute_commands = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList compute_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute_commands)!!;
     gpu::TextureBarrier to_general = {
         .texture       = shared_texture,
@@ -314,12 +314,13 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .after_hazard  = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&compute_commands, &compute_output_to_host)!!;
-    gpu::end_commands(&compute_commands)!!;
-    gpu::CommandList[1] compute_lists = { compute_commands };
+    gpu::ExecutableCommandList compute_commands_executable = gpu::end_commands(&compute_commands)!!;
+    defer discard_test_executable(&compute_commands_executable)!!;
+    gpu::ExecutableCommandList[1] compute_lists = { compute_commands_executable };
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
-    gpu::CompletionPoint compute_completion = gpu::submit(&device, &compute_submit)!!;
+    gpu::CompletionPoint compute_completion = submit_test_queue(&device, gpu::QueueKind.COMPUTE, &compute_submit)!!;
 
-    gpu::CommandList graphics_commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList graphics_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&graphics_commands)!!;
     gpu::TextureBarrier target_to_attachment = {
         .texture       = target,
@@ -368,14 +369,15 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&graphics_commands, &host_read)!!;
-    gpu::end_commands(&graphics_commands)!!;
-    gpu::CommandList[1] graphics_lists = { graphics_commands };
+    gpu::ExecutableCommandList graphics_commands_executable = gpu::end_commands(&graphics_commands)!!;
+    defer discard_test_executable(&graphics_commands_executable)!!;
+    gpu::ExecutableCommandList[1] graphics_lists = { graphics_commands_executable };
     gpu::CompletionPoint[1] graphics_waits = { compute_completion };
     gpu::SubmitDesc graphics_submit = {
         .command_lists    = graphics_lists[..],
         .completion_waits = graphics_waits[..],
     };
-    gpu::CompletionPoint graphics_completion = gpu::submit(&device, &graphics_submit)!!;
+    gpu::CompletionPoint graphics_completion = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &graphics_submit)!!;
     gpu::wait_completion(graphics_completion, ulong::max)!!;
     gpu::invalidate_buffer(
         device: &device,
@@ -502,7 +504,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     sample_root.width         = TEX;
     sample_root.height        = TEX;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture       = texture,
@@ -546,11 +548,12 @@ fn void descriptor_buffer_write_then_sample() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
 
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;

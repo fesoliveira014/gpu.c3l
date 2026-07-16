@@ -213,7 +213,7 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
     gpu::GpuSpan compute_root = alloc_empty_compute_root(&frame_token);
     gpu::GpuSpan graphics_root = alloc_empty_compute_root(&frame_token);
 
-    gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList compute = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
@@ -221,12 +221,13 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
         root:     compute_root.gpu,
         args:     args,
     )!!;
-    gpu::end_commands(&compute)!!;
-    gpu::CommandList[1] compute_lists = { compute };
+    gpu::ExecutableCommandList compute_executable = gpu::end_commands(&compute)!!;
+    defer discard_test_executable(&compute_executable)!!;
+    gpu::ExecutableCommandList[1] compute_lists = { compute_executable };
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
-    gpu::CompletionPoint compute_completion = gpu::submit(&device, &compute_submit)!!;
+    gpu::CompletionPoint compute_completion = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &compute_submit)!!;
 
-    gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList graphics = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&graphics)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
@@ -234,14 +235,15 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
         root:     graphics_root.gpu,
         args:     args,
     )!!;
-    gpu::end_commands(&graphics)!!;
-    gpu::CommandList[1] graphics_lists = { graphics };
+    gpu::ExecutableCommandList graphics_executable = gpu::end_commands(&graphics)!!;
+    defer discard_test_executable(&graphics_executable)!!;
+    gpu::ExecutableCommandList[1] graphics_lists = { graphics_executable };
     gpu::CompletionPoint[1] waits = { compute_completion };
     gpu::SubmitDesc graphics_submit = {
         .command_lists    = graphics_lists[..],
         .completion_waits = waits[..],
     };
-    gpu::CompletionPoint graphics_completion = gpu::submit(&device, &graphics_submit)!!;
+    gpu::CompletionPoint graphics_completion = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &graphics_submit)!!;
     gpu::end_frame(&frame_token)!!;
     gpu::wait_completion(graphics_completion, ulong::max)!!;
 }
@@ -266,7 +268,7 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
     gpu::GpuSpan compute_args = alloc_cross_family_indirect_args(&first_frame);
     assert(compute_args.offset == 0, "first slot use starts at offset zero");
     gpu::GpuSpan compute_root = alloc_empty_compute_root(&first_frame);
-    gpu::CommandList compute = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList compute = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
@@ -274,10 +276,11 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
         root:     compute_root.gpu,
         args:     compute_args,
     )!!;
-    gpu::end_commands(&compute)!!;
-    gpu::CommandList[1] compute_lists = { compute };
+    gpu::ExecutableCommandList compute_executable = gpu::end_commands(&compute)!!;
+    defer discard_test_executable(&compute_executable)!!;
+    gpu::ExecutableCommandList[1] compute_lists = { compute_executable };
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
-    gpu::submit(&device, &compute_submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &compute_submit)!!;
     gpu::end_frame(&first_frame)!!;
 
     gpu::FrameToken second_frame = gpu::begin_frame(&device)!!;
@@ -285,7 +288,7 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
     assert(graphics_args.buffer == compute_args.buffer, "retired slot reuses its backing buffer");
     assert(graphics_args.offset == 0, "retired slot reuses offset zero");
     gpu::GpuSpan graphics_root = alloc_empty_compute_root(&second_frame);
-    gpu::CommandList graphics = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList graphics = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&graphics)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
@@ -293,10 +296,11 @@ fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
         root:     graphics_root.gpu,
         args:     graphics_args,
     )!!;
-    gpu::end_commands(&graphics)!!;
-    gpu::CommandList[1] graphics_lists = { graphics };
+    gpu::ExecutableCommandList graphics_executable = gpu::end_commands(&graphics)!!;
+    defer discard_test_executable(&graphics_executable)!!;
+    gpu::ExecutableCommandList[1] graphics_lists = { graphics_executable };
     gpu::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..] };
-    gpu::submit(&device, &graphics_submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &graphics_submit)!!;
     gpu::end_frame(&second_frame)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
@@ -359,7 +363,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     root.dispatch_x       = 1;
     root.count_value      = 1;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
@@ -417,10 +421,12 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::cmd_end_render_pass(&cmd)!!;
     record_target_readback(&cmd, target, &rb_span);
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
 
     assert(!gpu::poll_readback(&device, &ticket)!!, "ticket is not resolvable before the frame ends");
     fault early = @catch(gpu::resolve_readback(&device, &ticket, (char[])((char*)&ticket)[:1]));
@@ -481,7 +487,7 @@ fn void plain_indirect_draw_from_frame_span() @test {
     gpu::DrawIndirectCommand* args = (gpu::DrawIndirectCommand*)args_span.cpu;
     *args = { .vertex_count = 3, .instance_count = 1 };
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -500,10 +506,11 @@ fn void plain_indirect_draw_from_frame_span() @test {
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
     record_target_readback(&cmd, target, &rb_span);
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
@@ -557,7 +564,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     double_root.output_gpu = (gpu::GpuAddress)((ulong)io_span.gpu + COUNT * 4);
     double_root.count      = COUNT;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
@@ -587,10 +594,11 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, io_span.buffer, 0, 0)!!;
@@ -645,7 +653,7 @@ fn void count_buffer_limits_draws() @test {
     gpu::GpuSpan count_zero = counts.checked_subspan(0, 4)!!;
     gpu::GpuSpan count_one = counts.checked_subspan(4, 4)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureHandle[2] targets = { target_zero, target_one };
     gpu::GpuSpan[2] count_spans = { count_zero, count_one };
@@ -671,10 +679,11 @@ fn void count_buffer_limits_draws() @test {
         gpu::cmd_end_render_pass(&cmd)!!;
         record_target_readback(&cmd, targets[i], &rb_spans[i]);
     }
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_buffer(&device, rb_zero, 0, 0)!!;
@@ -709,7 +718,7 @@ fn void ticket_hybrid_and_short_dest() @test {
     gpu::flush_buffer(&device, src, 0, 0)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::ReadbackTicket[TICKETS] tickets;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -725,10 +734,11 @@ fn void ticket_hybrid_and_short_dest() @test {
     ulong dedicated_count = vk::dedicated_fallback_count(state) - fallbacks_before;
     assert(dedicated_count > 0, "arena saturation falls back to dedicated tickets");
     assert(dedicated_count < TICKETS, "early tickets are arena-backed");
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     gpu::end_frame(&frame_token)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
@@ -749,10 +759,7 @@ fn void discard_consumes_active_render_pass_recording() @test {
     gpu::Device device = make_ind_device();
     gpu::TextureHandle target = make_ind_target(&device);
 
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     record_target_to_attach(&commands, target);
     gpu::ColorTargetDesc[1] colors = {{
         .texture  = target,
@@ -783,15 +790,16 @@ fn void discard_cancels_command_readback_tickets() @test {
     };
     gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(
         commands: &commands,
         src:      src,
         offset:   0,
         size:     1024,
     )!!;
-    gpu::end_commands(&commands)!!;
-    gpu::discard_commands(&commands)!!;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::discard_executable_commands(&commands_executable)!!;
 
     fault poll_fault = @catch(gpu::poll_readback(&device, &ticket));
     assert(poll_fault == gpu::INVALID_HANDLE,
@@ -816,17 +824,18 @@ fn void unresolved_readback_ticket_blocks_device_destruction() @test {
     gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(
         commands: &commands,
         src:      src,
         offset:   0,
         size:     1024,
     )!!;
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     gpu::end_frame(&frame)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::destroy_buffer(&device, src)!!;
@@ -863,7 +872,7 @@ fn void indirect_argument_validation() @test {
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
     gpu::GpuSpan args_span = gpu::alloc_frame_span(&frame_token, 64, 16)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -904,6 +913,7 @@ fn void indirect_argument_validation() @test {
     assert(overrun == gpu::INVALID_ARGUMENT, "draw_count past the span faults INVALID_ARGUMENT");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }

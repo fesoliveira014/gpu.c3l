@@ -24,11 +24,12 @@ fn void run_phase(gpu::Device* device, BenchPhase* phase) {
     for (uint frame = 0; frame < BENCH_FRAME_COUNT; frame++) {
         gpu::FrameToken frame_token = gpu::begin_frame(device)!!;
         foreach (kind : phase.kinds) {
-            gpu::CommandList cmd = gpu::begin_commands(device, kind)!!;
-            gpu::end_commands(&cmd)!!;
-            gpu::CommandList[1] one = { cmd };
+            gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, kind)!!)!!;
+            gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+            defer discard_bench_executable(&cmd_executable)!!;
+            gpu::ExecutableCommandList[1] one = { cmd_executable };
             gpu::SubmitDesc submit = { .command_lists = one[..] };
-            gpu::submit(device, &submit)!!;
+            submit_bench_queue(device, gpu::QueueKind.GRAPHICS, &submit)!!;
         }
         gpu::end_frame(&frame_token)!!;
     }
