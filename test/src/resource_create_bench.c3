@@ -21,6 +21,7 @@ enum BenchPhase : int {
     BUFFER,
     TEXTURE,
     SHADER,
+    ALLOCATION,
     MIXED,
 }
 
@@ -33,10 +34,11 @@ struct BenchWorkerArgs {
 
 fn ZString phase_name(BenchPhase phase) {
     switch (phase) {
-        case BenchPhase.BUFFER:  return "buffers";
-        case BenchPhase.TEXTURE: return "textures";
-        case BenchPhase.SHADER:  return "shaders";
-        default:                 return "mixed";
+        case BenchPhase.BUFFER:     return "buffers";
+        case BenchPhase.TEXTURE:    return "textures";
+        case BenchPhase.SHADER:     return "shaders";
+        case BenchPhase.ALLOCATION: return "allocations";
+        default:                    return "mixed";
     }
 }
 
@@ -70,6 +72,17 @@ fn void run_shader_op(gpu::Device* device) {
     gpu::destroy_shader(device, handle)!!;
 }
 
+fn void run_allocation_op(gpu::Device* device) {
+    gpu::AllocationDesc desc = {
+        .size         = 256,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = { .graphics, .compute, .transfer },
+    };
+    gpu::GpuAllocation allocation = gpu::allocate_memory(device, &desc)!!;
+    gpu::free_allocation(device, &allocation)!!;
+}
+
 fn void run_phase_op(gpu::Device* device, BenchPhase phase, uint mix_index) {
     switch (phase) {
         case BenchPhase.BUFFER:
@@ -78,11 +91,14 @@ fn void run_phase_op(gpu::Device* device, BenchPhase phase, uint mix_index) {
             run_texture_op(device);
         case BenchPhase.SHADER:
             run_shader_op(device);
+        case BenchPhase.ALLOCATION:
+            run_allocation_op(device);
         case BenchPhase.MIXED:
-            switch (mix_index % 3) {
+            switch (mix_index % 4) {
                 case 0:  run_buffer_op(device);
                 case 1:  run_texture_op(device);
-                default: run_shader_op(device);
+                case 2:  run_shader_op(device);
+                default: run_allocation_op(device);
             }
     }
 }
@@ -142,6 +158,7 @@ fn int main() {
     run_phase(&device, state, BenchPhase.BUFFER);
     run_phase(&device, state, BenchPhase.TEXTURE);
     run_phase(&device, state, BenchPhase.SHADER);
+    run_phase(&device, state, BenchPhase.ALLOCATION);
     run_phase(&device, state, BenchPhase.MIXED);
 
     return 0;

@@ -61,6 +61,22 @@ PLATFORM_HANDLE_TYPES = {
     "gpu::surface::x11": ("DisplayHandle", "WindowHandle"),
 }
 
+DEBUG_RESOURCE_KINDS = (
+    "NONE",
+    "DEVICE",
+    "BUFFER",
+    "TEXTURE",
+    "PIPELINE",
+    "SWAPCHAIN",
+    "SHADER",
+    "COMMAND_LIST",
+    "TEXTURE_DESCRIPTOR",
+    "SAMPLER",
+    "FRAME",
+    "PERSISTENT_SPAN",
+    "ALLOCATION",
+)
+
 RETIRED_SOURCE_SYMBOLS = (
     "PlatformKind",
     "PresentDesc",
@@ -225,6 +241,7 @@ def validate_document(document: dict) -> list[str]:
         ("GpuAllocation", "struct"),
         ("GpuSpan", "struct"),
         ("MemoryClass", "enum"),
+        ("DebugResourceKind", "enum"),
         ("AllocationDesc", "struct"),
         ("AllocationInfo", "struct"),
     ):
@@ -280,6 +297,13 @@ def validate_document(document: dict) -> list[str]:
                 ("CPU_READ", "MemoryClass"),
             ),
             "MemoryClass must expose exactly the three semantic values",
+        ),
+        "DebugResourceKind": (
+            tuple(
+                (name, "DebugResourceKind")
+                for name in DEBUG_RESOURCE_KINDS
+            ),
+            "DebugResourceKind must preserve its append-only schema",
         ),
     }
     for name, (expected_schema, failure) in public_type_schemas.items():

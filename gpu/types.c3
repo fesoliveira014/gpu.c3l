@@ -21,7 +21,7 @@ bitstruct Device : ulong {
     uint reserved   : 56..63;
 }
 
-<* Owning device-local generic-data allocation token. *>
+<* Owning token for device-scoped generic GPU data. *>
 struct GpuAllocation {
     ulong owner;
     uint  index;

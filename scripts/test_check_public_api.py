@@ -162,6 +162,14 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "DebugResourceKind",
+                        "kind": "enum",
+                        "members": [
+                            {"name": name, "type": {"name": "DebugResourceKind"}}
+                            for name in check_public_api.DEBUG_RESOURCE_KINDS
+                        ],
+                    },
+                    {
                         "name": "AllocationDesc",
                         "kind": "struct",
                         "members": [
@@ -333,6 +341,21 @@ class PublicApiCheckTests(unittest.TestCase):
         self.assertIn(
             "SubmitDesc.readiness must contain one-shot swapchain readiness",
             failures,
+        )
+
+    def test_rejects_debug_resource_kind_reordering(self) -> None:
+        document = valid_document()
+        resource_kind = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "DebugResourceKind"
+        )
+        resource_kind["members"][1], resource_kind["members"][2] = (
+            resource_kind["members"][2],
+            resource_kind["members"][1],
+        )
+        self.assertIn(
+            "DebugResourceKind must preserve its append-only schema",
+            check_public_api.validate_document(document),
         )
 
     def test_rejects_missing_allocation_contract(self) -> None:

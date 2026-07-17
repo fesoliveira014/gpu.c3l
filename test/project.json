@@ -102,6 +102,10 @@
       "type": "test",
       "sources": [ "src/test_vk_features.c3", "src/test_vk_runtime.c3", "src/test_vk_bootstrap.c3", "src/test_vk_public_contract.c3", "src/test_vk_result_mapping.c3", "src/test_vk_context_pools.c3", "src/root_pointer_abi.c3", "src/test_vk_vma_allocator.c3", "src/test_vk_buffer.c3", "src/test_vk_frame_arena.c3", "src/test_vk_persistent_arena.c3", "src/test_vk_span_resolver.c3" ]
     },
+    "vk_allocation": {
+      "type": "test",
+      "sources": [ "src/test_vk_allocation.c3" ]
+    },
     "vk_command": {
       "type": "test",
       "sources": [ "src/test_vk_command_submit.c3", "src/test_vk_command_validation.c3", "src/test_vk_layout_commit.c3", "src/offscreen_abi.c3" ]

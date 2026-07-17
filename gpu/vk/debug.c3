@@ -288,6 +288,33 @@ fn uint report_buffer_leaks(VkDeviceState* state) {
     return count;
 }
 
+fn uint report_allocation_leaks(VkDeviceState* state) {
+    uint count = 0;
+    if (state.allocations.slots.ptr == null) return 0;
+    foreach (i, &cell : state.allocations.slots[:state.allocations.next_new]) {
+        if (!cell.used) continue;
+        ZString name = slot_name(&cell.value.backing.debug_name[0]);
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.ALLOCATION,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          name,
+            backend_text:        "allocation remains live",
+        )) {
+            io::eprintfn(
+                "gpu: leaked allocation '%s' (index %d, generation %d)",
+                name,
+                i,
+                cell.generation,
+            );
+        }
+        count++;
+    }
+    return count;
+}
+
 fn uint report_texture_leaks(VkDeviceState* state) {
     uint count = 0;
     if (state.textures.slots.ptr == null) return 0;
@@ -365,7 +392,8 @@ fn uint report_shader_leaks(VkDeviceState* state) {
 }
 
 fn uint report_resource_leaks(VkDeviceState* state) {
-    uint count = report_buffer_leaks(state);
+    uint count = report_allocation_leaks(state);
+    count += report_buffer_leaks(state);
     count += report_texture_leaks(state);
     count += report_pipeline_leaks(state);
     count += report_shader_leaks(state);

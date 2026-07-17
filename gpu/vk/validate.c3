@@ -33,6 +33,18 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         offset = span.offset;
         access = slot.access;
         memory_kind = slot.memory_kind;
+    } else if (span.owner == state.allocations.owner) {
+        gpu::GpuAllocation allocation = {
+            .owner      = span.owner,
+            .index      = span.index,
+            .generation = span.generation,
+        };
+        AllocationSlot* allocation_slot = state.allocations.get(allocation)!;
+        backing_buffer = gpu::BUFFER_HANDLE_INVALID;
+        slot = &allocation_slot.backing;
+        offset = span.offset;
+        access = slot.access;
+        memory_kind = slot.memory_kind;
     } else if (span.owner == state.persistent_arena.allocations.owner) {
         PersistentAllocationHandle allocation_handle = {
             .owner      = span.owner,
@@ -196,6 +208,20 @@ fn void? validate_texture_recording_access(
     );
 }
 
+fn gpu::DebugResourceKind span_resource_kind(
+    VkDeviceState* state,
+    gpu::GpuSpan* span,
+) {
+    if (span != null && span.owner == state.allocations.owner) {
+        return gpu::DebugResourceKind.ALLOCATION;
+    }
+    if (span != null
+        && span.owner == state.persistent_arena.allocations.owner) {
+        return gpu::DebugResourceKind.PERSISTENT_SPAN;
+    }
+    return gpu::DebugResourceKind.BUFFER;
+}
+
 fn void? validate_span_recording_access(
     VkDeviceState* state,
     CommandRecord* record,
@@ -203,10 +229,7 @@ fn void? validate_span_recording_access(
     gpu::GpuSpan* span,
     ZString operation,
 ) @private {
-    gpu::DebugResourceKind resource_kind = span.owner
-        == state.persistent_arena.allocations.owner
-        ? gpu::DebugResourceKind.PERSISTENT_SPAN
-        : gpu::DebugResourceKind.BUFFER;
+    gpu::DebugResourceKind resource_kind = span_resource_kind(state, span);
     if ((uint)resolved.access == 0
         || !gpu::queue_roles_are_known(resolved.access)
         || !gpu::queue_roles_are_subset(resolved.access, resolved.slot.access)) {
@@ -249,6 +272,8 @@ fn ResolvedSpan? resolve_span_slot(
         if (operation == null) return span_fault~;
         bool persistent = span != null
             && span.owner == state.persistent_arena.allocations.owner;
+        bool allocation_owner = span != null
+            && span.owner == state.allocations.owner;
         bool has_identity = span_fault != gpu::INVALID_HANDLE;
         ZString debug_name;
         if (has_identity && span.owner == state.buffers.owner) {
@@ -260,14 +285,21 @@ fn ResolvedSpan? resolve_span_slot(
             if (try slot = state.buffers.get(handle)) {
                 debug_name = slot_name(&slot.debug_name[0]);
             }
+        } else if (has_identity && allocation_owner) {
+            gpu::GpuAllocation allocation = {
+                .owner      = span.owner,
+                .index      = span.index,
+                .generation = span.generation,
+            };
+            if (try slot = state.allocations.get(allocation)) {
+                debug_name = slot_name(&slot.backing.debug_name[0]);
+            }
         }
         return report_contract_failure(
             state:               state,
             operation:           operation,
             public_fault:        span_fault,
-            resource_kind:       persistent
-                ? gpu::DebugResourceKind.PERSISTENT_SPAN
-                : gpu::DebugResourceKind.BUFFER,
+            resource_kind:       span_resource_kind(state, span),
             has_public_identity: has_identity,
             index:               has_identity ? span.index : 0,
             generation:          has_identity ? span.generation : 0,
@@ -277,7 +309,7 @@ fn ResolvedSpan? resolve_span_slot(
                 : rejected_field,
             invariant:           span_fault == gpu::INVALID_HANDLE
                 ? "must identify one live span owner"
-                : persistent
+                : persistent || allocation_owner
                     ? "span range must fit its live owner"
                     : "span offset and size must fit the backing buffer",
             backend_text:        null,

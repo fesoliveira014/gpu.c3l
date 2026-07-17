@@ -311,39 +311,3 @@ fn gpu::GpuAddress? vk_get_span_address(gpu::Device* device, gpu::GpuSpan span) 
     ResolvedSpan resolved = resolve_span(state, &span)!;
     return resolved_span_address(&resolved);
 }
-
-fn gpu::GpuAllocation? vk_allocate_memory_unsupported(
-    gpu::Device* device,
-    gpu::AllocationDesc* desc,
-) @private {
-    (void)device;
-    (void)desc;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
-
-fn void? vk_free_allocation_unsupported(
-    gpu::Device* device,
-    gpu::GpuAllocation allocation,
-) @private {
-    (void)device;
-    (void)allocation;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
-
-fn gpu::AllocationInfo? vk_get_allocation_info_unsupported(
-    gpu::Device* device,
-    gpu::GpuAllocation allocation,
-) @private {
-    (void)device;
-    (void)allocation;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
-
-fn gpu::GpuSpan? vk_get_allocation_span_unsupported(
-    gpu::Device* device,
-    gpu::GpuAllocation allocation,
-) @private {
-    (void)device;
-    (void)allocation;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
