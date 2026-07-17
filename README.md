@@ -7,26 +7,27 @@ A GPU programming library for [C3](https://c3-lang.org/), built on Vulkan 1.3
 handles, C3 optionals for every error, and an execution model built around
 two ideas:
 
-- **Root pointers instead of descriptor sets.** Buffers are reached through
-  a single 64-bit GPU address pushed per dispatch/draw; your shader casts it
-  to a struct and walks to its data. No binding numbers, no set layouts, no
-  descriptor churn for buffer data.
+- **Root pointers instead of descriptor sets.** Generic GPU data is reached
+  through 64-bit addresses; each dispatch/draw pushes one root address and the
+  shader follows pointers from that struct. No binding numbers, set layouts,
+  or descriptor churn for generic data.
 - **One bindless heap for textures.** `TextureIndex`/`SamplerIndex` are compact
   generation-checked CPU tokens with shader-visible slots. Put them in your own
   structs; the library-managed global heap is the only set that exists.
 
 ```c3
+gpu::GpuSpan input_span = gpu::get_allocation_span(&device, input)!;
+gpu::GpuSpan output_span = gpu::get_allocation_span(&device, output)!;
 gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame, DoublerRoot::size, 16)!;
 DoublerRoot* root = (DoublerRoot*)gpu::get_span_mapping(&device, root_span)!.ptr;
-gpu::GpuAddress root_address = gpu::get_span_address(&device, root_span)!;
-root.input_gpu  = gpu::get_buffer_address(&device, input)!;
-root.output_gpu = gpu::get_buffer_address(&device, output)!;
+root.input_gpu  = gpu::get_span_address(&device, input_span)!;
+root.output_gpu = gpu::get_span_address(&device, output_span)!;
 root.count      = COUNT;
 
 gpu::cmd_dispatch(
     commands: &cmd,
     pipeline: pipeline,
-    root:     root_address,
+    root:     gpu::get_span_address(&device, root_span)!,
     groups:   { (COUNT + 63) / 64, 1, 1 },
 )!;
 ```
@@ -70,8 +71,6 @@ Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
 - **[docs/document_index.md](docs/document_index.md)** — map of the full
   documentation set (architecture, API, memory model, shader ABI, backend,
   testing, style).
-- **[Strict GPU architecture](docs/strict_gpu_profile.md)** — approved target
-  for evolving `gpu` in place and adding `gpu::compat` as an extension.
 
 ## Layout
 

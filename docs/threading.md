@@ -36,9 +36,6 @@ token's retained device pin while another call can still be in flight.
 | `allocate_memory` / `free_allocation` | S | internally synchronized; free must happen-after the last use |
 | `get_allocation_info` / `get_allocation_span` / `get_span_mapping` / `get_span_address` | S | lock-free slot resolution |
 | `flush_mapped_span` / `invalidate_mapped_span` | S | lock-free validation; coherent no-op; native calls are internally synchronized |
-| `create_buffer` / `destroy_buffer` | S | |
-| `get_buffer_address` / `get_buffer_span` | S | lock-free read |
-| `flush_buffer` / `invalidate_buffer` | S | native calls are internally synchronized |
 | `create_texture` / `destroy_texture` | S | |
 | `create_texture_descriptor` / `destroy_texture_descriptor` | S | |
 | `create_sampler` / `destroy_sampler` | S | |
@@ -238,7 +235,7 @@ every exit path, so one stuck helper costs its immediate successor one
 timeout rather than an unbounded stall. Frame-scoped paths
 (`cmd_upload_buffer`, `cmd_upload_texture`, `cmd_readback_buffer`,
 `cmd_readback_texture`) are unaffected: they still tag `frame_timeline` at
-`counter + 1`, retired only by `end_frame`. See docs/memory.md §14.1.
+`counter + 1`, retired only by `end_frame`. See docs/memory.md §13.1.
 Before recording, each blocking helper also checks under
 `helper_record_mutex` whether `helper_timeline` already reads its reserved
 value minus one — every predecessor complete — and if so resets the helper
@@ -254,6 +251,6 @@ bracket — sanctioned for frame-loop-free apps and one-shot setup work.
 Resources a command list submitted off-frame refers to must not be freed while
 that work may still be in flight. Independent allocations are immediate: wait
 the returned `CompletionPoint` before `free_allocation`. Other resource
-destruction uses the deferred-release queue (docs/memory.md §18). A later
+destruction uses the deferred-release queue (docs/memory.md §17). A later
 `end_frame` may also cover the work. `destroy_device` queries every published queue
 sequence without blocking and returns `DEVICE_BUSY` while any is incomplete.

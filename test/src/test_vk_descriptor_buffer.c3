@@ -128,47 +128,42 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::SamplerIndex sampler_index = gpu::create_sampler(&device, &sampler_desc)!!;
     defer gpu::destroy_sampler(&device, sampler_index)!!;
 
-    gpu::BufferDesc compute_root_desc = {
-        .size        = WriteRoot::size,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle compute_root_buffer = gpu::create_buffer(&device, &compute_root_desc)!!;
-    defer gpu::destroy_buffer(&device, compute_root_buffer)!!;
-    gpu::GpuSpan compute_root_span = gpu::get_buffer_span(&device, compute_root_buffer)!!;
+    OwnedSpan compute_root_buffer = allocate_owned_span(
+        device:       &device,
+        size:         WriteRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "descriptor_buffer_compute_root",
+    )!!;
+    defer free_owned_span(&device, &compute_root_buffer)!!;
+    gpu::GpuSpan compute_root_span = compute_root_buffer.span;
     WriteRoot* compute_root = (WriteRoot*)test_span_mapping(&device, compute_root_span).ptr;
     *compute_root = {
         .texture_index = texture_index,
         .width         = TEX_SIZE,
         .height        = TEX_SIZE,
     };
-    gpu::flush_buffer(
-        device: &device,
-        buffer: compute_root_buffer,
-        offset: 0,
-        size:   0,
+    gpu::flush_mapped_span(&device, compute_root_buffer.span)!!;
+
+    OwnedSpan compute_output = allocate_owned_span(
+        device:       &device,
+        size:         TEX_SIZE * TEX_SIZE * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "descriptor_buffer_compute_output",
     )!!;
+    defer free_owned_span(&device, &compute_output)!!;
+    gpu::GpuSpan compute_output_span = compute_output.span;
 
-    gpu::BufferDesc compute_output_desc = {
-        .size        = TEX_SIZE * TEX_SIZE * 16,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle compute_output = gpu::create_buffer(&device, &compute_output_desc)!!;
-    defer gpu::destroy_buffer(&device, compute_output)!!;
-    gpu::GpuSpan compute_output_span = gpu::get_buffer_span(&device, compute_output)!!;
-
-    gpu::BufferDesc sample_root_desc = {
-        .size        = SampleRoot::size,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle sample_root_buffer = gpu::create_buffer(&device, &sample_root_desc)!!;
-    defer gpu::destroy_buffer(&device, sample_root_buffer)!!;
-    gpu::GpuSpan sample_root_span = gpu::get_buffer_span(&device, sample_root_buffer)!!;
+    OwnedSpan sample_root_buffer = allocate_owned_span(
+        device:       &device,
+        size:         SampleRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "descriptor_buffer_sample_root",
+    )!!;
+    defer free_owned_span(&device, &sample_root_buffer)!!;
+    gpu::GpuSpan sample_root_span = sample_root_buffer.span;
     SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
     *sample_root = {
         .output_gpu    = test_span_address(&device, compute_output_span),
@@ -177,22 +172,17 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .width         = TEX_SIZE,
         .height        = TEX_SIZE,
     };
-    gpu::flush_buffer(
-        device: &device,
-        buffer: sample_root_buffer,
-        offset: 0,
-        size:   0,
-    )!!;
+    gpu::flush_mapped_span(&device, sample_root_buffer.span)!!;
 
-    gpu::BufferDesc graphics_root_desc = {
-        .size        = VERTEX_BYTES + FragRoot::size,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle graphics_root_buffer = gpu::create_buffer(&device, &graphics_root_desc)!!;
-    defer gpu::destroy_buffer(&device, graphics_root_buffer)!!;
-    gpu::GpuSpan graphics_root_span = gpu::get_buffer_span(&device, graphics_root_buffer)!!;
+    OwnedSpan graphics_root_buffer = allocate_owned_span(
+        device:       &device,
+        size:         VERTEX_BYTES + FragRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "descriptor_buffer_graphics_root",
+    )!!;
+    defer free_owned_span(&device, &graphics_root_buffer)!!;
+    gpu::GpuSpan graphics_root_span = graphics_root_buffer.span;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
          0.8f, -0.8f, 0.9f, 0.1f,
@@ -205,12 +195,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .texture_index = texture_index,
         .sampler_index = sampler_index,
     };
-    gpu::flush_buffer(
-        device: &device,
-        buffer: graphics_root_buffer,
-        offset: 0,
-        size:   0,
-    )!!;
+    gpu::flush_mapped_span(&device, graphics_root_buffer.span)!!;
 
     gpu::TextureDesc target_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -222,14 +207,14 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     };
     gpu::TextureHandle target = gpu::create_texture(&device, &target_desc)!!;
     defer gpu::destroy_texture(&device, target)!!;
-    gpu::BufferDesc readback_desc = {
-        .size        = TARGET_BYTES,
-        .usage       = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &readback_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         TARGET_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "descriptor_buffer_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
 
     gpu::ShaderDesc write_shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_WRITE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle write_shader = gpu::create_shader(&device, &write_shader_desc)!!;
@@ -358,7 +343,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
     };
     gpu::cmd_texture_barrier(&graphics_commands, &target_to_source)!!;
-    gpu::GpuSpan readback_span = gpu::get_buffer_span(&device, readback)!!;
+    gpu::GpuSpan readback_span = readback.span;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = readback_span };
     gpu::cmd_copy_texture_to_buffer(&graphics_commands, &copy)!!;
     gpu::BufferBarrier host_read = {
@@ -377,18 +362,8 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     };
     gpu::CompletionPoint graphics_completion = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &graphics_submit)!!;
     gpu::wait_completion(graphics_completion, ulong::max)!!;
-    gpu::invalidate_buffer(
-        device: &device,
-        buffer: readback,
-        offset: 0,
-        size:   0,
-    )!!;
-    gpu::invalidate_buffer(
-        device: &device,
-        buffer: compute_output,
-        offset: 0,
-        size:   0,
-    )!!;
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
+    gpu::invalidate_mapped_span(&device, compute_output.span)!!;
 
     float* compute_texels = (float*)test_span_mapping(&device, compute_output_span).ptr;
     for (uint y = 0; y < TEX_SIZE; y++) {
@@ -463,14 +438,14 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
     defer gpu::destroy_sampler(&device, smp_index)!!;
 
-    gpu::BufferDesc out_desc = {
-        .size        = TEX * TEX * 16,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle output = gpu::create_buffer(&device, &out_desc)!!;
-    defer gpu::destroy_buffer(&device, output)!!;
+    OwnedSpan output = allocate_owned_span(
+        device:       &device,
+        size:         TEX * TEX * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "descriptor_buffer_output",
+    )!!;
+    defer free_owned_span(&device, &output)!!;
 
     gpu::ShaderDesc write_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_WRITE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle write_shader = gpu::create_shader(&device, &write_sd)!!;
@@ -496,7 +471,7 @@ fn void descriptor_buffer_write_then_sample() @test {
 
     gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
-    sample_root.output_gpu    = gpu::get_buffer_address(&device, output)!!;
+    sample_root.output_gpu    = test_span_address(&device, output.span);
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
     sample_root.width         = TEX;
@@ -541,7 +516,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     )!!;
 
     gpu::BufferBarrier out_bar = {
-        .span = gpu::get_buffer_span(&device, output)!!,
+        .span = output.span,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -554,7 +529,8 @@ fn void descriptor_buffer_write_then_sample() @test {
     submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;
+    gpu::invalidate_mapped_span(&device, output.span)!!;
+    gpu::GpuSpan out_span = output.span;
     float* texels = (float*)test_span_mapping(&device, out_span).ptr;
     for (uint y = 0; y < TEX; y++) {
         for (uint x = 0; x < TEX; x++) {

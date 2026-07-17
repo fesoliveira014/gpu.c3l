@@ -29,13 +29,6 @@ struct GpuAllocation {
 }
 $assert GpuAllocation::size <= ulong::size * 2;
 
-struct BufferHandle {
-    ulong owner;
-    uint  index;
-    uint  generation;
-}
-$assert BufferHandle::size <= ulong::size * 2;
-
 struct TextureHandle {
     ulong owner;
     uint  index;
@@ -86,13 +79,12 @@ bitstruct SamplerIndex : uint {
     ushort generation : 16..31;
 }
 
-const Device DEVICE_INVALID                   = {};
-const GpuAllocation GPU_ALLOCATION_INVALID = {};
-const BufferHandle BUFFER_HANDLE_INVALID       = {};
-const TextureHandle TEXTURE_HANDLE_INVALID     = {};
-const PipelineHandle PIPELINE_HANDLE_INVALID   = {};
-const SwapchainHandle SWAPCHAIN_HANDLE_INVALID = {};
-const ShaderHandle SHADER_HANDLE_INVALID       = {};
+const Device            DEVICE_INVALID              = {};
+const GpuAllocation     GPU_ALLOCATION_INVALID      = {};
+const TextureHandle     TEXTURE_HANDLE_INVALID      = {};
+const PipelineHandle    PIPELINE_HANDLE_INVALID     = {};
+const SwapchainHandle   SWAPCHAIN_HANDLE_INVALID    = {};
+const ShaderHandle      SHADER_HANDLE_INVALID       = {};
 const CommandListHandle COMMAND_LIST_HANDLE_INVALID = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
@@ -103,12 +95,6 @@ fn bool Device.is_valid(self)          => (ulong)self != 0;
 // Owner-bearing handles require both fields to be nonzero.
 fn bool GpuAllocation.is_valid(self) => self.owner != 0 && self.generation != 0;
 fn bool GpuAllocation.equals(self, GpuAllocation other) @operator(==) {
-    return self.owner == other.owner
-        && self.index == other.index
-        && self.generation == other.generation;
-}
-fn bool BufferHandle.is_valid(self)    => self.owner != 0 && self.generation != 0;
-fn bool BufferHandle.equals(self, BufferHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;

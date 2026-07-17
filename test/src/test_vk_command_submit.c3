@@ -4,9 +4,6 @@ import gpu @public;
 import gpu::vk @public;
 import std::atomic;
 
-// Headless (lavapipe): record a buffer copy from a host-written upload buffer to
-// a readback buffer, submit signaling a timeline semaphore, wait, and verify the
-// bytes. Assumes host-coherent memory (non-coherent flush/invalidate is later).
 
 fn ulong command_submit_count(gpu::Device* device) {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
@@ -59,23 +56,29 @@ fn void copy_upload_to_readback() @test {
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc up_desc = {
-        .size = 256, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer }, .debug_name = "upload",
-    };
-    gpu::BufferHandle upload = gpu::create_buffer(&device, &up_desc)!!;
-    defer gpu::destroy_buffer(&device, upload)!!;
+    OwnedSpan upload = allocate_owned_span(
+        device:       &device,
+        size:         256,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "upload",
+    )!!;
+    defer free_owned_span(&device, &upload)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         256,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
 
-    gpu::BufferDesc rb_desc = {
-        .size = 256, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer }, .debug_name = "readback",
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
-
-    gpu::GpuSpan up_span = gpu::get_buffer_span(&device, upload)!!;
-    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
+    gpu::GpuSpan up_span = upload.span;
+    gpu::GpuSpan rb_span = readback.span;
     char[] up_mapping = gpu::get_span_mapping(&device, up_span)!!;
     char* src = up_mapping.ptr;
     for (uint i = 0; i < 256; i++) src[i] = (char)i;
+    gpu::flush_mapped_span(&device, upload.span)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
 
@@ -101,6 +104,7 @@ fn void copy_upload_to_readback() @test {
     )!!;
     gpu::wait_completion(completion, 1_000_000_000)!!;
 
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
     char[] rb_mapping = gpu::get_span_mapping(&device, rb_span)!!;
     char* dst = rb_mapping.ptr;
     for (uint i = 0; i < 256; i++) assert(dst[i] == (char)i, "readback byte matches uploaded byte");

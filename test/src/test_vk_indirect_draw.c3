@@ -135,7 +135,6 @@ fn void record_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target
 fn void record_target_readback(
     gpu::CommandList* cmd,
     gpu::TextureHandle target,
-    gpu::BufferHandle readback,
     gpu::GpuSpan* rb_span,
 ) {
     gpu::TextureBarrier to_src = {
@@ -328,24 +327,25 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!!;
     defer gpu::destroy_pipeline(&device, build_pipeline)!!;
 
-    // Indexed args live in a DEVICE buffer: GPU-written, ticket is the only
-    // way to observe them.
-    gpu::BufferDesc args_desc = {
-        .size        = 2 * gpu::DrawIndexedIndirectCommand::size,
-        .usage       = { .storage, .addressable, .indirect, .transfer_src },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
-    defer gpu::destroy_buffer(&device, args_buffer)!!;
-    gpu::GpuSpan args_span = gpu::get_buffer_span(&device, args_buffer)!!;
+    OwnedSpan args = allocate_owned_span(
+        device:       &device,
+        size:         2 * gpu::DrawIndexedIndirectCommand::size,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "indexed_indirect_args",
+    )!!;
+    defer free_owned_span(&device, &args)!!;
+    gpu::GpuSpan args_span = args.span;
 
-    gpu::BufferDesc rb_desc = {
-        .size = IND_RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
-    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         IND_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "indexed_indirect_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
+    gpu::GpuSpan rb_span = readback.span;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
@@ -418,7 +418,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
         index_span:    index_span,
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
-    record_target_readback(&cmd, target, readback, &rb_span);
+    record_target_readback(&cmd, target, &rb_span);
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -434,7 +434,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::end_frame(&frame_token)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
-    gpu::invalidate_buffer(&device, readback, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
     char* center = center_pixel(&device, &rb_span);
     assert(center[0] == (char)255 && center[1] == (char)255 && center[2] == (char)255,
         "compute-generated indexed indirect draw renders the triangle");
@@ -466,12 +466,15 @@ fn void plain_indirect_draw_from_frame_span() @test {
     gpu::TextureHandle target = make_ind_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc rb_desc = {
-        .size = IND_RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
-    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         IND_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "plain_indirect_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
+    gpu::GpuSpan rb_span = readback.span;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
@@ -504,7 +507,7 @@ fn void plain_indirect_draw_from_frame_span() @test {
         draw_count:    1,
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
-    record_target_readback(&cmd, target, readback, &rb_span);
+    record_target_readback(&cmd, target, &rb_span);
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
@@ -512,7 +515,7 @@ fn void plain_indirect_draw_from_frame_span() @test {
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
-    gpu::invalidate_buffer(&device, readback, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
     char* center = center_pixel(&device, &rb_span);
     assert(center[0] == (char)255, "non-indexed indirect draw renders");
     gpu::end_frame(&frame_token)!!;
@@ -540,19 +543,11 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     gpu::GpuSpan io_span = gpu::alloc_frame_span(&frame_token, COUNT * 4 * 2, 16)!!;
-    vk::ResolvedSpan io_resolved = vk::resolve_span(
-        (vk::VkDeviceState*)gpu::device_backend_state(device),
-        &io_span,
-    )!!;
     float* values = (float*)test_span_mapping(&device, io_span).ptr;
     for (uint i = 0; i < COUNT; i++) values[i] = (float)i;
 
     gpu::GpuSpan scratch = gpu::alloc_frame_span(&frame_token, 64, 16)!!;
     gpu::GpuSpan dispatch_args = scratch.checked_subspan(16, gpu::DispatchIndirectCommand::size)!!;
-    vk::ResolvedSpan dispatch_resolved = vk::resolve_span(
-        (vk::VkDeviceState*)gpu::device_backend_state(device),
-        &dispatch_args,
-    )!!;
 
     gpu::GpuSpan build_root_span = gpu::alloc_frame_span(&frame_token, BuildRoot::size, 16)!!;
     BuildRoot* build_root = (BuildRoot*)test_span_mapping(&device, build_root_span).ptr;
@@ -606,7 +601,6 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
-    gpu::invalidate_buffer(&device, io_resolved.backing_buffer, 0, 0)!!;
     float* doubled = &values[COUNT];
     for (uint i = 0; i < COUNT; i++) {
         assert(doubled[i] == (float)i * 2.0f, "indirect dispatch ran with GPU-written group counts");
@@ -626,15 +620,24 @@ fn void count_buffer_limits_draws() @test {
     gpu::TextureHandle target_one = make_ind_target(&device);
     defer gpu::destroy_texture(&device, target_one)!!;
 
-    gpu::BufferDesc rb_desc = {
-        .size = IND_RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle rb_zero = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, rb_zero)!!;
-    gpu::GpuSpan rb_zero_span = gpu::get_buffer_span(&device, rb_zero)!!;
-    gpu::BufferHandle rb_one = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, rb_one)!!;
-    gpu::GpuSpan rb_one_span = gpu::get_buffer_span(&device, rb_one)!!;
+    OwnedSpan rb_zero = allocate_owned_span(
+        device:       &device,
+        size:         IND_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "count_zero_readback",
+    )!!;
+    defer free_owned_span(&device, &rb_zero)!!;
+    gpu::GpuSpan rb_zero_span = rb_zero.span;
+    OwnedSpan rb_one = allocate_owned_span(
+        device:       &device,
+        size:         IND_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "count_one_readback",
+    )!!;
+    defer free_owned_span(&device, &rb_one)!!;
+    gpu::GpuSpan rb_one_span = rb_one.span;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
@@ -662,7 +665,6 @@ fn void count_buffer_limits_draws() @test {
     defer discard_test_commands(&cmd)!!;
     gpu::TextureHandle[2] targets = { target_zero, target_one };
     gpu::GpuSpan[2] count_spans = { count_zero, count_one };
-    gpu::BufferHandle[2] readbacks = { rb_zero, rb_one };
     gpu::GpuSpan[2] rb_spans = { rb_zero_span, rb_one_span };
     for (uint i = 0; i < 2; i++) {
         record_target_to_attach(&cmd, targets[i]);
@@ -683,7 +685,7 @@ fn void count_buffer_limits_draws() @test {
             index_span:     index_span,
         )!!;
         gpu::cmd_end_render_pass(&cmd)!!;
-        record_target_readback(&cmd, targets[i], readbacks[i], &rb_spans[i]);
+        record_target_readback(&cmd, targets[i], &rb_spans[i]);
     }
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
@@ -692,11 +694,11 @@ fn void count_buffer_limits_draws() @test {
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
-    gpu::invalidate_buffer(&device, rb_zero, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, rb_zero.span)!!;
     char* zero_center = center_pixel(&device, &rb_zero_span);
     assert(zero_center[0] == (char)8 && zero_center[1] == (char)16,
         "GPU count of zero draws nothing");
-    gpu::invalidate_buffer(&device, rb_one, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, rb_one.span)!!;
     char* one_center = center_pixel(&device, &rb_one_span);
     assert(one_center[0] == (char)255, "GPU count of one draws the triangle");
     gpu::end_frame(&frame_token)!!;
@@ -710,18 +712,18 @@ fn void ticket_hybrid_and_short_dest() @test {
 
     const usz CHUNK = 1024;
     const uint TICKETS = 6;
-    gpu::BufferDesc src_desc = {
-        .size        = CHUNK,
-        .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.STAGING,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
-    defer gpu::destroy_buffer(&device, src)!!;
-    gpu::GpuSpan src_span = gpu::get_buffer_span(&device, src)!!;
+    OwnedSpan src = allocate_owned_span(
+        device:       &device,
+        size:         CHUNK,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "ticket_source",
+    )!!;
+    defer free_owned_span(&device, &src)!!;
+    gpu::GpuSpan src_span = src.span;
     char* src_bytes = (char*)test_span_mapping(&device, src_span).ptr;
     for (usz i = 0; i < CHUNK; i++) src_bytes[i] = (char)(i % 251);
-    gpu::flush_buffer(&device, src, 0, 0)!!;
+    gpu::flush_mapped_span(&device, src.span)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -783,16 +785,16 @@ fn void discard_consumes_active_render_pass_recording() @test {
 
 fn void discard_cancels_command_readback_tickets() @test {
     gpu::Device device = make_ind_device(readback_arena_size: 1);
-    gpu::BufferDesc src_desc = {
-        .size        = 1024,
-        .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.STAGING,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
+    OwnedSpan src = allocate_owned_span(
+        device:       &device,
+        size:         1024,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "discarded_ticket_source",
+    )!!;
 
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&commands, gpu::get_buffer_span(&device, src)!!)!!;
+    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&commands, src.span)!!;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
     gpu::discard_executable_commands(&commands_executable)!!;
@@ -805,23 +807,23 @@ fn void discard_cancels_command_readback_tickets() @test {
     assert(resolve_fault == gpu::INVALID_HANDLE,
         "discard releases attached readback state");
 
-    gpu::destroy_buffer(&device, src)!!;
+    free_owned_span(&device, &src)!!;
     gpu::destroy_device(&device)!!;
 }
 
 fn void unresolved_readback_ticket_blocks_device_destruction() @test {
     gpu::Device device = make_ind_device(readback_arena_size: 1);
-    gpu::BufferDesc src_desc = {
-        .size        = 1024,
-        .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.STAGING,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
+    OwnedSpan src = allocate_owned_span(
+        device:       &device,
+        size:         1024,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "unresolved_ticket_source",
+    )!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&commands, gpu::get_buffer_span(&device, src)!!)!!;
+    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&commands, src.span)!!;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
     gpu::ExecutableCommandList[1] lists = { commands_executable };
@@ -829,7 +831,7 @@ fn void unresolved_readback_ticket_blocks_device_destruction() @test {
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     gpu::end_frame(&frame)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::destroy_buffer(&device, src)!!;
+    free_owned_span(&device, &src)!!;
 
     assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
         "an unresolved readback ticket blocks device destruction");
@@ -846,16 +848,15 @@ fn void indirect_argument_validation() @test {
     gpu::TextureHandle target = make_ind_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    // Storage-only: no indirect usage.
-    gpu::BufferDesc plain_desc = {
+    vk::BufferDesc plain_desc = {
         .size        = 64,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.DEVICE,
         .access      = { .graphics, .compute, .transfer },
     };
-    gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
-    defer gpu::destroy_buffer(&device, plain)!!;
-    gpu::GpuSpan plain_span = gpu::get_buffer_span(&device, plain)!!;
+    vk::BufferHandle plain = vk::vk_create_buffer(&device, &plain_desc)!!;
+    defer vk::vk_destroy_buffer(&device, plain)!!;
+    gpu::GpuSpan plain_span = vk::vk_get_buffer_span(&device, plain)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;

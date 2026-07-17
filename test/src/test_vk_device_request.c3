@@ -457,16 +457,16 @@ fn void runtime_devices_destroy_independently() @test {
             );
         }
 
-        gpu::BufferDesc buffer_desc = {
-            .size        = 256,
-            .usage       = { .storage },
-            .memory_kind = gpu::MemoryKind.DEVICE,
-            .access      = { .graphics, .compute, .transfer },
+        gpu::AllocationDesc allocation_desc = {
+            .size         = 256,
+            .alignment    = 16,
+            .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+            .access       = { .graphics, .compute, .transfer },
         };
-        gpu::BufferHandle first_buffer = gpu::create_buffer(&first, &buffer_desc)!!;
-        gpu::BufferHandle second_buffer = gpu::create_buffer(&second, &buffer_desc)!!;
-        gpu::destroy_buffer(&first, first_buffer)!!;
-        gpu::destroy_buffer(&second, second_buffer)!!;
+        gpu::GpuAllocation first_allocation = gpu::allocate_memory(&first, &allocation_desc)!!;
+        gpu::GpuAllocation second_allocation = gpu::allocate_memory(&second, &allocation_desc)!!;
+        gpu::free_allocation(&first, &first_allocation)!!;
+        gpu::free_allocation(&second, &second_allocation)!!;
 
         gpu::destroy_device(&first)!!;
         assert(gpu::get_device_caps(&second)!!.strict_enabled, "destroying one device preserves its peer");
@@ -475,8 +475,8 @@ fn void runtime_devices_destroy_independently() @test {
             "destroying one device preserves its peer's physical adapter"
         );
 
-        gpu::BufferHandle buffer = gpu::create_buffer(&second, &buffer_desc)!!;
-        gpu::destroy_buffer(&second, buffer)!!;
+        gpu::GpuAllocation allocation = gpu::allocate_memory(&second, &allocation_desc)!!;
+        gpu::free_allocation(&second, &allocation)!!;
         gpu::destroy_device(&second)!!;
         exercised = true;
         break;

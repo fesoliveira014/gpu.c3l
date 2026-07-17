@@ -219,7 +219,7 @@ fn AllocationNativeOps allocation_native_ops_real() {
     };
 }
 
-fn gpu::BufferUsage allocation_buffer_usage() {
+fn BufferUsage allocation_buffer_usage() {
     return {
         .transfer_src,
         .transfer_dst,
@@ -270,7 +270,7 @@ fn vk::BufferCreateInfo? allocation_buffer_create_info(
     gpu::AllocationDesc* desc,
     uint[] queue_families,
 ) {
-    gpu::BufferDesc backing = {
+    BufferDesc backing = {
         .size        = desc.size,
         .usage       = allocation_buffer_usage(),
         .memory_kind = allocation_memory_kind(desc.memory_class)!,

@@ -418,10 +418,10 @@ fn void allocation_table_retires_exhausted_generations() @test {
         "a retired slot is never reused");
 }
 
-fn void allocation_debug_kind_is_append_only() @test {
+fn void debug_resource_kind_ordinals_match_exact_schema() @test {
     assert((int)gpu::DebugResourceKind.NONE == 0);
     assert((int)gpu::DebugResourceKind.DEVICE == 1);
-    assert((int)gpu::DebugResourceKind.BUFFER == 2);
+    assert((int)gpu::DebugResourceKind.GPU_SPAN == 2);
     assert((int)gpu::DebugResourceKind.TEXTURE == 3);
     assert((int)gpu::DebugResourceKind.PIPELINE == 4);
     assert((int)gpu::DebugResourceKind.SWAPCHAIN == 5);
@@ -432,7 +432,7 @@ fn void allocation_debug_kind_is_append_only() @test {
     assert((int)gpu::DebugResourceKind.FRAME == 10);
     assert((int)gpu::DebugResourceKind.PERSISTENT_SPAN == 11);
     assert((int)gpu::DebugResourceKind.ALLOCATION == 12,
-        "allocation diagnostics append without shifting existing ordinals");
+        "allocation keeps the exact ordinal 12");
 }
 
 fn vk::Result allocation_probe_create_buffer(
@@ -984,8 +984,10 @@ fn void native_allocation_classes_map_and_release() @test {
     gpu::MemoryStats live = gpu::get_memory_stats(&device)!!;
     assert(live.live_allocation_count >= baseline.live_allocation_count + 3,
         "independent allocations contribute to VMA allocation statistics");
-    assert(live.buffer_count == baseline.buffer_count,
-        "private backing buffers do not change public buffer counts");
+    assert(live.heap_count == baseline.heap_count
+        && live.heap_count > 0
+        && live.heaps[0].budget > 0,
+        "allocation stats retain a valid heap budget snapshot");
 
     gpu::free_allocation(&device, &write)!!;
     assert(!write.is_valid()

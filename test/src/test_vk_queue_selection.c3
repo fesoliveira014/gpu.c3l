@@ -427,15 +427,15 @@ fn void multi_role_access_stays_exclusive_on_single_family() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc buf_desc = {
-        .size        = 256,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "multi_role_buf",
+    gpu::AllocationDesc allocation_desc = {
+        .size         = 256,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = { .graphics, .compute, .transfer },
+        .debug_name   = "multi_role_data",
     };
-    gpu::BufferHandle buf = gpu::create_buffer(&device, &buf_desc)!!;
-    gpu::destroy_buffer(&device, buf)!!;
+    gpu::GpuAllocation allocation = gpu::allocate_memory(&device, &allocation_desc)!!;
+    gpu::free_allocation(&device, &allocation)!!;
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -447,20 +447,6 @@ fn void multi_role_access_stays_exclusive_on_single_family() @test {
     };
     gpu::TextureHandle tex = gpu::create_texture(&device, &tex_desc)!!;
     gpu::destroy_texture(&device, tex)!!;
-}
-
-fn void empty_buffer_usage_is_invalid() @test {
-    gpu::Device device = make_queue_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::BufferDesc buf_desc = {
-        .size        = 64,
-        .usage       = {},
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    fault f = @catch(gpu::create_buffer(&device, &buf_desc));
-    assert(f == gpu::INVALID_ARGUMENT, "usage with no Vulkan bits faults INVALID_ARGUMENT");
 }
 
 fn void frame_arena_families_alias_without_transfer() @test {
@@ -491,7 +477,7 @@ fn void frame_arena_families_are_graphics_compute_only() @test {
 }
 
 fn void frame_arena_create_info_is_exclusive_when_families_alias() @test {
-    gpu::BufferDesc desc = {
+    vk::BufferDesc desc = {
         .size        = 256,
         .usage       = { .storage, .addressable, .indirect, .index },
         .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
@@ -505,7 +491,7 @@ fn void frame_arena_create_info_is_exclusive_when_families_alias() @test {
 }
 
 fn void frame_arena_create_info_uses_exact_distinct_families() @test {
-    gpu::BufferDesc desc = {
+    vk::BufferDesc desc = {
         .size        = 256,
         .usage       = { .storage, .addressable, .indirect, .index },
         .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,

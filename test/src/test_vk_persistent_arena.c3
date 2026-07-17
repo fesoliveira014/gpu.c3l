@@ -114,7 +114,6 @@ fn gpu::GpuSpan alloc_persistent_indirect_args(gpu::Device* device) {
     gpu::PersistentAllocDesc desc = {
         .size        = gpu::DispatchIndirectCommand::size,
         .align       = 4,
-        .usage       = { .indirect },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "persistent_cross_family_args",
@@ -123,13 +122,6 @@ fn gpu::GpuSpan alloc_persistent_indirect_args(gpu::Device* device) {
     char[] mapping = map_test_span(device, span);
     gpu::DispatchIndirectCommand* args = (gpu::DispatchIndirectCommand*)mapping.ptr;
     *args = { .x = 1, .y = 1, .z = 1 };
-    vk::ResolvedSpan resolved = resolve_native_span(device, &span);
-    gpu::flush_buffer(
-        device,
-        resolved.backing_buffer,
-        resolved.offset,
-        resolved.size,
-    )!!;
     return span;
 }
 
@@ -142,7 +134,7 @@ fn gpu::GpuSpan alloc_frame_empty_root(gpu::FrameToken* frame) {
 }
 
 fn void persistent_span_crosses_compute_and_graphics_families_when_available() @test {
-    gpu::Device device = make_persistent_usage_device();
+    gpu::Device device = make_persistent_span_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     if (state.graphics_family == state.compute_family) {
@@ -233,7 +225,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     gpu::GpuSpan compute_args = alloc_persistent_indirect_args(&device);
     assert(compute_args.offset == 0, "first persistent allocation uses offset zero");
     vk::ResolvedSpan compute_args_resolved = resolve_native_span(&device, &compute_args);
-    gpu::BufferHandle backing = compute_args_resolved.backing_buffer;
+    vk::BufferHandle backing = compute_args_resolved.backing_buffer;
     gpu::GpuAddress address = address_test_span(&device, compute_args);
     gpu::FrameToken compute_frame = gpu::begin_frame(&device)!!;
     gpu::GpuSpan compute_root = alloc_frame_empty_root(&compute_frame);
@@ -294,7 +286,7 @@ fn void persistent_arena_desc_has_exact_backing_contract() @test {
         .transfer_family = 4,
     };
     vk::PersistentArenaCreatePlan plan = vk::persistent_arena_create_plan(&state, 4096);
-    gpu::BufferUsage expected_usage = {
+    vk::BufferUsage expected_usage = {
         .transfer_src,
         .transfer_dst,
         .uniform,
@@ -310,6 +302,23 @@ fn void persistent_arena_desc_has_exact_backing_contract() @test {
     assert((uint)plan.desc.access == (uint)state.selected_queue_roles,
         "persistent arena descriptor admits every selected role");
     assert(plan.desc.debug_name == "persistent_arena", "persistent arena descriptor keeps its debug name");
+}
+
+fn void persistent_arena_backing_is_coherent() @test {
+    gpu::DeviceDesc desc = {
+        .backend               = gpu::BackendKind.VULKAN,
+        .persistent_arena_size = 4096,
+        .application_name      = "persistent_coherency_test",
+    };
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    defer destroy_test_device(&device)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::BufferSlot* slot = state.buffers.get(state.persistent_arena.backing_buffer)!!;
+    vk::MemoryPropertyFlags properties =
+        state.allocator.allocation_memory_properties(slot.allocation);
+    assert(((uint)properties & (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT) != 0,
+        "persistent mappings are host-coherent");
 }
 
 fn void persistent_arena_create_info_is_exclusive_when_families_alias() @test {
@@ -498,21 +507,6 @@ fn void persistent_allocation_rejections_report_contract_context() @test {
         debug_name: "bad_kind",
     );
 
-    gpu::PersistentAllocDesc bad_usage = {
-        .size = 64, .align = 16, .usage = { .vertex },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "bad_usage",
-        .access      = { .graphics, .compute, .transfer },
-    };
-    before = capture.calls;
-    fault usage_fault = @catch(gpu::alloc_persistent_span(&device, &bad_usage));
-    assert_persistent_rejection(
-        capture:    &capture,
-        before:     before,
-        returned:   usage_fault,
-        field:      "PersistentAllocDesc.usage",
-        invariant:  "contains unsupported persistent-arena flags",
-        debug_name: "bad_usage",
-    );
 }
 
 fn void persistent_diagnostic_callback_preserves_fault_parity() @test {
@@ -554,44 +548,44 @@ fn void custom_persistent_arena_size_reported() @test {
     assert(stats.capacity_bytes == 128 << 20, "custom persistent capacity reported in stats");
 }
 
-fn gpu::Device make_persistent_usage_device() {
+fn gpu::Device make_persistent_span_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .frames_in_flight  = 2,
-        .application_name  = "gpu_persistent_usage_test",
+        .application_name  = "gpu_persistent_span_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
 }
 
-<* A transfer-usage persistent span is a real cmd_copy_buffer endpoint: two
-   spans backed by the same arena buffer, copied disjointly. *>
-fn void transfer_usage_persistent_span_copies() @test {
-    gpu::Device device = make_persistent_usage_device();
+<* Two persistent spans backed by the same arena buffer are valid endpoints
+   for a disjoint copy. *>
+fn void persistent_span_copies_between_arena_ranges() @test {
+    gpu::Device device = make_persistent_span_test_device();
     defer destroy_test_device(&device)!!;
 
     gpu::PersistentAllocDesc src_desc = {
-        .size = 64, .align = 16, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "src",
+        .size        = 64,
+        .align       = 16,
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "src",
     };
     gpu::GpuSpan src = gpu::alloc_persistent_span(&device, &src_desc)!!;
     defer gpu::free_persistent_span(&device, src)!!;
     gpu::PersistentAllocDesc dst_desc = {
-        .size = 64, .align = 16, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "dst",
+        .size        = 64,
+        .align       = 16,
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "dst",
     };
     gpu::GpuSpan dst = gpu::alloc_persistent_span(&device, &dst_desc)!!;
     defer gpu::free_persistent_span(&device, dst)!!;
 
-    vk::ResolvedSpan src_resolved = resolve_native_span(&device, &src);
-    vk::ResolvedSpan dst_resolved = resolve_native_span(&device, &dst);
     char[] src_mapping = map_test_span(&device, src);
     char* src_bytes = src_mapping.ptr;
     for (usz i = 0; i < 64; i++) src_bytes[i] = (char)(i % 251);
-    gpu::flush_buffer(
-        &device,
-        src_resolved.backing_buffer,
-        src_resolved.offset,
-        src_resolved.size,
-    )!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -615,23 +609,15 @@ fn void transfer_usage_persistent_span_copies() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
-    gpu::invalidate_buffer(
-        &device,
-        dst_resolved.backing_buffer,
-        dst_resolved.offset,
-        dst_resolved.size,
-    )!!;
     char[] dst_mapping = map_test_span(&device, dst);
     char* dst_bytes = dst_mapping.ptr;
     for (usz i = 0; i < 64; i++) {
-        assert(dst_bytes[i] == (char)(i % 251), "transfer-usage persistent span copies intact bytes");
+        assert(dst_bytes[i] == (char)(i % 251), "persistent span copy preserves bytes");
     }
 }
 
-<* resolve_indirect_span rejects buffers without the indirect bit, so this
-   fails pre-fix and passes only once the arena carries the superset. *>
-fn void indirect_usage_persistent_span_dispatches() @test {
-    gpu::Device device = make_persistent_usage_device();
+fn void persistent_span_drives_indirect_dispatch() @test {
+    gpu::Device device = make_persistent_span_test_device();
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = PA_DOUBLE_SPIRV[..], .entry_point = "main" };
@@ -643,7 +629,11 @@ fn void indirect_usage_persistent_span_dispatches() @test {
 
     const uint COUNT = 4;
     gpu::PersistentAllocDesc io_desc = {
-        .size = COUNT * 4 * 2, .align = 16, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "io",
+        .size        = COUNT * 4 * 2,
+        .align       = 16,
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "io",
     };
     gpu::GpuSpan io = gpu::alloc_persistent_span(&device, &io_desc)!!;
     defer gpu::free_persistent_span(&device, io)!!;
@@ -652,7 +642,11 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     for (uint i = 0; i < COUNT; i++) values[i] = (float)i;
 
     gpu::PersistentAllocDesc root_desc = {
-        .size = ComputeRoot::size, .align = 16, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "root",
+        .size        = ComputeRoot::size,
+        .align       = 16,
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "root",
     };
     gpu::GpuSpan root_span = gpu::alloc_persistent_span(&device, &root_desc)!!;
     defer gpu::free_persistent_span(&device, root_span)!!;
@@ -664,19 +658,17 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     root.count      = COUNT;
 
     gpu::PersistentAllocDesc args_desc = {
-        .size = gpu::DispatchIndirectCommand::size, .align = 4, .usage = { .indirect }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }, .debug_name = "dispatch_args",
+        .size        = gpu::DispatchIndirectCommand::size,
+        .align       = 4,
+        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "dispatch_args",
     };
     gpu::GpuSpan args_span = gpu::alloc_persistent_span(&device, &args_desc)!!;
     defer gpu::free_persistent_span(&device, args_span)!!;
     char[] args_mapping = map_test_span(&device, args_span);
     gpu::DispatchIndirectCommand* args = (gpu::DispatchIndirectCommand*)args_mapping.ptr;
     *args = { .x = 1, .y = 1, .z = 1 };
-    vk::ResolvedSpan args_resolved = resolve_native_span(&device, &args_span);
-    vk::ResolvedSpan root_resolved = resolve_native_span(&device, &root_span);
-    vk::ResolvedSpan io_resolved = resolve_native_span(&device, &io);
-    gpu::flush_buffer(&device, args_resolved.backing_buffer, args_resolved.offset, args_resolved.size)!!;
-    gpu::flush_buffer(&device, root_resolved.backing_buffer, root_resolved.offset, root_resolved.size)!!;
-    gpu::flush_buffer(&device, io_resolved.backing_buffer, io_resolved.offset, io_resolved.size)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -701,29 +693,10 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
-    gpu::invalidate_buffer(&device, io_resolved.backing_buffer, io_resolved.offset, io_resolved.size)!!;
     float* doubled = &values[COUNT];
     for (uint i = 0; i < COUNT; i++) {
-        assert(doubled[i] == (float)i * 2.0f, "indirect-usage persistent span drove cmd_dispatch_indirect");
+        assert(doubled[i] == (float)i * 2.0f, "persistent span drives cmd_dispatch_indirect");
     }
-}
-
-<* Usage bits outside the arena's superset fault at allocation time instead
-   of surfacing as a Vulkan validation error at bind time. *>
-fn void unsupported_usage_persistent_span_faults() @test {
-    gpu::Device device = make_persistent_usage_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::PersistentAllocDesc vertex_desc = {
-        .size = 64, .align = 16, .usage = { .vertex }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer },
-    };
-    fault vertex_fault = @catch(gpu::alloc_persistent_span(&device, &vertex_desc));
-    assert(vertex_fault == gpu::INVALID_ARGUMENT, "vertex-bit usage request faults INVALID_ARGUMENT");
-
-    // Empty usage stays valid (storage-style default).
-    gpu::PersistentAllocDesc empty_desc = { .size = 64, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
-    gpu::GpuSpan empty_span = gpu::alloc_persistent_span(&device, &empty_desc)!!;
-    gpu::free_persistent_span(&device, empty_span)!!;
 }
 
 fn void persistent_free_rejections_report_exact_context() @test {

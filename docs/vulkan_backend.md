@@ -89,7 +89,7 @@ Each `VkRuntimeState` owns one instance, its instance dispatch, one optional
 debug messenger, and a stable adapter cache. Runtime creation publishes its
 public slot only after instance creation and adapter enumeration succeed.
 
-Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact cached physical device and borrows the runtime-owned instance. Device destruction never destroys that borrowed instance; the retained runtime remains unavailable for destruction until the device is gone. The transitional `create_device_from_desc(DeviceDesc*)` path owns a separate instance and performs its own adapter selection.
+Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact cached physical device and borrows the runtime-owned instance. Device destruction never destroys that borrowed instance; the retained runtime remains unavailable for destruction until the device is gone. The direct `create_device_from_desc(DeviceDesc*)` path owns a separate instance and performs its own adapter selection.
 
 Instance creation responsibilities:
 
@@ -298,40 +298,23 @@ immediately. Normal device destruction is blocked
 by live public allocations; accepted loss/partial teardown releases remaining
 table entries before destroying the allocator.
 
-## 8. Buffer implementation
+## 8. Private buffer implementation
 
-Creation flow:
+`gpu::vk::BufferHandle`, `BufferDesc`, and `BufferUsage` implement
+allocation and arena backing. They never cross backend dispatch.
 
-```text
-public BufferDesc
-    -> validate size, usage, and semantic access
-    -> translate BufferUsage to vk::BufferUsageFlags
-    -> derive the admitted native queue families
-    -> translate MemoryKind to vma::AllocationCreateInfo
-    -> allocator.try_create_buffer
-    -> query mapped pointer and optional device address
-    -> store BufferSlot, including access roles
-    -> return BufferHandle
-```
+Creation validates size and semantic access, derives the exact native queue
+families, translates private usage and memory policy, creates the VMA-backed
+buffer, and publishes the private handle only after mapping state and any
+required nonzero device address are known. Addressable backing includes
+`VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT`.
 
-Addressable buffers must include:
-
-```text
-VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-```
-
-If address query returns zero, creation should fail.
-Queue-family lists are derived from the descriptor's semantic `QueueRoles`
-access set. The backend visits admitted roles in graphics, compute, transfer
-order and includes every selected identity for each role. Private presentation
-queues are excluded. One unique family keeps `EXCLUSIVE` sharing with no family
-list; two or more use `CONCURRENT` with the exact ordered, deduplicated list.
-
-Frame arenas admit selected graphics and compute roles, or transfer on a
-transfer-only device. Persistent-arena backing admits every selected role;
-each returned span retains its narrower allocation access set. Concurrent
-sharing does not replace barriers, submission ordering, completion waits, or
-retirement. Every arena remains scoped to its owning `Device`.
+One unique family uses `EXCLUSIVE` sharing; multiple admitted families use
+`CONCURRENT` with the exact ordered, deduplicated list. Presentation queues
+are excluded. Frame arenas admit graphics and compute roles, or transfer on a
+transfer-only device. Persistent backing admits every selected role while each
+span retains its narrower access set. Sharing does not replace barriers,
+submission ordering, completion waits, or lifetime rules.
 
 ## 9. Texture implementation
 
@@ -414,7 +397,7 @@ DescriptorSlot
     TextureHandle owner_texture
 ```
 
-Initial policy should validate descriptor use in debug builds and report leaked descriptors at device destruction.
+Descriptor use is validated in debug builds, and device destruction reports leaks.
 
 Batch creation uses a prepare/commit transaction under the resource lock.
 Preparation validates every item and resolves its view without consuming
@@ -740,7 +723,6 @@ For VMA-backed resources:
 
 ```text
 independent allocation: allocator.destroy_buffer(buffer, allocation) immediately
-buffer: allocator.destroy_buffer(buffer, allocation) after retirement
 image: allocator.destroy_image(image, allocation) after retirement
 ```
 
@@ -774,7 +756,7 @@ The Vulkan backend is acceptable when:
 
 ```text
 device creation is validation-clean
-all buffers/images are VMA-backed
+all native buffer/image allocations are VMA-backed
 independent allocation creation publishes only complete native state
 addressable spans produce valid GPU addresses
 root-pointer compute works

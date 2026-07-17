@@ -7,9 +7,8 @@ import std::thread;
 import std::time;
 import std::core::mem::allocators;
 
-// Advisory, not gating: create/destroy round trips at 1/2/4 workers,
-// reporting ns/op and scaling vs one thread. ns/op includes the still-locked
-// destroy half, so create-path wins are understated. Indicative on lavapipe.
+// Advisory allocation, texture, and shader create/destroy round trips at
+// 1/2/4 workers, reporting ns/op and scaling against one worker.
 
 const char[*] BENCH_SHADER_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
@@ -18,7 +17,6 @@ const uint[3] BENCH_WORKER_COUNTS = { 1, 2, 4 };
 const uint BENCH_MAX_WORKERS = 4;
 
 enum BenchPhase : int {
-    BUFFER,
     TEXTURE,
     SHADER,
     ALLOCATION,
@@ -34,23 +32,11 @@ struct BenchWorkerArgs {
 
 fn ZString phase_name(BenchPhase phase) {
     switch (phase) {
-        case BenchPhase.BUFFER:     return "buffers";
         case BenchPhase.TEXTURE:    return "textures";
         case BenchPhase.SHADER:     return "shaders";
         case BenchPhase.ALLOCATION: return "allocations";
         default:                    return "mixed";
     }
-}
-
-fn void run_buffer_op(gpu::Device* device) {
-    gpu::BufferDesc desc = {
-        .size        = 256,
-        .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle handle = gpu::create_buffer(device, &desc)!!;
-    gpu::destroy_buffer(device, handle)!!;
 }
 
 fn void run_texture_op(gpu::Device* device) {
@@ -85,8 +71,6 @@ fn void run_allocation_op(gpu::Device* device) {
 
 fn void run_phase_op(gpu::Device* device, BenchPhase phase, uint mix_index) {
     switch (phase) {
-        case BenchPhase.BUFFER:
-            run_buffer_op(device);
         case BenchPhase.TEXTURE:
             run_texture_op(device);
         case BenchPhase.SHADER:
@@ -94,11 +78,10 @@ fn void run_phase_op(gpu::Device* device, BenchPhase phase, uint mix_index) {
         case BenchPhase.ALLOCATION:
             run_allocation_op(device);
         case BenchPhase.MIXED:
-            switch (mix_index % 4) {
-                case 0:  run_buffer_op(device);
+            switch (mix_index % 3) {
+                case 0:  run_allocation_op(device);
                 case 1:  run_texture_op(device);
-                case 2:  run_shader_op(device);
-                default: run_allocation_op(device);
+                default: run_shader_op(device);
             }
     }
 }
@@ -155,7 +138,6 @@ fn int main() {
     defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    run_phase(&device, state, BenchPhase.BUFFER);
     run_phase(&device, state, BenchPhase.TEXTURE);
     run_phase(&device, state, BenchPhase.SHADER);
     run_phase(&device, state, BenchPhase.ALLOCATION);

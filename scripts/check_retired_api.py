@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "test" / "retired_api"
 
 FIXTURES = {
+    "buffer_handle": "BufferHandle",
     "public_semaphore": "SemaphoreHandle",
     "queue_idle": "wait_queue_idle",
     "timeline_caps": "timeline_semaphore",
@@ -42,7 +43,7 @@ def main() -> int:
             print(f"- {failure}", file=sys.stderr)
         return 1
 
-    print("retired synchronization API fixtures fail to compile")
+    print("retired API fixtures fail to compile")
     return 0
 
 

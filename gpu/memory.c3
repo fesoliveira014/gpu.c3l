@@ -92,12 +92,10 @@ struct MemoryHeapBudget {
     ulong block_bytes;
 }
 
-// Device memory snapshot. `heaps[0..heap_count]` are valid. Resource counts are
-// 0 until the resource tables exist.
+// Device memory snapshot. `heaps[0..heap_count]` are valid.
 struct MemoryStats {
     MemoryHeapBudget[MAX_MEMORY_HEAPS] heaps;
     uint  heap_count;
-    ulong buffer_count;
     ulong texture_count;
     ulong live_allocation_count;
 }
@@ -277,11 +275,10 @@ macro void? @with_frame(FrameToken* out_frame, Device* device, #work, ...) {
 }
 
 // `memory_kind` must be PERSISTENT_UPLOAD; `align` 0 means no requirement;
-// `usage` must fit the arena superset; `access` must name selected roles.
+// `access` must name selected roles.
 struct PersistentAllocDesc {
     usz         size;
     usz         align;
-    BufferUsage usage;
     MemoryKind  memory_kind;
     QueueRoles  access;
     ZString     debug_name;

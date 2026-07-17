@@ -241,20 +241,17 @@ its returned completion point. `TextureUse.PRESENT` uses color-attachment
 output without presentation-facing access.
 Running example: `present_mode_explorer`.
 
-## 13. Choose a memory kind
+## 13. Choose a memory class
 
-Goal: right residency per access pattern.
-
-| Kind | For | Pattern |
+| Class or arena | For | Pattern |
 |---|---|---|
-| `FRAME_UPLOAD` | roots, per-frame constants | `alloc_frame_span(&frame, ...)`, valid for that token generation |
-| `PERSISTENT_UPLOAD` | tables the CPU rewrites | write + `flush_buffer` |
-| `DEVICE` | GPU-only working sets | upload via staging |
-| `STAGING` | transfer sources | `cmd_copy_buffer_to_texture` etc. |
-| `READBACK` | GPU→CPU results | `invalidate_buffer` before reading |
+| `MemoryClass.CPU_WRITE` | CPU-written generic data | map, write, `flush_mapped_span`, submit |
+| `MemoryClass.GPU_PRIVATE` | GPU-only working sets | upload through an exact destination span |
+| `MemoryClass.CPU_READ` | GPU-to-CPU results | wait, `invalidate_mapped_span`, read |
+| frame arena | roots and per-frame constants | `alloc_frame_span(&frame, ...)`; coherent and valid for that frame generation |
+| persistent arena | long-lived CPU-written tables | `alloc_persistent_span`; coherent until freed |
 
-Running example: `memory_report` prints the arenas live; `docs/memory.md`
-has the full model.
+See `docs/memory.md` for lifetime and visibility rules.
 
 ## 14. Allocate generic GPU data
 

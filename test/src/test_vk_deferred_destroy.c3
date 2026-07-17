@@ -5,10 +5,6 @@ import gpu::vk @public;
 import vk;
 import std::atomic::types;
 
-// Headless (lavapipe): destroys free the handle immediately but defer the
-// backend release until the referencing frame retires; plus a whitebox check
-// on the drain queue's accounting.
-
 const char[*] DEFER_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 const uint DEFER_COUNT = 64;
 
@@ -31,23 +27,22 @@ fn vk::DeferredStats defer_stats(gpu::Device* device) {
 }
 
 struct DeferRig {
-    gpu::BufferHandle   io;
+    vk::BufferHandle   io;
     gpu::TextureHandle  texture;
     gpu::ShaderHandle   shader;
     gpu::PipelineHandle pipeline;
 }
 
-<* Enough surface to submit real GPU work against before destroying it. *>
 fn DeferRig build_defer_rig(gpu::Device* device) {
-    gpu::BufferDesc io_desc = {
+    vk::BufferDesc io_desc = {
         .size        = DEFER_COUNT * float::size,
         .usage       = { .storage, .addressable },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "defer_io",
     };
-    gpu::BufferHandle io = gpu::create_buffer(device, &io_desc)!!;
-    gpu::GpuSpan io_span = gpu::get_buffer_span(device, io)!!;
+    vk::BufferHandle io = vk::vk_create_buffer(device, &io_desc)!!;
+    gpu::GpuSpan io_span = vk::vk_get_buffer_span(device, io)!!;
     float* data = (float*)test_span_mapping(device, io_span).ptr;
     for (uint i = 0; i < DEFER_COUNT; i++) data[i] = (float)i;
 
@@ -73,13 +68,11 @@ fn DeferRig build_defer_rig(gpu::Device* device) {
     return { .io = io, .texture = texture, .shader = shader, .pipeline = pipeline };
 }
 
-<* Submits without waiting, so the caller destroys resources the GPU may
-   still be running against. *>
 fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* rig) {
     gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
-    gpu::GpuSpan io_span = gpu::get_buffer_span(device, rig.io)!!;
+    gpu::GpuSpan io_span = vk::vk_get_buffer_span(device, rig.io)!!;
     ComputeRoot* root = (ComputeRoot*)test_span_mapping(device, root_span).ptr;
-    root.input_gpu  = gpu::get_buffer_address(device, rig.io)!!;
+    root.input_gpu  = vk::vk_get_buffer_address(device, rig.io)!!;
     root.output_gpu = root.input_gpu;
     root.count      = DEFER_COUNT;
 
@@ -129,7 +122,7 @@ fn void destroy_after_submit_survives_frame_cycle() @test {
     submit_defer_rig(&frame_token, &device, &rig);
 
     gpu::destroy_texture(&device, rig.texture)!!;
-    gpu::destroy_buffer(&device, rig.io)!!;
+    vk::vk_destroy_buffer(&device, rig.io)!!;
     gpu::destroy_pipeline(&device, rig.pipeline)!!;
     gpu::destroy_shader(&device, rig.shader)!!;
     assert(deferred_count(&device) > 0, "destroy-after-submit enqueues backend objects rather than freeing them");
@@ -152,12 +145,17 @@ fn void deferred_queue_count_rises_then_drains() @test {
     gpu::Device device = make_defer_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
+    vk::BufferDesc desc = {
+        .size        = 256,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
+    };
+    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &desc)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     assert(deferred_count(&device) == 0, "queue starts empty");
-    gpu::destroy_buffer(&device, buffer)!!;
+    vk::vk_destroy_buffer(&device, buffer)!!;
     assert(deferred_count(&device) == 1, "a mid-frame destroy raises the enqueued count");
     gpu::end_frame(&frame_token)!!;
 
@@ -172,11 +170,16 @@ fn void deferred_destroy_outside_frame_is_immediate() @test {
     gpu::Device device = make_defer_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
+    vk::BufferDesc desc = {
+        .size        = 256,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
+    };
+    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &desc)!!;
 
     assert(deferred_count(&device) == 0, "queue starts empty");
-    gpu::destroy_buffer(&device, buffer)!!;
+    vk::vk_destroy_buffer(&device, buffer)!!;
     assert(deferred_count(&device) == 0, "a destroy with no pending off-frame work retires through the opportunistic drain immediately");
 }
 
@@ -185,12 +188,17 @@ fn void deferred_enqueue_uses_only_the_signaled_shadow() @test {
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
+    vk::BufferDesc desc = {
+        .size        = 256,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
+    };
+    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &desc)!!;
     state.timeline_counter.store(1, AtomicOrdering.RELAXED);
     vk::DeferredStats before = vk::deferred_stats(state);
 
-    gpu::destroy_buffer(&device, buffer)!!;
+    vk::vk_destroy_buffer(&device, buffer)!!;
 
     vk::DeferredStats after = vk::deferred_stats(state);
     assert(after.host_queries == before.host_queries, "enqueue does not query a native timeline");
@@ -199,27 +207,25 @@ fn void deferred_enqueue_uses_only_the_signaled_shadow() @test {
     state.timeline_counter.store(0, AtomicOrdering.RELAXED);
 }
 
-<* An off-frame submit is sanctioned usage: destroying a buffer it
-   referenced must defer backend release, not free under in-flight work. *>
 fn void off_frame_destroy_defers_release() @test {
     gpu::Device device = make_defer_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc src_desc = {
+    vk::BufferDesc src_desc = {
         .size = 256, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }, .debug_name = "off_frame_src",
     };
-    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
+    vk::BufferHandle src = vk::vk_create_buffer(&device, &src_desc)!!;
 
-    gpu::BufferDesc dst_desc = {
+    vk::BufferDesc dst_desc = {
         .size = 256, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }, .debug_name = "off_frame_dst",
     };
-    gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
+    vk::BufferHandle dst = vk::vk_create_buffer(&device, &dst_desc)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = {
-        .src = gpu::get_buffer_span(&device, src)!!,
-        .dst = gpu::get_buffer_span(&device, dst)!!,
+        .src = vk::vk_get_buffer_span(&device, src)!!,
+        .dst = vk::vk_get_buffer_span(&device, dst)!!,
     };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
@@ -230,9 +236,9 @@ fn void off_frame_destroy_defers_release() @test {
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
 
     assert(deferred_count(&device) == 0, "queue starts empty");
-    gpu::destroy_buffer(&device, dst)!!;
+    vk::vk_destroy_buffer(&device, dst)!!;
     assert(deferred_count(&device) > 0, "destroying an off-frame submission's target enqueues rather than freeing synchronously");
-    gpu::destroy_buffer(&device, src)!!;
+    vk::vk_destroy_buffer(&device, src)!!;
 
     gpu::Device original = device;
     assert(@catch(gpu::destroy_device(&device)) == gpu::DEVICE_BUSY,
@@ -240,7 +246,7 @@ fn void off_frame_destroy_defers_release() @test {
     assert(device == original, "busy destruction preserves the device token");
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 0,
-        "off-frame resource destruction leaves no live public slots");
+        "off-frame resource destruction leaves no live backend buffer slots");
 }
 
 const uint STORM_COUNT = 128;
@@ -252,16 +258,21 @@ fn void mid_frame_destroy_storm_issues_no_host_queries() @test {
     gpu::Device device = make_defer_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferHandle[STORM_COUNT] buffers;
+    vk::BufferHandle[STORM_COUNT] buffers;
     for (uint i = 0; i < STORM_COUNT; i++) {
-        gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+        vk::BufferDesc desc = {
+        .size        = 256,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
+    };
+        buffers[i] = vk::vk_create_buffer(&device, &desc)!!;
     }
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     vk::DeferredStats before = defer_stats(&device);
     for (uint i = 0; i < STORM_COUNT; i++) {
-        gpu::destroy_buffer(&device, buffers[i])!!;
+        vk::vk_destroy_buffer(&device, buffers[i])!!;
     }
     vk::DeferredStats after = defer_stats(&device);
     assert(after.host_queries == before.host_queries, "tier 1 skips every mid-frame destroy: zero host timeline queries");
@@ -283,14 +294,19 @@ fn void deferred_stats_reconcile_without_teardown() @test {
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    gpu::BufferHandle[16] buffers;
+    vk::BufferHandle[16] buffers;
     for (uint i = 0; i < 16; i++) {
-        gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+        vk::BufferDesc desc = {
+        .size        = 256,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
+    };
+        buffers[i] = vk::vk_create_buffer(&device, &desc)!!;
     }
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    foreach (buffer : buffers) gpu::destroy_buffer(&device, buffer)!!;
+    foreach (buffer : buffers) vk::vk_destroy_buffer(&device, buffer)!!;
     gpu::end_frame(&frame_token)!!;
 
     frame_token = gpu::begin_frame(&device)!!;

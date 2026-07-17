@@ -5,11 +5,44 @@ import vk;
 import std::thread;
 import vma;
 
-// Concrete (non-generic) slot table for buffers. Monomorphized twin of
-// gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
+const usz MAX_BUFFERS = 4096;
 const uint BUFFER_FREE_NONE = 0;
+const BufferHandle BUFFER_HANDLE_INVALID = {};
 
-// Backend record stored per buffer slot.
+bitstruct BufferUsage : uint {
+    bool transfer_src : 0;
+    bool transfer_dst : 1;
+    bool uniform      : 2;
+    bool storage      : 3;
+    bool addressable  : 4;
+    bool indirect     : 5;
+    bool index        : 6;
+    bool vertex       : 7;
+}
+
+struct BufferHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
+}
+$assert BufferHandle::size <= ulong::size * 2;
+
+struct BufferDesc {
+    usz              size;
+    BufferUsage      usage;
+    gpu::MemoryKind  memory_kind;
+    gpu::QueueRoles  access;
+    ZString          debug_name;
+}
+
+fn bool BufferHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+
+fn bool BufferHandle.equals(self, BufferHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+
 struct BufferSlot {
     vk::Buffer          buffer;
     vma::Allocation     allocation;
@@ -17,7 +50,7 @@ struct BufferSlot {
     gpu::GpuAddress     gpu_base;
     void*               cpu_base;
     usz                 size;
-    gpu::BufferUsage    usage;
+    BufferUsage         usage;
     gpu::QueueRoles     access;
     gpu::MemoryKind     memory_kind;
     char[DEBUG_NAME_CAP] debug_name;
@@ -31,6 +64,7 @@ struct BufferCell {
     bool       used;
 }
 
+// Monomorphized twin of gpu::slots avoids a c3c 0.8.0 codegen failure.
 struct BufferTable {
     BufferCell[] slots;
     ulong        owner;
@@ -38,7 +72,7 @@ struct BufferTable {
     uint         next_new;
 }
 
-fn gpu::BufferHandle? BufferTable.alloc(&self, BufferSlot value) {
+fn BufferHandle? BufferTable.alloc(&self, BufferSlot value) {
     uint idx;
     bool found = false;
     while (self.free_head != BUFFER_FREE_NONE) {
@@ -58,14 +92,14 @@ fn gpu::BufferHandle? BufferTable.alloc(&self, BufferSlot value) {
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
     self.slots[idx].used = true;
-    return (gpu::BufferHandle){
+    return (BufferHandle){
         .owner      = self.owner,
         .index      = idx,
         .generation = self.slots[idx].generation,
     };
 }
 
-fn BufferSlot*? BufferTable.get(&self, gpu::BufferHandle h) {
+fn BufferSlot*? BufferTable.get(&self, BufferHandle h) {
     if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
@@ -73,7 +107,7 @@ fn BufferSlot*? BufferTable.get(&self, gpu::BufferHandle h) {
     return &self.slots[idx].value;
 }
 
-fn void? BufferTable.free(&self, gpu::BufferHandle h) {
+fn void? BufferTable.free(&self, BufferHandle h) {
     self.get(h)!;
     uint idx = h.index;
     self.slots[idx].used = false;
@@ -87,7 +121,7 @@ fn void? BufferTable.free(&self, gpu::BufferHandle h) {
     self.free_head = idx + 1;
 }
 
-fn vk::BufferUsageFlags buffer_usage_to_vk(gpu::BufferUsage usage) @private {
+fn vk::BufferUsageFlags buffer_usage_to_vk(BufferUsage usage) @private {
     uint flags = 0;
     if (usage.transfer_src) flags |= (uint)vk::BufferUsageFlagBits.TRANSFER_SRC_BIT;
     if (usage.transfer_dst) flags |= (uint)vk::BufferUsageFlagBits.TRANSFER_DST_BIT;
@@ -111,7 +145,11 @@ fn vma::AllocationCreateInfo memory_kind_to_vma(gpu::MemoryKind kind) @private {
                 .required_flags = (vk::MemoryPropertyFlags)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT,
             };
         case gpu::MemoryKind.PERSISTENT_UPLOAD:
-            return { .usage = vma::MemoryUsage.AUTO, .flags = { .host_access_sequential_write, .mapped } };
+            return {
+                .usage          = vma::MemoryUsage.AUTO,
+                .flags          = { .host_access_sequential_write, .mapped },
+                .required_flags = (vk::MemoryPropertyFlags)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT,
+            };
         case gpu::MemoryKind.DEVICE:
             return { .usage = vma::MemoryUsage.AUTO_PREFER_DEVICE };
         case gpu::MemoryKind.READBACK:
@@ -123,7 +161,7 @@ fn vma::AllocationCreateInfo memory_kind_to_vma(gpu::MemoryKind kind) @private {
     }
 }
 
-fn vk::BufferCreateInfo? make_buffer_create_info(gpu::BufferDesc* desc, uint[] queue_families) @private {
+fn vk::BufferCreateInfo? make_buffer_create_info(BufferDesc* desc, uint[] queue_families) @private {
     if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
     vk::BufferUsageFlags usage = buffer_usage_to_vk(desc.usage);
     if ((uint)usage == 0) return gpu::INVALID_ARGUMENT~;
@@ -138,9 +176,9 @@ fn vk::BufferCreateInfo? make_buffer_create_info(gpu::BufferDesc* desc, uint[] q
     return info;
 }
 
-fn gpu::BufferHandle? create_buffer_with_families_for_state(
+fn BufferHandle? create_buffer_with_families_for_state(
     VkDeviceState* state,
-    gpu::BufferDesc* desc,
+    BufferDesc* desc,
     uint[] queue_families,
 ) @private {
     vk::BufferCreateInfo buffer_info = make_buffer_create_info(desc, queue_families)!;
@@ -193,50 +231,22 @@ fn gpu::BufferHandle? create_buffer_with_families_for_state(
     return gpu::SLOT_TABLE_FULL~;
 }
 
-fn gpu::BufferHandle? create_buffer_for_state(VkDeviceState* state, gpu::BufferDesc* desc) @private {
+fn BufferHandle? create_buffer_for_state(VkDeviceState* state, BufferDesc* desc) @private {
     uint[MAX_QUEUE_FAMILIES] families;
     uint count = resource_queue_families(state, desc.access, families[..]);
     return create_buffer_with_families_for_state(state, desc, families[:count]);
 }
 
-fn gpu::BufferHandle? vk_create_buffer(gpu::Device* device, gpu::BufferDesc* desc) @private {
+fn BufferHandle? vk_create_buffer(gpu::Device* device, BufferDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
-    if (desc.size == 0) {
-        gpu::DebugMessage message = {
-            .severity       = gpu::DebugMessageSeverity.ERROR,
-            .category       = { .public_contract },
-            .operation      = "create_buffer",
-            .has_fault      = true,
-            .public_fault   = gpu::INVALID_ARGUMENT,
-            .resource       = { .kind = gpu::DebugResourceKind.BUFFER, .debug_name = desc.debug_name },
-            .rejected_field = "BufferDesc.size",
-            .invariant      = "must be greater than zero",
-        };
-        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if ((uint)buffer_usage_to_vk(desc.usage) == 0) {
-        gpu::DebugMessage message = {
-            .severity       = gpu::DebugMessageSeverity.ERROR,
-            .category       = { .public_contract },
-            .operation      = "create_buffer",
-            .has_fault      = true,
-            .public_fault   = gpu::INVALID_ARGUMENT,
-            .resource       = { .kind = gpu::DebugResourceKind.BUFFER, .debug_name = desc.debug_name },
-            .rejected_field = "BufferDesc.usage",
-            .invariant      = "must include at least one usage flag",
-        };
-        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
-        return gpu::INVALID_ARGUMENT~;
-    }
     return create_buffer_for_state(state, desc);
 }
 
 <* Frees the handle now; buffer + allocation release is deferred until every
    referencing frame retires. *>
-fn void? vk_destroy_buffer(gpu::Device* device, gpu::BufferHandle handle) @private {
+fn void? vk_destroy_buffer(gpu::Device* device, BufferHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
     defer exit_tracked(state);
@@ -256,14 +266,14 @@ fn void? vk_destroy_buffer(gpu::Device* device, gpu::BufferHandle handle) @priva
     );
 }
 
-fn gpu::GpuAddress? vk_get_buffer_address(gpu::Device* device, gpu::BufferHandle handle) @private {
+fn gpu::GpuAddress? vk_get_buffer_address(gpu::Device* device, BufferHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     BufferSlot* slot = state.buffers.get(handle)!;
     if ((ulong)slot.gpu_base == 0) return gpu::INVALID_ARGUMENT~;
     return slot.gpu_base;
 }
 
-fn void? vk_flush_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offset, usz size) @private {
+fn void? vk_flush_buffer(gpu::Device* device, BufferHandle handle, usz offset, usz size) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     BufferSlot* slot = state.buffers.get(handle)!;
     if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
@@ -273,7 +283,7 @@ fn void? vk_flush_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offs
     check_device_result(state, state.allocator.flush_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
 }
 
-fn void? vk_invalidate_buffer(gpu::Device* device, gpu::BufferHandle handle, usz offset, usz size) @private {
+fn void? vk_invalidate_buffer(gpu::Device* device, BufferHandle handle, usz offset, usz size) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     BufferSlot* slot = state.buffers.get(handle)!;
     if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
@@ -282,7 +292,7 @@ fn void? vk_invalidate_buffer(gpu::Device* device, gpu::BufferHandle handle, usz
     check_device_result(state, state.allocator.invalidate_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
 }
 
-fn gpu::GpuSpan? get_buffer_span_for_state(VkDeviceState* state, gpu::BufferHandle handle) @private {
+fn gpu::GpuSpan? get_buffer_span_for_state(VkDeviceState* state, BufferHandle handle) @private {
     BufferSlot* slot = state.buffers.get(handle)!;
     return {
         .owner      = handle.owner,
@@ -292,7 +302,7 @@ fn gpu::GpuSpan? get_buffer_span_for_state(VkDeviceState* state, gpu::BufferHand
     };
 }
 
-fn gpu::GpuSpan? vk_get_buffer_span(gpu::Device* device, gpu::BufferHandle handle) @private {
+fn gpu::GpuSpan? vk_get_buffer_span(gpu::Device* device, BufferHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (state == null) return gpu::INVALID_HANDLE~;
     return get_buffer_span_for_state(state, handle);

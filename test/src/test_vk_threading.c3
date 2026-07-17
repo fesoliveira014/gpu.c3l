@@ -69,13 +69,13 @@ fn int creation_storm_worker(void* arg) {
     StormArgs* args = (StormArgs*)arg;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
     for (uint i = 0; i < THR_ITERS; i++) {
-        gpu::BufferDesc buf_desc = {
-            .size        = (usz)(256 + (args.seed * 64 + i) % 512),
-            .usage       = { .storage, .addressable },
-            .memory_kind = gpu::MemoryKind.DEVICE,
-            .access      = { .graphics, .compute, .transfer },
-        };
-        gpu::BufferHandle buffer = gpu::create_buffer(args.device, &buf_desc)!!;
+        OwnedSpan buffer = allocate_owned_span(
+            device:       args.device,
+            size:         (usz)(256 + (args.seed * 64 + i) % 512),
+            memory_class: gpu::MemoryClass.GPU_PRIVATE,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "creation_storm_buffer",
+        )!!;
 
         gpu::TextureDesc tex_desc = {
             .dimension = gpu::TextureDimension.TEX_2D,
@@ -99,13 +99,13 @@ fn int creation_storm_worker(void* arg) {
         };
         gpu::SamplerIndex sampler = gpu::create_sampler(args.device, &sampler_desc)!!;
 
-        if (!buffer.is_valid() || !texture.is_valid() || !shader.is_valid() || !sampler.is_valid()) {
+        if (!buffer.allocation.is_valid() || !texture.is_valid() || !shader.is_valid() || !sampler.is_valid()) {
             args.failed = true;
         }
         gpu::destroy_sampler(args.device, sampler)!!;
         gpu::destroy_shader(args.device, shader)!!;
         gpu::destroy_texture(args.device, texture)!!;
-        gpu::destroy_buffer(args.device, buffer)!!;
+        free_owned_span(args.device, &buffer)!!;
     }
     };
     return 0;
@@ -339,11 +339,7 @@ fn void parallel_recording_across_workers() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     for (uint i = 0; i < THR_THREADS; i++) {
-        vk::ResolvedSpan io_resolved = vk::resolve_span(
-            (vk::VkDeviceState*)gpu::device_backend_state(device),
-            &args[i].io_span,
-        )!!;
-        gpu::invalidate_buffer(&device, io_resolved.backing_buffer, 0, 0)!!;
+
         float* values = (float*)test_span_mapping(&device, args[i].io_span).ptr;
         float* doubled = &values[THR_ELEMENTS];
         for (uint e = 0; e < THR_ELEMENTS; e++) {
@@ -447,14 +443,17 @@ fn void concurrent_blocking_uploads() @test {
     defer destroy_test_device(&device)!!;
 
     UploadArgs[THR_THREADS] args;
-    gpu::BufferHandle[THR_THREADS] buffers;
+    OwnedSpan[THR_THREADS] buffers;
     Thread[THR_THREADS] threads;
     for (uint i = 0; i < THR_THREADS; i++) {
-        gpu::BufferDesc desc = {
-            .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-        };
-        buffers[i] = gpu::create_buffer(&device, &desc)!!;
-        args[i] = { .device = &device, .span = gpu::get_buffer_span(&device, buffers[i])!!, .fill = (char)(i + 1) };
+        buffers[i] = allocate_owned_span(
+            device:       &device,
+            size:         256,
+            memory_class: gpu::MemoryClass.GPU_PRIVATE,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "thread_upload_buffer",
+        )!!;
+        args[i] = { .device = &device, .span = buffers[i].span, .fill = (char)(i + 1) };
     }
     for (uint i = 0; i < THR_THREADS; i++) {
         threads[i].create(&upload_worker, &args[i])!!;
@@ -471,7 +470,7 @@ fn void concurrent_blocking_uploads() @test {
             from_hazard: gpu::Hazard.TRANSFER_READ,
         )!!;
         foreach (b : readback) assert(b == (char)(i + 1), "every concurrent upload landed intact");
-        gpu::destroy_buffer(&device, buffers[i])!!;
+        free_owned_span(&device, &buffers[i])!!;
     }
 }
 
@@ -506,14 +505,17 @@ fn void concurrent_upload_hammer() @test {
     defer destroy_test_device(&device)!!;
 
     HammerArgs[THR_THREADS] args;
-    gpu::BufferHandle[THR_THREADS] buffers;
+    OwnedSpan[THR_THREADS] buffers;
     Thread[THR_THREADS] threads;
     for (uint i = 0; i < THR_THREADS; i++) {
-        gpu::BufferDesc desc = {
-            .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-        };
-        buffers[i] = gpu::create_buffer(&device, &desc)!!;
-        args[i] = { .device = &device, .span = gpu::get_buffer_span(&device, buffers[i])!!, .fill = (char)(i + 1) };
+        buffers[i] = allocate_owned_span(
+            device:       &device,
+            size:         256,
+            memory_class: gpu::MemoryClass.GPU_PRIVATE,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "thread_upload_buffer",
+        )!!;
+        args[i] = { .device = &device, .span = buffers[i].span, .fill = (char)(i + 1) };
     }
     for (uint i = 0; i < THR_THREADS; i++) {
         threads[i].create(&upload_hammer_worker, &args[i])!!;
@@ -530,7 +532,7 @@ fn void concurrent_upload_hammer() @test {
             from_hazard: gpu::Hazard.TRANSFER_READ,
         )!!;
         foreach (b : readback) assert(b == (char)(i + 1), "the device survived and buffers stayed isolated");
-        gpu::destroy_buffer(&device, buffers[i])!!;
+        free_owned_span(&device, &buffers[i])!!;
     }
 }
 
@@ -586,14 +588,17 @@ fn void two_helper_tiny_arena_hammer() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     HelperHammerArgs[HELPER_HAMMER_THREADS] args;
-    gpu::BufferHandle[HELPER_HAMMER_THREADS] buffers;
+    OwnedSpan[HELPER_HAMMER_THREADS] buffers;
     Thread[HELPER_HAMMER_THREADS] threads;
     for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) {
-        gpu::BufferDesc desc = {
-            .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-        };
-        buffers[i] = gpu::create_buffer(&device, &desc)!!;
-        args[i] = { .device = &device, .span = gpu::get_buffer_span(&device, buffers[i])!!, .seed = i + 1 };
+        buffers[i] = allocate_owned_span(
+            device:       &device,
+            size:         HELPER_HAMMER_PAYLOAD,
+            memory_class: gpu::MemoryClass.GPU_PRIVATE,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "helper_hammer_buffer",
+        )!!;
+        args[i] = { .device = &device, .span = buffers[i].span, .seed = i + 1 };
     }
     for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) {
         threads[i].create(&helper_hammer_worker, &args[i])!!;
@@ -617,7 +622,9 @@ fn void two_helper_tiny_arena_hammer() @test {
     assert(vk::helper_pool_reset_count(state) > resets_before_drain,
         "once concurrent hammering ends, the next sequential helper call reclaims the pool");
 
-    for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) gpu::destroy_buffer(&device, buffers[i])!!;
+    for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) {
+        free_owned_span(&device, &buffers[i])!!;
+    }
 }
 
 const uint SEQUENTIAL_HELPER_CALLS = 20;
@@ -630,12 +637,15 @@ fn void sequential_helper_calls_bound_the_pool_to_one_buffer() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = {
-        .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::GpuSpan buffer_span = gpu::get_buffer_span(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         HELPER_HAMMER_PAYLOAD,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "sequential_helper_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
+    gpu::GpuSpan buffer_span = buffer.span;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     ulong resets_before = vk::helper_pool_reset_count(state);
@@ -676,14 +686,17 @@ fn void failed_helpers_reclaim_command_records_on_pool_reset() @test {
         assert(invalid == gpu::INVALID_HANDLE, "invalid helper span faults before recording");
     }
 
-    gpu::BufferDesc desc = {
-        .size = payload.len, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         payload.len,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "helper_fault_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
     gpu::upload_buffer_data(
         device:      &device,
-        dst:         gpu::get_buffer_span(&device, buffer)!!,
+        dst:         buffer.span,
         data:        payload[..],
         next_stage:  gpu::Stage.TRANSFER,
         next_hazard: gpu::Hazard.TRANSFER_READ,
@@ -696,64 +709,61 @@ fn void failed_helpers_reclaim_command_records_on_pool_reset() @test {
     }
 }
 
-const uint GROWTH_THREADS = 4;
-const uint GROWTH_PER_THREAD = 24;
+const uint RELEASE_THREADS = 4;
+const uint RELEASES_PER_THREAD = 24;
 
-struct GrowthArgs {
-    gpu::Device*             device;
-    gpu::BufferHandle[GROWTH_PER_THREAD] buffers;
+struct ReleaseArgs {
+    gpu::Device* device;
+    OwnedSpan[RELEASES_PER_THREAD] buffers;
 }
 
-fn int growth_worker(void* arg) {
-    GrowthArgs* args = (GrowthArgs*)arg;
+fn int release_worker(void* arg) {
+    ReleaseArgs* args = (ReleaseArgs*)arg;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-    foreach (buffer : args.buffers) {
-        gpu::destroy_buffer(args.device, buffer)!!;
-    }
+        foreach (&buffer : args.buffers) {
+            free_owned_span(args.device, buffer)!!;
+        }
     };
     return 0;
 }
 
-<* Held mid-frame, every destroy's retire value stays in the future, so
-   nothing drains until the frame ends: all GROWTH_THREADS * GROWTH_PER_THREAD
-   destroys land while the frame is open, crossing DEFERRED_QUEUE_INITIAL_CAP
-   entirely from worker threads and forcing grow_deferred_queue off the main
-   thread. *>
-fn void deferred_queue_growth_from_worker_threads() @test {
+<* Release independent allocations concurrently while a frame is active. *>
+fn void concurrent_allocation_release_from_worker_threads() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
 
-    GrowthArgs[GROWTH_THREADS] args;
-    for (uint t = 0; t < GROWTH_THREADS; t++) {
-        args[t].device = &device;
-        for (uint i = 0; i < GROWTH_PER_THREAD; i++) {
-            gpu::BufferDesc desc = { .size = 256, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-            args[t].buffers[i] = gpu::create_buffer(&device, &desc)!!;
+    ReleaseArgs[RELEASE_THREADS] args;
+    for (uint thread_index = 0; thread_index < RELEASE_THREADS; thread_index++) {
+        args[thread_index].device = &device;
+        for (uint i = 0; i < RELEASES_PER_THREAD; i++) {
+            args[thread_index].buffers[i] = allocate_owned_span(
+                device:       &device,
+                size:         256,
+                memory_class: gpu::MemoryClass.GPU_PRIVATE,
+                access:       { .graphics, .compute, .transfer },
+                debug_name:   "worker_release_buffer",
+            )!!;
         }
     }
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    Thread[GROWTH_THREADS] threads;
-    for (uint t = 0; t < GROWTH_THREADS; t++) {
-        threads[t].create(&growth_worker, &args[t])!!;
+    Thread[RELEASE_THREADS] threads;
+    for (uint i = 0; i < RELEASE_THREADS; i++) {
+        threads[i].create(&release_worker, &args[i])!!;
     }
-    foreach (&t : threads) t.join()!!;
+    foreach (&worker : threads) worker.join()!!;
+
+    foreach (&thread_args : args) {
+        foreach (&buffer : thread_args.buffers) {
+            assert(!buffer.allocation.is_valid() && buffer.span.owner == 0,
+                "worker release clears every owned allocation and span");
+        }
+    }
+    gpu::end_frame(&frame_token)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    uint pending = vk::deferred_queue_count(state);
-    assert(pending == GROWTH_THREADS * GROWTH_PER_THREAD, "every worker-thread destroy enqueued exactly one deferred entry");
-    assert(pending > vk::DEFERRED_QUEUE_INITIAL_CAP, "worker-thread destroys crossed the initial capacity, forcing cross-thread growth");
-    gpu::end_frame(&frame_token)!!;
-
-    // frames_in_flight == 2: one more full cycle guarantees the drain
-    // observes the frame that covered the growth-storm destroys.
-    frame_token = gpu::begin_frame(&device)!!;
-    gpu::end_frame(&frame_token)!!;
-    frame_token = gpu::begin_frame(&device)!!;
-    assert(vk::deferred_queue_count(state) == 0, "every deferred entry drains cleanly once the covering frame retires");
-    gpu::end_frame(&frame_token)!!;
-
-    assert(vk::report_resource_leaks(state) == 0, "cross-thread queue growth leaves no leaked slots");
+    assert(vk::report_resource_leaks(state) == 0,
+        "concurrent allocation release leaves no live resource slots");
 }
 
 struct HelperRaceArgs {
@@ -784,27 +794,39 @@ fn void blocking_upload_races_thread_recording() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc upload_desc = {
-        .size = HELPER_HAMMER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle upload_buffer = gpu::create_buffer(&device, &upload_desc)!!;
-    defer gpu::destroy_buffer(&device, upload_buffer)!!;
+    OwnedSpan upload_buffer = allocate_owned_span(
+        device:       &device,
+        size:         HELPER_HAMMER_PAYLOAD,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "helper_race_upload_buffer",
+    )!!;
+    defer free_owned_span(&device, &upload_buffer)!!;
 
-    gpu::BufferDesc copy_desc = {
-        .size = 256, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle copy_src = gpu::create_buffer(&device, &copy_desc)!!;
-    defer gpu::destroy_buffer(&device, copy_src)!!;
-    gpu::BufferHandle copy_dst = gpu::create_buffer(&device, &copy_desc)!!;
-    defer gpu::destroy_buffer(&device, copy_dst)!!;
+    OwnedSpan copy_src = allocate_owned_span(
+        device:       &device,
+        size:         256,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "helper_race_copy_src",
+    )!!;
+    defer free_owned_span(&device, &copy_src)!!;
+    OwnedSpan copy_dst = allocate_owned_span(
+        device:       &device,
+        size:         256,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "helper_race_copy_dst",
+    )!!;
+    defer free_owned_span(&device, &copy_dst)!!;
 
-    HelperRaceArgs race_args = { .device = &device, .span = gpu::get_buffer_span(&device, upload_buffer)!! };
+    HelperRaceArgs race_args = { .device = &device, .span = upload_buffer.span };
     Thread uploader;
     uploader.create(&helper_race_upload_worker, &race_args)!!;
 
     gpu::BufferCopyDesc copy = {
-        .src = gpu::get_buffer_span(&device, copy_src)!!,
-        .dst = gpu::get_buffer_span(&device, copy_dst)!!,
+        .src = copy_src.span,
+        .dst = copy_dst.span,
     };
     for (uint i = 0; i < HELPER_RACE_ITERS; i++) {
         gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -834,12 +856,15 @@ fn int boundary_worker(void* arg) {
     // too fast to hold reliably, so hold the phase counter open by looping
     // creates until told to stop.
     while (args.release.load(AtomicOrdering.RELAXED) == 0) {
-        gpu::BufferDesc desc = {
-            .size = 4096, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-        };
-        gpu::BufferHandle buffer = gpu::create_buffer(args.device, &desc)!!;
+        OwnedSpan buffer = allocate_owned_span(
+            device:       args.device,
+            size:         4096,
+            memory_class: gpu::MemoryClass.GPU_PRIVATE,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "boundary_buffer",
+        )!!;
         args.entered.store(1, AtomicOrdering.RELAXED);
-        gpu::destroy_buffer(args.device, buffer)!!;
+        free_owned_span(args.device, &buffer)!!;
     }
     };
     return 0;
@@ -923,12 +948,15 @@ fn void multi_thread_tiny_arena_fallback_hammer() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
 
-    gpu::BufferHandle[FALLBACK_HAMMER_THREADS] buffers;
+    OwnedSpan[FALLBACK_HAMMER_THREADS] buffers;
     for (uint i = 0; i < FALLBACK_HAMMER_THREADS; i++) {
-        gpu::BufferDesc desc = {
-            .size = FALLBACK_HAMMER_PAYLOAD, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-        };
-        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+        buffers[i] = allocate_owned_span(
+            device:       &device,
+            size:         FALLBACK_HAMMER_PAYLOAD,
+            memory_class: gpu::MemoryClass.GPU_PRIVATE,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "fallback_hammer_buffer",
+        )!!;
     }
 
     ulong fallbacks_before = vk::dedicated_fallback_count(state);
@@ -936,7 +964,7 @@ fn void multi_thread_tiny_arena_fallback_hammer() @test {
     FallbackHammerArgs[FALLBACK_HAMMER_THREADS] args;
     Thread[FALLBACK_HAMMER_THREADS] threads;
     for (uint i = 0; i < FALLBACK_HAMMER_THREADS; i++) {
-        args[i] = { .device = &device, .dst = gpu::get_buffer_span(&device, buffers[i])!! };
+        args[i] = { .device = &device, .dst = buffers[i].span };
     }
     for (uint i = 0; i < FALLBACK_HAMMER_THREADS; i++) {
         threads[i].create(&fallback_hammer_worker, &args[i])!!;
@@ -967,7 +995,7 @@ fn void multi_thread_tiny_arena_fallback_hammer() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
 
-    foreach (b : buffers) gpu::destroy_buffer(&device, b)!!;
+    foreach (&buffer : buffers) free_owned_span(&device, buffer)!!;
     assert(vk::report_resource_leaks(state) == 0,
         "every fallback past the cap destroyed its fresh buffer instead of leaking it");
 }
@@ -1006,22 +1034,25 @@ fn void parallel_uploads_across_workers() @test {
     defer destroy_test_device(&device)!!;
 
 
-    gpu::BufferHandle[THR_THREADS] buffers;
+    OwnedSpan[THR_THREADS] buffers;
     for (uint i = 0; i < THR_THREADS; i++) {
-        gpu::BufferDesc desc = {
-            .size = PARALLEL_UPLOAD_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-        };
-        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+        buffers[i] = allocate_owned_span(
+            device:       &device,
+            size:         PARALLEL_UPLOAD_PAYLOAD,
+            memory_class: gpu::MemoryClass.GPU_PRIVATE,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "parallel_upload_buffer",
+        )!!;
     }
     defer {
-        foreach (b : buffers) (void)gpu::destroy_buffer(&device, b);
+        foreach (&buffer : buffers) (void)free_owned_span(&device, buffer);
     }
 
     ParallelUploadArgs[THR_THREADS] args;
     for (uint i = 0; i < THR_THREADS; i++) {
         args[i] = {
             .device = &device,
-            .span   = gpu::get_buffer_span(&device, buffers[i])!!,
+            .span   = buffers[i].span,
             .fill   = (char)(i + 1),
         };
     }

@@ -43,19 +43,19 @@ fn void diagnostic_dispatch_delivers_complete_message_once() @test {
     DebugMessage message = {
         .severity             = DebugMessageSeverity.ERROR,
         .category             = { .public_contract, .validation },
-        .operation            = "create_buffer",
+        .operation            = "allocate_memory",
         .has_fault            = true,
         .public_fault         = INVALID_ARGUMENT,
         .resource             = {
-            .kind                = DebugResourceKind.BUFFER,
+            .kind                = DebugResourceKind.ALLOCATION,
             .has_public_identity = true,
             .index               = 17,
             .generation          = 3,
-            .debug_name          = "diagnostic_buffer",
+            .debug_name          = "diagnostic_allocation",
         },
-        .rejected_field       = "BufferDesc.size",
-        .invariant            = "buffer size must be greater than zero",
-        .backend_text         = "buffer size is zero",
+        .rejected_field       = "AllocationDesc.size",
+        .invariant            = "allocation size must be greater than zero",
+        .backend_text         = "allocation size is zero",
         .validation_id_name   = "VUID-test",
         .validation_id_number = 42,
     };
@@ -67,17 +67,19 @@ fn void diagnostic_dispatch_delivers_complete_message_once() @test {
     assert(capture.message.severity == DebugMessageSeverity.ERROR, "severity is preserved");
     assert(capture.message.category.public_contract, "public-contract category is preserved");
     assert(capture.message.category.validation, "validation category is preserved");
-    assert(capture.message.operation.str_view() == "create_buffer", "operation is preserved");
+    assert(capture.message.operation.str_view() == "allocate_memory", "operation is preserved");
     assert(capture.message.has_fault, "public fault presence is preserved");
     assert(capture.message.public_fault == INVALID_ARGUMENT, "public fault is preserved");
-    assert(capture.message.resource.kind == DebugResourceKind.BUFFER, "resource kind is preserved");
+    assert(capture.message.resource.kind == DebugResourceKind.ALLOCATION, "resource kind is preserved");
     assert(capture.message.resource.has_public_identity, "public identity presence is preserved");
     assert(capture.message.resource.index == 17, "resource index is preserved");
     assert(capture.message.resource.generation == 3, "resource generation is preserved");
-    assert(capture.message.resource.debug_name.str_view() == "diagnostic_buffer", "debug name is preserved");
-    assert(capture.message.rejected_field.str_view() == "BufferDesc.size", "rejected field is preserved");
-    assert(capture.message.invariant.str_view() == "buffer size must be greater than zero", "invariant is preserved");
-    assert(capture.message.backend_text.str_view() == "buffer size is zero", "text is preserved");
+    assert(capture.message.resource.debug_name.str_view() == "diagnostic_allocation", "debug name is preserved");
+    assert(capture.message.rejected_field.str_view() == "AllocationDesc.size", "rejected field is preserved");
+    assert(capture.message.invariant.str_view()
+        == "allocation size must be greater than zero",
+        "invariant is preserved");
+    assert(capture.message.backend_text.str_view() == "allocation size is zero", "text is preserved");
     assert(capture.message.validation_id_name.str_view() == "VUID-test", "validation ID name is preserved");
     assert(capture.message.validation_id_number == 42, "validation ID number is preserved");
 }

@@ -39,7 +39,7 @@ struct TransferRange {
 }
 
 struct TransferArenaState {
-    gpu::BufferHandle backing;
+    BufferHandle      backing;
     gpu::GpuSpan      span;
     usz               size;
     ulong             virtual_head;
@@ -56,7 +56,7 @@ struct TransferArenaRange @private {
 }
 
 struct DedicatedStaging {
-    gpu::BufferHandle buffer;
+    BufferHandle      buffer;
     ulong             timeline_value;
     TimelineKind      timeline_kind;
 }
@@ -70,7 +70,7 @@ struct DedicatedRetireState {
 struct ReadbackTicketState @private {
     gpu::GpuSpan             span;
     ulong                    value;
-    gpu::BufferHandle        dedicated;
+    BufferHandle             dedicated;
     gpu::CommandListHandle   command;
     ulong                    range_end;
 }
@@ -154,7 +154,7 @@ fn void destroy_readback_tickets(VkDeviceState* state) @private {
 
 // Immediate destruction follows timeline completion, device idle, or a
 // pre-record failure; no fallible work follows a recorded readback copy.
-fn void destroy_readback_buffer(VkDeviceState* state, gpu::BufferHandle handle) @private {
+fn void destroy_readback_buffer(VkDeviceState* state, BufferHandle handle) @private {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     if (try slot = state.buffers.get(handle)) {
@@ -175,7 +175,7 @@ fn gpu::Device device_shim(VkDeviceState* state) @private {
     return state.owner;
 }
 
-fn gpu::BufferDesc staging_arena_desc(usz size, gpu::QueueRoles access) @private {
+fn BufferDesc staging_arena_desc(usz size, gpu::QueueRoles access) @private {
     return {
         .size        = size,
         .usage       = { .transfer_src },
@@ -185,7 +185,7 @@ fn gpu::BufferDesc staging_arena_desc(usz size, gpu::QueueRoles access) @private
     };
 }
 
-fn gpu::BufferDesc readback_arena_desc(usz size, gpu::QueueRoles access) @private {
+fn BufferDesc readback_arena_desc(usz size, gpu::QueueRoles access) @private {
     return {
         .size        = size,
         .usage       = { .transfer_dst },
@@ -195,7 +195,7 @@ fn gpu::BufferDesc readback_arena_desc(usz size, gpu::QueueRoles access) @privat
     };
 }
 
-fn gpu::BufferDesc staging_dedicated_desc(usz size, gpu::QueueRoles access) @private {
+fn BufferDesc staging_dedicated_desc(usz size, gpu::QueueRoles access) @private {
     return {
         .size        = size,
         .usage       = { .transfer_src },
@@ -209,7 +209,7 @@ fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
     usz staging_size = desc.staging_arena_size == 0 ? gpu::DEFAULT_STAGING_ARENA_SIZE : desc.staging_arena_size;
     usz readback_size = desc.readback_arena_size == 0 ? gpu::DEFAULT_READBACK_ARENA_SIZE : desc.readback_arena_size;
 
-    gpu::BufferDesc staging_desc = staging_arena_desc(staging_size, state.selected_queue_roles);
+    BufferDesc staging_desc = staging_arena_desc(staging_size, state.selected_queue_roles);
     uint[MAX_QUEUE_FAMILIES] family_storage;
     uint family_count = resource_queue_families(state, staging_desc.access, family_storage[..]);
     state.staging_arena.backing = create_buffer_with_families_for_state(
@@ -221,7 +221,7 @@ fn void? create_transfer_arenas(VkDeviceState* state, gpu::DeviceDesc* desc) {
     state.staging_arena.span = get_buffer_span_for_state(state, state.staging_arena.backing)!;
     state.staging_arena.size = staging_size;
 
-    gpu::BufferDesc readback_desc = readback_arena_desc(readback_size, state.selected_queue_roles);
+    BufferDesc readback_desc = readback_arena_desc(readback_size, state.selected_queue_roles);
     state.readback_arena.backing = create_buffer_for_state(state, &readback_desc)!;
     mark_buffer_internal(state, state.readback_arena.backing);
     state.readback_arena.span = get_buffer_span_for_state(state, state.readback_arena.backing)!;
@@ -342,7 +342,14 @@ fn void? drain_dedicated_transfers(VkDeviceState* state) @private {
 <* Span from the arena, or a dedicated one-shot buffer when it cannot fit.
    The fallback's creation runs outside transfer_mutex; only ring bookkeeping
    is locked, and the full re-check destroys the fresh buffer. *>
-fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena, usz size, usz align, gpu::BufferDesc* dedicated_desc, TimelineTag tag) @private {
+fn gpu::GpuSpan? transfer_alloc(
+    VkDeviceState* state,
+    TransferArenaState* arena,
+    usz size,
+    usz align,
+    BufferDesc* dedicated_desc,
+    TimelineTag tag,
+) @private {
     if (size == 0 || !is_pow2(align)) return gpu::INVALID_ARGUMENT~;
     {
         state.transfer_mutex.lock()!!;
@@ -364,7 +371,7 @@ fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena,
     }
 
     gpu::Device shim = device_shim(state);
-    gpu::BufferHandle buffer = vk_create_buffer(&shim, dedicated_desc)!;
+    BufferHandle buffer = vk_create_buffer(&shim, dedicated_desc)!;
     defer catch (void)vk_destroy_buffer(&shim, buffer);
     gpu::GpuSpan span = vk_get_buffer_span(&shim, buffer)!;
 
@@ -384,7 +391,7 @@ fn gpu::GpuSpan? transfer_alloc(VkDeviceState* state, TransferArenaState* arena,
 }
 
 fn gpu::GpuSpan? staging_alloc(VkDeviceState* state, usz size, usz align, TimelineTag tag) @private {
-    gpu::BufferDesc desc = staging_dedicated_desc(size, state.selected_queue_roles);
+    BufferDesc desc = staging_dedicated_desc(size, state.selected_queue_roles);
     return transfer_alloc(
         state:          state,
         arena:          &state.staging_arena,
@@ -396,7 +403,7 @@ fn gpu::GpuSpan? staging_alloc(VkDeviceState* state, usz size, usz align, Timeli
 }
 
 fn gpu::GpuSpan? readback_alloc(VkDeviceState* state, usz size, usz align, TimelineTag tag) @private {
-    gpu::BufferDesc desc = {
+    BufferDesc desc = {
         .size        = size,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
@@ -1549,7 +1556,7 @@ fn gpu::ReadbackTicket? ticket_alloc(
         }
     }
 
-    gpu::BufferDesc desc = {
+    BufferDesc desc = {
         .size        = size,
         .usage       = { .transfer_dst },
         .memory_kind = gpu::MemoryKind.READBACK,
@@ -1557,7 +1564,7 @@ fn gpu::ReadbackTicket? ticket_alloc(
         .debug_name  = "readback_ticket",
     };
     gpu::Device shim = device_shim(state);
-    gpu::BufferHandle buffer = vk_create_buffer(&shim, &desc)!;
+    BufferHandle buffer = vk_create_buffer(&shim, &desc)!;
     if (try span = vk_get_buffer_span(&shim, buffer)) {
         ReadbackTicketState data = {
             .span      = span,

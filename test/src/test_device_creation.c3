@@ -79,97 +79,96 @@ fn void distinct_adapter_devices_preserve_exact_owners() @test {
     );
 }
 
-fn void foreign_buffer_owner_rejects_before_backend_mutation() @test {
-    gpu::vk::stub_reset_buffer_counts();
+fn AllocationDesc device_creation_allocation_desc() {
+    return {
+        .size         = 256,
+        .alignment    = 16,
+        .memory_class = MemoryClass.GPU_PRIVATE,
+        .access       = { .graphics, .compute, .transfer },
+    };
+}
+
+fn void foreign_allocation_owner_rejects_before_backend_mutation() @test {
+    gpu::vk::stub_reset_allocation_counts();
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = device_creation_adapter(&runtime, 0);
     DeviceRequest request = gpu::strict_device_request();
     Device first = gpu::create_device(&adapter, &request)!!;
     Device second = gpu::create_device(&adapter, &request)!!;
-    BufferDesc buffer_desc = {
-        .size        = 256,
-        .usage       = { .transfer_dst },
-        .memory_kind = MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    BufferHandle first_buffer = gpu::create_buffer(&first, &buffer_desc)!!;
-    BufferHandle second_buffer = gpu::create_buffer(&second, &buffer_desc)!!;
+    AllocationDesc allocation_desc = device_creation_allocation_desc();
+    GpuAllocation first_allocation = gpu::allocate_memory(&first, &allocation_desc)!!;
+    GpuAllocation second_allocation = gpu::allocate_memory(&second, &allocation_desc)!!;
 
-    assert(first_buffer.index == second_buffer.index, "stub devices use coincident local slots");
-    assert(first_buffer.generation == second_buffer.generation, "stub devices use coincident local generations");
-    assert(first_buffer.owner != second_buffer.owner, "coincident buffers retain distinct owners");
-    uint before = gpu::vk::stub_buffer_destroy_attempt_count();
-    assert(@catch(gpu::destroy_buffer(&second, first_buffer)) == gpu::INVALID_HANDLE);
-    assert(
-        gpu::vk::stub_buffer_destroy_attempt_count() == before,
-        "foreign ownership rejects before backend mutation"
-    );
+    assert(first_allocation.index == second_allocation.index,
+        "stub devices use coincident local slots");
+    assert(first_allocation.generation == second_allocation.generation,
+        "stub devices use coincident local generations");
+    assert(first_allocation.owner != second_allocation.owner,
+        "coincident allocations retain distinct owners");
+    GpuAllocation foreign = first_allocation;
+    uint before = gpu::vk::stub_allocation_free_attempt_count();
+    assert(@catch(gpu::free_allocation(&second, &foreign)) == gpu::INVALID_HANDLE);
+    assert(gpu::vk::stub_allocation_free_attempt_count() == before,
+        "foreign ownership rejects before backend mutation");
 
-    gpu::destroy_buffer(&first, first_buffer)!!;
-    gpu::destroy_buffer(&second, second_buffer)!!;
+    gpu::free_allocation(&first, &first_allocation)!!;
+    gpu::free_allocation(&second, &second_allocation)!!;
     gpu::destroy_device(&first)!!;
     gpu::destroy_device(&second)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void stale_child_handle_rejects_after_device_slot_reuse() @test {
-    gpu::vk::stub_reset_buffer_counts();
+fn void stale_child_allocation_rejects_after_device_slot_reuse() @test {
+    gpu::vk::stub_reset_allocation_counts();
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = device_creation_adapter(&runtime, 0);
     DeviceRequest request = gpu::strict_device_request();
-    BufferDesc buffer_desc = {
-        .size        = 256,
-        .usage       = { .transfer_dst },
-        .memory_kind = MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
+    AllocationDesc allocation_desc = device_creation_allocation_desc();
 
     Device old_device = gpu::create_device(&adapter, &request)!!;
-    BufferHandle old_buffer = gpu::create_buffer(&old_device, &buffer_desc)!!;
+    GpuAllocation old_allocation = gpu::allocate_memory(&old_device, &allocation_desc)!!;
+    GpuAllocation stale_allocation = old_allocation;
     uint old_index = old_device.index;
     uint old_generation = old_device.generation;
-    gpu::destroy_buffer(&old_device, old_buffer)!!;
+    gpu::free_allocation(&old_device, &old_allocation)!!;
     gpu::destroy_device(&old_device)!!;
 
     Device replacement = gpu::create_device(&adapter, &request)!!;
-    BufferHandle replacement_buffer = gpu::create_buffer(&replacement, &buffer_desc)!!;
+    GpuAllocation replacement_allocation =
+        gpu::allocate_memory(&replacement, &allocation_desc)!!;
     assert(replacement.index == old_index, "freed registry slot is reused");
-    assert(replacement.generation != old_generation, "replacement has a distinct device generation");
-    assert(replacement_buffer.index == old_buffer.index, "replacement reuses the same child slot");
-    assert(replacement_buffer.generation == old_buffer.generation, "replacement reuses the same child generation");
-    assert(replacement_buffer.owner != old_buffer.owner, "replacement has a distinct child owner");
-    uint before = gpu::vk::stub_buffer_destroy_attempt_count();
-    assert(@catch(gpu::destroy_buffer(&replacement, old_buffer)) == gpu::INVALID_HANDLE);
-    assert(
-        gpu::vk::stub_buffer_destroy_attempt_count() == before,
-        "stale child owner rejects before the new tenant backend mutates"
-    );
-    gpu::destroy_buffer(&replacement, replacement_buffer)!!;
-    assert(
-        gpu::vk::stub_buffer_destroy_attempt_count() == before + 1,
-        "rejection preserves the replacement child"
-    );
+    assert(replacement.generation != old_generation,
+        "replacement has a distinct device generation");
+    assert(replacement_allocation.index == stale_allocation.index,
+        "replacement reuses the same child slot");
+    assert(replacement_allocation.generation == stale_allocation.generation,
+        "replacement reuses the same child generation");
+    assert(replacement_allocation.owner != stale_allocation.owner,
+        "replacement has a distinct child owner");
+    uint before = gpu::vk::stub_allocation_free_attempt_count();
+    assert(@catch(gpu::free_allocation(&replacement, &stale_allocation))
+        == gpu::INVALID_HANDLE);
+    assert(gpu::vk::stub_allocation_free_attempt_count() == before,
+        "stale child owner rejects before the new tenant backend mutates");
+    gpu::free_allocation(&replacement, &replacement_allocation)!!;
+    assert(gpu::vk::stub_allocation_free_attempt_count() == before + 1,
+        "rejection preserves the replacement child");
 
     gpu::destroy_device(&replacement)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
 
 fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
-    gpu::vk::stub_reset_buffer_counts();
+    gpu::vk::stub_reset_allocation_counts();
     gpu::vk::stub_reset_texture_counts();
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = device_creation_adapter(&runtime, 0);
     DeviceRequest request = gpu::strict_device_request();
     Device device = gpu::create_device(&adapter, &request)!!;
-    BufferDesc buffer_desc = {
-        .size        = 256,
-        .usage       = { .transfer_dst },
-        .memory_kind = MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
+    AllocationDesc allocation_desc = device_creation_allocation_desc();
     TextureDesc texture_desc = {
         .dimension = TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
@@ -178,14 +177,14 @@ fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
         .format    = Format.RGBA8_UNORM,
         .usage     = { .sampled },
     };
-    BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    GpuAllocation allocation = gpu::allocate_memory(&device, &allocation_desc)!!;
     TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
     TextureHandle forged_texture = {
-        .owner      = buffer.owner,
-        .index      = buffer.index,
-        .generation = buffer.generation,
+        .owner      = allocation.owner,
+        .index      = allocation.index,
+        .generation = allocation.generation,
     };
-    BufferHandle forged_buffer = {
+    GpuAllocation forged_allocation = {
         .owner      = texture.owner,
         .index      = texture.index,
         .generation = texture.generation,
@@ -193,19 +192,16 @@ fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
 
     uint texture_before = gpu::vk::stub_texture_destroy_attempt_count();
     assert(@catch(gpu::destroy_texture(&device, forged_texture)) == gpu::INVALID_HANDLE);
-    assert(
-        gpu::vk::stub_texture_destroy_attempt_count() == texture_before,
-        "buffer owner bits cannot mutate the texture table"
-    );
+    assert(gpu::vk::stub_texture_destroy_attempt_count() == texture_before,
+        "allocation owner bits cannot mutate the texture table");
 
-    uint buffer_before = gpu::vk::stub_buffer_destroy_attempt_count();
-    assert(@catch(gpu::destroy_buffer(&device, forged_buffer)) == gpu::INVALID_HANDLE);
-    assert(
-        gpu::vk::stub_buffer_destroy_attempt_count() == buffer_before,
-        "texture owner bits cannot mutate the buffer table"
-    );
+    uint allocation_before = gpu::vk::stub_allocation_free_attempt_count();
+    assert(@catch(gpu::free_allocation(&device, &forged_allocation))
+        == gpu::INVALID_HANDLE);
+    assert(gpu::vk::stub_allocation_free_attempt_count() == allocation_before,
+        "texture owner bits cannot mutate the allocation table");
 
-    gpu::destroy_buffer(&device, buffer)!!;
+    gpu::free_allocation(&device, &allocation)!!;
     gpu::destroy_texture(&device, texture)!!;
     gpu::destroy_device(&device)!!;
     gpu::destroy_runtime(&runtime)!!;

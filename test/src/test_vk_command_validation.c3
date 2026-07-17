@@ -322,14 +322,14 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc buffer_desc = {
-        .size        = 64,
-        .usage       = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .compute },
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .compute },
+        debug_name:   "compute_fill_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
 
     gpu::TextureDesc texture_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -342,20 +342,19 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc span_buffer_desc = {
-        .size        = 4,
-        .usage       = { .transfer_src },
-        .memory_kind = gpu::MemoryKind.STAGING,
-        .access      = { .compute },
-    };
-    gpu::BufferHandle span_buffer = gpu::create_buffer(&device, &span_buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, span_buffer)!!;
-    gpu::GpuSpan span = gpu::get_buffer_span(&device, span_buffer)!!;
+    OwnedSpan span_buffer = allocate_owned_span(
+        device:       &device,
+        size:         4,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "compute_copy_buffer",
+    )!!;
+    defer free_owned_span(&device, &span_buffer)!!;
+    gpu::GpuSpan span = span_buffer.span;
 
     gpu::PersistentAllocDesc persistent_desc = {
         .size        = 8,
         .align       = 4,
-        .usage       = { .transfer_src },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
         .access      = { .compute },
     };
@@ -403,7 +402,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     gpu::GpuSpan multi_access_head = multi_access.checked_subspan(0, 4)!!;
     vk::ResolvedSpan multi_access_span = vk::resolve_span(state, &multi_access_head)!!;
     assert(buffer_span.access.compute && !buffer_span.access.graphics,
-        "buffer span access comes from its live owner");
+        "allocation span access comes from its live owner");
     assert(persistent_span.access.compute && !persistent_span.access.graphics
         && persistent_tail_span.access.compute && !persistent_tail_span.access.graphics,
         "persistent subspans preserve immutable allocation access");
@@ -415,7 +414,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
 
     gpu::cmd_fill_buffer(
         commands: &commands,
-        dst:      gpu::get_buffer_span(&device, buffer)!!.checked_subspan(0, 4)!!,
+        dst:      buffer.span.checked_subspan(0, 4)!!,
         value:    0,
     )!!;
     record.queue.roles = { .graphics };
@@ -500,6 +499,48 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     gpu::end_frame(&frame)!!;
 }
 
+fn void frame_span_without_transfer_usage_rejects_copy_and_fill() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+
+    OwnedSpan transfer_span = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "transfer_span",
+    )!!;
+    defer free_owned_span(&device, &transfer_span)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    defer (void)gpu::end_frame(&frame);
+    gpu::GpuSpan frame_span = gpu::alloc_frame_span(&frame, 16, 16)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::BufferCopyDesc frame_source = {
+        .src = frame_span,
+        .dst = transfer_span.span,
+    };
+    assert(@catch(gpu::cmd_copy_buffer(&commands, &frame_source))
+        == gpu::INVALID_ARGUMENT,
+        "copy rejects a source span without transfer-source usage");
+
+    gpu::BufferCopyDesc frame_destination = {
+        .src = transfer_span.span,
+        .dst = frame_span,
+    };
+    assert(@catch(gpu::cmd_copy_buffer(&commands, &frame_destination))
+        == gpu::INVALID_ARGUMENT,
+        "copy rejects a destination span without transfer-destination usage");
+
+    assert(@catch(gpu::cmd_fill_buffer(&commands, frame_span, 0))
+        == gpu::INVALID_ARGUMENT,
+        "fill rejects a span without transfer-destination usage");
+}
+
 fn void render_pass_access_preflight_precedes_view_creation() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -554,183 +595,76 @@ fn void render_pass_access_preflight_precedes_view_creation() @test {
     gpu::end_frame(&frame)!!;
 }
 
-fn void copy_without_transfer_usage_faults() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::BufferDesc plain_desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
-    defer gpu::destroy_buffer(&device, plain)!!;
-    gpu::BufferDesc src_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
-    defer gpu::destroy_buffer(&device, src)!!;
-    gpu::BufferDesc dst_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
-    defer gpu::destroy_buffer(&device, dst)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
-    defer discard_test_commands(&cmd)!!;
-
-    gpu::BufferCopyDesc no_src_usage_copy = {
-        .src = gpu::get_buffer_span(&device, plain)!!,
-        .dst = gpu::get_buffer_span(&device, dst)!!,
-    };
-    fault no_src_usage = @catch(gpu::cmd_copy_buffer(&cmd, &no_src_usage_copy));
-    assert(no_src_usage == gpu::INVALID_ARGUMENT, "copy from a buffer without transfer_src faults INVALID_ARGUMENT");
-
-    gpu::BufferCopyDesc no_dst_usage_copy = {
-        .src = gpu::get_buffer_span(&device, src)!!,
-        .dst = gpu::get_buffer_span(&device, plain)!!,
-    };
-    fault no_dst_usage = @catch(gpu::cmd_copy_buffer(&cmd, &no_dst_usage_copy));
-    assert(no_dst_usage == gpu::INVALID_ARGUMENT, "copy to a buffer without transfer_dst faults INVALID_ARGUMENT");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
-    gpu::end_frame(&frame_token)!!;
-}
-
-fn void texture_copy_without_buffer_transfer_usage_faults() @test {
+fn void fill_alignment_faults_report_the_rejected_component() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
 
-    gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 4,
-        .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .sampled, .transfer_src, .transfer_dst },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-
-    gpu::BufferDesc plain_desc = {
-        .size        = 256,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "texture_copy_plain",
-    };
-    gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
-    defer gpu::destroy_buffer(&device, plain)!!;
-    gpu::GpuSpan plain_span = gpu::get_buffer_span(&device, plain)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         8,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "fill_alignment_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(
+    gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!,
     )!!;
-    defer discard_test_commands(&cmd)!!;
+    defer discard_test_commands(&commands)!!;
 
     reset_sync_diagnostic(
         capture:        &capture,
-        operation:      "cmd_copy_buffer_to_texture",
-        debug_name:     "texture_copy_plain",
-        rejected_field: "BufferUsage.transfer_src",
-        invariant:      "source buffer must include transfer_src usage",
+        operation:      "cmd_fill_buffer",
+        debug_name:     "fill_alignment_buffer",
+        rejected_field: "GpuSpan.offset",
+        invariant:      "span offset must be 4-byte aligned",
     );
-    gpu::BufferTextureCopyDesc up = {
-        .src = plain_span, .texture = texture, .width = 4, .height = 4,
-    };
-    fault no_src_usage = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &up));
-    assert(no_src_usage == gpu::INVALID_ARGUMENT,
-        "buffer-to-texture copy without buffer transfer_src faults INVALID_ARGUMENT");
-    assert_sync_contract_diagnostic(
-        capture:             &capture,
-        expected_fault:      no_src_usage,
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
-        has_public_identity: true,
-        index:               plain.index,
-        generation:          plain.generation,
-    );
-
-    reset_sync_diagnostic(
-        capture:        &capture,
-        operation:      "cmd_copy_texture_to_buffer",
-        debug_name:     "texture_copy_plain",
-        rejected_field: "BufferUsage.transfer_dst",
-        invariant:      "destination buffer must include transfer_dst usage",
-    );
-    gpu::TextureBufferCopyDesc down = {
-        .texture = texture, .dst = plain_span, .width = 4, .height = 4,
-    };
-    fault no_dst_usage = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &down));
-    assert(no_dst_usage == gpu::INVALID_ARGUMENT,
-        "texture-to-buffer copy without buffer transfer_dst faults INVALID_ARGUMENT");
-    assert_sync_contract_diagnostic(
-        capture:             &capture,
-        expected_fault:      no_dst_usage,
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
-        has_public_identity: true,
-        index:               plain.index,
-        generation:          plain.generation,
-    );
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
-    gpu::end_frame(&frame_token)!!;
-}
-fn void fill_without_transfer_dst_faults() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
-    defer discard_test_commands(&cmd)!!;
-    fault no_usage = @catch(gpu::cmd_fill_buffer(&cmd, gpu::get_buffer_span(&device, buffer)!!, 0));
-    assert(no_usage == gpu::INVALID_ARGUMENT, "fill on a buffer without transfer_dst faults INVALID_ARGUMENT");
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
-    gpu::end_frame(&frame_token)!!;
-}
-
-fn void indexed_draw_without_index_usage_faults() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    ValDrawCtx ctx = make_val_draw_ctx(&device);
-    defer destroy_val_draw_ctx(&device, &ctx);
-    gpu::TextureHandle target = make_val_target(&device);
-    defer gpu::destroy_texture(&device, target)!!;
-
-    // Storage-only: no index usage.
-    gpu::BufferDesc bad_index_desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle bad_index_buffer = gpu::create_buffer(&device, &bad_index_desc)!!;
-    defer gpu::destroy_buffer(&device, bad_index_buffer)!!;
-    gpu::GpuSpan bad_index_span = gpu::get_buffer_span(&device, bad_index_buffer)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
-    write_val_triangle_verts(&device, &verts_span);
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
-
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    defer discard_test_commands(&cmd)!!;
-    record_val_target_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
-    gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-
-    fault no_index_usage = @catch(gpu::cmd_draw_indexed(
-        commands:      &cmd,
-        pipeline:      ctx.graphics,
-        vertex_root:   val_span_address(&device, verts_span),
-        fragment_root: val_span_address(&device, frag_span),
-        index_span:    bad_index_span,
-        index_count:   3,
-        instance_count: 1,
+    gpu::GpuSpan misaligned_offset = buffer.span.checked_subspan(2, 4)!!;
+    fault offset_fault = @catch(gpu::cmd_fill_buffer(
+        &commands,
+        misaligned_offset,
+        0,
     ));
-    assert(no_index_usage == gpu::INVALID_ARGUMENT, "indexed draw over a non-index buffer faults INVALID_ARGUMENT");
+    assert(offset_fault == gpu::INVALID_ARGUMENT,
+        "fill rejects a span with a misaligned offset");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      offset_fault,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
+        has_public_identity: true,
+        index:               buffer.span.index,
+        generation:          buffer.span.generation,
+    );
 
-    gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_fill_buffer",
+        debug_name:     "fill_alignment_buffer",
+        rejected_field: "GpuSpan.size",
+        invariant:      "span size must be 4-byte aligned",
+    );
+    gpu::GpuSpan misaligned_size = buffer.span.checked_subspan(0, 2)!!;
+    fault size_fault = @catch(gpu::cmd_fill_buffer(
+        &commands,
+        misaligned_size,
+        0,
+    ));
+    assert(size_fault == gpu::INVALID_ARGUMENT,
+        "fill rejects a span with a misaligned size");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      size_fault,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
+        has_public_identity: true,
+        index:               buffer.span.index,
+        generation:          buffer.span.generation,
+    );
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -877,15 +811,30 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc up_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle upload = gpu::create_buffer(&device, &up_desc)!!;
-    defer gpu::destroy_buffer(&device, upload)!!;
-    gpu::BufferDesc rb_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
-    gpu::BufferDesc fill_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle fill_target = gpu::create_buffer(&device, &fill_desc)!!;
-    defer gpu::destroy_buffer(&device, fill_target)!!;
+    OwnedSpan upload = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "valid_copy_src",
+    )!!;
+    defer free_owned_span(&device, &upload)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "valid_copy_dst",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
+    OwnedSpan fill_target = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "valid_fill_dst",
+    )!!;
+    defer free_owned_span(&device, &fill_target)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
@@ -899,11 +848,11 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = {
-        .src = gpu::get_buffer_span(&device, upload)!!,
-        .dst = gpu::get_buffer_span(&device, readback)!!,
+        .src = upload.span,
+        .dst = readback.span,
     };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
-    gpu::cmd_fill_buffer(&cmd, gpu::get_buffer_span(&device, fill_target)!!, 0)!!;
+    gpu::cmd_fill_buffer(&cmd, fill_target.span, 0)!!;
 
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -934,10 +883,15 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     ValComputeCtx ctx = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &ctx);
 
-    gpu::BufferDesc args_desc = { .size = 16, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
-    defer gpu::destroy_buffer(&device, args_buffer)!!;
-    gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
+    OwnedSpan args_buffer = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "dispatch_indirect_args",
+    )!!;
+    defer free_owned_span(&device, &args_buffer)!!;
+    gpu::GpuSpan full_span = args_buffer.span;
     gpu::GpuSpan escaped = full_span.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -963,10 +917,15 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     ValComputeCtx ctx = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &ctx);
 
-    gpu::BufferDesc args_desc = { .size = 16, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
-    defer gpu::destroy_buffer(&device, args_buffer)!!;
-    gpu::GpuSpan full_span = gpu::get_buffer_span(&device, args_buffer)!!;
+    OwnedSpan args_buffer = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "dispatch_indirect_args",
+    )!!;
+    defer free_owned_span(&device, &args_buffer)!!;
+    gpu::GpuSpan full_span = args_buffer.span;
     gpu::GpuSpan boundary = full_span.checked_subspan(4, gpu::DispatchIndirectCommand::size)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -994,15 +953,25 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc args_desc = { .size = gpu::DrawIndexedIndirectCommand::size * 2, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
-    defer gpu::destroy_buffer(&device, args_buffer)!!;
-    gpu::GpuSpan args_span = gpu::get_buffer_span(&device, args_buffer)!!;
+    OwnedSpan args_buffer = allocate_owned_span(
+        device:       &device,
+        size:         gpu::DrawIndexedIndirectCommand::size * 2,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "draw_indirect_args",
+    )!!;
+    defer free_owned_span(&device, &args_buffer)!!;
+    gpu::GpuSpan args_span = args_buffer.span;
 
-    gpu::BufferDesc count_desc = { .size = 8, .usage = { .storage, .addressable, .indirect }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle count_buffer = gpu::create_buffer(&device, &count_desc)!!;
-    defer gpu::destroy_buffer(&device, count_buffer)!!;
-    gpu::GpuSpan full_count_span = gpu::get_buffer_span(&device, count_buffer)!!;
+    OwnedSpan count_buffer = allocate_owned_span(
+        device:       &device,
+        size:         8,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "draw_indirect_count",
+    )!!;
+    defer free_owned_span(&device, &count_buffer)!!;
+    gpu::GpuSpan full_count_span = count_buffer.span;
     gpu::GpuSpan escaped_count = full_count_span.unchecked_subspan(8, 4);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -1042,35 +1011,35 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc args_desc = {
-        .size        = gpu::DrawIndexedIndirectCommand::size * 2,
-        .usage       = { .indirect },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
-    defer gpu::destroy_buffer(&device, args_buffer)!!;
-    gpu::GpuSpan args_span = gpu::get_buffer_span(&device, args_buffer)!!;
+    OwnedSpan args_buffer = allocate_owned_span(
+        device:       &device,
+        size:         gpu::DrawIndexedIndirectCommand::size * 2,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "draw_count_args",
+    )!!;
+    defer free_owned_span(&device, &args_buffer)!!;
+    gpu::GpuSpan args_span = args_buffer.span;
 
-    gpu::BufferDesc count_desc = {
-        .size        = 4,
-        .usage       = { .indirect },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle count_buffer = gpu::create_buffer(&device, &count_desc)!!;
-    defer gpu::destroy_buffer(&device, count_buffer)!!;
-    gpu::GpuSpan count_span = gpu::get_buffer_span(&device, count_buffer)!!;
+    OwnedSpan count_buffer = allocate_owned_span(
+        device:       &device,
+        size:         4,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "draw_count_value",
+    )!!;
+    defer free_owned_span(&device, &count_buffer)!!;
+    gpu::GpuSpan count_span = count_buffer.span;
 
-    gpu::BufferDesc index_desc = {
-        .size        = 4,
-        .usage       = { .index },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
-    defer gpu::destroy_buffer(&device, index_buffer)!!;
-    gpu::GpuSpan index_span = gpu::get_buffer_span(&device, index_buffer)!!;
+    OwnedSpan index_buffer = allocate_owned_span(
+        device:       &device,
+        size:         4,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "draw_count_indices",
+    )!!;
+    defer free_owned_span(&device, &index_buffer)!!;
+    gpu::GpuSpan index_span = index_buffer.span;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -1153,10 +1122,15 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc index_desc = { .size = 16, .usage = { .index }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
-    defer gpu::destroy_buffer(&device, index_buffer)!!;
-    gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
+    OwnedSpan index_buffer = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "indexed_draw_data",
+    )!!;
+    defer free_owned_span(&device, &index_buffer)!!;
+    gpu::GpuSpan full_index_span = index_buffer.span;
     gpu::GpuSpan escaped = full_index_span.unchecked_subspan(16, 4);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -1192,10 +1166,15 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc index_desc = { .size = 16, .usage = { .index }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle index_buffer = gpu::create_buffer(&device, &index_desc)!!;
-    defer gpu::destroy_buffer(&device, index_buffer)!!;
-    gpu::GpuSpan full_index_span = gpu::get_buffer_span(&device, index_buffer)!!;
+    OwnedSpan index_buffer = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "indexed_draw_data",
+    )!!;
+    defer free_owned_span(&device, &index_buffer)!!;
+    gpu::GpuSpan full_index_span = index_buffer.span;
     gpu::GpuSpan boundary = full_index_span.checked_subspan(12, 4)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -1237,10 +1216,15 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc src_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
-    defer gpu::destroy_buffer(&device, src_buffer)!!;
-    gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
+    OwnedSpan src_buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "texture_copy_src",
+    )!!;
+    defer free_owned_span(&device, &src_buffer)!!;
+    gpu::GpuSpan full_span = src_buffer.span;
     gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -1273,10 +1257,15 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc dst_desc = { .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle dst_buffer = gpu::create_buffer(&device, &dst_desc)!!;
-    defer gpu::destroy_buffer(&device, dst_buffer)!!;
-    gpu::GpuSpan full_span = gpu::get_buffer_span(&device, dst_buffer)!!;
+    OwnedSpan dst_buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "texture_copy_dst",
+    )!!;
+    defer free_owned_span(&device, &dst_buffer)!!;
+    gpu::GpuSpan full_span = dst_buffer.span;
     gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -1309,10 +1298,15 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc src_desc = { .size = 96, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle src_buffer = gpu::create_buffer(&device, &src_desc)!!;
-    defer gpu::destroy_buffer(&device, src_buffer)!!;
-    gpu::GpuSpan full_span = gpu::get_buffer_span(&device, src_buffer)!!;
+    OwnedSpan src_buffer = allocate_owned_span(
+        device:       &device,
+        size:         96,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "texture_copy_boundary_src",
+    )!!;
+    defer free_owned_span(&device, &src_buffer)!!;
+    gpu::GpuSpan full_span = src_buffer.span;
     gpu::GpuSpan boundary = full_span.checked_subspan(32, 64)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -1333,15 +1327,20 @@ fn void buffer_barrier_range_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "barrier_range_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
-        .span = gpu::get_buffer_span(&device, buffer)!!.unchecked_subspan(48, 32),
+        .span = buffer.span.unchecked_subspan(48, 32),
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
     };
@@ -1358,15 +1357,20 @@ fn void buffer_barrier_boundary_exact_succeeds() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "barrier_range_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
-        .span = gpu::get_buffer_span(&device, buffer)!!.checked_subspan(32, 32)!!,
+        .span = buffer.span.checked_subspan(32, 32)!!,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
     };
@@ -1382,15 +1386,20 @@ fn void buffer_barrier_zero_size_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = { .size = 64, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "barrier_range_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
-        .span = gpu::get_buffer_span(&device, buffer)!!.unchecked_subspan(0, 0),
+        .span = buffer.span.unchecked_subspan(0, 0),
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
     };
@@ -1674,21 +1683,20 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = {
-        .size        = 64,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "barrier_diagnostic_buffer",
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "barrier_diagnostic_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     gpu::BufferBarrier barrier = {
-        .span          = gpu::get_buffer_span(&device, buffer)!!.unchecked_subspan(48, 32),
+        .span          = buffer.span.unchecked_subspan(48, 32),
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.COMPUTE_SHADER,
         .before_hazard = gpu::Hazard.SHADER_WRITE,
@@ -1702,10 +1710,10 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     assert(capture.has_fault && capture.public_fault == with_callback,
         "diagnostic carries the unchanged barrier fault");
     assert(capture.public_contract, "barrier range is a public-contract diagnostic");
-    assert(capture.resource_kind == gpu::DebugResourceKind.BUFFER, "resource kind is buffer");
+    assert(capture.resource_kind == gpu::DebugResourceKind.ALLOCATION, "resource kind is allocation");
     assert(capture.has_public_identity, "live buffer identity is present");
-    assert(capture.index == buffer.index, "buffer index is preserved");
-    assert(capture.generation == buffer.generation, "buffer generation is preserved");
+    assert(capture.index == buffer.span.index, "allocation index is preserved");
+    assert(capture.generation == buffer.span.generation, "allocation generation is preserved");
     assert(capture.debug_name_matches, "buffer debug name is preserved");
     assert(capture.rejected_field_matches, "barrier size field is identified");
     assert(capture.invariant_matches, "barrier range invariant is identified");
@@ -1719,7 +1727,7 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     state.debug_callback = &capture_sync_diagnostic;
     capture.expected_rejected_field = "BufferBarrier.span";
     capture.expected_invariant = "span range must fit its live owner";
-    barrier.span = gpu::get_buffer_span(&device, buffer)!!.unchecked_subspan(64, 0);
+    barrier.span = buffer.span.unchecked_subspan(64, 0);
     fault zero_with_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
 
     assert(zero_with_callback == gpu::INVALID_ARGUMENT, "zero-size span keeps INVALID_ARGUMENT");
@@ -1727,8 +1735,10 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     assert(capture.operation_matches, "zero-size span operation is cmd_buffer_barrier");
     assert(capture.has_fault && capture.public_fault == zero_with_callback,
         "zero-size span diagnostic carries the unchanged fault");
-    assert(capture.resource_kind == gpu::DebugResourceKind.BUFFER, "zero-size span resource kind is buffer");
-    assert(capture.has_public_identity && capture.index == buffer.index && capture.generation == buffer.generation,
+    assert(capture.resource_kind == gpu::DebugResourceKind.ALLOCATION, "zero-size span resource kind is allocation");
+    assert(capture.has_public_identity
+        && capture.index == buffer.span.index
+        && capture.generation == buffer.span.generation,
         "zero-size span diagnostic preserves buffer identity");
     assert(capture.debug_name_matches, "zero-size span diagnostic preserves the debug name");
     assert(capture.rejected_field_matches, "zero-size span field is identified");
@@ -1791,7 +1801,7 @@ fn void assert_sync_contract_diagnostic(
     assert(capture.invariant_matches, "invariant is exact");
 }
 
-fn void buffer_to_texture_access_diagnostic_precedes_buffer_usage() @test {
+fn void buffer_to_texture_access_diagnostic_precedes_recording() @test {
     SyncDiagnosticCapture capture = {};
     reset_sync_diagnostic(
         capture:        &capture,
@@ -1815,16 +1825,15 @@ fn void buffer_to_texture_access_diagnostic_precedes_buffer_usage() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc buffer_desc = {
-        .size        = 4,
-        .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .transfer },
-        .debug_name  = "copy_access_buffer",
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::GpuSpan span = gpu::get_buffer_span(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         4,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .transfer },
+        debug_name:   "copy_access_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
+    gpu::GpuSpan span = buffer.span;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(
@@ -1858,23 +1867,16 @@ fn void buffer_to_texture_access_diagnostic_precedes_buffer_usage() @test {
     vk::TextureSlot* texture_slot = state.textures.get(texture)!!;
     gpu::QueueRoles texture_access = texture_slot.access;
     texture_slot.access = { .transfer };
-    reset_sync_diagnostic(
-        capture:        &capture,
-        operation:      "cmd_copy_buffer_to_texture",
-        debug_name:     "copy_access_buffer",
-        rejected_field: "BufferUsage.transfer_src",
-        invariant:      "source buffer must include transfer_src usage",
+    record_val_texture_transition(
+        cmd:          &commands,
+        texture:      texture,
+        new_layout:   gpu::TextureLayout.TRANSFER_DST,
+        after_stage:  gpu::Stage.TRANSFER,
+        after_hazard: gpu::Hazard.TRANSFER_WRITE,
     );
-    fault usage_fault = @catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy));
-    assert(usage_fault == gpu::INVALID_ARGUMENT, "copy usage keeps INVALID_ARGUMENT");
-    assert_sync_contract_diagnostic(
-        capture:             &capture,
-        expected_fault:      usage_fault,
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
-        has_public_identity: true,
-        index:               span.index,
-        generation:          span.generation,
-    );
+    gpu::cmd_copy_buffer_to_texture(&commands, &copy)!!;
+    assert(capture.calls == 1,
+        "valid allocation copy emits no diagnostic after texture access is admitted");
     texture_slot.access = texture_access;
     record.queue.roles = selected_roles;
 
@@ -1883,40 +1885,136 @@ fn void buffer_to_texture_access_diagnostic_precedes_buffer_usage() @test {
     gpu::end_frame(&frame)!!;
 }
 
+fn void texture_copy_span_usage_diagnostics_are_semantic() @test {
+    SyncDiagnosticCapture capture = {};
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureDesc texture_desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .transfer },
+        .width      = 1,
+        .height     = 1,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .transfer_src, .transfer_dst },
+        .debug_name = "texture_copy_target",
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    OwnedSpan owned = allocate_owned_span(
+        device:       &device,
+        size:         4,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .transfer },
+        debug_name:   "texture_copy_span",
+    )!!;
+    defer free_owned_span(&device, &owned)!!;
+    gpu::GpuSpan span = owned.span;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::ResolvedSpan resolved = vk::resolve_span(state, &span)!!;
+    bool transfer_src = resolved.slot.usage.transfer_src;
+    bool transfer_dst = resolved.slot.usage.transfer_dst;
+    defer {
+        resolved.slot.usage.transfer_src = transfer_src;
+        resolved.slot.usage.transfer_dst = transfer_dst;
+    }
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     "texture_copy_span",
+        rejected_field: "GpuSpan",
+        invariant:      "source span must support copy reads",
+    );
+    resolved.slot.usage.transfer_src = false;
+    gpu::BufferTextureCopyDesc upload = {
+        .src     = span,
+        .texture = texture,
+        .width   = 1,
+        .height  = 1,
+    };
+    fault source_fault = @catch(gpu::cmd_copy_buffer_to_texture(&commands, &upload));
+    resolved.slot.usage.transfer_src = transfer_src;
+
+    assert(source_fault == gpu::INVALID_ARGUMENT, "source span rejection keeps INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      source_fault,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
+        has_public_identity: true,
+        index:               span.index,
+        generation:          span.generation,
+    );
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_texture_to_buffer",
+        debug_name:     "texture_copy_span",
+        rejected_field: "GpuSpan",
+        invariant:      "destination span must support copy writes",
+    );
+    resolved.slot.usage.transfer_dst = false;
+    gpu::TextureBufferCopyDesc readback = {
+        .texture = texture,
+        .dst     = span,
+        .width   = 1,
+        .height  = 1,
+    };
+    fault destination_fault = @catch(gpu::cmd_copy_texture_to_buffer(&commands, &readback));
+    resolved.slot.usage.transfer_dst = transfer_dst;
+
+    assert(destination_fault == gpu::INVALID_ARGUMENT,
+        "destination span rejection keeps INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      destination_fault,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
+        has_public_identity: true,
+        index:               span.index,
+        generation:          span.generation,
+    );
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::end_frame(&frame)!!;
+}
 fn void tranche_b_command_and_render_diagnostics() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    gpu::BufferDesc plain_desc = {
-        .size = 64, .usage = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "plain_buffer",
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
-    defer gpu::destroy_buffer(&device, plain)!!;
-    gpu::BufferDesc dst_desc = {
-        .size = 64, .usage = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "fill_buffer",
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle dst = gpu::create_buffer(&device, &dst_desc)!!;
-    defer gpu::destroy_buffer(&device, dst)!!;
+    OwnedSpan dst = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "fill_buffer",
+    )!!;
+    defer free_owned_span(&device, &dst)!!;
 
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
 
     ValComputeCtx compute = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &compute);
-    gpu::BufferDesc args_desc = {
-        .size = 16, .usage = { .indirect },
-        .memory_kind = gpu::MemoryKind.DEVICE, .debug_name = "indirect_args",
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
-    defer gpu::destroy_buffer(&device, args_buffer)!!;
-    gpu::GpuSpan args_full = gpu::get_buffer_span(&device, args_buffer)!!;
+    OwnedSpan args_buffer = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "indirect_args",
+    )!!;
+    defer free_owned_span(&device, &args_buffer)!!;
+    gpu::GpuSpan args_full = args_buffer.span;
     gpu::GpuSpan escaped_args = args_full.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
     gpu::TextureDesc usage_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -1940,73 +2038,47 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
 
-    gpu::BufferCopyDesc copy = {
-        .src = gpu::get_buffer_span(&device, plain)!!.checked_subspan(0, 16)!!,
-        .dst = gpu::get_buffer_span(&device, dst)!!.checked_subspan(0, 16)!!,
-    };
-    reset_sync_diagnostic(
-        capture:        &capture,
-        operation:      "cmd_copy_buffer",
-        debug_name:     "plain_buffer",
-        rejected_field: "GpuSpan",
-        invariant:      "source span must support copy reads",
-    );
-    fault copy_fault = @catch(gpu::cmd_copy_buffer(&commands, &copy));
-    assert(copy_fault == gpu::INVALID_ARGUMENT, "copy usage fault is unchanged");
-    assert_sync_contract_diagnostic(
-        capture:             &capture,
-        expected_fault:      copy_fault,
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
-        has_public_identity: true,
-        index:               plain.index,
-        generation:          plain.generation,
-    );
-    state.debug_callback = null;
-    assert(@catch(gpu::cmd_copy_buffer(&commands, &copy)) == copy_fault,
-        "copy usage fault is callback-independent");
-    state.debug_callback = &capture_sync_diagnostic;
-
     reset_sync_diagnostic(
         capture:        &capture,
         operation:      "cmd_fill_buffer",
         debug_name:     "fill_buffer",
         rejected_field: "GpuSpan.offset",
-        invariant:      "span offset and size must be 4-byte aligned",
+        invariant:      "span offset must be 4-byte aligned",
     );
     fault fill_fault = @catch(gpu::cmd_fill_buffer(
         commands: &commands,
-        dst:      gpu::get_buffer_span(&device, dst)!!.checked_subspan(2, 4)!!,
+        dst:      dst.span.checked_subspan(2, 4)!!,
         value:    0,
     ));
     assert(fill_fault == gpu::INVALID_ARGUMENT, "fill alignment fault is unchanged");
     assert_sync_contract_diagnostic(
         capture:             &capture,
         expected_fault:      fill_fault,
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        index:               dst.index,
-        generation:          dst.generation,
+        index:               dst.span.index,
+        generation:          dst.span.generation,
     );
     reset_sync_diagnostic(
         capture:        &capture,
         operation:      "cmd_fill_buffer",
         debug_name:     "fill_buffer",
         rejected_field: "GpuSpan.size",
-        invariant:      "span offset and size must be 4-byte aligned",
+        invariant:      "span size must be 4-byte aligned",
     );
     fault fill_size_fault = @catch(gpu::cmd_fill_buffer(
         commands: &commands,
-        dst:      gpu::get_buffer_span(&device, dst)!!.checked_subspan(0, 2)!!,
+        dst:      dst.span.checked_subspan(0, 2)!!,
         value:    0,
     ));
     assert(fill_size_fault == gpu::INVALID_ARGUMENT, "fill size-only alignment fault is unchanged");
     assert_sync_contract_diagnostic(
         capture:             &capture,
         expected_fault:      fill_size_fault,
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        index:               dst.index,
-        generation:          dst.generation,
+        index:               dst.span.index,
+        generation:          dst.span.generation,
     );
 
     reset_sync_diagnostic(
@@ -2051,10 +2123,10 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     assert_sync_contract_diagnostic(
         capture:             &capture,
         expected_fault:      span_fault,
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        index:               args_buffer.index,
-        generation:          args_buffer.generation,
+        index:               args_buffer.span.index,
+        generation:          args_buffer.span.generation,
     );
     state.debug_callback = null;
     fault span_without_callback = @catch(gpu::cmd_dispatch_indirect(
@@ -2147,6 +2219,10 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         generation:          color_target.generation,
     );
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::BufferCopyDesc state_copy = {
+        .src = dst.span.checked_subspan(0, 16)!!,
+        .dst = dst.span.checked_subspan(16, 16)!!,
+    };
     reset_sync_diagnostic(
         capture:        &capture,
         operation:      "cmd_copy_buffer",
@@ -2154,7 +2230,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         rejected_field: "CommandList.state",
         invariant:      "command must be recording outside a render pass",
     );
-    fault state_fault = @catch(gpu::cmd_copy_buffer(&commands, &copy));
+    fault state_fault = @catch(gpu::cmd_copy_buffer(&commands, &state_copy));
     assert(state_fault == gpu::COMMAND_RECORDING_ERROR, "recording-state fault is unchanged");
     assert_sync_contract_diagnostic(
         capture:             &capture,
@@ -2165,7 +2241,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         generation:          commands.handle.generation,
     );
     state.debug_callback = null;
-    assert(@catch(gpu::cmd_copy_buffer(&commands, &copy)) == state_fault,
+    assert(@catch(gpu::cmd_copy_buffer(&commands, &state_copy)) == state_fault,
         "recording-state fault is callback-independent");
     state.debug_callback = &capture_sync_diagnostic;
 

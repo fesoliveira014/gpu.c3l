@@ -110,17 +110,16 @@ Vulkan 1.3 lets a shader dereference raw 64-bit GPU addresses
 of tables and slots: write your parameters into a plain struct in GPU-visible
 memory, push the struct's 64-bit address as the only push constant, and let
 the shader cast the address back to the struct type and follow the pointers
-inside it. Which buffers a dispatch uses is just *data in a struct* — change
+inside it. Which data ranges a dispatch uses is just *data in a struct* — change
 the fields, dispatch again. Nothing to allocate, update, or bind, and the
-struct definition is shared between C3 and GLSL, so there is exactly one
-shape to keep in sync (and the ABI generator, later, keeps it for you).
+struct definition is shared between C3 and GLSL. The ABI generator emits both
+forms from one schema.
 
 Textures are the one thing GPUs still want tables for (samplers and image
 descriptors are opaque hardware state, not addresses) — for those the
 library manages a single global **bindless heap** and hands you plain
 integer indices (`TextureIndex`, `SamplerIndex`) that you put in your root
-structs like any other field. You will meet it in the samples; this program
-needs no textures.
+structs like any other field. This program needs no textures.
 
 The root struct below is this program's whole binding model:
 
@@ -212,23 +211,29 @@ fn void? run() {
     gpu::Device device = gpu::create_device(&adapter, &request)!;
     defer (void)gpu::destroy_device(&device);
 
-    gpu::BufferDesc io_desc = {
-        .size        = COUNT * float::size,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access      = { .compute },
-        .debug_name  = "io",
+    gpu::AllocationDesc input_desc = {
+        .size         = COUNT * float::size,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.CPU_WRITE,
+        .access       = { .compute },
+        .debug_name   = "input",
     };
-    gpu::BufferHandle input = gpu::create_buffer(&device, &io_desc)!;
-    defer (void)gpu::destroy_buffer(&device, input);
-    gpu::BufferHandle output = gpu::create_buffer(&device, &io_desc)!;
-    defer (void)gpu::destroy_buffer(&device, output);
+    gpu::AllocationDesc output_desc = input_desc;
+    output_desc.memory_class = gpu::MemoryClass.CPU_READ;
+    output_desc.debug_name = "output";
 
-    gpu::GpuSpan in_span = gpu::get_buffer_span(&device, input)!;
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!;
+    gpu::GpuAllocation input =
+        gpu::allocate_memory(&device, &input_desc)!;
+    defer (void)gpu::free_allocation(&device, &input);
+    gpu::GpuAllocation output =
+        gpu::allocate_memory(&device, &output_desc)!;
+    defer (void)gpu::free_allocation(&device, &output);
+
+    gpu::GpuSpan in_span = gpu::get_allocation_span(&device, input)!;
+    gpu::GpuSpan out_span = gpu::get_allocation_span(&device, output)!;
     float* in_data = (float*)gpu::get_span_mapping(&device, in_span)!.ptr;
     for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
-    gpu::flush_buffer(&device, input, 0, 0)!;
+    gpu::flush_mapped_span(&device, in_span)!;
 
     gpu::ShaderDesc shader_desc = {
         .stage       = gpu::ShaderStage.COMPUTE,
@@ -253,7 +258,7 @@ fn void? run() {
         if (frame.is_valid()) gpu::end_frame(&frame)!;
         return frame_err~;
     }
-    gpu::invalidate_buffer(&device, output, 0, 0)!;
+    gpu::invalidate_mapped_span(&device, out_span)!;
     float* out_data = (float*)gpu::get_span_mapping(&device, out_span)!.ptr;
     for (uint i = 0; i < COUNT; i++) {
         if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;

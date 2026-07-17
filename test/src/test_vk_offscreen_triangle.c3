@@ -48,11 +48,14 @@ fn void offscreen_clear_works() @test {
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc rb_desc = {
-        .size = RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "offscreen_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -90,7 +93,7 @@ fn void offscreen_clear_works() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
-    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
+    gpu::GpuSpan rb_span = readback.span;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = rb_span };
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
 
@@ -108,7 +111,7 @@ fn void offscreen_clear_works() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::invalidate_buffer(&device, readback, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
 
     char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
     for (uint i = 0; i < RT_SIZE * RT_SIZE; i++) {
@@ -149,12 +152,15 @@ fn void offscreen_textured_triangle() @test {
     gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
     defer gpu::destroy_sampler(&device, smp_index)!!;
 
-    gpu::BufferDesc staging_desc = {
-        .size = 4 * 4 * 4, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
-    defer gpu::destroy_buffer(&device, staging)!!;
-    gpu::GpuSpan staging_span = gpu::get_buffer_span(&device, staging)!!;
+    OwnedSpan staging = allocate_owned_span(
+        device:       &device,
+        size:         4 * 4 * 4,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "texture_staging",
+    )!!;
+    defer free_owned_span(&device, &staging)!!;
+    gpu::GpuSpan staging_span = staging.span;
     char* texels = (char*)test_span_mapping(&device, staging_span).ptr;
     for (uint i = 0; i < 16; i++) {
         texels[i * 4]     = (char)100;
@@ -162,13 +168,16 @@ fn void offscreen_textured_triangle() @test {
         texels[i * 4 + 2] = (char)200;
         texels[i * 4 + 3] = (char)255;
     }
-    gpu::flush_buffer(&device, staging, 0, 0)!!;
+    gpu::flush_mapped_span(&device, staging.span)!!;
 
-    gpu::BufferDesc rb_desc = {
-        .size = RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "offscreen_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle vert = gpu::create_shader(&device, &vert_sd)!!;
@@ -271,7 +280,7 @@ fn void offscreen_textured_triangle() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
-    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
+    gpu::GpuSpan rb_span = readback.span;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = rb_span };
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
@@ -288,7 +297,7 @@ fn void offscreen_textured_triangle() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::invalidate_buffer(&device, readback, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
 
     char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
     // Triangle interior: the center of the target sits well inside.
@@ -333,15 +342,15 @@ fn void dynamic_viewport_scissor_pixels() @test {
     for (uint i = 0; i < targets.len; i++) targets[i] = make_render_target(&device);
     defer for (uint i = 0; i < targets.len; i++) gpu::destroy_texture(&device, targets[i])!!;
 
-    gpu::BufferDesc readback_desc = {
-        .size = RT_BYTES * targets.len,
-        .usage = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &readback_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
-    gpu::GpuSpan readback_all = gpu::get_buffer_span(&device, readback)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         RT_BYTES * targets.len,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "dynamic_state_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
+    gpu::GpuSpan readback_all = readback.span;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan vertices = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
@@ -436,7 +445,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::invalidate_buffer(&device, readback, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
 
     for (uint i = 0; i < 2; i++) {
         char* pixels = (char*)test_span_mapping(&device, readback_all).ptr + RT_BYTES * i;
@@ -459,11 +468,14 @@ fn void offscreen_render_to_mip() @test {
     defer gpu::destroy_texture(&device, target)!!;
 
     const uint MIP1 = RT_SIZE / 2;
-    gpu::BufferDesc rb_desc = {
-        .size = MIP1 * MIP1 * 4, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         MIP1 * MIP1 * 4,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "mip_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -502,7 +514,7 @@ fn void offscreen_render_to_mip() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
-    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
+    gpu::GpuSpan rb_span = readback.span;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = rb_span, .mip = 1 };
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
@@ -519,7 +531,7 @@ fn void offscreen_render_to_mip() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::invalidate_buffer(&device, readback, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
 
     char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
     for (uint i = 0; i < MIP1 * MIP1; i++) {
@@ -674,11 +686,14 @@ fn void render_pass_state_machine() @test {
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
 
-    gpu::BufferDesc buf_desc = {
-        .size = 64, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buf_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan data = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "render_pass_data",
+    )!!;
+    defer free_owned_span(&device, &data)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -715,7 +730,7 @@ fn void render_pass_state_machine() @test {
     // Copies and barriers are illegal inside a pass.
     fault fill_fault = @catch(gpu::cmd_fill_buffer(
         commands: &cmd,
-        dst:      gpu::get_buffer_span(&device, buffer)!!,
+        dst:      data.span,
         value:    0,
     ));
     assert(fill_fault == gpu::COMMAND_RECORDING_ERROR, "buffer fill inside a render pass faults COMMAND_RECORDING_ERROR");

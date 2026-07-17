@@ -48,15 +48,14 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
     defer gpu::destroy_sampler(&device, smp_index)!!;
 
-    gpu::BufferDesc out_desc = {
-        .size        = TEX_SIZE * TEX_SIZE * 16,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "sample_output",
-    };
-    gpu::BufferHandle output = gpu::create_buffer(&device, &out_desc)!!;
-    defer gpu::destroy_buffer(&device, output)!!;
+    OwnedSpan output = allocate_owned_span(
+        device:       &device,
+        size:         TEX_SIZE * TEX_SIZE * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "sample_output",
+    )!!;
+    defer free_owned_span(&device, &output)!!;
 
     gpu::ShaderDesc write_shader_desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main",
@@ -86,7 +85,7 @@ fn void bindless_texture_write_then_sample() @test {
 
     gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
-    sample_root.output_gpu    = gpu::get_buffer_address(&device, output)!!;
+    sample_root.output_gpu    = test_span_address(&device, output.span);
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
     sample_root.width         = TEX_SIZE;
@@ -125,7 +124,7 @@ fn void bindless_texture_write_then_sample() @test {
     )!!;
 
     gpu::BufferBarrier out_bar = {
-        .span = gpu::get_buffer_span(&device, output)!!,
+        .span = output.span,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -139,7 +138,8 @@ fn void bindless_texture_write_then_sample() @test {
     submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;
+    gpu::invalidate_mapped_span(&device, output.span)!!;
+    gpu::GpuSpan out_span = output.span;
     float* texels = (float*)test_span_mapping(&device, out_span).ptr;
     for (uint y = 0; y < TEX_SIZE; y++) {
         for (uint x = 0; x < TEX_SIZE; x++) {

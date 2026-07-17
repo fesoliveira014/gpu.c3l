@@ -17,7 +17,6 @@
     "../../gpu/surface/**",
     "../../gpu/caps.c3",
     "../../gpu/memory.c3",
-    "../../gpu/buffer.c3",
     "../../gpu/texture.c3",
     "../../gpu/descriptor_heap.c3",
     "../../gpu/pipeline.c3",
@@ -32,6 +31,12 @@
   ],
   "output": "build",
   "targets": {
+    "buffer_handle": {
+      "type": "object-files",
+      "sources": [
+        "buffer_handle.c3"
+      ]
+    },
     "public_semaphore": {
       "type": "object-files",
       "sources": [

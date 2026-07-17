@@ -131,14 +131,18 @@ fn UploadBenchObservation run_phase_a_combo(
         *context_printed = true;
     }
 
-    gpu::BufferHandle[UPLOAD_BENCH_MAX_THREADS] dsts;
+    gpu::GpuAllocation[UPLOAD_BENCH_MAX_THREADS] dst_allocations;
     gpu::GpuSpan[UPLOAD_BENCH_MAX_THREADS] dst_spans;
     for (uint i = 0; i < threads; i++) {
-        gpu::BufferDesc desc = {
-            .size = payload_size, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
+        gpu::AllocationDesc desc = {
+            .size         = payload_size,
+            .alignment    = 16,
+            .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+            .access       = { .graphics, .compute, .transfer },
+            .debug_name   = "upload_bench_destination",
         };
-        dsts[i] = gpu::create_buffer(&device, &desc)!!;
-        dst_spans[i] = gpu::get_buffer_span(&device, dsts[i])!!;
+        dst_allocations[i] = gpu::allocate_memory(&device, &desc)!!;
+        dst_spans[i] = gpu::get_allocation_span(&device, dst_allocations[i])!!;
     }
 
     ulong fallbacks_before = gpu::vk::dedicated_fallback_count(state);
@@ -174,7 +178,7 @@ fn UploadBenchObservation run_phase_a_combo(
     ulong fallback_count = fallbacks_after - fallbacks_before;
 
     for (uint i = 0; i < threads; i++) {
-        (void)gpu::destroy_buffer(&device, dsts[i]);
+        (void)gpu::free_allocation(&device, &dst_allocations[i]);
     }
     return {
         .uploads_per_second       = uploads_per_sec,
@@ -238,17 +242,23 @@ fn void run_phase_b() {
     defer destroy_bench_device(&device)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    gpu::BufferHandle[UPLOAD_BENCH_MAX_THREADS] dsts;
+    gpu::GpuAllocation[UPLOAD_BENCH_MAX_THREADS] dst_allocations;
     gpu::GpuSpan[UPLOAD_BENCH_MAX_THREADS] dst_spans;
     for (uint i = 0; i < UPLOAD_BENCH_MAX_THREADS; i++) {
-        gpu::BufferDesc desc = {
-            .size = UPLOAD_BENCH_HELPER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
+        gpu::AllocationDesc desc = {
+            .size         = UPLOAD_BENCH_HELPER_PAYLOAD,
+            .alignment    = 16,
+            .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+            .access       = { .graphics, .compute, .transfer },
+            .debug_name   = "upload_bench_destination",
         };
-        dsts[i] = gpu::create_buffer(&device, &desc)!!;
-        dst_spans[i] = gpu::get_buffer_span(&device, dsts[i])!!;
+        dst_allocations[i] = gpu::allocate_memory(&device, &desc)!!;
+        dst_spans[i] = gpu::get_allocation_span(&device, dst_allocations[i])!!;
     }
     defer {
-        for (uint i = 0; i < UPLOAD_BENCH_MAX_THREADS; i++) (void)gpu::destroy_buffer(&device, dsts[i]);
+        for (uint i = 0; i < UPLOAD_BENCH_MAX_THREADS; i++) {
+            (void)gpu::free_allocation(&device, &dst_allocations[i]);
+        }
     }
 
     double one_worker_rate = 0.0;

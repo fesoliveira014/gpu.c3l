@@ -32,7 +32,6 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 |---|---|---:|---:|
 | Allocation | 64-byte frame span | 100,000 | 10.9 ns/allocation |
 | Allocation | 64-byte persistent span | 4,096 | 92.7 ns/allocation; 35.7 ns/free |
-| Resource creation | Buffer / texture / shader, one worker | 300 each | 1,726 / 2,294 / 11,225 ns/op |
 | Descriptor churn | Texture single / batch of 16 / sampler, one worker | 320 each | 523 / 330 / 563 ns/descriptor |
 | Upload recording | 256 KiB, 32 MiB arena, one / four workers | 40 per worker | 1,199 / 4,441 uploads/s |
 | Command reset | Idle / 15 worker pools | 2,000 each | 4,444 / 159,622 ns/begin_frame |
@@ -43,8 +42,8 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 
 ## Usage guidance
 
-- Use frame spans for transient data; persistent allocation is about 8.5 times
-  slower in this run, while resource creation costs microseconds.
+- Use frame spans for transient data; persistent allocation was about 8.5 times
+  slower in this run.
 - Batch descriptor writes. Batches of 16 reduced one-worker texture descriptor
   cost by about 37%.
 - Reuse worker threads. Recording pools are cached per worker and only dirty pools reset.
@@ -54,6 +53,3 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
   pipeline creation.
 - Queue overlap does not guarantee lower frame time. This run observed GPU
   overlap, but the independent phase was slower in wall time.
-
-The public API boundary and selected-device workload-limit checks pass the
-stabilization review; no unresolved correctness blocker is known.

@@ -11,11 +11,11 @@ struct StubRuntimeState {
 struct StubDeviceState {
     gpu::Adapter         adapter;
     gpu::Surface         surface;
-    gpu::BufferHandle    buffer;
+    gpu::GpuAllocation   allocation;
     gpu::TextureHandle   texture;
     gpu::SwapchainHandle swapchain;
     ulong                resource_owner;
-    bool                 buffer_live;
+    bool                 allocation_live;
     bool                 texture_live;
     bool                 swapchain_live;
 }
@@ -36,8 +36,8 @@ uint surface_creates @private;
 uint surface_destroys @private;
 bool presentation_supported @private = true;
 uint swapchain_create_attempts @private;
-uint buffer_create_attempts @private;
-uint buffer_destroy_attempts @private;
+uint allocation_create_attempts @private;
+uint allocation_free_attempts @private;
 uint texture_destroy_attempts @private;
 
 fn void destroy_stub_runtime(void* backend_state) {
@@ -264,12 +264,12 @@ fn uint stub_surface_destroy_count() => surface_destroys;
 
 fn uint stub_swapchain_create_attempt_count() => swapchain_create_attempts;
 
-fn void stub_reset_buffer_counts() {
-    buffer_create_attempts = 0;
-    buffer_destroy_attempts = 0;
+fn void stub_reset_allocation_counts() {
+    allocation_create_attempts = 0;
+    allocation_free_attempts = 0;
 }
 
-fn uint stub_buffer_destroy_attempt_count() => buffer_destroy_attempts;
+fn uint stub_allocation_free_attempt_count() => allocation_free_attempts;
 
 fn void stub_reset_texture_counts() {
     texture_destroy_attempts = 0;
@@ -290,33 +290,36 @@ fn void destroy_stub_device(void* backend_state) {
     mem::free(state);
 }
 
-fn gpu::BufferHandle? create_stub_buffer(
+fn gpu::GpuAllocation? allocate_stub_memory(
     gpu::Device* device,
-    gpu::BufferDesc* desc,
+    gpu::AllocationDesc* desc,
 ) {
     StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
-    buffer_create_attempts++;
+    allocation_create_attempts++;
     if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
-    if (state.buffer_live) return gpu::INVALID_RESOURCE_STATE~;
-    state.buffer = {
-        .owner      = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.BUFFER),
+    if (state.allocation_live) return gpu::INVALID_RESOURCE_STATE~;
+    state.allocation = {
+        .owner      = gpu::resource_owner_tag(
+            state.resource_owner,
+            gpu::ResourceOwnerKind.ALLOCATION,
+        ),
         .index      = 0,
         .generation = 1,
     };
-    state.buffer_live = true;
-    return state.buffer;
+    state.allocation_live = true;
+    return state.allocation;
 }
 
-fn void? destroy_stub_buffer(
+fn void? free_stub_allocation(
     gpu::Device* device,
-    gpu::BufferHandle buffer,
+    gpu::GpuAllocation allocation,
 ) {
     StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
-    buffer_destroy_attempts++;
-    if (state == null || !state.buffer_live) return gpu::INVALID_HANDLE~;
-    if (state.buffer != buffer) return gpu::INVALID_HANDLE~;
-    state.buffer = {};
-    state.buffer_live = false;
+    allocation_free_attempts++;
+    if (state == null || !state.allocation_live) return gpu::INVALID_HANDLE~;
+    if (state.allocation != allocation) return gpu::INVALID_HANDLE~;
+    state.allocation = {};
+    state.allocation_live = false;
 }
 
 fn gpu::TextureHandle? create_stub_texture(
@@ -384,8 +387,8 @@ fn void? destroy_stub_swapchain(
 
 const gpu::BackendVTable STUB_DEVICE_VTABLE @private = {
     .destroy_device      = &destroy_stub_device,
-    .create_buffer       = &create_stub_buffer,
-    .destroy_buffer      = &destroy_stub_buffer,
+    .allocate_memory     = &allocate_stub_memory,
+    .free_allocation     = &free_stub_allocation,
     .create_texture      = &create_stub_texture,
     .destroy_texture     = &destroy_stub_texture,
     .create_swapchain    = &create_stub_swapchain,
