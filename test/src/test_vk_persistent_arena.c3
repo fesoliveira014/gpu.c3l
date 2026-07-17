@@ -597,15 +597,12 @@ fn void transfer_usage_persistent_span_copies() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = {
-        .src        = src_resolved.backing_buffer,
-        .dst        = dst_resolved.backing_buffer,
-        .src_offset = src_resolved.offset,
-        .dst_offset = dst_resolved.offset,
-        .size       = 64,
+        .src = src,
+        .dst = dst,
     };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = dst_resolved.backing_buffer, .offset = dst_resolved.offset, .size = dst_resolved.size,
+        .span = dst,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -691,7 +688,7 @@ fn void indirect_usage_persistent_span_dispatches() @test {
         args:     args_span,
     )!!;
     gpu::BufferBarrier host_read = {
-        .buffer = io_resolved.backing_buffer, .offset = io_resolved.offset, .size = io_resolved.size,
+        .span = io,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };

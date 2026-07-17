@@ -305,9 +305,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
     gpu::BufferBarrier compute_output_to_host = {
-        .buffer        = compute_output,
-        .offset        = 0,
-        .size          = TEX_SIZE * TEX_SIZE * 16,
+        .span          = compute_output_span,
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE,
@@ -364,7 +362,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = readback_span };
     gpu::cmd_copy_texture_to_buffer(&graphics_commands, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = readback, .offset = 0, .size = TARGET_BYTES,
+        .span = readback_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -543,7 +541,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     )!!;
 
     gpu::BufferBarrier out_bar = {
-        .buffer = output, .offset = 0, .size = TEX * TEX * 16,
+        .span = gpu::get_buffer_span(&device, output)!!,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };

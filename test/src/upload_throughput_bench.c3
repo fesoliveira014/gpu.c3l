@@ -35,7 +35,7 @@ struct UploadBenchObservation {
 
 struct UploadPhaseAArgs {
     gpu::Device*               device;
-    gpu::BufferHandle          dst;
+    gpu::GpuSpan               dst;
     usz                        payload_size;
     uint                       iters;
     gpu::ExecutableCommandList executable;
@@ -43,7 +43,7 @@ struct UploadPhaseAArgs {
 
 struct UploadPhaseBArgs {
     gpu::Device*      device;
-    gpu::BufferHandle dst;
+    gpu::GpuSpan      dst;
     uint              iters;
 }
 
@@ -104,7 +104,7 @@ fn int upload_phase_a_worker(void* arg) {
             gpu::get_queue(args.device, gpu::QueueKind.GRAPHICS)!!,
         )!!;
         for (uint i = 0; i < args.iters; i++) {
-            gpu::cmd_upload_buffer(&commands, args.dst, 0, payload)!!;
+            gpu::cmd_upload_buffer(&commands, args.dst, payload)!!;
         }
         args.executable = gpu::end_commands(&commands)!!;
     };
@@ -132,11 +132,13 @@ fn UploadBenchObservation run_phase_a_combo(
     }
 
     gpu::BufferHandle[UPLOAD_BENCH_MAX_THREADS] dsts;
+    gpu::GpuSpan[UPLOAD_BENCH_MAX_THREADS] dst_spans;
     for (uint i = 0; i < threads; i++) {
         gpu::BufferDesc desc = {
             .size = payload_size, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         dsts[i] = gpu::create_buffer(&device, &desc)!!;
+        dst_spans[i] = gpu::get_buffer_span(&device, dsts[i])!!;
     }
 
     ulong fallbacks_before = gpu::vk::dedicated_fallback_count(state);
@@ -149,7 +151,7 @@ fn UploadBenchObservation run_phase_a_combo(
         for (uint i = 0; i < threads; i++) {
             args[i] = {
                 .device       = &device,
-                .dst          = dsts[i],
+                .dst          = dst_spans[i],
                 .payload_size = payload_size,
                 .iters        = UPLOAD_BENCH_WAVE_SIZE,
             };
@@ -219,7 +221,6 @@ fn int upload_phase_b_worker(void* arg) {
             gpu::upload_buffer_data(
                 device:      args.device,
                 dst:         args.dst,
-                offset:      0,
                 data:        payload,
                 next_stage:  gpu::Stage.TRANSFER,
                 next_hazard: gpu::Hazard.TRANSFER_READ,
@@ -238,11 +239,13 @@ fn void run_phase_b() {
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::BufferHandle[UPLOAD_BENCH_MAX_THREADS] dsts;
+    gpu::GpuSpan[UPLOAD_BENCH_MAX_THREADS] dst_spans;
     for (uint i = 0; i < UPLOAD_BENCH_MAX_THREADS; i++) {
         gpu::BufferDesc desc = {
             .size = UPLOAD_BENCH_HELPER_PAYLOAD, .usage = { .transfer_src, .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
         };
         dsts[i] = gpu::create_buffer(&device, &desc)!!;
+        dst_spans[i] = gpu::get_buffer_span(&device, dsts[i])!!;
     }
     defer {
         for (uint i = 0; i < UPLOAD_BENCH_MAX_THREADS; i++) (void)gpu::destroy_buffer(&device, dsts[i]);
@@ -253,7 +256,7 @@ fn void run_phase_b() {
         UploadPhaseBArgs[UPLOAD_BENCH_MAX_THREADS] args;
         Thread[UPLOAD_BENCH_MAX_THREADS] threads_arr;
         for (uint i = 0; i < threads; i++) {
-            args[i] = { .device = &device, .dst = dsts[i], .iters = UPLOAD_BENCH_HELPER_ITERS_PER_THREAD };
+            args[i] = { .device = &device, .dst = dst_spans[i], .iters = UPLOAD_BENCH_HELPER_ITERS_PER_THREAD };
         }
         ulong fallbacks_before = gpu::vk::dedicated_fallback_count(state);
         std::time::Clock start = std::time::clock::now();

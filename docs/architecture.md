@@ -525,13 +525,18 @@ Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex in
 ### Transfer
 
 ```text
-cmd_copy_buffer
+cmd_copy_buffer(command_list, { src_span, dst_span })
 cmd_copy_buffer_to_texture
 cmd_copy_texture_to_buffer
-cmd_fill_buffer
+cmd_fill_buffer(command_list, dst_span, value)
+cmd_upload_buffer(command_list, dst_span, data)
+cmd_readback_buffer(command_list, src_span)
 ```
 
-Transfer helpers do not imply next-use barriers.
+Buffer copies use equal-size, non-overlapping spans. Fill, upload, and readback
+operate on the exact supplied span. Upload data and blocking-readback output
+lengths must match it. Use a checked subspan for a partial operation. Transfer
+helpers do not imply next-use barriers.
 
 ### Barriers
 
@@ -542,6 +547,9 @@ cmd_buffer_barrier(command_list, BufferBarrier)
 cmd_texture_barrier(command_list, TextureBarrier)
 cmd_global_barrier(command_list, GlobalBarrier)
 ```
+
+`BufferBarrier` scopes the hazard to one exact span and has no zero-size
+shorthand.
 
 Render pass boundaries do not imply shader-read or transfer-read readiness.
 

@@ -19,7 +19,7 @@ const usz BENCH_WORKER_POOL_SIZE = 64 * 1024;
 
 struct ResetWorkerArgs {
     gpu::Device*               device;
-    gpu::BufferHandle          target;
+    gpu::GpuSpan               target;
     uint                       index;
     Atomic{uint}*              epoch;
     Atomic{uint}*              ready;
@@ -43,9 +43,7 @@ fn int reset_worker(void* raw_args) {
             )!!;
             gpu::cmd_fill_buffer(
                 commands: &commands,
-                buffer:   args.target,
-                offset:   args.index * BENCH_FILL_STRIDE,
-                size:     BENCH_FILL_STRIDE,
+                dst:      args.target,
                 value:    args.index,
             )!!;
             args.executable = gpu::end_commands(&commands)!!;
@@ -95,6 +93,7 @@ fn int main() {
     };
     gpu::BufferHandle target = gpu::create_buffer(&device, &buf_desc)!!;
     defer gpu::destroy_buffer(&device, target)!!;
+    gpu::GpuSpan target_span = gpu::get_buffer_span(&device, target)!!;
 
     Atomic{uint} epoch;
     Atomic{uint} ready;
@@ -105,7 +104,7 @@ fn int main() {
     for (uint i = 0; i < BENCH_WORKERS; i++) {
         args[i] = {
             .device = &device,
-            .target = target,
+            .target = target_span.checked_subspan(i * BENCH_FILL_STRIDE, BENCH_FILL_STRIDE)!!,
             .index  = i,
             .epoch  = &epoch,
             .ready  = &ready,

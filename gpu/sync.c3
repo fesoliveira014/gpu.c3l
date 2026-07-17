@@ -67,17 +67,13 @@ struct CompletionPoint {
     ulong  payload;
 }
 
-<* Orders before_* access against after_* access on a range of one buffer.
-   `size` 0 means the whole buffer from `offset` onward (VK_WHOLE_SIZE),
-   matching the flush/invalidate/fill convention. *>
+<* Orders before_* access against after_* access on one GPU span. *>
 struct BufferBarrier {
-    BufferHandle buffer;
-    usz          offset;
-    usz          size;
-    Stage        before_stage;
-    Stage        after_stage;
-    Hazard       before_hazard;
-    Hazard       after_hazard;
+    GpuSpan span;
+    Stage   before_stage;
+    Stage   after_stage;
+    Hazard  before_hazard;
+    Hazard  after_hazard;
 }
 
 <* Orders access and transitions layout on a whole texture. `old_layout` must match

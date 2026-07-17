@@ -180,7 +180,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::cmd_copy_texture_to_buffer(&cmd, &mip1_out)!!;
 
     gpu::BufferBarrier host_read = {
-        .buffer = mip1_readback, .offset = 0, .size = MIP1_BYTES,
+        .span = rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -298,7 +298,7 @@ fn void storage_write_direct_readback() @test {
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
 
     gpu::BufferBarrier host_read = {
-        .buffer = readback, .offset = 0, .size = MIP0_BYTES,
+        .span = rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -510,7 +510,7 @@ fn void mip_subset_view_sampled() @test {
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier out_bar = {
-        .buffer = sample_out, .offset = 0, .size = (UP_SIZE / 2) * (UP_SIZE / 2) * 16,
+        .span = gpu::get_buffer_span(&device, sample_out)!!,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };

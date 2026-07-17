@@ -337,13 +337,12 @@ fn PersistentArenaStats? get_persistent_stats(Device* device) {
     return operation.vtable.get_persistent_stats(device);
 }
 
-<* Record an upload into `dst` through the staging arena: staging span,
-   memcpy, flush, copy. Records no barriers — destination preconditions and
-   next-use transitions stay with the caller, exactly as with raw copies. *>
-fn void? cmd_upload_buffer(CommandList* commands, BufferHandle dst, usz offset, char[] data) {
+<* Record an exact-span upload through the staging arena. `data.len` must equal
+   `dst.size`; the caller records destination barriers. *>
+fn void? cmd_upload_buffer(CommandList* commands, GpuSpan dst, char[] data) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
-    return operation.vtable.cmd_upload_buffer(commands, dst, offset, data);
+    return operation.vtable.cmd_upload_buffer(commands, dst, data);
 }
 
 <* Texture flavor of cmd_upload_buffer. The region follows the copy-desc rules
@@ -355,12 +354,24 @@ fn void? cmd_upload_texture(CommandList* commands, TextureUploadDesc* desc, char
     return operation.vtable.cmd_upload_texture(commands, desc, data);
 }
 
-<* One-call blocking upload on the device's frame queue role, followed by the
-   caller-named next-use barrier. dst must admit that role. Not a hot path. *>
-fn void? upload_buffer_data(Device* device, BufferHandle dst, usz offset, char[] data, Stage next_stage, Hazard next_hazard) {
+<* Blocking exact-span upload followed by the caller-named next-use barrier.
+   `data.len` must equal `dst.size`; `dst` must admit the frame queue role. *>
+fn void? upload_buffer_data(
+    Device* device,
+    GpuSpan dst,
+    char[] data,
+    Stage next_stage,
+    Hazard next_hazard,
+) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    return operation.vtable.upload_buffer_data(device, dst, offset, data, next_stage, next_hazard);
+    return operation.vtable.upload_buffer_data(
+        device:      device,
+        dst:         dst,
+        data:        data,
+        next_stage:  next_stage,
+        next_hazard: next_hazard,
+    );
 }
 
 <* Blocking full-mip texture upload. The texture must be tracked UNDEFINED
@@ -373,12 +384,24 @@ fn void? upload_texture_data(Device* device, TextureHandle dst, uint mip, char[]
     return operation.vtable.upload_texture_data(device, dst, mip, data, next_stage, next_hazard, next_layout);
 }
 
-<* One-call blocking readback on the device's frame queue role. src must admit
-   that role. The from trio orders prior writes before copy and host read. *>
-fn void? readback_buffer_data(Device* device, BufferHandle src, usz offset, char[] out_data, Stage from_stage, Hazard from_hazard) {
+<* Blocking exact-span readback. `out_data.len` must equal `src.size`; `src`
+   must admit the frame queue role. The hazards order prior writes. *>
+fn void? readback_buffer_data(
+    Device* device,
+    GpuSpan src,
+    char[] out_data,
+    Stage from_stage,
+    Hazard from_hazard,
+) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    return operation.vtable.readback_buffer_data(device, src, offset, out_data, from_stage, from_hazard);
+    return operation.vtable.readback_buffer_data(
+        device:      device,
+        src:         src,
+        out_data:    out_data,
+        from_stage:  from_stage,
+        from_hazard: from_hazard,
+    );
 }
 
 <* Blocking full-mip texture readback; round-trips from_layout → TRANSFER_SRC
@@ -392,15 +415,10 @@ fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char
 <* Record a non-blocking buffer readback into the caller's command list.
    Source-side synchronization is the caller's barrier. The ticket holds its
    range until resolve_readback, or until discard cancels the command. *>
-fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) {
+fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, GpuSpan src) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
-    ReadbackTicket ticket = operation.vtable.cmd_readback_buffer(
-        commands,
-        src,
-        offset,
-        size,
-    )!;
+    ReadbackTicket ticket = operation.vtable.cmd_readback_buffer(commands, src)!;
     retain_device_children(&operation);
     return ticket;
 }

@@ -77,6 +77,7 @@ fn DeferRig build_defer_rig(gpu::Device* device) {
    still be running against. *>
 fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* rig) {
     gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
+    gpu::GpuSpan io_span = gpu::get_buffer_span(device, rig.io)!!;
     ComputeRoot* root = (ComputeRoot*)test_span_mapping(device, root_span).ptr;
     root.input_gpu  = gpu::get_buffer_address(device, rig.io)!!;
     root.output_gpu = root.input_gpu;
@@ -104,9 +105,7 @@ fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* 
     )!!;
 
     gpu::BufferBarrier buf_bar = {
-        .buffer        = rig.io,
-        .offset        = 0,
-        .size          = DEFER_COUNT * float::size,
+        .span          = io_span,
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE,
@@ -218,7 +217,10 @@ fn void off_frame_destroy_defers_release() @test {
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    gpu::BufferCopyDesc copy = { .src = src, .dst = dst, .src_offset = 0, .dst_offset = 0, .size = 256 };
+    gpu::BufferCopyDesc copy = {
+        .src = gpu::get_buffer_span(&device, src)!!,
+        .dst = gpu::get_buffer_span(&device, dst)!!,
+    };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;

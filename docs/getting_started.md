@@ -179,10 +179,10 @@ struct DoublerRoot {
 }
 
 struct FrameWork {
-    gpu::Device*         device;
-    gpu::BufferHandle    input;
-    gpu::BufferHandle    output;
-    gpu::PipelineHandle  pipeline;
+    gpu::Device*        device;
+    gpu::GpuSpan        input_span;
+    gpu::GpuSpan        output_span;
+    gpu::PipelineHandle pipeline;
 }
 
 fn int main() {
@@ -225,6 +225,7 @@ fn void? run() {
     defer (void)gpu::destroy_buffer(&device, output);
 
     gpu::GpuSpan in_span = gpu::get_buffer_span(&device, input)!;
+    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!;
     float* in_data = (float*)gpu::get_span_mapping(&device, in_span)!.ptr;
     for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
     gpu::flush_buffer(&device, input, 0, 0)!;
@@ -242,10 +243,10 @@ fn void? run() {
     defer (void)gpu::destroy_pipeline(&device, pipeline);
 
     FrameWork frame_work = {
-        .device   = &device,
-        .input    = input,
-        .output   = output,
-        .pipeline = pipeline,
+        .device      = &device,
+        .input_span  = in_span,
+        .output_span = out_span,
+        .pipeline    = pipeline,
     };
     gpu::FrameToken frame;
     if (catch frame_err = gpu::@with_frame(&frame, &device, run_frame, &frame_work)) {
@@ -253,7 +254,6 @@ fn void? run() {
         return frame_err~;
     }
     gpu::invalidate_buffer(&device, output, 0, 0)!;
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!;
     float* out_data = (float*)gpu::get_span_mapping(&device, out_span)!.ptr;
     for (uint i = 0; i < COUNT; i++) {
         if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
@@ -264,8 +264,8 @@ fn void? run_frame(gpu::FrameToken* frame, FrameWork* work) {
     gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, DoublerRoot::size, 16)!;
     DoublerRoot* root = (DoublerRoot*)gpu::get_span_mapping(work.device, root_span)!.ptr;
     gpu::GpuAddress root_address = gpu::get_span_address(work.device, root_span)!;
-    root.input_gpu  = gpu::get_buffer_address(work.device, work.input)!;
-    root.output_gpu = gpu::get_buffer_address(work.device, work.output)!;
+    root.input_gpu  = gpu::get_span_address(work.device, work.input_span)!;
+    root.output_gpu = gpu::get_span_address(work.device, work.output_span)!;
     root.count      = COUNT;
 
     gpu::Queue queue = gpu::get_queue(work.device, gpu::QueueKind.COMPUTE)!;
@@ -278,9 +278,11 @@ fn void? run_frame(gpu::FrameToken* frame, FrameWork* work) {
         groups:   { (COUNT + 63) / 64, 1, 1 },
     )!;
     gpu::BufferBarrier to_host = {
-        .buffer = work.output, .offset = 0, .size = COUNT * float::size,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+        .span          = work.output_span,
+        .before_stage  = gpu::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &to_host)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!;

@@ -382,7 +382,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors`; `resolve_readback` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, undersized output, a consumed `ReadbackTicket`, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors`; `resolve_readback` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, mismatched transfer payload length, undersized output, a consumed `ReadbackTicket`, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit`; readback polling/resolution | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame, or readback alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver host-allocation failure |
@@ -609,16 +609,22 @@ kinds are persistently mapped and exposed through
 `get_span_mapping(device, get_buffer_span(device, buffer)!)`, paired with
 `flush_buffer`/`invalidate_buffer` for non-coherent ranges.
 
-Upload/readback helpers round out the buffer path (signatures in the
-generated reference): blocking `upload_buffer_data` / `upload_texture_data` /
-`readback_buffer_data` / `readback_texture_data` (all take the resource's
-current Stage/Hazard[/TextureLayout] and restore it), recorded
-`cmd_upload_buffer` / `cmd_upload_texture`, and the non-blocking ticket flow
-`cmd_readback_buffer`/`cmd_readback_texture` → `poll_readback` →
-`resolve_readback` (see docs/memory.md §13). Frame lifecycle is
-`begin_frame`/`end_frame` around each frame's work (or `@with_frame` for
-fallible named-worker scopes); memory introspection is
-`get_memory_stats` / `build_memory_report` / `get_persistent_stats`.
+Buffer upload and blocking readback use exact spans:
+
+```text
+cmd_upload_buffer(CommandList* commands, GpuSpan dst, char[] data) -> void?
+upload_buffer_data(Device* device, GpuSpan dst, char[] data, Stage next_stage, Hazard next_hazard) -> void?
+readback_buffer_data(Device* device, GpuSpan src, char[] out_data, Stage from_stage, Hazard from_hazard) -> void?
+```
+
+`data.len` or `out_data.len` must equal the span size. Use
+`GpuSpan.checked_subspan` for a partial transfer. Recorded uploads add no
+barriers. Blocking helpers submit and wait: upload ends at
+`next_stage`/`next_hazard`; readback orders `from_stage`/`from_hazard`
+before the copy.
+
+Texture variants retain their texture-specific arguments. Non-blocking
+readback is documented below.
 
 ## 6. Texture API
 
@@ -1154,9 +1160,9 @@ cmd_draw_indexed_indirect_count(commands, pipeline, vertex_root, fragment_root, 
 cmd_dispatch_indirect(commands, pipeline, root, args) -> void?
 ```
 
-Argument spans must come from a buffer with `indirect` usage, 4-byte aligned,
-with `draw_count` (or `max_draw_count`) times the tight argument size inside
-the span. One vertex/fragment root pair applies to every draw in a
+Argument spans must support indirect-command reads, be 4-byte aligned, and
+contain `draw_count` (or `max_draw_count`) times the tight argument size. One
+vertex/fragment root pair applies to every draw in a
 multi-draw; per-draw variation indexes a table through `gl_DrawID` (see
 `docs/shader_abi.md`). Direct draw counts and GPU-written count values may be
 zero and must not exceed `DeviceCaps.max_draw_indirect_count`. In the count
@@ -1180,11 +1186,20 @@ robustness behavior.
 ### Transfer
 
 ```text
+BufferCopyDesc
+    GpuSpan src
+    GpuSpan dst
+
 cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) -> void?
 cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) -> void?
 cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) -> void?
-cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset, usz size, uint value) -> void?
+cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) -> void?
 ```
+
+Copy spans must be nonzero, equal in size, and non-overlapping.
+`cmd_fill_buffer` fills the exact destination span; its byte offset and
+size must be 4-byte aligned. There is no zero-size shorthand. Callers provide
+the surrounding barriers.
 
 ### Readback tickets
 
@@ -1193,16 +1208,15 @@ Non-blocking readback: record now, resolve later.
 ```text
 ReadbackTicket                   (generation-checked token)
 
-cmd_readback_buffer(CommandList* commands, BufferHandle src, usz offset, usz size) -> ReadbackTicket?
+cmd_readback_buffer(CommandList* commands, GpuSpan src) -> ReadbackTicket?
 cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) -> ReadbackTicket?
 poll_readback(Device* device, ReadbackTicket* ticket) -> bool?
 resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) -> void?
 ```
 
-Recording copies the source into readback memory inside the caller's command
-list and inserts only the internal transfer→host barrier on the destination;
-source-side ordering (and, for textures, the `TRANSFER_SRC` layout) is the
-caller's responsibility.
+Buffer readback copies the exact nonzero source span. Recording inserts only
+the internal transfer→host barrier on the destination; source-side ordering
+(and, for textures, the `TRANSFER_SRC` layout) is the caller's responsibility.
 
 Readiness is frame-boundary granular: a ticket's copy is a Tier C recording
 that always retires on the frame timeline, which only `end_frame` signals
@@ -1256,9 +1270,7 @@ Hazard
     DEPTH_READ_WRITE
 
 BufferBarrier
-    BufferHandle buffer
-    usz offset
-    usz size
+    GpuSpan span
     Stage before_stage
     Stage after_stage
     Hazard before_hazard
@@ -1283,6 +1295,9 @@ cmd_buffer_barrier(CommandList* commands, BufferBarrier* barrier) -> void?
 cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) -> void?
 cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) -> void?
 ```
+
+`BufferBarrier` applies to the exact nonzero span. It has no whole-buffer or
+zero-size shorthand.
 
 `Stage.NONE` is an empty execution scope. Use it only for a barrier side that
 has no pipeline work to wait for. Explicit `Stage.PRESENT` and

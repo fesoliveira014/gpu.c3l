@@ -38,7 +38,7 @@ alias SubmitFn @private          = fn CompletionPoint? (Queue, SubmitDesc*);
 alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
 alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
 alias CmdCopyBufferFn @private       = fn void? (CommandList*, BufferCopyDesc*);
-alias CmdFillBufferFn @private       = fn void? (CommandList*, BufferHandle, usz, usz, uint);
+alias CmdFillBufferFn @private       = fn void? (CommandList*, GpuSpan, uint);
 alias CmdCopyBufferToTextureFn @private = fn void? (CommandList*, BufferTextureCopyDesc*);
 alias CmdCopyTextureToBufferFn @private = fn void? (CommandList*, TextureBufferCopyDesc*);
 alias FlushBufferFn @private            = fn void? (Device*, BufferHandle, usz, usz);
@@ -75,13 +75,25 @@ alias CmdDrawIndexedIndirectCountFn @private = fn void? (CommandList*, PipelineH
 alias CmdDispatchIndirectFn @private   = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuSpan);
 alias CmdBeginLabelFn @private         = fn void? (CommandList*, ZString, float[4]);
 alias CmdEndLabelFn @private           = fn void? (CommandList*);
-alias CmdUploadBufferFn @private       = fn void? (CommandList*, BufferHandle, usz, char[]);
+alias CmdUploadBufferFn @private       = fn void? (CommandList*, GpuSpan, char[]);
 alias CmdUploadTextureFn @private      = fn void? (CommandList*, TextureUploadDesc*, char[]);
-alias UploadBufferDataFn @private      = fn void? (Device*, BufferHandle, usz, char[], Stage, Hazard);
+alias UploadBufferDataFn @private = fn void? (
+    Device* device,
+    GpuSpan dst,
+    char[] data,
+    Stage next_stage,
+    Hazard next_hazard,
+);
 alias UploadTextureDataFn @private     = fn void? (Device*, TextureHandle, uint, char[], Stage, Hazard, TextureLayout);
-alias ReadbackBufferDataFn @private    = fn void? (Device*, BufferHandle, usz, char[], Stage, Hazard);
+alias ReadbackBufferDataFn @private = fn void? (
+    Device* device,
+    GpuSpan src,
+    char[] out_data,
+    Stage from_stage,
+    Hazard from_hazard,
+);
 alias ReadbackTextureDataFn @private   = fn void? (Device*, TextureHandle, uint, char[], Stage, Hazard, TextureLayout);
-alias CmdReadbackBufferFn @private     = fn ReadbackTicket? (CommandList*, BufferHandle, usz, usz);
+alias CmdReadbackBufferFn @private     = fn ReadbackTicket? (CommandList*, GpuSpan);
 alias CmdReadbackTextureFn @private    = fn ReadbackTicket? (CommandList*, TextureHandle, uint);
 alias PollReadbackFn @private          = fn bool? (Device*, ReadbackTicket*);
 alias ResolveReadbackFn @private       = fn void? (Device*, ReadbackTicket*, char[]);

@@ -125,7 +125,7 @@ fn void bindless_texture_write_then_sample() @test {
     )!!;
 
     gpu::BufferBarrier out_bar = {
-        .buffer = output, .offset = 0, .size = TEX_SIZE * TEX_SIZE * 16,
+        .span = gpu::get_buffer_span(&device, output)!!,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
