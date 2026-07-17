@@ -501,10 +501,11 @@ device allocation failure and explicit device loss propagate without retry.
 ## 12. Command buffers
 
 `begin_commands(queue)` lazily creates a private recording-pool set for the
-calling thread and device. Each set contains one pool per frame slot for every
-selected native queue family; aliased roles share a pool. Blocking transfer
-helpers use a separate private set. Pool construction is transactional and
-uses the device host allocator.
+calling thread and device. Each set contains one pool per frame slot for
+selected graphics and compute families. Compute aliases graphics when both use
+one family. A selected transfer role always has a separate pool, even when its
+family is shared. Blocking transfer helpers use a separate private set. Pool
+construction is transactional and uses the device host allocator.
 
 Public command values have two states:
 

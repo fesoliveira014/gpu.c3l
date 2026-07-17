@@ -278,28 +278,38 @@ fn void record_val_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle ta
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
 
-fn void mixed_queue_submit_faults() @test {
+fn void submit_requires_exact_recording_queue_token() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList gfx = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    defer discard_test_commands(&gfx)!!;
-    gpu::ExecutableCommandList gfx_executable = gpu::end_commands(&gfx)!!;
-    defer discard_test_executable(&gfx_executable)!!;
-    gpu::CommandList xfer = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
-    defer discard_test_commands(&xfer)!!;
-    gpu::ExecutableCommandList xfer_executable = gpu::end_commands(&xfer)!!;
-    defer discard_test_executable(&xfer_executable)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
 
-    gpu::ExecutableCommandList[2] lists = { gfx_executable, xfer_executable };
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandRecord* record = state.commands.get(executable.handle)!!;
+    gpu::Queue recorded_queue = record.queue;
+    record.queue.id++;
+
+    gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    fault mixed = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit));
-    assert(mixed == gpu::INVALID_ARGUMENT, "mixed-queue submit faults INVALID_ARGUMENT before any queue work runs");
+    fault mismatched = @catch(gpu::submit(queue, &submit));
+    assert(mismatched == gpu::INVALID_ARGUMENT,
+        "submission requires the exact queue token captured while recording");
+    assert(lists[0].handle.is_valid(),
+        "queue-token rejection preserves the executable token");
+
+    record.queue = recorded_queue;
+    gpu::CompletionPoint point = gpu::submit(queue, &submit)!!;
+    gpu::wait_completion(point, 1_000_000_000)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
-fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
+fn void resource_access_intersects_recording_roles_before_mutation() @test {
     SyncDiagnosticCapture capture = {
         .expected_operation      = "",
         .expected_rejected_field = "",
@@ -383,16 +393,17 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::CommandRecord* record = state.commands.get(commands.handle)!!;
+    gpu::Queue recorded_queue = record.queue;
+    record.queue.roles = { .graphics, .compute };
 
-    assert(@catch(gpu::cmd_fill_buffer(
+    gpu::cmd_fill_buffer(
         commands: &commands,
         buffer:   buffer,
         offset:   0,
         size:     4,
         value:    0,
-    )) == gpu::INVALID_ARGUMENT,
-        "compute-only buffer rejects graphics recording even when queues alias");
-
+    )!!;
+    record.queue.roles = { .graphics };
     gpu::TextureBarrier barrier = {
         .texture       = texture,
         .before_stage  = gpu::Stage.NONE,
@@ -405,7 +416,7 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
     uint pending_before = record.pending_layout_count;
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,
-        "compute-only texture rejects graphics recording even when queues alias");
+        "compute-only texture rejects a disjoint recording-role token");
     assert(record.pending_layout_count == pending_before,
         "access rejection precedes pending-layout mutation");
 
@@ -489,6 +500,7 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
         == gpu::INVALID_ARGUMENT,
         "a forged span cannot introduce unknown access bits");
 
+    record.queue = recorded_queue;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
 
     defer discard_test_executable(&commands_executable)!!;
@@ -520,6 +532,9 @@ fn void render_pass_access_preflight_precedes_view_creation() @test {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, admitted);
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    gpu::Queue recorded_queue = record.queue;
+    record.queue.roles = { .graphics };
 
     gpu::ColorTargetDesc[2] colors = {
         { .texture = admitted, .mip_level = 1 },
@@ -536,10 +551,10 @@ fn void render_pass_access_preflight_precedes_view_creation() @test {
         "a later attachment outside the recording role rejects the whole pass");
     assert(val_cached_view_count(&device, admitted) == cached_before,
         "attachment access preflight precedes view-cache mutation");
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     assert(record.state == vk::CommandState.RECORDING,
         "attachment access rejection leaves command state reusable");
 
+    record.queue = recorded_queue;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
 
     defer discard_test_executable(&commands_executable)!!;

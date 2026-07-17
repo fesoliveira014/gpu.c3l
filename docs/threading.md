@@ -59,6 +59,11 @@ submit or executable discard releases it.
 Pin acquisition may return `DEVICE_BUSY`; failed destruction restores the live
 state and preserves the token and generation.
 
+`begin_commands` lazily allocates one recording context per thread/device pair.
+Each device reserves one helper context and can allocate 256 recording-thread
+contexts over its lifetime. A further distinct recording thread receives
+`SLOT_TABLE_FULL`; contexts are released when the device is destroyed.
+
 Runtime creation and destruction must not overlap other runtime operations. After
 publication, enumeration and adapter queries may run concurrently; all such calls
 must finish before runtime destruction.

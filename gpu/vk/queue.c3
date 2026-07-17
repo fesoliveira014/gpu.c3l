@@ -2042,7 +2042,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 defer state.command_mutex.unlock();
                 foreach (i, &token : desc.command_lists) {
                     CommandRecord* record = state.commands.get(token.handle)!;
-                    if (record != records[i]) return gpu::COMMAND_RECORDING_ERROR~;
                     if (record.state != CommandState.EXECUTABLE) {
                         return gpu::COMMAND_RECORDING_ERROR~;
                     }

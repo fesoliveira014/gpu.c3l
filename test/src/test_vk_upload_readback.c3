@@ -1644,6 +1644,9 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
+    gpu::vk::CommandRecord* record = state.commands.get(commands.handle)!!;
+    gpu::Queue recorded_queue = record.queue;
+    record.queue.roles = { .graphics };
     staging_before = state.staging_arena.retire_count;
     before = capture.calls;
     fault command_upload = @catch(gpu::cmd_upload_buffer(
@@ -1698,6 +1701,7 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
         && state.readback_tickets.next_new == tickets_before,
         "recorded readback access rejection allocates no ticket or arena range");
 
+    record.queue = recorded_queue;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
 
     defer discard_test_executable(&commands_executable)!!;
