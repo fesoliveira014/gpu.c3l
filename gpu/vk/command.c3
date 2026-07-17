@@ -588,7 +588,6 @@ fn void? vk_cmd_copy_buffer_to_texture(
         span:      &desc.src,
         operation: "cmd_copy_buffer_to_texture",
     )!;
-    if (!buffer.slot.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
 
     validate_texture_recording_access(
         state:     state,
@@ -597,6 +596,7 @@ fn void? vk_cmd_copy_buffer_to_texture(
         handle:    desc.texture,
         operation: "cmd_copy_buffer_to_texture",
     )!;
+    if (!buffer.slot.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
     if (layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
@@ -614,12 +614,12 @@ fn void? vk_cmd_copy_buffer_to_texture(
         height:            desc.height,
     )!;
     vk::cmd_copy_buffer_to_image(
-        record.command_buffer,
-        buffer.slot.buffer,
-        texture.image,
-        layout_to_vk(layout),
-        1,
-        &region,
+        command_buffer:  record.command_buffer,
+        src_buffer:      buffer.slot.buffer,
+        dst_image:       texture.image,
+        dst_image_layout: layout_to_vk(layout),
+        region_count:    1,
+        p_regions:       &region,
     );
 }
 
@@ -670,12 +670,12 @@ fn void? vk_cmd_copy_texture_to_buffer(
         height:            desc.height,
     )!;
     vk::cmd_copy_image_to_buffer(
-        record.command_buffer,
-        texture.image,
-        layout_to_vk(layout),
-        buffer.slot.buffer,
-        1,
-        &region,
+        command_buffer:  record.command_buffer,
+        src_image:       texture.image,
+        src_image_layout: layout_to_vk(layout),
+        dst_buffer:      buffer.slot.buffer,
+        region_count:    1,
+        p_regions:       &region,
     );
 }
 

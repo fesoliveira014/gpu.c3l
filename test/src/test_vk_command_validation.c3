@@ -1745,6 +1745,69 @@ fn void assert_sync_contract_diagnostic(
     assert(capture.invariant_matches, "invariant is exact");
 }
 
+fn void buffer_to_texture_access_diagnostic_precedes_buffer_usage() @test {
+    SyncDiagnosticCapture capture = {};
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     "copy_access_texture",
+        rejected_field: "TextureDesc.access",
+        invariant:      "access must include the operation queue role",
+    );
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureDesc texture_desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics },
+        .width      = 1,
+        .height     = 1,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .transfer_dst },
+        .debug_name = "copy_access_texture",
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    gpu::BufferDesc buffer_desc = {
+        .size        = 4,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .transfer },
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::GpuSpan span = gpu::get_buffer_span(&device, buffer)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::BufferTextureCopyDesc copy = {
+        .src     = span,
+        .texture = texture,
+        .width   = 1,
+        .height  = 1,
+    };
+
+    fault copy_fault = @catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy));
+
+    assert(copy_fault == gpu::INVALID_ARGUMENT, "copy keeps INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      copy_fault,
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        index:               texture.index,
+        generation:          texture.generation,
+    );
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::end_frame(&frame)!!;
+}
+
 fn void tranche_b_command_and_render_diagnostics() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);

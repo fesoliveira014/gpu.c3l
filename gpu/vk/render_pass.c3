@@ -391,10 +391,12 @@ fn void bind_index_buffer(
     gpu::IndexType index_type,
 ) @private {
     vk::cmd_bind_index_buffer(
-        cb,
-        index_span.slot.buffer,
-        (vk::DeviceSize)index_span.offset,
-        index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32,
+        command_buffer: cb,
+        buffer:         index_span.slot.buffer,
+        offset:         (vk::DeviceSize)index_span.offset,
+        index_type:     index_type == gpu::IndexType.U16
+            ? vk::IndexType.UINT16
+            : vk::IndexType.UINT32,
     );
 }
 <* Index-range bounds live in the GPU-written arguments and are not validated

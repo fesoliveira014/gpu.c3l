@@ -198,6 +198,18 @@ fn void persistent_span_rejects_native_offset_overflow() @test {
         "persistent native-offset overflow faults INVALID_ARGUMENT");
 }
 
+fn void span_resolver_rejects_gpu_address_overflow() @test {
+    SpanResolverFixture fixture;
+    init_span_resolver_fixture(&fixture);
+    fixture.buffer_cells[0].value.gpu_base = (gpu::GpuAddress)(ulong::max - 4);
+    gpu::GpuSpan span = fixture_buffer_span(&fixture, 8, 1);
+
+    fault address_fault = @catch(vk::resolve_span(&fixture.state, &span));
+
+    assert(address_fault == gpu::INVALID_ARGUMENT,
+        "GPU-address overflow faults INVALID_ARGUMENT");
+}
+
 fn void resolved_span_mapping_and_address_require_backing_metadata() @test {
     SpanResolverFixture fixture;
     init_span_resolver_fixture(&fixture);
