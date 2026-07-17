@@ -499,6 +499,48 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     gpu::end_frame(&frame)!!;
 }
 
+fn void frame_span_without_transfer_usage_rejects_copy_and_fill() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+
+    OwnedSpan transfer_span = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "transfer_span",
+    )!!;
+    defer free_owned_span(&device, &transfer_span)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    defer (void)gpu::end_frame(&frame);
+    gpu::GpuSpan frame_span = gpu::alloc_frame_span(&frame, 16, 16)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::BufferCopyDesc frame_source = {
+        .src = frame_span,
+        .dst = transfer_span.span,
+    };
+    assert(@catch(gpu::cmd_copy_buffer(&commands, &frame_source))
+        == gpu::INVALID_ARGUMENT,
+        "copy rejects a source span without transfer-source usage");
+
+    gpu::BufferCopyDesc frame_destination = {
+        .src = transfer_span.span,
+        .dst = frame_span,
+    };
+    assert(@catch(gpu::cmd_copy_buffer(&commands, &frame_destination))
+        == gpu::INVALID_ARGUMENT,
+        "copy rejects a destination span without transfer-destination usage");
+
+    assert(@catch(gpu::cmd_fill_buffer(&commands, frame_span, 0))
+        == gpu::INVALID_ARGUMENT,
+        "fill rejects a span without transfer-destination usage");
+}
+
 fn void render_pass_access_preflight_precedes_view_creation() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;

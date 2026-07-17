@@ -506,7 +506,7 @@ For fallible frame work, use the compile-time direct-call helper:
 
 ```c3
 fn void? render_frame(gpu::FrameToken* frame, RenderState* state) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::align)!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
     record_rendering(&frame.device, state, root_span)!;
 }
 
@@ -1520,7 +1520,7 @@ fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
     gpu::GpuSpan root_span = gpu::alloc_frame_span(
         frame,
         RootArgs::size,
-        RootArgs::align,
+        RootArgs::alignment,
     )!;
     RootArgs* root =
         (RootArgs*)gpu::get_span_mapping(work.device, root_span)!.ptr;

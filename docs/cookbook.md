@@ -291,7 +291,7 @@ an early `!`.
 
 ```c3
 fn void? render_frame(gpu::FrameToken* frame, AppState* state) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::align)!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
     record_and_submit(state, root_span)!;
 }
 
