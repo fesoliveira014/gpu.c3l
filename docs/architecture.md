@@ -4,13 +4,17 @@
 
 `gpu.c3l` is a C3 library that exposes a direct GPU programming model suitable for modern explicit rendering and compute workloads. It is not a renderer, render graph, material system, asset system, or platform abstraction layer.
 
-The current API uses root pointers, bindless heap indices, explicit resource barriers, and Vulkan-backed resource allocation. The [strict GPU architecture](strict_gpu_profile.md) defines the target derived from Sebastian Aaltonen's [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api). This document describes the implemented `gpu` API until each target contract lands.
+The API uses root pointers, bindless heap indices, explicit barriers, and
+backend-neutral GPU allocation. Its design follows Sebastian Aaltonen's
+[No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api);
+the [strict GPU architecture](strict_gpu_profile.md) records the broader design.
 
-The API centers on four ideas:
+The API centers on:
 
 ```text
-GpuAddress      -> shader-visible buffer pointers
-GpuSpan         -> CPU/GPU range metadata
+GpuAllocation   -> owning generic GPU storage
+GpuSpan         -> non-owning identity and range
+GpuAddress      -> shader-visible data address
 TextureIndex    -> shader-visible texture heap index
 SamplerIndex    -> shader-visible sampler heap index
 ```
@@ -165,7 +169,7 @@ Responsibilities:
 ```text
 backend lifetime
 queue ownership
-resource slot tables
+resource slot tables, including independent allocations
 VMA allocator through backend state
 descriptor heaps
 frame upload arenas
@@ -197,11 +201,12 @@ changing the token or generation. Successful teardown increments the generation
 and invalidates the passed token. Device loss bypasses child and progress checks
 after pins retire; command tokens remain discardable after loss.
 
-Device-owned table handles carry an opaque device-and-kind owner plus a local slot and
-generation. Backend tables reject foreign owners before resolving or mutating
-resource state, then validate liveness and generation. Frame and command tokens
-derive the same ownership from their device. Shader-visible indices and GPU
-addresses remain caller-lifetime values rather than ownership tokens. The
+Device-owned table handles, including `GpuAllocation`, carry an opaque
+device-and-kind owner plus a local slot and generation. Backend tables reject
+foreign owners before validating liveness and generation. `GpuSpan` carries
+the same identity plus offset and size, but does not own storage. Frame and
+command tokens derive ownership from their device. Shader-visible indices and
+GPU addresses remain caller-lifetime values rather than ownership tokens. The
 transitional descriptor release API still accepts raw indices; see
 `docs/limitations.md`.
 
@@ -230,13 +235,12 @@ identity with a shared role mask. The Vulkan backend allocates every selected
 native identity. Each identity owns a private completion timeline and monotonic
 submission sequence. Command entry points take `QueueKind`.
 
-`BufferDesc`, `TextureDesc`, and `PersistentAllocDesc` declare a non-empty
-`QueueRoles` access set. Every explicitly named command resource is checked
-against the command's semantic role before backend state changes. Persistent
-spans carry a generation-checked allocation identity; command validation checks
-their immutable bounds and access before the recording role. Other `GpuSpan`
-access remains a non-empty subset of its backing buffer. Root-addressed shader
-access remains a caller
+`AllocationDesc`, `BufferDesc`, `TextureDesc`, and
+`PersistentAllocDesc` declare a non-empty `QueueRoles` access set. The
+backend stores it as immutable resource metadata. Span resolution recovers that
+metadata and validates liveness, device ownership, bounds, and the recording
+role before backend state changes. A span cannot widen access because it
+contains no public access field. Root-addressed shader access remains a caller
 precondition because nested pointers are opaque.
 
 The backend deduplicates only admitted roles' native families: one family stays
@@ -263,6 +267,21 @@ queue progress. Success publishes one `CompletionPoint` and invalidates every
 submitted token and alias. Frame-slot reuse is rejected while abandoned records
 remain; callers must submit or discard them. Invalid transitions return faults,
 and render-pass command constraints remain enforced.
+
+### Independent allocations
+
+`allocate_memory` creates a `GpuAllocation` for generic GPU data.
+`MemoryClass` selects CPU-write, GPU-private, or CPU-read behavior without
+exposing backend heaps. `AllocationInfo` reports immutable properties and
+actual mapping, coherence, and address capabilities.
+
+The device owns each allocation in a generation-checked table and keeps native
+storage private. `get_allocation_span` borrows the complete range; mapping and
+address queries resolve live spans. Stale, foreign, and out-of-bounds spans are
+rejected before native use.
+
+`free_allocation` consumes its token only after success. It requires quiescent
+GPU use and destroys storage immediately.
 
 ### Buffers
 
@@ -385,6 +404,7 @@ Creation functions return fallible values:
 
 ```text
 Device?
+GpuAllocation?
 BufferHandle?
 TextureHandle?
 PipelineHandle?
@@ -395,7 +415,8 @@ Failures return specific faults.
 
 ### Destruction
 
-Destruction is explicit and validates handles.
+Destruction is explicit and validates handles. `free_allocation` consumes a
+`GpuAllocation*` only after success; faults preserve it.
 
 Policy:
 
@@ -414,7 +435,9 @@ retire_frame(frame_index)
     destroy resources whose retire_timeline <= completed_timeline
 ```
 
-Calling `destroy_buffer` removes the public handle immediately, but backend destruction may be deferred.
+Calling `destroy_buffer` removes the public handle immediately, but backend
+destruction may be deferred. Independent allocations instead require quiescence
+and are freed immediately.
 
 ## 7. Frame model
 
@@ -592,6 +615,7 @@ bindless texture compute
 offscreen graphics readback
 SDL3 windowed triangle sample
 GPU-driven indirect draw sample
+independent allocation ownership, mapping, and address queries
 VMA memory budget reporting
 debug resource leak reporting
 shader ABI docs and generated layout checks

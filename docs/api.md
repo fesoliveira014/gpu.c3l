@@ -310,6 +310,7 @@ caller-lifetime values.
 contain an opaque device-and-kind owner identity plus a local slot and generation.
 
 ```text
+GpuAllocation
 BufferHandle
 TextureHandle
 PipelineHandle
@@ -332,32 +333,29 @@ device or process lifetimes. Compare `Queue` values as wholes and use
 `FrameToken` and `CommandList` embed a copy of their owning `Device` token; they
 do not borrow caller variable storage.
 
-### GPU addresses
+### Allocations, spans, and GPU addresses
+
+`GpuAllocation` is an owning, generation-checked token. `GpuSpan` borrows a
+range and contains no pointer, GPU address, memory class, access mask, backing
+buffer, or ownership token.
 
 ```text
 GpuAddress = ulong        (typedef — a distinct type, cast explicitly)
 
 GpuSpan
-    GpuAddress gpu
-    void* cpu
-    usz size
-    BufferHandle buffer
-    AllocationHandle allocation
+    ulong owner
+    uint index
+    uint generation
     usz offset
-    MemoryKind kind
-    QueueRoles access
+    usz size
 ```
 
-Rules:
-
-```text
-GpuAddress zero is invalid for shader-visible memory.
-GpuSpan.cpu may be null.
-GpuSpan.gpu must be aligned for the intended shader layout.
-GpuSpan.buffer identifies the backing buffer for barriers/copies/debug.
-GpuSpan.allocation identifies a live persistent suballocation when applicable.
-GpuSpan.access is the non-empty set of selected roles admitted to the range.
-```
+The identity fields are opaque. Consumers may copy a complete span only for the
+lifetime documented by its producer; allocation, buffer, frame, and persistent
+spans have different expiry rules. Do not construct or mutate the identity.
+Mapping, address, access, bounds, and native backing remain device-owned and are
+recovered when a public operation resolves the span. A zero `GpuAddress` is
+invalid.
 
 `GpuSpan` slicing is explicit:
 
@@ -366,11 +364,10 @@ span.checked_subspan(offset, size)   -> GpuSpan?
 span.unchecked_subspan(offset, size) -> GpuSpan
 ```
 
-`checked_subspan` returns `INVALID_ARGUMENT` for zero size, if the requested
-exact-sized range escapes its immediate parent, or if advancing the GPU
-address, non-null CPU pointer, or backing-buffer offset would overflow.
-`unchecked_subspan` performs only the metadata additions; callers must prove
-the range and derived metadata are valid before using it.
+`checked_subspan` rejects zero size, a range outside its immediate parent, and
+offset overflow. It preserves the identity and changes only `offset` and
+`size`. `unchecked_subspan` performs no bounds or overflow checks; use it
+only after proving the range.
 
 ## 4. Faults
 
@@ -385,16 +382,16 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; resource creation: empty, unknown, or unselected access role; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; a command token recorded for another queue; missing transfer/index usage flag, an access set disjoint from the selected queue roles, stale or forged span allocation metadata, malformed span access, or a misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
-| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, `poll_completion`, `wait_completion`, any resource-handle-taking call, `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; pipeline/shader creates; `texture_transition`; `create_texture_descriptors`; `resolve_readback` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, undersized output, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address queries; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit`; readback polling/resolution | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame, or readback alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
-| `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
+| `OUT_OF_DEVICE_MEMORY` | allocation, buffer, and texture creates | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
-| `RESOURCE_IN_USE` | `destroy_device`, `destroy_runtime`, `destroy_surface`, `destroy_texture` | a device has a live child, a runtime has a live surface or device, a surface has a live swapchain, or a live `TextureIndex` owns a texture |
+| `RESOURCE_IN_USE` | `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface`, `destroy_texture` | a placed resource still depends on an allocation; a device has a live child; a runtime has a live surface or device; a surface has a live swapchain; or a live `TextureIndex` owns a texture |
 | `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
-| `SLOT_TABLE_FULL` | runtime, device, and resource creates; `begin_commands`; `acquire_next_image`; persistent allocation; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
+| `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `begin_commands`; `acquire_next_image`; persistent allocation; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity < live descriptors + same-frame retires (they recycle a frame later); `create_texture_descriptors` checks this as a pre-flight before creating anything, so a batch that would overflow leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
@@ -408,6 +405,60 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled. `DEVICE_LOST` is reserved for an explicit native device-loss result; an unmapped native result becomes `BACKEND_ERROR`.
 
 ## 5. Memory API
+
+### Independent allocations
+
+```text
+MemoryClass.CPU_WRITE
+MemoryClass.GPU_PRIVATE
+MemoryClass.CPU_READ
+
+AllocationDesc
+    usz size
+    usz alignment
+    MemoryClass memory_class
+    QueueRoles access
+    ZString debug_name
+
+AllocationInfo
+    usz size
+    usz alignment
+    MemoryClass memory_class
+    QueueRoles access
+    bool mapped
+    bool coherent
+    bool addressable
+
+allocate_memory(Device*, AllocationDesc*) -> GpuAllocation?
+free_allocation(Device*, GpuAllocation*) -> void?
+get_allocation_info(Device*, GpuAllocation) -> AllocationInfo?
+get_allocation_span(Device*, GpuAllocation) -> GpuSpan?
+get_span_mapping(Device*, GpuSpan) -> char[]?
+get_span_address(Device*, GpuSpan) -> GpuAddress?
+```
+
+`CPU_WRITE` is mapped for host writes, `GPU_PRIVATE` is unmapped and
+GPU-preferred, and `CPU_READ` is mapped for host reads. These are behavioral
+classes, not backend heap or property selectors.
+
+`AllocationDesc.size` must be nonzero. Alignment zero selects 16 bytes; an
+explicit alignment must be a power of two and is raised to at least 16.
+`access` must be a non-empty subset of the device's selected queue roles.
+`AllocationInfo` reports immutable properties and actual mapping, coherence,
+and address capabilities.
+
+`get_allocation_span` borrows the complete allocation. Mapping and address
+queries resolve a live span; mapping returns its exact byte range and the
+address points to its first byte. A mapping query on an unmapped span and an
+address query on a non-addressable span fault
+`INVALID_ARGUMENT`. Returned mappings and addresses remain valid only while
+the allocation remains live.
+
+`free_allocation` releases storage immediately, so all GPU use must be
+quiescent. Success invalidates the passed token and every borrowed span; faults
+preserve the token. `RESOURCE_IN_USE` is reserved for a live resource placement;
+the root module exposes no placement creation operation. A live allocation
+also prevents normal device destruction.
 
 ### Memory kinds
 
@@ -500,9 +551,9 @@ alloc_persistent_span(Device* device, PersistentAllocDesc* desc) -> GpuSpan?
 free_persistent_span(Device* device, GpuSpan span) -> void?
 ```
 
-`PersistentAllocDesc.access` is required and copied to the returned span. The
-arena backing remains available to all selected roles; a generation-checked
-allocation identity preserves each live range's bounds and narrow access.
+`PersistentAllocDesc.access` is required and stored with the allocation. The
+arena backing remains available to all selected roles; span resolution recovers
+each live range's immutable bounds and narrower access.
 Explicit buffers and textures derive private native
 sharing from their own `access` fields: one unique family stays exclusive, while
 two or more use the exact ordered family list.
@@ -545,10 +596,10 @@ invalidate_buffer(Device* device, BufferHandle buffer, usz offset, usz size) -> 
 ```
 
 `get_buffer_address` faults if the buffer was not created with the
-`addressable` usage flag set. There is no map/unmap pair — mappable memory
-kinds are persistently mapped and exposed through `GpuSpan.cpu`
-(`get_buffer_span`), paired with `flush_buffer`/`invalidate_buffer` for
-non-coherent ranges.
+`addressable` usage flag set. There is no map/unmap pair: mappable memory
+kinds are persistently mapped and exposed through
+`get_span_mapping(device, get_buffer_span(device, buffer)!)`, paired with
+`flush_buffer`/`invalidate_buffer` for non-coherent ranges.
 
 Upload/readback helpers round out the buffer path (signatures in the
 generated reference): blocking `upload_buffer_data` / `upload_texture_data` /
@@ -1335,9 +1386,9 @@ violations, stale frame tokens, invalid alignment before zero size, arena
 exhaustion, non-timeout frame-wait failures and retirement queries,
 end-frame signal failures, persistent virtual-allocation exhaustion, and
 invalid or repeated frees. Expected/retryable frame-wait `WAIT_TIMEOUT` outcomes
-remain silent; other diagnostics preserve `ARENA_FULL` and retry state. Frame
-tokens and unresolved persistent allocations have no public identity; failures
-after `AllocationHandle` resolution include its index and generation.
+remain silent; other diagnostics preserve `ARENA_FULL` and retry state.
+`GpuAllocation` diagnostics carry its public index and generation. Persistent
+arena allocation identity remains private.
 
 ```text
 cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) -> void?
@@ -1494,7 +1545,8 @@ fn void? run_compute() {
 
 fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
     gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
-    RootArgs* root = (RootArgs*)root_span.cpu;
+    RootArgs* root = (RootArgs*)gpu::get_span_mapping(work.device, root_span)!.ptr;
+    gpu::GpuAddress root_address = gpu::get_span_address(work.device, root_span)!;
     root.input = gpu::get_buffer_address(work.device, work.input)!;
     root.count = 1024;
     gpu::Queue queue = gpu::get_queue(work.device, gpu::QueueKind.COMPUTE)!;
@@ -1503,7 +1555,7 @@ fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
     gpu::cmd_dispatch(
         commands: &commands,
         pipeline: work.pipeline,
-        root:     root_span.gpu,
+        root:     root_address,
         groups:   { 16, 1, 1 },
     )!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;

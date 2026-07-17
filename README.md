@@ -17,7 +17,8 @@ two ideas:
 
 ```c3
 gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame, DoublerRoot::size, 16)!;
-DoublerRoot* root = (DoublerRoot*)root_span.cpu;
+DoublerRoot* root = (DoublerRoot*)gpu::get_span_mapping(&device, root_span)!.ptr;
+gpu::GpuAddress root_address = gpu::get_span_address(&device, root_span)!;
 root.input_gpu  = gpu::get_buffer_address(&device, input)!;
 root.output_gpu = gpu::get_buffer_address(&device, output)!;
 root.count      = COUNT;
@@ -25,7 +26,7 @@ root.count      = COUNT;
 gpu::cmd_dispatch(
     commands: &cmd,
     pipeline: pipeline,
-    root:     root_span.gpu,
+    root:     root_address,
     groups:   { (COUNT + 63) / 64, 1, 1 },
 )!;
 ```
@@ -36,8 +37,8 @@ gpu::cmd_dispatch(
   the public API is GPU-shaped, not Vulkan-shaped — no `vk::` types leak
 - Shader ABI generator: one `.abi` schema emits the C3 struct (with
   compile-time size/offset asserts) and the GLSL include, plus a CI drift gate
-- VMA-backed memory: per-frame arenas, persistent arena, staging/readback
-  arenas, dedicated allocations, leak reporting
+- VMA-backed memory: independent `GpuAllocation` storage with checked spans,
+  mapping/address queries, arenas, dedicated transfers, and leak reporting
 - Explicit barrier model with tracked texture layouts; validation-clean is a
   test gate across the whole suite
 - GPU-driven path: multi-draw indirect (+ count), draw tables via `gl_DrawID`
@@ -63,8 +64,9 @@ Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
   running GPU compute program; the walkthrough is executed by CI, so it
   cannot rot.
 - **[gpu.c3l-samples](https://github.com/fesoliveira014/gpu.c3l-samples)** —
-  18 runnable samples: triangle → textured cube → GPU-driven culling →
-  shadow mapping → deferred shading → PBR → stress/perf harnesses.
+  18 runnable samples plus the helper self-test: triangle → textured cube →
+  GPU-driven culling → shadow mapping → deferred shading → PBR → stress/perf
+  harnesses.
 - **[docs/document_index.md](docs/document_index.md)** — map of the full
   documentation set (architecture, API, memory model, shader ABI, backend,
   testing, style).

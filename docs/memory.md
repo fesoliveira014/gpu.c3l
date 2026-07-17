@@ -7,8 +7,12 @@ Memory is the foundation of `gpu.c3l`. The library's shader ABI depends on user 
 The public API uses:
 
 ```text
-GpuAddress
+GpuAllocation
 GpuSpan
+GpuAddress
+MemoryClass
+AllocationDesc
+AllocationInfo
 BufferHandle
 TextureHandle
 MemoryKind
@@ -36,6 +40,7 @@ Backend files that may import `vma`:
 
 ```text
 gpu/vk/allocator.c3
+gpu/vk/allocation.c3
 gpu/vk/memory.c3
 gpu/vk/buffer.c3
 gpu/vk/texture.c3
@@ -61,13 +66,12 @@ provide virtual allocator for CPU-side suballocation
 `gpu.c3l` responsibilities:
 
 ```text
-choose public memory kind
-translate usage to Vulkan/VMA policy
-track public handles
-track GPU addresses
-track CPU pointers
-own frame/persistent/staging/readback arena policy
-validate lifetimes
+define behavioral memory classes
+track owning allocations and non-owning span identities
+keep mappings, addresses, access, and native backing private
+translate resource policy to Vulkan/VMA
+own frame/persistent/staging/readback arenas
+validate bounds, capabilities, and lifetimes
 record explicit barriers
 ```
 
@@ -81,6 +85,7 @@ VkDeviceState
     vk::PhysicalDevice physical_device
     vk::Device device
     vma::Allocator allocator
+    AllocationTable allocations
     FrameArenaState[] frame_arenas
     PersistentArenaState persistent_arena
     TransferArenaState staging_arena
@@ -91,7 +96,8 @@ VkDeviceState
 (One persistent arena, PERSISTENT_UPLOAD only — device-local persistent data
 goes through explicit DEVICE buffers, not an arena.)
 
-Allocator creation happens after Vulkan device creation and before buffer/image creation. Allocator destruction happens after all resource destruction queues have been drained.
+Allocator creation happens after Vulkan device creation and before resource
+creation. The allocation table is destroyed before the allocator.
 
 ## 4. VMA allocator creation policy
 
@@ -108,9 +114,63 @@ allocator flags for memory budget when supported
 
 If buffer device address is not supported, device creation should fail. The primary shader ABI depends on addressable buffers.
 
-## 5. Public memory kinds
+## 5. Independent allocations
 
-### 5.1 `MemoryKind.FRAME_UPLOAD`
+`GpuAllocation` owns device-scoped generic storage. `GpuSpan` borrows a range
+from an allocation, buffer, or arena and stores only
+`{ owner, index, generation, offset, size }`. Mapping, GPU address, access,
+memory class, and native backing remain in device state.
+
+```text
+MemoryClass.CPU_WRITE    mapped for host writes
+MemoryClass.GPU_PRIVATE  unmapped, GPU-preferred
+MemoryClass.CPU_READ     mapped for host reads
+
+AllocationDesc
+    size
+    alignment
+    memory_class
+    access
+    debug_name
+
+allocate_memory
+free_allocation
+get_allocation_info
+get_allocation_span
+get_span_mapping
+get_span_address
+```
+
+Size must be nonzero. Alignment zero selects 16 bytes; explicit alignment must
+be a power of two and is normalized to at least 16. `AllocationInfo` reports
+the immutable size, actual alignment, class, access, mapping, coherence, and
+address capabilities.
+
+The Vulkan backend creates one private addressable buffer and VMA allocation,
+then publishes an `AllocationTable` slot only after all native work succeeds.
+The table owns generation and liveness. Mapping and address queries resolve the
+span, validate its owner, generation, and bounds, then return the exact range.
+No Vulkan or VMA object crosses the public boundary.
+
+`free_allocation` destroys the backing immediately and invalidates the token
+only after success. The caller must ensure GPU use is quiescent. Faults preserve
+the token. Allocation debug names are copied into backend state and included in
+leak diagnostics.
+
+Use `checked_subspan` to partition a span:
+
+```c3
+GpuSpan vertices = packed.checked_subspan(0, vertex_bytes)!;
+GpuSpan indices = packed.checked_subspan(vertex_bytes, index_bytes)!;
+```
+
+Checked slicing preserves identity, changes only offset and size, and rejects
+zero size, parent escape, and offset overflow. `unchecked_subspan` performs no
+bounds or overflow checks.
+
+## 6. Public memory kinds
+
+### 6.1 `MemoryKind.FRAME_UPLOAD`
 
 Short-lived, CPU-written, GPU-read data.
 
@@ -151,7 +211,7 @@ usage: AUTO or AUTO_PREFER_HOST
 flags: HOST_ACCESS_SEQUENTIAL_WRITE, MAPPED
 ```
 
-### 5.2 `MemoryKind.PERSISTENT_UPLOAD`
+### 6.2 `MemoryKind.PERSISTENT_UPLOAD`
 
 Long-lived CPU-updated, GPU-readable data.
 
@@ -182,7 +242,7 @@ flags: HOST_ACCESS_SEQUENTIAL_WRITE, MAPPED, HOST_ACCESS_ALLOW_TRANSFER_INSTEAD 
 
 If an allocation is not host-visible because the backend allows transfer fallback, the API must route writes through staging.
 
-### 5.3 `MemoryKind.DEVICE`
+### 6.3 `MemoryKind.DEVICE`
 
 GPU-local memory.
 
@@ -214,7 +274,7 @@ usage: AUTO for images
 flags: none unless buffer device address or dedicated allocation is required
 ```
 
-### 5.4 `MemoryKind.READBACK`
+### 6.4 `MemoryKind.READBACK`
 
 GPU-written, CPU-read memory.
 
@@ -244,7 +304,7 @@ usage: AUTO or AUTO_PREFER_HOST
 flags: HOST_ACCESS_RANDOM, MAPPED
 ```
 
-### 5.5 `MemoryKind.STAGING`
+### 6.5 `MemoryKind.STAGING`
 
 One-shot or batched upload memory.
 
@@ -272,32 +332,8 @@ usage: AUTO
 flags: HOST_ACCESS_SEQUENTIAL_WRITE, MAPPED
 ```
 
-### 5.6 `GpuSpan` slicing
 
-Use `checked_subspan` when partitioning a span:
-
-```c3
-GpuSpan vertices = packed.checked_subspan(0, vertex_bytes)!;
-GpuSpan indices = packed.checked_subspan(vertex_bytes, index_bytes)!;
-```
-
-Slicing preserves access and allocation identity. Command validation rejects
-stale persistent allocations, ranges outside their allocation, any changed
-persistent allocation access, and access wider than a non-persistent backing
-buffer. Bounds are
-relative to the immediate parent, so a nested child cannot escape an intermediate
-slice even when it would still fit the original backing buffer. Bounds use
-`size <= parent.size - offset` after validating
-the offset, avoiding `offset + size` overflow. Derived GPU, CPU, and backing
-offset additions are checked separately.
-
-`size == 0` faults `INVALID_ARGUMENT`, matching the other public span
-producers and avoiding ambiguity with operations where zero means “to end.”
-
-`unchecked_subspan` is reserved for already-proven hot paths and tests that
-deliberately construct invalid spans; no historical unchecked alias remains.
-
-## 6. Buffer allocation
+## 7. Buffer allocation
 
 Public descriptor:
 
@@ -339,7 +375,7 @@ Backend creation flow:
 11. Return BufferHandle.
 ```
 
-## 7. Buffer slot
+## 8. Buffer slot
 
 ```text
 BufferSlot
@@ -359,7 +395,7 @@ BufferSlot
     bool pending_destroy
 ```
 
-## 8. Texture allocation
+## 9. Texture allocation
 
 Public descriptor:
 
@@ -401,7 +437,7 @@ Backend creation flow:
 8. Return TextureHandle.
 ```
 
-## 9. Texture slot
+## 10. Texture slot
 
 ```text
 TextureSlot
@@ -423,7 +459,7 @@ TextureSlot
     bool pending_destroy
 ```
 
-## 10. Frame upload arena
+## 11. Frame upload arena
 
 Each frame-in-flight owns one or more VMA-backed buffers.
 
@@ -494,8 +530,7 @@ alloc_frame_span(token, size, align)
     if size > arena.size - aligned: return ARENA_FULL
     next_cursor = aligned + size
     if !compare_exchange(cursor, next_cursor): goto retry
-    span = { gpu_base + aligned, cpu_base + aligned,
-             backing_buffer, aligned, size, FRAME_UPLOAD, access }
+    span = backing_span.unchecked_subspan(aligned, size)
 ```
 
 Reset:
@@ -505,7 +540,7 @@ reset only after queue timeline >= frame_timeline_value
 cursor = 0
 ```
 
-## 11. Persistent arenas
+## 12. Persistent arenas
 
 Persistent arenas use VMA virtual allocator to suballocate ranges from large real buffers.
 
@@ -516,9 +551,9 @@ families use the exact ordered concurrent-sharing list; one family remains
 exclusive.
 
 `PersistentAllocDesc.usage` must be a subset of that superset; empty usage is
-the storage-style default. `PersistentAllocDesc.access` is required and must be
-a subset of selected roles. Each returned span carries a generation-checked
-allocation identity whose immutable record stores its bounds and access.
+the storage-style default. `PersistentAllocDesc.access` is required and must be a subset of selected
+roles. Each returned span carries generation-checked identity; device-owned
+metadata stores its bounds and access.
 
 Concurrent sharing removes queue-family ownership transfers only. Callers must
 still flush host writes as required, record barriers, order submissions with
@@ -556,7 +591,7 @@ Free flow:
 3. Retire the allocation generation.
 ```
 
-## 12. Readback arena
+## 13. Readback arena
 
 Readback buffers may be explicit buffers or arena spans. They must support CPU invalidation before reads.
 
@@ -567,8 +602,8 @@ Blocking flow (the `readback_buffer_data` / `readback_texture_data` helpers):
 2. Record GPU copy into readback resource.
 3. Record barrier transfer write -> host read if needed by backend policy.
 4. Submit and wait for timeline.
-5. Invalidate VMA allocation range if non-coherent.
-6. Read CPU pointer.
+5. Invalidate the allocation range if non-coherent.
+6. Read the range returned by `get_span_mapping`.
 ```
 
 Non-blocking readback records a copy with `cmd_readback_buffer` or
@@ -578,7 +613,7 @@ non-blocking; `resolve_readback` copies and releases completed state, or faults
 the command cancels its unsubmitted tickets. An unresolved submitted ticket
 returns `RESOURCE_IN_USE` from `destroy_device`.
 
-## 13. Staging arena
+## 14. Staging arena
 
 The staging arena exists to upload large data without creating many short-lived buffers.
 
@@ -600,7 +635,7 @@ Upload flow:
 
 ```text
 1. Allocate staging span.
-2. Copy source bytes to span.cpu.
+2. Copy source bytes to the range returned by `get_span_mapping`.
 3. Flush if non-coherent.
 4. Record copy to destination.
 5. Caller records destination next-use barrier.
@@ -617,7 +652,7 @@ flushes, barriers, submission ordering, queue completion, timeline retirement,
 and ring locking remain required. Each ring remains scoped to its owning
 `Device`.
 
-### 13.1 Which timeline retires a range
+### 14.1 Which timeline retires a range
 
 Every staging range, dedicated staging buffer, and readback range carries a
 timeline tag decided at allocation time: `FRAME` (`frame_timeline`, tagged
@@ -638,7 +673,7 @@ transfer role rather than a recording queue's merged role set, so a span
 admitted on a multi-role queue recording may still be rejected by a helper;
 this stricter check is intentional and deterministic across queue topologies.
 
-## 14. Flush and invalidate policy
+## 15. Flush and invalidate policy
 
 The backend should track whether memory is host-coherent.
 
@@ -658,7 +693,7 @@ if allocation is non-coherent:
 
 The public helpers should expose explicit flush/invalidate for mapped buffers and hide it only in high-level upload/readback convenience functions.
 
-## 15. Memory budget and statistics
+## 16. Memory budget and statistics
 
 Public API:
 
@@ -690,7 +725,7 @@ live slot tables
 
 Call current-frame-index update during `begin_frame` so VMA budget tracking remains useful.
 
-## 16. Allocation names and user data
+## 17. Allocation names and user data
 
 Debug builds should set:
 
@@ -703,6 +738,7 @@ VMA allocation user data or backend side table
 Recommended allocation name format:
 
 ```text
+allocation:<debug_name>
 buffer:<debug_name>
 texture:<debug_name>
 arena:frame_upload:<frame_index>
@@ -711,7 +747,10 @@ arena:staging
 arena:readback
 ```
 
-## 17. Deferred destruction
+## 18. Deferred destruction
+
+Independent allocations are not deferred. `free_allocation` requires
+quiescence and destroys its native buffer/allocation pair immediately.
 
 `destroy_buffer`, `destroy_texture`, `destroy_pipeline`, and `destroy_shader`
 consume the public handle immediately, but submitted frames
@@ -735,7 +774,7 @@ A frame-loop-free application waits on the latest `CompletionPoint` from each
 affected queue. Until those points complete, `destroy_device` returns
 `DEVICE_BUSY` without changing its token or state.
 
-## 18. Defragmentation policy
+## 19. Defragmentation policy
 
 VMA defragmentation is deferred.
 
@@ -757,14 +796,15 @@ non-addressable resource defrag
 rebuild all addressable references after move
 ```
 
-## 19. Memory acceptance criteria
+## 20. Memory acceptance criteria
 
 The memory layer is acceptable when:
 
 ```text
 all Vulkan buffers/images are VMA-backed
 no raw vkAllocateMemory path exists in backend code
-addressable buffers return non-zero GpuAddress
+independent allocations provide generation-checked ownership and range queries
+addressable spans return non-zero GpuAddress
 frame spans reset only after timeline retirement
 persistent spans support allocation/free/reuse
 readback path invalidates non-coherent memory

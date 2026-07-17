@@ -63,7 +63,7 @@ fn GpuAddress? get_buffer_address(Device* device, BufferHandle buffer) {
     return operation.vtable.get_buffer_address(device, buffer);
 }
 
-<* Host-visible view of a buffer; `cpu` is null for non-mappable memory kinds. *>
+<* Borrow the buffer range; query host access with `get_span_mapping`. *>
 fn GpuSpan? get_buffer_span(Device* device, BufferHandle buffer) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
