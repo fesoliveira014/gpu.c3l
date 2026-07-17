@@ -382,7 +382,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; pipeline/shader creates; `texture_transition`; `create_texture_descriptors`; `resolve_readback` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, undersized output, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors`; `resolve_readback` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, undersized output, a consumed `ReadbackTicket`, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address queries; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit`; readback polling/resolution | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame, or readback alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
@@ -607,7 +607,7 @@ generated reference): blocking `upload_buffer_data` / `upload_texture_data` /
 current Stage/Hazard[/TextureLayout] and restore it), recorded
 `cmd_upload_buffer` / `cmd_upload_texture`, and the non-blocking ticket flow
 `cmd_readback_buffer`/`cmd_readback_texture` → `poll_readback` →
-`resolve_readback` (see docs/memory.md §12). Frame lifecycle is
+`resolve_readback` (see docs/memory.md §13). Frame lifecycle is
 `begin_frame`/`end_frame` around each frame's work (or `@with_frame` for
 fallible named-worker scopes); memory introspection is
 `get_memory_stats` / `build_memory_report` / `get_persistent_stats`.

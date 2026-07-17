@@ -284,8 +284,8 @@ struct TextureUploadDesc {
 <* Allocate a long-lived span from the persistent arena. `size` must be
    nonzero; `align` 0 means no requirement, otherwise a power of two
    (INVALID_ARGUMENT). `access` must be a non-empty subset of selected roles
-   and is preserved in the returned span. Its GPU address is stable until
-   freed. Ownership: free with free_persistent_span. *>
+   and is recorded in the arena's immutable allocation identity. The span's
+   GPU address is stable until freed. Ownership: free with free_persistent_span. *>
 fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
