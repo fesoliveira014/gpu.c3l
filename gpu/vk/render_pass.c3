@@ -332,7 +332,7 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
         operation: "cmd_draw_indexed",
     )!;
     usz index_size = index_element_size(index_type);
-    BufferSlot* buffer = resolve_index_span(
+    ResolvedSpan buffer = resolve_index_span(
         state:      state,
         record:     record,
         span:       &index_span,
@@ -349,7 +349,7 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
     )!;
-    vk::cmd_bind_index_buffer(cb, buffer.buffer, (vk::DeviceSize)index_span.offset,
+    vk::cmd_bind_index_buffer(cb, buffer.slot.buffer, (vk::DeviceSize)buffer.offset,
         index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32);
     vk::cmd_draw_indexed(cb, index_count, instance_count, 0, 0, 0);
 }
@@ -364,7 +364,7 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
         kind:      PipelineKind.GRAPHICS,
         operation: "cmd_draw_indirect",
     )!;
-    BufferSlot* args_buffer = resolve_indirect_span(
+    ResolvedSpan args_buffer = resolve_indirect_span(
         state:          state,
         record:         record,
         span:           &args,
@@ -382,19 +382,21 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
     )!;
-    vk::cmd_draw_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset, draw_count, gpu::DrawIndirectCommand::size);
+    vk::cmd_draw_indirect(cb, args_buffer.slot.buffer, (vk::DeviceSize)args_buffer.offset, draw_count, gpu::DrawIndirectCommand::size);
 }
 
 fn void bind_index_buffer(
     vk::CommandBuffer cb,
-    BufferSlot* buffer,
-    gpu::GpuSpan* index_span,
+    ResolvedSpan* index_span,
     gpu::IndexType index_type,
 ) @private {
-    vk::cmd_bind_index_buffer(cb, buffer.buffer, (vk::DeviceSize)index_span.offset,
-        index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32);
+    vk::cmd_bind_index_buffer(
+        cb,
+        index_span.slot.buffer,
+        (vk::DeviceSize)index_span.offset,
+        index_type == gpu::IndexType.U16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32,
+    );
 }
-
 <* Index-range bounds live in the GPU-written arguments and are not validated
    here; out-of-bounds indices follow device robustness. *>
 fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, uint draw_count, gpu::GpuSpan index_span, gpu::IndexType index_type) @private {
@@ -407,7 +409,7 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
         kind:      PipelineKind.GRAPHICS,
         operation: "cmd_draw_indexed_indirect",
     )!;
-    BufferSlot* args_buffer = resolve_indirect_span(
+    ResolvedSpan args_buffer = resolve_indirect_span(
         state:          state,
         record:         record,
         span:           &args,
@@ -417,7 +419,7 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
         rejected_field: "draw_count",
         max_count:      state.caps.max_draw_indirect_count,
     )!;
-    BufferSlot* index_buffer = resolve_index_span(
+    ResolvedSpan index_buffer = resolve_index_span(
         state:      state,
         record:     record,
         span:       &index_span,
@@ -435,11 +437,10 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
     )!;
     bind_index_buffer(
         cb:         cb,
-        buffer:     index_buffer,
-        index_span: &index_span,
+        index_span: &index_buffer,
         index_type: index_type,
     );
-    vk::cmd_draw_indexed_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset, draw_count, gpu::DrawIndexedIndirectCommand::size);
+    vk::cmd_draw_indexed_indirect(cb, args_buffer.slot.buffer, (vk::DeviceSize)args_buffer.offset, draw_count, gpu::DrawIndexedIndirectCommand::size);
 }
 
 fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, gpu::GpuSpan count_span, uint max_draw_count, gpu::GpuSpan index_span, gpu::IndexType index_type) @private {
@@ -453,7 +454,7 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
         operation: "cmd_draw_indexed_indirect_count",
     )!;
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
-    BufferSlot* args_buffer = resolve_indirect_span(
+    ResolvedSpan args_buffer = resolve_indirect_span(
         state:          state,
         record:         record,
         span:           &args,
@@ -462,7 +463,7 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
         operation:      "cmd_draw_indexed_indirect_count",
         rejected_field: "args",
     )!;
-    BufferSlot* count_buffer = resolve_indirect_span(
+    ResolvedSpan count_buffer = resolve_indirect_span(
         state:          state,
         record:         record,
         span:           &count_span,
@@ -471,7 +472,7 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
         operation:      "cmd_draw_indexed_indirect_count",
         rejected_field: "count_span",
     )!;
-    BufferSlot* index_buffer = resolve_index_span(
+    ResolvedSpan index_buffer = resolve_index_span(
         state:      state,
         record:     record,
         span:       &index_span,
@@ -489,16 +490,15 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
     )!;
     bind_index_buffer(
         cb:         cb,
-        buffer:     index_buffer,
-        index_span: &index_span,
+        index_span: &index_buffer,
         index_type: index_type,
     );
     vk::cmd_draw_indexed_indirect_count(
         cb,
-        args_buffer.buffer,
-        (vk::DeviceSize)args.offset,
-        count_buffer.buffer,
-        (vk::DeviceSize)count_span.offset,
+        args_buffer.slot.buffer,
+        (vk::DeviceSize)args_buffer.offset,
+        count_buffer.slot.buffer,
+        (vk::DeviceSize)count_buffer.offset,
         max_draw_count,
         gpu::DrawIndexedIndirectCommand::size,
     );

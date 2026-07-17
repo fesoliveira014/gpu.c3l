@@ -85,9 +85,9 @@ fn gpu::TextureHandle make_color_target(gpu::Device* device) {
     return gpu::create_texture(device, &desc)!!;
 }
 
-fn gpu::GpuSpan write_tri(gpu::FrameToken* frame, float z) {
+fn gpu::GpuSpan write_tri(gpu::Device* device, gpu::FrameToken* frame, float z) {
     gpu::GpuSpan span = gpu::alloc_frame_span(frame, 3 * 16, 16)!!;
-    float* verts = (float*)span.cpu;
+    float* verts = (float*)test_span_mapping(device, span).ptr;
     float[12] data = {
         -0.8f, -0.8f, z, 0.0f,
          0.8f, -0.8f, z, 0.0f,
@@ -97,9 +97,9 @@ fn gpu::GpuSpan write_tri(gpu::FrameToken* frame, float z) {
     return span;
 }
 
-fn gpu::GpuSpan write_color(gpu::FrameToken* frame, float[4] rgba) {
+fn gpu::GpuSpan write_color(gpu::Device* device, gpu::FrameToken* frame, float[4] rgba) {
     gpu::GpuSpan span = gpu::alloc_frame_span(frame, 16, 16)!!;
-    float* color = (float*)span.cpu;
+    float* color = (float*)test_span_mapping(device, span).ptr;
     for (uint i = 0; i < 4; i++) color[i] = rgba[i];
     return span;
 }
@@ -126,7 +126,7 @@ fn void record_color_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target)
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
 
-fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, gpu::GpuSpan* rb_span) {
+fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, gpu::BufferHandle readback, gpu::GpuSpan* rb_span) {
     gpu::TextureBarrier to_src = {
         .texture       = target,
         .before_stage  = gpu::Stage.COLOR_ATTACHMENT,
@@ -140,14 +140,14 @@ fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, 
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = rb_span.buffer, .offset = rb_span.offset, .size = rb_span.size,
+        .buffer = readback, .offset = rb_span.offset, .size = rb_span.size,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(cmd, &host_read)!!;
 }
 
-fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, gpu::GpuSpan* rb_span) {
+fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, gpu::BufferHandle readback, gpu::GpuSpan* rb_span) {
     gpu::TextureBarrier to_src = {
         .texture       = depth,
         .before_stage  = gpu::Stage.DEPTH_STENCIL,
@@ -161,7 +161,7 @@ fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, g
     gpu::TextureBufferCopyDesc copy = { .texture = depth, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = rb_span.buffer, .offset = rb_span.offset, .size = rb_span.size,
+        .buffer = readback, .offset = rb_span.offset, .size = rb_span.size,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -183,13 +183,13 @@ fn void submit_and_finish(gpu::Device* device, gpu::CommandList* commands) {
     wait_test_queue(device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn char* dp_center(gpu::GpuSpan* rb_span) {
-    char* pixels = (char*)rb_span.cpu;
+fn char* dp_center(gpu::Device* device, gpu::GpuSpan* rb_span) {
+    char* pixels = (char*)test_span_mapping(device, *rb_span).ptr;
     return &pixels[(DP_RT / 2 * DP_RT + DP_RT / 2) * 4];
 }
 
-fn float* dp_center_depth(gpu::GpuSpan* rb_span) {
-    float* texels = (float*)rb_span.cpu;
+fn float* dp_center_depth(gpu::Device* device, gpu::GpuSpan* rb_span) {
+    float* texels = (float*)test_span_mapping(device, *rb_span).ptr;
     return &texels[DP_RT / 2 * DP_RT + DP_RT / 2];
 }
 
@@ -217,10 +217,10 @@ fn void depth_test_occludes_both_orders() @test {
         gpu::GpuSpan depth_rb_span = gpu::get_buffer_span(&device, depth_rb)!!;
 
         gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-        gpu::GpuSpan near_verts = write_tri(&frame_token, NEAR_Z);
-        gpu::GpuSpan far_verts = write_tri(&frame_token, FAR_Z);
-        gpu::GpuSpan red = write_color(&frame_token, { 1.0f, 0.0f, 0.0f, 1.0f });
-        gpu::GpuSpan green = write_color(&frame_token, { 0.0f, 1.0f, 0.0f, 1.0f });
+        gpu::GpuSpan near_verts = write_tri(&device, &frame_token, NEAR_Z);
+        gpu::GpuSpan far_verts = write_tri(&device, &frame_token, FAR_Z);
+        gpu::GpuSpan red = write_color(&device, &frame_token, { 1.0f, 0.0f, 0.0f, 1.0f });
+        gpu::GpuSpan green = write_color(&device, &frame_token, { 0.0f, 1.0f, 0.0f, 1.0f });
 
         gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
         defer discard_test_commands(&cmd)!!;
@@ -245,34 +245,34 @@ fn void depth_test_occludes_both_orders() @test {
         gpu::cmd_draw(
             commands:       &cmd,
             pipeline:       pipeline,
-            vertex_root:    first_verts.gpu,
-            fragment_root:  first_color.gpu,
+            vertex_root:    test_span_address(&device, first_verts),
+            fragment_root:  test_span_address(&device, first_color),
             vertex_count:   3,
             instance_count: 1,
         )!!;
         gpu::cmd_draw(
             commands:       &cmd,
             pipeline:       pipeline,
-            vertex_root:    second_verts.gpu,
-            fragment_root:  second_color.gpu,
+            vertex_root:    test_span_address(&device, second_verts),
+            fragment_root:  test_span_address(&device, second_color),
             vertex_count:   3,
             instance_count: 1,
         )!!;
         gpu::cmd_end_render_pass(&cmd)!!;
 
-        record_color_readback(&cmd, target, &color_rb_span);
-        record_depth_readback(&cmd, depth, &depth_rb_span);
+        record_color_readback(&cmd, target, color_rb, &color_rb_span);
+        record_depth_readback(&cmd, depth, depth_rb, &depth_rb_span);
         submit_and_finish(&device, &cmd);
 
         gpu::invalidate_buffer(&device, color_rb, 0, 0)!!;
-        char* center = dp_center(&color_rb_span);
+        char* center = dp_center(&device, &color_rb_span);
         assert(center[0] == (char)255 && center[1] == (char)0,
             "the near triangle wins regardless of draw order");
 
         gpu::invalidate_buffer(&device, depth_rb, 0, 0)!!;
-        float* depth_center = dp_center_depth(&depth_rb_span);
+        float* depth_center = dp_center_depth(&device, &depth_rb_span);
         assert(*depth_center == NEAR_Z, "depth buffer holds the near z");
-        float* depth_corner = (float*)depth_rb_span.cpu;
+        float* depth_corner = (float*)test_span_mapping(&device, depth_rb_span).ptr;
         assert(depth_corner[0] == 1.0f, "untouched pixels hold the clear depth");
 
         gpu::end_frame(&frame_token)!!;
@@ -303,10 +303,10 @@ fn void depth_write_toggle_honored() @test {
     defer gpu::destroy_pipeline(&device, far_pipeline)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan near_verts = write_tri(&frame_token, NEAR_Z);
-    gpu::GpuSpan far_verts = write_tri(&frame_token, FAR_Z);
-    gpu::GpuSpan red = write_color(&frame_token, { 1.0f, 0.0f, 0.0f, 1.0f });
-    gpu::GpuSpan green = write_color(&frame_token, { 0.0f, 1.0f, 0.0f, 1.0f });
+    gpu::GpuSpan near_verts = write_tri(&device, &frame_token, NEAR_Z);
+    gpu::GpuSpan far_verts = write_tri(&device, &frame_token, FAR_Z);
+    gpu::GpuSpan red = write_color(&device, &frame_token, { 1.0f, 0.0f, 0.0f, 1.0f });
+    gpu::GpuSpan green = write_color(&device, &frame_token, { 0.0f, 1.0f, 0.0f, 1.0f });
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -324,29 +324,29 @@ fn void depth_write_toggle_honored() @test {
     gpu::cmd_draw(
         commands:       &cmd,
         pipeline:       near_pipeline,
-        vertex_root:    near_verts.gpu,
-        fragment_root:  red.gpu,
+        vertex_root:    test_span_address(&device, near_verts),
+        fragment_root:  test_span_address(&device, red),
         vertex_count:   3,
         instance_count: 1,
     )!!;
     gpu::cmd_draw(
         commands:       &cmd,
         pipeline:       far_pipeline,
-        vertex_root:    far_verts.gpu,
-        fragment_root:  green.gpu,
+        vertex_root:    test_span_address(&device, far_verts),
+        fragment_root:  test_span_address(&device, green),
         vertex_count:   3,
         instance_count: 1,
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
-    record_color_readback(&cmd, target, &color_rb_span);
-    record_depth_readback(&cmd, depth, &depth_rb_span);
+    record_color_readback(&cmd, target, color_rb, &color_rb_span);
+    record_depth_readback(&cmd, depth, depth_rb, &depth_rb_span);
     submit_and_finish(&device, &cmd);
 
     gpu::invalidate_buffer(&device, color_rb, 0, 0)!!;
-    char* center = dp_center(&color_rb_span);
+    char* center = dp_center(&device, &color_rb_span);
     assert(center[1] == (char)255, "far triangle renders because the near draw wrote no depth");
     gpu::invalidate_buffer(&device, depth_rb, 0, 0)!!;
-    assert(*dp_center_depth(&depth_rb_span) == FAR_Z, "depth holds the far z, written by the tested draw");
+    assert(*dp_center_depth(&device, &depth_rb_span) == FAR_Z, "depth holds the far z, written by the tested draw");
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -374,10 +374,10 @@ fn void depth_state_variants_share_entry() @test {
     assert(entries == 1, "depth-state variants share one cache entry");
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan near_verts = write_tri(&frame_token, NEAR_Z);
-    gpu::GpuSpan far_verts = write_tri(&frame_token, FAR_Z);
-    gpu::GpuSpan red = write_color(&frame_token, { 1.0f, 0.0f, 0.0f, 1.0f });
-    gpu::GpuSpan green = write_color(&frame_token, { 0.0f, 1.0f, 0.0f, 1.0f });
+    gpu::GpuSpan near_verts = write_tri(&device, &frame_token, NEAR_Z);
+    gpu::GpuSpan far_verts = write_tri(&device, &frame_token, FAR_Z);
+    gpu::GpuSpan red = write_color(&device, &frame_token, { 1.0f, 0.0f, 0.0f, 1.0f });
+    gpu::GpuSpan green = write_color(&device, &frame_token, { 0.0f, 1.0f, 0.0f, 1.0f });
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -395,25 +395,25 @@ fn void depth_state_variants_share_entry() @test {
     gpu::cmd_draw(
         commands:       &cmd,
         pipeline:       test_on,
-        vertex_root:    near_verts.gpu,
-        fragment_root:  red.gpu,
+        vertex_root:    test_span_address(&device, near_verts),
+        fragment_root:  test_span_address(&device, red),
         vertex_count:   3,
         instance_count: 1,
     )!!;
     gpu::cmd_draw(
         commands:       &cmd,
         pipeline:       test_off,
-        vertex_root:    far_verts.gpu,
-        fragment_root:  green.gpu,
+        vertex_root:    test_span_address(&device, far_verts),
+        fragment_root:  test_span_address(&device, green),
         vertex_count:   3,
         instance_count: 1,
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
-    record_color_readback(&cmd, target, &color_rb_span);
+    record_color_readback(&cmd, target, color_rb, &color_rb_span);
     submit_and_finish(&device, &cmd);
 
     gpu::invalidate_buffer(&device, color_rb, 0, 0)!!;
-    char* center = dp_center(&color_rb_span);
+    char* center = dp_center(&device, &color_rb_span);
     assert(center[1] == (char)255, "test-off alias of the same entry overwrites the near triangle");
     gpu::end_frame(&frame_token)!!;
 }
@@ -439,8 +439,8 @@ fn void depth_only_pass_renders_footprint() @test {
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan near_verts = write_tri(&frame_token, NEAR_Z);
-    gpu::GpuSpan color = write_color(&frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
+    gpu::GpuSpan near_verts = write_tri(&device, &frame_token, NEAR_Z);
+    gpu::GpuSpan color = write_color(&device, &frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -454,18 +454,18 @@ fn void depth_only_pass_renders_footprint() @test {
     gpu::cmd_draw(
         commands:       &cmd,
         pipeline:       pipeline,
-        vertex_root:    near_verts.gpu,
-        fragment_root:  color.gpu,
+        vertex_root:    test_span_address(&device, near_verts),
+        fragment_root:  test_span_address(&device, color),
         vertex_count:   3,
         instance_count: 1,
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
-    record_depth_readback(&cmd, depth, &depth_rb_span);
+    record_depth_readback(&cmd, depth, depth_rb, &depth_rb_span);
     submit_and_finish(&device, &cmd);
 
     gpu::invalidate_buffer(&device, depth_rb, 0, 0)!!;
-    assert(*dp_center_depth(&depth_rb_span) == NEAR_Z, "depth-only pass writes the triangle footprint");
-    float* corner = (float*)depth_rb_span.cpu;
+    assert(*dp_center_depth(&device, &depth_rb_span) == NEAR_Z, "depth-only pass writes the triangle footprint");
+    float* corner = (float*)test_span_mapping(&device, depth_rb_span).ptr;
     assert(corner[0] == 1.0f, "outside the footprint the clear depth remains");
     gpu::end_frame(&frame_token)!!;
 }
@@ -507,12 +507,16 @@ fn void sampled_depth_matches_readback() @test {
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan near_verts = write_tri(&frame_token, NEAR_Z);
-    gpu::GpuSpan color = write_color(&frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
+    gpu::GpuSpan near_verts = write_tri(&device, &frame_token, NEAR_Z);
+    gpu::GpuSpan color = write_color(&device, &frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
     gpu::GpuSpan out_span = gpu::alloc_frame_span(&frame_token, 4, 4)!!;
+    vk::ResolvedSpan out_resolved = vk::resolve_span(
+        (vk::VkDeviceState*)gpu::device_backend_state(device),
+        &out_span,
+    )!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, SampleDepthRoot::size, 16)!!;
-    SampleDepthRoot* root = (SampleDepthRoot*)root_span.cpu;
-    root.out_gpu = out_span.gpu;
+    SampleDepthRoot* root = (SampleDepthRoot*)test_span_mapping(&device, root_span).ptr;
+    root.out_gpu = test_span_address(&device, out_span);
     root.texture_index = tex_index;
     root.sampler_index = smp_index;
     root.u = 0.5f;
@@ -530,8 +534,8 @@ fn void sampled_depth_matches_readback() @test {
     gpu::cmd_draw(
         commands:       &cmd,
         pipeline:       pipeline,
-        vertex_root:    near_verts.gpu,
-        fragment_root:  color.gpu,
+        vertex_root:    test_span_address(&device, near_verts),
+        fragment_root:  test_span_address(&device, color),
         vertex_count:   3,
         instance_count: 1,
     )!!;
@@ -550,19 +554,19 @@ fn void sampled_depth_matches_readback() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: sample_pipeline,
-        root:     root_span.gpu,
+        root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier host_read = {
-        .buffer = out_span.buffer, .offset = out_span.offset, .size = out_span.size,
+        .buffer = out_resolved.backing_buffer, .offset = out_resolved.offset, .size = out_resolved.size,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
     submit_and_finish(&device, &cmd);
 
-    gpu::invalidate_buffer(&device, out_span.buffer, 0, 0)!!;
-    float* sampled = (float*)out_span.cpu;
+    gpu::invalidate_buffer(&device, out_resolved.backing_buffer, 0, 0)!!;
+    float* sampled = (float*)test_span_mapping(&device, out_span).ptr;
     assert(*sampled == NEAR_Z, "heap-sampled depth matches the rendered z");
     gpu::end_frame(&frame_token)!!;
 }
@@ -650,12 +654,16 @@ fn void compare_sampler_exact_results() @test {
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan near_verts = write_tri(&frame_token, NEAR_Z);
-    gpu::GpuSpan color = write_color(&frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
+    gpu::GpuSpan near_verts = write_tri(&device, &frame_token, NEAR_Z);
+    gpu::GpuSpan color = write_color(&device, &frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
     gpu::GpuSpan out_span = gpu::alloc_frame_span(&frame_token, 8, 8)!!;
+    vk::ResolvedSpan out_resolved = vk::resolve_span(
+        (vk::VkDeviceState*)gpu::device_backend_state(device),
+        &out_span,
+    )!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, ShadowProbeRoot::size, 16)!!;
-    ShadowProbeRoot* root = (ShadowProbeRoot*)root_span.cpu;
-    root.out_gpu        = out_span.gpu;
+    ShadowProbeRoot* root = (ShadowProbeRoot*)test_span_mapping(&device, root_span).ptr;
+    root.out_gpu        = test_span_address(&device, out_span);
     root.depth_texture  = tex_index;
     root.shadow_sampler = shadow_smp;
     root.u = 0.5f;
@@ -675,8 +683,8 @@ fn void compare_sampler_exact_results() @test {
     gpu::cmd_draw(
         commands:       &cmd,
         pipeline:       pipeline,
-        vertex_root:    near_verts.gpu,
-        fragment_root:  color.gpu,
+        vertex_root:    test_span_address(&device, near_verts),
+        fragment_root:  test_span_address(&device, color),
         vertex_count:   3,
         instance_count: 1,
     )!!;
@@ -695,19 +703,19 @@ fn void compare_sampler_exact_results() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: probe_pipeline,
-        root:     root_span.gpu,
+        root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier host_read = {
-        .buffer = out_span.buffer, .offset = out_span.offset, .size = out_span.size,
+        .buffer = out_resolved.backing_buffer, .offset = out_resolved.offset, .size = out_resolved.size,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
     submit_and_finish(&device, &cmd);
 
-    gpu::invalidate_buffer(&device, out_span.buffer, 0, 0)!!;
-    float* results = (float*)out_span.cpu;
+    gpu::invalidate_buffer(&device, out_resolved.backing_buffer, 0, 0)!!;
+    float* results = (float*)test_span_mapping(&device, out_span).ptr;
     assert(results[0] == 1.0f, "reference below stored depth passes LESS compare, got %f", results[0]);
     assert(results[1] == 0.0f, "reference above stored depth fails LESS compare, got %f", results[1]);
     gpu::end_frame(&frame_token)!!;
@@ -748,8 +756,8 @@ fn void depth_bias_shifts_stored_depth() @test {
     gpu::GpuSpan rb_biased = rb.checked_subspan(DP_DEPTH_BYTES, DP_DEPTH_BYTES)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts = write_tri(&frame_token, NEAR_Z);
-    gpu::GpuSpan color = write_color(&frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
+    gpu::GpuSpan verts = write_tri(&device, &frame_token, NEAR_Z);
+    gpu::GpuSpan color = write_color(&device, &frame_token, { 1.0f, 1.0f, 1.0f, 1.0f });
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -767,20 +775,20 @@ fn void depth_bias_shifts_stored_depth() @test {
         gpu::cmd_draw(
             commands:       &cmd,
             pipeline:       pipelines[i],
-            vertex_root:    verts.gpu,
-            fragment_root:  color.gpu,
+            vertex_root:    test_span_address(&device, verts),
+            fragment_root:  test_span_address(&device, color),
             vertex_count:   3,
             instance_count: 1,
         )!!;
         gpu::cmd_end_render_pass(&cmd)!!;
-        record_depth_readback(&cmd, targets[i], readbacks[i]);
+        record_depth_readback(&cmd, targets[i], readback, readbacks[i]);
     }
     submit_and_finish(&device, &cmd);
 
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
     uint center = (DP_RT / 2 * DP_RT + DP_RT / 2);
-    float plain_z = ((float*)rb_plain.cpu)[center];
-    float biased_z = ((float*)rb_biased.cpu)[center];
+    float plain_z = ((float*)test_span_mapping(&device, rb_plain).ptr)[center];
+    float biased_z = ((float*)test_span_mapping(&device, rb_biased).ptr)[center];
     assert(plain_z == NEAR_Z, "unbiased depth stores the rendered z, got %f", plain_z);
     assert(biased_z > plain_z, "biased depth is pushed further, got %f vs %f", biased_z, plain_z);
     gpu::end_frame(&frame_token)!!;

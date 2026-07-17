@@ -268,10 +268,14 @@ struct RecordArgs {
 fn int record_worker(void* arg) {
     RecordArgs* args = (RecordArgs*)arg;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-        ComputeRoot* root = (ComputeRoot*)args.root_span.cpu;
-        root.input_gpu = args.io_span.gpu;
+        vk::ResolvedSpan io_resolved = vk::resolve_span(
+            (vk::VkDeviceState*)gpu::device_backend_state(*args.device),
+            &args.io_span,
+        )!!;
+        ComputeRoot* root = (ComputeRoot*)test_span_mapping(args.device, args.root_span).ptr;
+        root.input_gpu = test_span_address(args.device, args.io_span);
         root.output_gpu = (gpu::GpuAddress)(
-            (ulong)args.io_span.gpu + THR_ELEMENTS * 4
+            (ulong)test_span_address(args.device, args.io_span) + THR_ELEMENTS * 4
         );
         root.count = THR_ELEMENTS;
 
@@ -281,7 +285,7 @@ fn int record_worker(void* arg) {
         gpu::cmd_dispatch(
             commands: &commands,
             pipeline: args.pipeline,
-            root:     args.root_span.gpu,
+            root:     test_span_address(args.device, args.root_span),
             groups:   {
                 (THR_ELEMENTS + 63) / 64,
                 1,
@@ -289,9 +293,9 @@ fn int record_worker(void* arg) {
             },
         )!!;
         gpu::BufferBarrier host_read = {
-            .buffer        = args.io_span.buffer,
-            .offset        = args.io_span.offset,
-            .size          = args.io_span.size,
+            .buffer        = io_resolved.backing_buffer,
+            .offset        = io_resolved.offset,
+            .size          = io_resolved.size,
             .before_stage  = gpu::Stage.COMPUTE_SHADER,
             .after_stage   = gpu::Stage.HOST,
             .before_hazard = gpu::Hazard.SHADER_WRITE,
@@ -323,7 +327,7 @@ fn void parallel_recording_across_workers() @test {
         args[i].pipeline = pipeline;
         args[i].io_span = gpu::alloc_frame_span(&frame_token, THR_ELEMENTS * 4 * 2, 16)!!;
         args[i].root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
-        float* values = (float*)args[i].io_span.cpu;
+        float* values = (float*)test_span_mapping(&device, args[i].io_span).ptr;
         for (uint e = 0; e < THR_ELEMENTS; e++) values[e] = (float)(i * 1000 + e);
     }
 
@@ -340,8 +344,12 @@ fn void parallel_recording_across_workers() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     for (uint i = 0; i < THR_THREADS; i++) {
-        gpu::invalidate_buffer(&device, args[i].io_span.buffer, 0, 0)!!;
-        float* values = (float*)args[i].io_span.cpu;
+        vk::ResolvedSpan io_resolved = vk::resolve_span(
+            (vk::VkDeviceState*)gpu::device_backend_state(device),
+            &args[i].io_span,
+        )!!;
+        gpu::invalidate_buffer(&device, io_resolved.backing_buffer, 0, 0)!!;
+        float* values = (float*)test_span_mapping(&device, args[i].io_span).ptr;
         float* doubled = &values[THR_ELEMENTS];
         for (uint e = 0; e < THR_ELEMENTS; e++) {
             assert(doubled[e] == (float)(i * 1000 + e) * 2.0f,

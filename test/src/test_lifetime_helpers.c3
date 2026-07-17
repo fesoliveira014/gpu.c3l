@@ -2,6 +2,14 @@ module gpu_test;
 
 import gpu @public;
 
+fn char[] test_span_mapping(gpu::Device* device, gpu::GpuSpan span) {
+    return gpu::get_span_mapping(device, span)!!;
+}
+
+fn gpu::GpuAddress test_span_address(gpu::Device* device, gpu::GpuSpan span) {
+    return gpu::get_span_address(device, span)!!;
+}
+
 fn void? discard_test_commands(gpu::CommandList* commands) {
     if (commands == null || !commands.handle.is_valid()) return;
     if (catch err = gpu::discard_commands(commands)) {

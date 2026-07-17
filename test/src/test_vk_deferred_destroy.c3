@@ -48,7 +48,7 @@ fn DeferRig build_defer_rig(gpu::Device* device) {
     };
     gpu::BufferHandle io = gpu::create_buffer(device, &io_desc)!!;
     gpu::GpuSpan io_span = gpu::get_buffer_span(device, io)!!;
-    float* data = (float*)io_span.cpu;
+    float* data = (float*)test_span_mapping(device, io_span).ptr;
     for (uint i = 0; i < DEFER_COUNT; i++) data[i] = (float)i;
 
     gpu::TextureDesc tex_desc = {
@@ -77,7 +77,7 @@ fn DeferRig build_defer_rig(gpu::Device* device) {
    still be running against. *>
 fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* rig) {
     gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
-    ComputeRoot* root = (ComputeRoot*)root_span.cpu;
+    ComputeRoot* root = (ComputeRoot*)test_span_mapping(device, root_span).ptr;
     root.input_gpu  = gpu::get_buffer_address(device, rig.io)!!;
     root.output_gpu = root.input_gpu;
     root.count      = DEFER_COUNT;
@@ -99,7 +99,7 @@ fn void submit_defer_rig(gpu::FrameToken* frame, gpu::Device* device, DeferRig* 
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: rig.pipeline,
-        root:     root_span.gpu,
+        root:     test_span_address(device, root_span),
         groups:   { (DEFER_COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;
 

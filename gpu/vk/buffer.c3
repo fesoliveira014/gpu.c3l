@@ -284,14 +284,11 @@ fn void? vk_invalidate_buffer(gpu::Device* device, gpu::BufferHandle handle, usz
 
 fn gpu::GpuSpan? get_buffer_span_for_state(VkDeviceState* state, gpu::BufferHandle handle) @private {
     BufferSlot* slot = state.buffers.get(handle)!;
-    return (gpu::GpuSpan){
-        .gpu    = slot.gpu_base,
-        .cpu    = slot.cpu_base,
-        .size   = slot.size,
-        .buffer = handle,
-        .offset = 0,
-        .kind   = slot.memory_kind,
-        .access = slot.access,
+    return {
+        .owner      = handle.owner,
+        .index      = handle.index,
+        .generation = handle.generation,
+        .size       = slot.size,
     };
 }
 
@@ -299,4 +296,54 @@ fn gpu::GpuSpan? vk_get_buffer_span(gpu::Device* device, gpu::BufferHandle handl
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (state == null) return gpu::INVALID_HANDLE~;
     return get_buffer_span_for_state(state, handle);
+}
+
+fn char[]? vk_get_span_mapping(gpu::Device* device, gpu::GpuSpan span) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    if (state == null) return gpu::INVALID_HANDLE~;
+    ResolvedSpan resolved = resolve_span(state, &span)!;
+    return resolved_span_mapping(&resolved);
+}
+
+fn gpu::GpuAddress? vk_get_span_address(gpu::Device* device, gpu::GpuSpan span) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    if (state == null) return gpu::INVALID_HANDLE~;
+    ResolvedSpan resolved = resolve_span(state, &span)!;
+    return resolved_span_address(&resolved);
+}
+
+fn gpu::GpuAllocation? vk_allocate_memory_unsupported(
+    gpu::Device* device,
+    gpu::AllocationDesc* desc,
+) @private {
+    (void)device;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_free_allocation_unsupported(
+    gpu::Device* device,
+    gpu::GpuAllocation allocation,
+) @private {
+    (void)device;
+    (void)allocation;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::AllocationInfo? vk_get_allocation_info_unsupported(
+    gpu::Device* device,
+    gpu::GpuAllocation allocation,
+) @private {
+    (void)device;
+    (void)allocation;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::GpuSpan? vk_get_allocation_span_unsupported(
+    gpu::Device* device,
+    gpu::GpuAllocation allocation,
+) @private {
+    (void)device;
+    (void)allocation;
+    return gpu::UNSUPPORTED_FEATURE~;
 }
