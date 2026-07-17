@@ -99,6 +99,18 @@ def public_entries(module: dict) -> dict:
     }
 
 
+def member_schema(
+    definition: dict | None,
+) -> tuple[tuple[str | None, str | None], ...]:
+    return tuple(
+        (
+            member.get("name"),
+            member.get("type", {}).get("name"),
+        )
+        for member in (definition or {}).get("members", [])
+    )
+
+
 def validate_document(document: dict) -> list[str]:
     modules = document.get("modules", {})
     public_module = modules.get("gpu")
@@ -167,6 +179,112 @@ def validate_document(document: dict) -> list[str]:
         )
         if parameter_types != ("Queue", "SubmitDesc*"):
             failures.append("submit must take Queue and SubmitDesc*")
+
+    allocation_functions = {
+        "allocate_memory": (
+            ("Device*", "AllocationDesc*"),
+            "GpuAllocation?",
+        ),
+        "free_allocation": (
+            ("Device*", "GpuAllocation*"),
+            "void?",
+        ),
+        "get_allocation_info": (
+            ("Device*", "GpuAllocation"),
+            "AllocationInfo?",
+        ),
+        "get_allocation_span": (
+            ("Device*", "GpuAllocation"),
+            "GpuSpan?",
+        ),
+        "get_span_mapping": (
+            ("Device*", "GpuSpan"),
+            "char[]?",
+        ),
+        "get_span_address": (
+            ("Device*", "GpuSpan"),
+            "GpuAddress?",
+        ),
+    }
+    for name, contract in allocation_functions.items():
+        expected_parameters, expected_return = contract
+        function = functions.get(name)
+        if function is None:
+            failures.append(f"missing {name}")
+            continue
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in function.get("members", [])
+        )
+        if parameter_types != expected_parameters:
+            failures.append(f"{name} has the wrong parameters")
+        if function.get("return_type", {}).get("name") != expected_return:
+            failures.append(f"{name} has the wrong return type")
+
+    for name, kind in (
+        ("GpuAllocation", "struct"),
+        ("GpuSpan", "struct"),
+        ("MemoryClass", "enum"),
+        ("AllocationDesc", "struct"),
+        ("AllocationInfo", "struct"),
+    ):
+        definition = types.get(name)
+        if definition is None or definition.get("kind") != kind:
+            failures.append(f"missing {name} {kind}")
+
+    public_type_schemas = {
+        "GpuSpan": (
+            (
+                ("owner", "ulong"),
+                ("index", "uint"),
+                ("generation", "uint"),
+                ("offset", "usz"),
+                ("size", "usz"),
+            ),
+            "GpuSpan must match the exact identity/range schema",
+        ),
+        "GpuAllocation": (
+            (
+                ("owner", "ulong"),
+                ("index", "uint"),
+                ("generation", "uint"),
+            ),
+            "GpuAllocation must match the exact identity schema",
+        ),
+        "AllocationDesc": (
+            (
+                ("size", "usz"),
+                ("alignment", "usz"),
+                ("memory_class", "MemoryClass"),
+                ("access", "QueueRoles"),
+                ("debug_name", "ZString"),
+            ),
+            "AllocationDesc must match the exact public schema",
+        ),
+        "AllocationInfo": (
+            (
+                ("size", "usz"),
+                ("alignment", "usz"),
+                ("memory_class", "MemoryClass"),
+                ("access", "QueueRoles"),
+                ("mapped", "bool"),
+                ("coherent", "bool"),
+                ("addressable", "bool"),
+            ),
+            "AllocationInfo must match the exact public schema",
+        ),
+        "MemoryClass": (
+            (
+                ("CPU_WRITE", "MemoryClass"),
+                ("GPU_PRIVATE", "MemoryClass"),
+                ("CPU_READ", "MemoryClass"),
+            ),
+            "MemoryClass must expose exactly the three semantic values",
+        ),
+    }
+    for name, (expected_schema, failure) in public_type_schemas.items():
+        if member_schema(types.get(name)) != expected_schema:
+            failures.append(failure)
 
     present = functions.get("present")
     if present is None:

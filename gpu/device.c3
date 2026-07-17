@@ -12,6 +12,12 @@ alias CheckDeviceDestroyFn @private  = fn void? (void*);
 alias DestroyDeviceFn @private       = fn void (void*);
 alias GetMemoryStatsFn @private      = fn MemoryStats? (Device*);
 alias BuildMemoryReportFn @private   = fn String? (Device*, bool detailed);
+alias AllocateMemoryFn @private      = fn GpuAllocation? (Device*, AllocationDesc*);
+alias FreeAllocationFn @private      = fn void? (Device*, GpuAllocation);
+alias GetAllocationInfoFn @private   = fn AllocationInfo? (Device*, GpuAllocation);
+alias GetAllocationSpanFn @private   = fn GpuSpan? (Device*, GpuAllocation);
+alias GetSpanMappingFn @private      = fn char[]? (Device*, GpuSpan);
+alias GetSpanAddressFn @private      = fn GpuAddress? (Device*, GpuSpan);
 alias CreateBufferFn @private        = fn BufferHandle? (Device*, BufferDesc*);
 alias DestroyBufferFn @private       = fn void? (Device*, BufferHandle);
 alias GetBufferAddressFn @private    = fn GpuAddress? (Device*, BufferHandle);
@@ -109,6 +115,12 @@ struct BackendVTable @private {
     DestroyDeviceFn         destroy_device;
     GetMemoryStatsFn        get_memory_stats;
     BuildMemoryReportFn     build_memory_report;
+    AllocateMemoryFn        allocate_memory;
+    FreeAllocationFn        free_allocation;
+    GetAllocationInfoFn     get_allocation_info;
+    GetAllocationSpanFn     get_allocation_span;
+    GetSpanMappingFn        get_span_mapping;
+    GetSpanAddressFn        get_span_address;
     CreateBufferFn          create_buffer;
     DestroyBufferFn         destroy_buffer;
     GetBufferAddressFn      get_buffer_address;
@@ -214,6 +226,7 @@ struct DeviceOperation @private {
 
 enum ResourceOwnerKind @private {
     ALLOCATION,
+    PERSISTENT_ALLOCATION,
     BUFFER,
     TEXTURE,
     TEXTURE_VIEW,
