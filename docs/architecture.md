@@ -540,33 +540,28 @@ material records.
 
 ## 10. Swapchain model
 
-Swapchain operations:
-
 ```text
-create_swapchain(device, Surface*, SwapchainDesc*) -> SwapchainHandle?
-get_swapchain_info(device, swapchain) -> SwapchainInfo?
-acquire_next_image(device, swapchain) -> AcquiredImage?
-present(device, PresentDesc) -> void?
-get_present_mode_support(device, swapchain) -> PresentModeSupport?
-retry unchanged on WAIT_TIMEOUT
-resize on SWAPCHAIN_OUT_OF_DATE
-replace the surface and swapchain on SURFACE_LOST
+acquired = acquire_next_image(device, swapchain)
+rendered = submit(graphics, command lists + acquired.readiness)
+present(device, acquired, rendered)
 ```
 
-`PresentModeSupport` is a bitstruct reporting fifo/immediate/mailbox availability for the swapchain's surface.
+Acquisition returns a borrowed texture and compact one-shot readiness value.
+Submission validates the exact device, swapchain generation, acquisition
+identity, and graphics role before waiting the private native acquire bridge.
+Only successful native submission consumes readiness and records its returned
+`CompletionPoint` as the acquisition's render completion.
 
-`SwapchainInfo` is the coherent runtime snapshot: selected format, clamped
-extent, driver-returned image count, selected present mode, and dormant state.
-Successful creation/recreation publishes all fields together. A zero extent
-or failed rebuild publishes a queryable dormant sentinel with `UNDEFINED`
-format, zero extent/count, and FIFO as the inactive mode value. Consumers
-re-query after resize and rebuild format-dependent pipelines if needed.
+Presentation consumes the exact `AcquiredImage` and accepts only that render
+completion point. The point remains reusable for host observation. Native
+binary synchronization stays in the backend; public ordering uses readiness
+and completion values only.
 
-`AcquiredImage.prior_layout` comes from committed texture-layout state. New
-swapchain images report `UNDEFINED`; images that completed the normal
-transition/present cycle report `PRESENT`.
+`SwapchainInfo` reports the selected format, extent, image count, present mode,
+and dormant state. `AcquiredImage.prior_layout` comes from committed texture
+state. Resize stales borrowed textures and never reuses acquisition identities.
 
-Surface creation is platform-specific. The sample harness may provide helper functions that take `sdl::Window*`, but those helpers should live outside the core public API.
+Surface creation remains platform-specific. SDL helpers live outside `gpu`.
 
 ## 11. Debug model
 

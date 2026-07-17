@@ -150,30 +150,56 @@ fn void? check_swapchain_acquire_lifecycle(
     }
 }
 
-fn void? check_swapchain_present_lifecycle(
+fn void? check_swapchain_present_contract(
     WsiDiagnosticContext* context,
     SwapchainSlot* slot,
+    gpu::AcquiredImage* image,
+    gpu::CompletionPoint render_completion,
 ) {
-    if (catch guard_fault = swapchain_present_guard(slot.acquire_pending, slot.acquire_consumed)) {
+    fault guard_fault = @catch(swapchain_present_guard(
+        acquire_pending:      slot.acquire_pending,
+        readiness_consumed:   slot.readiness_consumed,
+        expected_acquisition: slot.acquisition,
+        provided_acquisition: swapchain_readiness_acquisition(
+            image.readiness,
+        ),
+        expected_completion:  slot.render_completion,
+        provided_completion:  render_completion,
+    ));
+    if (guard_fault) {
+        bool wrong_completion = guard_fault == gpu::INVALID_ARGUMENT;
         return report_wsi_contract(
             context:        context,
             public_fault:   guard_fault,
-            rejected_field: "swapchain acquire lifecycle",
-            invariant:      "acquired image must be consumed by one coupled submit before present",
+            rejected_field: wrong_completion
+                ? "render_completion"
+                : "acquired image readiness",
+            invariant:      wrong_completion
+                ? "must be returned by the readiness-consuming submission"
+                : "must match the pending acquisition after readiness submission",
+        )~;
+    }
+    if (image.index != slot.pending_image
+        || image.texture != slot.textures[slot.pending_image]) {
+        return report_wsi_contract(
+            context:        context,
+            public_fault:   gpu::INVALID_ARGUMENT,
+            rejected_field: "AcquiredImage",
+            invariant:      "must match the current acquired swapchain image",
         )~;
     }
 }
 
-fn void? check_swapchain_mutation_lifecycle(
+fn void? check_swapchain_resize_lifecycle(
     WsiDiagnosticContext* context,
     SwapchainSlot* slot,
 ) {
-    if (catch guard_fault = swapchain_mutation_guard(slot.acquire_pending)) {
+    if (catch guard_fault = swapchain_resize_guard(slot.acquire_pending)) {
         return report_wsi_contract(
             context:        context,
             public_fault:   guard_fault,
             rejected_field: "swapchain acquire lifecycle",
-            invariant:      "no image may be acquired during resize or destruction",
+            invariant:      "an acquired image must be presented or destroyed before resize",
         )~;
     }
 }

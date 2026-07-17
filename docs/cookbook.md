@@ -128,9 +128,10 @@ gpu::CompletionPoint[1] draw_waits = { sim_done };
 gpu::SubmitDesc draw_submit = {
     .command_lists    = draw_lists[..],
     .completion_waits = draw_waits[..],
-    .swapchain        = swapchain,
+    .readiness        = acquired.readiness,
 };
 gpu::CompletionPoint draw_done = gpu::submit(graphics, &draw_submit)!;
+gpu::present(&device, &acquired, draw_done)!;
 ```
 
 Real overlap happens when `caps.async_compute` is true (distinct compute
@@ -231,8 +232,9 @@ Re-query `SwapchainInfo` after resize, rebuild pipelines if `format` changed,
 and size any per-image data from `image_count`. `prior_layout` removes the
 fixed-size seen table normally used to distinguish first acquire from a
 previously presented image. FIFO is always available; other modes remain a
-support query away. The coupled graphics submission synchronizes at color-attachment output.
-`TextureUse.PRESENT` uses that stage without presentation-facing access.
+support query away. The graphics submission consumes `acquired.readiness`; presentation accepts
+its returned completion point. `TextureUse.PRESENT` uses color-attachment
+output without presentation-facing access.
 Running example: `present_mode_explorer`.
 
 ## 13. Choose a memory kind

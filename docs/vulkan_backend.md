@@ -566,11 +566,9 @@ Presentation transitions use these exact synchronization2 scopes:
 | `COLOR_ATTACHMENT -> PRESENT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT \| VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_NONE` |
 
 The presentation-facing access scope is empty because the presentation engine
-is external to the Vulkan pipeline. Its stage remains color-attachment output
-so the acquire transition chains after the image-available semaphore wait and
-the release transition chains before the render-finished semaphore signal;
-both semaphore operations use that stage. `Stage.NONE` is legal for semaphore
-operations but carries no pipeline work; use it only deliberately.
+is external to the Vulkan pipeline. The texture transitions keep their narrow
+color-attachment scopes; the private acquire and present semaphores
+conservatively cover the complete readiness-consuming submission.
 
 ## 14. Timeline semaphores
 
@@ -637,61 +635,40 @@ Do not transition attachments to shader-read automatically.
 
 ## 16. Swapchain implementation
 
-The runtime-owned `gpu::Surface` backend object owns its `vk::SurfaceKHR` and
-retains the Vulkan instance through the runtime. A swapchain borrows that handle
-and retains the public surface token until swapchain destruction.
+A swapchain borrows its runtime-owned `vk::SurfaceKHR` and retains the public
+surface until destruction. Each live slot owns its `vk::SwapchainKHR`, wrapped
+images, acquire semaphores, per-image present semaphores, runtime snapshot, and
+one pending acquisition state.
 
-Swapchain module owns:
+Acquire first checks identity headroom, then calls `vkAcquireNextImageKHR`.
+Success publishes a `SwapchainReadiness` packed from device, swapchain slot and
+generation, and a non-repeating acquisition sequence. The native semaphore
+never enters the public value.
 
-```text
-vk::SwapchainKHR
-vk::Image[]
-vk::ImageView[]
-SwapchainInfo info
-uint image_count
-```
+A readiness-consuming graphics submit:
 
-Consumers create surfaces through the typed
-`gpu::surface::{win32,wayland,x11}::create_surface` modules. SDL3 helpers may
-translate window properties into those native handle types; they do not call
-`gpu::vk` or Vulkan WSI functions.
+1. validates the exact pending acquisition;
+2. waits its private acquire semaphore across the complete submission;
+3. signals the image's private present semaphore and the queue timeline;
+4. commits readiness consumption and the returned completion point only after
+   `vkQueueSubmit2` succeeds.
 
-Swapchain operations:
+Present requires that exact completion point and image identity, verifies the
+tracked `PRESENT` layout, then waits the private present semaphore in
+`vkQueuePresentKHR`. Successful and enqueued WSI outcomes retire the acquisition.
+Host or device allocation failure preserves it for retry.
 
-```text
-create
-acquire
-present
-query runtime info
-query present-mode support
-resize on out-of-date/suboptimal; recreate the surface on surface-lost
-```
-
-`vk_get_present_mode_support` queries the borrowed, runtime-owned
-`vk::SurfaceKHR` for fifo/immediate/mailbox availability. At creation,
-`select_present_mode` falls back to FIFO when the requested mode is unavailable.
-
-WSI result mapping is explicit and pure-tested:
-
-| Vulkan result | Public outcome | State/recovery |
+| Vulkan result | Public outcome | Recovery |
 |---|---|---|
-| acquire `TIMEOUT` / `NOT_READY` | `WAIT_TIMEOUT` | pending-acquire state stays unchanged; retry |
-| `ERROR_OUT_OF_DATE_KHR` | `SWAPCHAIN_OUT_OF_DATE` | resize the swapchain |
-| `ERROR_SURFACE_LOST_KHR` | `SURFACE_LOST` | replace the platform surface and swapchain |
-| acquire `SUBOPTIMAL_KHR` | valid image with `suboptimal = true` | finish the frame; resize when convenient |
-| present `SUBOPTIMAL_KHR` | success | current public API exposes no soft present result |
+| acquire `TIMEOUT` / `NOT_READY` | `WAIT_TIMEOUT` | retry acquire |
+| `ERROR_OUT_OF_DATE_KHR` | `SWAPCHAIN_OUT_OF_DATE` | resize |
+| `ERROR_SURFACE_LOST_KHR` | `SURFACE_LOST` | replace surface and swapchain |
+| acquire `SUBOPTIMAL_KHR` | valid image with `suboptimal = true` | present, then resize |
+| present `SUBOPTIMAL_KHR` | success | resize when convenient |
 
-Swapchain construction keeps selected format, clamped extent, actual image
-count returned by the driver, and selected present mode local until every
-image is wrapped. A completed build publishes one `SwapchainInfo` snapshot;
-a zero extent or failed rebuild publishes the dormant sentinel
-(`UNDEFINED`, zero extent/count, FIFO, dormant). Tier-E external
-synchronization prevents observation during publication.
-
-Acquire reads `AcquiredImage.prior_layout` from the wrapped texture's
-committed tracked layout. Resize creates new wrapped slots at `UNDEFINED`;
-submitted barriers commit later states through the normal texture-layout
-path, so swapchain code owns no parallel seen-state table.
+Creation and resize publish `SwapchainInfo` only after every image is wrapped.
+Zero extent or failed rebuild publishes the dormant sentinel. Resize preserves
+the acquisition sequence, so stale readiness cannot alias later work.
 
 ## 17. Debug implementation
 
