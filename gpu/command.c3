@@ -422,11 +422,11 @@ fn void? cmd_draw_indexed(CommandList* commands, PipelineHandle pipeline, GpuAdd
 }
 
 <* Draw from GPU-written DrawIndirectCommand arguments at the span's offset.
-   The args buffer needs indirect usage; the root pair applies to every draw
-   in the multi-draw (per-draw variation via gl_DrawID). Ordering against the
-   argument writes is the caller's barrier. Every allocation reachable from
-   either root must admit the recording queue's role. draw_count may not exceed
-   DeviceCaps.max_draw_indirect_count. *>
+   The args span must support indirect-command reads. The root pair applies to
+   every draw in the multi-draw (per-draw variation via gl_DrawID). Ordering
+   against argument writes is the caller's barrier. Every allocation reachable
+   from either root must admit the recording queue's role. draw_count may not
+   exceed DeviceCaps.max_draw_indirect_count. *>
 fn void? cmd_draw_indirect(CommandList* commands, PipelineHandle pipeline, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);

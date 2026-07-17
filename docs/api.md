@@ -1160,9 +1160,9 @@ cmd_draw_indexed_indirect_count(commands, pipeline, vertex_root, fragment_root, 
 cmd_dispatch_indirect(commands, pipeline, root, args) -> void?
 ```
 
-Argument spans must come from a buffer with `indirect` usage, 4-byte aligned,
-with `draw_count` (or `max_draw_count`) times the tight argument size inside
-the span. One vertex/fragment root pair applies to every draw in a
+Argument spans must support indirect-command reads, be 4-byte aligned, and
+contain `draw_count` (or `max_draw_count`) times the tight argument size. One
+vertex/fragment root pair applies to every draw in a
 multi-draw; per-draw variation indexes a table through `gl_DrawID` (see
 `docs/shader_abi.md`). Direct draw counts and GPU-written count values may be
 zero and must not exceed `DeviceCaps.max_draw_indirect_count`. In the count
