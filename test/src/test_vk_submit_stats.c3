@@ -21,6 +21,7 @@ vk::Semaphore[2] retried_frame_wait_semaphores;
 ulong rejected_user_completion_value;
 uint rejected_user_signal_count;
 uint counted_user_submit_calls;
+uint accepted_swapchain_submit_calls;
 uint completion_counter_query_calls;
 ulong completion_counter_value;
 vk::Result completion_counter_result;
@@ -349,6 +350,21 @@ fn vk::Result reject_swapchain_submit(
         "present readiness covers the complete submission");
     return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 }
+
+fn vk::Result accept_swapchain_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)submit_count;
+    (void)submits;
+    (void)fence;
+    accepted_swapchain_submit_calls++;
+    return vk::Result.SUCCESS;
+}
+
 fn void native_submit_failure_preserves_swapchain_readiness() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
@@ -390,6 +406,111 @@ fn void native_submit_failure_preserves_swapchain_readiness() @test {
     assert(!preserved.render_completion.is_valid(),
         "native failure publishes no render completion");
 }
+
+fn void swapchain_submit_path_guards_precede_native_mutation() @test {
+    gpu::Device device = make_submit_stats_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
+    state.presentation.swapchains.owner = gpu::resource_owner_tag(
+        state.resource_owner,
+        gpu::ResourceOwnerKind.SWAPCHAIN,
+    );
+    state.presentation.swapchains.slots = cells[..];
+    defer state.presentation.swapchains.slots = {};
+
+    gpu::CompletionPoint[1] retirements;
+    vk::SwapchainSlot pending = {
+        .acquire_retirements       = retirements[..],
+        .acquire_pending           = true,
+        .acquisition               = 7,
+        .pending_acquire_semaphore = (vk::Semaphore)1,
+    };
+    pending.present_semaphores[0] = (vk::Semaphore)2;
+    gpu::SwapchainHandle handle =
+        state.presentation.swapchains.alloc(pending)!!;
+    gpu::SwapchainReadiness readiness = vk::make_swapchain_readiness(
+        device,
+        handle,
+        7,
+    )!!;
+    gpu::SubmitDesc desc = { .readiness = readiness };
+    gpu::Queue graphics = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, graphics.id)!!;
+    ulong next_before = completion.next_sequence;
+    ulong observed_before = completion.observed_completed_sequence;
+    ulong published_before = completion.published_sequence.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    uint off_frame_before = state.off_frame_pending_queues.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    vk::SubmitStats stats_before = state.submit_stats;
+    accepted_swapchain_submit_calls = 0;
+
+    vk::vk_submit_with(graphics, &desc, &accept_swapchain_submit)!!;
+    assert(accepted_swapchain_submit_calls == 1,
+        "valid readiness reaches one native submit");
+
+    fault replay = @catch(vk::vk_submit_with(
+        graphics,
+        &desc,
+        &accept_swapchain_submit,
+    ));
+    assert(replay == gpu::INVALID_RESOURCE_STATE,
+        "readiness replay faults INVALID_RESOURCE_STATE");
+    assert(accepted_swapchain_submit_calls == 1,
+        "readiness replay reaches no second native submit");
+
+    vk::SwapchainSlot* slot = state.presentation.swapchains.get(handle)!!;
+    slot.readiness_consumed = false;
+    slot.render_completion = {};
+    gpu::SwapchainReadiness stale = vk::make_swapchain_readiness(
+        device,
+        handle,
+        6,
+    )!!;
+    gpu::SubmitDesc stale_desc = { .readiness = stale };
+    fault stale_fault = @catch(vk::vk_submit_with(
+        graphics,
+        &stale_desc,
+        &accept_swapchain_submit,
+    ));
+    assert(stale_fault == gpu::INVALID_RESOURCE_STATE,
+        "stale readiness faults INVALID_RESOURCE_STATE through submit");
+    assert(accepted_swapchain_submit_calls == 1,
+        "stale readiness reaches no native submit");
+
+    gpu::Queue compute_only = graphics;
+    compute_only.roles = { .compute };
+    fault role_fault = @catch(vk::vk_submit_with(
+        compute_only,
+        &desc,
+        &accept_swapchain_submit,
+    ));
+    assert(role_fault == gpu::INVALID_ARGUMENT,
+        "non-graphics readiness submit faults INVALID_ARGUMENT");
+    assert(accepted_swapchain_submit_calls == 1,
+        "non-graphics readiness reaches no native submit");
+
+    completion.next_sequence = next_before;
+    completion.observed_completed_sequence = observed_before;
+    completion.published_sequence.store(
+        published_before,
+        AtomicOrdering.RELEASE,
+    );
+    state.off_frame_pending_queues.store(
+        off_frame_before,
+        AtomicOrdering.RELEASE,
+    );
+    state.submit_stats = stats_before;
+}
+
 fn void helper_submit_failure_preserves_cleanup_token() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
@@ -423,6 +544,7 @@ fn void helper_submit_failure_preserves_cleanup_token() @test {
     assert(!commands.handle.is_valid(),
         "helper fault cleanup consumes the preserved token");
 }
+
 fn void completion_distance_backpressure_preserves_submit_state() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;

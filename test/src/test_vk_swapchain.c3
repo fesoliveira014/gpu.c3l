@@ -6,6 +6,9 @@ import vk;
 
 gpu::CompletionPoint captured_swapchain_wait;
 uint captured_swapchain_wait_count;
+uint captured_acquire_release_submits;
+vk::Semaphore captured_acquire_release_wait;
+uint captured_present_calls;
 
 fn void? capture_swapchain_wait(
     gpu::Device* device,
@@ -14,6 +17,39 @@ fn void? capture_swapchain_wait(
     assert(point.device == *device, "swapchain wait keeps device identity");
     captured_swapchain_wait = point;
     captured_swapchain_wait_count++;
+}
+
+fn vk::Result capture_acquire_release_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)fence;
+    assert(submit_count == 1, "acquire release emits one native submit");
+    assert(submits[0].wait_semaphore_info_count == 1,
+        "acquire release waits one semaphore");
+    assert(submits[0].command_buffer_info_count == 0,
+        "acquire release submits no command buffers");
+    assert(submits[0].signal_semaphore_info_count == 0,
+        "acquire release signals no semaphore");
+    captured_acquire_release_submits++;
+    captured_acquire_release_wait =
+        submits[0].p_wait_semaphore_infos[0].semaphore;
+    return vk::Result.SUCCESS;
+}
+
+fn vk::Result capture_present(
+    vk::Queue queue,
+    vk::PresentInfoKHR* info,
+) {
+    (void)queue;
+    assert(info.swapchain_count == 1, "present seam receives one swapchain");
+    assert(info.wait_semaphore_count == 1,
+        "present seam receives one render wait");
+    captured_present_calls++;
+    return vk::Result.SUCCESS;
 }
 
 // Pure swapchain selection logic over synthetic capability lists, plus the
@@ -169,6 +205,16 @@ fn void swapchain_submit_guard_lifecycle() @test {
     ));
     assert(stale_readiness == gpu::INVALID_RESOURCE_STATE, "stale readiness faults INVALID_RESOURCE_STATE");
 
+    fault future_readiness = @catch(gpu::vk::swapchain_submit_guard(
+        acquire_pending:      true,
+        readiness_consumed:   false,
+        expected_acquisition: 7,
+        provided_acquisition: 8,
+        roles:                graphics,
+    ));
+    assert(future_readiness == gpu::INVALID_RESOURCE_STATE,
+        "future readiness faults INVALID_RESOURCE_STATE");
+
     gpu::QueueRoles compute = { .compute };
     fault compute_coupled = @catch(gpu::vk::swapchain_submit_guard(
         acquire_pending:      true,
@@ -223,6 +269,17 @@ fn void swapchain_present_guard_lifecycle() @test {
     ));
     assert(stale_image == gpu::INVALID_RESOURCE_STATE, "stale acquired image faults INVALID_RESOURCE_STATE");
 
+    fault future_image = @catch(gpu::vk::swapchain_present_guard(
+        acquire_pending:      true,
+        readiness_consumed:   true,
+        expected_acquisition: 7,
+        provided_acquisition: 8,
+        expected_completion:  expected,
+        provided_completion:  expected,
+    ));
+    assert(future_image == gpu::INVALID_RESOURCE_STATE,
+        "future acquired image faults INVALID_RESOURCE_STATE");
+
     fault wrong_completion = @catch(gpu::vk::swapchain_present_guard(
         acquire_pending:      true,
         readiness_consumed:   true,
@@ -232,6 +289,121 @@ fn void swapchain_present_guard_lifecycle() @test {
         provided_completion:  other,
     ));
     assert(wrong_completion == gpu::INVALID_ARGUMENT, "unrelated completion faults INVALID_ARGUMENT");
+}
+
+fn void present_path_guards_precede_native_mutation() @test {
+    WsiDiagnosticCapture capture;
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .application_name  = "gpu_present_guard_test",
+        .debug_callback    = &capture_wsi_diagnostic,
+        .debug_user_data   = &capture,
+    };
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::vk::VkDeviceState* state =
+        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    state.presentation.queue_mutex.init()!!;
+
+    gpu::vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
+    state.presentation.swapchains.owner = gpu::resource_owner_tag(
+        state.resource_owner,
+        gpu::ResourceOwnerKind.SWAPCHAIN,
+    );
+    state.presentation.swapchains.slots = cells[..];
+    defer state.presentation.swapchains.slots = {};
+
+    gpu::vk::TextureSlot texture;
+    gpu::vk::set_texture_layout(&texture, gpu::TextureLayout.PRESENT);
+    gpu::TextureHandle texture_handle = state.textures.alloc(texture)!!;
+    defer state.textures.free(texture_handle)!!;
+
+    gpu::CompletionPoint expected = {
+        .device  = device,
+        .payload = 1ull << gpu::COMPLETION_QUEUE_BITS,
+    };
+    gpu::vk::SwapchainSlot pending = {
+        .swapchain          = (vk::SwapchainKHR)1,
+        .acquire_pending    = true,
+        .readiness_consumed = true,
+        .acquisition        = 7,
+        .pending_image      = 0,
+        .render_completion  = expected,
+    };
+    pending.textures[0] = texture_handle;
+    pending.present_semaphores[0] = (vk::Semaphore)2;
+    gpu::SwapchainHandle handle =
+        state.presentation.swapchains.alloc(pending)!!;
+    gpu::SwapchainReadiness readiness = gpu::vk::make_swapchain_readiness(
+        device,
+        handle,
+        7,
+    )!!;
+    gpu::AcquiredImage image = {
+        .texture   = texture_handle,
+        .readiness = readiness,
+        .index     = 0,
+    };
+    gpu::AcquiredImage replay = image;
+    gpu::CompletionPoint unrelated = expected;
+    unrelated.payload++;
+    captured_present_calls = 0;
+    capture = {};
+
+    fault completion_fault = @catch(gpu::vk::vk_present_with(
+        device:            &device,
+        image:             &image,
+        render_completion: unrelated,
+        present_fn:        &capture_present,
+    ));
+    assert(completion_fault == gpu::INVALID_ARGUMENT,
+        "present path rejects an unrelated completion point");
+    assert(captured_present_calls == 0,
+        "completion rejection precedes native present");
+    assert(capture.calls == 1 && capture.last.category.public_contract,
+        "completion rejection emits one contract diagnostic");
+
+    capture = {};
+    gpu::AcquiredImage wrong_image = image;
+    wrong_image.index = 1;
+    fault image_fault = @catch(gpu::vk::vk_present_with(
+        device:            &device,
+        image:             &wrong_image,
+        render_completion: expected,
+        present_fn:        &capture_present,
+    ));
+    assert(image_fault == gpu::INVALID_ARGUMENT,
+        "present path rejects the wrong acquired image");
+    assert(captured_present_calls == 0,
+        "image rejection precedes native present");
+    assert(capture.calls == 1 && capture.last.category.public_contract,
+        "image rejection emits one contract diagnostic");
+
+    capture = {};
+    gpu::vk::vk_present_with(
+        device:            &device,
+        image:             &image,
+        render_completion: expected,
+        present_fn:        &capture_present,
+    )!!;
+    assert(captured_present_calls == 1,
+        "valid present reaches the native seam exactly once");
+    assert(capture.calls == 0, "valid present emits no diagnostic");
+
+    fault replay_fault = @catch(gpu::vk::vk_present_with(
+        device:            &device,
+        image:             &replay,
+        render_completion: expected,
+        present_fn:        &capture_present,
+    ));
+    assert(replay_fault == gpu::INVALID_RESOURCE_STATE,
+        "present replay faults INVALID_RESOURCE_STATE");
+    assert(captured_present_calls == 1,
+        "present replay reaches no second native mutation");
+    assert(capture.calls == 1 && capture.last.category.public_contract,
+        "present replay emits one contract diagnostic");
 }
 
 fn void present_oom_preserves_the_acquisition_for_retry() @test {
@@ -338,6 +510,7 @@ fn void acquire_semaphores_retire_before_reuse() @test {
     assert(busy == gpu::WAIT_TIMEOUT,
         "acquire stays retryable while every semaphore wait is pending");
 }
+
 fn void pending_swapchain_destroy_waits_the_exact_render_queue() @test {
     gpu::Device device = { .generation = 1 };
     gpu::CompletionPoint secondary_graphics = {
@@ -369,12 +542,50 @@ fn void pending_swapchain_destroy_waits_the_exact_render_queue() @test {
         "destroy waits the exact secondary graphics completion");
 }
 
+fn void unsubmitted_acquire_is_consumed_before_teardown() @test {
+    gpu::DeviceDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .application_name  = "gpu_acquire_teardown_test",
+    };
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::vk::VkDeviceState* state =
+        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::vk::WsiDiagnosticContext context = {
+        .state     = state,
+        .operation = "destroy_swapchain",
+    };
+    gpu::vk::SwapchainSlot slot = {
+        .acquire_pending           = true,
+        .pending_acquire_semaphore = (vk::Semaphore)17,
+    };
+    captured_acquire_release_submits = 0;
+    captured_acquire_release_wait = (vk::Semaphore)null;
+
+    gpu::vk::consume_unsubmitted_swapchain_acquire_with(
+        state:     state,
+        context:   &context,
+        slot:      &slot,
+        submit_fn: &capture_acquire_release_submit,
+    )!!;
+
+    assert(captured_acquire_release_submits == 1,
+        "teardown consumes one unsubmitted acquire signal");
+    assert(captured_acquire_release_wait == (vk::Semaphore)17,
+        "teardown waits the pending acquire semaphore");
+    assert(!slot.acquire_pending && slot.pending_acquire_semaphore == null,
+        "successful consume invalidates the pending acquisition");
+}
+
 fn void swapchain_resize_rejects_a_pending_acquisition() @test {
     gpu::vk::swapchain_resize_guard(false)!!;
     fault pending = @catch(gpu::vk::swapchain_resize_guard(true));
     assert(pending == gpu::INVALID_RESOURCE_STATE,
         "resize rejects an acquired image until present or destroy");
 }
+
 fn void swapchain_readiness_identity_round_trips() @test {
     gpu::Device device = { .index = 3, .generation = 11 };
     gpu::SwapchainHandle swapchain = {

@@ -278,6 +278,44 @@ fn void? wait_pending_swapchain_render(
     );
 }
 
+fn void? consume_unsubmitted_swapchain_acquire_with(
+    VkDeviceState* state,
+    WsiDiagnosticContext* context,
+    SwapchainSlot* slot,
+    QueueSubmit2Fn submit_fn,
+) {
+    if (!slot.acquire_pending || slot.readiness_consumed) return;
+    if (slot.pending_acquire_semaphore == null) return gpu::BACKEND_ERROR~;
+
+    vk::SemaphoreSubmitInfo[1] waits = {
+        vk::semaphore_submit_info()
+            .set_semaphore(slot.pending_acquire_semaphore)
+            .set_stage_mask(
+                vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+            ),
+    };
+    vk::SubmitInfo2 submit = vk::submit_info2()
+        .set_wait_semaphore_infos(waits[..]);
+    Mutex* queue_mutex = native_queue_mutex_for(
+        state,
+        state.graphics_queue,
+    );
+    queue_mutex.lock()!!;
+    vk::Result result = submit_fn(
+        state.graphics_queue,
+        1,
+        &submit,
+        (vk::Fence)null,
+    );
+    queue_mutex.unlock();
+    check_wsi_backend_result(
+        context: context,
+        kind:    WsiResultKind.COMMON,
+        result:  result,
+    )!;
+    clear_swapchain_acquisition(slot);
+}
+
 fn uint? select_acquire_semaphore_with(
     gpu::Device* device,
     SwapchainSlot* slot,
@@ -845,6 +883,12 @@ fn void? vk_destroy_swapchain(gpu::Device* device, gpu::SwapchainHandle handle) 
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     WsiDiagnosticContext context = { .state = state, .operation = "destroy_swapchain" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
+    consume_unsubmitted_swapchain_acquire_with(
+        state:     state,
+        context:   &context,
+        slot:      slot,
+        submit_fn: &real_queue_submit2,
+    )!;
     wait_pending_swapchain_render(device, slot)!;
     wait_swapchain_queues_idle(state, &context)!;
     destroy_swapchain_slot(state, slot);
@@ -945,11 +989,12 @@ fn gpu::AcquiredImage? vk_acquire_next_image(
     );
 }
 
-fn void? vk_present(
+fn void? vk_present_with(
     gpu::Device* device,
     gpu::AcquiredImage* image,
     gpu::CompletionPoint render_completion,
-) @private {
+    vk::PFN_vkQueuePresentKHR present_fn,
+) {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (!image.readiness.is_valid() || image.readiness.device != *device) {
         return gpu::INVALID_HANDLE~;
@@ -960,21 +1005,12 @@ fn void? vk_present(
     )!;
     WsiDiagnosticContext context = { .state = state, .operation = "present" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
-    swapchain_present_guard(
-        acquire_pending:      slot.acquire_pending,
-        readiness_consumed:   slot.readiness_consumed,
-        expected_acquisition: slot.acquisition,
-        provided_acquisition: swapchain_readiness_acquisition(
-            image.readiness,
-        ),
-        expected_completion:  slot.render_completion,
-        provided_completion:  render_completion,
+    check_swapchain_present_contract(
+        context:           &context,
+        slot:              slot,
+        image:             image,
+        render_completion: render_completion,
     )!;
-    if (image.index != slot.pending_image
-        || image.texture != slot.textures[slot.pending_image]) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    check_swapchain_present_lifecycle(&context, slot)!;
     TextureSlot* image_slot = resolve_swapchain_texture_for_operation(
         context: &context,
         handle:  image.texture,
@@ -992,16 +1028,27 @@ fn void? vk_present(
 
     Mutex* queue_mutex = present_queue_mutex_for(state);
     queue_mutex.lock()!!;
-    vk::Result result = state.device_dispatch.presentation.queue_present(
-        state.presentation.queue,
-        &info,
-    );
+    vk::Result result = present_fn(state.presentation.queue, &info);
     queue_mutex.unlock();
     commit_present_result(slot, image, result);
     return check_wsi_backend_result(
         context: &context,
         kind:    WsiResultKind.PRESENT,
         result:  result,
+    );
+}
+
+fn void? vk_present(
+    gpu::Device* device,
+    gpu::AcquiredImage* image,
+    gpu::CompletionPoint render_completion,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    return vk_present_with(
+        device:            device,
+        image:             image,
+        render_completion: render_completion,
+        present_fn:        state.device_dispatch.presentation.queue_present,
     );
 }
 

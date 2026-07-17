@@ -345,8 +345,17 @@ fn void wsi_lifecycle_and_layout_diagnostics_are_contract_failures() @test {
 
     capture = {};
     context.operation = "present";
+    slot.acquisition = 7;
     slot.readiness_consumed = false;
-    assert(@catch(gpu::vk::check_swapchain_present_lifecycle(&context, &slot)) == gpu::INVALID_RESOURCE_STATE,
+    gpu::AcquiredImage acquired = {
+        .readiness = { .payload = 7ull << 32 },
+    };
+    assert(@catch(gpu::vk::check_swapchain_present_contract(
+        context:           &context,
+        slot:              &slot,
+        image:             &acquired,
+        render_completion: {},
+    )) == gpu::INVALID_RESOURCE_STATE,
         "unconsumed present preserves INVALID_RESOURCE_STATE");
     assert(capture.calls == 1 && capture.last.category.public_contract,
         "unconsumed present reports one contract diagnostic");

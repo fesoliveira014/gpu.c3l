@@ -721,6 +721,7 @@ fn void swapchain_sharing_includes_every_selected_graphics_family() @test {
     assert(families[0] == 4 && families[1] == 6 && families[2] == 7,
         "graphics families precede the private presentation family");
 }
+
 fn void swapchain_sharing_includes_a_separate_present_family() @test {
     vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
     vk::Queue present_queue = (vk::Queue)(uptr)0x20;

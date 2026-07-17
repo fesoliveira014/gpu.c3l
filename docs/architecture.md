@@ -562,6 +562,7 @@ and dormant state. `AcquiredImage.prior_layout` comes from committed texture
 state. Resize stales borrowed textures and never reuses acquisition identities.
 
 Surface creation remains platform-specific. SDL helpers live outside `gpu`.
+
 ## 11. Debug model
 
 Debug builds should track:

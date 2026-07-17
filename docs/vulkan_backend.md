@@ -669,6 +669,7 @@ Host or device allocation failure preserves it for retry.
 Creation and resize publish `SwapchainInfo` only after every image is wrapped.
 Zero extent or failed rebuild publishes the dormant sentinel. Resize preserves
 the acquisition sequence, so stale readiness cannot alias later work.
+
 ## 17. Debug implementation
 
 Debug features:
