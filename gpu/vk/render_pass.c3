@@ -382,7 +382,13 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
     )!;
-    vk::cmd_draw_indirect(cb, args_buffer.slot.buffer, (vk::DeviceSize)args_buffer.offset, draw_count, gpu::DrawIndirectCommand::size);
+    vk::cmd_draw_indirect(
+        command_buffer: cb,
+        buffer:         args_buffer.slot.buffer,
+        offset:         (vk::DeviceSize)args_buffer.offset,
+        draw_count:     draw_count,
+        stride:         gpu::DrawIndirectCommand::size,
+    );
 }
 
 fn void bind_index_buffer(
@@ -442,7 +448,13 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
         index_span: &index_buffer,
         index_type: index_type,
     );
-    vk::cmd_draw_indexed_indirect(cb, args_buffer.slot.buffer, (vk::DeviceSize)args_buffer.offset, draw_count, gpu::DrawIndexedIndirectCommand::size);
+    vk::cmd_draw_indexed_indirect(
+        command_buffer: cb,
+        buffer:         args_buffer.slot.buffer,
+        offset:         (vk::DeviceSize)args_buffer.offset,
+        draw_count:     draw_count,
+        stride:         gpu::DrawIndexedIndirectCommand::size,
+    );
 }
 
 fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, gpu::GpuSpan args, gpu::GpuSpan count_span, uint max_draw_count, gpu::GpuSpan index_span, gpu::IndexType index_type) @private {
