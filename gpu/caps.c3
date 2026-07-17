@@ -21,8 +21,7 @@ enum DescriptorHeapMode : int {
     DESCRIPTOR_INDEXING,
 }
 
-<* Transitional creation parameters for create_device_from_desc; a
-   zero-initialized desc uses backend defaults. *>
+<* Device creation options. Zero-initialized fields select documented defaults. *>
 struct DeviceDesc {
     BackendKind          backend;
     bool                 enable_validation;

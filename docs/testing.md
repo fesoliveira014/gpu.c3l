@@ -109,7 +109,7 @@ surface-aware queue selection and presentation-request gating
 create/destroy Vulkan device
 create/destroy VMA allocator
 query memory budget and stats
-create addressable VMA-backed buffers
+create addressable VMA-backed allocation storage
 retrieve non-zero GPU address
 map/flush/invalidate paths
 independent allocation identity, capacity, generation reuse, and owner-domain checks
@@ -279,11 +279,11 @@ test_handle_pack_round_trip
 test_generation_mismatch_rejected
 test_frame_arena_alignment
 test_vk_create_device
-test_vk_create_addressable_buffer
+test_vk_create_addressable_allocation
 test_vk_root_pointer_compute
 ```
 
-Do not include development phase labels in test names.
+Test names describe behavior, not roadmap or ticket labels.
 
 ## 8. Required coverage
 
@@ -294,7 +294,7 @@ Do not include development phase labels in test names.
 | Independent allocations | descriptor normalization; identity/capacity/reuse; all memory classes; info, mapping, address, checked subspans; rollback; immediate free; placement/lifetime rejection; leaks/stats. |
 | Vulkan bootstrap | create/destroy device, required feature checks. |
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
-| Buffers | mapped buffer, device buffer, addressable buffer. |
+| Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Frame arena | allocation, alignment, overflow, reset safety. |
 | Persistent arena | allocate/free/reuse, virtual allocator stats. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
@@ -481,7 +481,7 @@ Compute:
 ```text
 write known input
 run shader
-read output buffer
+read the output allocation span
 compare exact values
 ```
 
@@ -490,7 +490,7 @@ Graphics:
 ```text
 clear to known color
 render primitive
-copy render target to readback buffer
+copy the render target to readback storage
 sample a small set of pixels
 compare with tolerance for floating formats
 ```

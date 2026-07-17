@@ -3,7 +3,7 @@ module gpu_test;
 import gpu @public;
 import gpu::vk @public;
 
-uint resource_access_buffer_creates;
+uint resource_access_allocations;
 uint resource_access_texture_queries;
 uint resource_access_texture_creates;
 uint resource_access_persistent_allocations;
@@ -12,13 +12,13 @@ fn void destroy_resource_access_device(void* backend_state) {
     (void)backend_state;
 }
 
-fn gpu::BufferHandle? create_resource_access_buffer(
+fn gpu::GpuAllocation? allocate_resource_access_memory(
     gpu::Device* device,
-    gpu::BufferDesc* desc,
+    gpu::AllocationDesc* desc,
 ) {
     (void)device;
     (void)desc;
-    resource_access_buffer_creates++;
+    resource_access_allocations++;
     return gpu::OUT_OF_DEVICE_MEMORY~;
 }
 
@@ -54,7 +54,7 @@ fn gpu::GpuSpan? alloc_resource_access_persistent(
 
 gpu::BackendVTable resource_access_vtable = {
     .destroy_device        = &destroy_resource_access_device,
-    .create_buffer         = &create_resource_access_buffer,
+    .allocate_memory       = &allocate_resource_access_memory,
     .supports_texture_desc = &supports_resource_access_texture,
     .create_texture        = &create_resource_access_texture,
     .alloc_persistent_span = &alloc_resource_access_persistent,
@@ -78,12 +78,12 @@ fn gpu::Device create_compute_only_resource_access_device(int* state) {
     )!!;
 }
 
-fn gpu::BufferDesc resource_access_buffer_desc(gpu::QueueRoles access) {
+fn gpu::AllocationDesc resource_access_allocation_desc(gpu::QueueRoles access) {
     return {
-        .size        = 64,
-        .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = access,
+        .size         = 64,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = access,
     };
 }
 
@@ -101,30 +101,29 @@ fn gpu::TextureDesc resource_access_texture_desc(gpu::QueueRoles access) {
 fn gpu::PersistentAllocDesc resource_access_persistent_desc(gpu::QueueRoles access) {
     return {
         .size        = 64,
-        .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
         .access      = access,
     };
 }
 
-fn void resource_access_rejects_invalid_buffer_domains_before_backend() @test {
+fn void resource_access_rejects_invalid_allocation_domains_before_backend() @test {
     int state;
     gpu::Device device = create_compute_only_resource_access_device(&state);
-    resource_access_buffer_creates = 0;
+    resource_access_allocations = 0;
 
-    gpu::BufferDesc empty = resource_access_buffer_desc({});
-    assert(@catch(gpu::create_buffer(&device, &empty)) == gpu::INVALID_ARGUMENT);
+    gpu::AllocationDesc empty = resource_access_allocation_desc({});
+    assert(@catch(gpu::allocate_memory(&device, &empty)) == gpu::INVALID_ARGUMENT);
 
-    gpu::BufferDesc unavailable = resource_access_buffer_desc({ .graphics });
-    assert(@catch(gpu::create_buffer(&device, &unavailable)) == gpu::INVALID_ARGUMENT);
+    gpu::AllocationDesc unavailable = resource_access_allocation_desc({ .graphics });
+    assert(@catch(gpu::allocate_memory(&device, &unavailable)) == gpu::INVALID_ARGUMENT);
 
-    gpu::BufferDesc unknown = resource_access_buffer_desc((gpu::QueueRoles)0x8);
-    assert(@catch(gpu::create_buffer(&device, &unknown)) == gpu::INVALID_ARGUMENT);
-    assert(resource_access_buffer_creates == 0, "invalid domains do not reach buffer creation");
+    gpu::AllocationDesc unknown = resource_access_allocation_desc((gpu::QueueRoles)0x8);
+    assert(@catch(gpu::allocate_memory(&device, &unknown)) == gpu::INVALID_ARGUMENT);
+    assert(resource_access_allocations == 0, "invalid domains do not reach allocation");
 
-    gpu::BufferDesc accepted = resource_access_buffer_desc({ .compute });
-    assert(@catch(gpu::create_buffer(&device, &accepted)) == gpu::OUT_OF_DEVICE_MEMORY);
-    assert(resource_access_buffer_creates == 1, "selected compute access reaches the backend");
+    gpu::AllocationDesc accepted = resource_access_allocation_desc({ .compute });
+    assert(@catch(gpu::allocate_memory(&device, &accepted)) == gpu::OUT_OF_DEVICE_MEMORY);
+    assert(resource_access_allocations == 1, "selected compute access reaches allocation");
 
     gpu::destroy_device(&device)!!;
 }

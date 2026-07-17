@@ -213,22 +213,38 @@ fn int main() {
         }
     }
 
-    gpu::BufferDesc data_desc = {
-        .size = OVERLAP_DATA_BYTES, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer },
-        .debug_name = "overlap_compute_data",
+    gpu::AllocationDesc data_desc = {
+        .size         = OVERLAP_DATA_BYTES,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = { .graphics, .compute, .transfer },
+        .debug_name   = "overlap_compute_data",
     };
-    gpu::BufferHandle data_buffer = gpu::create_buffer(&device, &data_desc)!!;
-    defer gpu::destroy_buffer(&device, data_buffer)!!;
+    gpu::GpuAllocation data = gpu::allocate_memory(&device, &data_desc)!!;
+    defer gpu::free_allocation(&device, &data)!!;
+    gpu::GpuSpan data_span = gpu::get_allocation_span(&device, data)!!;
 
-    gpu::BufferDesc comp_root_desc = {
-        .size = OverlapComputeRoot::size, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer },
-        .debug_name = "overlap_compute_root",
+    gpu::AllocationDesc comp_root_desc = {
+        .size         = OverlapComputeRoot::size,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.CPU_WRITE,
+        .access       = { .graphics, .compute, .transfer },
+        .debug_name   = "overlap_compute_root",
     };
-    gpu::BufferHandle comp_root_buffer = gpu::create_buffer(&device, &comp_root_desc)!!;
-    defer gpu::destroy_buffer(&device, comp_root_buffer)!!;
-    gpu::GpuSpan comp_root_span = gpu::get_buffer_span(&device, comp_root_buffer)!!;
-    OverlapComputeRoot* comp_root = (OverlapComputeRoot*)gpu::get_span_mapping(&device, comp_root_span)!!.ptr;
-    comp_root.data_gpu = gpu::get_buffer_address(&device, data_buffer)!!;
+    gpu::GpuAllocation comp_root_allocation = gpu::allocate_memory(
+        &device,
+        &comp_root_desc,
+    )!!;
+    defer gpu::free_allocation(&device, &comp_root_allocation)!!;
+    gpu::GpuSpan comp_root_span = gpu::get_allocation_span(
+        &device,
+        comp_root_allocation,
+    )!!;
+    OverlapComputeRoot* comp_root = (OverlapComputeRoot*)gpu::get_span_mapping(
+        &device,
+        comp_root_span,
+    )!!.ptr;
+    comp_root.data_gpu = gpu::get_span_address(&device, data_span)!!;
     comp_root.elem_count = DISPATCH_GROUPS * OVERLAP_WORKGROUP;
 
     gpu::TextureDesc rt_desc = {
@@ -287,7 +303,7 @@ fn int main() {
     double frag_ns = 0;
     for (uint round = 0; round < CALIBRATION_ROUNDS; round++) {
         comp_root.iters = comp_iters;
-        gpu::flush_buffer(&device, comp_root_buffer, 0, 0)!!;
+        gpu::flush_mapped_span(&device, comp_root_span)!!;
         frame_token = gpu::begin_frame(&device)!!;
         gpu::ExecutableCommandList comp_cmd = record_compute(
             device:        &device,
@@ -358,7 +374,7 @@ fn int main() {
         frag_iters = (uint)frag_next;
     }
     comp_root.iters = comp_iters;
-    gpu::flush_buffer(&device, comp_root_buffer, 0, 0)!!;
+    gpu::flush_mapped_span(&device, comp_root_span)!!;
     io::printfn(
         "calibration: compute_iters=%d (%.3f ms) fragment_iters=%d (%.3f ms) target_ms=%.1f",
         comp_iters, comp_ns / 1.0e6, frag_iters, frag_ns / 1.0e6, TARGET_MS,

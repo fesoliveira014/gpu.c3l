@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from scripts import check_public_api
 
@@ -318,6 +319,25 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "MemoryStats",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "heaps",
+                                "type": {"name": "MemoryHeapBudget[16]"},
+                            },
+                            {"name": "heap_count", "type": {"name": "uint"}},
+                            {
+                                "name": "texture_count",
+                                "type": {"name": "ulong"},
+                            },
+                            {
+                                "name": "live_allocation_count",
+                                "type": {"name": "ulong"},
+                            },
+                        ],
+                    },
+                    {
                         "name": "AllocationDesc",
                         "kind": "struct",
                         "members": [
@@ -326,6 +346,20 @@ def valid_document() -> dict:
                             {
                                 "name": "memory_class",
                                 "type": {"name": "MemoryClass"},
+                            },
+                            {"name": "access", "type": {"name": "QueueRoles"}},
+                            {"name": "debug_name", "type": {"name": "ZString"}},
+                        ],
+                    },
+                    {
+                        "name": "PersistentAllocDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "size", "type": {"name": "usz"}},
+                            {"name": "align", "type": {"name": "usz"}},
+                            {
+                                "name": "memory_kind",
+                                "type": {"name": "MemoryKind"},
                             },
                             {"name": "access", "type": {"name": "QueueRoles"}},
                             {"name": "debug_name", "type": {"name": "ZString"}},
@@ -578,7 +612,19 @@ class PublicApiCheckTests(unittest.TestCase):
             failures,
         )
 
-    def test_rejects_debug_resource_kind_reordering(self) -> None:
+    def test_rejects_wrong_debug_resource_kind_member(self) -> None:
+        document = valid_document()
+        resource_kind = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "DebugResourceKind"
+        )
+        resource_kind["members"][2]["name"] = "BUFFER"
+        self.assertIn(
+            "DebugResourceKind must match its exact schema",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_wrong_debug_resource_kind_order(self) -> None:
         document = valid_document()
         resource_kind = next(
             entry for entry in document["modules"]["gpu"]["types"]
@@ -589,7 +635,22 @@ class PublicApiCheckTests(unittest.TestCase):
             resource_kind["members"][1],
         )
         self.assertIn(
-            "DebugResourceKind must preserve its append-only schema",
+            "DebugResourceKind must match its exact schema",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_memory_stats_buffer_count(self) -> None:
+        document = valid_document()
+        memory_stats = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "MemoryStats"
+        )
+        memory_stats["members"].insert(2, {
+            "name": "buffer_count",
+            "type": {"name": "ulong"},
+        })
+        self.assertIn(
+            "MemoryStats must match its exact public schema",
             check_public_api.validate_document(document),
         )
 
@@ -793,13 +854,67 @@ class PublicApiCheckTests(unittest.TestCase):
             check_public_api.validate_document(document),
         )
 
-    def test_allows_buffer_handle_with_span_operations(self) -> None:
-        document = valid_document()
-        document["modules"]["gpu"]["types"].append({
-            "name": "BufferHandle",
-            "kind": "struct",
-        })
-        self.assertEqual(check_public_api.validate_document(document), [])
+    def test_rejects_public_buffer_types(self) -> None:
+        for name, failure in (
+            ("BufferHandle", "retired BufferHandle"),
+            ("BufferDesc", "retired BufferDesc"),
+            ("BufferUsage", "retired BufferUsage"),
+        ):
+            with self.subTest(name=name):
+                document = valid_document()
+                document["modules"]["gpu"]["types"].append({
+                    "name": name,
+                    "kind": "struct",
+                })
+                self.assertIn(
+                    failure,
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_public_buffer_lifecycle(self) -> None:
+        for name in (
+            "create_buffer",
+            "destroy_buffer",
+            "get_buffer_address",
+            "get_buffer_span",
+            "flush_buffer",
+            "invalidate_buffer",
+        ):
+            with self.subTest(name=name):
+                document = valid_document()
+                document["modules"]["gpu"]["functions"].append({
+                    "name": name,
+                })
+                self.assertIn(
+                    "retired public buffer lifecycle",
+                    check_public_api.validate_document(document),
+                )
+
+    def test_requires_private_vulkan_backend_modules(self) -> None:
+        relative = Path("gpu/vk/buffer.c3")
+        self.assertEqual(
+            check_public_api.validate_private_backend_source(
+                relative,
+                "module gpu::vk @private;",
+            ),
+            [],
+        )
+        for declaration in (
+            "module gpu::vk;",
+            "module gpu::vk @public;",
+            "module gpu;",
+        ):
+            with self.subTest(declaration=declaration):
+                self.assertEqual(
+                    check_public_api.validate_private_backend_source(
+                        relative,
+                        declaration,
+                    ),
+                    [
+                        "gpu/vk/buffer.c3 must declare the private "
+                        "gpu::vk backend module"
+                    ],
+                )
 
     def test_rejects_span_backend_details(self) -> None:
         document = valid_document()
@@ -851,6 +966,21 @@ class PublicApiCheckTests(unittest.TestCase):
         desc["members"][3]["type"]["name"] = "QueueKind"
         self.assertIn(
             "AllocationDesc must match the exact public schema",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_wrong_persistent_alloc_desc_schema(self) -> None:
+        document = valid_document()
+        desc = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "PersistentAllocDesc"
+        )
+        desc["members"].insert(2, {
+            "name": "usage",
+            "type": {"name": "BufferUsage"},
+        })
+        self.assertIn(
+            "PersistentAllocDesc must match the exact public schema",
             check_public_api.validate_document(document),
         )
 

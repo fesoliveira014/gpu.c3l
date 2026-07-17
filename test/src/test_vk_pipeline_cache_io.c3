@@ -5,8 +5,6 @@ import gpu::vk @public;
 import std::core::mem;
 import vk;
 
-// Headless (lavapipe): driver pipeline-cache blob export/import. Correctness
-// only — blob content usefulness is driver-dependent, so no timing asserts.
 
 const char[*] CACHE_IO_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
@@ -109,24 +107,32 @@ fn gpu::PipelineHandle build_cache_io_pipeline(gpu::Device* device) {
 
 fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline) {
     const uint COUNT = 64;
-    gpu::BufferDesc io_desc = {
-        .size = COUNT * float::size, .usage = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "cache_io",
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle input = gpu::create_buffer(device, &io_desc)!!;
-    defer gpu::destroy_buffer(device, input)!!;
-    gpu::BufferHandle output = gpu::create_buffer(device, &io_desc)!!;
-    defer gpu::destroy_buffer(device, output)!!;
-    gpu::GpuSpan in_span = gpu::get_buffer_span(device, input)!!;
-    float* in_data = (float*)test_span_mapping(device, in_span).ptr;
+    OwnedSpan input = allocate_owned_span(
+        device:       device,
+        size:         COUNT * float::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "cache_input",
+    )!!;
+    defer free_owned_span(device, &input)!!;
+    OwnedSpan output = allocate_owned_span(
+        device:       device,
+        size:         COUNT * float::size,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "cache_output",
+    )!!;
+    defer free_owned_span(device, &output)!!;
+
+    float* in_data = (float*)test_span_mapping(device, input.span).ptr;
     for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
+    gpu::flush_mapped_span(device, input.span)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
     ComputeRoot* root = (ComputeRoot*)test_span_mapping(device, root_span).ptr;
-    root.input_gpu  = gpu::get_buffer_address(device, input)!!;
-    root.output_gpu = gpu::get_buffer_address(device, output)!!;
+    root.input_gpu  = test_span_address(device, input.span);
+    root.output_gpu = test_span_address(device, output.span);
     root.count      = COUNT;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.COMPUTE)!!)!!;
@@ -138,7 +144,7 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
         groups:   { (COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;
     gpu::BufferBarrier bar = {
-        .span = gpu::get_buffer_span(device, output)!!,
+        .span = output.span,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -150,8 +156,8 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     submit_test_queue(device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(device, gpu::QueueKind.COMPUTE)!!;
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(device, output)!!;
-    float* out_data = (float*)test_span_mapping(device, out_span).ptr;
+    gpu::invalidate_mapped_span(device, output.span)!!;
+    float* out_data = (float*)test_span_mapping(device, output.span).ptr;
     for (uint i = 0; i < COUNT; i++) assert(out_data[i] == (float)i * 2.0, "warm pipeline computes correctly");
     gpu::end_frame(&frame_token)!!;
 }

@@ -12,7 +12,7 @@ enum DebugMessageSeverity : int {
 enum DebugResourceKind : int {
     NONE,
     DEVICE,
-    BUFFER,
+    GPU_SPAN,
     TEXTURE,
     PIPELINE,
     SWAPCHAIN,

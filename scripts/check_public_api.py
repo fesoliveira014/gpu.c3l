@@ -9,10 +9,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CPU_PROJECT = ROOT / "test" / "cpu"
+PRIVATE_BACKEND_DECLARATION = "module gpu::vk @private;"
 
 FORBIDDEN_TEXT = {
     "backend_state": "backend state pointer",
     "backendvtable": "backend dispatch table",
+    "bufferhandle": "retired BufferHandle",
+    "bufferdesc": "retired BufferDesc",
+    "bufferusage": "retired BufferUsage",
+    "create_buffer": "retired public buffer lifecycle",
+    "destroy_buffer": "retired public buffer lifecycle",
+    "get_buffer_address": "retired public buffer lifecycle",
+    "get_buffer_span": "retired public buffer lifecycle",
+    "flush_buffer": "retired public buffer lifecycle",
+    "invalidate_buffer": "retired public buffer lifecycle",
     "platformkind": "retired PlatformKind",
     "presentdesc": "retired PresentDesc",
     "semaphoredesc": "retired public semaphore",
@@ -64,7 +74,7 @@ PLATFORM_HANDLE_TYPES = {
 DEBUG_RESOURCE_KINDS = (
     "NONE",
     "DEVICE",
-    "BUFFER",
+    "GPU_SPAN",
     "TEXTURE",
     "PIPELINE",
     "SWAPCHAIN",
@@ -81,6 +91,15 @@ RETIRED_SOURCE_SYMBOLS = (
     "PlatformKind",
     "PresentDesc",
     "SurfaceDesc",
+    "BufferHandle",
+    "BufferDesc",
+    "BufferUsage",
+    "create_buffer(",
+    "destroy_buffer(",
+    "get_buffer_address(",
+    "get_buffer_span(",
+    "flush_buffer(",
+    "invalidate_buffer(",
     "RecordingContextHandle",
     "RECORDING_CONTEXT",
     "SemaphoreDesc",
@@ -418,8 +437,10 @@ def validate_document(document: dict) -> list[str]:
         ("GpuAllocation", "struct"),
         ("GpuSpan", "struct"),
         ("MemoryClass", "enum"),
+        ("MemoryStats", "struct"),
         ("DebugResourceKind", "enum"),
         ("AllocationDesc", "struct"),
+        ("PersistentAllocDesc", "struct"),
         ("AllocationInfo", "struct"),
         ("BufferCopyDesc", "struct"),
         ("BufferTextureCopyDesc", "struct"),
@@ -458,6 +479,16 @@ def validate_document(document: dict) -> list[str]:
                 ("debug_name", "ZString"),
             ),
             "AllocationDesc must match the exact public schema",
+        ),
+        "PersistentAllocDesc": (
+            (
+                ("size", "usz"),
+                ("align", "usz"),
+                ("memory_kind", "MemoryKind"),
+                ("access", "QueueRoles"),
+                ("debug_name", "ZString"),
+            ),
+            "PersistentAllocDesc must match the exact public schema",
         ),
         "AllocationInfo": (
             (
@@ -518,6 +549,15 @@ def validate_document(document: dict) -> list[str]:
             ),
             "BufferBarrier must contain exactly one span and semantic hazards",
         ),
+        "MemoryStats": (
+            (
+                ("heaps", "MemoryHeapBudget[16]"),
+                ("heap_count", "uint"),
+                ("texture_count", "ulong"),
+                ("live_allocation_count", "ulong"),
+            ),
+            "MemoryStats must match its exact public schema",
+        ),
         "MemoryClass": (
             (
                 ("CPU_WRITE", "MemoryClass"),
@@ -531,7 +571,7 @@ def validate_document(document: dict) -> list[str]:
                 (name, "DebugResourceKind")
                 for name in DEBUG_RESOURCE_KINDS
             ),
-            "DebugResourceKind must preserve its append-only schema",
+            "DebugResourceKind must match its exact schema",
         ),
     }
     for name, (expected_schema, failure) in public_type_schemas.items():
@@ -646,6 +686,27 @@ def scan_retired_source_symbols() -> list[str]:
     return failures
 
 
+def validate_private_backend_source(relative: Path, source: str) -> list[str]:
+    lines = source.lstrip("﻿").splitlines()
+    if lines and lines[0].strip() == PRIVATE_BACKEND_DECLARATION:
+        return []
+    return [
+        f"{relative.as_posix()} must declare the private gpu::vk backend module"
+    ]
+
+
+def scan_private_backend_modules() -> list[str]:
+    failures = []
+    for path in sorted((ROOT / "gpu" / "vk").rglob("*.c3")):
+        failures.extend(
+            validate_private_backend_source(
+                path.relative_to(ROOT),
+                path.read_text(encoding="utf-8"),
+            )
+        )
+    return failures
+
+
 def main() -> int:
     result = subprocess.run(
         ["c3c", "docgen", "--json"],
@@ -661,6 +722,7 @@ def main() -> int:
     document = json.loads(result.stdout)
     failures = validate_document(document)
     failures.extend(scan_retired_source_symbols())
+    failures.extend(scan_private_backend_modules())
     if failures:
         print("public GPU API contract violations:", file=sys.stderr)
         for failure in failures:

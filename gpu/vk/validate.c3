@@ -5,7 +5,7 @@ import vk;
 
 struct ResolvedSpan {
     BufferSlot*       slot;
-    gpu::BufferHandle backing_buffer;
+    BufferHandle      backing_buffer;
     usz               offset;
     usz               size;
     gpu::QueueRoles   access;
@@ -18,7 +18,7 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     if (state == null || span == null) return gpu::INVALID_HANDLE~;
 
     BufferSlot* slot;
-    gpu::BufferHandle backing_buffer;
+    BufferHandle backing_buffer;
     usz offset;
     gpu::QueueRoles access;
     gpu::MemoryKind memory_kind;
@@ -39,7 +39,7 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
             .generation = span.generation,
         };
         AllocationSlot* allocation_slot = state.allocations.get(allocation)!;
-        backing_buffer = gpu::BUFFER_HANDLE_INVALID;
+        backing_buffer = BUFFER_HANDLE_INVALID;
         slot = &allocation_slot.backing;
         offset = span.offset;
         access = slot.access;
@@ -136,42 +136,6 @@ fn void? validate_operation_queue_access(
     )~;
 }
 
-fn void? validate_buffer_queue_access(
-    VkDeviceState* state,
-    gpu::QueueRoles queue_roles,
-    BufferSlot* slot,
-    gpu::BufferHandle handle,
-    ZString operation,
-) @private {
-    return validate_operation_queue_access(
-        state:          state,
-        queue_roles:    queue_roles,
-        access:         slot.access,
-        resource_kind:  gpu::DebugResourceKind.BUFFER,
-        index:          handle.index,
-        generation:     handle.generation,
-        debug_name:     slot_name(&slot.debug_name[0]),
-        operation:      operation,
-        rejected_field: "BufferDesc.access",
-    );
-}
-
-fn void? validate_buffer_recording_access(
-    VkDeviceState* state,
-    CommandRecord* record,
-    BufferSlot* slot,
-    gpu::BufferHandle handle,
-    ZString operation,
-) @private {
-    return validate_buffer_queue_access(
-        state:     state,
-        queue_roles: record.queue.roles,
-        slot:      slot,
-        handle:    handle,
-        operation: operation,
-    );
-}
-
 fn void? validate_texture_queue_access(
     VkDeviceState* state,
     gpu::QueueRoles queue_roles,
@@ -219,7 +183,7 @@ fn gpu::DebugResourceKind span_resource_kind(
         && span.owner == state.persistent_arena.allocations.owner) {
         return gpu::DebugResourceKind.PERSISTENT_SPAN;
     }
-    return gpu::DebugResourceKind.BUFFER;
+    return gpu::DebugResourceKind.GPU_SPAN;
 }
 
 fn void? validate_span_queue_access(
@@ -319,7 +283,7 @@ fn ResolvedSpan? resolve_span_slot(
         bool has_identity = span_fault != gpu::INVALID_HANDLE;
         ZString debug_name;
         if (has_identity && span.owner == state.buffers.owner) {
-            gpu::BufferHandle handle = {
+            BufferHandle handle = {
                 .owner      = span.owner,
                 .index      = span.index,
                 .generation = span.generation,

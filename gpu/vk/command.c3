@@ -530,9 +530,13 @@ fn void? vk_cmd_fill_buffer(
         operation: "cmd_fill_buffer",
     )!;
     if (resolved.offset % 4 != 0 || resolved.size % 4 != 0) {
-        ZString rejected_field = resolved.offset % 4 != 0
+        bool offset_misaligned = resolved.offset % 4 != 0;
+        ZString rejected_field = offset_misaligned
             ? "GpuSpan.offset"
             : "GpuSpan.size";
+        ZString invariant = offset_misaligned
+            ? "span offset must be 4-byte aligned"
+            : "span size must be 4-byte aligned";
         return report_contract_failure(
             state:               state,
             operation:           "cmd_fill_buffer",
@@ -543,7 +547,7 @@ fn void? vk_cmd_fill_buffer(
             generation:          dst.generation,
             debug_name:          slot_name(&resolved.slot.debug_name[0]),
             rejected_field:      rejected_field,
-            invariant:           "span offset and size must be 4-byte aligned",
+            invariant:           invariant,
             backend_text:        null,
         )~;
     }
@@ -654,21 +658,13 @@ fn void? vk_cmd_copy_buffer_to_texture(
         handle:    desc.texture,
         operation: "cmd_copy_buffer_to_texture",
     )!;
-    if (!buffer.slot.usage.transfer_src) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_copy_buffer_to_texture",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       span_resource_kind(state, &desc.src),
-            has_public_identity: true,
-            index:               desc.src.index,
-            generation:          desc.src.generation,
-            debug_name:          slot_name(&buffer.slot.debug_name[0]),
-            rejected_field:      "BufferUsage.transfer_src",
-            invariant:           "source buffer must include transfer_src usage",
-            backend_text:        null,
-        )~;
-    }
+    validate_span_transfer_usage(
+        state:     state,
+        resolved:  &buffer,
+        span:      &desc.src,
+        source:    true,
+        operation: "cmd_copy_buffer_to_texture",
+    )!;
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
     if (layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
@@ -724,21 +720,13 @@ fn void? vk_cmd_copy_texture_to_buffer(
         span:      &desc.dst,
         operation: "cmd_copy_texture_to_buffer",
     )!;
-    if (!buffer.slot.usage.transfer_dst) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_copy_texture_to_buffer",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       span_resource_kind(state, &desc.dst),
-            has_public_identity: true,
-            index:               desc.dst.index,
-            generation:          desc.dst.generation,
-            debug_name:          slot_name(&buffer.slot.debug_name[0]),
-            rejected_field:      "BufferUsage.transfer_dst",
-            invariant:           "destination buffer must include transfer_dst usage",
-            backend_text:        null,
-        )~;
-    }
+    validate_span_transfer_usage(
+        state:     state,
+        resolved:  &buffer,
+        span:      &desc.dst,
+        source:    false,
+        operation: "cmd_copy_texture_to_buffer",
+    )!;
     if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
     if (layout != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;

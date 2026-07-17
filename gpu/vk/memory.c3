@@ -12,7 +12,7 @@ alias QueueSubmit2Fn @private = fn vk::Result (vk::Queue, uint, vk::SubmitInfo2*
 alias FrameCounterQueryFn @private = fn vk::Result (vk::Device, vk::Semaphore, ulong*);
 
 const uint PERSISTENT_ALLOCATION_FREE_NONE @private = 0;
-const gpu::BufferUsage PERSISTENT_ARENA_USAGE = {
+const BufferUsage PERSISTENT_ARENA_USAGE = {
     .transfer_src, .transfer_dst, .uniform, .storage, .addressable, .indirect, .index,
 };
 
@@ -45,14 +45,14 @@ struct PersistentAllocationTable {
 }
 
 struct PersistentArenaState {
-    gpu::BufferHandle          backing_buffer;
+    BufferHandle               backing_buffer;
     vma::VirtualBlock          virtual_block;
     usz                        size;
     PersistentAllocationTable allocations;
 }
 
 struct PersistentArenaCreatePlan @private {
-    gpu::BufferDesc          desc;
+    BufferDesc               desc;
     uint[MAX_QUEUE_FAMILIES] families;
     uint                     family_count;
 }
@@ -60,7 +60,7 @@ struct PersistentArenaCreatePlan @private {
 // Per-frame upload arena: a mapped, addressable buffer bump-allocated within a
 // frame, reset once its timeline value retires.
 struct FrameArenaState {
-    gpu::BufferHandle backing_buffer;
+    BufferHandle      backing_buffer;
     usz               size;
     gpu::QueueRoles   access;
     Atomic{usz}       cursor;
@@ -174,14 +174,14 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
     };
     if ((uint)frame_access == 0) frame_access.transfer = true;
     for (uint i = 0; i < state.frames_in_flight; i++) {
-        gpu::BufferDesc arena_desc = {
+        BufferDesc arena_desc = {
             .size        = frame_arena_size,
             .usage       = { .storage, .addressable, .indirect, .index },
             .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
             .access      = frame_access,
             .debug_name  = "frame_arena",
         };
-        gpu::BufferHandle buffer = create_buffer_with_families_for_state(
+        BufferHandle buffer = create_buffer_with_families_for_state(
             state,
             &arena_desc,
             frame_families[:frame_family_count],
@@ -670,7 +670,7 @@ fn void? vk_end_frame(gpu::FrameToken* frame) @private {
     return end_frame_with_submit(frame, &real_queue_submit2);
 }
 
-fn gpu::BufferDesc persistent_arena_desc(
+fn BufferDesc persistent_arena_desc(
     usz arena_size,
     gpu::QueueRoles access,
 ) @private {
@@ -696,7 +696,7 @@ fn PersistentArenaCreatePlan persistent_arena_create_plan(VkDeviceState* state, 
 fn void? create_persistent_arena(VkDeviceState* state, gpu::DeviceDesc* device_desc) {
     usz arena_size = device_desc.persistent_arena_size == 0 ? gpu::DEFAULT_PERSISTENT_ARENA_SIZE : device_desc.persistent_arena_size;
     PersistentArenaCreatePlan plan = persistent_arena_create_plan(state, arena_size);
-    gpu::BufferHandle buffer = create_buffer_with_families_for_state(
+    BufferHandle buffer = create_buffer_with_families_for_state(
         state:          state,
         desc:           &plan.desc,
         queue_families: plan.families[:plan.family_count],
@@ -778,22 +778,6 @@ fn gpu::GpuSpan? vk_alloc_persistent_span(gpu::Device* device, gpu::PersistentAl
             debug_name:          desc.debug_name,
             rejected_field:      "PersistentAllocDesc.align",
             invariant:           "must be zero or a power of two",
-            backend_text:        null,
-        )~;
-    }
-    uint unsupported_usage = (uint)desc.usage & ~(uint)PERSISTENT_ARENA_USAGE;
-    if (unsupported_usage != 0) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "alloc_persistent_span",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.PERSISTENT_SPAN,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          desc.debug_name,
-            rejected_field:      "PersistentAllocDesc.usage",
-            invariant:           "contains unsupported persistent-arena flags",
             backend_text:        null,
         )~;
     }

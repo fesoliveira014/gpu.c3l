@@ -69,24 +69,23 @@ exists (else the limit is compile-time).
 
 | Limit | Value | Knob | Fault when exceeded |
 |---|---|---|---|
-| Texture descriptors in the heap | 4096 default, 65 536 max (`gpu/descriptor_heap.c3:3`) | `texture_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
-| Sampler descriptors | 256 default (`gpu/descriptor_heap.c3:4`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
-| Live textures | 1024 default, 65 536 max (`gpu/texture.c3:3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
-| Live buffers | 4096 (`gpu/buffer.c3:3`) | — | `SLOT_TABLE_FULL` |
-| Live independent allocations | 4096 (`gpu/vk/allocation.c3:26`) | — | `SLOT_TABLE_FULL` |
-| Live pipelines / shaders | 256 each by default (`gpu/pipeline.c3:3-4`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
+| Texture descriptors in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Sampler descriptors | 256 default, 65 536 max (`DEFAULT_SAMPLER_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY` in `gpu/texture.c3`; `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
+| Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
+| Live pipelines / shaders | 256 each by default (`MAX_PIPELINES`, `MAX_SHADERS` in `gpu/pipeline.c3`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
 | Compute push-constant range | Selected-device `maxPushConstantsSize`, reported by `DeviceCaps.max_push_constant_size` | — | `INVALID_ARGUMENT` |
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
-| Live command records | 4096 (`gpu/vk/command_state.c3:7`) | — | `SLOT_TABLE_FULL` |
-| Worker recording-pool caches per device | 256 (`gpu/vk/command.c3:11`) | reuse a bounded worker pool | `SLOT_TABLE_FULL` |
-| Swapchains | 8 (`gpu/swapchain.c3:3`) | — | `SLOT_TABLE_FULL` |
-| Color attachments per pass | Lesser of 8 (`gpu/pipeline.c3:6`) and the selected device limit, reported by `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
-| Frame arena (per frame in flight) | 16 MiB (`gpu/memory.c3:61`) | `frame_arena_size` | `ARENA_FULL` |
-| Persistent arena | 64 MiB (`gpu/memory.c3:62`) | `persistent_arena_size` | `ARENA_FULL` |
-| Live persistent allocations | 4096 (`gpu/memory.c3:60`) | — | `SLOT_TABLE_FULL` |
-| Staging arena | 32 MiB default (`gpu/memory.c3:63`) | `staging_arena_size` | `ARENA_FULL` |
-| Readback arena | 8 MiB default (`gpu/memory.c3:64`) | `readback_arena_size` | `ARENA_FULL` |
+| Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/device.c3`) | — | `SLOT_TABLE_FULL` |
+| Worker recording-pool caches per device | 256 worker caches; 257 contexts including the helper (`MAX_RECORDING_CONTEXTS` in `gpu/vk/command.c3`) | reuse a bounded worker pool | `SLOT_TABLE_FULL` |
+| Swapchains | 8 (`MAX_SWAPCHAINS` in `gpu/swapchain.c3`) | — | `SLOT_TABLE_FULL` |
+| Color attachments per pass | Lesser of 8 (`MAX_COLOR_ATTACHMENTS` in `gpu/pipeline.c3`) and `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
+| Frame arena (per frame in flight) | 16 MiB (`DEFAULT_FRAME_ARENA_SIZE` in `gpu/memory.c3`) | `frame_arena_size` | `ARENA_FULL` |
+| Persistent arena | 64 MiB (`DEFAULT_PERSISTENT_ARENA_SIZE` in `gpu/memory.c3`) | `persistent_arena_size` | `ARENA_FULL` |
+| Live persistent allocations | 4096 (`MAX_PERSISTENT_ALLOCATIONS` in `gpu/memory.c3`) | — | `SLOT_TABLE_FULL` |
+| Staging arena | 32 MiB default (`DEFAULT_STAGING_ARENA_SIZE` in `gpu/memory.c3`) | `staging_arena_size` | `ARENA_FULL` |
+| Readback arena | 8 MiB default (`DEFAULT_READBACK_ARENA_SIZE` in `gpu/memory.c3`) | `readback_arena_size` | `ARENA_FULL` |
 
 Two sizing rules that bite:
 - **Packed descriptor ceilings are not guaranteed hardware capacities.** On the
@@ -104,7 +103,7 @@ Two sizing rules that bite:
   not zero. `bindless_stress` demonstrates both the failure and the sizing.
 - **Frame-arena data is per frame in flight.** Every `alloc_frame_span`
   byte exists once per in-flight frame; large per-frame tables belong in
-  persistent buffers you rewrite (see `deferred_shading`'s lights).
+  persistent spans or allocations you rewrite (see `deferred_shading`'s lights).
 - **Pending texture transitions grow with the command record.** There is no
   16-texture recording cap; the backend starts at 16 entries and doubles the
   host allocation as distinct textures are added. Submit or discard the token
@@ -121,7 +120,7 @@ Two sizing rules that bite:
 | Multithreaded recording shows ~1× scaling with validation on | the validation layer locks every `vkCmd*` | benchmark with validation off; gate correctness with it on (`multithreaded_recording` does both) | — |
 | FIFO present does not throttle under xvfb | virtual displays have no vblank | expected; pacing numbers under xvfb are structural only (`present_mode_explorer`) | — |
 | Schema field named `sampler` (or other GLSL keyword) breaks shader compile | generator emits the name verbatim into GLSL | rename the field (for example, `heap_sampler`) | reserved names are not rewritten |
-| `TYPE_OPTIONAL` c3c crash building the library with debug info | c3c 0.8.0/0.8.1 debug-codegen bug on optional-of-struct vtable signatures | worked around in-tree (out-param `BeginCommandsFn`); fixed upstream in 0.8.2 — revert lands with the version bump | `scripts/c3c_bug_repro/` |
+| `TYPE_OPTIONAL` c3c crash building the library with debug info | c3c 0.8.0/0.8.1 debug-codegen bug on optional-of-struct vtable signatures | no consumer action; the in-tree vtable uses an out parameter | `scripts/c3c_bug_repro/` |
 
 ## 4. Capability queries
 

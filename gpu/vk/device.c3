@@ -234,10 +234,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .get_span_address       = &vk_get_span_address,
     .flush_mapped_span      = &vk_flush_mapped_span,
     .invalidate_mapped_span = &vk_invalidate_mapped_span,
-    .create_buffer          = &vk_create_buffer,
-    .destroy_buffer         = &vk_destroy_buffer,
-    .get_buffer_address     = &vk_get_buffer_address,
-    .get_buffer_span        = &vk_get_buffer_span,
     .begin_frame         = &vk_begin_frame,
     .alloc_frame_span    = &vk_alloc_frame_span,
     .end_frame           = &vk_end_frame,
@@ -254,8 +250,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .cmd_fill_buffer     = &vk_cmd_fill_buffer,
     .cmd_copy_buffer_to_texture = &vk_cmd_copy_buffer_to_texture,
     .cmd_copy_texture_to_buffer = &vk_cmd_copy_texture_to_buffer,
-    .flush_buffer               = &vk_flush_buffer,
-    .invalidate_buffer          = &vk_invalidate_buffer,
     .cmd_buffer_barrier  = &vk_cmd_buffer_barrier,
     .cmd_global_barrier  = &vk_cmd_global_barrier,
     .cmd_texture_barrier = &vk_cmd_texture_barrier,
@@ -601,7 +595,7 @@ fn gpu::Device? create_vk_device_with_selection(
     create_vk_allocator(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.ALLOCATOR)!;
     state.buffers.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.BUFFER);
-    state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
+    state.buffers.slots = mem::new_array(BufferCell, MAX_BUFFERS);
     state.allocations.owner = gpu::resource_owner_tag(
         state.resource_owner,
         gpu::ResourceOwnerKind.ALLOCATION,

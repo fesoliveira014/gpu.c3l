@@ -2,77 +2,90 @@ module gpu_test;
 
 import gpu;
 
-// Headless (lavapipe): the root-pointer compute ABI proof. A compute shader
-// reads/writes buffers through GPU addresses carried in a root struct pushed as
-// one 64-bit push constant, with no descriptor sets. SPIR-V is $embedded from
-// test/src/shaders/ (placed there by scripts/build_shaders.sh).
-
 const char[*] ROOT_POINTER_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
 fn void root_pointer_compute_readback() @test {
     const uint COUNT = 256;
     gpu::DeviceDesc device_desc = {
-        .backend = gpu::BackendKind.VULKAN, .enable_validation = true,
-        .frames_in_flight = 2, .application_name = "gpu_root_pointer_test",
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .application_name  = "gpu_root_pointer_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc io_desc = {
-        .size = COUNT * float::size, .usage = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .debug_name = "io",
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle input = gpu::create_buffer(&device, &io_desc)!!;
-    defer gpu::destroy_buffer(&device, input)!!;
-    gpu::BufferHandle output = gpu::create_buffer(&device, &io_desc)!!;
-    defer gpu::destroy_buffer(&device, output)!!;
+    OwnedSpan input = allocate_owned_span(
+        device:       &device,
+        size:         COUNT * float::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "input",
+    )!!;
+    defer free_owned_span(&device, &input)!!;
+    OwnedSpan output = allocate_owned_span(
+        device:       &device,
+        size:         COUNT * float::size,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .compute },
+        debug_name:   "output",
+    )!!;
+    defer free_owned_span(&device, &output)!!;
 
-    gpu::GpuSpan in_span = gpu::get_buffer_span(&device, input)!!;
-    float* in_data = (float*)test_span_mapping(&device, in_span).ptr;
-    for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
+    float* input_data = (float*)test_span_mapping(&device, input.span).ptr;
+    for (uint i = 0; i < COUNT; i++) input_data[i] = (float)i;
+    gpu::flush_mapped_span(&device, input.span)!!;
 
     gpu::ShaderDesc shader_desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = ROOT_POINTER_SPIRV[..], .entry_point = "main",
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = ROOT_POINTER_SPIRV[..],
+        .entry_point = "main",
     };
     gpu::ShaderHandle shader = gpu::create_shader(&device, &shader_desc)!!;
     defer gpu::destroy_shader(&device, shader)!!;
-
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
-    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
+    gpu::ComputePipelineDesc pipeline_desc = {
+        .shader             = shader,
+        .push_constant_size = gpu::RootPush::size,
+    };
+    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame, ComputeRoot::size, 16)!!;
     ComputeRoot* root = (ComputeRoot*)test_span_mapping(&device, root_span).ptr;
-    root.input_gpu  = gpu::get_buffer_address(&device, input)!!;
-    root.output_gpu = gpu::get_buffer_address(&device, output)!!;
-    root.count      = COUNT;
+    root.input_gpu = test_span_address(&device, input.span);
+    root.output_gpu = test_span_address(&device, output.span);
+    root.count = COUNT;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
-    defer discard_test_commands(&cmd)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    defer discard_test_commands(&commands)!!;
     gpu::cmd_dispatch(
-        commands: &cmd,
+        commands: &commands,
         pipeline: pipeline,
         root:     test_span_address(&device, root_span),
         groups:   { (COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;
-    gpu::BufferBarrier bar = {
-        .span = gpu::get_buffer_span(&device, output)!!,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::BufferBarrier host_read = {
+        .span          = output.span,
+        .before_stage  = gpu::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::Hazard.HOST_READ,
     };
-    gpu::cmd_buffer_barrier(&cmd, &bar)!!;
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
+    gpu::cmd_buffer_barrier(&commands, &host_read)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
 
-    gpu::ExecutableCommandList[1] lists = { cmd_executable };
+    gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+    gpu::end_frame(&frame)!!;
+    gpu::wait_completion(completion)!!;
+    gpu::invalidate_mapped_span(&device, output.span)!!;
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;
-    float* out_data = (float*)test_span_mapping(&device, out_span).ptr;
-    for (uint i = 0; i < COUNT; i++) assert(out_data[i] == (float)i * 2.0, "output[i] == input[i]*2");
-    gpu::end_frame(&frame_token)!!;
+    float* output_data = (float*)test_span_mapping(&device, output.span).ptr;
+    for (uint i = 0; i < COUNT; i++) {
+        assert(output_data[i] == (float)i * 2.0, "output equals doubled input");
+    }
 }

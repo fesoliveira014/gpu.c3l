@@ -20,7 +20,6 @@
     "../../gpu/surface/**",
     "../../gpu/caps.c3",
     "../../gpu/memory.c3",
-    "../../gpu/buffer.c3",
     "../../gpu/texture.c3",
     "../../gpu/descriptor_heap.c3",
     "../../gpu/pipeline.c3",

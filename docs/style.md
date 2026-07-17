@@ -25,9 +25,9 @@ Sample modules may use sample-specific namespaces. Do not put samples in `module
 | Kind | Case | Examples |
 |---|---|---|
 | Variables, fields, parameters | `snake_case` | `frame_index`, `debug_name`, `memory_kind` |
-| Functions | `snake_case` | `create_buffer`, `cmd_dispatch`, `alloc_frame_span` |
+| Functions | `snake_case` | `allocate_memory`, `cmd_dispatch`, `alloc_frame_span` |
 | Structs, enums, typedefs, aliases | `PascalCase` | `DeviceDesc`, `GpuSpan`, `TextureUsage` |
-| Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_BUFFERS`, `TRANSFER_DST`, `DEVICE_LOST` |
+| Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_PERSISTENT_ALLOCATIONS`, `TRANSFER_DST`, `DEVICE_LOST` |
 | Modules | lowercase, dotted | `gpu`, `gpu::vk` |
 | Files | `snake_case.c3` | `descriptor_heap.c3`, `pipeline_graphics.c3` |
 
@@ -54,8 +54,8 @@ Project-owned lifecycle uses free functions:
 ```text
 create_device
 destroy_device
-create_buffer
-destroy_buffer
+allocate_memory
+free_allocation
 create_texture
 destroy_texture
 ```
@@ -64,7 +64,7 @@ Avoid:
 
 ```text
 Device.create
-Buffer.destroy
+GpuAllocation.free
 Texture.create
 ```
 
@@ -77,7 +77,7 @@ Use C3 optionals/faults for fallible operations.
 Good:
 
 ```text
-create_buffer(...) -> BufferHandle?
+allocate_memory(...) -> GpuAllocation?
 cmd_dispatch(...) -> void?
 return INVALID_HANDLE~
 ```
@@ -110,7 +110,7 @@ Use typed handles. Do not pass raw `uint`, `int`, or `ulong` where a domain hand
 Good:
 
 ```text
-BufferHandle buffer
+GpuAllocation allocation
 TextureHandle texture
 PipelineHandle pipeline
 ```
@@ -118,7 +118,7 @@ PipelineHandle pipeline
 Bad:
 
 ```text
-ulong buffer
+ulong allocation
 uint texture
 int pipeline
 ```
@@ -130,11 +130,12 @@ Calls with four or more arguments, or calls that would exceed 120 characters, sh
 Preferred:
 
 ```c3
-create_buffer(
-    device: &device,
-    desc:   &buffer_desc,
-    flags:  debug_flags,
-    name:   "input_buffer",
+upload_buffer_data(
+    device:      &device,
+    dst:         destination,
+    data:        bytes,
+    next_stage:  Stage.COMPUTE_SHADER,
+    next_hazard: Hazard.SHADER_READ,
 );
 ```
 
@@ -145,8 +146,8 @@ Short calls with three or fewer arguments may stay positional if readable.
 Use K&R brace style:
 
 ```c3
-fn void? destroy_buffer(Device* device, BufferHandle handle) {
-    if (handle.value == 0) {
+fn void? free_allocation(Device* device, GpuAllocation* allocation) {
+    if (allocation == null || !allocation.is_valid()) {
         return INVALID_HANDLE~;
     }
 }
@@ -159,21 +160,19 @@ Do not use Allman braces.
 Prefer doc comments for public API contracts:
 
 ```c3
-<* Create a GPU buffer.
-   Ownership: caller must destroy the returned handle with destroy_buffer.
-   If ADDRESSABLE is set, the backend creates a shader-device-address buffer. *>
-fn BufferHandle? create_buffer(Device* device, BufferDesc* desc);
+<* Allocate addressable generic GPU data.
+   Ownership: free with `free_allocation` after GPU use is quiescent. *>
+fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc);
 ```
 
 Avoid inline comments that restate the code. Comments should explain why, not what.
 
 API preconditions, side effects, and ownership rules belong in doc comments. If a field needs a comment to be understood, consider renaming it or restructuring the type.
 
-## 11. Development language
+## 11. Current-state documentation
 
-Shipped code and documentation describe current behavior. Do not include
-schedules, development phases, issue or pull-request numbers, or implementation
-history in identifiers, comments, tests, or user documentation.
+Shipped code and documentation describe current behavior. Omit schedules,
+roadmap labels, ticket identifiers, and implementation history.
 
 Use behavior names such as `test_root_pointer_compute` and
 `create_frame_upload_arena`.
@@ -199,7 +198,6 @@ Public files should be grouped by API area:
 ```text
 gpu/device.c3
 gpu/memory.c3
-gpu/buffer.c3
 gpu/texture.c3
 gpu/pipeline.c3
 gpu/command.c3

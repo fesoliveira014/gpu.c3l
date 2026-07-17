@@ -267,15 +267,30 @@ fn void cull_replay_renders_per_alias() @test {
     defer gpu::destroy_pipeline(&device, culled)!!;
     assert(cache_entry_count(&device) == 1, "both draw pipelines alias one cache entry");
 
-    gpu::BufferDesc rb_desc = {
-        .size = CACHE_RT_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle rb_culled = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, rb_culled)!!;
-    gpu::BufferHandle rb_drawn = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, rb_drawn)!!;
-    gpu::BufferHandle rb_reset = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, rb_reset)!!;
+    OwnedSpan rb_culled = allocate_owned_span(
+        device:       &device,
+        size:         CACHE_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "cache_culled_readback",
+    )!!;
+    defer free_owned_span(&device, &rb_culled)!!;
+    OwnedSpan rb_drawn = allocate_owned_span(
+        device:       &device,
+        size:         CACHE_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "cache_drawn_readback",
+    )!!;
+    defer free_owned_span(&device, &rb_drawn)!!;
+    OwnedSpan rb_reset = allocate_owned_span(
+        device:       &device,
+        size:         CACHE_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "cache_reset_readback",
+    )!!;
+    defer free_owned_span(&device, &rb_reset)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
@@ -298,7 +313,7 @@ fn void cull_replay_renders_per_alias() @test {
 
     gpu::TextureHandle[3] targets = { target_culled, target_drawn, target_reset };
     gpu::PipelineHandle[3] pipelines = { culled, no_cull, no_cull };
-    gpu::BufferHandle[3] readbacks = { rb_culled, rb_drawn, rb_reset };
+    gpu::GpuSpan[3] readbacks = { rb_culled.span, rb_drawn.span, rb_reset.span };
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
             .texture       = targets[i],
@@ -350,7 +365,7 @@ fn void cull_replay_renders_per_alias() @test {
         };
         gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
-        gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readbacks[i])!!;
+        gpu::GpuSpan rb_span = readbacks[i];
         gpu::TextureBufferCopyDesc copy = { .texture = targets[i], .dst = rb_span };
         gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
         gpu::BufferBarrier host_read = {
@@ -369,15 +384,15 @@ fn void cull_replay_renders_per_alias() @test {
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
-    gpu::invalidate_buffer(&device, rb_culled, 0, 0)!!;
-    gpu::GpuSpan culled_span = gpu::get_buffer_span(&device, rb_culled)!!;
+    gpu::invalidate_mapped_span(&device, rb_culled.span)!!;
+    gpu::GpuSpan culled_span = rb_culled.span;
     char* culled_pixels = (char*)test_span_mapping(&device, culled_span).ptr;
     char* culled_center = &culled_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
     assert(culled_center[0] == (char)8 && culled_center[1] == (char)16 && culled_center[2] == (char)32,
         "back-face culled draw leaves the clear color");
 
-    gpu::invalidate_buffer(&device, rb_drawn, 0, 0)!!;
-    gpu::GpuSpan drawn_span = gpu::get_buffer_span(&device, rb_drawn)!!;
+    gpu::invalidate_mapped_span(&device, rb_drawn.span)!!;
+    gpu::GpuSpan drawn_span = rb_drawn.span;
     char* drawn_pixels = (char*)test_span_mapping(&device, drawn_span).ptr;
     char* drawn_left = &drawn_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 4) * 4];
     char* drawn_right = &drawn_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE * 3 / 4) * 4];
@@ -386,8 +401,8 @@ fn void cull_replay_renders_per_alias() @test {
     assert(drawn_right[0] == (char)8 && drawn_right[1] == (char)16 && drawn_right[2] == (char)32,
         "pipeline alias switch preserves clipping on the right");
 
-    gpu::invalidate_buffer(&device, rb_reset, 0, 0)!!;
-    gpu::GpuSpan reset_span = gpu::get_buffer_span(&device, rb_reset)!!;
+    gpu::invalidate_mapped_span(&device, rb_reset.span)!!;
+    gpu::GpuSpan reset_span = rb_reset.span;
     char* reset_pixels = (char*)test_span_mapping(&device, reset_span).ptr;
     char* reset_center = &reset_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
     assert(reset_center[0] == (char)255 && reset_center[1] == (char)255 && reset_center[2] == (char)255,

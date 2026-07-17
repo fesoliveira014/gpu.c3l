@@ -15,7 +15,7 @@ struct DebugCapture {
     uint              calls;
     gpu::DebugMessage last;
     bool              validation_strings_match;
-    bool              buffer_strings_match;
+    bool              span_strings_match;
     bool              device_name_matches;
     bool              messenger_failure_strings_match;
 }
@@ -29,15 +29,15 @@ fn void capture_debug_message(gpu::DebugMessage* message, void* user_data) {
         capture.validation_strings_match = message.backend_text != null
             && message.backend_text.str_view() == "fabricated validation message"
             && message.resource.debug_name != null
-            && message.resource.debug_name.str_view() == "named_buffer";
+            && message.resource.debug_name.str_view() == "named_gpu_span";
     }
-    if (message.operation != null && message.operation.str_view() == "create_buffer") {
-        capture.buffer_strings_match = message.resource.debug_name != null
-            && message.resource.debug_name.str_view() == "zero_buffer"
+    if (message.operation != null && message.operation.str_view() == "cmd_buffer_barrier") {
+        capture.span_strings_match = message.resource.debug_name != null
+            && message.resource.debug_name.str_view() == "debug_span"
             && message.rejected_field != null
-            && message.rejected_field.str_view() == "BufferDesc.size"
+            && message.rejected_field.str_view() == "BufferBarrier.span"
             && message.invariant != null
-            && message.invariant.str_view() == "must be greater than zero";
+            && message.invariant.str_view() == "span range must fit its live owner";
     }
     if (message.resource.kind == gpu::DebugResourceKind.DEVICE && message.resource.debug_name != null) {
         capture.device_name_matches = message.resource.debug_name.str_view() == "named_device";
@@ -51,7 +51,7 @@ fn void capture_debug_message(gpu::DebugMessage* message, void* user_data) {
 struct LeakCapture {
     uint total;
     uint allocations;
-    uint buffers;
+    uint gpu_spans;
     uint textures;
     uint pipelines;
     uint shaders;
@@ -64,6 +64,8 @@ struct LeakCapture {
     gpu::PipelineHandle expected_pipeline_a;
     gpu::PipelineHandle expected_pipeline_b;
     bool pipeline_identity_valid;
+    bool private_span_identity_hidden;
+    bool private_span_wording_valid;
     bool named_resources_valid;
 }
 
@@ -90,11 +92,16 @@ fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
             capture.named_resources_valid = capture.named_resources_valid
                 && message.resource.debug_name != null
                 && message.resource.debug_name.str_view() == "leaky_allocation";
-        case gpu::DebugResourceKind.BUFFER:
-            capture.buffers++;
+        case gpu::DebugResourceKind.GPU_SPAN:
+            capture.gpu_spans++;
+            capture.private_span_identity_hidden = !message.resource.has_public_identity
+                && message.resource.index == 0
+                && message.resource.generation == 0;
+            capture.private_span_wording_valid = message.backend_text != null
+                && message.backend_text.str_view() == "GPU span storage remains live";
             capture.named_resources_valid = capture.named_resources_valid
                 && message.resource.debug_name != null
-                && message.resource.debug_name.str_view() == "leaky_buffer";
+                && message.resource.debug_name.str_view() == "leaky_gpu_span_storage";
         case gpu::DebugResourceKind.TEXTURE:
             capture.textures++;
             capture.named_resources_valid = capture.named_resources_valid
@@ -192,7 +199,7 @@ fn void vulkan_debug_message_routes_structured_fields() @test {
     vk::DebugUtilsObjectNameInfoEXT object = vk::debug_utils_object_name_info_ext();
     object.object_type = vk::ObjectType.BUFFER;
     object.object_handle = 0x1234;
-    object.p_object_name = (char*)"named_buffer";
+    object.p_object_name = (char*)"named_gpu_span";
     vk::DebugUtilsMessengerCallbackDataEXT data = vk::debug_utils_messenger_callback_data_ext();
     data.p_message_id_name = (char*)"VUID-Test-123";
     data.message_id_number = 2718;
@@ -218,7 +225,8 @@ fn void vulkan_debug_message_routes_structured_fields() @test {
     assert(capture.last.category.performance, "performance category is preserved");
     assert(!capture.last.category.general, "unset general category stays clear");
     assert(capture.last.validation_id_number == 2718, "numeric validation ID is preserved");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER, "named Vulkan buffer maps to public resource kind");
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.GPU_SPAN,
+        "native Vulkan buffer maps to the semantic GPU span kind");
     assert(capture.validation_strings_match, "callback observes borrowed validation ID, text, and object name while valid");
     assert(!capture.last.resource.has_public_identity, "native callback data invents no public handle identity");
     assert(capture.last.resource.index == 0 && capture.last.resource.generation == 0,
@@ -281,7 +289,7 @@ fn void vulkan_debug_message_prefers_named_resource_and_falls_back_to_kind() @te
         data:         &data,
     );
 
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER,
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.GPU_SPAN,
         "all-unnamed objects fall back to the first mapped kind");
     assert(capture.last.resource.debug_name == null, "fallback resource has no invented name");
 }
@@ -311,27 +319,42 @@ fn void vulkan_debug_message_handles_null_callback_data() @test {
     assert(!capture.last.resource.has_public_identity, "missing objects produce no public identity");
 }
 
-fn void zero_size_buffer_diagnostic_preserves_fault() @test {
+fn void allocation_span_diagnostic_preserves_fault() @test {
     DebugCapture capture;
     gpu::DeviceDesc device_desc = {
-        .backend         = gpu::BackendKind.VULKAN,
-        .debug_callback  = &capture_debug_message,
-        .debug_user_data = &capture,
+        .backend          = gpu::BackendKind.VULKAN,
+        .debug_callback   = &capture_debug_message,
+        .debug_user_data  = &capture,
         .frames_in_flight = 2,
         .application_name = "gpu_debug_contract_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer destroy_test_device(&device)!!;
 
-    uint before = capture.calls;
-    gpu::BufferDesc desc = {
-        .size        = 0,
-        .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "zero_buffer",
+    OwnedSpan owned = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "debug_span",
+    )!!;
+    defer free_owned_span(&device, &owned)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::BufferBarrier barrier = {
+        .span          = owned.span.unchecked_subspan(48, 32),
+        .before_stage  = gpu::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::Stage.COMPUTE_SHADER,
+        .before_hazard = gpu::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::Hazard.SHADER_READ,
     };
-    fault rejected = @catch(gpu::create_buffer(&device, &desc));
+
+    uint before = capture.calls;
+    fault rejected = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
 
     assert(rejected == gpu::INVALID_ARGUMENT, "structured diagnostics do not change the public fault");
     assert(capture.calls == before + 1, "one public-contract message accompanies the fault");
@@ -339,9 +362,19 @@ fn void zero_size_buffer_diagnostic_preserves_fault() @test {
     assert(capture.last.category.public_contract, "public rejection carries the contract category");
     assert(capture.last.has_fault && capture.last.public_fault == gpu::INVALID_ARGUMENT,
         "diagnostic carries the same public fault");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER, "rejected resource kind is identified");
-    assert(!capture.last.resource.has_public_identity, "rejected create has no invented public identity");
-    assert(capture.buffer_strings_match, "callback observes borrowed operation metadata and debug name while valid");
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.ALLOCATION,
+        "rejected allocation resource kind is identified");
+    assert(capture.last.resource.has_public_identity,
+        "rejected allocation preserves its public identity");
+    assert(capture.last.resource.index == owned.span.index
+        && capture.last.resource.generation == owned.span.generation,
+        "rejected allocation preserves its slot identity");
+    assert(capture.span_strings_match,
+        "callback observes borrowed allocation/span metadata while valid");
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::end_frame(&frame)!!;
 }
 
 fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
@@ -353,15 +386,15 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
 
     fault returned = vk::report_contract_failure(
         state:               &state,
-        operation:           "create_buffer",
+        operation:           "cmd_buffer_barrier",
         public_fault:        gpu::INVALID_ARGUMENT,
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
         index:               7,
         generation:          9,
-        debug_name:          "zero_buffer",
-        rejected_field:      "BufferDesc.size",
-        invariant:           "must be greater than zero",
+        debug_name:          "debug_span",
+        rejected_field:      "BufferBarrier.span",
+        invariant:           "span range must fit its live owner",
         backend_text:        null,
     );
 
@@ -369,13 +402,13 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
     assert(capture.calls == 1, "helper dispatches exactly once");
     assert(capture.last.has_fault && capture.last.public_fault == returned,
         "structured message carries the returned fault");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.BUFFER,
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.ALLOCATION,
         "helper preserves resource kind");
     assert(capture.last.resource.has_public_identity
         && capture.last.resource.index == 7
         && capture.last.resource.generation == 9,
         "helper preserves public slot identity");
-    assert(capture.buffer_strings_match, "helper exposes borrowed contract strings only during callback delivery");
+    assert(capture.span_strings_match, "helper exposes borrowed contract strings only during callback delivery");
 }
 
 fn void debug_messenger_failure_routes_backend_warning() @test {
@@ -409,15 +442,15 @@ fn void debug_names_do_not_require_validation() @test {
 
     assert(state.debug_names, "backend retains the debug-name opt-in without validation");
 
-    gpu::BufferDesc buffer_desc = {
+    vk::BufferDesc buffer_desc = {
         .size        = 64,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "names_without_validation",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    gpu::destroy_buffer(&device, buffer)!!;
+    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &buffer_desc)!!;
+    vk::vk_destroy_buffer(&device, buffer)!!;
 }
 
 fn gpu::Device make_dbg_device() {
@@ -434,14 +467,14 @@ fn void leak_reporters_count_leaks() @test {
     gpu::Device device = make_dbg_device();
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    gpu::BufferDesc buf_desc = {
+    vk::BufferDesc buf_desc = {
         .size        = 256,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
         .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "leaky_buffer",
+        .debug_name  = "leaky_gpu_span_storage",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buf_desc)!!;
+    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &buf_desc)!!;
 
     gpu::AllocationDesc allocation_desc = {
         .size         = 256,
@@ -492,7 +525,7 @@ fn void leak_reporters_count_leaks() @test {
     state.debug_callback = &capture_leak_message;
     state.debug_user_data = &capture;
 
-    assert(vk::report_buffer_leaks(state) == 1, "one leaked buffer counted");
+    assert(vk::report_buffer_leaks(state) == 1, "one private GPU span backing leak counted");
     assert(vk::report_allocation_leaks(state) == 1,
         "one leaked allocation counted");
     assert(vk::report_texture_leaks(state) == 1, "one leaked texture counted");
@@ -501,19 +534,23 @@ fn void leak_reporters_count_leaks() @test {
 
     vk::report_descriptor_leaks(state);
 
-    assert(capture.total == 7, "each public resource or descriptor emits one warning");
-    assert(capture.allocations == 1 && capture.buffers == 1
+    assert(capture.total == 7, "each reported resource or descriptor emits one warning");
+    assert(capture.allocations == 1 && capture.gpu_spans == 1
         && capture.textures == 1 && capture.pipelines == 1,
-        "allocation, buffer, texture, and pipeline leak kinds are exact");
+        "allocation, GPU span, texture, and pipeline leak kinds are exact");
     assert(capture.shaders == 1,
         "private recording pools are not public resource leaks");
     assert(capture.texture_descriptors == 1 && capture.samplers == 1,
         "descriptor leak kinds are exact");
-    assert(capture.public_identities == 7,
-        "every slot-backed leak carries one public identity");
+    assert(capture.public_identities == 6,
+        "only strict public resources carry slot identities");
+    assert(capture.private_span_identity_hidden,
+        "private backing storage exposes no private handle identity");
+    assert(capture.private_span_wording_valid,
+        "private backing storage uses semantic GPU span wording");
     assert(capture.pipeline_identity_valid, "pipeline cache leak identifies one live public alias");
     assert(capture.metadata_valid, "leak diagnostics are warning, resource-lifetime, faultless destroy-device messages");
-    assert(capture.named_resources_valid, "slot-owned buffer and texture names are observed during the callback");
+    assert(capture.named_resources_valid, "slot-owned storage and texture names are observed during the callback");
 
     // Slot data feeding the report lines.
     vk::TextureSlot* tex_slot = &state.textures.slots[texture.index].value;
@@ -526,7 +563,7 @@ fn void leak_reporters_count_leaks() @test {
     gpu::destroy_pipeline(&device, second_alias)!!;
     gpu::destroy_shader(&device, shader)!!;
     gpu::destroy_texture(&device, texture)!!;
-    gpu::destroy_buffer(&device, buffer)!!;
+    vk::vk_destroy_buffer(&device, buffer)!!;
     gpu::free_allocation(&device, &allocation)!!;
 
     gpu::PersistentAllocDesc persistent_desc = {
@@ -558,15 +595,15 @@ fn void debug_name_copy_is_independent() @test {
     for (uint i = 0; i < 7; i++) volatile_name[i] = source[i];
     volatile_name[7] = 0;
 
-    gpu::BufferDesc desc = {
+    vk::BufferDesc desc = {
         .size        = 64,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = (ZString)&volatile_name[0],
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &desc)!!;
+    defer vk::vk_destroy_buffer(&device, buffer)!!;
 
     foreach (&b : volatile_name) *b = 'X';
 
@@ -575,15 +612,26 @@ fn void debug_name_copy_is_independent() @test {
         "the slot holds its own copy, unaffected by the caller's buffer");
 }
 
-fn void stats_counts_populated() @test {
+fn void stats_cover_public_allocations_textures_and_budgets() @test {
     gpu::Device device = make_dbg_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferHandle[3] buffers;
+    gpu::MemoryStats baseline = gpu::get_memory_stats(&device)!!;
+    gpu::GpuAllocation[3] allocations;
     for (uint i = 0; i < 3; i++) {
-        gpu::BufferDesc desc = { .size = 128, .usage = { .storage }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-        buffers[i] = gpu::create_buffer(&device, &desc)!!;
+        gpu::AllocationDesc desc = {
+            .size         = 128,
+            .alignment    = 16,
+            .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+            .access       = { .graphics, .compute, .transfer },
+        };
+        allocations[i] = gpu::allocate_memory(&device, &desc)!!;
     }
+    gpu::MemoryStats allocated = gpu::get_memory_stats(&device)!!;
+    assert(allocated.live_allocation_count
+        >= baseline.live_allocation_count + (ulong)allocations.len,
+        "public allocations contribute to live allocation statistics");
+
     gpu::TextureHandle[2] textures;
     for (uint i = 0; i < 2; i++) {
         gpu::TextureDesc desc = {
@@ -598,14 +646,18 @@ fn void stats_counts_populated() @test {
     }
 
     gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
-    assert(stats.buffer_count == 3, "buffer count reflects live buffers");
-    assert(stats.texture_count == 2, "texture count reflects live textures");
-    assert(stats.heap_count > 0 && stats.heaps[0].budget > 0, "stats include a VMA budget");
+    assert(stats.texture_count == baseline.texture_count + (ulong)textures.len,
+        "public texture count reflects live textures");
+    assert(stats.heap_count > 0 && stats.heaps[0].budget > 0,
+        "memory stats include a valid heap budget");
 
-    foreach (t : textures) gpu::destroy_texture(&device, t)!!;
-    foreach (b : buffers) gpu::destroy_buffer(&device, b)!!;
+    foreach (texture : textures) gpu::destroy_texture(&device, texture)!!;
+    for (uint i = 0; i < allocations.len; i++) {
+        gpu::free_allocation(&device, &allocations[i])!!;
+    }
     stats = gpu::get_memory_stats(&device)!!;
-    assert(stats.buffer_count == 0 && stats.texture_count == 0, "counts drop to zero after destroy");
+    assert(stats.texture_count == baseline.texture_count,
+        "destroyed public textures leave no live texture count");
 }
 
 fn void labels_record_validation_clean() @test {
@@ -666,21 +718,19 @@ fn void labels_record_validation_clean() @test {
     assert(end_stale == gpu::INVALID_HANDLE, "ending a label on a consumed list faults INVALID_HANDLE");
 }
 
-fn void live_resource_report_precedes_retryable_destruction() @test {
+fn void live_backend_resource_is_reported_before_device_teardown() @test {
     gpu::Device device = make_dbg_device();
-    gpu::BufferDesc desc = {
+    vk::BufferDesc desc = {
         .size        = 128,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "canary_buffer",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
+    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &desc)!!;
+    assert(buffer.is_valid(), "private backend storage is live");
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(vk::report_resource_leaks(state) == 1, "the live buffer is reported");
-    assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
-        "a reported live resource still blocks destruction");
-    gpu::destroy_buffer(&device, buffer)!!;
+    assert(vk::report_resource_leaks(state) == 1, "the live private backing is reported");
     gpu::destroy_device(&device)!!;
 }
 
@@ -697,21 +747,25 @@ fn void callback_reports_leaks_without_validation() @test {
         .application_name  = "gpu_callback_leak_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
-    gpu::BufferDesc buffer_desc = {
+    vk::BufferDesc buffer_desc = {
         .size        = 128,
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
         .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "leaky_buffer",
+        .debug_name  = "leaky_gpu_span_storage",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &buffer_desc)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(vk::report_resource_leaks(state) == 1, "the live buffer is reported");
+    assert(vk::report_resource_leaks(state) == 1, "the live private backing is reported");
 
-    assert(capture.total == 1 && capture.buffers == 1,
-        "callback receives one leaked-buffer warning without validation");
+    assert(capture.total == 1 && capture.gpu_spans == 1,
+        "callback receives one private-storage warning without validation");
     assert(capture.metadata_valid && capture.named_resources_valid,
         "the report preserves structured leak metadata");
-    gpu::destroy_buffer(&device, buffer)!!;
+    assert(capture.private_span_identity_hidden,
+        "private backing storage exposes no private handle identity");
+    assert(capture.private_span_wording_valid,
+        "private backing storage uses semantic GPU span wording");
+    vk::vk_destroy_buffer(&device, buffer)!!;
     gpu::destroy_device(&device)!!;
 }

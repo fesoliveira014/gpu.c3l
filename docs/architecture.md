@@ -61,7 +61,6 @@ gpu.c3l/
 │   ├── device.c3
 │   ├── queue.c3
 │   ├── memory.c3
-│   ├── buffer.c3
 │   ├── texture.c3
 │   ├── descriptor_heap.c3
 │   ├── shader_abi.c3
@@ -136,7 +135,7 @@ destroy_runtime(Runtime*)          -> void?
 
 `AdapterList` is an allocation-free view. Its adapters and the read-only strings in adapter query results are borrowed until their runtime is destroyed. Destroying a runtime consumes its token, invalidates its adapter views and handles, and returns `RESOURCE_IN_USE` while a dependent surface or device is live.
 
-Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact borrowed adapter, retains its runtime, and reuses the runtime-owned backend instance. `supports_device_request` is read-only and does not enable state. The transitional `create_device_from_desc(DeviceDesc*)` path is headless, performs independent discovery, and owns a separate backend instance.
+Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact borrowed adapter, retains its runtime, and reuses the runtime-owned backend instance. `supports_device_request` is read-only and does not enable state. The direct `create_device_from_desc(DeviceDesc*)` path is headless, performs independent discovery, and owns a separate backend instance.
 
 ### Surfaces
 
@@ -206,9 +205,9 @@ device-and-kind owner plus a local slot and generation. Backend tables reject
 foreign owners before validating liveness and generation. `GpuSpan` carries
 the same identity plus offset and size, but does not own storage. Frame and
 command tokens derive ownership from their device. Shader-visible indices and
-GPU addresses remain caller-lifetime values rather than ownership tokens. The
-transitional descriptor release API still accepts raw indices; see
-`docs/limitations.md`.
+GPU addresses remain caller-lifetime values rather than ownership tokens.
+Descriptor release accepts `TextureIndex` and `SamplerIndex` values without
+device-owner metadata; `docs/limitations.md` describes the cross-device risk.
 
 ### Queues
 
@@ -235,13 +234,12 @@ identity with a shared role mask. The Vulkan backend allocates every selected
 native identity. Each identity owns a private completion timeline and monotonic
 submission sequence. Command entry points take `QueueKind`.
 
-`AllocationDesc`, `BufferDesc`, `TextureDesc`, and
-`PersistentAllocDesc` declare a non-empty `QueueRoles` access set. The
-backend stores it as immutable resource metadata. Span resolution recovers that
-metadata and validates liveness, device ownership, bounds, and the recording
-role before backend state changes. A span cannot widen access because it
-contains no public access field. Root-addressed shader access remains a caller
-precondition because nested pointers are opaque.
+`AllocationDesc`, `TextureDesc`, and `PersistentAllocDesc` declare a
+non-empty `QueueRoles` access set. The backend stores it as immutable resource
+metadata. Span resolution validates liveness, device ownership, bounds, and the
+recording role before backend state changes. A span cannot widen access because
+it contains no public access field. Root-addressed shader access remains a
+caller precondition because nested pointers are opaque.
 
 The backend deduplicates only admitted roles' native families: one family stays
 exclusive; multiple families use private concurrent sharing.
@@ -287,37 +285,16 @@ skip native visibility calls. Non-coherent atom alignment remains private.
 `free_allocation` consumes its token only after success. It requires quiescent
 GPU use and destroys storage immediately.
 
-### Buffers
+### Private buffer backing
 
-Buffers are backend-owned resources with optional CPU mapping and optional shader-visible GPU address.
+The public API has no buffer object. Generic GPU data is owned by
+`GpuAllocation`, borrowed as `GpuSpan`, and addressed as `GpuAddress`.
+Copy, fill, index, indirect, upload, and readback operations resolve spans to
+private native buffers.
 
-Public uses:
-
-```text
-copy source/destination
-shader-readable/writable storage
-indirect command buffers
-index buffers
-fixed vertex buffers when needed
-arena backing buffers
-readback buffers
-```
-
-Backend slot:
-
-```text
-BufferSlot
-    vk::Buffer buffer
-    vma::Allocation allocation
-    vma::AllocationInfo allocation_info
-    vk::DeviceAddress gpu_base
-    void* cpu_base
-    usz size
-    BufferUsage usage
-    MemoryKind memory_kind
-    ushort generation
-    bool used
-```
+The Vulkan backend may use private `BufferHandle`, `BufferDesc`, and
+`BufferUsage` declarations for allocation and arena backing. They remain in
+`gpu::vk` and never cross backend dispatch.
 
 ### Textures
 
@@ -361,7 +338,7 @@ TextureHandle -> lifetime and commands
 TextureIndex  -> shader-visible sampled/storage reference
 ```
 
-Destroying a texture must invalidate or reject descriptors pointing at it according to the final debug policy. The safer initial policy is to require descriptor destruction before texture destruction in debug builds and report a fault otherwise.
+Destroying a texture with live descriptors returns `RESOURCE_IN_USE`.
 
 ### Pipelines
 
@@ -409,7 +386,6 @@ Creation functions return fallible values:
 ```text
 Device?
 GpuAllocation?
-BufferHandle?
 TextureHandle?
 PipelineHandle?
 GpuSpan?
@@ -439,9 +415,9 @@ retire_frame(frame_index)
     destroy resources whose retire_timeline <= completed_timeline
 ```
 
-Calling `destroy_buffer` removes the public handle immediately, but backend
-destruction may be deferred. Independent allocations instead require quiescence
-and are freed immediately.
+Textures, pipelines, and shaders may defer native destruction after their
+public handles are consumed. Independent allocations require quiescence and
+free their private backing immediately.
 
 ## 7. Frame model
 

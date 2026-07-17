@@ -37,8 +37,8 @@ Use:
 
 ```text
 create_device
-create_buffer
-destroy_buffer
+allocate_memory
+free_allocation
 begin_commands
 cmd_dispatch
 cmd_barrier
@@ -48,7 +48,7 @@ Do not use project-owned OO-style constructors such as:
 
 ```text
 Device.create
-Buffer.create
+GpuAllocation.create
 Texture.destroy
 ```
 
@@ -200,8 +200,8 @@ report unavailable counts or topology without enabling device state.
 
 A live adapter-created device retains its runtime and reuses the runtime-owned
 backend instance. Destroy the device before destroying that runtime.
-`create_device_from_desc` remains as a transitional direct-device path for
-existing headless consumers; it performs its own discovery and owns that discovery state.
+`create_device_from_desc` is the direct headless convenience path; it performs
+its own discovery and owns that discovery state.
 
 ```text
 DescriptorHeapMode
@@ -311,7 +311,6 @@ contain an opaque device-and-kind owner identity plus a local slot and generatio
 
 ```text
 GpuAllocation
-BufferHandle
 TextureHandle
 PipelineHandle
 ShaderHandle
@@ -320,10 +319,11 @@ SwapchainHandle
 
 (Samplers have no handle — they are `SamplerIndex` heap indices.)
 
-Invalid sentinels are module constants (`BUFFER_HANDLE_INVALID`, ...), all
-zero-valued. `handle.is_valid()` checks the owner and generation; operations
-also validate the local slot generation. Public code should not inspect or
-construct the representation.
+Owning tokens have zero-valued invalid constants such as
+`GPU_ALLOCATION_INVALID` and `TEXTURE_HANDLE_INVALID`.
+`token.is_valid()` checks the owner and generation; operations also validate
+the local slot generation. Public code should not inspect or construct the
+representation.
 
 Handles, `Queue`, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
 command tokens, and synchronization values are runtime-only and scoped to their
@@ -351,8 +351,8 @@ GpuSpan
 ```
 
 The identity fields are opaque. Consumers may copy a complete span only for the
-lifetime documented by its producer; allocation, buffer, frame, and persistent
-spans have different expiry rules. Do not construct or mutate the identity.
+lifetime documented by its producer; allocation, frame, and persistent spans
+have different expiry rules. Do not construct or mutate the identity.
 Mapping, address, access, bounds, and native backing remain device-owned and are
 recovered when a public operation resolves the span. A zero `GpuAddress` is
 invalid.
@@ -386,7 +386,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit`; readback polling/resolution | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame, or readback alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver host-allocation failure |
-| `OUT_OF_DEVICE_MEMORY` | allocation, buffer, and texture creates; mapped visibility | backend device-memory exhaustion |
+| `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
 | `RESOURCE_IN_USE` | `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface`, `destroy_texture` | a placed resource still depends on an allocation; a device has a live child; a runtime has a live surface or device; a surface has a live swapchain; or a live `TextureIndex` owns a texture |
@@ -468,15 +468,12 @@ preserve the token. `RESOURCE_IN_USE` is reserved for a live resource placement;
 the root module exposes no placement creation operation. A live allocation
 also prevents normal device destruction.
 
-### Memory kinds
+### Arena memory selector
 
-```text
-MemoryKind.FRAME_UPLOAD
-MemoryKind.PERSISTENT_UPLOAD
-MemoryKind.DEVICE
-MemoryKind.READBACK
-MemoryKind.STAGING
-```
+`MemoryKind` is not an independent-allocation selector. Public code uses it
+only in `PersistentAllocDesc`, where `PERSISTENT_UPLOAD` is required.
+Independent allocations use `MemoryClass`; frame and transfer APIs select
+their private backing policy.
 
 ### Frame spans
 
@@ -509,7 +506,7 @@ For fallible frame work, use the compile-time direct-call helper:
 
 ```c3
 fn void? render_frame(gpu::FrameToken* frame, RenderState* state) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::align)!;
     record_rendering(&frame.device, state, root_span)!;
 }
 
@@ -544,13 +541,12 @@ small per-frame tables
 
 ### Persistent spans
 
-Persistent spans are suballocations from large VMA-backed buffers.
+Persistent spans are long-lived suballocations from a host-coherent arena.
 
 ```text
 PersistentAllocDesc
     usz size
     usz align
-    BufferUsage usage
     MemoryKind memory_kind
     QueueRoles access
     ZString debug_name
@@ -559,57 +555,22 @@ alloc_persistent_span(Device* device, PersistentAllocDesc* desc) -> GpuSpan?
 free_persistent_span(Device* device, GpuSpan span) -> void?
 ```
 
-`PersistentAllocDesc.access` is required and stored with the allocation. The
-arena backing remains available to all selected roles; span resolution recovers
-each live range's immutable bounds and narrower access.
-Explicit buffers and textures derive private native
-sharing from their own `access` fields: one unique family stays exclusive, while
-two or more use the exact ordered family list.
+`size` must be nonzero; `align` is zero or a power of two; `memory_kind`
+must be `PERSISTENT_UPLOAD`; and `access` must be a non-empty subset of
+selected roles. The arena backing admits every selected role while each span
+retains its narrower access.
+Independent allocations and textures derive private native sharing from their
+own `access` fields: one unique family stays exclusive, while two or more use
+the exact ordered family list.
 
-Concurrent sharing does not provide visibility, execution ordering, completion,
-or lifetime management. Callers must retain the required flushes, barriers,
-completion-point dependencies, and host waits, and may call
-`free_persistent_span` only after all work referencing the span retires. Spans
-are scoped to their owning `Device` and cannot be passed to another device.
+Persistent-arena backing is host-coherent, so mapped writes need no explicit
+flush. Callers still provide barriers, completion-point dependencies, host
+waits, and lifetime management. Call `free_persistent_span` only after all
+referencing work retires. Spans are scoped to their owning `Device`.
 
-### Explicit buffers
+### Span transfers
 
-`BufferUsage` is a bitstruct of bool flags, composed by field-set
-(`{ .storage, .addressable }`), not OR-combined enum values.
-
-```text
-bitstruct BufferUsage : uint
-    bool transfer_src : 0
-    bool transfer_dst : 1
-    bool uniform      : 2
-    bool storage      : 3
-    bool addressable  : 4
-    bool indirect     : 5
-    bool index        : 6
-    bool vertex       : 7
-
-BufferDesc
-    usz size
-    BufferUsage usage
-    MemoryKind memory_kind
-    QueueRoles access
-    ZString debug_name
-
-create_buffer(Device* device, BufferDesc* desc) -> BufferHandle?
-destroy_buffer(Device* device, BufferHandle buffer) -> void?
-get_buffer_span(Device* device, BufferHandle buffer) -> GpuSpan?
-get_buffer_address(Device* device, BufferHandle buffer) -> GpuAddress?
-flush_buffer(Device* device, BufferHandle buffer, usz offset, usz size) -> void?
-invalidate_buffer(Device* device, BufferHandle buffer, usz offset, usz size) -> void?
-```
-
-`get_buffer_address` faults if the buffer was not created with the
-`addressable` usage flag set. There is no map/unmap pair: mappable memory
-kinds are persistently mapped and exposed through
-`get_span_mapping(device, get_buffer_span(device, buffer)!)`, paired with
-`flush_buffer`/`invalidate_buffer` for non-coherent ranges.
-
-Buffer upload and blocking readback use exact spans:
+Upload and blocking readback use exact spans:
 
 ```text
 cmd_upload_buffer(CommandList* commands, GpuSpan dst, char[] data) -> void?
@@ -1514,71 +1475,66 @@ SDL integration belongs in samples or an optional helper module.
 
 ## 11. Example: root-pointer compute
 
-Pseudo-code:
-
 ```c3
 import gpu;
 
 struct RootArgs {
     gpu::GpuAddress input;
     gpu::GpuAddress output;
-    uint count;
-    uint _pad0, _pad1, _pad2;
+    uint            count;
+    uint            _pad0;
+    uint            _pad1;
+    uint            _pad2;
 }
 
 struct ComputeWork {
-    gpu::Device*       device;
-    gpu::BufferHandle  input;
+    gpu::Device*        device;
+    gpu::GpuSpan        input;
+    gpu::GpuSpan        output;
     gpu::PipelineHandle pipeline;
 }
 
-fn void? run_compute() {
-    gpu::RuntimeDesc runtime_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
-        .application_name  = "root_pointer_compute",
+fn void? run_compute(gpu::Device* device, gpu::PipelineHandle pipeline) {
+    gpu::AllocationDesc storage_desc = {
+        .size         = 8192,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = { .compute },
+        .debug_name   = "compute_storage",
     };
-    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
-    defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
-    gpu::Adapter adapter = adapters.get(0)!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
-    gpu::DeviceRequestSupport support =
-        gpu::supports_device_request(&adapter, &request)!;
-    if (!support.supported) return gpu::UNSUPPORTED_FEATURE~;
+    gpu::GpuAllocation storage = gpu::allocate_memory(device, &storage_desc)!;
+    defer (void)gpu::free_allocation(device, &storage);
 
-    gpu::Device device = gpu::create_device(&adapter, &request)!;
-    defer gpu::destroy_device(&device)!!;
-
-    gpu::BufferDesc input_desc = {
-        .size = 4096,
-        .usage = { .storage, .addressable, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access = { .compute },
-        .debug_name = "input",
+    gpu::GpuSpan storage_span = gpu::get_allocation_span(device, storage)!;
+    ComputeWork work = {
+        .device   = device,
+        .input    = storage_span.checked_subspan(0, 4096)!,
+        .output   = storage_span.checked_subspan(4096, 4096)!,
+        .pipeline = pipeline,
     };
-
-    gpu::BufferHandle input = gpu::create_buffer(&device, &input_desc)!;
-    defer gpu::destroy_buffer(&device, input)!!;
-
-    ComputeWork work = { .device = &device, .input = input, .pipeline = pipeline };
     gpu::FrameToken frame;
-    gpu::@with_frame(&frame, &device, record_compute, &work)!;
+    gpu::@with_frame(&frame, device, record_compute, &work)!;
 }
 
 fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
-    RootArgs* root = (RootArgs*)gpu::get_span_mapping(work.device, root_span)!.ptr;
-    gpu::GpuAddress root_address = gpu::get_span_address(work.device, root_span)!;
-    root.input = gpu::get_buffer_address(work.device, work.input)!;
+    gpu::GpuSpan root_span = gpu::alloc_frame_span(
+        frame,
+        RootArgs::size,
+        RootArgs::align,
+    )!;
+    RootArgs* root =
+        (RootArgs*)gpu::get_span_mapping(work.device, root_span)!.ptr;
+    root.input = gpu::get_span_address(work.device, work.input)!;
+    root.output = gpu::get_span_address(work.device, work.output)!;
     root.count = 1024;
+
     gpu::Queue queue = gpu::get_queue(work.device, gpu::QueueKind.COMPUTE)!;
     gpu::CommandList commands = gpu::begin_commands(queue)!;
     defer (void)gpu::discard_commands(&commands);
     gpu::cmd_dispatch(
         commands: &commands,
         pipeline: work.pipeline,
-        root:     root_address,
+        root:     gpu::get_span_address(work.device, root_span)!,
         groups:   { 16, 1, 1 },
     )!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
@@ -1586,8 +1542,9 @@ fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
-    gpu::wait_completion(completion, ulong::max)!;
+    gpu::wait_completion(completion)!;
 }
+
 ```
 
 ## 12. API acceptance criteria
@@ -1598,6 +1555,7 @@ The public API is acceptable when:
 no public signature exposes vk::, vma::, or sdl:: types
 all fallible operations return optionals/faults
 all resources have explicit destruction or frame ownership
+generic GPU data uses allocations, spans, and addresses without a public buffer object
 root-pointer compute can be written without descriptor-set concepts
 texture sampling can be written with TextureIndex and SamplerIndex
 barriers are explicit and expressive enough for all samples

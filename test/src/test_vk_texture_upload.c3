@@ -2,10 +2,6 @@ module gpu_test;
 
 import gpu;
 
-// Headless (lavapipe): texture uploads and readbacks. Shares SampleRoot,
-// quantize_unorm8, and the embedded heap shaders with test_vk_texture_heap.c3
-// (same test target).
-
 const uint UP_SIZE = 8;
 const usz MIP0_BYTES = UP_SIZE * UP_SIZE * 4;
 const usz MIP1_BYTES = (UP_SIZE / 2) * (UP_SIZE / 2) * 4;
@@ -24,8 +20,6 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::Device device = make_upload_test_device();
     defer destroy_test_device(&device)!!;
 
-    // Sampled-only (no storage): descriptor expects SHADER_READ, proving the
-    // usage-implies-layout convention end to end.
     gpu::TextureDesc tex_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
@@ -51,17 +45,15 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
     defer gpu::destroy_sampler(&device, smp_index)!!;
 
-    gpu::BufferDesc staging_desc = {
-        .size        = MIP0_BYTES + MIP1_BYTES,
-        .usage       = { .transfer_src },
-        .memory_kind = gpu::MemoryKind.STAGING,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "upload_staging",
-    };
-    gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
-    defer gpu::destroy_buffer(&device, staging)!!;
-
-    gpu::GpuSpan staging_span = gpu::get_buffer_span(&device, staging)!!;
+    OwnedSpan staging = allocate_owned_span(
+        device:       &device,
+        size:         MIP0_BYTES + MIP1_BYTES,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "upload_staging",
+    )!!;
+    defer free_owned_span(&device, &staging)!!;
+    gpu::GpuSpan staging_span = staging.span;
     char* bytes = (char*)test_span_mapping(&device, staging_span).ptr;
     for (uint y = 0; y < UP_SIZE; y++) {
         for (uint x = 0; x < UP_SIZE; x++) {
@@ -81,27 +73,24 @@ fn void sampled_texture_upload_and_mip_readback() @test {
             texel[3] = (char)255;
         }
     }
-    gpu::flush_buffer(&device, staging, 0, 0)!!;
+    gpu::flush_mapped_span(&device, staging.span)!!;
 
-    gpu::BufferDesc out_desc = {
-        .size        = UP_SIZE * UP_SIZE * 16,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "sample_output",
-    };
-    gpu::BufferHandle sample_out = gpu::create_buffer(&device, &out_desc)!!;
-    defer gpu::destroy_buffer(&device, sample_out)!!;
-
-    gpu::BufferDesc rb_desc = {
-        .size        = MIP1_BYTES,
-        .usage       = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "mip1_readback",
-    };
-    gpu::BufferHandle mip1_readback = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, mip1_readback)!!;
+    OwnedSpan sample_out = allocate_owned_span(
+        device:       &device,
+        size:         UP_SIZE * UP_SIZE * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "sample_output",
+    )!!;
+    defer free_owned_span(&device, &sample_out)!!;
+    OwnedSpan mip1_readback = allocate_owned_span(
+        device:       &device,
+        size:         MIP1_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "mip1_readback",
+    )!!;
+    defer free_owned_span(&device, &mip1_readback)!!;
 
     gpu::ShaderDesc sample_sd = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
@@ -116,7 +105,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
 
     gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
-    sample_root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
+    sample_root.output_gpu    = test_span_address(&device, sample_out.span);
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
     sample_root.width         = UP_SIZE;
@@ -160,6 +149,15 @@ fn void sampled_texture_upload_and_mip_readback() @test {
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
+    gpu::BufferBarrier sample_host_read = {
+        .span          = sample_out.span,
+        .before_stage  = gpu::Stage.COMPUTE_SHADER,
+        .after_stage   = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.SHADER_WRITE,
+        .after_hazard  = gpu::Hazard.HOST_READ,
+    };
+    gpu::cmd_buffer_barrier(&cmd, &sample_host_read)!!;
+
     gpu::TextureBarrier to_src = {
         .texture       = texture,
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
@@ -171,7 +169,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
-    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, mip1_readback)!!;
+    gpu::GpuSpan rb_span = mip1_readback.span;
     gpu::TextureBufferCopyDesc mip1_out = {
         .texture = texture,
         .dst     = rb_span,
@@ -194,7 +192,8 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
+    gpu::invalidate_mapped_span(&device, sample_out.span)!!;
+    gpu::GpuSpan out_span = sample_out.span;
     float* texels = (float*)test_span_mapping(&device, out_span).ptr;
     for (uint y = 0; y < UP_SIZE; y++) {
         for (uint x = 0; x < UP_SIZE; x++) {
@@ -205,7 +204,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
         }
     }
 
-    gpu::invalidate_buffer(&device, mip1_readback, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, mip1_readback.span)!!;
     char* mip1_bytes = (char*)test_span_mapping(&device, rb_span).ptr;
     for (uint y = 0; y < UP_SIZE / 2; y++) {
         for (uint x = 0; x < UP_SIZE / 2; x++) {
@@ -236,14 +235,14 @@ fn void storage_write_direct_readback() @test {
     gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, texture, null)!!;
     defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
 
-    gpu::BufferDesc rb_desc = {
-        .size        = MIP0_BYTES,
-        .usage       = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &rb_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         MIP0_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "storage_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
 
     gpu::ShaderDesc write_sd = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main",
@@ -293,7 +292,7 @@ fn void storage_write_direct_readback() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
-    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
+    gpu::GpuSpan rb_span = readback.span;
     gpu::TextureBufferCopyDesc copy = { .texture = texture, .dst = rb_span };
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
 
@@ -311,7 +310,7 @@ fn void storage_write_direct_readback() @test {
     submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
-    gpu::invalidate_buffer(&device, readback, 0, 0)!!;
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
     char* bytes = (char*)test_span_mapping(&device, rb_span).ptr;
     for (uint y = 0; y < UP_SIZE; y++) {
         for (uint x = 0; x < UP_SIZE; x++) {
@@ -340,21 +339,20 @@ fn void copy_validation_faults() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc staging_desc = {
-        .size        = MIP0_BYTES,
-        .usage       = { .transfer_src },
-        .memory_kind = gpu::MemoryKind.STAGING,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
-    defer gpu::destroy_buffer(&device, staging)!!;
-    gpu::GpuSpan span = gpu::get_buffer_span(&device, staging)!!;
+    OwnedSpan staging = allocate_owned_span(
+        device:       &device,
+        size:         MIP0_BYTES,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "copy_validation_staging",
+    )!!;
+    defer free_owned_span(&device, &staging)!!;
+    gpu::GpuSpan span = staging.span;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
-    // Tracked layout is UNDEFINED, not TRANSFER_DST.
     gpu::BufferTextureCopyDesc wrong_layout = { .src = span, .texture = texture };
     fault layout_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &wrong_layout));
     assert(layout_fault == gpu::INVALID_RESOURCE_STATE, "copy into a non-TRANSFER_DST layout faults INVALID_RESOURCE_STATE");
@@ -386,7 +384,6 @@ fn void copy_validation_faults() @test {
     fault mip_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &bad_mip));
     assert(mip_fault == gpu::INVALID_ARGUMENT, "copy to a missing mip faults INVALID_ARGUMENT");
 
-    // No transfer_src usage: reading the texture back must fault.
     gpu::TextureBufferCopyDesc no_src_usage = { .texture = texture, .dst = span };
     fault usage_fault = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &no_src_usage));
     assert(usage_fault == gpu::INVALID_ARGUMENT, "texture without transfer_src faults INVALID_ARGUMENT on readback");
@@ -432,12 +429,15 @@ fn void mip_subset_view_sampled() @test {
     gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
     defer gpu::destroy_sampler(&device, smp_index)!!;
 
-    gpu::BufferDesc staging_desc = {
-        .size = MIP0_BYTES + MIP1_BYTES, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
-    defer gpu::destroy_buffer(&device, staging)!!;
-    gpu::GpuSpan staging_span = gpu::get_buffer_span(&device, staging)!!;
+    OwnedSpan staging = allocate_owned_span(
+        device:       &device,
+        size:         MIP0_BYTES + MIP1_BYTES,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "mip_subset_staging",
+    )!!;
+    defer free_owned_span(&device, &staging)!!;
+    gpu::GpuSpan staging_span = staging.span;
     char* bytes = (char*)test_span_mapping(&device, staging_span).ptr;
     for (uint i = 0; i < UP_SIZE * UP_SIZE; i++) {
         bytes[i * 4] = (char)10; bytes[i * 4 + 1] = (char)20; bytes[i * 4 + 2] = (char)30; bytes[i * 4 + 3] = (char)255;
@@ -446,16 +446,16 @@ fn void mip_subset_view_sampled() @test {
         char* texel = &bytes[MIP0_BYTES + (usz)i * 4];
         texel[0] = (char)200; texel[1] = (char)210; texel[2] = (char)220; texel[3] = (char)255;
     }
-    gpu::flush_buffer(&device, staging, 0, 0)!!;
+    gpu::flush_mapped_span(&device, staging.span)!!;
 
-    gpu::BufferDesc out_desc = {
-        .size        = (UP_SIZE / 2) * (UP_SIZE / 2) * 16,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle sample_out = gpu::create_buffer(&device, &out_desc)!!;
-    defer gpu::destroy_buffer(&device, sample_out)!!;
+    OwnedSpan sample_out = allocate_owned_span(
+        device:       &device,
+        size:         (UP_SIZE / 2) * (UP_SIZE / 2) * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "mip_subset_output",
+    )!!;
+    defer free_owned_span(&device, &sample_out)!!;
 
     gpu::ShaderDesc sample_sd = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
@@ -469,7 +469,7 @@ fn void mip_subset_view_sampled() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* root = (SampleRoot*)test_span_mapping(&device, root_span).ptr;
-    root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
+    root.output_gpu    = test_span_address(&device, sample_out.span);
     root.texture_index = tex_index;
     root.sampler_index = smp_index;
     root.width         = UP_SIZE / 2;
@@ -510,7 +510,7 @@ fn void mip_subset_view_sampled() @test {
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier out_bar = {
-        .span = gpu::get_buffer_span(&device, sample_out)!!,
+        .span = sample_out.span,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -522,28 +522,30 @@ fn void mip_subset_view_sampled() @test {
     submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
+    gpu::invalidate_mapped_span(&device, sample_out.span)!!;
+    gpu::GpuSpan out_span = sample_out.span;
     float* sampled = (float*)test_span_mapping(&device, out_span).ptr;
     assert(quantize_unorm8(sampled[0]) == 200, "mip-subset view samples mip 1, not mip 0");
     assert(quantize_unorm8(sampled[1]) == 210, "mip-subset view green matches mip 1");
     gpu::end_frame(&frame_token)!!;
 }
 
-fn void flush_invalidate_stale_handle_faults() @test {
+fn void mapped_span_stale_owner_faults() @test {
     gpu::Device device = make_upload_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = {
-        .size        = 64,
-        .usage       = { .transfer_src },
-        .memory_kind = gpu::MemoryKind.STAGING,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    gpu::flush_buffer(&device, buffer, 0, 0)!!;
-    gpu::invalidate_buffer(&device, buffer, 0, 64)!!;
-    gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan owned = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "stale_mapped_span",
+    )!!;
+    gpu::GpuSpan stale = owned.span;
+    gpu::flush_mapped_span(&device, stale)!!;
+    gpu::invalidate_mapped_span(&device, stale)!!;
+    free_owned_span(&device, &owned)!!;
 
-    fault stale_fault = @catch(gpu::flush_buffer(&device, buffer, 0, 0));
-    assert(stale_fault == gpu::INVALID_HANDLE, "flush on a destroyed buffer faults INVALID_HANDLE");
+    fault stale_fault = @catch(gpu::flush_mapped_span(&device, stale));
+    assert(stale_fault == gpu::INVALID_HANDLE, "flush on a freed allocation faults INVALID_HANDLE");
 }

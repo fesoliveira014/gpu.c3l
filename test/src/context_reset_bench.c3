@@ -85,15 +85,16 @@ fn int main() {
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_bench_device(&device)!!;
 
-    gpu::BufferDesc buf_desc = {
-        .size        = BENCH_WORKERS * BENCH_FILL_STRIDE,
-        .usage       = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
+    gpu::AllocationDesc target_desc = {
+        .size         = BENCH_WORKERS * BENCH_FILL_STRIDE,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = { .graphics, .compute, .transfer },
+        .debug_name   = "context_reset_target",
     };
-    gpu::BufferHandle target = gpu::create_buffer(&device, &buf_desc)!!;
-    defer gpu::destroy_buffer(&device, target)!!;
-    gpu::GpuSpan target_span = gpu::get_buffer_span(&device, target)!!;
+    gpu::GpuAllocation target = gpu::allocate_memory(&device, &target_desc)!!;
+    defer gpu::free_allocation(&device, &target)!!;
+    gpu::GpuSpan target_span = gpu::get_allocation_span(&device, target)!!;
 
     Atomic{uint} epoch;
     Atomic{uint} ready;

@@ -2,39 +2,13 @@ module gpu_test;
 
 import gpu @public;
 
-fn void handle_pack_unpack() @test {
-    BufferHandle h = { .owner = 1, .index = 42, .generation = 7 };
-    assert(h.index == 42, "index round-trips");
-    assert(h.generation == 7, "generation round-trips");
-    assert(h.is_valid(), "non-zero handle is valid");
-    assert(!gpu::BUFFER_HANDLE_INVALID.is_valid(), "INVALID handle is not valid");
+struct SlotHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
 }
 
-fn void smallest_owner_bearing_handle_is_valid() @test {
-    BufferHandle h = {
-        .owner      = 1,
-        .index      = 0,
-        .generation = 1,
-    };
-    assert(h.is_valid(), "the smallest owner-bearing local token is valid");
-}
-
-fn void child_handles_retain_exact_owner_identity() @test {
-    BufferHandle first = {
-        .owner      = 17,
-        .index      = 0,
-        .generation = 1,
-    };
-    BufferHandle second = {
-        .owner      = 18,
-        .index      = first.index,
-        .generation = first.generation,
-    };
-
-    assert(first.is_valid(), "an owner-bearing local token is valid");
-    assert(first.owner != second.owner, "coincident local tokens retain distinct owners");
-    assert(BufferHandle::size <= ulong::size * 2, "child handles fit in two machine words");
-}
+fn bool SlotHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 
 fn void public_state_tokens_are_compact() @test {
     assert(Device::size == ulong::size, "Device is one opaque 64-bit token");
@@ -72,9 +46,7 @@ fn void index_smallest_valid_never_zero() @test {
     assert(s.is_valid(), "slot 0 with generation 1 is valid");
 }
 
-// Concrete generation-checked slot table mirroring the backend's per-type
-// tables (the generic gpu::slots module was removed to avoid a c3c 0.8.0
-// codegen crash; see slot table comments in gpu/vk/*.c3).
+// Concrete generation-checked slot table used to exercise handle invariants.
 const uint FREE_NONE = 0;
 
 struct IntCell {
@@ -91,7 +63,7 @@ struct IntTable {
     uint      next_new;
 }
 
-fn BufferHandle? IntTable.alloc(&self, int value) {
+fn SlotHandle? IntTable.alloc(&self, int value) {
     uint idx;
     if (self.free_head != FREE_NONE) {
         idx = self.free_head - 1;
@@ -105,10 +77,10 @@ fn BufferHandle? IntTable.alloc(&self, int value) {
     self.slots[idx].value = value;
     self.slots[idx].generation++;
     self.slots[idx].used = true;
-    return (BufferHandle){ .owner = self.owner, .index = idx, .generation = self.slots[idx].generation };
+    return (SlotHandle){ .owner = self.owner, .index = idx, .generation = self.slots[idx].generation };
 }
 
-fn int*? IntTable.get(&self, BufferHandle h) {
+fn int*? IntTable.get(&self, SlotHandle h) {
     if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
@@ -116,7 +88,7 @@ fn int*? IntTable.get(&self, BufferHandle h) {
     return &self.slots[idx].value;
 }
 
-fn void? IntTable.free(&self, BufferHandle h) {
+fn void? IntTable.free(&self, SlotHandle h) {
     self.get(h)!;
     uint idx = h.index;
     self.slots[idx].used = false;
@@ -129,7 +101,7 @@ fn void slot_alloc_get_free() @test {
     IntCell[8] storage;
     IntTable t = { .slots = storage[..], .owner = 1 };
 
-    BufferHandle a = t.alloc(100)!!;
+    SlotHandle a = t.alloc(100)!!;
     assert(a.is_valid(), "alloc returns a valid handle");
     assert(*t.get(a)!! == 100, "get returns the stored value");
 
@@ -142,9 +114,9 @@ fn void generation_mismatch_rejected() @test {
     IntCell[8] storage;
     IntTable t = { .slots = storage[..], .owner = 1 };
 
-    BufferHandle stale = t.alloc(1)!!;
+    SlotHandle stale = t.alloc(1)!!;
     t.free(stale)!!;
-    BufferHandle fresh = t.alloc(2)!!;
+    SlotHandle fresh = t.alloc(2)!!;
 
     assert(fresh.index == stale.index, "freed slot index is reused");
     assert(fresh.generation > stale.generation, "reused slot bumps generation");

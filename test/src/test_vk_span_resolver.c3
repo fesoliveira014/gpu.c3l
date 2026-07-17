@@ -118,7 +118,7 @@ fn void buffer_span_resolves_private_metadata() @test {
     );
 
     vk::ResolvedSpan resolved = vk::resolve_span(&fixture.state, &span)!!;
-    gpu::BufferHandle expected = {
+    vk::BufferHandle expected = {
         .owner      = fixture.state.buffers.owner,
         .index      = 0,
         .generation = 5,
@@ -316,7 +316,7 @@ fn void independent_allocation_span_resolves() @test {
 
     assert(resolved.slot == &fixture.allocation_cells[0].value.backing,
         "independent spans resolve their private backing slot");
-    assert(resolved.backing_buffer == gpu::BUFFER_HANDLE_INVALID,
+    assert(resolved.backing_buffer == vk::BUFFER_HANDLE_INVALID,
         "independent spans never forge a public buffer handle");
     assert(resolved.offset == 8 && resolved.size == 16,
         "independent spans preserve their checked range");

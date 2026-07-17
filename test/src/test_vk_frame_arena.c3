@@ -524,23 +524,16 @@ fn void frame_upload_memory_is_coherent() @test {
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc buf_desc = {
-        .size        = 256,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "coherency_probe",
-    };
-    gpu::BufferHandle buf = gpu::create_buffer(&device, &buf_desc)!!;
-    defer gpu::destroy_buffer(&device, buf)!!;
-
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    defer (void)gpu::end_frame(&frame);
+    gpu::GpuSpan span = gpu::alloc_frame_span(&frame, 256, 16)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    vk::BufferSlot* slot = state.buffers.get(buf)!!;
-    vk::MemoryPropertyFlags props = state.allocator.allocation_memory_properties(slot.allocation);
-    assert(((uint)props & (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT) != 0,
+    vk::ResolvedSpan resolved = vk::resolve_span(state, &span)!!;
+    vk::MemoryPropertyFlags properties =
+        state.allocator.allocation_memory_properties(resolved.slot.allocation);
+    assert(((uint)properties & (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT) != 0,
         "frame-upload memory is host-coherent");
 }
-
 fn void frame_contract_rejections_report_exact_context() @test {
     FrameDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_frame_device(&capture);

@@ -48,7 +48,7 @@ fn gpu::DebugMessageCategory debug_message_category(vk::DebugUtilsMessageTypeFla
 
 fn gpu::DebugResourceKind debug_resource_kind(vk::ObjectType object_type) {
     switch (object_type) {
-        case vk::ObjectType.BUFFER:         return gpu::DebugResourceKind.BUFFER;
+        case vk::ObjectType.BUFFER:         return gpu::DebugResourceKind.GPU_SPAN;
         case vk::ObjectType.DEVICE:         return gpu::DebugResourceKind.DEVICE;
         case vk::ObjectType.IMAGE:
         case vk::ObjectType.IMAGE_VIEW:     return gpu::DebugResourceKind.TEXTURE;
@@ -262,7 +262,7 @@ fn ZString slot_name(char* name) @private {
 }
 
 <* Library-internal allocations (arenas, dedicated transfers) are exempt. *>
-fn void mark_buffer_internal(VkDeviceState* state, gpu::BufferHandle handle) {
+fn void mark_buffer_internal(VkDeviceState* state, BufferHandle handle) {
     if (try slot = state.buffers.get(handle)) slot.internal = true;
 }
 
@@ -274,14 +274,14 @@ fn uint report_buffer_leaks(VkDeviceState* state) {
         ZString name = slot_name(&cell.value.debug_name[0]);
         if (!report_resource_lifetime(
             state:               state,
-            resource_kind:       gpu::DebugResourceKind.BUFFER,
-            has_public_identity: true,
-            index:               (uint)i,
-            generation:          cell.generation,
+            resource_kind:       gpu::DebugResourceKind.GPU_SPAN,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
             debug_name:          name,
-            backend_text:        "buffer remains live",
+            backend_text:        "GPU span storage remains live",
         )) {
-            io::eprintfn("gpu: leaked buffer '%s' (index %d, generation %d)", name, i, cell.generation);
+            io::eprintfn("gpu: leaked GPU span storage '%s'", name);
         }
         count++;
     }

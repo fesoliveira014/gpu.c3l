@@ -131,9 +131,14 @@ fn void same_list_barrier_then_copy_validates() @test {
     gpu::TextureHandle tex = make_layout_texture(&device);
     defer gpu::destroy_texture(&device, tex)!!;
 
-    gpu::BufferDesc staging_desc = { .size = 64, .usage = { .transfer_src }, .memory_kind = gpu::MemoryKind.STAGING, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
-    defer gpu::destroy_buffer(&device, staging)!!;
+    OwnedSpan staging = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "layout_copy_source",
+    )!!;
+    defer free_owned_span(&device, &staging)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -145,7 +150,7 @@ fn void same_list_barrier_then_copy_validates() @test {
         new_layout: gpu::TextureLayout.TRANSFER_DST,
     );
 
-    gpu::GpuSpan staging_span = gpu::get_buffer_span(&device, staging)!!;
+    gpu::GpuSpan staging_span = staging.span;
     gpu::BufferTextureCopyDesc copy = { .src = staging_span, .texture = tex, .width = 4, .height = 4 };
     gpu::cmd_copy_buffer_to_texture(&cmd, &copy)!!;
 

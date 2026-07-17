@@ -99,25 +99,27 @@ fn int main() {
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_bench_device(&device)!!;
 
-    gpu::BufferDesc buffer_desc = {
-        .size        = 64,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
+    gpu::AllocationDesc data_desc = {
+        .size         = 64,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = { .graphics, .compute, .transfer },
+        .debug_name   = "command_record_data",
     };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::GpuSpan buffer_span = gpu::get_buffer_span(&device, buffer)!!;
+    gpu::GpuAllocation data = gpu::allocate_memory(&device, &data_desc)!!;
+    defer gpu::free_allocation(&device, &data)!!;
+    gpu::GpuSpan buffer_span = gpu::get_allocation_span(&device, data)!!;
 
-    gpu::BufferDesc args_desc = {
-        .size        = gpu::DispatchIndirectCommand::size,
-        .usage       = { .indirect },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
+    gpu::AllocationDesc args_desc = {
+        .size         = gpu::DispatchIndirectCommand::size,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = { .graphics, .compute, .transfer },
+        .debug_name   = "command_record_args",
     };
-    gpu::BufferHandle args_buffer = gpu::create_buffer(&device, &args_desc)!!;
-    defer gpu::destroy_buffer(&device, args_buffer)!!;
-    gpu::GpuSpan args = gpu::get_buffer_span(&device, args_buffer)!!;
+    gpu::GpuAllocation args_allocation = gpu::allocate_memory(&device, &args_desc)!!;
+    defer gpu::free_allocation(&device, &args_allocation)!!;
+    gpu::GpuSpan args = gpu::get_allocation_span(&device, args_allocation)!!;
 
     gpu::ShaderDesc shader_desc = {
         .stage       = gpu::ShaderStage.COMPUTE,

@@ -12,9 +12,9 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
     defer destroy_test_device(&device)!!;
 
     assert(
-        @catch(gpu::create_buffer(&device, (gpu::BufferDesc*)null))
+        @catch(gpu::allocate_memory(&device, (gpu::AllocationDesc*)null))
             == gpu::INVALID_ARGUMENT,
-        "create_buffer rejects a null descriptor"
+        "allocate_memory rejects a null descriptor"
     );
     assert(
         @catch(gpu::supports_texture_desc(&device, (gpu::TextureDesc*)null))

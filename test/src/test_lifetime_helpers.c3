@@ -2,6 +2,37 @@ module gpu_test;
 
 import gpu @public;
 
+struct OwnedSpan {
+    gpu::GpuAllocation allocation;
+    gpu::GpuSpan       span;
+}
+
+fn OwnedSpan? allocate_owned_span(
+    gpu::Device* device,
+    usz size,
+    gpu::MemoryClass memory_class,
+    gpu::QueueRoles access,
+    ZString debug_name,
+) {
+    gpu::AllocationDesc desc = {
+        .size         = size,
+        .alignment    = 16,
+        .memory_class = memory_class,
+        .access       = access,
+        .debug_name   = debug_name,
+    };
+    gpu::GpuAllocation allocation = gpu::allocate_memory(device, &desc)!;
+    defer catch (void)gpu::free_allocation(device, &allocation);
+    gpu::GpuSpan span = gpu::get_allocation_span(device, allocation)!;
+    return { .allocation = allocation, .span = span };
+}
+
+fn void? free_owned_span(gpu::Device* device, OwnedSpan* owned) {
+    if (owned == null || !owned.allocation.is_valid()) return;
+    gpu::free_allocation(device, &owned.allocation)!;
+    owned.span = {};
+}
+
 fn char[] test_span_mapping(gpu::Device* device, gpu::GpuSpan span) {
     return gpu::get_span_mapping(device, span)!!;
 }

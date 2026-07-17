@@ -36,7 +36,7 @@ struct TransferDiagnosticCapture {
 
 struct StagingReuseFixture {
     gpu::Device device;
-    gpu::BufferHandle[2] buffers;
+    OwnedSpan[2] buffers;
     gpu::GpuSpan[2] spans;
 }
 
@@ -123,17 +123,22 @@ fn gpu::Device make_transfer_test_device(
 fn StagingReuseFixture make_staging_reuse_fixture() {
     StagingReuseFixture fixture;
     fixture.device = make_transfer_test_device(staging_size: STAGING_REUSE_BYTES);
-    gpu::BufferDesc desc = { .size = STAGING_REUSE_BYTES, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.READBACK, .access = { .graphics, .compute, .transfer }};
     for (uint i = 0; i < 2; i++) {
-        fixture.buffers[i] = gpu::create_buffer(&fixture.device, &desc)!!;
-        fixture.spans[i] = gpu::get_buffer_span(&fixture.device, fixture.buffers[i])!!;
+        fixture.buffers[i] = allocate_owned_span(
+            device:       &fixture.device,
+            size:         STAGING_REUSE_BYTES,
+            memory_class: gpu::MemoryClass.CPU_READ,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "staging_reuse_readback",
+        )!!;
+        fixture.spans[i] = fixture.buffers[i].span;
     }
     return fixture;
 }
 
 fn void destroy_staging_reuse_fixture(StagingReuseFixture* fixture) {
-    gpu::destroy_buffer(&fixture.device, fixture.buffers[1])!!;
-    gpu::destroy_buffer(&fixture.device, fixture.buffers[0])!!;
+    free_owned_span(&fixture.device, &fixture.buffers[1])!!;
+    free_owned_span(&fixture.device, &fixture.buffers[0])!!;
     gpu::destroy_device(&fixture.device)!!;
 }
 
@@ -142,12 +147,7 @@ fn void fill_staging_payload(char[] payload, uint seed) {
 }
 
 fn void verify_staging_payload(StagingReuseFixture* fixture, uint index, char[] expected) {
-    gpu::invalidate_buffer(
-        device: &fixture.device,
-        buffer: fixture.buffers[index],
-        offset: 0,
-        size:   0,
-    )!!;
+    gpu::invalidate_mapped_span(&fixture.device, fixture.spans[index])!!;
     char* actual = (char*)test_span_mapping(&fixture.device, fixture.spans[index]).ptr;
     foreach (i, value : expected) assert(actual[i] == value, "reused staging range preserves payload bytes");
 }
@@ -304,16 +304,15 @@ fn void buffer_upload_readback_round_trip() @test {
     gpu::Device device = make_transfer_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = {
-        .size        = 4096,
-        .usage       = { .storage, .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "device_buffer",
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::GpuSpan buffer_span = gpu::get_buffer_span(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         4096,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "device_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
+    gpu::GpuSpan buffer_span = buffer.span;
 
     char[4096] data;
     for (uint i = 0; i < 4096; i++) data[i] = (char)(i * 7);
@@ -342,15 +341,15 @@ fn void transfer_lengths_must_match_exact_spans() @test {
     gpu::Device device = make_transfer_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = {
-        .size        = 16,
-        .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::GpuSpan span = gpu::get_buffer_span(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "exact_transfer_span",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
+    gpu::GpuSpan span = buffer.span;
     char[15] shorter;
     char[17] longer;
 
@@ -403,14 +402,14 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
     gpu::Device device = make_transfer_test_device(capture: &capture);
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc buffer_desc = {
-        .size        = 64,
-        .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "transfer_diagnostic_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
 
     char[16] data;
     gpu::CommandList commands = gpu::begin_commands(
@@ -423,7 +422,7 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
     uint before = capture.calls;
     fault command_state = @catch(gpu::cmd_upload_buffer(
         &ended_alias,
-        gpu::get_buffer_span(&device, buffer)!!.checked_subspan(0, data.len)!!,
+        buffer.span.checked_subspan(0, data.len)!!,
         data[..],
     ));
     assert(command_state == gpu::COMMAND_RECORDING_ERROR, "ended upload command keeps COMMAND_RECORDING_ERROR");
@@ -443,16 +442,14 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
 
     gpu::CommandList lookup_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&lookup_commands)!!;
-    gpu::BufferHandle missing = { .index = gpu::MAX_BUFFERS, .generation = 1 };
     gpu::GpuSpan missing_span = {
-        .owner      = missing.owner,
-        .index      = missing.index,
-        .generation = missing.generation,
+        .index      = uint::max,
+        .generation = 1,
         .size       = data.len,
     };
     before = capture.calls;
     fault invalid_buffer = @catch(gpu::cmd_upload_buffer(&lookup_commands, missing_span, data[..]));
-    assert(invalid_buffer == gpu::INVALID_HANDLE, "missing upload buffer keeps INVALID_HANDLE");
+    assert(invalid_buffer == gpu::INVALID_HANDLE, "missing upload span keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
         before:              before,
@@ -460,7 +457,63 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
         operation:           "cmd_upload_buffer",
         rejected_field:      "GpuSpan.identity",
         invariant:           "must identify one live span owner",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.GPU_SPAN,
+        has_public_identity: false,
+        resource_index:      0,
+        resource_generation: 0,
+        resource_name:       null,
+    );
+}
+
+fn void stale_allocation_span_rejects_after_slot_reuse() @test {
+    TransferDiagnosticCapture capture;
+    gpu::Device device = make_transfer_test_device(capture: &capture);
+    defer destroy_test_device(&device)!!;
+
+    OwnedSpan first = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "stale_allocation",
+    )!!;
+    gpu::GpuSpan stale = first.span;
+    free_owned_span(&device, &first)!!;
+
+    OwnedSpan replacement = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "replacement_allocation",
+    )!!;
+    defer free_owned_span(&device, &replacement)!!;
+    assert(replacement.span.index == stale.index
+        && replacement.span.generation != stale.generation,
+        "allocation slot reuse advances the generation");
+
+    char[16] data;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+
+    uint before = capture.calls;
+    fault stale_fault = @catch(gpu::cmd_upload_buffer(
+        &commands,
+        stale,
+        data[..],
+    ));
+    assert(stale_fault == gpu::INVALID_HANDLE,
+        "a stale span cannot address the allocation reusing its slot");
+    assert_transfer_rejection(
+        capture:             &capture,
+        before:              before,
+        returned:            stale_fault,
+        operation:           "cmd_upload_buffer",
+        rejected_field:      "GpuSpan.identity",
+        invariant:           "must identify one live span owner",
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: false,
         resource_index:      0,
         resource_generation: 0,
@@ -603,15 +656,14 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    gpu::BufferDesc buffer_desc = {
-        .size        = 128,
-        .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "exhaustion_buffer",
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         128,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "exhaustion_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     gpu::TextureDesc texture_desc = {
@@ -634,7 +686,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
 
     char[16] data;
     uint before = capture.calls;
-    gpu::GpuSpan dst = gpu::get_buffer_span(&device, buffer)!!.checked_subspan(0, data.len)!!;
+    gpu::GpuSpan dst = buffer.span.checked_subspan(0, data.len)!!;
     fault staging_full = @catch(gpu::cmd_upload_buffer(&commands, dst, data[..]));
     state.staging_arena.size = staging_size;
     state.dedicated_staging.count = dedicated_count;
@@ -646,10 +698,10 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "cmd_upload_buffer",
         rejected_field:      "data",
         invariant:           "staging capacity must be available for the upload",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      buffer.index,
-        resource_generation: buffer.generation,
+        resource_index:      buffer.span.index,
+        resource_generation: buffer.span.generation,
         resource_name:       "exhaustion_buffer",
     );
     gpu::TextureBarrier to_dst = {
@@ -691,7 +743,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     before = capture.calls;
     fault helper_buffer_full = @catch(gpu::upload_buffer_data(
         device:      &device,
-        dst:         gpu::get_buffer_span(&device, buffer)!!.checked_subspan(0, data.len)!!,
+        dst:         buffer.span.checked_subspan(0, data.len)!!,
         data:        data[..],
         next_stage:  gpu::Stage.TRANSFER,
         next_hazard: gpu::Hazard.TRANSFER_READ,
@@ -706,10 +758,10 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "upload_buffer_data",
         rejected_field:      "data",
         invariant:           "staging capacity must be available for the upload",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      buffer.index,
-        resource_generation: buffer.generation,
+        resource_index:      buffer.span.index,
+        resource_generation: buffer.span.generation,
         resource_name:       "exhaustion_buffer",
     );
 
@@ -788,7 +840,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     before = capture.calls;
     fault readback_full = @catch(gpu::readback_buffer_data(
         device:      &device,
-        src:         gpu::get_buffer_span(&device, buffer)!!.checked_subspan(0, out_data.len)!!,
+        src:         buffer.span.checked_subspan(0, out_data.len)!!,
         out_data:    out_data[..],
         from_stage:  gpu::Stage.TRANSFER,
         from_hazard: gpu::Hazard.TRANSFER_READ,
@@ -803,10 +855,10 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "readback_buffer_data",
         rejected_field:      "out_data",
         invariant:           "readback capacity must be available for the destination",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      buffer.index,
-        resource_generation: buffer.generation,
+        resource_index:      buffer.span.index,
+        resource_generation: buffer.span.generation,
         resource_name:       "exhaustion_buffer",
     );
     usz readback_size = state.readback_arena.size;
@@ -816,7 +868,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     state.buffers.next_new = (uint)state.buffers.slots.len;
     state.buffers.free_head = 0;
     before = capture.calls;
-    gpu::GpuSpan src = gpu::get_buffer_span(&device, buffer)!!.checked_subspan(0, 16)!!;
+    gpu::GpuSpan src = buffer.span.checked_subspan(0, 16)!!;
     fault ticket_full = @catch(gpu::cmd_readback_buffer(&commands, src));
     state.readback_arena.size = readback_size;
     state.buffers.next_new = next_new;
@@ -829,10 +881,10 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         operation:           "cmd_readback_buffer",
         rejected_field:      "src",
         invariant:           "readback capacity must be available for the span",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      buffer.index,
-        resource_generation: buffer.generation,
+        resource_index:      buffer.span.index,
+        resource_generation: buffer.span.generation,
         resource_name:       "exhaustion_buffer",
     );
 }
@@ -847,15 +899,14 @@ fn void helper_recording_fault_does_not_poison_frame_slot() @test {
     gpu::vk::VkDeviceState* state =
         (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    gpu::BufferDesc buffer_desc = {
-        .size        = 128,
-        .usage       = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "helper_fault_buffer",
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         128,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "helper_fault_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
 
     usz staging_size = state.staging_arena.size;
     uint dedicated_count = state.dedicated_staging.count;
@@ -868,7 +919,7 @@ fn void helper_recording_fault_does_not_poison_frame_slot() @test {
     char[16] data;
     fault helper_fault = @catch(gpu::upload_buffer_data(
         device:      &device,
-        dst:         gpu::get_buffer_span(&device, buffer)!!.checked_subspan(0, data.len)!!,
+        dst:         buffer.span.checked_subspan(0, data.len)!!,
         data:        data[..],
         next_stage:  gpu::Stage.TRANSFER,
         next_hazard: gpu::Hazard.TRANSFER_READ,
@@ -912,16 +963,15 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::end_frame(&frame_token)!!;
 
-    gpu::BufferDesc src_desc = {
-        .size        = 256,
-        .usage       = { .storage, .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "ticket_src",
-    };
-    gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
-    defer gpu::destroy_buffer(&device, src)!!;
-    gpu::GpuSpan src_span = gpu::get_buffer_span(&device, src)!!;
+    OwnedSpan src = allocate_owned_span(
+        device:       &device,
+        size:         256,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "ticket_src",
+    )!!;
+    defer free_owned_span(&device, &src)!!;
+    gpu::GpuSpan src_span = src.span;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -935,10 +985,10 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         operation:           "cmd_readback_buffer",
         rejected_field:      "src",
         invariant:           "span range must fit its live owner",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      src.index,
-        resource_generation: src.generation,
+        resource_index:      src.span.index,
+        resource_generation: src.span.generation,
         resource_name:       "ticket_src",
     );
 
@@ -952,10 +1002,10 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
         operation:           "cmd_readback_buffer",
         rejected_field:      "src",
         invariant:           "span range must fit its live owner",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      src.index,
-        resource_generation: src.generation,
+        resource_index:      src.span.index,
+        resource_generation: src.span.generation,
         resource_name:       "ticket_src",
     );
 
@@ -964,21 +1014,20 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
     defer discard_test_executable(&cmd_executable)!!;
     // Deliberately never submit_test_queue(&device, gpu::QueueKind.GRAPHICS, ...): the ticket's copy never runs.
 
-    gpu::BufferDesc unrelated_desc = {
-        .size        = 64,
-        .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "unrelated",
-    };
-    gpu::BufferHandle unrelated = gpu::create_buffer(&device, &unrelated_desc)!!;
-    defer gpu::destroy_buffer(&device, unrelated)!!;
+    OwnedSpan unrelated = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "unrelated",
+    )!!;
+    defer free_owned_span(&device, &unrelated)!!;
 
     char[64] payload;
     foreach (&b : payload) *b = (char)0xAB;
     gpu::upload_buffer_data(
         device:      &device,
-        dst:         gpu::get_buffer_span(&device, unrelated)!!,
+        dst:         unrelated.span,
         data:        payload[..],
         next_stage:  gpu::Stage.TRANSFER,
         next_hazard: gpu::Hazard.TRANSFER_READ,
@@ -1036,15 +1085,15 @@ fn void oversized_upload_uses_dedicated_staging() @test {
     uint diagnostic_count = capture.calls;
 
     const usz BIG = 256 * 1024;
-    gpu::BufferDesc desc = {
-        .size        = BIG,
-        .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::GpuSpan buffer_span = gpu::get_buffer_span(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         BIG,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "oversized_transfer_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
+    gpu::GpuSpan buffer_span = buffer.span;
 
     @pool() {
         char[] data = mem::talloc_array(char, (sz)BIG);
@@ -1078,15 +1127,15 @@ fn void staging_ring_reuses_across_frames() @test {
     gpu::Device device = make_transfer_test_device(staging_size: 4096);
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = {
-        .size        = 1024,
-        .usage       = { .storage, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::GpuSpan buffer_span = gpu::get_buffer_span(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         1024,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "staging_ring_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
+    gpu::GpuSpan buffer_span = buffer.span;
 
     char[1024] data;
     for (uint frame = 0; frame < 12; frame++) {
@@ -1117,18 +1166,24 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
     gpu::Device device = make_transfer_test_device(staging_size: 4096);
     defer destroy_test_device(&device)!!;
 
-    gpu::BufferDesc desc = {
-        .size        = 1024,
-        .usage       = { .transfer_src, .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle first = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, first)!!;
-    gpu::BufferHandle second = gpu::create_buffer(&device, &desc)!!;
-    defer gpu::destroy_buffer(&device, second)!!;
-    gpu::GpuSpan first_span = gpu::get_buffer_span(&device, first)!!;
-    gpu::GpuSpan second_span = gpu::get_buffer_span(&device, second)!!;
+    OwnedSpan first = allocate_owned_span(
+        device:       &device,
+        size:         1024,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "out_of_frame_first",
+    )!!;
+    defer free_owned_span(&device, &first)!!;
+    OwnedSpan second = allocate_owned_span(
+        device:       &device,
+        size:         1024,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "out_of_frame_second",
+    )!!;
+    defer free_owned_span(&device, &second)!!;
+    gpu::GpuSpan first_span = first.span;
+    gpu::GpuSpan second_span = second.span;
 
     char[1024] a;
     char[1024] b;
@@ -1221,14 +1276,14 @@ fn void texture_upload_helper_sampled() @test {
     assert(in_use == gpu::INVALID_RESOURCE_STATE, "in-use texture upload faults INVALID_RESOURCE_STATE");
 
     // Sample it through the heap: the shader must see the uploaded texels.
-    gpu::BufferDesc out_desc = {
-        .size        = UR_TEX * UR_TEX * 16,
-        .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.READBACK,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    gpu::BufferHandle sample_out = gpu::create_buffer(&device, &out_desc)!!;
-    defer gpu::destroy_buffer(&device, sample_out)!!;
+    OwnedSpan sample_out = allocate_owned_span(
+        device:       &device,
+        size:         UR_TEX * UR_TEX * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "sample_output",
+    )!!;
+    defer free_owned_span(&device, &sample_out)!!;
 
     gpu::ShaderDesc sample_sd = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = UPLOAD_HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
@@ -1242,7 +1297,7 @@ fn void texture_upload_helper_sampled() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
     SampleRoot* root = (SampleRoot*)test_span_mapping(&device, root_span).ptr;
-    root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
+    root.output_gpu    = gpu::get_span_address(&device, sample_out.span)!!;
     root.texture_index = tex_index;
     root.sampler_index = smp_index;
     root.width         = UR_TEX;
@@ -1257,7 +1312,7 @@ fn void texture_upload_helper_sampled() @test {
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier out_bar = {
-        .span = gpu::get_buffer_span(&device, sample_out)!!,
+        .span = sample_out.span,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -1269,8 +1324,8 @@ fn void texture_upload_helper_sampled() @test {
     submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
-    gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
-    float* sampled = (float*)test_span_mapping(&device, out_span).ptr;
+    gpu::invalidate_mapped_span(&device, sample_out.span)!!;
+    float* sampled = (float*)test_span_mapping(&device, sample_out.span).ptr;
     assert(quantize_unorm8(sampled[1]) == 90, "sampled green matches helper upload");
     assert(quantize_unorm8(sampled[2]) == 160, "sampled blue matches helper upload");
     gpu::end_frame(&frame_token)!!;
@@ -1402,11 +1457,14 @@ fn void upload_helper_validation_faults() @test {
     );
     assert(state.helper_counter == helper_before, "invalid bare mip reserves no helper value");
 
-    gpu::BufferDesc buf_desc = {
-        .size = 64, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }, .debug_name = "helper_upload_buffer",
-    };
-    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buf_desc)!!;
-    defer gpu::destroy_buffer(&device, buffer)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "helper_upload_buffer",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
 
     char[128] too_big;
     char[] empty_data = {};
@@ -1414,7 +1472,7 @@ fn void upload_helper_validation_faults() @test {
     helper_before = state.helper_counter;
     fault empty_fault = @catch(gpu::upload_buffer_data(
         device:      &device,
-        dst:         gpu::get_buffer_span(&device, buffer)!!,
+        dst:         buffer.span,
         data:        empty_data,
         next_stage:  gpu::Stage.TRANSFER,
         next_hazard: gpu::Hazard.TRANSFER_READ,
@@ -1427,54 +1485,20 @@ fn void upload_helper_validation_faults() @test {
         operation:           "upload_buffer_data",
         rejected_field:      "data",
         invariant:           "data length must equal the destination span size",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      buffer.index,
-        resource_generation: buffer.generation,
+        resource_index:      buffer.span.index,
+        resource_generation: buffer.span.generation,
         resource_name:       "helper_upload_buffer",
     );
     assert(state.helper_counter == helper_before, "empty upload reserves no helper value");
 
-    gpu::BufferDesc no_transfer_buffer_desc = {
-        .size        = 64,
-        .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "no_transfer_upload_buffer",
-    };
-    gpu::BufferHandle no_transfer_buffer = gpu::create_buffer(&device, &no_transfer_buffer_desc)!!;
-    defer gpu::destroy_buffer(&device, no_transfer_buffer)!!;
-    char[8] small_upload;
-    before = capture.calls;
-    helper_before = state.helper_counter;
-    fault buffer_usage_fault = @catch(gpu::upload_buffer_data(
-        device:      &device,
-        dst:         gpu::get_buffer_span(&device, no_transfer_buffer)!!.checked_subspan(0, small_upload.len)!!,
-        data:        small_upload[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
-    ));
-    assert(buffer_usage_fault == gpu::INVALID_ARGUMENT, "buffer without transfer_dst faults INVALID_ARGUMENT");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            buffer_usage_fault,
-        operation:           "upload_buffer_data",
-        rejected_field:      "GpuSpan",
-        invariant:           "destination span must support copy writes",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
-        has_public_identity: true,
-        resource_index:      no_transfer_buffer.index,
-        resource_generation: no_transfer_buffer.generation,
-        resource_name:       "no_transfer_upload_buffer",
-    );
-    assert(state.helper_counter == helper_before, "invalid buffer usage reserves no helper value");
 
     before = capture.calls;
     helper_before = state.helper_counter;
     fault bounds_fault = @catch(gpu::upload_buffer_data(
         device:      &device,
-        dst:         gpu::get_buffer_span(&device, buffer)!!.unchecked_subspan(0, too_big.len),
+        dst:         buffer.span.unchecked_subspan(0, too_big.len),
         data:        too_big[..],
         next_stage:  gpu::Stage.TRANSFER,
         next_hazard: gpu::Hazard.TRANSFER_READ,
@@ -1487,10 +1511,10 @@ fn void upload_helper_validation_faults() @test {
         operation:           "upload_buffer_data",
         rejected_field:      "dst",
         invariant:           "span range must fit its live owner",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      buffer.index,
-        resource_generation: buffer.generation,
+        resource_index:      buffer.span.index,
+        resource_generation: buffer.span.generation,
         resource_name:       "helper_upload_buffer",
     );
     assert(state.helper_counter == helper_before, "invalid buffer range reserves no helper value");
@@ -1539,29 +1563,6 @@ fn void upload_helper_validation_faults() @test {
         "invalid texture usage preserves the tracked layout"
     );
 
-    char[8] readback_dest;
-    before = capture.calls;
-    fault usage_fault = @catch(gpu::readback_buffer_data(
-        device:      &device,
-        src:         gpu::get_buffer_span(&device, buffer)!!.checked_subspan(0, readback_dest.len)!!,
-        out_data:    readback_dest[..],
-        from_stage:  gpu::Stage.TRANSFER,
-        from_hazard: gpu::Hazard.TRANSFER_WRITE,
-    ));
-    assert(usage_fault == gpu::INVALID_ARGUMENT, "readback source without transfer_src keeps INVALID_ARGUMENT");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            usage_fault,
-        operation:           "readback_buffer_data",
-        rejected_field:      "GpuSpan",
-        invariant:           "source span must support copy reads",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
-        has_public_identity: true,
-        resource_index:      buffer.index,
-        resource_generation: buffer.generation,
-        resource_name:       "helper_upload_buffer",
-    );
 
     // cmd-level upload into a texture that is not TRANSFER_DST still faults.
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
@@ -1615,25 +1616,23 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
     gpu::vk::VkDeviceState* state =
         (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    gpu::BufferDesc upload_desc = {
-        .size        = 16,
-        .usage       = { .transfer_dst },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .compute },
-        .debug_name  = "compute_upload_only",
-    };
-    gpu::BufferHandle upload = gpu::create_buffer(&device, &upload_desc)!!;
-    defer gpu::destroy_buffer(&device, upload)!!;
+    OwnedSpan upload = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .compute },
+        debug_name:   "compute_upload_only",
+    )!!;
+    defer free_owned_span(&device, &upload)!!;
 
-    gpu::BufferDesc readback_desc = {
-        .size        = 16,
-        .usage       = { .transfer_src },
-        .memory_kind = gpu::MemoryKind.DEVICE,
-        .access      = { .compute },
-        .debug_name  = "compute_readback_only",
-    };
-    gpu::BufferHandle readback = gpu::create_buffer(&device, &readback_desc)!!;
-    defer gpu::destroy_buffer(&device, readback)!!;
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .compute },
+        debug_name:   "compute_readback_only",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
 
     char[8] data;
     ulong helper_before = state.helper_counter;
@@ -1642,7 +1641,7 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
     uint before = capture.calls;
     fault blocking_upload = @catch(gpu::upload_buffer_data(
         device:      &device,
-        dst:         gpu::get_buffer_span(&device, upload)!!.checked_subspan(0, data.len)!!,
+        dst:         upload.span.checked_subspan(0, data.len)!!,
         data:        data[..],
         next_stage:  gpu::Stage.COMPUTE_SHADER,
         next_hazard: gpu::Hazard.SHADER_READ,
@@ -1656,10 +1655,10 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
         operation:           "upload_buffer_data",
         rejected_field:      "GpuSpan",
         invariant:           "access must include the operation queue role",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      upload.index,
-        resource_generation: upload.generation,
+        resource_index:      upload.span.index,
+        resource_generation: upload.span.generation,
         resource_name:       "compute_upload_only",
     );
     assert(state.helper_counter == helper_before
@@ -1673,7 +1672,7 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
     before = capture.calls;
     fault blocking_readback = @catch(gpu::readback_buffer_data(
         device:      &device,
-        src:         gpu::get_buffer_span(&device, readback)!!.checked_subspan(0, out_data.len)!!,
+        src:         readback.span.checked_subspan(0, out_data.len)!!,
         out_data:    out_data[..],
         from_stage:  gpu::Stage.COMPUTE_SHADER,
         from_hazard: gpu::Hazard.SHADER_WRITE,
@@ -1687,10 +1686,10 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
         operation:           "readback_buffer_data",
         rejected_field:      "GpuSpan",
         invariant:           "access must include the operation queue role",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      readback.index,
-        resource_generation: readback.generation,
+        resource_index:      readback.span.index,
+        resource_generation: readback.span.generation,
         resource_name:       "compute_readback_only",
     );
     assert(state.helper_counter == helper_before
@@ -1707,7 +1706,7 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
     before = capture.calls;
     fault command_upload = @catch(gpu::cmd_upload_buffer(
         commands: &commands,
-        dst:      gpu::get_buffer_span(&device, upload)!!.checked_subspan(0, data.len)!!,
+        dst:      upload.span.checked_subspan(0, data.len)!!,
         data:     data[..],
     ));
     assert(command_upload == gpu::INVALID_ARGUMENT,
@@ -1719,10 +1718,10 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
         operation:           "cmd_upload_buffer",
         rejected_field:      "GpuSpan",
         invariant:           "access must include the operation queue role",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      upload.index,
-        resource_generation: upload.generation,
+        resource_index:      upload.span.index,
+        resource_generation: upload.span.generation,
         resource_name:       "compute_upload_only",
     );
     assert(state.staging_arena.retire_count == staging_before,
@@ -1731,7 +1730,7 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
     readback_before = state.readback_arena.retire_count;
     uint tickets_before = state.readback_tickets.next_new;
     before = capture.calls;
-    gpu::GpuSpan src = gpu::get_buffer_span(&device, readback)!!.checked_subspan(0, 8)!!;
+    gpu::GpuSpan src = readback.span.checked_subspan(0, 8)!!;
     fault command_readback = @catch(gpu::cmd_readback_buffer(&commands, src));
     assert(command_readback == gpu::INVALID_ARGUMENT,
         "recorded readback rejects a resource outside the recording role");
@@ -1742,10 +1741,10 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
         operation:           "cmd_readback_buffer",
         rejected_field:      "GpuSpan",
         invariant:           "access must include the operation queue role",
-        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        resource_index:      readback.index,
-        resource_generation: readback.generation,
+        resource_index:      readback.span.index,
+        resource_generation: readback.span.generation,
         resource_name:       "compute_readback_only",
     );
     assert(state.readback_arena.retire_count == readback_before
@@ -1762,30 +1761,41 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
 fn void transfer_callback_presence_preserves_upload_fault() @test {
     TransferDiagnosticCapture capture;
     gpu::Device callback_device = make_transfer_test_device(capture: &capture);
-    gpu::BufferDesc desc = { .size = 16, .usage = { .transfer_dst }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
-    gpu::BufferHandle callback_buffer = gpu::create_buffer(&callback_device, &desc)!!;
+    OwnedSpan callback_buffer = allocate_owned_span(
+        device:       &callback_device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "callback_upload_buffer",
+    )!!;
     char[32] payload;
     fault callback_fault = @catch(gpu::upload_buffer_data(
         device:      &callback_device,
-        dst:         gpu::get_buffer_span(&callback_device, callback_buffer)!!.unchecked_subspan(0, payload.len),
+        dst:         callback_buffer.span.unchecked_subspan(0, payload.len),
         data:        payload[..],
         next_stage:  gpu::Stage.TRANSFER,
         next_hazard: gpu::Hazard.TRANSFER_READ,
     ));
     assert(capture.calls == 1, "callback upload rejection emits exactly once");
-    gpu::destroy_buffer(&callback_device, callback_buffer)!!;
+    free_owned_span(&callback_device, &callback_buffer)!!;
     gpu::destroy_device(&callback_device)!!;
 
     gpu::Device plain_device = make_transfer_test_device();
-    gpu::BufferHandle plain_buffer = gpu::create_buffer(&plain_device, &desc)!!;
+    OwnedSpan plain_buffer = allocate_owned_span(
+        device:       &plain_device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "plain_upload_buffer",
+    )!!;
     fault plain_fault = @catch(gpu::upload_buffer_data(
         device:      &plain_device,
-        dst:         gpu::get_buffer_span(&plain_device, plain_buffer)!!.unchecked_subspan(0, payload.len),
+        dst:         plain_buffer.span.unchecked_subspan(0, payload.len),
         data:        payload[..],
         next_stage:  gpu::Stage.TRANSFER,
         next_hazard: gpu::Hazard.TRANSFER_READ,
     ));
-    gpu::destroy_buffer(&plain_device, plain_buffer)!!;
+    free_owned_span(&plain_device, &plain_buffer)!!;
     gpu::destroy_device(&plain_device)!!;
     assert(plain_fault == callback_fault, "callback presence does not change upload fault");
 }
