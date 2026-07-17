@@ -35,6 +35,7 @@ gpu/vk/instance.c3             shared instance construction
 gpu/vk/device.c3               physical device selection, logical device, feature chain
 gpu/vk/queue.c3                queue family selection, queue handles, submit
 gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
+gpu/vk/allocation.c3           independent allocation table and VMA backing
 gpu/vk/memory.c3               memory kind policy, arenas, virtual allocator
 gpu/vk/buffer.c3               VkBuffer + VMA allocation path
 gpu/vk/texture.c3              VkImage + VMA allocation, views, layout tracking
@@ -257,6 +258,7 @@ Backend code should use idiomatic VMA wrappers where possible:
 ```text
 vma::try_create_allocator
 allocator.try_create_buffer
+allocator.create_buffer_with_alignment
 allocator.try_create_image
 allocator.try_map
 allocator.try_flush
@@ -264,6 +266,37 @@ allocator.try_invalidate
 allocator.heap_budgets
 allocator.stats_string
 ```
+
+### Independent allocations
+
+`AllocationDesc` is translated without exposing native policy publicly:
+
+```text
+validate size, class, alignment, and semantic access
+derive exact admitted queue families
+build a private addressable buffer with the generic usage superset
+select VMA policy for CPU_WRITE, GPU_PRIVATE, or CPU_READ
+create the buffer/allocation pair with the requested minimum alignment
+require a mapping for CPU_WRITE and CPU_READ
+query actual alignment, memory properties, and a nonzero device address
+copy debug names
+publish the AllocationTable slot last
+```
+
+`CPU_WRITE` uses mapped sequential host access, `GPU_PRIVATE` prefers device
+memory without a public mapping, and `CPU_READ` uses mapped random host access.
+These choices stay in `gpu::vk`; public code sees only `MemoryClass` and
+`AllocationInfo`.
+
+Each slot stores immutable size, class, access, alignment, mapping/coherence,
+address, debug name, and generation. Span resolution checks owner, generation,
+and bounds before deriving a mapping or address. Creation rollback destroys the
+private buffer/allocation pair without publishing a token.
+
+`free_allocation` retires the generation and calls `allocator.destroy_buffer`
+immediately. Normal device destruction is blocked
+by live public allocations; accepted loss/partial teardown releases remaining
+table entries before destroying the allocator.
 
 ## 8. Buffer implementation
 
@@ -677,6 +710,7 @@ Debug features:
 ```text
 Vulkan object names
 VMA allocation names
+live allocation identity/name reports
 live slot reports
 leaked descriptor reports
 allocation stats
@@ -688,7 +722,11 @@ Object naming should happen immediately after successful backend object creation
 
 ## 18. Deferred destruction
 
-Resources may be destroyed publicly before the GPU has finished using them.
+Independent allocations are different: the caller proves quiescence and
+`free_allocation` destroys the backing immediately.
+
+Other resources may be destroyed publicly before the GPU has finished using
+them.
 
 Backend policy:
 
@@ -701,8 +739,9 @@ free backend object after timeline completed
 For VMA-backed resources:
 
 ```text
-buffer: allocator.destroy_buffer(buffer, allocation)
-image: allocator.destroy_image(image, allocation)
+independent allocation: allocator.destroy_buffer(buffer, allocation) immediately
+buffer: allocator.destroy_buffer(buffer, allocation) after retirement
+image: allocator.destroy_image(image, allocation) after retirement
 ```
 
 ## 19. Translation helpers
@@ -736,7 +775,8 @@ The Vulkan backend is acceptable when:
 ```text
 device creation is validation-clean
 all buffers/images are VMA-backed
-addressable buffers produce valid GPU addresses
+independent allocation creation publishes only complete native state
+addressable spans produce valid GPU addresses
 root-pointer compute works
 texture heap works through TextureIndex
 barriers use synchronization2

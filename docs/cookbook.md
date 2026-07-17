@@ -252,7 +252,35 @@ Goal: right residency per access pattern.
 Running example: `memory_report` prints the arenas live; `docs/memory.md`
 has the full model.
 
-## 14. Pair fallible frame work
+## 14. Allocate generic GPU data
+
+Goal: own an addressable range without exposing backend memory objects.
+
+```c3
+gpu::AllocationDesc desc = {
+    .size         = 4096,
+    .alignment    = 256,
+    .memory_class = gpu::MemoryClass.CPU_WRITE,
+    .access       = { .compute },
+    .debug_name   = "constants",
+};
+gpu::GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!;
+defer (void)gpu::free_allocation(&device, &allocation);
+
+gpu::AllocationInfo info = gpu::get_allocation_info(&device, allocation)!;
+gpu::GpuSpan span = gpu::get_allocation_span(&device, allocation)!;
+gpu::GpuSpan header = span.checked_subspan(0, 256)!;
+char[] mapping = gpu::get_span_mapping(&device, header)!;
+gpu::GpuAddress address = gpu::get_span_address(&device, header)!;
+```
+
+`GpuAllocation` owns storage; its spans borrow ranges. `free_allocation`
+invalidates the token only after success and requires all GPU use to be
+quiescent. `CPU_WRITE` and `CPU_READ` are mapped; `GPU_PRIVATE` is not.
+Use `AllocationInfo` for the actual alignment, coherence, mapping, and address
+capabilities. Running example: `memory_report`.
+
+## 15. Pair fallible frame work
 
 Goal: observe worker and frame-end faults without leaving the frame active on
 an early `!`.
