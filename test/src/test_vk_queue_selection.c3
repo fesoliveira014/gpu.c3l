@@ -701,6 +701,26 @@ fn void swapchain_sharing_aliases_the_main_family() @test {
     assert(queues[0] == queue, "the graphics queue is waited");
 }
 
+fn void swapchain_sharing_includes_every_selected_graphics_family() @test {
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics },
+        .graphics_family      = 4,
+        .presentation         = {
+            .enabled = true,
+            .family  = 7,
+        },
+    };
+    state.queues.counts.graphics = 2;
+    state.queues.graphics_ids[0] = vk::native_queue_id(4, 0);
+    state.queues.graphics_ids[1] = vk::native_queue_id(6, 0);
+
+    uint[4] families;
+    uint family_count = vk::swapchain_queue_families(&state, families[..]);
+    assert(family_count == 3,
+        "swapchain sharing includes every selected graphics family");
+    assert(families[0] == 4 && families[1] == 6 && families[2] == 7,
+        "graphics families precede the private presentation family");
+}
 fn void swapchain_sharing_includes_a_separate_present_family() @test {
     vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
     vk::Queue present_queue = (vk::Queue)(uptr)0x20;

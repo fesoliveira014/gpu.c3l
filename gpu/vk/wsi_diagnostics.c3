@@ -154,26 +154,27 @@ fn void? check_swapchain_present_lifecycle(
     WsiDiagnosticContext* context,
     SwapchainSlot* slot,
 ) {
-    if (catch guard_fault = swapchain_present_guard(slot.acquire_pending, slot.acquire_consumed)) {
+    if (!slot.acquire_pending || !slot.readiness_consumed) {
         return report_wsi_contract(
             context:        context,
-            public_fault:   guard_fault,
+            public_fault:   gpu::INVALID_RESOURCE_STATE,
             rejected_field: "swapchain acquire lifecycle",
-            invariant:      "acquired image must be consumed by one coupled submit before present",
+            invariant:      "acquired image readiness must be consumed by submission before present",
         )~;
     }
 }
 
-fn void? check_swapchain_mutation_lifecycle(
+
+fn void? check_swapchain_resize_lifecycle(
     WsiDiagnosticContext* context,
     SwapchainSlot* slot,
 ) {
-    if (catch guard_fault = swapchain_mutation_guard(slot.acquire_pending)) {
+    if (catch guard_fault = swapchain_resize_guard(slot.acquire_pending)) {
         return report_wsi_contract(
             context:        context,
             public_fault:   guard_fault,
             rejected_field: "swapchain acquire lifecycle",
-            invariant:      "no image may be acquired during resize or destruction",
+            invariant:      "an acquired image must be presented or destroyed before resize",
         )~;
     }
 }

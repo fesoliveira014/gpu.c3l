@@ -60,12 +60,12 @@ struct QueueSelection @private {
     QueueRoles[MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
 }
 
-<* Work submitted to an explicit queue. A non-zero swapchain requires a
-   graphics-capable queue. *>
+<* Work submitted to an explicit queue. Non-zero readiness requires a
+   graphics-capable queue and is consumed only by successful submission. *>
 struct SubmitDesc {
     ExecutableCommandList[] command_lists;
-    CompletionPoint[] completion_waits;
-    SwapchainHandle   swapchain;
+    CompletionPoint[]       completion_waits;
+    SwapchainReadiness      readiness;
 }
 
 fn bool Queue.is_valid(self) => self.device.is_valid();
@@ -553,13 +553,12 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     foreach (wait : desc.completion_waits) {
         validate_completion_point(&operation, &device, wait)!;
     }
-    if (desc.swapchain != SWAPCHAIN_HANDLE_INVALID) {
+    if (desc.readiness != SWAPCHAIN_READINESS_INVALID) {
+        if (!desc.readiness.is_valid()
+            || desc.readiness.device != device) {
+            return INVALID_HANDLE~;
+        }
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
-        validate_resource_owner(
-            &operation,
-            desc.swapchain.owner,
-            ResourceOwnerKind.SWAPCHAIN,
-        )!;
     }
     CompletionPoint point = operation.vtable.submit(queue, desc)!;
     foreach (&commands : desc.command_lists) {

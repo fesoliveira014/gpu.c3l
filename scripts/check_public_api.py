@@ -14,6 +14,7 @@ FORBIDDEN_TEXT = {
     "backend_state": "backend state pointer",
     "backendvtable": "backend dispatch table",
     "platformkind": "retired PlatformKind",
+    "presentdesc": "retired PresentDesc",
     "semaphoredesc": "retired public semaphore",
     "semaphorehandle": "retired public semaphore",
     "semaphoresignal": "retired public semaphore",
@@ -62,6 +63,7 @@ PLATFORM_HANDLE_TYPES = {
 
 RETIRED_SOURCE_SYMBOLS = (
     "PlatformKind",
+    "PresentDesc",
     "SurfaceDesc",
     "RecordingContextHandle",
     "RECORDING_CONTEXT",
@@ -166,25 +168,54 @@ def validate_document(document: dict) -> list[str]:
         if parameter_types != ("Queue", "SubmitDesc*"):
             failures.append("submit must take Queue and SubmitDesc*")
 
+    present = functions.get("present")
+    if present is None:
+        failures.append("missing present")
+    else:
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in present.get("members", [])
+        )
+        if parameter_types != (
+            "Device*",
+            "AcquiredImage*",
+            "CompletionPoint",
+        ):
+            failures.append(
+                "present must consume AcquiredImage* with CompletionPoint"
+            )
+
     executable = types.get("ExecutableCommandList")
     if executable is None or executable.get("kind") != "struct":
         failures.append("missing ExecutableCommandList token")
 
     submit_desc = types.get("SubmitDesc")
-    command_lists_type = None
-    if submit_desc is not None:
-        command_lists_type = next(
-            (
-                member.get("type", {}).get("name")
-                for member in submit_desc.get("members", [])
-                if member.get("name") == "command_lists"
-            ),
-            None,
-        )
-    if command_lists_type != "ExecutableCommandList[]":
+    submit_fields = {
+        member.get("name"): member.get("type", {}).get("name")
+        for member in (submit_desc or {}).get("members", [])
+    }
+    if submit_fields.get("command_lists") != "ExecutableCommandList[]":
         failures.append(
             "SubmitDesc.command_lists must contain executable tokens"
         )
+    if submit_fields.get("readiness") != "SwapchainReadiness":
+        failures.append(
+            "SubmitDesc.readiness must contain one-shot swapchain readiness"
+        )
+    if "swapchain" in submit_fields:
+        failures.append("SubmitDesc must not expose swapchain coupling")
+
+    readiness = types.get("SwapchainReadiness")
+    if readiness is None or readiness.get("kind") != "struct":
+        failures.append("missing SwapchainReadiness token")
+
+    acquired = types.get("AcquiredImage")
+    acquired_fields = {
+        member.get("name"): member.get("type", {}).get("name")
+        for member in (acquired or {}).get("members", [])
+    }
+    if acquired_fields.get("readiness") != "SwapchainReadiness":
+        failures.append("AcquiredImage must carry SwapchainReadiness")
 
     for module_name, handle_names in PLATFORM_HANDLE_TYPES.items():
         module = modules.get(module_name)

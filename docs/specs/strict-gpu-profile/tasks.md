@@ -151,7 +151,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.5 One-shot swapchain readiness
 
-- [ ] Migrate acquisition, submission, and presentation in `gpu/swapchain.c3`, `gpu/vk/swapchain.c3`, and `gpu/vk/sync.c3` to one-shot readiness plus ordinary render completion points.
+- [x] Migrate acquisition, submission, and presentation in `gpu/swapchain.c3`, `gpu/queue.c3`, `gpu/vk/swapchain.c3`, and `gpu/vk/queue.c3` to one-shot readiness plus ordinary render completion points.
   - **Depends on:** 3.2–3.4 and 1.3.
   - **Contract:** acquire returns a borrowed texture and readiness token; submission consumes readiness; presentation consumes the acquired image and accepts a same-device completion point covering rendering; native bridge objects remain private.
   - **Edges:** unused or double-used readiness, wrong image or device, out-of-date swapchain, dormant surface, surface loss, and retryable present failure.

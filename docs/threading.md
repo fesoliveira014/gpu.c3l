@@ -29,9 +29,9 @@ token's retained device pin while another call can still be in flight.
 | `create_device` | E | per runtime; device-registry mutation is synchronized; presentation also uses the surface scope |
 | `destroy_device` | S | per target device; success invalidates the caller's token; live children return `RESOURCE_IN_USE`, while active operations, incomplete queue work, or closing state return retryable `DEVICE_BUSY` |
 | `begin_frame` / `end_frame` / `@with_frame` | E | token-paired `IDLE -> ACTIVE -> IDLE`; quiescence required; helper worker is a direct call |
-| `submit` / `present` | E | selected-queue submission is internally serialized; public calls remain externally synchronized |
+| `submit` / `present` | E | externally synchronize each acquired image; submit consumes readiness, present consumes the image |
 | `poll_completion` / `wait_completion` | S | reusable value queries; host waits do not consume the point |
-| `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction rejects a pending acquire and waits graphics/present work |
+| `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction invalidates a pending acquire and waits its render work |
 | `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; resize rejects a pending acquire and waits graphics/present work |
 | `create_buffer` / `destroy_buffer` | S | |
 | `get_buffer_address` / `get_buffer_span` | S | lock-free read |

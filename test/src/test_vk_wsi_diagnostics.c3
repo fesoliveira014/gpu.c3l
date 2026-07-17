@@ -134,10 +134,20 @@ fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
         "acquire reports exactly once"
     );
 
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::SubmitDesc submit_desc;
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit_desc)!!;
+    gpu::wait_completion(completion, 1_000_000_000)!!;
+    gpu::AcquiredImage acquired = {
+        .readiness = gpu::vk::make_swapchain_readiness(
+            device,
+            bogus,
+            1,
+        )!!,
+    };
     capture = {};
-    gpu::PresentDesc present_desc = { .swapchain = bogus };
     assert(
-        @catch(gpu::present(&device, &present_desc)) == gpu::INVALID_HANDLE,
+        @catch(gpu::present(&device, &acquired, completion)) == gpu::INVALID_HANDLE,
         "present preserves stale-handle fault"
     );
     assert(capture.calls == 1 && capture.last.operation.str_view() == "present", "present reports exactly once");
@@ -335,7 +345,7 @@ fn void wsi_lifecycle_and_layout_diagnostics_are_contract_failures() @test {
 
     capture = {};
     context.operation = "present";
-    slot.acquire_consumed = false;
+    slot.readiness_consumed = false;
     assert(@catch(gpu::vk::check_swapchain_present_lifecycle(&context, &slot)) == gpu::INVALID_RESOURCE_STATE,
         "unconsumed present preserves INVALID_RESOURCE_STATE");
     assert(capture.calls == 1 && capture.last.category.public_contract,

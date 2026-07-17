@@ -260,7 +260,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void swapchain_only_submit_validates_stale_handle() @test {
+fn void readiness_only_submit_validates_stale_swapchain() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
@@ -270,29 +270,34 @@ fn void swapchain_only_submit_validates_stale_handle() @test {
         .owner      = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN),
         .generation = 1,
     };
-    gpu::SubmitDesc submit = { .swapchain = stale };
+    gpu::SwapchainReadiness readiness = gpu::vk::make_swapchain_readiness(
+        device,
+        stale,
+        1,
+    )!!;
+    gpu::SubmitDesc submit = { .readiness = readiness };
 
     ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit));
-    assert(rejected == gpu::INVALID_HANDLE, "a stale swapchain-only submit faults INVALID_HANDLE");
-    assert(command_submit_count(&device) == before, "stale swapchain rejection records no queue submit");
+    assert(rejected == gpu::INVALID_HANDLE, "stale readiness faults INVALID_HANDLE");
+    assert(command_submit_count(&device) == before, "stale readiness records no queue submit");
 }
 
-fn void swapchain_only_submit_rejects_generation_zero_handle() @test {
+fn void readiness_only_submit_rejects_malformed_identity() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    gpu::SwapchainHandle malformed = {
-        .owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN),
+    gpu::SwapchainReadiness malformed = {
+        .device  = device,
+        .payload = 1,
     };
-    gpu::SubmitDesc submit = { .swapchain = malformed };
+    gpu::SubmitDesc submit = { .readiness = malformed };
 
     ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit));
-    assert(rejected == gpu::INVALID_HANDLE, "a generation-zero swapchain faults INVALID_HANDLE");
-    assert(command_submit_count(&device) == before, "malformed swapchain rejection records no queue submit");
+    assert(rejected == gpu::INVALID_HANDLE, "malformed readiness faults INVALID_HANDLE");
+    assert(command_submit_count(&device) == before, "malformed readiness records no queue submit");
 }
 
 fn void simultaneous_devices_submit_independently() @test {

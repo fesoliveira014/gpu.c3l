@@ -4,6 +4,18 @@ import gpu;
 import gpu::vk @public;
 import vk;
 
+gpu::CompletionPoint captured_swapchain_wait;
+uint captured_swapchain_wait_count;
+
+fn void? capture_swapchain_wait(
+    gpu::Device* device,
+    gpu::CompletionPoint point,
+) {
+    assert(point.device == *device, "swapchain wait keeps device identity");
+    captured_swapchain_wait = point;
+    captured_swapchain_wait_count++;
+}
+
 // Pure swapchain selection logic over synthetic capability lists, plus the
 // headless presentation gate. Windowed behavior is covered by the
 // hello_triangle_sdl smoke run.
@@ -120,64 +132,278 @@ fn void swapchain_requires_a_presentation_request() @test {
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "swapchain without a presentation request faults");
 }
 
-// Acquire-submit-present coupling lifecycle. One state matrix per
-// guard, covering every (pending, consumed[, kind]) combination the guard
-// distinguishes; the not-acquired/not-consumed rows also cover the states
-// build_swapchain's dormant path and vk_present's clear leave the slot in.
-
 fn void swapchain_submit_guard_lifecycle() @test {
-    // Never acquired: nothing to couple to.
-    fault not_acquired = @catch(gpu::vk::swapchain_submit_guard(false, false, gpu::QueueKind.GRAPHICS));
+    gpu::QueueRoles graphics = { .graphics };
+    fault not_acquired = @catch(gpu::vk::swapchain_submit_guard(
+        acquire_pending:      false,
+        readiness_consumed:   false,
+        expected_acquisition: 0,
+        provided_acquisition: 1,
+        roles:                graphics,
+    ));
     assert(not_acquired == gpu::INVALID_RESOURCE_STATE, "submit with no pending acquire faults INVALID_RESOURCE_STATE");
 
-    // Acquired, not yet consumed, GRAPHICS: the one legal coupled submit.
-    gpu::vk::swapchain_submit_guard(true, false, gpu::QueueKind.GRAPHICS)!!;
+    gpu::vk::swapchain_submit_guard(
+        acquire_pending:      true,
+        readiness_consumed:   false,
+        expected_acquisition: 7,
+        provided_acquisition: 7,
+        roles:                graphics,
+    )!!;
 
-    // Already consumed by a prior coupled submit: the double-submit case
-    // this guard exists to reject before the queue is touched.
-    fault double_submit = @catch(gpu::vk::swapchain_submit_guard(true, true, gpu::QueueKind.GRAPHICS));
-    assert(double_submit == gpu::INVALID_RESOURCE_STATE, "second coupled submit faults INVALID_RESOURCE_STATE");
+    fault double_submit = @catch(gpu::vk::swapchain_submit_guard(
+        acquire_pending:      true,
+        readiness_consumed:   true,
+        expected_acquisition: 7,
+        provided_acquisition: 7,
+        roles:                graphics,
+    ));
+    assert(double_submit == gpu::INVALID_RESOURCE_STATE, "second readiness submit faults INVALID_RESOURCE_STATE");
 
-    // consumed=true with pending=false cannot arise from the real lifecycle
-    // (present clears both together) but the guard must still reject it.
-    fault stale_consumed = @catch(gpu::vk::swapchain_submit_guard(false, true, gpu::QueueKind.GRAPHICS));
-    assert(stale_consumed == gpu::INVALID_RESOURCE_STATE, "consumed without pending faults INVALID_RESOURCE_STATE");
+    fault stale_readiness = @catch(gpu::vk::swapchain_submit_guard(
+        acquire_pending:      true,
+        readiness_consumed:   false,
+        expected_acquisition: 7,
+        provided_acquisition: 6,
+        roles:                graphics,
+    ));
+    assert(stale_readiness == gpu::INVALID_RESOURCE_STATE, "stale readiness faults INVALID_RESOURCE_STATE");
 
-    // Non-GRAPHICS coupling: rejected regardless of an otherwise-legal state.
-    fault compute_coupled = @catch(gpu::vk::swapchain_submit_guard(true, false, gpu::QueueKind.COMPUTE));
-    assert(compute_coupled == gpu::INVALID_ARGUMENT, "COMPUTE-coupled submit faults INVALID_ARGUMENT");
-
-    fault transfer_coupled = @catch(gpu::vk::swapchain_submit_guard(true, false, gpu::QueueKind.TRANSFER));
-    assert(transfer_coupled == gpu::INVALID_ARGUMENT, "TRANSFER-coupled submit faults INVALID_ARGUMENT");
+    gpu::QueueRoles compute = { .compute };
+    fault compute_coupled = @catch(gpu::vk::swapchain_submit_guard(
+        acquire_pending:      true,
+        readiness_consumed:   false,
+        expected_acquisition: 7,
+        provided_acquisition: 7,
+        roles:                compute,
+    ));
+    assert(compute_coupled == gpu::INVALID_ARGUMENT, "COMPUTE readiness submit faults INVALID_ARGUMENT");
 }
 
 fn void swapchain_present_guard_lifecycle() @test {
-    // Never acquired.
-    fault not_acquired = @catch(gpu::vk::swapchain_present_guard(false, false));
+    gpu::Device device = { .generation = 1 };
+    gpu::CompletionPoint expected = { .device = device, .payload = 17 };
+    gpu::CompletionPoint other = { .device = device, .payload = 18 };
+    fault not_acquired = @catch(gpu::vk::swapchain_present_guard(
+        acquire_pending:      false,
+        readiness_consumed:   false,
+        expected_acquisition: 0,
+        provided_acquisition: 1,
+        expected_completion:  expected,
+        provided_completion:  expected,
+    ));
     assert(not_acquired == gpu::INVALID_RESOURCE_STATE, "present with no pending acquire faults INVALID_RESOURCE_STATE");
 
-    // Acquired but never submitted: the unsignaled-semaphore hang this guard
-    // replaces with a deterministic fault.
-    fault not_consumed = @catch(gpu::vk::swapchain_present_guard(true, false));
-    assert(not_consumed == gpu::INVALID_RESOURCE_STATE, "present without a consumed submit faults INVALID_RESOURCE_STATE");
+    fault not_consumed = @catch(gpu::vk::swapchain_present_guard(
+        acquire_pending:      true,
+        readiness_consumed:   false,
+        expected_acquisition: 7,
+        provided_acquisition: 7,
+        expected_completion:  expected,
+        provided_completion:  expected,
+    ));
+    assert(not_consumed == gpu::INVALID_RESOURCE_STATE, "present without a readiness submit faults INVALID_RESOURCE_STATE");
 
-    // Acquired and consumed by a coupled submit: the one legal present.
-    gpu::vk::swapchain_present_guard(true, true)!!;
+    gpu::vk::swapchain_present_guard(
+        acquire_pending:      true,
+        readiness_consumed:   true,
+        expected_acquisition: 7,
+        provided_acquisition: 7,
+        expected_completion:  expected,
+        provided_completion:  expected,
+    )!!;
 
-    // consumed=true with pending=false: same unreachable-but-must-reject case
-    // as the submit guard.
-    fault stale_consumed = @catch(gpu::vk::swapchain_present_guard(false, true));
-    assert(stale_consumed == gpu::INVALID_RESOURCE_STATE, "consumed without pending faults INVALID_RESOURCE_STATE");
+    fault stale_image = @catch(gpu::vk::swapchain_present_guard(
+        acquire_pending:      true,
+        readiness_consumed:   true,
+        expected_acquisition: 7,
+        provided_acquisition: 6,
+        expected_completion:  expected,
+        provided_completion:  expected,
+    ));
+    assert(stale_image == gpu::INVALID_RESOURCE_STATE, "stale acquired image faults INVALID_RESOURCE_STATE");
+
+    fault wrong_completion = @catch(gpu::vk::swapchain_present_guard(
+        acquire_pending:      true,
+        readiness_consumed:   true,
+        expected_acquisition: 7,
+        provided_acquisition: 7,
+        expected_completion:  expected,
+        provided_completion:  other,
+    ));
+    assert(wrong_completion == gpu::INVALID_ARGUMENT, "unrelated completion faults INVALID_ARGUMENT");
 }
 
-fn void swapchain_mutation_guard_lifecycle() @test {
-    gpu::vk::swapchain_mutation_guard(false)!!;
-    fault acquired = @catch(gpu::vk::swapchain_mutation_guard(true));
-    assert(
-        acquired == gpu::INVALID_RESOURCE_STATE,
-        "resize or destroy with an acquired image faults INVALID_RESOURCE_STATE"
+fn void present_oom_preserves_the_acquisition_for_retry() @test {
+    gpu::vk::SwapchainSlot slot = {
+        .acquire_pending    = true,
+        .readiness_consumed = true,
+        .acquisition        = 9,
+        .pending_image      = 2,
+    };
+    gpu::AcquiredImage image = {
+        .texture   = { .index = 2, .generation = 1 },
+        .readiness = {
+            .device  = { .generation = 1 },
+            .payload = 9,
+        },
+        .index = 2,
+    };
+
+    gpu::vk::commit_present_result(
+        &slot,
+        &image,
+        vk::Result.ERROR_OUT_OF_HOST_MEMORY,
     );
+    assert(slot.acquire_pending && slot.readiness_consumed,
+        "host OOM preserves the pending acquisition");
+    assert(image.readiness.is_valid(), "host OOM preserves the acquired image");
+
+    gpu::vk::commit_present_result(
+        &slot,
+        &image,
+        vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
+    );
+    assert(slot.acquire_pending && image.readiness.is_valid(),
+        "device OOM preserves the acquired image");
+
+    gpu::vk::commit_present_result(
+        &slot,
+        &image,
+        vk::Result.ERROR_OUT_OF_DATE_KHR,
+    );
+    assert(!slot.acquire_pending && !slot.readiness_consumed,
+        "an enqueued out-of-date present consumes the acquisition");
+    assert(!image.readiness.is_valid(), "an enqueued present consumes the image");
 }
+
+fn bool? poll_only_second_retirement(
+    gpu::Device* device,
+    gpu::CompletionPoint point,
+) {
+    (void)device;
+    return gpu::completion_point_sequence(point) == 2;
+}
+
+fn bool? poll_no_retirement(
+    gpu::Device* device,
+    gpu::CompletionPoint point,
+) {
+    (void)device;
+    (void)point;
+    return false;
+}
+
+fn void acquire_semaphores_retire_before_reuse() @test {
+    gpu::Device device = { .generation = 1 };
+    gpu::CompletionPoint[3] retirements = {
+        { .device = device, .payload = 1ull << gpu::COMPLETION_QUEUE_BITS },
+        { .device = device, .payload = 2ull << gpu::COMPLETION_QUEUE_BITS },
+        { .device = device, .payload = 3ull << gpu::COMPLETION_QUEUE_BITS },
+    };
+    gpu::vk::SwapchainSlot slot = {
+        .acquire_retirements   = retirements[..],
+        .next_acquire_semaphore = 2,
+    };
+
+    uint selected = gpu::vk::select_acquire_semaphore_with(
+        &device,
+        &slot,
+        &poll_only_second_retirement,
+    )!!;
+    assert(selected == 1,
+        "selection skips pending waits and finds a retired semaphore");
+
+    retirements[2] = {};
+    selected = gpu::vk::select_acquire_semaphore_with(
+        &device,
+        &slot,
+        &poll_no_retirement,
+    )!!;
+    assert(selected == 2, "a never-used semaphore is immediately available");
+
+    slot.pending_acquire_semaphore_index = 2;
+    gpu::CompletionPoint submitted = { .device = device, .payload = 3ull << gpu::COMPLETION_QUEUE_BITS };
+    gpu::vk::commit_swapchain_submit(&slot, submitted);
+    assert(slot.readiness_consumed && slot.render_completion == submitted,
+        "successful submission commits readiness and render completion");
+    assert(retirements[2] == submitted,
+        "successful submission retires the exact acquire semaphore");
+
+    fault busy = @catch(gpu::vk::select_acquire_semaphore_with(
+        &device,
+        &slot,
+        &poll_no_retirement,
+    ));
+    assert(busy == gpu::WAIT_TIMEOUT,
+        "acquire stays retryable while every semaphore wait is pending");
+}
+fn void pending_swapchain_destroy_waits_the_exact_render_queue() @test {
+    gpu::Device device = { .generation = 1 };
+    gpu::CompletionPoint secondary_graphics = {
+        .device  = device,
+        .payload = (5ull << gpu::COMPLETION_QUEUE_BITS) | 3,
+    };
+    gpu::vk::SwapchainSlot slot = { .acquire_pending = true };
+    captured_swapchain_wait = {};
+    captured_swapchain_wait_count = 0;
+
+    gpu::vk::wait_pending_swapchain_render_with(
+        &device,
+        &slot,
+        &capture_swapchain_wait,
+    )!!;
+    assert(captured_swapchain_wait_count == 0,
+        "an unused readiness has no submitted render work to wait");
+
+    slot.readiness_consumed = true;
+    slot.render_completion = secondary_graphics;
+    gpu::vk::wait_pending_swapchain_render_with(
+        &device,
+        &slot,
+        &capture_swapchain_wait,
+    )!!;
+    assert(captured_swapchain_wait_count == 1,
+        "destroy waits one readiness-consuming submission");
+    assert(captured_swapchain_wait == secondary_graphics,
+        "destroy waits the exact secondary graphics completion");
+}
+
+fn void swapchain_resize_rejects_a_pending_acquisition() @test {
+    gpu::vk::swapchain_resize_guard(false)!!;
+    fault pending = @catch(gpu::vk::swapchain_resize_guard(true));
+    assert(pending == gpu::INVALID_RESOURCE_STATE,
+        "resize rejects an acquired image until present or destroy");
+}
+fn void swapchain_readiness_identity_round_trips() @test {
+    gpu::Device device = { .index = 3, .generation = 11 };
+    gpu::SwapchainHandle swapchain = {
+        .owner      = 99,
+        .index      = 7,
+        .generation = 0x00FF_FFFE,
+    };
+    gpu::SwapchainReadiness readiness = gpu::vk::make_swapchain_readiness(
+        device,
+        swapchain,
+        0xFFFF_FFFE,
+    )!!;
+
+    assert(readiness.device == device, "readiness keeps exact device identity");
+    assert(gpu::vk::swapchain_readiness_index(readiness) == swapchain.index,
+        "readiness keeps swapchain index");
+    assert(gpu::vk::swapchain_readiness_generation(readiness) == swapchain.generation,
+        "readiness keeps swapchain generation");
+    assert(gpu::vk::swapchain_readiness_acquisition(readiness) == 0xFFFF_FFFE,
+        "readiness keeps acquisition identity");
+}
+
+fn void swapchain_acquisition_sequence_never_wraps() @test {
+    assert(gpu::vk::next_swapchain_acquisition(0)!! == 1,
+        "first acquisition uses the first non-zero identity");
+    fault exhausted = @catch(gpu::vk::next_swapchain_acquisition(uint::max));
+    assert(exhausted == gpu::SLOT_TABLE_FULL, "acquisition identity faults before wrapping");
+}
+
 
 fn void swapchain_image_usage_mapping() @test {
     gpu::TextureUsage color_only = gpu::vk::swapchain_image_usage((uint)vk::ImageUsageFlagBits.COLOR_ATTACHMENT_BIT);
@@ -219,9 +445,10 @@ fn void swapchain_info_snapshots_are_coherent() @test {
         "active snapshot reports selected mode and active state");
 
     gpu::vk::SwapchainSlot slot = {
-        .info             = first,
-        .acquire_pending  = true,
-        .acquire_consumed = true,
+        .info               = first,
+        .acquire_pending    = true,
+        .readiness_consumed = true,
+        .acquisition        = 9,
     };
     vk::Extent2D resized_extent = { .width = 1280, .height = 720 };
     gpu::SwapchainInfo resized = gpu::vk::make_swapchain_info(
@@ -236,28 +463,38 @@ fn void swapchain_info_snapshots_are_coherent() @test {
         "replacement snapshot has only the new extent and count");
     assert(slot.info.present_mode == gpu::PresentMode.MAILBOX && !slot.info.dormant,
         "replacement snapshot has only the new mode and state");
-    assert(!slot.acquire_pending && !slot.acquire_consumed,
+    assert(!slot.acquire_pending && !slot.readiness_consumed,
         "active publication resets the acquire lifecycle");
+    assert(slot.acquisition == 9, "resize does not reuse acquisition identities");
 
     slot.acquire_pending = true;
-    slot.acquire_consumed = true;
+    slot.readiness_consumed = true;
     gpu::vk::publish_dormant_swapchain_info(&slot);
     assert(slot.info.format == gpu::Format.UNDEFINED, "dormant publication clears the prior format");
     assert(slot.info.width == 0 && slot.info.height == 0 && slot.info.image_count == 0,
         "dormant publication clears the prior extent and image count");
     assert(slot.info.present_mode == gpu::PresentMode.FIFO && slot.info.dormant,
         "dormant publication uses the documented ignored mode sentinel");
-    assert(!slot.acquire_pending && !slot.acquire_consumed,
+    assert(!slot.acquire_pending && !slot.readiness_consumed,
         "dormant publication resets the acquire lifecycle");
+    assert(slot.acquisition == 9, "dormancy does not reuse acquisition identities");
 }
 
 fn void acquired_image_reports_committed_prior_layout() @test {
     gpu::vk::TextureSlot texture;
+    gpu::Device device = { .generation = 1 };
+    gpu::SwapchainHandle swapchain = { .index = 1, .generation = 1 };
+    gpu::SwapchainReadiness readiness = gpu::vk::make_swapchain_readiness(
+        device,
+        swapchain,
+        1,
+    )!!;
     gpu::TextureHandle handle = { .index = 2, .generation = 7 };
 
     gpu::AcquiredImage first = gpu::vk::make_acquired_image(
         texture:    &texture,
         handle:     handle,
+        readiness:  readiness,
         index:      1,
         suboptimal: false,
     );
@@ -265,11 +502,13 @@ fn void acquired_image_reports_committed_prior_layout() @test {
         "newly wrapped image reports undefined prior layout");
     assert(first.texture == handle && first.index == 1 && !first.suboptimal,
         "acquired-image construction preserves existing fields");
+    assert(first.readiness == readiness, "acquired image carries one-shot readiness");
 
     gpu::vk::set_texture_layout(&texture, gpu::TextureLayout.PRESENT);
     gpu::AcquiredImage presented = gpu::vk::make_acquired_image(
         texture:    &texture,
         handle:     handle,
+        readiness:  readiness,
         index:      1,
         suboptimal: true,
     );

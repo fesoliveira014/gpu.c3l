@@ -1,6 +1,7 @@
 module gpu;
 
 const uint MAX_SWAPCHAINS = 8;
+const SwapchainReadiness SWAPCHAIN_READINESS_INVALID = {};
 
 
 <* Pacing of presentation; unsupported requested modes fall back to FIFO. *>
@@ -46,18 +47,30 @@ struct SwapchainInfo {
     bool        dormant;
 }
 
-// The texture handle is frame-transient: resize re-wraps images and stales
-// prior handles, so hold it for the current frame only.
+<* One-shot acquisition readiness. Submission accepts it exactly once. *>
+struct SwapchainReadiness {
+    Device device;
+    ulong  payload;
+}
+$assert(SwapchainReadiness::size <= ulong::size * 2);
+
+<* Borrowed swapchain texture and its one-shot acquisition identity. Resize
+   invalidates the texture; an enqueued presentation consumes the value. *>
 struct AcquiredImage {
-    TextureHandle texture;
-    uint          index;
-    bool          suboptimal;
-    TextureLayout prior_layout;
+    TextureHandle       texture;
+    SwapchainReadiness  readiness;
+    uint                index;
+    bool                suboptimal;
+    TextureLayout       prior_layout;
 }
 
-<* Parameters for present; targets the swapchain's most recently acquired image. *>
-struct PresentDesc {
-    SwapchainHandle swapchain;
+fn bool SwapchainReadiness.is_valid(self) => self.device.is_valid()
+    && self.payload != 0;
+fn bool SwapchainReadiness.equals(
+    self,
+    SwapchainReadiness other,
+) @operator(==) {
+    return self.device == other.device && self.payload == other.payload;
 }
 
 <* The surface remains owned by its runtime and must outlive the swapchain. *>
@@ -84,8 +97,8 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
     return swapchain;
 }
 
-<* Counterpart of create_swapchain. Returns INVALID_RESOURCE_STATE while an
-   acquired image is pending; otherwise waits for in-flight swapchain work. *>
+<* Counterpart of create_swapchain. Waits for submitted swapchain work and
+   invalidates any pending acquisition. *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
@@ -96,8 +109,8 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
 <* Recreate under the same handle at a new extent. A zero clamped extent or
    a failed rebuild leaves the swapchain dormant (acquire faults
    SWAPCHAIN_OUT_OF_DATE) until a successful resize. Prior acquired-image
-   handles become stale. Returns INVALID_RESOURCE_STATE while an acquired
-   image is pending. *>
+   handles become stale. An acquired image must be presented or its swapchain
+   destroyed before resize. *>
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
@@ -112,28 +125,27 @@ fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) 
     return operation.vtable.get_swapchain_info(device, swapchain);
 }
 
-<* Acquire the next image. WAIT_TIMEOUT is transient: retry the same swapchain.
-   SWAPCHAIN_OUT_OF_DATE requires resize_swapchain; SURFACE_LOST requires
-   destroying the swapchain and creating another from fresh platform handles.
-   INVALID_RESOURCE_STATE means an acquire is already pending. A true
-   `suboptimal` image remains usable but is a soft signal to resize soon. The
-   rendering submit must name the swapchain in its SubmitDesc. *>
+<* Acquire a borrowed texture and one-shot readiness. WAIT_TIMEOUT is retryable;
+   out-of-date requires resize and surface loss requires replacement. *>
 fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     return operation.vtable.acquire_next_image(device, swapchain);
 }
 
-<* Present the last acquired image. Requires the coupled GRAPHICS submit that
-   consumes the acquire to have run first and the image in the PRESENT tracked
-   layout (INVALID_RESOURCE_STATE otherwise). SWAPCHAIN_OUT_OF_DATE requires
-   resize_swapchain; SURFACE_LOST requires destroying the swapchain and
-   creating another from fresh platform handles. *>
-fn void? present(Device* device, PresentDesc* desc) {
+<* Present and consume an acquired image after its readiness-consuming submit.
+   `render_completion` must be the point returned by that submit. *>
+fn void? present(
+    Device* device,
+    AcquiredImage* image,
+    CompletionPoint render_completion,
+) {
+    if (image == null) return INVALID_ARGUMENT~;
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    return operation.vtable.present(device, desc);
+    validate_completion_point(&operation, device, render_completion)!;
+    operation.vtable.present(device, image, render_completion)!;
+    *image = {};
 }
 
 <* Present modes the swapchain's surface supports. Unsupported requested

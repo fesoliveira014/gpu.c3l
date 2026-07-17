@@ -65,9 +65,13 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         "create_swapchain rejects null descriptors"
     );
     assert(
-        @catch(gpu::present(&device, (gpu::PresentDesc*)null))
+        @catch(gpu::present(
+            &device,
+            (gpu::AcquiredImage*)null,
+            gpu::COMPLETION_POINT_INVALID,
+        ))
             == gpu::INVALID_ARGUMENT,
-        "present rejects a null descriptor"
+        "present rejects a null acquired image"
     );
 }
 

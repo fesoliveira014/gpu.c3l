@@ -327,6 +327,69 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     gpu::wait_completion(point, 1_000_000_000)!!;
 }
 
+fn vk::Result reject_swapchain_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)fence;
+    assert(submit_count == 1, "readiness emits one native submit");
+    vk::SubmitInfo2* submit = &submits[0];
+    assert(submit.wait_semaphore_info_count == 1,
+        "readiness adds one private acquire wait");
+    assert(submit.p_wait_semaphore_infos[0].stage_mask
+        == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        "acquire readiness covers the complete submission");
+    assert(submit.signal_semaphore_info_count == 2,
+        "readiness adds one private present signal");
+    assert(submit.p_signal_semaphore_infos[0].stage_mask
+        == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        "present readiness covers the complete submission");
+    return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
+}
+fn void native_submit_failure_preserves_swapchain_readiness() @test {
+    gpu::Device device = make_submit_stats_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
+    state.presentation.swapchains.owner = gpu::resource_owner_tag(
+        state.resource_owner,
+        gpu::ResourceOwnerKind.SWAPCHAIN,
+    );
+    state.presentation.swapchains.slots = cells[..];
+    defer state.presentation.swapchains.slots = {};
+
+    vk::SwapchainSlot pending = {
+        .acquire_pending           = true,
+        .acquisition               = 1,
+        .pending_acquire_semaphore = (vk::Semaphore)1,
+    };
+    pending.present_semaphores[0] = (vk::Semaphore)2;
+    gpu::SwapchainHandle handle =
+        state.presentation.swapchains.alloc(pending)!!;
+    gpu::SwapchainReadiness readiness = vk::make_swapchain_readiness(
+        device,
+        handle,
+        1,
+    )!!;
+    gpu::SubmitDesc desc = { .readiness = readiness };
+
+    assert(@catch(vk::vk_submit_with(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        &desc,
+        &reject_swapchain_submit,
+    )) == gpu::OUT_OF_HOST_MEMORY,
+        "native failure preserves the readiness fault contract");
+    vk::SwapchainSlot* preserved =
+        state.presentation.swapchains.get(handle)!!;
+    assert(!preserved.readiness_consumed,
+        "native failure leaves readiness retryable");
+    assert(!preserved.render_completion.is_valid(),
+        "native failure publishes no render completion");
+}
 fn void helper_submit_failure_preserves_cleanup_token() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;

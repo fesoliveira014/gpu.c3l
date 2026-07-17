@@ -387,7 +387,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; resource creation: empty, unknown, or unselected access role; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; a command token recorded for another queue; missing transfer/index usage flag, an access set disjoint from the selected queue roles, stale or forged span allocation metadata, malformed span access, or a misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
 | `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, `poll_completion`, `wait_completion`, any resource-handle-taking call, `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
-| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
+| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
@@ -1266,9 +1266,9 @@ memory ordering. Presets intentionally cover only common cases; construct a
 raw `TextureBarrier` for transfer sources, other shader stages, read-only
 attachments, subresource-specific work, or any unusual tuple.
 
-At the presentation boundary, both barrier sides use `COLOR_ATTACHMENT` so
-they chain with the coupled submission's color-attachment-output semaphore
-wait and signal. Access remains asymmetric by composition:
+At the presentation boundary, both barrier sides use `COLOR_ATTACHMENT` for
+the texture transition itself. The private readiness bridge conservatively
+covers the complete submission. Access remains asymmetric by composition:
 `PRESENT -> COLOR_ATTACHMENT` uses `NONE -> COLOR_READ_WRITE`, while
 `COLOR_ATTACHMENT -> PRESENT` uses `COLOR_READ_WRITE -> NONE`.
 
@@ -1380,89 +1380,63 @@ SwapchainInfo
     PresentMode present_mode
     bool dormant
 
+SwapchainReadiness
+    opaque one-shot value
+
 AcquiredImage
-    TextureHandle texture   (frame-transient — resize stales it)
+    TextureHandle texture
+    SwapchainReadiness readiness
     uint index
     bool suboptimal
     TextureLayout prior_layout
 
-PresentDesc
-    SwapchainHandle swapchain
-
-bitstruct PresentModeSupport : uint
-    bool fifo
-    bool immediate
-    bool mailbox
-
-create_swapchain(Device* device, Surface* surface, SwapchainDesc* desc) -> SwapchainHandle?
-destroy_swapchain(Device* device, SwapchainHandle swapchain) -> void?
-resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) -> void?
-get_swapchain_info(Device* device, SwapchainHandle swapchain) -> SwapchainInfo?
-acquire_next_image(Device* device, SwapchainHandle swapchain) -> AcquiredImage?
-present(Device* device, PresentDesc* desc) -> void?
-get_present_mode_support(Device* device, SwapchainHandle swapchain) -> PresentModeSupport?
+create_swapchain(Device*, Surface*, SwapchainDesc*) -> SwapchainHandle?
+destroy_swapchain(Device*, SwapchainHandle) -> void?
+resize_swapchain(Device*, SwapchainHandle, uint width, uint height) -> void?
+get_swapchain_info(Device*, SwapchainHandle) -> SwapchainInfo?
+acquire_next_image(Device*, SwapchainHandle) -> AcquiredImage?
+present(Device*, AcquiredImage*, CompletionPoint render_completion) -> void?
+get_present_mode_support(Device*, SwapchainHandle) -> PresentModeSupport?
 ```
 
-An unsupported requested mode falls back to FIFO silently at creation; query
-`get_present_mode_support` to choose deliberately (`present_mode_explorer`
-sample). State-machine contracts: acquiring while an acquire is pending
-faults INVALID_RESOURCE_STATE; present enforces the PRESENT tracked layout;
-a failed resize parks the swapchain dormant (next acquire reports
-SWAPCHAIN_OUT_OF_DATE).
+The rendering submission passes `acquired.readiness` in `SubmitDesc`. Successful
+submission consumes that readiness and returns the only completion point
+accepted by `present` for the acquisition. Validation and retryable native
+failure preserve readiness; device loss is terminal. Replays, stale
+acquisitions, foreign devices, non-graphics queues, and unrelated completion
+points fault before native mutation.
 
-Configured diagnostics preserve the public WSI operation and fault, report
-exact lifecycle or descriptor context, and include the raw signed VkResult for
-native failures. Expected recovery outcomes are silent: acquire `WAIT_TIMEOUT`
-and dormant-swapchain `SWAPCHAIN_OUT_OF_DATE` return their faults without a
-callback. Handle identity is present only after a live swapchain resolves.
-Each swapchain is scoped to its creating `Device`; multiple devices may own
-independent swapchains.
+```c3
+gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
+gpu::SubmitDesc submit = {
+    .command_lists = lists[..],
+    .readiness     = acquired.readiness,
+};
+gpu::CompletionPoint rendered = gpu::submit(graphics, &submit)!;
+gpu::present(&device, &acquired, rendered)!;
+```
 
-WSI recovery is fault-specific:
+A successful or enqueued present consumes `acquired`; validation failure and
+native host/device allocation failure leave it retryable. `present` requires the
+texture's tracked layout to be `PRESENT`. Resize rejects a pending acquisition;
+destruction waits submitted render work and invalidates it.
 
-| Outcome | Meaning | Recovery |
-|---|---|---|
-| `WAIT_TIMEOUT` from acquire | no image was available during the bounded wait | retry acquire on the same swapchain; do not resize |
-| `SWAPCHAIN_OUT_OF_DATE` | swapchain no longer matches the surface | call `resize_swapchain`, then retry |
-| `SURFACE_LOST` | platform surface is no longer usable | destroy the swapchain, refresh native surface handles as needed, and create a new swapchain |
-| acquired image with `suboptimal = true` | image is valid but presentation properties changed | finish the frame and resize when convenient |
+`WAIT_TIMEOUT` from acquire leaves the swapchain unchanged. Out-of-date requires
+resize; surface loss requires a new surface and swapchain. A suboptimal image is
+valid and may be presented before resizing. Unsupported requested present modes
+fall back to FIFO; query `get_present_mode_support` to choose explicitly.
 
-`get_swapchain_info` reports the selected format, clamped extent,
-driver-returned image count, and selected present mode (including FIFO
-fallback), not the requested values. Re-query after every successful
-`resize_swapchain`; if the format changed, rebuild format-dependent graphics
-pipelines. The snapshot is published coherently after a complete build. A
-zero extent or failed rebuild publishes the dormant sentinel:
-`format = UNDEFINED`, zero width/height/image count, `present_mode = FIFO`,
-and `dormant = true`. The handle remains valid and queryable while dormant.
+`get_swapchain_info` returns the selected format, extent, image count, present
+mode, and dormant state. Re-query after resize and rebuild format-dependent
+pipelines when the format changes. A dormant swapchain reports `UNDEFINED`,
+zero extent/count, and FIFO until resize succeeds.
 
-`AcquiredImage.prior_layout` is the image's committed tracked layout at
-acquire time. It is `UNDEFINED` for a newly wrapped image and `PRESENT` after
-that image's submitted present transition, so callers can use it directly as
-the first barrier's `old_layout` without a per-image seen table.
+`AcquiredImage.prior_layout` is the committed texture layout: `UNDEFINED` for a
+newly wrapped image and `PRESENT` after the normal presentation cycle. Resize
+stales prior borrowed texture handles. Destroy descriptors that reference
+swapchain textures before resize.
 
-`resize_swapchain` (and swapchain/device teardown) release the old wrapped
-swapchain textures directly, bypassing `destroy_texture` — so they never hit
-the `RESOURCE_IN_USE` check (§4 Faults). A `TextureIndex` descriptor created
-against a swapchain texture does **not** block a resize, and is not faulted
-or freed by it: the descriptor is left dangling once the backing image is
-gone. Destroy any descriptors on the current swapchain textures before
-calling `resize_swapchain`.
-
-Resize and destruction reject a pending acquire with
-`INVALID_RESOURCE_STATE`. Otherwise, they wait for both graphics and
-presentation work before releasing swapchain resources.
-
-Each acquired image couples to exactly one GRAPHICS `submit` before present:
-a second coupled submit or a present without a consumed submit faults
-INVALID_RESOURCE_STATE (a failed submit leaves the acquire retryable), and
-coupling a COMPUTE/TRANSFER submit faults INVALID_ARGUMENT. Wrapped swapchain
-textures carry only the usage bits the surface actually granted, so a
-transfer-src copy faults INVALID_ARGUMENT where TRANSFER_SRC was never
-supported.
-
-SDL helper functions should live in samples or an optional helper module, not in the core API.
-
+SDL integration belongs in samples or an optional helper module.
 ## 11. Example: root-pointer compute
 
 Pseudo-code:

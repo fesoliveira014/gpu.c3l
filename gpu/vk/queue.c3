@@ -1522,15 +1522,25 @@ fn uint swapchain_queue_families(
     VkDeviceState* state,
     uint[] out_families,
 ) {
-    uint count = 0;
+    uint count;
     if (state.selected_queue_roles.graphics) {
-        out_families[count++] = state.graphics_family;
+        count = append_queue_family(
+            out_families,
+            count,
+            state.graphics_family,
+        );
+        count = append_selected_role_families(
+            selection:    &state.queues,
+            kind:         gpu::QueueKind.GRAPHICS,
+            out_families: out_families,
+            count:        count,
+        );
     }
-    if (!state.selected_queue_roles.graphics
-        || state.presentation.family != state.graphics_family) {
-        out_families[count++] = state.presentation.family;
-    }
-    return count;
+    return append_queue_family(
+        out_families,
+        count,
+        state.presentation.family,
+    );
 }
 
 fn void? bind_queue_completion_role(
@@ -1969,12 +1979,24 @@ fn SubmitInputs? resolve_submit_inputs(
         }
     }
 
-    if (desc.swapchain != gpu::SWAPCHAIN_HANDLE_INVALID) {
-        inputs.swapchain = state.presentation.swapchains.get(desc.swapchain)!;
+    if (desc.readiness != gpu::SWAPCHAIN_READINESS_INVALID) {
+        if (!desc.readiness.is_valid()
+            || desc.readiness.device != device) {
+            return gpu::INVALID_HANDLE~;
+        }
+        gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
+            state,
+            desc.readiness,
+        )!;
+        inputs.swapchain = state.presentation.swapchains.get(handle)!;
         swapchain_submit_guard(
-            inputs.swapchain.acquire_pending,
-            inputs.swapchain.acquire_consumed,
-            queue_kind_for_roles(queue.roles),
+            acquire_pending:      inputs.swapchain.acquire_pending,
+            readiness_consumed:   inputs.swapchain.readiness_consumed,
+            expected_acquisition: inputs.swapchain.acquisition,
+            provided_acquisition: swapchain_readiness_acquisition(
+                desc.readiness,
+            ),
+            roles:                queue.roles,
         )!;
     }
 
@@ -2104,7 +2126,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 waits[next_wait++] = vk::semaphore_submit_info()
                     .set_semaphore(swapchain.pending_acquire_semaphore)
                     .set_stage_mask(
-                        vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
                     );
             }
             if (next_wait > 0) {
@@ -2126,7 +2148,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                     swapchain.present_semaphores[swapchain.pending_image],
                 )
                 .set_stage_mask(
-                    vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
                 );
         }
 
@@ -2186,7 +2208,9 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             }
 
             state.submit_stats.queue_submits++;
-            if (swapchain != null) swapchain.acquire_consumed = true;
+            if (swapchain != null) {
+                commit_swapchain_submit(swapchain, point);
+            }
             if (piggyback_compute) {
                 state.aux_compute_counter++;
                 state.aux_compute_last_signaled = state.aux_compute_counter;

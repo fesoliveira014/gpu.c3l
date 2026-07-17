@@ -57,15 +57,45 @@ def valid_document() -> dict:
                             },
                         ],
                     },
+                    {
+                        "name": "present",
+                        "return_type": {"name": "void?"},
+                        "members": [
+                            {"name": "device", "type": {"name": "Device*"}},
+                            {
+                                "name": "image",
+                                "type": {"name": "AcquiredImage*"},
+                            },
+                            {
+                                "name": "render_completion",
+                                "type": {"name": "CompletionPoint"},
+                            },
+                        ],
+                    },
                 ],
                 "types": [
                     {"name": "ExecutableCommandList", "kind": "struct"},
                     {
                         "name": "SubmitDesc",
                         "kind": "struct",
+                        "members": [
+                            {
+                                "name": "command_lists",
+                                "type": {"name": "ExecutableCommandList[]"},
+                            },
+                            {
+                                "name": "readiness",
+                                "type": {"name": "SwapchainReadiness"},
+                            },
+                        ],
+                    },
+                    {"name": "SwapchainReadiness", "kind": "struct"},
+                    {
+                        "name": "AcquiredImage",
+                        "kind": "struct",
                         "members": [{
-                            "name": "command_lists",
-                            "type": {"name": "ExecutableCommandList[]"},
+                            "name": "readiness",
+                            "type": {"name": "SwapchainReadiness"},
                         }],
                     },
                 ],
@@ -156,6 +186,26 @@ class PublicApiCheckTests(unittest.TestCase):
         })
         failures = check_public_api.validate_document(document)
         self.assertIn("retired recording context", failures)
+
+    def test_rejects_swapchain_handle_coupling(self) -> None:
+        document = valid_document()
+        submit_desc = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "SubmitDesc"
+        )
+        submit_desc["members"] = [{
+            "name": "swapchain",
+            "type": {"name": "SwapchainHandle"},
+        }]
+        failures = check_public_api.validate_document(document)
+        self.assertIn(
+            "SubmitDesc must not expose swapchain coupling",
+            failures,
+        )
+        self.assertIn(
+            "SubmitDesc.readiness must contain one-shot swapchain readiness",
+            failures,
+        )
 
     def test_rejects_old_command_lifecycle_shape(self) -> None:
         document = valid_document()
