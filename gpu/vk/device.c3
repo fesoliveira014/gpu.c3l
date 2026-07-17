@@ -80,6 +80,7 @@ struct VkDeviceState {
     uint                       transfer_completion_id;
     gpu::DeviceCaps            caps;
     ulong                      max_timeline_semaphore_value_difference;
+    usz                        non_coherent_atom_size;
     bool                       validation;
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
@@ -225,16 +226,18 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .destroy_device       = &vk_destroy_device,
     .get_memory_stats     = &vk_get_memory_stats,
     .build_memory_report  = &vk_build_memory_report,
-    .allocate_memory      = &vk_allocate_memory,
-    .free_allocation      = &vk_free_allocation,
-    .get_allocation_info  = &vk_get_allocation_info,
-    .get_allocation_span  = &vk_get_allocation_span,
-    .get_span_mapping     = &vk_get_span_mapping,
-    .get_span_address     = &vk_get_span_address,
-    .create_buffer        = &vk_create_buffer,
-    .destroy_buffer      = &vk_destroy_buffer,
-    .get_buffer_address  = &vk_get_buffer_address,
-    .get_buffer_span     = &vk_get_buffer_span,
+    .allocate_memory        = &vk_allocate_memory,
+    .free_allocation        = &vk_free_allocation,
+    .get_allocation_info    = &vk_get_allocation_info,
+    .get_allocation_span    = &vk_get_allocation_span,
+    .get_span_mapping       = &vk_get_span_mapping,
+    .get_span_address       = &vk_get_span_address,
+    .flush_mapped_span      = &vk_flush_mapped_span,
+    .invalidate_mapped_span = &vk_invalidate_mapped_span,
+    .create_buffer          = &vk_create_buffer,
+    .destroy_buffer         = &vk_destroy_buffer,
+    .get_buffer_address     = &vk_get_buffer_address,
+    .get_buffer_span        = &vk_get_buffer_span,
     .begin_frame         = &vk_begin_frame,
     .alloc_frame_span    = &vk_alloc_frame_span,
     .end_frame           = &vk_end_frame,
@@ -664,6 +667,7 @@ fn gpu::Device? create_vk_device_with_selection(
         physical_device:         state.physical_device,
         inputs:                  &caps_inputs,
         max_timeline_difference: &state.max_timeline_semaphore_value_difference,
+        non_coherent_atom_size:  &state.non_coherent_atom_size,
     );
 
     gpu::QueueRequirements requirements = queue_requirements == null
@@ -1210,6 +1214,7 @@ fn gpu::DeviceCaps build_caps(
     vk::PhysicalDevice physical_device,
     CapsInputs* inputs,
     ulong* max_timeline_difference,
+    usz* non_coherent_atom_size,
 ) @private {
     vk::PhysicalDeviceTimelineSemaphoreProperties timeline_props =
         vk::physical_device_timeline_semaphore_properties();
@@ -1219,6 +1224,7 @@ fn gpu::DeviceCaps build_caps(
     vk::PhysicalDeviceProperties props = props2.properties;
     *max_timeline_difference =
         timeline_props.max_timeline_semaphore_value_difference;
+    *non_coherent_atom_size = (usz)props.limits.non_coherent_atom_size;
     return (gpu::DeviceCaps){
         .strict_enabled            = inputs.strict_enabled,
         .presentation_enabled      = inputs.presentation_enabled,

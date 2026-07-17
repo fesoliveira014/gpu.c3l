@@ -201,6 +201,32 @@ fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
     return operation.vtable.get_span_address(device, span);
 }
 
+<* Make CPU writes to a live mapped allocation range visible to the GPU.
+   Coherent ranges are no-ops. *>
+fn void? flush_mapped_span(Device* device, GpuSpan span) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    validate_resource_owner(
+        &operation,
+        span.owner,
+        ResourceOwnerKind.ALLOCATION,
+    )!;
+    return operation.vtable.flush_mapped_span(device, span);
+}
+
+<* After the relevant GPU completion point, make its writes visible to CPU
+   reads. This call does not wait; coherent ranges are no-ops. *>
+fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    validate_resource_owner(
+        &operation,
+        span.owner,
+        ResourceOwnerKind.ALLOCATION,
+    )!;
+    return operation.vtable.invalidate_mapped_span(device, span);
+}
+
 fn DeviceOperation? frame_operation(FrameToken* frame) @private {
     if (frame == null || frame.generation == 0) return INVALID_HANDLE~;
     return begin_device_operation(&frame.device);

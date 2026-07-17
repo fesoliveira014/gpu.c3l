@@ -271,14 +271,17 @@ gpu::AllocationInfo info = gpu::get_allocation_info(&device, allocation)!;
 gpu::GpuSpan span = gpu::get_allocation_span(&device, allocation)!;
 gpu::GpuSpan header = span.checked_subspan(0, 256)!;
 char[] mapping = gpu::get_span_mapping(&device, header)!;
+mapping[0] = 1;
+gpu::flush_mapped_span(&device, header)!;
 gpu::GpuAddress address = gpu::get_span_address(&device, header)!;
 ```
 
 `GpuAllocation` owns storage; its spans borrow ranges. `free_allocation`
 invalidates the token only after success and requires all GPU use to be
 quiescent. `CPU_WRITE` and `CPU_READ` are mapped; `GPU_PRIVATE` is not.
-Use `AllocationInfo` for the actual alignment, coherence, mapping, and address
-capabilities. Running example: `memory_report`.
+Use `AllocationInfo` for actual capabilities. Flush CPU writes before GPU use.
+For readback, wait or poll completion, invalidate the `CPU_READ` span, then read
+its mapping. Running example: `memory_report`.
 
 ## 15. Pair fallible frame work
 

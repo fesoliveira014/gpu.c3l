@@ -40,6 +40,106 @@ struct AllocationTransactionFixture {
     AllocationNativeProbe probe;
 }
 
+struct MappedVisibilityProbe {
+    vk::Result     result;
+    vk::DeviceSize offset;
+    vk::DeviceSize size;
+    uint           flush_count;
+    uint           invalidate_count;
+}
+
+struct MappedVisibilityFixture {
+    vk::VkDeviceState     state;
+    vk::AllocationCell[1] cells;
+    char[256]             mapping;
+    MappedVisibilityProbe probe;
+}
+
+fn vk::Result mapped_visibility_probe_flush(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+    vk::DeviceSize offset,
+    vk::DeviceSize size,
+) {
+    (void)allocator;
+    (void)allocation;
+    MappedVisibilityProbe* probe = (MappedVisibilityProbe*)user_data;
+    probe.flush_count++;
+    probe.offset = offset;
+    probe.size = size;
+    return probe.result;
+}
+
+fn vk::Result mapped_visibility_probe_invalidate(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+    vk::DeviceSize offset,
+    vk::DeviceSize size,
+) {
+    (void)allocator;
+    (void)allocation;
+    MappedVisibilityProbe* probe = (MappedVisibilityProbe*)user_data;
+    probe.invalidate_count++;
+    probe.offset = offset;
+    probe.size = size;
+    return probe.result;
+}
+
+fn vk::AllocationNativeOps mapped_visibility_probe_ops(
+    MappedVisibilityProbe* probe,
+) {
+    return {
+        .user_data             = probe,
+        .flush_allocation      = &mapped_visibility_probe_flush,
+        .invalidate_allocation = &mapped_visibility_probe_invalidate,
+    };
+}
+
+fn gpu::GpuSpan init_mapped_visibility_fixture(
+    MappedVisibilityFixture* fixture,
+    usz logical_size,
+    usz native_size,
+    bool coherent,
+    bool mapped,
+) {
+    fixture.state.resource_owner = ALLOCATION_TEST_OWNER;
+    fixture.state.non_coherent_atom_size = 64;
+    fixture.state.allocations.owner = gpu::resource_owner_tag(
+        ALLOCATION_TEST_OWNER,
+        gpu::ResourceOwnerKind.ALLOCATION,
+    );
+    fixture.state.allocations.slots = fixture.cells[..];
+    fixture.state.allocations.next_new = 1;
+    fixture.cells[0] = {
+        .value = {
+            .backing = {
+                .allocation = (vma::Allocation)(void*)0x200,
+                .allocation_info = { .offset = 4096, .size = (vk::DeviceSize)native_size },
+                .cpu_base = mapped ? &fixture.mapping[0] : null,
+                .size = logical_size,
+                .memory_kind = mapped
+                    ? gpu::MemoryKind.PERSISTENT_UPLOAD
+                    : gpu::MemoryKind.DEVICE,
+            },
+            .alignment = 64,
+            .memory_class = mapped
+                ? gpu::MemoryClass.CPU_WRITE
+                : gpu::MemoryClass.GPU_PRIVATE,
+            .coherent = coherent,
+        },
+        .generation = 3,
+        .used = true,
+    };
+    return {
+        .owner      = fixture.state.allocations.owner,
+        .index      = 0,
+        .generation = 3,
+        .size       = logical_size,
+    };
+}
+
 fn vk::AllocationSlot allocation_slot(uint live_placements = 0) {
     return {
         .backing = {
@@ -60,6 +160,203 @@ fn vk::AllocationTable allocation_table(vk::AllocationCell[] cells) {
             gpu::ResourceOwnerKind.ALLOCATION,
         ),
     };
+}
+
+fn void mapped_memory_range_normalization_is_exact_and_safe() @test {
+    vk::NonCoherentRange exact = vk::normalize_mapped_memory_range(
+        offset:          64,
+        size:            64,
+        allocation_size: 150,
+        atom_size:       64,
+    )!!;
+    assert(exact.offset == 64 && exact.size == 64,
+        "aligned ranges remain exact");
+
+    vk::NonCoherentRange unaligned = vk::normalize_mapped_memory_range(
+        offset:          65,
+        size:            2,
+        allocation_size: 150,
+        atom_size:       64,
+    )!!;
+    assert(unaligned.offset == 64 && unaligned.size == 64,
+        "unaligned ranges expand to complete atoms");
+
+    vk::NonCoherentRange crossing = vk::normalize_mapped_memory_range(
+        offset:          63,
+        size:            2,
+        allocation_size: 130,
+        atom_size:       64,
+    )!!;
+    assert(crossing.offset == 0 && crossing.size == 128,
+        "ranges crossing an atom boundary expand from aligned endpoints");
+
+    vk::NonCoherentRange tail = vk::normalize_mapped_memory_range(
+        offset:          129,
+        size:            21,
+        allocation_size: 150,
+        atom_size:       64,
+    )!!;
+    assert(tail.offset == 128 && tail.size == 22,
+        "the final atom clamps to the native allocation end");
+
+    vk::NonCoherentRange near_limit = vk::normalize_mapped_memory_range(
+        offset:          usz::max - 63,
+        size:            63,
+        allocation_size: usz::max,
+        atom_size:       64,
+    )!!;
+    assert(near_limit.offset == (vk::DeviceSize)(usz::max - 63)
+        && near_limit.size == 63,
+        "near-limit normalization never overflows end padding");
+
+    assert(@catch(vk::normalize_mapped_memory_range(
+        offset:          0,
+        size:            0,
+        allocation_size: 150,
+        atom_size:       64,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::normalize_mapped_memory_range(
+        offset:          149,
+        size:            2,
+        allocation_size: 150,
+        atom_size:       64,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::normalize_mapped_memory_range(
+        offset:          usz::max,
+        size:            1,
+        allocation_size: usz::max,
+        atom_size:       64,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::normalize_mapped_memory_range(
+        offset:          0,
+        size:            1,
+        allocation_size: 150,
+        atom_size:       0,
+    )) == gpu::BACKEND_ERROR);
+}
+
+fn void mapped_visibility_validates_and_skips_coherent_memory() @test {
+    MappedVisibilityFixture fixture;
+    gpu::GpuSpan span = init_mapped_visibility_fixture(
+        fixture:      &fixture,
+        logical_size: 150,
+        native_size:  150,
+        coherent:     false,
+        mapped:       true,
+    );
+    vk::AllocationNativeOps ops = mapped_visibility_probe_ops(
+        &fixture.probe,
+    );
+
+    gpu::GpuSpan unaligned = span;
+    unaligned.offset = 65;
+    unaligned.size = 2;
+    vk::flush_mapped_span_for_state_with_ops(
+        &fixture.state,
+        unaligned,
+        &ops,
+    )!!;
+    assert(fixture.probe.flush_count == 1
+        && fixture.probe.offset == 64
+        && fixture.probe.size == 64,
+        "non-coherent flush uses the normalized allocation-relative range");
+
+    gpu::GpuSpan tail = span;
+    tail.offset = 129;
+    tail.size = 21;
+    vk::invalidate_mapped_span_for_state_with_ops(
+        &fixture.state,
+        tail,
+        &ops,
+    )!!;
+    assert(fixture.probe.invalidate_count == 1
+        && fixture.probe.offset == 128
+        && fixture.probe.size == 22,
+        "non-coherent invalidate clamps the final atom");
+
+    fixture.cells[0].value.coherent = true;
+    vk::flush_mapped_span_for_state_with_ops(
+        &fixture.state,
+        span,
+        &ops,
+    )!!;
+    vk::invalidate_mapped_span_for_state_with_ops(
+        &fixture.state,
+        span,
+        &ops,
+    )!!;
+    assert(fixture.probe.flush_count == 1
+        && fixture.probe.invalidate_count == 1,
+        "coherent visibility operations are validated native no-ops");
+
+    fixture.cells[0].value.coherent = false;
+    fixture.probe.result = vk::Result.ERROR_OUT_OF_HOST_MEMORY;
+    assert(@catch(vk::flush_mapped_span_for_state_with_ops(
+        &fixture.state,
+        span,
+        &ops,
+    )) == gpu::OUT_OF_HOST_MEMORY,
+        "visibility failures use the standard backend result mapping");
+}
+
+fn void mapped_visibility_rejects_invalid_spans_before_native_work() @test {
+    MappedVisibilityFixture fixture;
+    gpu::GpuSpan span = init_mapped_visibility_fixture(
+        fixture:      &fixture,
+        logical_size: 150,
+        native_size:  150,
+        coherent:     false,
+        mapped:       true,
+    );
+    vk::AllocationNativeOps ops = mapped_visibility_probe_ops(
+        &fixture.probe,
+    );
+
+    gpu::GpuSpan zero = span;
+    zero.size = 0;
+    assert(@catch(vk::flush_mapped_span_for_state_with_ops(
+        &fixture.state,
+        zero,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+
+    gpu::GpuSpan overflow = span;
+    overflow.offset = 149;
+    overflow.size = 2;
+    assert(@catch(vk::invalidate_mapped_span_for_state_with_ops(
+        &fixture.state,
+        overflow,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+
+    gpu::GpuSpan stale = span;
+    stale.generation++;
+    assert(@catch(vk::flush_mapped_span_for_state_with_ops(
+        &fixture.state,
+        stale,
+        &ops,
+    )) == gpu::INVALID_HANDLE);
+
+    gpu::GpuSpan foreign = span;
+    foreign.owner = gpu::resource_owner_tag(
+        ALLOCATION_TEST_OWNER,
+        gpu::ResourceOwnerKind.BUFFER,
+    );
+    assert(@catch(vk::invalidate_mapped_span_for_state_with_ops(
+        &fixture.state,
+        foreign,
+        &ops,
+    )) == gpu::INVALID_HANDLE);
+
+    fixture.cells[0].value.backing.cpu_base = null;
+    assert(@catch(vk::flush_mapped_span_for_state_with_ops(
+        &fixture.state,
+        span,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(fixture.probe.flush_count == 0
+        && fixture.probe.invalidate_count == 0,
+        "invalid, stale, foreign, and unmapped spans perform no native work");
 }
 
 fn void allocation_table_checks_identity_reuse_and_capacity() @test {
@@ -167,6 +464,7 @@ fn vk::Result allocation_probe_create_buffer(
     *out_allocation = (vma::Allocation)(void*)0x200;
     *out_info = {
         .offset = min_alignment,
+        .size = 256,
         .mapped_data = allocation_info.flags.mapped
             && probe.failure != AllocationFailurePoint.NULL_MAPPING
             ? &probe.mapping[0]
@@ -708,6 +1006,76 @@ fn void native_allocation_classes_map_and_release() @test {
     gpu::MemoryStats released = gpu::get_memory_stats(&device)!!;
     assert(released.live_allocation_count == baseline.live_allocation_count,
         "immediate release returns VMA allocation statistics to baseline");
+}
+
+fn void native_mapped_visibility_round_trip() @test {
+    gpu::Device device = create_allocation_test_device(
+        "gpu_mapped_visibility_test",
+    );
+    defer (void)destroy_test_device(&device);
+    gpu::AllocationDesc write_desc = native_allocation_desc(
+        gpu::MemoryClass.CPU_WRITE,
+        "mapped_write",
+    );
+    gpu::AllocationDesc read_desc = native_allocation_desc(
+        gpu::MemoryClass.CPU_READ,
+        "mapped_read",
+    );
+    gpu::GpuAllocation write = gpu::allocate_memory(&device, &write_desc)!!;
+    defer (void)gpu::free_allocation(&device, &write);
+    gpu::GpuAllocation read = gpu::allocate_memory(&device, &read_desc)!!;
+    defer (void)gpu::free_allocation(&device, &read);
+    gpu::GpuSpan write_span = gpu::get_allocation_span(&device, write)!!;
+    gpu::GpuSpan read_span = gpu::get_allocation_span(&device, read)!!;
+    gpu::GpuSpan written = write_span.checked_subspan(3, 127)!!;
+    gpu::GpuSpan copied = read_span.checked_subspan(5, 127)!!;
+    char[] source = gpu::get_span_mapping(&device, written)!!;
+    for (usz i = 0; i < source.len; i++) {
+        source[i] = (char)((i * 17 + 11) % 97);
+    }
+    gpu::flush_mapped_span(&device, written)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::device_backend_state_ptr(&device);
+    vk::AllocationSlot* write_slot = state.allocations.get(write)!!;
+    vk::AllocationSlot* read_slot = state.allocations.get(read)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    defer (void)discard_test_commands(&commands);
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::BufferCopy region = {
+        .src_offset = 3,
+        .dst_offset = 5,
+        .size       = 127,
+    };
+    vk::cmd_copy_buffer(
+        command_buffer: record.command_buffer,
+        src_buffer:     write_slot.backing.buffer,
+        dst_buffer:     read_slot.backing.buffer,
+        region_count:   1,
+        p_regions:      &region,
+    );
+    gpu::GlobalBarrier host_read = {
+        .before_stage  = gpu::Stage.TRANSFER,
+        .after_stage   = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+        .after_hazard  = gpu::Hazard.HOST_READ,
+    };
+    gpu::cmd_global_barrier(&commands, &host_read)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer (void)discard_test_executable(&executable);
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+    gpu::wait_completion(completion)!!;
+
+    gpu::invalidate_mapped_span(&device, copied)!!;
+    char[] destination = gpu::get_span_mapping(&device, copied)!!;
+    assert(destination.len == source.len);
+    for (usz i = 0; i < source.len; i++) {
+        assert(destination[i] == source[i],
+            "completed GPU writes become visible after mapped-span invalidation");
+    }
 }
 
 fn void live_allocation_blocks_normal_device_destruction() @test {

@@ -382,11 +382,11 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors`; `resolve_readback` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, undersized output, a consumed `ReadbackTicket`, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
-| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address queries; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit`; readback polling/resolution | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame, or readback alias |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors`; `resolve_readback` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, undersized output, a consumed `ReadbackTicket`, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit`; readback polling/resolution | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame, or readback alias |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
-| `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
-| `OUT_OF_DEVICE_MEMORY` | allocation, buffer, and texture creates | backend device-memory exhaustion |
+| `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver host-allocation failure |
+| `OUT_OF_DEVICE_MEMORY` | allocation, buffer, and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
 | `RESOURCE_IN_USE` | `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface`, `destroy_texture` | a placed resource still depends on an allocation; a device has a live child; a runtime has a live surface or device; a surface has a live swapchain; or a live `TextureIndex` owns a texture |
@@ -435,6 +435,8 @@ get_allocation_info(Device*, GpuAllocation) -> AllocationInfo?
 get_allocation_span(Device*, GpuAllocation) -> GpuSpan?
 get_span_mapping(Device*, GpuSpan) -> char[]?
 get_span_address(Device*, GpuSpan) -> GpuAddress?
+flush_mapped_span(Device*, GpuSpan) -> void?
+invalidate_mapped_span(Device*, GpuSpan) -> void?
 ```
 
 `CPU_WRITE` is mapped for host writes, `GPU_PRIVATE` is unmapped and
@@ -453,6 +455,12 @@ address points to its first byte. A mapping query on an unmapped span and an
 address query on a non-addressable span fault
 `INVALID_ARGUMENT`. Returned mappings and addresses remain valid only while
 the allocation remains live.
+
+`flush_mapped_span` publishes CPU writes before GPU use.
+`invalidate_mapped_span` publishes completed GPU writes before CPU reads; wait
+or poll the relevant `CompletionPoint` first. Neither call waits. Both accept
+only live, mapped independent-allocation spans. Coherent ranges return success
+without native work; non-coherent alignment stays backend-private.
 
 `free_allocation` releases storage immediately, so all GPU use must be
 quiescent. Success invalidates the passed token and every borrowed span; faults

@@ -22,6 +22,9 @@ alias AllocationGetAddressFn = fn vk::DeviceAddress (
 alias AllocationDestroyBufferFn = fn void (
     void*, vma::Allocator, vk::Buffer, vma::Allocation
 );
+alias AllocationVisibilityFn = fn vk::Result (
+    void*, vma::Allocator, vma::Allocation, vk::DeviceSize, vk::DeviceSize
+);
 
 const uint ALLOCATION_CAPACITY = 4096;
 const uint ALLOCATION_FREE_NONE = 0;
@@ -55,6 +58,13 @@ struct AllocationNativeOps {
     AllocationGetMemoryPropertiesFn get_memory_properties;
     AllocationGetAddressFn          get_buffer_device_address;
     AllocationDestroyBufferFn       destroy_buffer;
+    AllocationVisibilityFn          flush_allocation;
+    AllocationVisibilityFn          invalidate_allocation;
+}
+
+struct NonCoherentRange {
+    vk::DeviceSize offset;
+    vk::DeviceSize size;
 }
 
 fn gpu::GpuAllocation? AllocationTable.alloc(&self, AllocationSlot value) {
@@ -175,6 +185,28 @@ fn void allocation_destroy_buffer_real(
     allocator.destroy_buffer(buffer, allocation);
 }
 
+fn vk::Result allocation_flush_real(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+    vk::DeviceSize offset,
+    vk::DeviceSize size,
+) {
+    (void)user_data;
+    return allocator.flush_allocation(allocation, offset, size);
+}
+
+fn vk::Result allocation_invalidate_real(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+    vk::DeviceSize offset,
+    vk::DeviceSize size,
+) {
+    (void)user_data;
+    return allocator.invalidate_allocation(allocation, offset, size);
+}
+
 fn AllocationNativeOps allocation_native_ops_real() {
     return {
         .create_buffer             = &allocation_create_buffer_real,
@@ -182,6 +214,8 @@ fn AllocationNativeOps allocation_native_ops_real() {
         .get_memory_properties     = &allocation_get_properties_real,
         .get_buffer_device_address = &allocation_get_address_real,
         .destroy_buffer            = &allocation_destroy_buffer_real,
+        .flush_allocation          = &allocation_flush_real,
+        .invalidate_allocation     = &allocation_invalidate_real,
     };
 }
 
@@ -416,6 +450,129 @@ fn void? free_allocation_for_state_with_ops(
         released.backing.buffer,
         released.backing.allocation,
     );
+}
+
+fn NonCoherentRange? normalize_mapped_memory_range(
+    usz offset,
+    usz size,
+    usz allocation_size,
+    usz atom_size,
+) {
+    if (size == 0 || !gpu::range_fits(allocation_size, offset, size)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (!is_pow2(atom_size)) return gpu::BACKEND_ERROR~;
+
+    usz mask = atom_size - 1;
+    usz start = offset & ~mask;
+    usz end = offset + size;
+    usz remainder = end & mask;
+    if (remainder != 0) {
+        usz padding = atom_size - remainder;
+        usz remaining = allocation_size - end;
+        end = padding <= remaining ? end + padding : allocation_size;
+    }
+    return {
+        .offset = (vk::DeviceSize)start,
+        .size   = (vk::DeviceSize)(end - start),
+    };
+}
+
+fn AllocationSlot*? resolve_mapped_allocation_span(
+    VkDeviceState* state,
+    gpu::GpuSpan* span,
+) {
+    if (state == null || span == null) return gpu::INVALID_HANDLE~;
+    if (span.owner != state.allocations.owner) return gpu::INVALID_HANDLE~;
+    gpu::GpuAllocation allocation = {
+        .owner      = span.owner,
+        .index      = span.index,
+        .generation = span.generation,
+    };
+    AllocationSlot* slot = state.allocations.get(allocation)!;
+    if (span.size == 0
+        || !gpu::range_fits(slot.backing.size, span.offset, span.size)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (slot.backing.cpu_base == null) return gpu::INVALID_ARGUMENT~;
+    return slot;
+}
+
+fn NonCoherentRange? mapped_allocation_range(
+    VkDeviceState* state,
+    AllocationSlot* slot,
+    gpu::GpuSpan* span,
+) {
+    if (state == null || slot == null || span == null) {
+        return gpu::INVALID_HANDLE~;
+    }
+    vk::DeviceSize native_size = slot.backing.allocation_info.size;
+    usz allocation_size = (usz)native_size;
+    if (native_size == 0 || (vk::DeviceSize)allocation_size != native_size) {
+        return gpu::BACKEND_ERROR~;
+    }
+    return normalize_mapped_memory_range(
+        offset:          span.offset,
+        size:            span.size,
+        allocation_size: allocation_size,
+        atom_size:       state.non_coherent_atom_size,
+    );
+}
+
+fn void? flush_mapped_span_for_state_with_ops(
+    VkDeviceState* state,
+    gpu::GpuSpan span,
+    AllocationNativeOps* ops,
+) {
+    AllocationSlot* slot = resolve_mapped_allocation_span(state, &span)!;
+    if (slot.coherent) return;
+    NonCoherentRange range = mapped_allocation_range(state, slot, &span)!;
+    check_device_result(state, ops.flush_allocation(
+        ops.user_data,
+        state.allocator,
+        slot.backing.allocation,
+        range.offset,
+        range.size,
+    ))!;
+}
+
+fn void? invalidate_mapped_span_for_state_with_ops(
+    VkDeviceState* state,
+    gpu::GpuSpan span,
+    AllocationNativeOps* ops,
+) {
+    AllocationSlot* slot = resolve_mapped_allocation_span(state, &span)!;
+    if (slot.coherent) return;
+    NonCoherentRange range = mapped_allocation_range(state, slot, &span)!;
+    check_device_result(state, ops.invalidate_allocation(
+        ops.user_data,
+        state.allocator,
+        slot.backing.allocation,
+        range.offset,
+        range.size,
+    ))!;
+}
+
+fn void? vk_flush_mapped_span(
+    gpu::Device* device,
+    gpu::GpuSpan span,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    enter_tracked(state);
+    defer exit_tracked(state);
+    AllocationNativeOps ops = allocation_native_ops_real();
+    return flush_mapped_span_for_state_with_ops(state, span, &ops);
+}
+
+fn void? vk_invalidate_mapped_span(
+    gpu::Device* device,
+    gpu::GpuSpan span,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    enter_tracked(state);
+    defer exit_tracked(state);
+    AllocationNativeOps ops = allocation_native_ops_real();
+    return invalidate_mapped_span_for_state_with_ops(state, span, &ops);
 }
 
 fn gpu::GpuAllocation? vk_allocate_memory(

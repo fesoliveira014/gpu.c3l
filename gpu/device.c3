@@ -18,6 +18,8 @@ alias GetAllocationInfoFn @private   = fn AllocationInfo? (Device*, GpuAllocatio
 alias GetAllocationSpanFn @private   = fn GpuSpan? (Device*, GpuAllocation);
 alias GetSpanMappingFn @private      = fn char[]? (Device*, GpuSpan);
 alias GetSpanAddressFn @private      = fn GpuAddress? (Device*, GpuSpan);
+alias FlushSpanFn @private           = fn void? (Device*, GpuSpan);
+alias InvalidateSpanFn @private      = fn void? (Device*, GpuSpan);
 alias CreateBufferFn @private        = fn BufferHandle? (Device*, BufferDesc*);
 alias DestroyBufferFn @private       = fn void? (Device*, BufferHandle);
 alias GetBufferAddressFn @private    = fn GpuAddress? (Device*, BufferHandle);
@@ -121,6 +123,8 @@ struct BackendVTable @private {
     GetAllocationSpanFn     get_allocation_span;
     GetSpanMappingFn        get_span_mapping;
     GetSpanAddressFn        get_span_address;
+    FlushSpanFn             flush_mapped_span;
+    InvalidateSpanFn        invalidate_mapped_span;
     CreateBufferFn          create_buffer;
     DestroyBufferFn         destroy_buffer;
     GetBufferAddressFn      get_buffer_address;

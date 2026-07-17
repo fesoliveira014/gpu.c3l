@@ -9,6 +9,9 @@ struct AllocationStubState {
     char[128]      mapping;
     uint           allocate_calls;
     uint           free_calls;
+    uint           flush_calls;
+    uint           invalidate_calls;
+    uint           visibility_entries;
     bool           live;
     bool           block_free;
 }
@@ -95,14 +98,30 @@ fn GpuAddress? get_stub_span_address(Device* device, GpuSpan span) {
     return (GpuAddress)(0x1000 + span.offset);
 }
 
+fn void? flush_stub_mapped_span(Device* device, GpuSpan span) {
+    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    state.visibility_entries++;
+    (void)get_stub_span_mapping(device, span)!;
+    state.flush_calls++;
+}
+
+fn void? invalidate_stub_mapped_span(Device* device, GpuSpan span) {
+    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    state.visibility_entries++;
+    (void)get_stub_span_mapping(device, span)!;
+    state.invalidate_calls++;
+}
+
 BackendVTable allocation_stub_vtable = {
     .destroy_device      = &destroy_allocation_stub,
     .allocate_memory     = &allocate_stub_memory,
     .free_allocation     = &free_stub_allocation,
     .get_allocation_info = &get_stub_allocation_info,
     .get_allocation_span = &get_stub_allocation_span,
-    .get_span_mapping    = &get_stub_span_mapping,
-    .get_span_address    = &get_stub_span_address,
+    .get_span_mapping       = &get_stub_span_mapping,
+    .get_span_address       = &get_stub_span_address,
+    .flush_mapped_span      = &flush_stub_mapped_span,
+    .invalidate_mapped_span = &invalidate_stub_mapped_span,
 };
 
 fn Device create_allocation_stub_device(AllocationStubState* state) {
@@ -219,6 +238,51 @@ fn void zero_sized_span_resolvers_are_rejected() @test {
     gpu::destroy_device(&device)!!;
 }
 
+fn void mapped_span_visibility_validates_ownership_and_ranges() @test {
+    AllocationStubState first_state;
+    AllocationStubState second_state;
+    Device first = create_allocation_stub_device(&first_state);
+    Device second = create_allocation_stub_device(&second_state);
+    AllocationDesc desc = allocation_stub_desc();
+    GpuAllocation allocation = gpu::allocate_memory(&first, &desc)!!;
+    GpuSpan span = gpu::get_allocation_span(&first, allocation)!!;
+    GpuSpan range = span.checked_subspan(7, 19)!!;
+
+    gpu::flush_mapped_span(&first, range)!!;
+    gpu::invalidate_mapped_span(&first, range)!!;
+    assert(first_state.flush_calls == 1
+        && first_state.invalidate_calls == 1,
+        "live mapped ranges dispatch each visibility operation once");
+
+    assert(@catch(gpu::flush_mapped_span(&second, range))
+        == gpu::INVALID_HANDLE);
+    GpuSpan buffer_owned = range;
+    buffer_owned.owner = gpu::resource_owner_tag(
+        first_state.owner,
+        ResourceOwnerKind.BUFFER,
+    );
+    assert(@catch(gpu::flush_mapped_span(&first, buffer_owned))
+        == gpu::INVALID_HANDLE);
+    assert(first_state.visibility_entries == 2,
+        "cross-kind spans stop before backend dispatch");
+    GpuSpan zero = range;
+    zero.size = 0;
+    assert(@catch(gpu::invalidate_mapped_span(&first, zero))
+        == gpu::INVALID_ARGUMENT);
+    assert(second_state.flush_calls == 0
+        && first_state.invalidate_calls == 1,
+        "rejected ranges perform no visibility mutation");
+
+    gpu::free_allocation(&first, &allocation)!!;
+    assert(@catch(gpu::flush_mapped_span(&first, range))
+        == gpu::INVALID_HANDLE);
+    assert(first_state.flush_calls == 1,
+        "stale ranges do not reach native visibility work");
+
+    gpu::destroy_device(&first)!!;
+    gpu::destroy_device(&second)!!;
+}
+
 fn void live_allocation_blocks_device_destruction() @test {
     AllocationStubState state;
     Device device = create_allocation_stub_device(&state);
@@ -260,6 +324,8 @@ fn void mapping_availability_is_class_specific() @test {
     GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
 
     assert(@catch(gpu::get_span_mapping(&device, span)) == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::flush_mapped_span(&device, span)) == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::invalidate_mapped_span(&device, span)) == gpu::INVALID_ARGUMENT);
     assert((ulong)gpu::get_span_address(&device, span)!! != 0,
         "GPU-private data remains addressable");
 

@@ -114,7 +114,8 @@ retrieve non-zero GPU address
 map/flush/invalidate paths
 independent allocation identity, capacity, generation reuse, and owner-domain checks
 atomic allocation rollback and CPU_WRITE/GPU_PRIVATE/CPU_READ policy
-native allocation info, exact mapping/address queries, checked subspans, and immediate free
+mapped-span owner, liveness, mapping, coherence, atom-range, and backend-fault checks
+native allocation info, mapping/address queries, mapped visibility round trip, and immediate free
 allocation-span stale/foreign/range rejection, stats, leak identity, and device-loss teardown
 frame-token generation, stale-alias rejection, allocation, end retry, and reset safety
 scoped helper with one observed end attempt after successful and faulting named workers

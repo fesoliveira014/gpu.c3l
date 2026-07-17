@@ -139,6 +139,8 @@ get_allocation_info
 get_allocation_span
 get_span_mapping
 get_span_address
+flush_mapped_span
+invalidate_mapped_span
 ```
 
 Size must be nonzero. Alignment zero selects 16 bytes; explicit alignment must
@@ -148,9 +150,10 @@ address capabilities.
 
 The Vulkan backend creates one private addressable buffer and VMA allocation,
 then publishes an `AllocationTable` slot only after all native work succeeds.
-The table owns generation and liveness. Mapping and address queries resolve the
-span, validate its owner, generation, and bounds, then return the exact range.
-No Vulkan or VMA object crosses the public boundary.
+The table owns generation and liveness. Mapping, address, and visibility calls
+validate owner, generation, bounds, and required mapping before native use.
+`flush_mapped_span` and `invalidate_mapped_span` accept only independent
+allocation spans. No Vulkan or VMA object crosses the public boundary.
 
 `free_allocation` destroys the backing immediately and invalidates the token
 only after success. The caller must ensure GPU use is quiescent. Faults preserve
@@ -673,25 +676,15 @@ transfer role rather than a recording queue's merged role set, so a span
 admitted on a multi-role queue recording may still be rejected by a helper;
 this stricter check is intentional and deterministic across queue topologies.
 
-## 15. Flush and invalidate policy
+## 15. Mapped visibility
 
-The backend should track whether memory is host-coherent.
+Call `flush_mapped_span` after CPU writes and before GPU use. After waiting or
+polling the relevant completion point, call `invalidate_mapped_span` before CPU
+reads. Neither operation waits.
 
-CPU write path:
-
-```text
-if allocation is non-coherent:
-    flush written range before GPU reads
-```
-
-CPU read path:
-
-```text
-if allocation is non-coherent:
-    invalidate read range after GPU writes and before CPU reads
-```
-
-The public helpers should expose explicit flush/invalidate for mapped buffers and hide it only in high-level upload/readback convenience functions.
+Both operations require a live, mapped independent-allocation span. Coherent
+memory returns success without native work. The backend rounds non-coherent
+ranges to atom boundaries and clamps the final atom to the native allocation.
 
 ## 16. Memory budget and statistics
 

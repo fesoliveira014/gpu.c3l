@@ -161,7 +161,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.1 Independent allocations and checked spans
 
-- [ ] Replace buffer ownership with `GpuAllocation`, non-owning `GpuSpan`, memory classes, mapping, and address queries in `gpu/memory.c3`, `gpu/buffer.c3`, `gpu/vk/memory.c3`, `gpu/vk/allocator.c3`, and transfer code.
+- [x] Add independent storage ownership with `GpuAllocation`, non-owning `GpuSpan`, memory classes, mapping, and address queries in `gpu/memory.c3` and `gpu/vk/allocation.c3`.
   - **Depends on:** 2.3 and 2.4.
   - **Contract:** allocations own storage and release exactly once; spans cannot release parents; span slicing checks overflow and bounds; CPU mappings and GPU addresses exist only for supported memory classes.
   - **Edges:** zero length, end-boundary span, integer overflow, wrong device, unmapped memory, unavailable address, and releasing with live placements.
@@ -169,7 +169,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.2 Explicit mapped-memory visibility
 
-- [ ] Add mapped-span flush and invalidate operations in `gpu/memory.c3` and `gpu/vk/memory.c3` with private non-coherent range alignment.
+- [x] Add mapped-span flush and invalidate operations in `gpu/memory.c3` and `gpu/vk/allocation.c3` with private non-coherent range alignment.
   - **Depends on:** 4.1.
   - **Contract:** flush makes CPU writes visible to the GPU; invalidate makes completed GPU writes visible to the CPU; coherent memory is a semantic no-op.
   - **Edges:** unaligned ranges, zero length, overflow, unmapped spans, non-host-visible allocations, and calls before completion.
