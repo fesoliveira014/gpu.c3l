@@ -221,6 +221,14 @@ def validate_document(document: dict) -> list[str]:
             ("Device*", "GpuSpan"),
             "GpuAddress?",
         ),
+        "flush_mapped_span": (
+            ("Device*", "GpuSpan"),
+            "void?",
+        ),
+        "invalidate_mapped_span": (
+            ("Device*", "GpuSpan"),
+            "void?",
+        ),
     }
     for name, contract in allocation_functions.items():
         expected_parameters, expected_return = contract

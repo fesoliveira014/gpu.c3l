@@ -35,9 +35,10 @@ token's retained device pin while another call can still be in flight.
 | `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; resize rejects a pending acquire and waits graphics/present work |
 | `allocate_memory` / `free_allocation` | S | internally synchronized; free must happen-after the last use |
 | `get_allocation_info` / `get_allocation_span` / `get_span_mapping` / `get_span_address` | S | lock-free slot resolution |
+| `flush_mapped_span` / `invalidate_mapped_span` | S | lock-free validation; coherent no-op; native calls are internally synchronized |
 | `create_buffer` / `destroy_buffer` | S | |
 | `get_buffer_address` / `get_buffer_span` | S | lock-free read |
-| `flush_buffer` / `invalidate_buffer` | S | VMA is internally synchronized |
+| `flush_buffer` / `invalidate_buffer` | S | native calls are internally synchronized |
 | `create_texture` / `destroy_texture` | S | |
 | `create_texture_descriptor` / `destroy_texture_descriptor` | S | |
 | `create_sampler` / `destroy_sampler` | S | |

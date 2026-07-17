@@ -280,6 +280,10 @@ storage private. `get_allocation_span` borrows the complete range; mapping and
 address queries resolve live spans. Stale, foreign, and out-of-bounds spans are
 rejected before native use.
 
+`flush_mapped_span` publishes CPU writes; after GPU completion,
+`invalidate_mapped_span` publishes GPU writes to the CPU. Coherent allocations
+skip native visibility calls. Non-coherent atom alignment remains private.
+
 `free_allocation` consumes its token only after success. It requires quiescent
 GPU use and destroys storage immediately.
 

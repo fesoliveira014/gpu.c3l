@@ -132,6 +132,22 @@ def valid_document() -> dict:
                             {"name": "span", "type": {"name": "GpuSpan"}},
                         ],
                     },
+                    {
+                        "name": "flush_mapped_span",
+                        "return_type": {"name": "void?"},
+                        "members": [
+                            {"name": "device", "type": {"name": "Device*"}},
+                            {"name": "span", "type": {"name": "GpuSpan"}},
+                        ],
+                    },
+                    {
+                        "name": "invalidate_mapped_span",
+                        "return_type": {"name": "void?"},
+                        "members": [
+                            {"name": "device", "type": {"name": "Device*"}},
+                            {"name": "span", "type": {"name": "GpuSpan"}},
+                        ],
+                    },
                 ],
                 "types": [
                     {
@@ -369,6 +385,20 @@ class PublicApiCheckTests(unittest.TestCase):
             "missing allocate_memory",
             check_public_api.validate_document(document),
         )
+
+    def test_rejects_missing_mapped_visibility_contract(self) -> None:
+        for name in ("flush_mapped_span", "invalidate_mapped_span"):
+            with self.subTest(name=name):
+                document = valid_document()
+                functions = document["modules"]["gpu"]["functions"]
+                functions[:] = [
+                    function for function in functions
+                    if function["name"] != name
+                ]
+                self.assertIn(
+                    f"missing {name}",
+                    check_public_api.validate_document(document),
+                )
 
     def test_rejects_span_backend_details(self) -> None:
         document = valid_document()
