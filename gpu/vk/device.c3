@@ -126,10 +126,7 @@ struct VkDeviceState {
     PersistentArenaState       persistent_arena;
     RecordingContextTable      recording_contexts;
     CommandTable               commands;
-    gpu::RecordingContextHandle default_context;
-    // Reserved for the four blocking helpers; never touched by Tier-C
-    // recording, so it never races the default context's pool.
-    gpu::RecordingContextHandle helper_context;
+    RecordingContextHandle     helper_context;
     ShaderTable                shaders;
     PipelineTable              pipelines;
     PipelineCacheTable         pipeline_cache;
@@ -238,8 +235,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .free_persistent_span  = &vk_free_persistent_span,
     .get_persistent_stats  = &vk_get_persistent_stats,
     .begin_commands      = &vk_begin_commands,
-    .create_recording_context  = &vk_create_recording_context,
-    .destroy_recording_context = &vk_destroy_recording_context,
     .end_commands        = &vk_end_commands,
     .discard_commands    = &vk_discard_commands,
     .submit              = &vk_submit,
@@ -603,11 +598,15 @@ fn gpu::Device? create_vk_device_with_selection(
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.FRAME_RESOURCES)!;
     create_persistent_arena(state, desc)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PERSISTENT_ARENA)!;
-    state.recording_contexts.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.RECORDING_CONTEXT);
-    state.recording_contexts.slots = mem::new_array(RecordingContextCell, gpu::MAX_RECORDING_CONTEXTS);
-    state.commands.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.COMMAND);
+    state.recording_contexts.slots = mem::new_array(
+        RecordingContextCell,
+        MAX_RECORDING_CONTEXTS,
+    );
+    state.commands.owner = gpu::resource_owner_tag(
+        state.resource_owner,
+        gpu::ResourceOwnerKind.COMMAND,
+    );
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
-    state.default_context = create_builtin_recording_context(state)!;
     state.helper_context = create_builtin_recording_context(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.RECORDING_CONTEXTS)!;
     uint pipeline_capacity;

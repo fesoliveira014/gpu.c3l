@@ -13,9 +13,6 @@ enum StoreOp : int {
     DONT_CARE,
 }
 
-// Two slots are internal (default + helper contexts); 15 remain for users.
-const uint MAX_RECORDING_CONTEXTS = 17;
-
 <* Unsigned 3-vector; dispatches take their workgroup counts as one. *>
 struct Vec3u {
     uint x;
@@ -111,13 +108,19 @@ struct RenderPassDesc {
     uint              height;
 }
 
-// A small recording token. Mutable lifecycle and backend state are device-owned;
-// the embedded device token keeps copies independent of caller storage.
+<* A recording command token. Successful end consumes it. *>
 struct CommandList {
     Device            device;
     CommandListHandle handle;
 }
 $assert CommandList::size <= ulong::size * 3;
+
+<* A one-shot executable command token. Submit or discard consumes it. *>
+struct ExecutableCommandList {
+    Device            device;
+    CommandListHandle handle;
+}
+$assert ExecutableCommandList::size <= ulong::size * 3;
 
 <* Byte-range copy for cmd_copy_buffer; src and dst ranges must not overlap. *>
 struct BufferCopyDesc {
@@ -194,39 +197,36 @@ fn DeviceOperation? command_operation(
     return operation;
 }
 
-<* Create a recording context: per-frame command pools confined to one
-   thread at a time. Ownership: release with destroy_recording_context. *>
-fn RecordingContextHandle? create_recording_context(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    RecordingContextHandle context = vtable.create_recording_context(device)!;
-    retain_device_children(&operation);
-    return context;
+fn DeviceOperation? executable_command_operation(
+    ExecutableCommandList* commands,
+    bool allow_lost = false,
+) @private {
+    if (commands == null) return INVALID_HANDLE~;
+    DeviceOperation operation = has_retained_executable_command_pin(commands)
+        ? borrow_retained_device_operation(&commands.device, allow_lost)!
+        : begin_device_operation(&commands.device, allow_lost)!;
+    if (commands.handle.owner != resource_owner_tag(
+        operation.data.resource_owner,
+        ResourceOwnerKind.COMMAND,
+    )) {
+        end_device_operation(&operation);
+        return INVALID_HANDLE~;
+    }
+    return operation;
 }
 
-<* Counterpart of create_recording_context; the context's command lists must be retired first. *>
-fn void? destroy_recording_context(Device* device, RecordingContextHandle ctx) {
-    DeviceOperation operation = begin_device_operation(device)!;
+<* Begin recording on a selected queue. The token retains its device until
+   successful end followed by submit, or until discard. *>
+fn CommandList? begin_commands(Queue queue) {
+    Device device = queue.device;
+    DeviceOperation operation = begin_device_operation(&device)!;
     defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    vtable.destroy_recording_context(device, ctx)!;
-    release_device_children(&operation);
-}
-
-<* Begin recording on a semantic queue role. Every explicitly named resource
-   must admit that role. ctx = {} selects the built-in context; a created
-   context supports recording from another thread. The returned token retains
-   the device until successful submit or discard. *>
-fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_selected_queue_kind(&operation, queue)!;
+    validate_queue(&operation, &device, queue)!;
     BackendVTable* vtable = operation.vtable;
     CommandList commands;
-    vtable.begin_commands(device, queue, ctx, &commands)!;
+    vtable.begin_commands(queue, &commands)!;
     if (!retain_command_pin_lease(&operation, &commands)) {
-        vtable.discard_commands(&commands)!;
+        vtable.discard_commands(&commands.device, commands.handle, false)!;
         return INVALID_HANDLE~;
     }
     retain_device_children(&operation);
@@ -234,22 +234,54 @@ fn CommandList? begin_commands(Device* device, QueueKind queue, RecordingContext
     return commands;
 }
 
-<* Finish recording through the list's owner; it becomes submittable once. *>
-fn void? end_commands(CommandList* commands) {
+<* Finish and consume a recording token. Failure leaves it recording. *>
+fn ExecutableCommandList? end_commands(CommandList* commands) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.end_commands(commands);
+    operation.vtable.end_commands(commands)!;
+    ExecutableCommandList executable = {
+        .device = commands.device,
+        .handle = commands.handle,
+    };
+    *commands = {};
+    return executable;
 }
 
-<* Consume a recording or executable list, including after device loss. *>
+<* Consume an unfinished recording, including after device loss. *>
 fn void? discard_commands(CommandList* commands) {
     DeviceOperation operation = command_operation(commands, true)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     CommandList consumed = *commands;
-    ulong canceled_tickets = vtable.discard_commands(commands)!;
+    ulong canceled_tickets = vtable.discard_commands(
+        &consumed.device,
+        consumed.handle,
+        false,
+    )!;
+    *commands = {};
     bool released_lease = release_command_pin_lease(&operation, &consumed);
+    if (released_lease || !operation.owns_pin) {
+        release_device_children(&operation, canceled_tickets + 1);
+        (void)release_retained_device_pins(&operation);
+    }
+}
+
+<* Consume an executable token without submitting it. *>
+fn void? discard_executable_commands(ExecutableCommandList* commands) {
+    DeviceOperation operation = executable_command_operation(commands, true)!;
+    defer end_device_operation(&operation);
+    BackendVTable* vtable = operation.vtable;
+    ExecutableCommandList consumed = *commands;
+    ulong canceled_tickets = vtable.discard_commands(
+        &consumed.device,
+        consumed.handle,
+        true,
+    )!;
+    *commands = {};
+    bool released_lease = release_executable_command_pin_lease(
+        &operation,
+        &consumed,
+    );
     if (released_lease || !operation.owns_pin) {
         release_device_children(&operation, canceled_tickets + 1);
         (void)release_retained_device_pins(&operation);

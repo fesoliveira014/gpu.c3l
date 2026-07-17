@@ -278,26 +278,38 @@ fn void record_val_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle ta
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
 
-fn void mixed_queue_submit_faults() @test {
+fn void submit_requires_exact_recording_queue_token() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList gfx = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
-    defer discard_test_commands(&gfx)!!;
-    gpu::end_commands(&gfx)!!;
-    gpu::CommandList xfer = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
-    defer discard_test_commands(&xfer)!!;
-    gpu::end_commands(&xfer)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
 
-    gpu::CommandList[2] lists = { gfx, xfer };
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandRecord* record = state.commands.get(executable.handle)!!;
+    gpu::Queue recorded_queue = record.queue;
+    record.queue.id++;
+
+    gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    fault mixed = @catch(gpu::submit(&device, &submit));
-    assert(mixed == gpu::INVALID_ARGUMENT, "mixed-queue submit faults INVALID_ARGUMENT before any queue work runs");
+    fault mismatched = @catch(gpu::submit(queue, &submit));
+    assert(mismatched == gpu::INVALID_ARGUMENT,
+        "submission requires the exact queue token captured while recording");
+    assert(lists[0].handle.is_valid(),
+        "queue-token rejection preserves the executable token");
+
+    record.queue = recorded_queue;
+    gpu::CompletionPoint point = gpu::submit(queue, &submit)!!;
+    gpu::wait_completion(point, 1_000_000_000)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
-fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
+fn void resource_access_intersects_recording_roles_before_mutation() @test {
     SyncDiagnosticCapture capture = {
         .expected_operation      = "",
         .expected_rejected_field = "",
@@ -377,23 +389,21 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
     defer gpu::destroy_texture(&device, copy_texture)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        device: &device,
-        queue:  gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::CommandRecord* record = state.commands.get(commands.handle)!!;
+    gpu::Queue recorded_queue = record.queue;
+    record.queue.roles = { .graphics, .compute };
 
-    assert(@catch(gpu::cmd_fill_buffer(
+    gpu::cmd_fill_buffer(
         commands: &commands,
         buffer:   buffer,
         offset:   0,
         size:     4,
         value:    0,
-    )) == gpu::INVALID_ARGUMENT,
-        "compute-only buffer rejects graphics recording even when queues alias");
-
+    )!!;
+    record.queue.roles = { .graphics };
     gpu::TextureBarrier barrier = {
         .texture       = texture,
         .before_stage  = gpu::Stage.NONE,
@@ -406,7 +416,7 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
     uint pending_before = record.pending_layout_count;
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,
-        "compute-only texture rejects graphics recording even when queues alias");
+        "compute-only texture rejects a disjoint recording-role token");
     assert(record.pending_layout_count == pending_before,
         "access rejection precedes pending-layout mutation");
 
@@ -490,7 +500,10 @@ fn void resource_access_rejects_wrong_recording_role_before_mutation() @test {
         == gpu::INVALID_ARGUMENT,
         "a forged span cannot introduce unknown access bits");
 
-    gpu::end_commands(&commands)!!;
+    record.queue = recorded_queue;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+
+    defer discard_test_executable(&commands_executable)!!;
     gpu::end_frame(&frame)!!;
 }
 
@@ -516,12 +529,12 @@ fn void render_pass_access_preflight_precedes_view_creation() @test {
     defer gpu::destroy_texture(&device, rejected)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        device: &device,
-        queue:  gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, admitted);
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    gpu::Queue recorded_queue = record.queue;
+    record.queue.roles = { .graphics };
 
     gpu::ColorTargetDesc[2] colors = {
         { .texture = admitted, .mip_level = 1 },
@@ -538,11 +551,13 @@ fn void render_pass_access_preflight_precedes_view_creation() @test {
         "a later attachment outside the recording role rejects the whole pass");
     assert(val_cached_view_count(&device, admitted) == cached_before,
         "attachment access preflight precedes view-cache mutation");
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     assert(record.state == vk::CommandState.RECORDING,
         "attachment access rejection leaves command state reusable");
 
-    gpu::end_commands(&commands)!!;
+    record.queue = recorded_queue;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+
+    defer discard_test_executable(&commands_executable)!!;
     gpu::end_frame(&frame)!!;
 }
 
@@ -561,7 +576,7 @@ fn void copy_without_transfer_usage_faults() @test {
     defer gpu::destroy_buffer(&device, dst)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::BufferCopyDesc no_src_usage_copy = { .src = plain, .dst = dst, .size = 64 };
@@ -572,7 +587,9 @@ fn void copy_without_transfer_usage_faults() @test {
     fault no_dst_usage = @catch(gpu::cmd_copy_buffer(&cmd, &no_dst_usage_copy));
     assert(no_dst_usage == gpu::INVALID_ARGUMENT, "copy to a buffer without transfer_dst faults INVALID_ARGUMENT");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -597,7 +614,7 @@ fn void texture_copy_without_buffer_transfer_usage_faults() @test {
     gpu::GpuSpan plain_span = gpu::get_buffer_span(&device, plain)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     // Buffer usage is checked before the texture's tracked layout, so no
@@ -610,7 +627,9 @@ fn void texture_copy_without_buffer_transfer_usage_faults() @test {
     fault no_dst_usage = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &down));
     assert(no_dst_usage == gpu::INVALID_ARGUMENT, "texture-to-buffer copy without buffer transfer_dst faults INVALID_ARGUMENT");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -623,11 +642,12 @@ fn void fill_without_transfer_dst_faults() @test {
     defer gpu::destroy_buffer(&device, buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
     fault no_usage = @catch(gpu::cmd_fill_buffer(&cmd, buffer, 0, 64, 0));
     assert(no_usage == gpu::INVALID_ARGUMENT, "fill on a buffer without transfer_dst faults INVALID_ARGUMENT");
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -650,7 +670,7 @@ fn void indexed_draw_without_index_usage_faults() @test {
     write_val_triangle_verts(&verts_span);
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -669,7 +689,8 @@ fn void indexed_draw_without_index_usage_faults() @test {
     assert(no_index_usage == gpu::INVALID_ARGUMENT, "indexed draw over a non-index buffer faults INVALID_ARGUMENT");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -690,7 +711,7 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     gpu::GpuSpan index_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
     gpu::GpuSpan misaligned = index_span.checked_subspan(2, 8)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -709,7 +730,8 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     assert(misaligned_fault == gpu::INVALID_ARGUMENT, "misaligned index offset faults INVALID_ARGUMENT");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -721,7 +743,7 @@ fn void dispatch_with_graphics_pipeline_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     fault wrong_kind = @catch(gpu::cmd_dispatch(
         commands: &cmd,
@@ -730,7 +752,8 @@ fn void dispatch_with_graphics_pipeline_faults() @test {
         groups:   { 1, 1, 1 },
     ));
     assert(wrong_kind == gpu::INVALID_ARGUMENT, "dispatch with a graphics pipeline faults INVALID_ARGUMENT");
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -748,7 +771,7 @@ fn void draw_with_compute_pipeline_faults() @test {
     defer gpu::destroy_pipeline(&device, compute)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -766,7 +789,8 @@ fn void draw_with_compute_pipeline_faults() @test {
     assert(wrong_kind == gpu::INVALID_ARGUMENT, "draw with a compute pipeline faults INVALID_ARGUMENT");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -831,7 +855,7 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     frag_root.texture_index = ctx.tex_index;
     frag_root.sampler_index = ctx.smp_index;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = { .src = upload, .dst = readback, .size = 64 };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
@@ -847,10 +871,12 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     gpu::cmd_draw(&cmd, ctx.graphics, verts_span.gpu, frag_span.gpu, 3, 1)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }
@@ -871,7 +897,7 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     gpu::GpuSpan escaped = full_span.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     fault beyond = @catch(gpu::cmd_dispatch_indirect(
         commands: &cmd,
@@ -881,7 +907,9 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     ));
     assert(beyond == gpu::INVALID_ARGUMENT, "dispatch indirect args beyond the backing buffer faults INVALID_ARGUMENT");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -898,7 +926,7 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     gpu::GpuSpan boundary = full_span.checked_subspan(4, gpu::DispatchIndirectCommand::size)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch_indirect(
         commands: &cmd,
@@ -907,7 +935,9 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
         args:     boundary,
     )!!;
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -932,7 +962,7 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::GpuSpan escaped_count = full_count_span.unchecked_subspan(8, 4);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -953,7 +983,8 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     assert(beyond == gpu::INVALID_ARGUMENT, "indirect count span beyond the backing buffer faults INVALID_ARGUMENT");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -998,7 +1029,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     gpu::GpuSpan index_span = gpu::get_buffer_span(&device, index_buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -1065,7 +1096,8 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     )!!;
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1084,7 +1116,7 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::GpuSpan escaped = full_index_span.unchecked_subspan(16, 4);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -1103,7 +1135,8 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     assert(beyond == gpu::INVALID_ARGUMENT, "index span beyond the backing buffer faults INVALID_ARGUMENT");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1122,7 +1155,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::GpuSpan boundary = full_index_span.checked_subspan(12, 4)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -1140,7 +1173,8 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     )!!;
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1166,7 +1200,7 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_texture_transition(&cmd, texture, gpu::TextureLayout.TRANSFER_DST, gpu::Stage.TRANSFER, gpu::Hazard.TRANSFER_WRITE);
 
@@ -1174,7 +1208,9 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     fault beyond = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &up));
     assert(beyond == gpu::INVALID_ARGUMENT, "buffer-to-texture copy span beyond the backing buffer faults INVALID_ARGUMENT");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1200,7 +1236,7 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_texture_transition(&cmd, texture, gpu::TextureLayout.TRANSFER_SRC, gpu::Stage.TRANSFER, gpu::Hazard.TRANSFER_READ);
 
@@ -1208,7 +1244,9 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     fault beyond = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &down));
     assert(beyond == gpu::INVALID_ARGUMENT, "texture-to-buffer copy span beyond the backing buffer faults INVALID_ARGUMENT");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1234,14 +1272,16 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     gpu::GpuSpan boundary = full_span.checked_subspan(32, 64)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_texture_transition(&cmd, texture, gpu::TextureLayout.TRANSFER_DST, gpu::Stage.TRANSFER, gpu::Hazard.TRANSFER_WRITE);
 
     gpu::BufferTextureCopyDesc up = { .src = boundary, .texture = texture, .width = 4, .height = 4 };
     gpu::cmd_copy_buffer_to_texture(&cmd, &up)!!;
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1254,7 +1294,7 @@ fn void buffer_barrier_range_beyond_buffer_faults() @test {
     defer gpu::destroy_buffer(&device, buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
         .buffer = buffer, .offset = 48, .size = 32,
@@ -1264,7 +1304,9 @@ fn void buffer_barrier_range_beyond_buffer_faults() @test {
     fault beyond = @catch(gpu::cmd_buffer_barrier(&cmd, &barrier));
     assert(beyond == gpu::INVALID_ARGUMENT, "buffer barrier range beyond the backing buffer faults INVALID_ARGUMENT");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1277,7 +1319,7 @@ fn void buffer_barrier_boundary_exact_succeeds() @test {
     defer gpu::destroy_buffer(&device, buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
         .buffer = buffer, .offset = 32, .size = 32,
@@ -1286,7 +1328,9 @@ fn void buffer_barrier_boundary_exact_succeeds() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &barrier)!!;
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1299,7 +1343,7 @@ fn void buffer_barrier_zero_size_whole_buffer_succeeds() @test {
     defer gpu::destroy_buffer(&device, buffer)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
         .buffer = buffer, .offset = 0, .size = 0,
@@ -1308,7 +1352,9 @@ fn void buffer_barrier_zero_size_whole_buffer_succeeds() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &barrier)!!;
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1347,7 +1393,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     defer gpu::destroy_texture(&device, mip_depth)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, large);
     record_val_target_to_attach(&cmd, small);
@@ -1410,7 +1456,9 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         mip_count: 1,
     ), "multi-mip depth attachment view selects exactly mip zero and layer zero");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1420,7 +1468,7 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::ColorTargetDesc[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
@@ -1438,7 +1486,9 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "device-limit rejection records no pass");
     state.caps.max_color_attachments = device_limit;
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1457,7 +1507,7 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
     defer state.caps = original_caps;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::cmd_dispatch(
@@ -1497,7 +1547,9 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
         generation:          0,
     );
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1533,7 +1585,7 @@ fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
     foreach (&cached : saturated_slot.views) cached.used = true;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, first);
     record_val_target_to_attach(&cmd, saturated);
@@ -1561,7 +1613,9 @@ fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
         "later view resolution fault rolls back the earlier cached view");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "view resolution fault records no pass");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1586,7 +1640,7 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     defer gpu::destroy_buffer(&device, buffer)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     gpu::BufferBarrier barrier = {
         .buffer        = buffer,
@@ -1643,7 +1697,9 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     assert(whole_without_callback == whole_with_callback, "whole-buffer callback presence does not alter the fault");
     assert(capture.calls == 2, "whole-buffer null callback emits no duplicate");
 
-    gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+
+    defer discard_test_executable(&commands_executable)!!;
     gpu::end_frame(&frame)!!;
 }
 
@@ -1747,7 +1803,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::GpuSpan root = gpu::alloc_frame_span(&frame, 16, 16)!!;
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
 
     gpu::BufferCopyDesc copy = { .src = plain, .dst = dst, .size = 16 };
@@ -1981,6 +2037,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     state.debug_callback = &capture_sync_diagnostic;
 
     gpu::cmd_end_render_pass(&commands)!!;
-    gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
     gpu::end_frame(&frame)!!;
 }

@@ -64,13 +64,6 @@ struct ShaderHandle {
 }
 $assert ShaderHandle::size <= ulong::size * 2;
 
-struct RecordingContextHandle {
-    ulong owner;
-    uint  index;
-    uint  generation;
-}
-$assert RecordingContextHandle::size <= ulong::size * 2;
-
 struct CommandListHandle {
     ulong owner;
     uint  index;
@@ -100,7 +93,6 @@ const TextureHandle TEXTURE_HANDLE_INVALID     = {};
 const PipelineHandle PIPELINE_HANDLE_INVALID   = {};
 const SwapchainHandle SWAPCHAIN_HANDLE_INVALID = {};
 const ShaderHandle SHADER_HANDLE_INVALID       = {};
-const RecordingContextHandle RECORDING_CONTEXT_HANDLE_INVALID = {};
 const CommandListHandle COMMAND_LIST_HANDLE_INVALID = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
@@ -141,12 +133,6 @@ fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
 }
 fn bool ShaderHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 fn bool ShaderHandle.equals(self, ShaderHandle other) @operator(==) {
-    return self.owner == other.owner
-        && self.index == other.index
-        && self.generation == other.generation;
-}
-fn bool RecordingContextHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
-fn bool RecordingContextHandle.equals(self, RecordingContextHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;

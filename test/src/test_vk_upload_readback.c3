@@ -167,7 +167,7 @@ fn void blocking_staging_upload(StagingReuseFixture* fixture, char[] payload) {
 <* Waits for frame retirement so the next upload can reuse physical offset zero. *>
 fn void recorded_staging_upload(StagingReuseFixture* fixture, gpu::QueueKind queue, uint index, char[] payload) {
     gpu::FrameToken frame = gpu::begin_frame(&fixture.device)!!;
-    gpu::CommandList commands = gpu::begin_commands(&fixture.device, queue)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&fixture.device, queue)!!)!!;
     defer discard_test_commands(&commands)!!;
     gpu::cmd_upload_buffer(
         commands: &commands,
@@ -181,10 +181,11 @@ fn void recorded_staging_upload(StagingReuseFixture* fixture, gpu::QueueKind que
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&commands, &host_read)!!;
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&fixture.device, &submit)!!;
+    submit_test_queue(&fixture.device, queue, &submit)!!;
     wait_test_queue(&fixture.device, queue)!!;
     gpu::end_frame(&frame)!!;
     wait_test_queue(&fixture.device, gpu::QueueKind.GRAPHICS)!!;
@@ -355,11 +356,20 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
     defer gpu::destroy_buffer(&device, buffer)!!;
 
     char[16] data;
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
     defer discard_test_commands(&commands)!!;
-    gpu::end_commands(&commands)!!;
+    gpu::CommandList ended_alias = commands;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
     uint before = capture.calls;
-    fault command_state = @catch(gpu::cmd_upload_buffer(&commands, buffer, 0, data[..]));
+    fault command_state = @catch(gpu::cmd_upload_buffer(
+        &ended_alias,
+        buffer,
+        0,
+        data[..],
+    ));
     assert(command_state == gpu::COMMAND_RECORDING_ERROR, "ended upload command keeps COMMAND_RECORDING_ERROR");
     assert_transfer_rejection(
         capture:             &capture,
@@ -370,12 +380,12 @@ fn void transfer_rejections_report_resolved_command_and_lookup_context() @test {
         invariant:           "command must be recording outside a render pass",
         resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
         has_public_identity: true,
-        resource_index:      commands.handle.index,
-        resource_generation: commands.handle.generation,
+        resource_index:      ended_alias.handle.index,
+        resource_generation: ended_alias.handle.generation,
         resource_name:       null,
     );
 
-    gpu::CommandList lookup_commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList lookup_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&lookup_commands)!!;
     gpu::BufferHandle missing = { .index = gpu::MAX_BUFFERS, .generation = 1 };
     before = capture.calls;
@@ -401,18 +411,22 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
     gpu::Device device = make_transfer_test_device(capture: &capture);
     defer destroy_test_device(&device)!!;
 
-    gpu::CommandList stale = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList stale = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
     defer discard_test_commands(&stale)!!;
-    gpu::end_commands(&stale)!!;
-    gpu::CommandList[1] lists = { stale };
+    gpu::CommandList stale_alias = stale;
+    gpu::ExecutableCommandList stale_executable = gpu::end_commands(&stale)!!;
+    defer discard_test_executable(&stale_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { stale_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     char[4] data;
     gpu::TextureUploadDesc texture_upload;
     uint before = capture.calls;
-    fault upload_buffer = @catch(gpu::cmd_upload_buffer(&stale, {}, 0, data[..]));
+    fault upload_buffer = @catch(gpu::cmd_upload_buffer(&stale_alias, {}, 0, data[..]));
     assert(upload_buffer == gpu::INVALID_HANDLE, "stale buffer upload keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
@@ -429,7 +443,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
     );
 
     before = capture.calls;
-    fault upload_texture = @catch(gpu::cmd_upload_texture(&stale, &texture_upload, data[..]));
+    fault upload_texture = @catch(gpu::cmd_upload_texture(&stale_alias, &texture_upload, data[..]));
     assert(upload_texture == gpu::INVALID_HANDLE, "stale texture upload keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
@@ -446,7 +460,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
     );
 
     before = capture.calls;
-    fault readback_buffer = @catch(gpu::cmd_readback_buffer(&stale, {}, 0, 4));
+    fault readback_buffer = @catch(gpu::cmd_readback_buffer(&stale_alias, {}, 0, 4));
     assert(readback_buffer == gpu::INVALID_HANDLE, "stale buffer readback keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
@@ -463,7 +477,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
     );
 
     before = capture.calls;
-    fault readback_texture = @catch(gpu::cmd_readback_texture(&stale, {}, 0));
+    fault readback_texture = @catch(gpu::cmd_readback_texture(&stale_alias, {}, 0));
     assert(readback_texture == gpu::INVALID_HANDLE, "stale texture readback keeps INVALID_HANDLE");
     assert_transfer_rejection(
         capture:             &capture,
@@ -536,7 +550,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     gpu::TextureDesc texture_desc = {
         .dimension  = gpu::TextureDimension.TEX_2D,
@@ -847,7 +861,7 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
     gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
     defer gpu::destroy_buffer(&device, src)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     uint before = capture.calls;
     fault zero_size = @catch(gpu::cmd_readback_buffer(&cmd, src, 0, 0));
@@ -884,8 +898,9 @@ fn void cmd_readback_ticket_not_ready_before_submit() @test {
     );
 
     gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, src, 0, 256)!!;
-    gpu::end_commands(&cmd)!!;
-    // Deliberately never gpu::submit(&device, ...): the ticket's copy never runs.
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    // Deliberately never submit_test_queue(&device, gpu::QueueKind.GRAPHICS, ...): the ticket's copy never runs.
 
     gpu::BufferDesc unrelated_desc = {
         .size        = 64,
@@ -1016,7 +1031,7 @@ fn void staging_ring_reuses_across_frames() @test {
     for (uint frame = 0; frame < 12; frame++) {
         for (uint i = 0; i < 1024; i++) data[i] = (char)(frame + i);
         gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-        gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
         defer discard_test_commands(&cmd)!!;
         gpu::cmd_upload_buffer(&cmd, buffer, 0, data[..])!!;
         gpu::BufferBarrier next_use = {
@@ -1025,10 +1040,11 @@ fn void staging_ring_reuses_across_frames() @test {
             .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
         };
         gpu::cmd_buffer_barrier(&cmd, &next_use)!!;
-        gpu::end_commands(&cmd)!!;
-        gpu::CommandList[1] lists = { cmd };
+        gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+        defer discard_test_executable(&cmd_executable)!!;
+        gpu::ExecutableCommandList[1] lists = { cmd_executable };
         gpu::SubmitDesc submit = { .command_lists = lists[..] };
-        gpu::submit(&device, &submit)!!;
+        submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
         gpu::end_frame(&frame_token)!!;
     }
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -1058,7 +1074,7 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
         b[i] = (char)77;
     }
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::cmd_upload_buffer(&cmd, first, 0, a[..])!!;
     gpu::cmd_upload_buffer(&cmd, second, 0, b[..])!!;
@@ -1068,10 +1084,11 @@ fn void out_of_frame_uploads_do_not_alias_staging() @test {
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.TRANSFER_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &next_use)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     char[1024] out;
@@ -1169,7 +1186,7 @@ fn void texture_upload_helper_sampled() @test {
     root.width         = UR_TEX;
     root.height        = UR_TEX;
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
@@ -1183,10 +1200,11 @@ fn void texture_upload_helper_sampled() @test {
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
@@ -1489,7 +1507,7 @@ fn void upload_helper_validation_faults() @test {
 
     // cmd-level upload into a texture that is not TRANSFER_DST still faults.
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     char[UR_TEX_BYTES] full;
     gpu::TextureUploadDesc upload = { .texture = texture, .mip = 0 };
@@ -1527,7 +1545,8 @@ fn void upload_helper_validation_faults() @test {
         resource_generation: texture.generation,
         resource_name:       "helper_upload_texture",
     );
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -1623,11 +1642,11 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
         "blocking readback access rejection consumes no helper or arena state");
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        device: &device,
-        queue:  gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
+    gpu::vk::CommandRecord* record = state.commands.get(commands.handle)!!;
+    gpu::Queue recorded_queue = record.queue;
+    record.queue.roles = { .graphics };
     staging_before = state.staging_arena.retire_count;
     before = capture.calls;
     fault command_upload = @catch(gpu::cmd_upload_buffer(
@@ -1682,7 +1701,10 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
         && state.readback_tickets.next_new == tickets_before,
         "recorded readback access rejection allocates no ticket or arena range");
 
-    gpu::end_commands(&commands)!!;
+    record.queue = recorded_queue;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+
+    defer discard_test_executable(&commands_executable)!!;
     gpu::end_frame(&frame)!!;
 }
 

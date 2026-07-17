@@ -463,9 +463,10 @@ Headless tests may skip swapchain-specific acquire/present steps.
 
 ## 8. Command model
 
-`begin_commands` takes an optional `RecordingContextHandle`. One context per worker thread (`create_recording_context` / `destroy_recording_context`) enables concurrent recording; see `docs/threading.md`.
-`end_commands(CommandList*)` derives the device from the owner-bearing token;
-callers do not repeat it. The embedded owner rejects stale command-list tokens.
+`begin_commands(queue)` returns a thread-confined recording token. Successful
+`end_commands` consumes it and returns a one-shot executable token. Submission
+or explicit discard consumes the executable token. Native recording pools are
+private and cached per worker; see `docs/threading.md`.
 
 ### Compute
 

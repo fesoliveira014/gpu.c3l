@@ -290,8 +290,7 @@ token. Most public operations take a short-lived atomic pin before reading
 backend state. `begin_commands` transfers its pin to the returned command token;
 recording calls borrow that pin without acquiring another one.
 
-`destroy_device` never waits. Live resources, frames, command lists, recording
-contexts, persistent spans, swapchains, descriptors, and readback
+`destroy_device` never waits. Live resources, frames, command lists, persistent spans, swapchains, descriptors, and readback
 tickets return `RESOURCE_IN_USE`. Active operations, incomplete queue work, or
 a closing slot return retryable `DEVICE_BUSY`. Every failed attempt preserves
 the token, generation, and backend state. Success increments the generation
@@ -316,7 +315,6 @@ TextureHandle
 PipelineHandle
 ShaderHandle
 SwapchainHandle
-RecordingContextHandle
 ```
 
 (Samplers have no handle — they are `SamplerIndex` heap indices.)
@@ -387,9 +385,9 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; resource creation: empty, unknown, or unselected access role; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; mixed queue kinds in one submission; missing transfer/index usage flag, an access set that omits the operation queue role, stale or forged span allocation metadata, malformed span access, or a misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
-| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, `poll_completion`, `wait_completion`, any resource-handle-taking call, `cmd_*`, `end_commands`, `discard_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
-| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `destroy_recording_context`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight Tier S work; recording context still owns a live command record; or `old_layout` disagrees with the list's effective layout (its own pending transitions, else the tracked layout) |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `GpuSpan.checked_subspan`; `get_queue`; `submit`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; `cmd_draw_indexed`(+indirect variants); `cmd_dispatch`/`cmd_draw`(+indirect variants); `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `cmd_texture_barrier`; `texture_transition`; `create_texture_descriptors`, `resolve_readback` | `request_queues`: empty group, per-role count above 255, distinct role with zero count, malformed request, or duplicate group; resource creation: empty, unknown, or unselected access role; otherwise null or malformed required input, zero size, undersized output buffer, out-of-range value, rectangle outside the active pass, or a subspan outside its parent/with overflowing metadata; a command token recorded for another queue; missing transfer/index usage flag, an access set disjoint from the selected queue roles, stale or forged span allocation metadata, malformed span access, or a misaligned range; pipeline kind or shader stage mismatch; invalid texture use or `UNDEFINED` transition destination; consumed original `ReadbackTicket`; `create_texture_descriptors`' `out_indices.len` does not equal `descs.len` |
+| `INVALID_HANDLE` | runtime and adapter queries; `destroy_runtime`; `destroy_device`, `get_device_*`, `get_queue_counts`, `get_queue`, `get_queue_info`, `poll_completion`, `wait_completion`, any resource-handle-taking call, `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit`, `alloc_frame_span`, `end_frame`, `poll_readback`, `resolve_readback` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, or resource token; consumed or stale command-list alias or `FrameToken`; stale `ReadbackTicket` alias |
+| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize or destruction; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | buffer/texture creates | VMA/driver device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
@@ -402,7 +400,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
-| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
+| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
 | `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |
 | `WAIT_TIMEOUT` | `wait_completion`, `begin_frame`, `acquire_next_image` | bounded wait or transient image unavailability; retry with the unchanged completion point or resource |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
@@ -847,14 +845,10 @@ Export must not race pipeline creation; blob usefulness is driver-dependent
 
 ### Threading
 
-Thread-safety is tiered per entry point — see `docs/threading.md` for the
-full table, lock order, and disciplines. Summary: resource creation and the
-transfer helpers are thread-safe; frame lifecycle, submit/present, and
-swapchain operations are externally synchronized; recording is confined —
-`begin_commands(device, queue, ctx)` takes a `RecordingContextHandle`
-(default `{}` = the device's built-in context), and each context records from
-one thread at a time. Create one context per recording thread with
-`create_recording_context`.
+Command tokens are thread-confined. Different threads may call
+`begin_commands` for the same device concurrently; the backend owns and caches
+recording storage per worker. A recording or executable token and its aliases
+must not be used concurrently. See `docs/threading.md`.
 
 ### Command lifecycle
 
@@ -862,16 +856,17 @@ one thread at a time. Create one context per recording thread with
 get_queue_counts(Device* device) -> QueueCounts?
 get_queue(Device* device, QueueKind kind, uint index = 0) -> Queue?
 get_queue_info(Device* device, Queue queue) -> QueueInfo?
-begin_commands(Device* device, QueueKind queue, RecordingContextHandle ctx = {}) -> CommandList?
-end_commands(CommandList* commands) -> void?
+begin_commands(Queue queue) -> CommandList?
+end_commands(CommandList* commands) -> ExecutableCommandList?
 discard_commands(CommandList* commands) -> void?
-submit(Device* device, SubmitDesc* desc) -> CompletionPoint?
+discard_executable_commands(ExecutableCommandList* commands) -> void?
+submit(Queue queue, SubmitDesc* desc) -> CompletionPoint?
 poll_completion(CompletionPoint point) -> bool?
 wait_completion(CompletionPoint point, ulong timeout_ns = ulong::max) -> void?
 
 CompletionPoint
     Device device
-    ulong payload                     (opaque queue identity and sequence)
+    ulong payload
 
 Queue
     Device device
@@ -893,11 +888,9 @@ QueueInfo
     QueueRoles roles
 
 SubmitDesc
-    CommandList[] command_lists
+    ExecutableCommandList[] command_lists
     CompletionPoint[] completion_waits
-    SwapchainHandle swapchain       (present-linked submits)
-
-create_recording_context / destroy_recording_context    (one per worker thread; docs/threading.md)
+    SwapchainHandle swapchain
 ```
 
 `CompletionPoint` is a reusable queue-progress value. It fits in two machine
@@ -906,21 +899,21 @@ false while work is incomplete. `wait_completion` returns `WAIT_TIMEOUT` when
 the bound expires; either operation leaves the point unchanged. Zero, stale,
 foreign-device, malformed, and unpublished points fault `INVALID_HANDLE`.
 
-`CommandList` is a small owner-bearing token; mutable lifecycle, binding cache,
-pending texture layouts, and the backend command buffer are device-owned. Copies
-alias the same record, and the embedded `Device` value does not borrow the
-variable passed to `begin_commands`. Recording and executable tokens retain one
-device pin. Successful submission consumes each token, releases its pin, and
-clears the corresponding `SubmitDesc.command_lists` entry; copied aliases then
-fault `INVALID_HANDLE`. `discard_commands` remains available after device loss,
-consumes a recording or executable token, and cancels attached readback tickets.
+`CommandList` is a recording token. Successful `end_commands` consumes it and
+returns a one-shot `ExecutableCommandList`; failure leaves the recording token
+unchanged. Copies alias the same backend record. Recording and executable tokens
+retain the device until consumed.
 
-A submit batch is transactional. Success consumes every command token, publishes
-exactly one queue sequence, and returns its `CompletionPoint`. An empty batch
-targets the frame-anchor queue: graphics when present, otherwise compute, then
-transfer. Duplicate tokens fault `COMMAND_RECORDING_ERROR`, mixed queue kinds
-fault `INVALID_ARGUMENT`, and any failure before native acceptance publishes no
-point and leaves tokens executable. A live unsubmitted token blocks its
+`discard_commands` consumes unfinished recording. Use
+`discard_executable_commands` for an ended token that will not be submitted.
+Both remain available after device loss and cancel attached readback tickets.
+
+Submission targets an explicit `Queue`. Every executable token in the batch
+must have been recorded for that queue. Success consumes all tokens and returns
+one queue-owned `CompletionPoint`; failure publishes no point and preserves the
+tokens for retry or discard. An empty batch signals the selected queue.
+Duplicate or non-executable tokens fault `COMMAND_RECORDING_ERROR`; a token for
+another queue faults `INVALID_ARGUMENT`. A live unsubmitted token blocks its
 frame-slot pool reset until submitted or discarded.
 
 `SubmitDesc.completion_waits` accepts published points from the same device.
@@ -941,9 +934,8 @@ unavailable role index.
 `get_queue_info` faults `INVALID_HANDLE` for zero, stale, foreign-device, or
 malformed tokens and returns the stable device-local ID and supported roles.
 Backend family indices and native handles remain private. Resource descriptions
-require a non-empty subset of the selected roles. Command operations reject every
-explicitly named resource whose `access` omits the semantic operation role, even
-when that role aliases the same native queue. A `GpuSpan` also rejects empty,
+require a non-empty subset of the selected roles. A queue may use a resource when
+at least one of its roles appears in the resource's `access` set. A `GpuSpan` also rejects empty,
 unknown, or wider-than-backing access metadata. These checks run before command,
 layout, helper-timeline, or transfer-arena mutation.
 
@@ -1530,7 +1522,8 @@ fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
     RootArgs* root = (RootArgs*)root_span.cpu;
     root.input = gpu::get_buffer_address(work.device, work.input)!;
     root.count = 1024;
-    gpu::CommandList commands = gpu::begin_commands(work.device, gpu::QueueKind.COMPUTE)!;
+    gpu::Queue queue = gpu::get_queue(work.device, gpu::QueueKind.COMPUTE)!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!;
     defer (void)gpu::discard_commands(&commands);
     gpu::cmd_dispatch(
         commands: &commands,
@@ -1538,10 +1531,11 @@ fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
         root:     root_span.gpu,
         groups:   { 16, 1, 1 },
     )!;
-    gpu::end_commands(&commands)!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
+    defer (void)gpu::discard_executable_commands(&executable);
+    gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = gpu::submit(work.device, &submit)!;
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
     gpu::wait_completion(completion, ulong::max)!;
 }
 ```

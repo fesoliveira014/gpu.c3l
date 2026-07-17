@@ -5,7 +5,7 @@ import vk;
 
 fn void? validate_operation_queue_access(
     VkDeviceState* state,
-    gpu::QueueKind queue,
+    gpu::QueueRoles queue_roles,
     gpu::QueueRoles access,
     gpu::DebugResourceKind resource_kind,
     uint index,
@@ -14,7 +14,7 @@ fn void? validate_operation_queue_access(
     ZString operation,
     ZString rejected_field,
 ) @private {
-    if (gpu::queue_access_allows(access, queue)) return;
+    if (gpu::queue_access_intersects(access, queue_roles)) return;
     return report_contract_failure(
         state:               state,
         operation:           operation,
@@ -32,14 +32,14 @@ fn void? validate_operation_queue_access(
 
 fn void? validate_buffer_queue_access(
     VkDeviceState* state,
-    gpu::QueueKind queue,
+    gpu::QueueRoles queue_roles,
     BufferSlot* slot,
     gpu::BufferHandle handle,
     ZString operation,
 ) @private {
     return validate_operation_queue_access(
         state:          state,
-        queue:          queue,
+        queue_roles:    queue_roles,
         access:         slot.access,
         resource_kind:  gpu::DebugResourceKind.BUFFER,
         index:          handle.index,
@@ -59,7 +59,7 @@ fn void? validate_buffer_recording_access(
 ) @private {
     return validate_buffer_queue_access(
         state:     state,
-        queue:     record.queue,
+        queue_roles: record.queue.roles,
         slot:      slot,
         handle:    handle,
         operation: operation,
@@ -68,14 +68,14 @@ fn void? validate_buffer_recording_access(
 
 fn void? validate_texture_queue_access(
     VkDeviceState* state,
-    gpu::QueueKind queue,
+    gpu::QueueRoles queue_roles,
     TextureSlot* slot,
     gpu::TextureHandle handle,
     ZString operation,
 ) @private {
     return validate_operation_queue_access(
         state:          state,
-        queue:          queue,
+        queue_roles:    queue_roles,
         access:         slot.access,
         resource_kind:  gpu::DebugResourceKind.TEXTURE,
         index:          handle.index,
@@ -95,7 +95,7 @@ fn void? validate_texture_recording_access(
 ) @private {
     return validate_texture_queue_access(
         state:     state,
-        queue:     record.queue,
+        queue_roles: record.queue.roles,
         slot:      slot,
         handle:    handle,
         operation: operation,
@@ -150,7 +150,7 @@ fn void? validate_span_recording_access(
     }
     return validate_operation_queue_access(
         state:          state,
-        queue:          record.queue,
+        queue_roles:    record.queue.roles,
         access:         span.access,
         resource_kind:  gpu::DebugResourceKind.BUFFER,
         index:          span.buffer.index,

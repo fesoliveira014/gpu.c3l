@@ -922,6 +922,7 @@ fn void? maybe_reset_helper_pool(VkDeviceState* state, ZString operation) @priva
     RecordingContextState* context = state.recording_contexts.get(state.helper_context)!;
     PoolDirtyMask* dirty = &context.pool_dirty[state.frame_index];
     gpu::QueueKind queue = frame_queue_kind(state);
+    gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
     bool pool_dirty;
     switch (queue) {
         case gpu::QueueKind.COMPUTE:
@@ -949,7 +950,7 @@ fn void? maybe_reset_helper_pool(VkDeviceState* state, ZString operation) @priva
         operation:       operation,
         result:          vk::reset_command_pool(
             state.device,
-            pool_for(context, queue, state.frame_index),
+            pool_for(context, helper_queue, state.frame_index),
             (vk::CommandPoolResetFlags)0,
         ),
         fault_is_public: true,
@@ -990,7 +991,7 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
     gpu::QueueKind queue = frame_queue_kind(state);
     validate_buffer_queue_access(
         state:     state,
-        queue:     queue,
+        queue_roles: gpu::queue_roles_for_kind(queue),
         slot:      dst_slot,
         handle:    dst,
         operation: "upload_buffer_data",
@@ -1007,11 +1008,12 @@ fn void? vk_upload_buffer_data(gpu::Device* device, gpu::BufferHandle dst, usz o
         maybe_reset_helper_pool(state, "upload_buffer_data")!;
         helper_value = reserve_helper_value(state);
         tag.value = helper_value;
-        vk_begin_commands(
-            device:       device,
-            queue:        queue,
-            ctx:          state.helper_context,
-            out_commands: &commands,
+        gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
+        vk_begin_commands_with_context(
+            state:          state,
+            queue:          helper_queue,
+            context_handle: state.helper_context,
+            out_commands:   &commands,
         )!;
         cmd_upload_buffer_impl(
             commands: &commands,
@@ -1112,7 +1114,7 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     }
     validate_texture_queue_access(
         state:     state,
-        queue:     queue,
+        queue_roles: gpu::queue_roles_for_kind(queue),
         slot:      slot,
         handle:    dst,
         operation: "upload_texture_data",
@@ -1126,11 +1128,12 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
         maybe_reset_helper_pool(state, "upload_texture_data")!;
         helper_value = reserve_helper_value(state);
         tag.value = helper_value;
-        vk_begin_commands(
-            device:       device,
-            queue:        queue,
-            ctx:          state.helper_context,
-            out_commands: &commands,
+        gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
+        vk_begin_commands_with_context(
+            state:          state,
+            queue:          helper_queue,
+            context_handle: state.helper_context,
+            out_commands:   &commands,
         )!;
 
         if (tracked == gpu::TextureLayout.UNDEFINED) {
@@ -1235,7 +1238,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     }
     validate_buffer_queue_access(
         state:     state,
-        queue:     queue,
+        queue_roles: gpu::queue_roles_for_kind(queue),
         slot:      src_slot,
         handle:    src,
         operation: "readback_buffer_data",
@@ -1262,11 +1265,12 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
             allocation_fault = err;
         } else {
             readback = allocated_readback;
-            vk_begin_commands(
-                device:       device,
-                queue:        queue,
-                ctx:          state.helper_context,
-                out_commands: &commands,
+            gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
+            vk_begin_commands_with_context(
+                state:          state,
+                queue:          helper_queue,
+                context_handle: state.helper_context,
+                out_commands:   &commands,
             )!;
 
             gpu::BufferBarrier from = {
@@ -1379,7 +1383,7 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     }
     validate_texture_queue_access(
         state:     state,
-        queue:     queue,
+        queue_roles: gpu::queue_roles_for_kind(queue),
         slot:      slot,
         handle:    src,
         operation: "readback_texture_data",
@@ -1407,11 +1411,12 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
             allocation_fault = err;
         } else {
             readback = allocated_readback;
-            vk_begin_commands(
-                device:       device,
-                queue:        queue,
-                ctx:          state.helper_context,
-                out_commands: &commands,
+            gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
+            vk_begin_commands_with_context(
+                state:          state,
+                queue:          helper_queue,
+                context_handle: state.helper_context,
+                out_commands:   &commands,
             )!;
 
             gpu::TextureBarrier to_src = {
@@ -1474,19 +1479,37 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     finish_helper_timeline(state, &helper_value, "readback_texture_data")!;
 }
 
-<* Submit an ended helper list and wait for its completion. The caller owns its retirement tag. *>
-fn void? submit_and_wait(
+fn void? submit_and_wait_with(
     gpu::Device* device,
     gpu::CommandList* commands,
+    QueueSubmit2Fn submit_fn,
 ) @private {
-    gpu::CommandList[1] lists = { *commands };
+    CommandRecord* record = resolve_command(commands)!;
+    gpu::Queue queue = record.queue;
+    gpu::ExecutableCommandList[1] lists = {{
+        .device = commands.device,
+        .handle = commands.handle,
+    }};
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint point = vk_submit(device, &submit)!;
+    gpu::CompletionPoint point = vk_submit_with(queue, &submit, submit_fn)!;
+    *commands = {};
     return vk_wait_completion(
         device,
         gpu::completion_point_queue_id(point),
         gpu::completion_point_sequence(point),
         ulong::max,
+    );
+}
+
+<* Submit an ended helper list and wait for completion. *>
+fn void? submit_and_wait(
+    gpu::Device* device,
+    gpu::CommandList* commands,
+) @private {
+    return submit_and_wait_with(
+        device,
+        commands,
+        &real_queue_submit2,
     );
 }
 

@@ -17,7 +17,6 @@ enum DebugResourceKind : int {
     PIPELINE,
     SWAPCHAIN,
     SHADER,
-    RECORDING_CONTEXT,
     COMMAND_LIST,
     TEXTURE_DESCRIPTOR,
     SAMPLER,

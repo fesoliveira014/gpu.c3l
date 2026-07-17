@@ -9,14 +9,30 @@ fn void? discard_test_commands(gpu::CommandList* commands) {
     }
 }
 
+fn void? discard_test_executable(gpu::ExecutableCommandList* commands) {
+    if (commands == null || !commands.handle.is_valid()) return;
+    if (catch err = gpu::discard_executable_commands(commands)) {
+        if (err != gpu::INVALID_HANDLE) return err~;
+    }
+}
+
+fn gpu::CompletionPoint? submit_test_queue(
+    gpu::Device* device,
+    gpu::QueueKind kind,
+    gpu::SubmitDesc* desc,
+) {
+    return gpu::submit(gpu::get_queue(device, kind)!, desc);
+}
+
 fn void? wait_test_queue(gpu::Device* device, gpu::QueueKind queue) {
-    gpu::CommandList[1] lists;
-    lists[0] = gpu::begin_commands(device, queue)!;
-    defer (void)gpu::discard_commands(&lists[0]);
-    gpu::end_commands(&lists[0])!;
+    gpu::Queue target = gpu::get_queue(device, queue)!;
+    gpu::CommandList commands = gpu::begin_commands(target)!;
+    defer (void)gpu::discard_commands(&commands);
+    gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)! };
+    defer (void)gpu::discard_executable_commands(&lists[0]);
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = gpu::submit(device, &submit)!;
-    gpu::wait_completion(completion, ulong::max)!;
+    gpu::CompletionPoint completion = gpu::submit(target, &submit)!;
+    gpu::wait_completion(completion)!;
 }
 
 fn void? destroy_test_device(gpu::Device* device) {

@@ -24,8 +24,8 @@ struct PendingLayout {
 
 struct CommandRecord {
     vk::CommandBuffer            command_buffer;
-    gpu::RecordingContextHandle  context;
-    gpu::QueueKind               queue;
+    RecordingContextHandle  context;
+    gpu::Queue                   queue;
     uint                         frame_index;
     CommandState                 state;
     uint                         active_render_width;
@@ -133,7 +133,7 @@ fn bool frame_has_live_commands(VkDeviceState* state, uint frame_index) {
 
 fn void release_commands_for_context_frame(
     VkDeviceState* state,
-    gpu::RecordingContextHandle context,
+    RecordingContextHandle context,
     uint frame_index,
 ) {
     state.command_mutex.lock()!!;
@@ -151,14 +151,6 @@ fn void release_commands_for_context_frame(
     }
 }
 
-fn bool context_has_live_commands(VkDeviceState* state, gpu::RecordingContextHandle context) {
-    state.command_mutex.lock()!!;
-    defer state.command_mutex.unlock();
-    foreach (&cell : state.commands.slots[:state.commands.next_new]) {
-        if (cell.used && cell.value.context == context) return true;
-    }
-    return false;
-}
 
 fn void destroy_command_table(VkDeviceState* state) {
     if (state.commands.slots.ptr == null) return;

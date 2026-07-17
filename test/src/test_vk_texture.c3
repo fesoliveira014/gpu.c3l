@@ -176,7 +176,7 @@ fn void texture_barrier_transitions_layout() @test {
     defer gpu::destroy_texture(&device, texture)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_general = {
@@ -204,11 +204,13 @@ fn void texture_barrier_transitions_layout() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &general_to_general)!!;
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
-    gpu::CommandList[1] lists = { cmd };
+    defer discard_test_executable(&cmd_executable)!!;
+
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }
@@ -253,7 +255,7 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
     defer gpu::destroy_texture(&device, texture)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture       = texture,
@@ -265,11 +267,12 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
         .new_layout    = gpu::TextureLayout.GENERAL,
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
 
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }
@@ -290,7 +293,7 @@ fn void texture_barrier_stale_handle_rejected() @test {
     gpu::destroy_texture(&device, texture)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier barrier = {
@@ -301,7 +304,9 @@ fn void texture_barrier_stale_handle_rejected() @test {
     fault barrier_fault = @catch(gpu::cmd_texture_barrier(&cmd, &barrier));
     assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on a destroyed texture faults INVALID_HANDLE");
 
-    gpu::end_commands(&cmd)!!;
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
 
@@ -641,7 +646,7 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
     defer gpu::destroy_texture(&device, texture)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     gpu::TextureBarrier barrier = {
         .texture       = texture,
@@ -675,6 +680,8 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
     assert(without_callback == with_callback, "callback presence does not alter the layout fault");
     assert(capture.calls == 1, "null callback emits no additional diagnostic");
 
-    gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+
+    defer discard_test_executable(&commands_executable)!!;
     gpu::end_frame(&frame)!!;
 }

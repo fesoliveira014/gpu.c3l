@@ -119,7 +119,7 @@ fn void range_and_alignment_validation() @test {
     fault f7 = @catch(gpu::alloc_frame_span(&frame_token, 0, 16));
     assert(f7 == gpu::INVALID_ARGUMENT, "zero-size span faults");
 
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     fault f8 = @catch(gpu::cmd_fill_buffer(&cmd, buf, 2, 4, 0xAB));
     assert(f8 == gpu::INVALID_ARGUMENT, "misaligned fill offset faults");
@@ -136,10 +136,11 @@ fn void range_and_alignment_validation() @test {
     gpu::cmd_copy_buffer(&cmd, &touching)!!;
     gpu::BufferCopyDesc disjoint = { .src = buf, .dst = buf, .src_offset = 0, .dst_offset = 128, .size = 64 };
     gpu::cmd_copy_buffer(&cmd, &disjoint)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }

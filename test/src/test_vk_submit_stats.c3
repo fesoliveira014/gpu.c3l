@@ -58,12 +58,13 @@ fn void end_frame_issues_exactly_one_empty_submit() @test {
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::QueueKind[3] kinds = { gpu::QueueKind.GRAPHICS, gpu::QueueKind.COMPUTE, gpu::QueueKind.TRANSFER };
     foreach (kind : kinds) {
-        gpu::CommandList cmd = gpu::begin_commands(&device, kind)!!;
+        gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, kind)!!)!!;
         defer discard_test_commands(&cmd)!!;
-        gpu::end_commands(&cmd)!!;
-        gpu::CommandList[1] one = { cmd };
+        gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+        defer discard_test_executable(&cmd_executable)!!;
+        gpu::ExecutableCommandList[1] one = { cmd_executable };
         gpu::SubmitDesc submit = { .command_lists = one[..] };
-        gpu::submit(&device, &submit)!!;
+        submit_test_queue(&device, kind, &submit)!!;
     }
 
     vk::SubmitStats before = stats_of(&device);
@@ -79,14 +80,15 @@ fn void graphics_only_frame_emits_one_empty_submit() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
 
     vk::SubmitStats before_submit = stats_of(&device);
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     vk::SubmitStats after_submit = stats_of(&device);
     assert(after_submit.queue_submits - before_submit.queue_submits == 1, "one user submit records one queue submit");
 
@@ -104,18 +106,23 @@ fn void failed_submit_records_nothing_and_end_frame_stays_clean() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList unfinished = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList unfinished = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&unfinished)!!;
-    gpu::CommandList[1] not_executable = { unfinished };
+    gpu::ExecutableCommandList[1] not_executable = {{
+        .device = unfinished.device,
+        .handle = unfinished.handle,
+    }};
     gpu::SubmitDesc bad_submit = { .command_lists = not_executable[..] };
 
     vk::SubmitStats before = stats_of(&device);
-    fault f = @catch(gpu::submit(&device, &bad_submit));
+    fault f = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &bad_submit));
     assert(f == gpu::COMMAND_RECORDING_ERROR, "a not-yet-executable list rejects before touching the queue");
     vk::SubmitStats after = stats_of(&device);
     assert(after.queue_submits == before.queue_submits, "a rejected submit records no queue submit");
 
-    gpu::end_commands(&unfinished)!!;
+    gpu::ExecutableCommandList unfinished_executable = gpu::end_commands(&unfinished)!!;
+
+    defer discard_test_executable(&unfinished_executable)!!;
     gpu::end_frame(&frame)!!;
 
     // A clean cycle right after proves end_frame never waited a bogus value.
@@ -284,20 +291,22 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
     ulong next_before = completion.next_sequence;
     ulong published_before = completion.published_sequence.load(
         AtomicOrdering.ACQUIRE,
     );
 
-    assert(@catch(vk::vk_submit_with(&device, &desc, &reject_user_submit))
+    assert(@catch(vk::vk_submit_with(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        &desc,
+        &reject_user_submit,
+    ))
         == gpu::OUT_OF_HOST_MEMORY,
         "native submission failure keeps its public fault");
     assert(completion.next_sequence == next_before,
@@ -310,7 +319,7 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     assert(lists[0].handle.is_valid(),
         "native failure preserves the executable token for retry");
 
-    gpu::CompletionPoint point = gpu::submit(&device, &desc)!!;
+    gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;
     assert(point.is_valid(), "retry returns a valid completion point");
     assert(completion.next_sequence == next_before + 1,
         "retry reuses the rolled-back sequence");
@@ -318,6 +327,39 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     gpu::wait_completion(point, 1_000_000_000)!!;
 }
 
+fn void helper_submit_failure_preserves_cleanup_token() @test {
+    gpu::Device device = make_submit_stats_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+
+    gpu::CommandList commands;
+    vk::vk_begin_commands_with_context(
+        state:          state,
+        queue:          queue,
+        context_handle: state.helper_context,
+        out_commands:   &commands,
+    )!!;
+    vk::vk_end_commands(&commands)!!;
+
+    fault submit_fault = @catch(vk::submit_and_wait_with(
+        &device,
+        &commands,
+        &reject_user_submit,
+    ));
+    assert(submit_fault == gpu::OUT_OF_HOST_MEMORY,
+        "helper submission preserves the native fault");
+    assert(commands.handle.is_valid(),
+        "helper submission failure preserves its cleanup token");
+
+    vk::release_helper_command_on_fault(state, &commands);
+    assert(!commands.handle.is_valid(),
+        "helper fault cleanup consumes the preserved token");
+}
 fn void completion_distance_backpressure_preserves_submit_state() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
@@ -326,13 +368,11 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
     ulong next_before = completion.next_sequence;
     ulong observed_before = completion.observed_completed_sequence;
@@ -347,7 +387,10 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     completion_counter_result = vk::Result.SUCCESS;
 
     assert(@catch(vk::vk_submit_with_queries(
-        device:           &device,
+        queue:            gpu::get_queue(
+            &device,
+            gpu::QueueKind.GRAPHICS,
+        )!!,
         desc:             &desc,
         submit_fn:        &reject_counted_user_submit,
         counter_query_fn: &query_completion_counter,
@@ -365,7 +408,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     completion.next_sequence = next_before;
     completion.observed_completed_sequence = observed_before;
     state.max_timeline_semaphore_value_difference = limit_before;
-    gpu::CompletionPoint point = gpu::submit(&device, &desc)!!;
+    gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;
     gpu::wait_completion(point, 1_000_000_000)!!;
 }
 
@@ -377,13 +420,11 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
     ulong next_before = completion.next_sequence;
 
@@ -392,7 +433,10 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
     completion_counter_query_calls = 0;
 
     assert(@catch(vk::vk_submit_with_queries(
-        device:           &device,
+        queue:            gpu::get_queue(
+            &device,
+            gpu::QueueKind.GRAPHICS,
+        )!!,
         desc:             &desc,
         submit_fn:        &reject_counted_user_submit,
         counter_query_fn: &query_completion_counter,
@@ -408,7 +452,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
         "sequence exhaustion preserves the executable token");
 
     completion.next_sequence = next_before;
-    gpu::CompletionPoint point = gpu::submit(&device, &desc)!!;
+    gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;
     gpu::wait_completion(point, 1_000_000_000)!!;
 }
 
@@ -420,20 +464,22 @@ fn void native_device_loss_rolls_back_and_allows_discard() @test {
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
     ulong next_before = completion.next_sequence;
     ulong published_before = completion.published_sequence.load(
         AtomicOrdering.ACQUIRE,
     );
 
-    assert(@catch(vk::vk_submit_with(&device, &desc, &lose_user_submit))
+    assert(@catch(vk::vk_submit_with(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        &desc,
+        &lose_user_submit,
+    ))
         == gpu::DEVICE_LOST,
         "native device loss keeps its public fault");
     assert(completion.next_sequence == next_before,
@@ -444,7 +490,7 @@ fn void native_device_loss_rolls_back_and_allows_discard() @test {
     assert(lists[0].handle.is_valid(),
         "device loss leaves the executable token discardable");
 
-    gpu::discard_commands(&lists[0])!!;
+    gpu::discard_executable_commands(&lists[0])!!;
     assert(!lists[0].handle.is_valid(),
         "discard consumes the token after device loss");
 }
@@ -502,14 +548,14 @@ fn void empty_submit_returns_completion_point() @test {
     gpu::SubmitDesc desc;
     ulong before = stats_of(&device).queue_submits;
 
-    gpu::CompletionPoint point = gpu::submit(&device, &desc)!!;
+    gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;
 
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(point.is_valid(), "an empty submit still returns queue progress");
     assert(gpu::completion_point_queue_id(point)
         == state.graphics_completion_id,
-        "an empty strict submit targets the frame-anchor queue");
+        "an empty submit targets the selected graphics queue");
     assert(stats_of(&device).queue_submits == before + 1,
         "an empty submit emits one completion signal");
     gpu::wait_completion(point, 1_000_000_000)!!;
@@ -522,19 +568,16 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
     defer destroy_test_device(&consumer)!!;
 
     gpu::SubmitDesc producer_submit;
-    gpu::CompletionPoint foreign = gpu::submit(
-        &producer,
+    gpu::CompletionPoint foreign = submit_test_queue(&producer, gpu::QueueKind.GRAPHICS,
         &producer_submit,
     )!!;
     gpu::wait_completion(foreign, 1_000_000_000)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        &consumer,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&consumer, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::CompletionPoint[1] waits = { foreign };
     gpu::SubmitDesc desc = {
         .command_lists    = lists[..],
@@ -542,7 +585,7 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
     };
     ulong submits_before = stats_of(&consumer).queue_submits;
 
-    assert(@catch(gpu::submit(&consumer, &desc)) == gpu::INVALID_HANDLE,
+    assert(@catch(submit_test_queue(&consumer, gpu::QueueKind.GRAPHICS, &desc)) == gpu::INVALID_HANDLE,
         "a completion point from another device is rejected");
     assert(stats_of(&consumer).queue_submits == submits_before,
         "foreign completion rejection reaches no native submit");
@@ -550,7 +593,7 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
         "foreign completion rejection preserves the executable token");
 
     desc.completion_waits = {};
-    gpu::CompletionPoint point = gpu::submit(&consumer, &desc)!!;
+    gpu::CompletionPoint point = submit_test_queue(&consumer, gpu::QueueKind.GRAPHICS, &desc)!!;
     gpu::wait_completion(point, 1_000_000_000)!!;
 }
 
@@ -568,20 +611,18 @@ fn void unpublished_same_queue_wait_preserves_token() @test {
         queue,
     )!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::CompletionPoint[1] waits = { future };
     gpu::SubmitDesc desc = {
         .command_lists    = lists[..],
         .completion_waits = waits[..],
     };
 
-    assert(@catch(gpu::submit(&device, &desc)) == gpu::INVALID_HANDLE,
+    assert(@catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)) == gpu::INVALID_HANDLE,
         "an unpublished same-queue wait is rejected");
     assert(lists[0].handle.is_valid(),
         "invalid completion wait preserves the executable token");
@@ -593,6 +634,6 @@ fn void unpublished_same_queue_wait_preserves_token() @test {
     completion.submit_mutex.unlock();
     desc.completion_waits = {};
 
-    gpu::CompletionPoint point = gpu::submit(&device, &desc)!!;
+    gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;
     gpu::wait_completion(point, 1_000_000_000)!!;
 }

@@ -43,7 +43,7 @@ gpu/vk/shader.c3               SPIR-V modules and reflection validation
 gpu/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
 gpu/vk/pipeline_compute.c3     compute pipeline creation
 gpu/vk/pipeline_graphics.c3    graphics pipeline creation
-gpu/vk/command.c3              recording contexts and command encoding
+gpu/vk/command.c3              private recording pools and command encoding
 gpu/vk/command_state.c3        command-list state and handle tracking
 gpu/vk/transfer.c3             upload/readback helpers and staging arenas
 gpu/vk/sync.c3                 barriers, timeline semaphores
@@ -500,48 +500,33 @@ device allocation failure and explicit device loss propagate without retry.
 
 ## 12. Command buffers
 
-Command pools follow the representative queue selected for each public
-`QueueKind`, not every allocated identity. Each recording context owns:
+`begin_commands(queue)` lazily creates a private recording-pool set for the
+calling thread and device. Each set contains one pool per frame slot for
+selected graphics and compute families. Compute aliases graphics when both use
+one family. A selected transfer role always has a separate pool, even when its
+family is shared. Blocking transfer helpers use a separate private set. Pool
+construction is transactional and uses the device host allocator.
+
+Public command values have two states:
 
 ```text
-one graphics pool per frame when graphics is requested
-one compute pool per frame when graphics is absent or uses another family
-one transfer pool per frame when transfer is requested
-reset pools when frame retires
+CommandList                recording
+ExecutableCommandList      ended, one-shot
 ```
 
-Recording-context pool sets are constructed transactionally: ownership is
-published only after every representative pool exists. Any create fault
-destroys all earlier pools and releases the host arrays. Same-family compute
-aliases the graphics pool only after success. Additional selected identities do
-not own command pools because command recording and submission take
-`QueueKind` and route through its representative native queue.
+Both carry a device token and a `CommandListHandle`. The handle resolves to a
+device-owned `CommandRecord` with the native command buffer, exact public queue,
+frame slot, lifecycle state, binding cache, and pending texture transitions.
+Successful end consumes the recording token and returns the executable token.
+Submit or explicit executable discard consumes the ended token.
 
-Public command token:
+Submission preflights the batch under the command-table mutex. It rejects stale,
+duplicate, non-executable, or wrong-queue tokens before claiming records. A
+failure before native acceptance restores every claim; success commits pending
+texture state and invalidates all aliases.
 
-```text
-CommandList
-    Device device
-    CommandListHandle handle
-```
-
-The handle resolves through a fixed 4096-entry device table to a backend
-`CommandRecord` containing the `vk::CommandBuffer`, recording context, queue,
-frame-slot index, lifecycle state, last-bound pipeline cache, and a growable
-array of pending texture-layout transitions. The public token stays within three
-machine words; copying it creates an alias, not an independent recorder.
-`begin_commands` transfers its device operation pin to the record. Recording
-calls borrow that pin; successful submit or discard releases it exactly once.
-
-Begin/end validate state transitions. Submit preflights a whole batch under the
-command-table mutex, rejects duplicate tokens, mixed queue kinds, and stale
-owners, then claims every record as `SUBMITTING` before constructing the Vulkan
-submission. A fault before `vkQueueSubmit2` succeeds restores claimed records to
-`EXECUTABLE`. Success commits layout transitions in submission order and frees
-the records, invalidating all aliases.
-Frame-slot pool reset is rejected while an unsubmitted record still references
-the slot. Callers must submit or discard those records before reset. A recording
-context cannot be destroyed while one of its records remains live.
+A live command record prevents reset of its frame-slot pool. Applications must
+submit or discard every token before that slot is reused.
 
 ## 13. Synchronization
 
@@ -604,9 +589,9 @@ submission mutex. Roles that resolve to the same native queue share that state.
 The public `CompletionPoint` packs the device, queue identity, and sequence in
 two words. Reservation and publication allocate nothing.
 
-Every public `submit` signals exactly one queue-owned sequence and returns its
-point. An empty batch uses the frame-anchor queue: graphics, else compute, else
-transfer. Completion waits resolve to the owning private timeline and use
+Every public `submit(queue, desc)` signals one sequence on the selected queue
+and returns its point. Empty batches are valid. Completion waits resolve to the
+owning private timeline and use
 `ALL_COMMANDS`; waits owned by the target queue are validated and elided.
 The queue mutex covers sequence reservation and `vkQueueSubmit2`, satisfying
 Vulkan external synchronization. Near the timeline-value-difference limit, the
@@ -617,7 +602,7 @@ publication commit only after native success.
 
 ```text
 SubmitDesc
-    CommandList[] command_lists
+    ExecutableCommandList[] command_lists
     CompletionPoint[] completion_waits
 ```
 

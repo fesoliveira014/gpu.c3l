@@ -297,7 +297,7 @@ Do not include development phase labels in test names.
 | Graphics | offscreen clear/draw/readback; dynamic viewport/scissor state, validation, clipping, pass reset, and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior layout; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start. |
-| Threading | per-thread recording contexts, parallel record, identical submit. |
+| Threading | automatic per-worker recording pools, parallel record, identical submit. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
 | Depth | depth attachment creation, depth-tested draw, readback. |
 | Indirect draw | compute-written draw args, indirect draw, readback. |

@@ -52,7 +52,7 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         "alloc_persistent_span rejects a null descriptor"
     );
     assert(
-        @catch(gpu::submit(&device, (gpu::SubmitDesc*)null))
+        @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, (gpu::SubmitDesc*)null))
             == gpu::INVALID_ARGUMENT,
         "submit rejects a null descriptor"
     );
@@ -82,8 +82,7 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(
-        &device,
-        gpu::QueueKind.GRAPHICS,
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
     defer discard_test_commands(&commands)!!;
 
@@ -151,10 +150,11 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
         "cmd_begin_label rejects a null label"
     );
 
-    gpu::end_commands(&commands)!!;
-    gpu::CommandList[1] lists = { commands };
+    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     gpu::end_frame(&frame)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }

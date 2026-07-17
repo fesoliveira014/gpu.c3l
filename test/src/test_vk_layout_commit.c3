@@ -51,7 +51,7 @@ fn void dropped_list_leaves_layout_uncommitted() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     // Record a transition and end the list, but never submit it.
-    gpu::CommandList dropped = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList dropped = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&dropped)!!;
     record_layout_barrier(
         cmd:        &dropped,
@@ -59,11 +59,12 @@ fn void dropped_list_leaves_layout_uncommitted() @test {
         old_layout: gpu::TextureLayout.UNDEFINED,
         new_layout: gpu::TextureLayout.TRANSFER_DST,
     );
-    gpu::end_commands(&dropped)!!;
+    gpu::ExecutableCommandList dropped_executable = gpu::end_commands(&dropped)!!;
+    defer discard_test_executable(&dropped_executable)!!;
 
     // A fresh list must still see the pre-recording layout: the dropped
     // list's transition never committed.
-    gpu::CommandList next = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList next = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&next)!!;
     record_layout_barrier(
         cmd:        &next,
@@ -71,11 +72,12 @@ fn void dropped_list_leaves_layout_uncommitted() @test {
         old_layout: gpu::TextureLayout.UNDEFINED,
         new_layout: gpu::TextureLayout.TRANSFER_DST,
     );
-    gpu::end_commands(&next)!!;
+    gpu::ExecutableCommandList next_executable = gpu::end_commands(&next)!!;
+    defer discard_test_executable(&next_executable)!!;
 
-    gpu::CommandList[1] lists = { next };
+    gpu::ExecutableCommandList[1] lists = { next_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::end_frame(&frame_token)!!;
@@ -89,7 +91,7 @@ fn void two_lists_submitted_in_order_validate() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
-    gpu::CommandList first = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList first = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&first)!!;
     record_layout_barrier(
         cmd:        &first,
@@ -97,14 +99,15 @@ fn void two_lists_submitted_in_order_validate() @test {
         old_layout: gpu::TextureLayout.UNDEFINED,
         new_layout: gpu::TextureLayout.TRANSFER_DST,
     );
-    gpu::end_commands(&first)!!;
-    gpu::CommandList[1] first_lists = { first };
+    gpu::ExecutableCommandList first_executable = gpu::end_commands(&first)!!;
+    defer discard_test_executable(&first_executable)!!;
+    gpu::ExecutableCommandList[1] first_lists = { first_executable };
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
-    gpu::submit(&device, &first_submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &first_submit)!!;
 
     // Depends on the first list's commit having already landed: its
     // old_layout only matches if commit-at-submit ran before this validates.
-    gpu::CommandList second = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList second = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&second)!!;
     record_layout_barrier(
         cmd:        &second,
@@ -112,10 +115,11 @@ fn void two_lists_submitted_in_order_validate() @test {
         old_layout: gpu::TextureLayout.TRANSFER_DST,
         new_layout: gpu::TextureLayout.SHADER_READ,
     );
-    gpu::end_commands(&second)!!;
-    gpu::CommandList[1] second_lists = { second };
+    gpu::ExecutableCommandList second_executable = gpu::end_commands(&second)!!;
+    defer discard_test_executable(&second_executable)!!;
+    gpu::ExecutableCommandList[1] second_lists = { second_executable };
     gpu::SubmitDesc second_submit = { .command_lists = second_lists[..] };
-    gpu::submit(&device, &second_submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &second_submit)!!;
 
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
@@ -132,7 +136,7 @@ fn void same_list_barrier_then_copy_validates() @test {
     defer gpu::destroy_buffer(&device, staging)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_layout_barrier(
         cmd:        &cmd,
@@ -145,10 +149,12 @@ fn void same_list_barrier_then_copy_validates() @test {
     gpu::BufferTextureCopyDesc copy = { .src = staging_span, .texture = tex, .width = 4, .height = 4 };
     gpu::cmd_copy_buffer_to_texture(&cmd, &copy)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }
@@ -165,7 +171,7 @@ fn void more_than_sixteen_pending_layouts_submit() @test {
     }
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     for (uint i = 0; i < TEXTURE_COUNT; i++) {
         record_layout_barrier(
@@ -175,12 +181,13 @@ fn void more_than_sixteen_pending_layouts_submit() @test {
             new_layout: gpu::TextureLayout.TRANSFER_DST,
         );
     }
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(&device, &submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
 
-    gpu::CommandList verify = gpu::begin_commands(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList verify = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&verify)!!;
     for (uint i = 0; i < TEXTURE_COUNT; i++) {
         record_layout_barrier(
@@ -190,10 +197,11 @@ fn void more_than_sixteen_pending_layouts_submit() @test {
             new_layout: gpu::TextureLayout.SHADER_READ,
         );
     }
-    gpu::end_commands(&verify)!!;
-    gpu::CommandList[1] verify_lists = { verify };
+    gpu::ExecutableCommandList verify_executable = gpu::end_commands(&verify)!!;
+    defer discard_test_executable(&verify_executable)!!;
+    gpu::ExecutableCommandList[1] verify_lists = { verify_executable };
     gpu::SubmitDesc verify_submit = { .command_lists = verify_lists[..] };
-    gpu::submit(&device, &verify_submit)!!;
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &verify_submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 }

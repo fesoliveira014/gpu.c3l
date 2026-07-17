@@ -28,8 +28,47 @@ def valid_document() -> dict:
     return {
         "modules": {
             "gpu": {
-                "functions": [],
-                "types": [],
+                "functions": [
+                    {
+                        "name": "begin_commands",
+                        "return_type": {"name": "CommandList?"},
+                        "members": [
+                            {"name": "queue", "type": {"name": "Queue"}},
+                        ],
+                    },
+                    {
+                        "name": "end_commands",
+                        "return_type": {
+                            "name": "ExecutableCommandList?",
+                        },
+                        "members": [{
+                            "name": "commands",
+                            "type": {"name": "CommandList*"},
+                        }],
+                    },
+                    {
+                        "name": "submit",
+                        "return_type": {"name": "CompletionPoint?"},
+                        "members": [
+                            {"name": "queue", "type": {"name": "Queue"}},
+                            {
+                                "name": "desc",
+                                "type": {"name": "SubmitDesc*"},
+                            },
+                        ],
+                    },
+                ],
+                "types": [
+                    {"name": "ExecutableCommandList", "kind": "struct"},
+                    {
+                        "name": "SubmitDesc",
+                        "kind": "struct",
+                        "members": [{
+                            "name": "command_lists",
+                            "type": {"name": "ExecutableCommandList[]"},
+                        }],
+                    },
+                ],
             },
             "gpu::surface::win32": surface_module(
                 "InstanceHandle",
@@ -104,6 +143,42 @@ class PublicApiCheckTests(unittest.TestCase):
         self.assertIn("retired public semaphore", failures)
         self.assertIn("retired wait_queue_idle", failures)
         self.assertIn("retired timeline capability", failures)
+
+
+    def test_rejects_public_recording_contexts(self) -> None:
+        document = valid_document()
+        document["modules"]["gpu"]["types"].append(
+            {"name": "RecordingContextHandle"}
+        )
+        document["modules"]["gpu"]["types"].append({
+            "name": "DebugResourceKind",
+            "members": [{"name": "RECORDING_CONTEXT"}],
+        })
+        failures = check_public_api.validate_document(document)
+        self.assertIn("retired recording context", failures)
+
+    def test_rejects_old_command_lifecycle_shape(self) -> None:
+        document = valid_document()
+        functions = document["modules"]["gpu"]["functions"]
+        begin_commands = next(
+            entry for entry in functions
+            if entry["name"] == "begin_commands"
+        )
+        begin_commands["members"] = [
+            {"name": "device", "type": {"name": "Device*"}},
+            {"name": "queue", "type": {"name": "QueueKind"}},
+        ]
+        end_commands = next(
+            entry for entry in functions
+            if entry["name"] == "end_commands"
+        )
+        end_commands["return_type"] = {"name": "void?"}
+        failures = check_public_api.validate_document(document)
+        self.assertIn("begin_commands must take one Queue token", failures)
+        self.assertIn(
+            "end_commands must return ExecutableCommandList?",
+            failures,
+        )
 
 
 if __name__ == "__main__":

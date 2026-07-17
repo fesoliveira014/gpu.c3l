@@ -143,7 +143,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.4 Transient one-shot command lifecycle
 
-- [ ] Replace public recording-context and pool policy with `begin_commands(queue)`, recording `CommandList`, successful end to an executable token, and consuming `discard_commands` in `gpu/command.c3`, `gpu/vk/command.c3`, and `gpu/vk/command_state.c3`.
+- [x] Replace public recording-context and pool policy with `begin_commands(queue)`, recording `CommandList`, successful end to an executable token, and consuming `discard_commands` in `gpu/command.c3`, `gpu/vk/command.c3`, and `gpu/vk/command_state.c3`.
   - **Depends on:** 2.5 and 3.2.
   - **Contract:** recording and executable tokens retain device pins; native pools are private and may be cached or sharded; command calls use pinned state and take no global registry lock.
   - **Edges:** abandon before end, double end/discard, validation failure leaving recording unchanged, worker-thread reuse, submit-once enforcement, and device loss.

@@ -118,8 +118,11 @@ Running example: `gpu_driven_draw_sdl`, `frustum_culling`.
 Goal: simulation and rendering as separate submits with explicit ordering.
 
 ```c3
+gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!;
+gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
+
 gpu::SubmitDesc sim_submit = { .command_lists = sim_lists[..] };
-gpu::CompletionPoint sim_done = gpu::submit(&device, &sim_submit)!;
+gpu::CompletionPoint sim_done = gpu::submit(compute, &sim_submit)!;
 
 gpu::CompletionPoint[1] draw_waits = { sim_done };
 gpu::SubmitDesc draw_submit = {
@@ -127,7 +130,7 @@ gpu::SubmitDesc draw_submit = {
     .completion_waits = draw_waits[..],
     .swapchain        = swapchain,
 };
-gpu::CompletionPoint draw_done = gpu::submit(&device, &draw_submit)!;
+gpu::CompletionPoint draw_done = gpu::submit(graphics, &draw_submit)!;
 ```
 
 Real overlap happens when `caps.async_compute` is true (distinct compute
@@ -140,19 +143,17 @@ Running example: `particle_sim`.
 Goal: scale CPU-side recording.
 
 ```c3
-// one per worker:
-gpu::RecordingContextHandle ctx = gpu::create_recording_context(&device)!;
-// inside the worker thread (temp allocator required!):
-@pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-    gpu::CommandList list = gpu::begin_commands(&device, queue, ctx)!;
-    ...
-};
-// main thread: one submit with all lists, in your chosen order
+// Each worker records against the selected queue.
+gpu::CommandList list = gpu::begin_commands(queue)!;
+...
+gpu::ExecutableCommandList executable = gpu::end_commands(&list)!;
+
+// The main thread submits the executable tokens in the chosen order.
 ```
 
-Gotchas: benchmark with validation off (the layer serializes `vkCmd*`);
-`alloc_frame_span(&frame, ...)` is lock-free and safe from workers while the
-token generation is active. Quiesce every worker before ending the frame.
+Recording storage is cached automatically per worker. Benchmark with validation
+off because validation layers may serialize recording. Quiesce every worker
+before ending the frame.
 Running example: `multithreaded_recording`.
 
 ## 9. Shadow mapping with compare samplers

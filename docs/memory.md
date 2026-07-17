@@ -633,6 +633,11 @@ helper's completion can never retire another helper's or an unsubmitted
 list's ranges. See docs/threading.md §Helper timeline for the
 completion-side turnstile.
 
+Blocking helpers validate resource access against their single internal
+transfer role rather than a recording queue's merged role set, so a span
+admitted on a multi-role queue recording may still be rejected by a helper;
+this stricter check is intentional and deterministic across queue topologies.
+
 ## 14. Flush and invalidate policy
 
 The backend should track whether memory is host-coherent.

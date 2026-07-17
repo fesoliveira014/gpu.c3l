@@ -13,9 +13,9 @@ token's retained device pin while another call can still be in flight.
   runtime and surface calls may use a process-wide scope.
 - **S — thread-safe.** Any thread, any time within a frame; internally
   synchronized (see the lock map).
-- **C — confined.** The object (a `CommandList` and the `RecordingContext` it
-  came from) is used by one thread at a time. Different contexts record in
-  parallel freely.
+- **C — confined.** A recording or executable command token and its aliases
+  are used by one thread at a time. Different tokens may be recorded in
+  parallel.
 
 ## Per-entry-point table
 
@@ -43,22 +43,26 @@ token's retained device pin while another call can still be in flight.
 | `create_compute_pipeline` / `create_graphics_pipeline` / `destroy_pipeline` | S | driver compiles run in parallel; a same-key race compiles twice, converges to one entry |
 | `alloc_frame_span` | S | lock-free CAS bump through a current `FrameToken`; token copies may be shared during the active generation |
 | `alloc_persistent_span` / `free_persistent_span` | S | VMA virtual blocks are not internally synchronized; the library locks them |
-| `create_recording_context` / `destroy_recording_context` | S | destroy requires the context's lists retired |
-| `upload_buffer_data` / `upload_texture_data` / `readback_buffer_data` / `readback_texture_data` | S | record on a dedicated internal context, serialized by helper_record_mutex; never share a pool with Tier-C recording |
+| `upload_buffer_data` / `upload_texture_data` / `readback_buffer_data` / `readback_texture_data` | S | use a separate private pool serialized by `helper_record_mutex` |
 | `cmd_readback_buffer` / `cmd_readback_texture` | C | records into the caller's list |
 | `poll_readback` | S | lock-free |
 | `resolve_readback` | S | |
 | `get_memory_stats` / `build_memory_report` / `get_persistent_stats` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
-| `begin_commands` / `end_commands` / `discard_commands` | C | confined to the context's thread; discard also cancels attached readback tickets |
+| `begin_commands` / `end_commands` / command discard | C | recording storage is automatic per worker; discard also cancels attached readback tickets |
 | every `cmd_*` recording call | C | confined to the list's thread |
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
 Most public device operations take a short-lived atomic pin. `begin_commands`
-transfers its pin to the returned recording token; `cmd_*`, `end_commands`, and
-`discard_commands` borrow it without another pin operation. `submit` takes one
-short batch pin and releases command pins only after native submission succeeds.
+transfers its pin to the recording token. Recording calls and end/discard borrow
+that pin. Successful end transfers ownership to the executable token; successful
+submit or executable discard releases it.
 Pin acquisition may return `DEVICE_BUSY`; failed destruction restores the live
 state and preserves the token and generation.
+
+`begin_commands` lazily allocates one recording context per thread/device pair.
+Each device reserves one helper context and can allocate 256 recording-thread
+contexts over its lifetime. A further distinct recording thread receives
+`SLOT_TABLE_FULL`; contexts are released when the device is destroyed.
 
 Runtime creation and destruction must not overlap other runtime operations. After
 publication, enumeration and adapter queries may run concurrently; all such calls
@@ -181,9 +185,8 @@ through the matching destroy return; no callback occurs afterward.
 
 ## Miscellany
 
-- A context is confined, not locked: two lists from one context may be
-  recorded interleaved by the owning thread, never by two threads.
-- Command lists from different contexts may be mixed in one `SubmitDesc`.
+- A command token is confined, not locked.
+- Executable tokens recorded for the same queue may share one `SubmitDesc`.
 
 ## Frame retirement across queues
 

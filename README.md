@@ -41,7 +41,7 @@ gpu::cmd_dispatch(
 - Explicit barrier model with tracked texture layouts; validation-clean is a
   test gate across the whole suite
 - GPU-driven path: multi-draw indirect (+ count), draw tables via `gl_DrawID`
-- Tiered threading: per-thread recording contexts, lock-free frame-arena
+- Tiered threading: automatic per-worker command pools, lock-free frame-arena
   allocation, one submit
 - Pipeline dedup cache + driver-cache save/load; swapchain with present-mode
   query; compare samplers, depth bias, MRT

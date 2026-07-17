@@ -41,7 +41,7 @@ fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAdd
     gpu::TextureHandle target = gpu::create_texture(device, &rt_desc)!!;
     defer gpu::destroy_texture(device, target)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_attach = {
         .texture       = target,
@@ -90,10 +90,12 @@ fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAdd
     };
     gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
 
-    gpu::end_commands(&cmd)!!;
-    gpu::CommandList[1] lists = { cmd };
+    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+
+    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::submit(device, &submit)!!;
+    submit_test_queue(device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(device, rb_span.buffer, rb_span.offset, rb_span.size)!!;
 }
