@@ -81,6 +81,8 @@ fn void allocation_table_checks_identity_reuse_and_capacity() @test {
     gpu::GpuAllocation reused = table.alloc(allocation_slot())!!;
     assert(reused.index == first.index && reused.generation > first.generation,
         "a reusable slot receives a fresh generation");
+    assert(@catch(table.get(first)) == gpu::INVALID_HANDLE,
+        "the original token remains stale after slot reuse");
 }
 
 fn void allocation_table_preserves_live_placement_state() @test {

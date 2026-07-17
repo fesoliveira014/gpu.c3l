@@ -118,10 +118,15 @@ fn void buffer_span_resolves_private_metadata() @test {
     );
 
     vk::ResolvedSpan resolved = vk::resolve_span(&fixture.state, &span)!!;
+    gpu::BufferHandle expected = {
+        .owner      = fixture.state.buffers.owner,
+        .index      = 0,
+        .generation = 5,
+    };
 
     assert(resolved.slot == &fixture.buffer_cells[0].value,
         "buffer span resolves its native slot");
-    assert(resolved.backing_buffer == fixture.state.persistent_arena.backing_buffer,
+    assert(resolved.backing_buffer == expected,
         "buffer span resolves its backing handle");
     assert(resolved.offset == 8 && resolved.size == 16,
         "buffer span preserves its checked native range");

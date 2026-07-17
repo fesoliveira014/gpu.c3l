@@ -301,6 +301,8 @@ fn gpu::GpuSpan? vk_get_buffer_span(gpu::Device* device, gpu::BufferHandle handl
 fn char[]? vk_get_span_mapping(gpu::Device* device, gpu::GpuSpan span) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (state == null) return gpu::INVALID_HANDLE~;
+    enter_tracked(state);
+    defer exit_tracked(state);
     ResolvedSpan resolved = resolve_span(state, &span)!;
     return resolved_span_mapping(&resolved);
 }
@@ -308,6 +310,8 @@ fn char[]? vk_get_span_mapping(gpu::Device* device, gpu::GpuSpan span) @private 
 fn gpu::GpuAddress? vk_get_span_address(gpu::Device* device, gpu::GpuSpan span) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     if (state == null) return gpu::INVALID_HANDLE~;
+    enter_tracked(state);
+    defer exit_tracked(state);
     ResolvedSpan resolved = resolve_span(state, &span)!;
     return resolved_span_address(&resolved);
 }

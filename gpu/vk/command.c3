@@ -596,7 +596,21 @@ fn void? vk_cmd_copy_buffer_to_texture(
         handle:    desc.texture,
         operation: "cmd_copy_buffer_to_texture",
     )!;
-    if (!buffer.slot.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
+    if (!buffer.slot.usage.transfer_src) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_copy_buffer_to_texture",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       span_resource_kind(state, &desc.src),
+            has_public_identity: true,
+            index:               desc.src.index,
+            generation:          desc.src.generation,
+            debug_name:          slot_name(&buffer.slot.debug_name[0]),
+            rejected_field:      "BufferUsage.transfer_src",
+            invariant:           "source buffer must include transfer_src usage",
+            backend_text:        null,
+        )~;
+    }
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
     if (layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
@@ -652,7 +666,21 @@ fn void? vk_cmd_copy_texture_to_buffer(
         span:      &desc.dst,
         operation: "cmd_copy_texture_to_buffer",
     )!;
-    if (!buffer.slot.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
+    if (!buffer.slot.usage.transfer_dst) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_copy_texture_to_buffer",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       span_resource_kind(state, &desc.dst),
+            has_public_identity: true,
+            index:               desc.dst.index,
+            generation:          desc.dst.generation,
+            debug_name:          slot_name(&buffer.slot.debug_name[0]),
+            rejected_field:      "BufferUsage.transfer_dst",
+            invariant:           "destination buffer must include transfer_dst usage",
+            backend_text:        null,
+        )~;
+    }
     if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
     if (layout != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;

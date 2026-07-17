@@ -589,7 +589,8 @@ fn void copy_without_transfer_usage_faults() @test {
 }
 
 fn void texture_copy_without_buffer_transfer_usage_faults() @test {
-    gpu::Device device = make_val_device();
+    SyncDiagnosticCapture capture = {};
+    gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
@@ -603,31 +604,71 @@ fn void texture_copy_without_buffer_transfer_usage_faults() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc plain_desc = { .size = 256, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
+    gpu::BufferDesc plain_desc = {
+        .size        = 256,
+        .usage       = { .storage, .addressable },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "texture_copy_plain",
+    };
     gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
     defer gpu::destroy_buffer(&device, plain)!!;
     gpu::GpuSpan plain_span = gpu::get_buffer_span(&device, plain)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
+    gpu::CommandList cmd = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!,
+    )!!;
     defer discard_test_commands(&cmd)!!;
 
-    // Buffer usage is checked before the texture's tracked layout, so no
-    // barrier is needed to reach either fault.
-    gpu::BufferTextureCopyDesc up = { .src = plain_span, .texture = texture, .width = 4, .height = 4 };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     "texture_copy_plain",
+        rejected_field: "BufferUsage.transfer_src",
+        invariant:      "source buffer must include transfer_src usage",
+    );
+    gpu::BufferTextureCopyDesc up = {
+        .src = plain_span, .texture = texture, .width = 4, .height = 4,
+    };
     fault no_src_usage = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &up));
-    assert(no_src_usage == gpu::INVALID_ARGUMENT, "buffer-to-texture copy without buffer transfer_src faults INVALID_ARGUMENT");
+    assert(no_src_usage == gpu::INVALID_ARGUMENT,
+        "buffer-to-texture copy without buffer transfer_src faults INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      no_src_usage,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               plain.index,
+        generation:          plain.generation,
+    );
 
-    gpu::TextureBufferCopyDesc down = { .texture = texture, .dst = plain_span, .width = 4, .height = 4 };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_texture_to_buffer",
+        debug_name:     "texture_copy_plain",
+        rejected_field: "BufferUsage.transfer_dst",
+        invariant:      "destination buffer must include transfer_dst usage",
+    );
+    gpu::TextureBufferCopyDesc down = {
+        .texture = texture, .dst = plain_span, .width = 4, .height = 4,
+    };
     fault no_dst_usage = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &down));
-    assert(no_dst_usage == gpu::INVALID_ARGUMENT, "texture-to-buffer copy without buffer transfer_dst faults INVALID_ARGUMENT");
+    assert(no_dst_usage == gpu::INVALID_ARGUMENT,
+        "texture-to-buffer copy without buffer transfer_dst faults INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      no_dst_usage,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               plain.index,
+        generation:          plain.generation,
+    );
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
     defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
-
 fn void fill_without_transfer_dst_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -1774,6 +1815,7 @@ fn void buffer_to_texture_access_diagnostic_precedes_buffer_usage() @test {
         .usage       = { .storage },
         .memory_kind = gpu::MemoryKind.DEVICE,
         .access      = { .transfer },
+        .debug_name  = "copy_access_buffer",
     };
     gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
     defer gpu::destroy_buffer(&device, buffer)!!;
@@ -1790,6 +1832,11 @@ fn void buffer_to_texture_access_diagnostic_precedes_buffer_usage() @test {
         .width   = 1,
         .height  = 1,
     };
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandRecord* record = state.commands.get(commands.handle)!!;
+    gpu::QueueRoles selected_roles = record.queue.roles;
+    // Keep diagnostic precedence independent of physical queue aliasing.
+    record.queue.roles = { .transfer };
 
     fault copy_fault = @catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy));
 
@@ -1802,6 +1849,29 @@ fn void buffer_to_texture_access_diagnostic_precedes_buffer_usage() @test {
         index:               texture.index,
         generation:          texture.generation,
     );
+
+    vk::TextureSlot* texture_slot = state.textures.get(texture)!!;
+    gpu::QueueRoles texture_access = texture_slot.access;
+    texture_slot.access = { .transfer };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     "copy_access_buffer",
+        rejected_field: "BufferUsage.transfer_src",
+        invariant:      "source buffer must include transfer_src usage",
+    );
+    fault usage_fault = @catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy));
+    assert(usage_fault == gpu::INVALID_ARGUMENT, "copy usage keeps INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      usage_fault,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               span.index,
+        generation:          span.generation,
+    );
+    texture_slot.access = texture_access;
+    record.queue.roles = selected_roles;
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
