@@ -88,6 +88,7 @@ struct VkDeviceState {
     bool                       draw_indirect_count;
     float                      max_sampler_anisotropy;
     BufferTable                buffers;
+    AllocationTable            allocations;
     vk::Semaphore              frame_timeline;
     // Per-queue aux timelines piggybacked onto user submits; each signals
     // from one queue only, so values are monotonic. counter/last_signaled
@@ -222,9 +223,15 @@ fn PoolResetStats pool_reset_stats(VkDeviceState* state) {
 const gpu::BackendVTable VK_VTABLE @private = {
     .check_device_destroy = &vk_check_device_destroy,
     .destroy_device       = &vk_destroy_device,
-    .get_memory_stats    = &vk_get_memory_stats,
-    .build_memory_report = &vk_build_memory_report,
-    .create_buffer       = &vk_create_buffer,
+    .get_memory_stats     = &vk_get_memory_stats,
+    .build_memory_report  = &vk_build_memory_report,
+    .allocate_memory      = &vk_allocate_memory,
+    .free_allocation      = &vk_free_allocation,
+    .get_allocation_info  = &vk_get_allocation_info,
+    .get_allocation_span  = &vk_get_allocation_span,
+    .get_span_mapping     = &vk_get_span_mapping,
+    .get_span_address     = &vk_get_span_address,
+    .create_buffer        = &vk_create_buffer,
     .destroy_buffer      = &vk_destroy_buffer,
     .get_buffer_address  = &vk_get_buffer_address,
     .get_buffer_span     = &vk_get_buffer_span,
@@ -592,6 +599,14 @@ fn gpu::Device? create_vk_device_with_selection(
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.ALLOCATOR)!;
     state.buffers.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.BUFFER);
     state.buffers.slots = mem::new_array(BufferCell, gpu::MAX_BUFFERS);
+    state.allocations.owner = gpu::resource_owner_tag(
+        state.resource_owner,
+        gpu::ResourceOwnerKind.ALLOCATION,
+    );
+    state.allocations.slots = mem::new_array(
+        AllocationCell,
+        ALLOCATION_CAPACITY,
+    );
     state.readback_tickets.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.READBACK_TICKET);
     state.readback_tickets.slots = mem::new_array(ReadbackTicketCell, READBACK_TICKET_CAPACITY);
     create_frame_resources(state, desc)!;
@@ -768,6 +783,7 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
             mem::free(state.textures.slots.ptr);
             state.textures.slots = {};
         }
+        destroy_allocation_table(state);
         // Cache entries own the pipelines; slots only alias them.
         if (state.pipelines.slots.ptr != null) {
             mem::free(state.pipelines.slots.ptr);

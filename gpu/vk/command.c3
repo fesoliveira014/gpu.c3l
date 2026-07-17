@@ -505,34 +505,57 @@ fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer
     vk::cmd_fill_buffer(record.command_buffer, slot.buffer, (vk::DeviceSize)offset, fill_size, value);
 }
 
-<* Validate a copy region against the texture, the mip's clamped extent,
-   Vulkan's buffer-offset alignment, and the span's bounds against its backing
-   buffer, then translate it. Zero defaults resolve here: extent 0 = full mip,
-   layer_count 0 = 1. *>
-fn vk::BufferImageCopy? resolve_texture_copy_region(VkDeviceState* state, gpu::GpuSpan* span, TextureSlot* slot, uint row_length_texels, uint mip, uint base_layer, uint layer_count, uint x, uint y, uint width, uint height) @private {
+<* Validate and translate a buffer-image copy region. *>
+fn vk::BufferImageCopy? resolve_texture_copy_region(
+    ResolvedSpan* resolved,
+    TextureSlot* slot,
+    uint row_length_texels,
+    uint mip,
+    uint base_layer,
+    uint layer_count,
+    uint x,
+    uint y,
+    uint width,
+    uint height,
+) @private {
     if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
     uint layers = layer_count == 0 ? 1 : layer_count;
-    if ((ulong)base_layer + (ulong)layers > (ulong)slot.array_layers) return gpu::INVALID_ARGUMENT~;
+    if ((ulong)base_layer + (ulong)layers > (ulong)slot.array_layers) {
+        return gpu::INVALID_ARGUMENT~;
+    }
 
     MipExtent extent = texture_mip_extent(slot, mip);
-    if (width == 0)  width = extent.width;
+    if (width == 0) width = extent.width;
     if (height == 0) height = extent.height;
-    if ((ulong)x + (ulong)width > (ulong)extent.width || (ulong)y + (ulong)height > (ulong)extent.height) return gpu::INVALID_ARGUMENT~;
-    if (row_length_texels != 0 && row_length_texels < width) return gpu::INVALID_ARGUMENT~;
+    if ((ulong)x + (ulong)width > (ulong)extent.width
+        || (ulong)y + (ulong)height > (ulong)extent.height) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (row_length_texels != 0 && row_length_texels < width) {
+        return gpu::INVALID_ARGUMENT~;
+    }
 
     usz texel_size = format_texel_size(slot.format);
-    if (texel_size == 0) return gpu::INVALID_ARGUMENT~;
-    if (span.offset % texel_size != 0 || span.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
-
     usz row_texels = row_length_texels == 0 ? width : row_length_texels;
-    usz copy_bytes = row_texels * texel_size * height * layers;
-    resolve_span_slot(state, span, copy_bytes)!;
+    if (texel_size == 0 || row_texels == 0 || height == 0 || layers == 0) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (row_texels > usz::max / texel_size) return gpu::INVALID_ARGUMENT~;
+    usz copy_bytes = row_texels * texel_size;
+    if ((usz)height > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
+    copy_bytes *= height;
+    if ((usz)layers > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
+    copy_bytes *= layers;
+    if (copy_bytes > resolved.size) return gpu::INVALID_ARGUMENT~;
+    if (resolved.offset % texel_size != 0 || resolved.offset % 4 != 0) {
+        return gpu::INVALID_ARGUMENT~;
+    }
 
-    return (vk::BufferImageCopy){
-        .buffer_offset      = (vk::DeviceSize)span.offset,
-        .buffer_row_length  = row_length_texels,
+    return {
+        .buffer_offset       = (vk::DeviceSize)resolved.offset,
+        .buffer_row_length   = row_length_texels,
         .buffer_image_height = 0,
-        .image_subresource  = {
+        .image_subresource   = {
             .aspect_mask      = format_aspect(slot.format),
             .mip_level        = mip,
             .base_array_layer = base_layer,
@@ -543,19 +566,29 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(VkDeviceState* state, gpu::G
     };
 }
 
-fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTextureCopyDesc* desc) @private {
+fn void? vk_cmd_copy_buffer_to_texture(
+    gpu::CommandList* commands,
+    gpu::BufferTextureCopyDesc* desc,
+) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     TextureSlot* texture = state.textures.get(desc.texture)!;
-    BufferSlot* buffer = state.buffers.get(desc.src.buffer)!;
+    ResolvedSpan buffer = resolve_span_slot(
+        state:          state,
+        span:           &desc.src,
+        required:       0,
+        operation:      "cmd_copy_buffer_to_texture",
+        rejected_field: "GpuSpan",
+    )!;
     validate_span_recording_access(
         state:     state,
         record:    record,
-        slot:      buffer,
+        resolved:  &buffer,
         span:      &desc.src,
         operation: "cmd_copy_buffer_to_texture",
     )!;
+
     validate_texture_recording_access(
         state:     state,
         record:    record,
@@ -563,14 +596,27 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
         handle:    desc.texture,
         operation: "cmd_copy_buffer_to_texture",
     )!;
-    if (!buffer.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
+    if (!buffer.slot.usage.transfer_src) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_copy_buffer_to_texture",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       span_resource_kind(state, &desc.src),
+            has_public_identity: true,
+            index:               desc.src.index,
+            generation:          desc.src.generation,
+            debug_name:          slot_name(&buffer.slot.debug_name[0]),
+            rejected_field:      "BufferUsage.transfer_src",
+            invariant:           "source buffer must include transfer_src usage",
+            backend_text:        null,
+        )~;
+    }
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
     gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
     if (layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
-        state:             state,
-        span:              &desc.src,
+        resolved:          &buffer,
         slot:              texture,
         row_length_texels: desc.row_length_texels,
         mip:               desc.mip,
@@ -581,15 +627,24 @@ fn void? vk_cmd_copy_buffer_to_texture(gpu::CommandList* commands, gpu::BufferTe
         width:             desc.width,
         height:            desc.height,
     )!;
-    vk::cmd_copy_buffer_to_image(record.command_buffer, buffer.buffer, texture.image, layout_to_vk(layout), 1, &region);
+    vk::cmd_copy_buffer_to_image(
+        command_buffer:  record.command_buffer,
+        src_buffer:      buffer.slot.buffer,
+        dst_image:       texture.image,
+        dst_image_layout: layout_to_vk(layout),
+        region_count:    1,
+        p_regions:       &region,
+    );
 }
 
-fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureBufferCopyDesc* desc) @private {
+fn void? vk_cmd_copy_texture_to_buffer(
+    gpu::CommandList* commands,
+    gpu::TextureBufferCopyDesc* desc,
+) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     TextureSlot* texture = state.textures.get(desc.texture)!;
-    BufferSlot* buffer = state.buffers.get(desc.dst.buffer)!;
     validate_texture_recording_access(
         state:     state,
         record:    record,
@@ -597,21 +652,41 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
         handle:    desc.texture,
         operation: "cmd_copy_texture_to_buffer",
     )!;
+    ResolvedSpan buffer = resolve_span_slot(
+        state:          state,
+        span:           &desc.dst,
+        required:       0,
+        operation:      "cmd_copy_texture_to_buffer",
+        rejected_field: "GpuSpan",
+    )!;
     validate_span_recording_access(
         state:     state,
         record:    record,
-        slot:      buffer,
+        resolved:  &buffer,
         span:      &desc.dst,
         operation: "cmd_copy_texture_to_buffer",
     )!;
-    if (!buffer.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
+    if (!buffer.slot.usage.transfer_dst) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_copy_texture_to_buffer",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       span_resource_kind(state, &desc.dst),
+            has_public_identity: true,
+            index:               desc.dst.index,
+            generation:          desc.dst.generation,
+            debug_name:          slot_name(&buffer.slot.debug_name[0]),
+            rejected_field:      "BufferUsage.transfer_dst",
+            invariant:           "destination buffer must include transfer_dst usage",
+            backend_text:        null,
+        )~;
+    }
     if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
     gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
     if (layout != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
-        state:             state,
-        span:              &desc.dst,
+        resolved:          &buffer,
         slot:              texture,
         row_length_texels: desc.row_length_texels,
         mip:               desc.mip,
@@ -622,12 +697,19 @@ fn void? vk_cmd_copy_texture_to_buffer(gpu::CommandList* commands, gpu::TextureB
         width:             desc.width,
         height:            desc.height,
     )!;
-    vk::cmd_copy_image_to_buffer(record.command_buffer, texture.image, layout_to_vk(layout), buffer.buffer, 1, &region);
+    vk::cmd_copy_image_to_buffer(
+        command_buffer:  record.command_buffer,
+        src_image:       texture.image,
+        src_image_layout: layout_to_vk(layout),
+        dst_buffer:      buffer.slot.buffer,
+        region_count:    1,
+        p_regions:       &region,
+    );
 }
 
 <* Resolve an indirect argument span: indirect usage, 4-byte offset alignment,
    checked argument bytes within the span, and the span within its backing buffer. *>
-fn BufferSlot*? resolve_indirect_span(
+fn ResolvedSpan? resolve_indirect_span(
     VkDeviceState* state,
     CommandRecord* record,
     gpu::GpuSpan* span,
@@ -674,7 +756,7 @@ fn BufferSlot*? resolve_indirect_span(
         )~;
     }
     usz required = required_result;
-    BufferSlot* slot = resolve_span_slot(
+    ResolvedSpan resolved = resolve_span_slot(
         state:          state,
         span:           span,
         required:       required,
@@ -684,13 +766,13 @@ fn BufferSlot*? resolve_indirect_span(
     validate_span_recording_access(
         state:     state,
         record:    record,
-        slot:      slot,
+        resolved:  &resolved,
         span:      span,
         operation: operation,
     )!;
-    if (!slot.usage.indirect) return gpu::INVALID_ARGUMENT~;
-    if (span.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
-    return slot;
+    if (!resolved.slot.usage.indirect) return gpu::INVALID_ARGUMENT~;
+    if (resolved.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
+    return resolved;
 }
 
 fn void? bind_compute_and_push(VkDeviceState* state, CommandRecord* record, gpu::PipelineHandle handle, gpu::GpuAddress root) @private {
@@ -760,7 +842,7 @@ fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandl
         kind:      PipelineKind.COMPUTE,
         operation: "cmd_dispatch_indirect",
     )!;
-    BufferSlot* args_buffer = resolve_indirect_span(
+    ResolvedSpan args_buffer = resolve_indirect_span(
         state:          state,
         record:         record,
         span:           &args,
@@ -776,5 +858,5 @@ fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandl
         handle: handle,
         root:   root,
     )!;
-    vk::cmd_dispatch_indirect(cb, args_buffer.buffer, (vk::DeviceSize)args.offset);
+    vk::cmd_dispatch_indirect(cb, args_buffer.slot.buffer, (vk::DeviceSize)args_buffer.offset);
 }

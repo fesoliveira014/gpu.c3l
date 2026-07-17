@@ -14,7 +14,7 @@ Start with:
 | [Architecture](architecture.md) | Modules, objects, lifetime, frames, commands, descriptors, and swapchains. |
 | [Strict GPU architecture](strict_gpu_profile.md) | Target runtime, device, memory, command, and compatibility extension model. |
 | [Public API](api.md) | Public types, functions, faults, and examples. |
-| [Memory](memory.md) | Memory kinds, arenas, upload/readback, mapping, and deferred release. |
+| [Memory](memory.md) | Owning allocations, non-owning spans, mapping/address queries, arenas, and transfers. |
 | [Shader ABI](shader_abi.md) | Root pointers, generated layouts, descriptor indices, and reflection. |
 | [Threading](threading.md) | Entry-point tiers, frame boundaries, lock order, and command recording. |
 | [Vulkan backend](vulkan_backend.md) | Vulkan 1.3 requirements and backend implementation. |

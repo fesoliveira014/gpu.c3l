@@ -110,7 +110,7 @@ fn void offscreen_clear_works() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
-    char* pixels = (char*)rb_span.cpu;
+    char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
     for (uint i = 0; i < RT_SIZE * RT_SIZE; i++) {
         assert(pixels[i * 4] == (char)64, "cleared red");
         assert(pixels[i * 4 + 1] == (char)128, "cleared green");
@@ -155,7 +155,7 @@ fn void offscreen_textured_triangle() @test {
     gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
     defer gpu::destroy_buffer(&device, staging)!!;
     gpu::GpuSpan staging_span = gpu::get_buffer_span(&device, staging)!!;
-    char* texels = (char*)staging_span.cpu;
+    char* texels = (char*)test_span_mapping(&device, staging_span).ptr;
     for (uint i = 0; i < 16; i++) {
         texels[i * 4]     = (char)100;
         texels[i * 4 + 1] = (char)150;
@@ -192,7 +192,7 @@ fn void offscreen_textured_triangle() @test {
 
     // Vertex data: xy = NDC position, zw = uv.
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
-    float* verts = (float*)verts_span.cpu;
+    float* verts = (float*)test_span_mapping(&device, verts_span).ptr;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
          0.8f, -0.8f, 0.9f, 0.1f,
@@ -201,7 +201,7 @@ fn void offscreen_textured_triangle() @test {
     for (uint i = 0; i < 12; i++) verts[i] = vertex_data[i];
 
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
-    FragRoot* frag_root = (FragRoot*)frag_span.cpu;
+    FragRoot* frag_root = (FragRoot*)test_span_mapping(&device, frag_span).ptr;
     frag_root.texture_index = tex_index;
     frag_root.sampler_index = smp_index;
 
@@ -253,8 +253,8 @@ fn void offscreen_textured_triangle() @test {
     gpu::cmd_draw(
         commands:       &cmd,
         pipeline:       pipeline,
-        vertex_root:    verts_span.gpu,
-        fragment_root:  frag_span.gpu,
+        vertex_root:    test_span_address(&device, verts_span),
+        fragment_root:  test_span_address(&device, frag_span),
         vertex_count:   3,
         instance_count: 1,
     )!!;
@@ -290,7 +290,7 @@ fn void offscreen_textured_triangle() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
-    char* pixels = (char*)rb_span.cpu;
+    char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
     // Triangle interior: the center of the target sits well inside.
     char* center = &pixels[(RT_SIZE / 2 * RT_SIZE + RT_SIZE / 2) * 4];
     assert(center[0] == (char)100, "triangle interior red is the sampled texture");
@@ -350,11 +350,11 @@ fn void dynamic_viewport_scissor_pixels() @test {
          3.0f, -1.0f, 0.0f, 0.0f,
         -1.0f,  3.0f, 0.0f, 0.0f,
     };
-    for (uint i = 0; i < vertex_data.len; i++) ((float*)vertices.cpu)[i] = vertex_data[i];
+    for (uint i = 0; i < vertex_data.len; i++) ((float*)test_span_mapping(&device, vertices).ptr)[i] = vertex_data[i];
 
     gpu::GpuSpan color = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
     float[4] green = { 0.0f, 1.0f, 0.0f, 1.0f };
-    for (uint i = 0; i < green.len; i++) ((float*)color.cpu)[i] = green[i];
+    for (uint i = 0; i < green.len; i++) ((float*)test_span_mapping(&device, color).ptr)[i] = green[i];
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -400,8 +400,8 @@ fn void dynamic_viewport_scissor_pixels() @test {
         gpu::cmd_draw(
             commands:       &cmd,
             pipeline:       pipeline,
-            vertex_root:    vertices.gpu,
-            fragment_root:  color.gpu,
+            vertex_root:    test_span_address(&device, vertices),
+            fragment_root:  test_span_address(&device, color),
             vertex_count:   3,
             instance_count: 1,
         )!!;
@@ -439,13 +439,13 @@ fn void dynamic_viewport_scissor_pixels() @test {
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
     for (uint i = 0; i < 2; i++) {
-        char* pixels = (char*)readback_all.cpu + RT_BYTES * i;
+        char* pixels = (char*)test_span_mapping(&device, readback_all).ptr + RT_BYTES * i;
         usz left_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE / 4) * 4 + 1;
         usz right_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE * 3 / 4) * 4 + 1;
         assert(pixels[left_green] != 0, "the clipped draw covers the left half");
         assert(pixels[right_green] == 0, "the clipped draw leaves the right half clear");
     }
-    char* reset_pixels = (char*)readback_all.cpu + RT_BYTES * 2;
+    char* reset_pixels = (char*)test_span_mapping(&device, readback_all).ptr + RT_BYTES * 2;
     usz reset_right_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE * 3 / 4) * 4 + 1;
     assert(reset_pixels[reset_right_green] != 0, "the next pass restores full viewport and scissor defaults");
 
@@ -521,7 +521,7 @@ fn void offscreen_render_to_mip() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
 
-    char* pixels = (char*)rb_span.cpu;
+    char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
     for (uint i = 0; i < MIP1 * MIP1; i++) {
         assert(pixels[i * 4] == (char)40 && pixels[i * 4 + 1] == (char)80 && pixels[i * 4 + 2] == (char)120,
             "mip 1 holds the rendered clear color");

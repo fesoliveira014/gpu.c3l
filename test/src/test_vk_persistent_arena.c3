@@ -78,6 +78,19 @@ fn void assert_persistent_rejection(
 // addresses, stats, and usage honoring (index/indirect/transfer spans usable,
 // vertex-bit requests fault).
 
+fn vk::ResolvedSpan resolve_native_span(gpu::Device* device, gpu::GpuSpan* span) {
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
+    return vk::resolve_span(state, span)!!;
+}
+
+fn char[] map_test_span(gpu::Device* device, gpu::GpuSpan span) {
+    return gpu::get_span_mapping(device, span)!!;
+}
+
+fn gpu::GpuAddress address_test_span(gpu::Device* device, gpu::GpuSpan span) {
+    return gpu::get_span_address(device, span)!!;
+}
+
 const char[*] PA_DOUBLE_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
 fn gpu::PipelineHandle make_persistent_cross_family_pipeline(
@@ -107,15 +120,23 @@ fn gpu::GpuSpan alloc_persistent_indirect_args(gpu::Device* device) {
         .debug_name  = "persistent_cross_family_args",
     };
     gpu::GpuSpan span = gpu::alloc_persistent_span(device, &desc)!!;
-    gpu::DispatchIndirectCommand* args = (gpu::DispatchIndirectCommand*)span.cpu;
+    char[] mapping = map_test_span(device, span);
+    gpu::DispatchIndirectCommand* args = (gpu::DispatchIndirectCommand*)mapping.ptr;
     *args = { .x = 1, .y = 1, .z = 1 };
-    gpu::flush_buffer(device, span.buffer, span.offset, span.size)!!;
+    vk::ResolvedSpan resolved = resolve_native_span(device, &span);
+    gpu::flush_buffer(
+        device,
+        resolved.backing_buffer,
+        resolved.offset,
+        resolved.size,
+    )!!;
     return span;
 }
 
 fn gpu::GpuSpan alloc_frame_empty_root(gpu::FrameToken* frame) {
     gpu::GpuSpan span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
-    ComputeRoot* root = (ComputeRoot*)span.cpu;
+    char[] mapping = map_test_span(&frame.device, span);
+    ComputeRoot* root = (ComputeRoot*)mapping.ptr;
     *root = { .count = 0 };
     return span;
 }
@@ -148,7 +169,7 @@ fn void persistent_span_crosses_compute_and_graphics_families_when_available() @
     gpu::cmd_dispatch_indirect(
         commands: &compute,
         pipeline: pipeline,
-        root:     compute_root.gpu,
+        root:     address_test_span(&device, compute_root),
         args:     args,
     )!!;
     gpu::ExecutableCommandList compute_executable = gpu::end_commands(&compute)!!;
@@ -162,7 +183,7 @@ fn void persistent_span_crosses_compute_and_graphics_families_when_available() @
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
         pipeline: pipeline,
-        root:     graphics_root.gpu,
+        root:     address_test_span(&device, graphics_root),
         args:     args,
     )!!;
     gpu::ExecutableCommandList graphics_executable = gpu::end_commands(&graphics)!!;
@@ -211,8 +232,9 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
 
     gpu::GpuSpan compute_args = alloc_persistent_indirect_args(&device);
     assert(compute_args.offset == 0, "first persistent allocation uses offset zero");
-    gpu::BufferHandle backing = compute_args.buffer;
-    gpu::GpuAddress address = compute_args.gpu;
+    vk::ResolvedSpan compute_args_resolved = resolve_native_span(&device, &compute_args);
+    gpu::BufferHandle backing = compute_args_resolved.backing_buffer;
+    gpu::GpuAddress address = address_test_span(&device, compute_args);
     gpu::FrameToken compute_frame = gpu::begin_frame(&device)!!;
     gpu::GpuSpan compute_root = alloc_frame_empty_root(&compute_frame);
     gpu::CommandList compute = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
@@ -220,7 +242,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     gpu::cmd_dispatch_indirect(
         commands: &compute,
         pipeline: pipeline,
-        root:     compute_root.gpu,
+        root:     address_test_span(&device, compute_root),
         args:     compute_args,
     )!!;
     gpu::ExecutableCommandList compute_executable = gpu::end_commands(&compute)!!;
@@ -233,9 +255,12 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     gpu::free_persistent_span(&device, compute_args)!!;
 
     gpu::GpuSpan graphics_args = alloc_persistent_indirect_args(&device);
-    assert(graphics_args.buffer == backing, "reallocation keeps the persistent backing buffer");
+    vk::ResolvedSpan graphics_args_resolved = resolve_native_span(&device, &graphics_args);
+    assert(graphics_args_resolved.backing_buffer == backing,
+        "reallocation keeps the persistent backing buffer");
     assert(graphics_args.offset == 0, "retired persistent allocation reuses offset zero");
-    assert(graphics_args.gpu == address, "retired persistent allocation reuses its GPU address");
+    assert(address_test_span(&device, graphics_args) == address,
+        "retired persistent allocation reuses its GPU address");
     gpu::FrameToken graphics_frame = gpu::begin_frame(&device)!!;
     gpu::GpuSpan graphics_root = alloc_frame_empty_root(&graphics_frame);
     gpu::CommandList graphics = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -243,7 +268,7 @@ fn void persistent_span_reused_offset_switches_family_when_available() @test {
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
         pipeline: pipeline,
-        root:     graphics_root.gpu,
+        root:     address_test_span(&device, graphics_root),
         args:     graphics_args,
     )!!;
     gpu::ExecutableCommandList graphics_executable = gpu::end_commands(&graphics)!!;
@@ -370,12 +395,16 @@ fn void persistent_alloc_free_stats() @test {
         .access = { .compute },
     };
     gpu::GpuSpan a = gpu::alloc_persistent_span(&device, &desc_a)!!;
-    assert(a.cpu != null, "persistent span is mapped");
-    assert((ulong)a.gpu != 0, "non-zero GPU address");
-    assert(a.offset % 64 == 0, "offset honors alignment");
-    assert((uint)a.access == (uint)desc_a.access,
+    char[] a_mapping = map_test_span(&device, a);
+    gpu::GpuAddress a_address = address_test_span(&device, a);
+    vk::ResolvedSpan a_resolved = resolve_native_span(&device, &a);
+    assert(a_mapping.ptr != null && a_mapping.len == a.size,
+        "persistent span is mapped");
+    assert((ulong)a_address != 0, "non-zero GPU address");
+    assert(a_resolved.offset % 64 == 0, "native offset honors alignment");
+    assert((uint)a_resolved.access == (uint)desc_a.access,
         "persistent span retains the allocation access roles");
-    ulong a_gpu = (ulong)a.gpu;
+    ulong a_gpu = (ulong)a_address;
 
     gpu::PersistentArenaStats after_a = gpu::get_persistent_stats(&device)!!;
     assert(after_a.used_bytes >= 256, "used bytes rose");
@@ -383,7 +412,7 @@ fn void persistent_alloc_free_stats() @test {
 
     gpu::PersistentAllocDesc desc_b = { .size = 512, .align = 256, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
     gpu::GpuSpan b = gpu::alloc_persistent_span(&device, &desc_b)!!;
-    assert((ulong)b.gpu != a_gpu, "B gets a distinct address");
+    assert((ulong)address_test_span(&device, b) != a_gpu, "B gets a distinct address");
     assert(gpu::get_persistent_stats(&device)!!.allocation_count == 2, "two live allocations");
 
     // Free B; A's address is unchanged, count drops.
@@ -391,12 +420,12 @@ fn void persistent_alloc_free_stats() @test {
     gpu::PersistentArenaStats after_free_b = gpu::get_persistent_stats(&device)!!;
     assert(after_free_b.allocation_count == 1, "back to one after free");
     assert(after_free_b.used_bytes < after_a.used_bytes + 512, "used dropped after free");
-    assert((ulong)a.gpu == a_gpu, "A's GPU address is stable");
+    assert((ulong)address_test_span(&device, a) == a_gpu, "A's GPU address is stable");
 
     // Reuse: C allocates into freed space, A still distinct/stable.
     gpu::PersistentAllocDesc desc_c = { .size = 128, .align = 16, .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD, .access = { .graphics, .compute, .transfer }};
     gpu::GpuSpan c = gpu::alloc_persistent_span(&device, &desc_c)!!;
-    assert((ulong)c.gpu != a_gpu, "C distinct from live A");
+    assert((ulong)address_test_span(&device, c) != a_gpu, "C distinct from live A");
 
     gpu::free_persistent_span(&device, a)!!;
     gpu::free_persistent_span(&device, c)!!;
@@ -410,7 +439,7 @@ fn void persistent_alloc_free_stats() @test {
     assert(kind_fault == gpu::INVALID_ARGUMENT, "non-persistent memory kind faults INVALID_ARGUMENT");
 
     // Bogus free faults.
-    gpu::GpuSpan bogus = { .buffer = a.buffer, .offset = 999_999 };
+    gpu::GpuSpan bogus = { .owner = a.owner, .index = a.index, .generation = a.generation, .offset = 999_999, .size = 1 };
     fault free_fault = @catch(gpu::free_persistent_span(&device, bogus));
     assert(free_fault == gpu::INVALID_HANDLE, "freeing a bogus span faults INVALID_HANDLE");
 }
@@ -552,17 +581,31 @@ fn void transfer_usage_persistent_span_copies() @test {
     gpu::GpuSpan dst = gpu::alloc_persistent_span(&device, &dst_desc)!!;
     defer gpu::free_persistent_span(&device, dst)!!;
 
-    char* src_bytes = (char*)src.cpu;
+    vk::ResolvedSpan src_resolved = resolve_native_span(&device, &src);
+    vk::ResolvedSpan dst_resolved = resolve_native_span(&device, &dst);
+    char[] src_mapping = map_test_span(&device, src);
+    char* src_bytes = src_mapping.ptr;
     for (usz i = 0; i < 64; i++) src_bytes[i] = (char)(i % 251);
-    gpu::flush_buffer(&device, src.buffer, src.offset, src.size)!!;
+    gpu::flush_buffer(
+        &device,
+        src_resolved.backing_buffer,
+        src_resolved.offset,
+        src_resolved.size,
+    )!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    gpu::BufferCopyDesc copy = { .src = src.buffer, .dst = dst.buffer, .src_offset = src.offset, .dst_offset = dst.offset, .size = 64 };
+    gpu::BufferCopyDesc copy = {
+        .src        = src_resolved.backing_buffer,
+        .dst        = dst_resolved.backing_buffer,
+        .src_offset = src_resolved.offset,
+        .dst_offset = dst_resolved.offset,
+        .size       = 64,
+    };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = dst.buffer, .offset = dst.offset, .size = dst.size,
+        .buffer = dst_resolved.backing_buffer, .offset = dst_resolved.offset, .size = dst_resolved.size,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -575,8 +618,14 @@ fn void transfer_usage_persistent_span_copies() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
-    gpu::invalidate_buffer(&device, dst.buffer, dst.offset, dst.size)!!;
-    char* dst_bytes = (char*)dst.cpu;
+    gpu::invalidate_buffer(
+        &device,
+        dst_resolved.backing_buffer,
+        dst_resolved.offset,
+        dst_resolved.size,
+    )!!;
+    char[] dst_mapping = map_test_span(&device, dst);
+    char* dst_bytes = dst_mapping.ptr;
     for (usz i = 0; i < 64; i++) {
         assert(dst_bytes[i] == (char)(i % 251), "transfer-usage persistent span copies intact bytes");
     }
@@ -601,7 +650,8 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     };
     gpu::GpuSpan io = gpu::alloc_persistent_span(&device, &io_desc)!!;
     defer gpu::free_persistent_span(&device, io)!!;
-    float* values = (float*)io.cpu;
+    char[] io_mapping = map_test_span(&device, io);
+    float* values = (float*)io_mapping.ptr;
     for (uint i = 0; i < COUNT; i++) values[i] = (float)i;
 
     gpu::PersistentAllocDesc root_desc = {
@@ -609,9 +659,11 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     };
     gpu::GpuSpan root_span = gpu::alloc_persistent_span(&device, &root_desc)!!;
     defer gpu::free_persistent_span(&device, root_span)!!;
-    ComputeRoot* root = (ComputeRoot*)root_span.cpu;
-    root.input_gpu  = io.gpu;
-    root.output_gpu = (gpu::GpuAddress)((ulong)io.gpu + COUNT * 4);
+    char[] root_mapping = map_test_span(&device, root_span);
+    ComputeRoot* root = (ComputeRoot*)root_mapping.ptr;
+    gpu::GpuAddress io_address = address_test_span(&device, io);
+    root.input_gpu  = io_address;
+    root.output_gpu = (gpu::GpuAddress)((ulong)io_address + COUNT * 4);
     root.count      = COUNT;
 
     gpu::PersistentAllocDesc args_desc = {
@@ -619,11 +671,15 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     };
     gpu::GpuSpan args_span = gpu::alloc_persistent_span(&device, &args_desc)!!;
     defer gpu::free_persistent_span(&device, args_span)!!;
-    gpu::DispatchIndirectCommand* args = (gpu::DispatchIndirectCommand*)args_span.cpu;
+    char[] args_mapping = map_test_span(&device, args_span);
+    gpu::DispatchIndirectCommand* args = (gpu::DispatchIndirectCommand*)args_mapping.ptr;
     *args = { .x = 1, .y = 1, .z = 1 };
-    gpu::flush_buffer(&device, args_span.buffer, args_span.offset, args_span.size)!!;
-    gpu::flush_buffer(&device, root_span.buffer, root_span.offset, root_span.size)!!;
-    gpu::flush_buffer(&device, io.buffer, io.offset, io.size)!!;
+    vk::ResolvedSpan args_resolved = resolve_native_span(&device, &args_span);
+    vk::ResolvedSpan root_resolved = resolve_native_span(&device, &root_span);
+    vk::ResolvedSpan io_resolved = resolve_native_span(&device, &io);
+    gpu::flush_buffer(&device, args_resolved.backing_buffer, args_resolved.offset, args_resolved.size)!!;
+    gpu::flush_buffer(&device, root_resolved.backing_buffer, root_resolved.offset, root_resolved.size)!!;
+    gpu::flush_buffer(&device, io_resolved.backing_buffer, io_resolved.offset, io_resolved.size)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -631,11 +687,11 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     gpu::cmd_dispatch_indirect(
         commands: &cmd,
         pipeline: pipeline,
-        root:     root_span.gpu,
+        root:     address_test_span(&device, root_span),
         args:     args_span,
     )!!;
     gpu::BufferBarrier host_read = {
-        .buffer = io.buffer, .offset = io.offset, .size = io.size,
+        .buffer = io_resolved.backing_buffer, .offset = io_resolved.offset, .size = io_resolved.size,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -648,7 +704,7 @@ fn void indirect_usage_persistent_span_dispatches() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::end_frame(&frame_token)!!;
 
-    gpu::invalidate_buffer(&device, io.buffer, io.offset, io.size)!!;
+    gpu::invalidate_buffer(&device, io_resolved.backing_buffer, io_resolved.offset, io_resolved.size)!!;
     float* doubled = &values[COUNT];
     for (uint i = 0; i < COUNT; i++) {
         assert(doubled[i] == (float)i * 2.0f, "indirect-usage persistent span drove cmd_dispatch_indirect");
@@ -692,19 +748,19 @@ fn void persistent_free_rejections_report_exact_context() @test {
     gpu::GpuSpan span = gpu::alloc_persistent_span(&device, &alloc_desc)!!;
 
     gpu::GpuSpan wrong_buffer = span;
-    wrong_buffer.buffer = gpu::BUFFER_HANDLE_INVALID;
+    wrong_buffer.owner = 0;
     uint before = capture.calls;
     fault wrong_fault = @catch(gpu::free_persistent_span(&device, wrong_buffer));
-    assert(wrong_fault == gpu::INVALID_ARGUMENT, "wrong persistent backing keeps INVALID_ARGUMENT");
+    assert(wrong_fault == gpu::INVALID_HANDLE, "wrong persistent owner keeps INVALID_HANDLE");
     assert(capture.calls == before + 1, "wrong persistent backing emits exactly once");
-    assert(capture.has_fault && capture.public_fault == wrong_fault, "wrong backing diagnostic keeps its fault");
+    assert(capture.has_fault && capture.public_fault == wrong_fault, "wrong owner diagnostic keeps its fault");
     assert(capture.resource_kind == gpu::DebugResourceKind.PERSISTENT_SPAN,
-        "wrong backing diagnostic identifies a persistent span");
-    assert(!capture.has_public_identity, "wrong backing diagnostic invents no identity");
+        "wrong owner diagnostic identifies a persistent span");
+    assert(!capture.has_public_identity, "wrong owner diagnostic invents no identity");
     assert(((ZString)&capture.operation[0]).str_view() == "free_persistent_span",
         "wrong backing diagnostic names free_persistent_span");
-    assert(((ZString)&capture.rejected_field[0]).str_view() == "GpuSpan.buffer",
-        "wrong backing diagnostic identifies GpuSpan.buffer");
+    assert(((ZString)&capture.rejected_field[0]).str_view() == "GpuSpan.owner",
+        "wrong owner diagnostic identifies GpuSpan.owner");
 
     gpu::GpuSpan wrong_range = span;
     wrong_range.size /= 2;
@@ -713,8 +769,8 @@ fn void persistent_free_rejections_report_exact_context() @test {
     assert(range_fault == gpu::INVALID_ARGUMENT, "changed persistent range keeps INVALID_ARGUMENT");
     assert(capture.calls == before + 1, "changed persistent range emits exactly once");
     assert(capture.has_public_identity
-        && capture.resource_index == span.allocation.index
-        && capture.resource_generation == span.allocation.generation,
+        && capture.resource_index == span.index
+        && capture.resource_generation == span.generation,
         "resolved persistent range diagnostic preserves allocation identity");
 
     gpu::free_persistent_span(&device, span)!!;
@@ -724,8 +780,8 @@ fn void persistent_free_rejections_report_exact_context() @test {
     assert(capture.calls == before + 1, "double persistent free emits exactly once");
     assert(capture.has_fault && capture.public_fault == double_free, "double-free diagnostic keeps its fault");
     assert(!capture.has_public_identity, "double-free diagnostic invents no identity");
-    assert(((ZString)&capture.rejected_field[0]).str_view() == "GpuSpan.allocation",
-        "double-free diagnostic identifies GpuSpan.allocation");
+    assert(((ZString)&capture.rejected_field[0]).str_view() == "GpuSpan.identity",
+        "double-free diagnostic identifies GpuSpan.identity");
 }
 
 fn void persistent_capacity_failure_reports_backend_result() @test {

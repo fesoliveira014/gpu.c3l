@@ -22,6 +22,7 @@ enum DebugResourceKind : int {
     SAMPLER,
     FRAME,
     PERSISTENT_SPAN,
+    ALLOCATION,
 }
 
 bitstruct DebugMessageCategory : uint {

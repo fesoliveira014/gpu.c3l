@@ -73,6 +73,7 @@ exists (else the limit is compile-time).
 | Sampler descriptors | 256 default (`gpu/descriptor_heap.c3:4`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Live textures | 1024 default, 65 536 max (`gpu/texture.c3:3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
 | Live buffers | 4096 (`gpu/buffer.c3:3`) | — | `SLOT_TABLE_FULL` |
+| Live independent allocations | 4096 (`gpu/vk/allocation.c3:26`) | — | `SLOT_TABLE_FULL` |
 | Live pipelines / shaders | 256 each by default (`gpu/pipeline.c3:3-4`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
 | Compute push-constant range | Selected-device `maxPushConstantsSize`, reported by `DeviceCaps.max_push_constant_size` | — | `INVALID_ARGUMENT` |
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |

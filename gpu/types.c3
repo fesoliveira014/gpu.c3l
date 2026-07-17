@@ -21,13 +21,13 @@ bitstruct Device : ulong {
     uint reserved   : 56..63;
 }
 
-<* Generation-checked identity carried by persistent arena spans. *>
-struct AllocationHandle {
+<* Owning token for device-scoped generic GPU data. *>
+struct GpuAllocation {
     ulong owner;
     uint  index;
     uint  generation;
 }
-$assert AllocationHandle::size <= ulong::size * 2;
+$assert GpuAllocation::size <= ulong::size * 2;
 
 struct BufferHandle {
     ulong owner;
@@ -87,7 +87,7 @@ bitstruct SamplerIndex : uint {
 }
 
 const Device DEVICE_INVALID                   = {};
-const AllocationHandle ALLOCATION_HANDLE_INVALID = {};
+const GpuAllocation GPU_ALLOCATION_INVALID = {};
 const BufferHandle BUFFER_HANDLE_INVALID       = {};
 const TextureHandle TEXTURE_HANDLE_INVALID     = {};
 const PipelineHandle PIPELINE_HANDLE_INVALID   = {};
@@ -101,8 +101,8 @@ const SamplerIndex SAMPLER_INDEX_INVALID = {};
 <* True when the device handle is not the invalid zero sentinel. *>
 fn bool Device.is_valid(self)          => (ulong)self != 0;
 // Owner-bearing handles require both fields to be nonzero.
-fn bool AllocationHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
-fn bool AllocationHandle.equals(self, AllocationHandle other) @operator(==) {
+fn bool GpuAllocation.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool GpuAllocation.equals(self, GpuAllocation other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;

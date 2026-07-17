@@ -62,7 +62,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     defer gpu::destroy_buffer(&device, staging)!!;
 
     gpu::GpuSpan staging_span = gpu::get_buffer_span(&device, staging)!!;
-    char* bytes = (char*)staging_span.cpu;
+    char* bytes = (char*)test_span_mapping(&device, staging_span).ptr;
     for (uint y = 0; y < UP_SIZE; y++) {
         for (uint x = 0; x < UP_SIZE; x++) {
             char* texel = &bytes[(y * UP_SIZE + x) * 4];
@@ -115,7 +115,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
-    SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
+    SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
     sample_root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
@@ -156,7 +156,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: sample_pipe,
-        root:     sample_root_span.gpu,
+        root:     test_span_address(&device, sample_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
@@ -195,7 +195,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
-    float* texels = (float*)out_span.cpu;
+    float* texels = (float*)test_span_mapping(&device, out_span).ptr;
     for (uint y = 0; y < UP_SIZE; y++) {
         for (uint x = 0; x < UP_SIZE; x++) {
             float* texel = &texels[(y * UP_SIZE + x) * 4];
@@ -206,7 +206,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     }
 
     gpu::invalidate_buffer(&device, mip1_readback, 0, 0)!!;
-    char* mip1_bytes = (char*)rb_span.cpu;
+    char* mip1_bytes = (char*)test_span_mapping(&device, rb_span).ptr;
     for (uint y = 0; y < UP_SIZE / 2; y++) {
         for (uint x = 0; x < UP_SIZE / 2; x++) {
             char* texel = &mip1_bytes[(y * (UP_SIZE / 2) + x) * 4];
@@ -256,7 +256,7 @@ fn void storage_write_direct_readback() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
-    WriteRoot* root = (WriteRoot*)root_span.cpu;
+    WriteRoot* root = (WriteRoot*)test_span_mapping(&device, root_span).ptr;
     root.texture_index = tex_index;
     root.width         = UP_SIZE;
     root.height        = UP_SIZE;
@@ -278,7 +278,7 @@ fn void storage_write_direct_readback() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: write_pipe,
-        root:     root_span.gpu,
+        root:     test_span_address(&device, root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
@@ -312,7 +312,7 @@ fn void storage_write_direct_readback() @test {
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::invalidate_buffer(&device, readback, 0, 0)!!;
-    char* bytes = (char*)rb_span.cpu;
+    char* bytes = (char*)test_span_mapping(&device, rb_span).ptr;
     for (uint y = 0; y < UP_SIZE; y++) {
         for (uint x = 0; x < UP_SIZE; x++) {
             char* texel = &bytes[(y * UP_SIZE + x) * 4];
@@ -438,7 +438,7 @@ fn void mip_subset_view_sampled() @test {
     gpu::BufferHandle staging = gpu::create_buffer(&device, &staging_desc)!!;
     defer gpu::destroy_buffer(&device, staging)!!;
     gpu::GpuSpan staging_span = gpu::get_buffer_span(&device, staging)!!;
-    char* bytes = (char*)staging_span.cpu;
+    char* bytes = (char*)test_span_mapping(&device, staging_span).ptr;
     for (uint i = 0; i < UP_SIZE * UP_SIZE; i++) {
         bytes[i * 4] = (char)10; bytes[i * 4 + 1] = (char)20; bytes[i * 4 + 2] = (char)30; bytes[i * 4 + 3] = (char)255;
     }
@@ -468,7 +468,7 @@ fn void mip_subset_view_sampled() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
-    SampleRoot* root = (SampleRoot*)root_span.cpu;
+    SampleRoot* root = (SampleRoot*)test_span_mapping(&device, root_span).ptr;
     root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
     root.texture_index = tex_index;
     root.sampler_index = smp_index;
@@ -506,7 +506,7 @@ fn void mip_subset_view_sampled() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: sample_pipe,
-        root:     root_span.gpu,
+        root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier out_bar = {
@@ -523,7 +523,7 @@ fn void mip_subset_view_sampled() @test {
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
-    float* sampled = (float*)out_span.cpu;
+    float* sampled = (float*)test_span_mapping(&device, out_span).ptr;
     assert(quantize_unorm8(sampled[0]) == 200, "mip-subset view samples mip 1, not mip 0");
     assert(quantize_unorm8(sampled[1]) == 210, "mip-subset view green matches mip 1");
     gpu::end_frame(&frame_token)!!;

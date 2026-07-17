@@ -136,7 +136,7 @@ fn int main() {
 
     (void)record_global_barriers(&device);
     (void)record_buffer_barriers(&device, buffer);
-    (void)record_indirect_dispatches(&device, pipeline, buffer_span.gpu, args);
+    (void)record_indirect_dispatches(&device, pipeline, gpu::get_span_address(&device, buffer_span)!!, args);
 
     double[COMMAND_RECORD_REPETITIONS] global_results;
     double[COMMAND_RECORD_REPETITIONS] buffer_results;
@@ -144,7 +144,7 @@ fn int main() {
     for (uint i = 0; i < COMMAND_RECORD_REPETITIONS; i++) {
         global_results[i] = record_global_barriers(&device);
         buffer_results[i] = record_buffer_barriers(&device, buffer);
-        indirect_results[i] = record_indirect_dispatches(&device, pipeline, buffer_span.gpu, args);
+        indirect_results[i] = record_indirect_dispatches(&device, pipeline, gpu::get_span_address(&device, buffer_span)!!, args);
     }
 
     io::printfn(

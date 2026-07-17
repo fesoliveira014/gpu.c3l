@@ -29,7 +29,16 @@ fn gpu::BufferHandle u16v_persistent(gpu::Device* device, usz size, gpu::BufferU
     return gpu::create_buffer(device, &desc)!!;
 }
 
-fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAddress verts, gpu::GpuAddress color, gpu::GpuSpan index_span, gpu::IndexType index_type, gpu::GpuSpan* rb_span) {
+fn void u16v_draw(
+    gpu::Device* device,
+    gpu::PipelineHandle pipeline,
+    gpu::GpuAddress verts,
+    gpu::GpuAddress color,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+    gpu::BufferHandle readback,
+    gpu::GpuSpan* rb_span,
+) {
     gpu::TextureDesc rt_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
@@ -84,7 +93,7 @@ fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAdd
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = rb_span.buffer, .offset = rb_span.offset, .size = rb_span.size,
+        .buffer = readback, .offset = rb_span.offset, .size = rb_span.size,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -97,7 +106,7 @@ fn void u16v_draw(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAdd
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::invalidate_buffer(device, rb_span.buffer, rb_span.offset, rb_span.size)!!;
+    gpu::invalidate_buffer(device, readback, rb_span.offset, rb_span.size)!!;
 }
 
 fn void u16_and_u32_indexed_draws_match() @test {
@@ -129,13 +138,13 @@ fn void u16_and_u32_indexed_draws_match() @test {
         -0.8f,  0.8f, 0.5f, 0.0f,
          0.8f,  0.8f, 0.5f, 0.0f,
     };
-    mem::copy(vspan.cpu, &verts, 16 * 4);
+    mem::copy(test_span_mapping(&device, vspan).ptr, &verts, 16 * 4);
 
     gpu::BufferHandle cbuf = u16v_persistent(&device, 16, { .storage, .addressable });
     defer gpu::destroy_buffer(&device, cbuf)!!;
     gpu::GpuSpan cspan = gpu::get_buffer_span(&device, cbuf)!!;
     float[4] color = { 0.0f, 1.0f, 0.0f, 1.0f };
-    mem::copy(cspan.cpu, &color, 16);
+    mem::copy(test_span_mapping(&device, cspan).ptr, &color, 16);
 
     ushort[6] idx16 = { 0, 1, 2, 2, 1, 3 };
     uint[6] idx32 = { 0, 1, 2, 2, 1, 3 };
@@ -143,18 +152,18 @@ fn void u16_and_u32_indexed_draws_match() @test {
     gpu::BufferHandle ib16 = u16v_persistent(&device, U16V_INDEX_COUNT * 2, { .index });
     defer gpu::destroy_buffer(&device, ib16)!!;
     gpu::GpuSpan span16 = gpu::get_buffer_span(&device, ib16)!!;
-    mem::copy(span16.cpu, &idx16, U16V_INDEX_COUNT * 2);
+    mem::copy(test_span_mapping(&device, span16).ptr, &idx16, U16V_INDEX_COUNT * 2);
 
     gpu::BufferHandle ib32 = u16v_persistent(&device, U16V_INDEX_COUNT * 4, { .index });
     defer gpu::destroy_buffer(&device, ib32)!!;
     gpu::GpuSpan span32 = gpu::get_buffer_span(&device, ib32)!!;
-    mem::copy(span32.cpu, &idx32, U16V_INDEX_COUNT * 4);
+    mem::copy(test_span_mapping(&device, span32).ptr, &idx32, U16V_INDEX_COUNT * 4);
 
     usz u16_off_bytes = (U16V_OFFSET_ELEMENTS + U16V_INDEX_COUNT) * 2;
     gpu::BufferHandle ib16_off = u16v_persistent(&device, u16_off_bytes, { .index });
     defer gpu::destroy_buffer(&device, ib16_off)!!;
     gpu::GpuSpan span16_off = gpu::get_buffer_span(&device, ib16_off)!!;
-    ushort* p16_off = (ushort*)span16_off.cpu;
+    ushort* p16_off = (ushort*)test_span_mapping(&device, span16_off).ptr;
     for (uint i = 0; i < U16V_OFFSET_ELEMENTS; i++) p16_off[i] = 0;
     for (uint i = 0; i < U16V_INDEX_COUNT; i++) p16_off[U16V_OFFSET_ELEMENTS + i] = idx16[i];
 
@@ -162,7 +171,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
     gpu::BufferHandle ib32_off = u16v_persistent(&device, u32_off_bytes, { .index });
     defer gpu::destroy_buffer(&device, ib32_off)!!;
     gpu::GpuSpan span32_off = gpu::get_buffer_span(&device, ib32_off)!!;
-    uint* p32_off = (uint*)span32_off.cpu;
+    uint* p32_off = (uint*)test_span_mapping(&device, span32_off).ptr;
     for (uint i = 0; i < U16V_OFFSET_ELEMENTS; i++) p32_off[i] = 0;
     for (uint i = 0; i < U16V_INDEX_COUNT; i++) p32_off[U16V_OFFSET_ELEMENTS + i] = idx32[i];
 
@@ -185,45 +194,49 @@ fn void u16_and_u32_indexed_draws_match() @test {
     u16v_draw(
         device:     &device,
         pipeline:   pipeline,
-        verts:      vspan.gpu,
-        color:      cspan.gpu,
+        verts:      test_span_address(&device, vspan),
+        color:      test_span_address(&device, cspan),
         index_span: span16.checked_subspan(0, U16V_INDEX_COUNT * 2)!!,
         index_type: gpu::IndexType.U16,
+        readback:   rb,
         rb_span:    &rb_u16,
     );
     u16v_draw(
         device:     &device,
         pipeline:   pipeline,
-        verts:      vspan.gpu,
-        color:      cspan.gpu,
+        verts:      test_span_address(&device, vspan),
+        color:      test_span_address(&device, cspan),
         index_span: span32.checked_subspan(0, U16V_INDEX_COUNT * 4)!!,
         index_type: gpu::IndexType.U32,
+        readback:   rb,
         rb_span:    &rb_u32,
     );
     u16v_draw(
         device:     &device,
         pipeline:   pipeline,
-        verts:      vspan.gpu,
-        color:      cspan.gpu,
+        verts:      test_span_address(&device, vspan),
+        color:      test_span_address(&device, cspan),
         index_span: span16_off.checked_subspan(U16V_OFFSET_ELEMENTS * 2, U16V_INDEX_COUNT * 2)!!,
         index_type: gpu::IndexType.U16,
+        readback:   rb,
         rb_span:    &rb_u16_off,
     );
     u16v_draw(
         device:     &device,
         pipeline:   pipeline,
-        verts:      vspan.gpu,
-        color:      cspan.gpu,
+        verts:      test_span_address(&device, vspan),
+        color:      test_span_address(&device, cspan),
         index_span: span32_off.checked_subspan(U16V_OFFSET_ELEMENTS * 4, U16V_INDEX_COUNT * 4)!!,
         index_type: gpu::IndexType.U32,
+        readback:   rb,
         rb_span:    &rb_u32_off,
     );
     gpu::end_frame(&frame_token)!!;
 
-    char* a = (char*)rb_u16.cpu;
-    char* b = (char*)rb_u32.cpu;
-    char* c = (char*)rb_u16_off.cpu;
-    char* d = (char*)rb_u32_off.cpu;
+    char* a = (char*)test_span_mapping(&device, rb_u16).ptr;
+    char* b = (char*)test_span_mapping(&device, rb_u32).ptr;
+    char* c = (char*)test_span_mapping(&device, rb_u16_off).ptr;
+    char* d = (char*)test_span_mapping(&device, rb_u32_off).ptr;
     uint diff_zero = 0;
     uint diff_off = 0;
     uint diff_u16_offsets = 0;

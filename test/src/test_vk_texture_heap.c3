@@ -79,13 +79,13 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     gpu::GpuSpan write_root_span = gpu::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
-    WriteRoot* write_root = (WriteRoot*)write_root_span.cpu;
+    WriteRoot* write_root = (WriteRoot*)test_span_mapping(&device, write_root_span).ptr;
     write_root.texture_index = tex_index;
     write_root.width         = TEX_SIZE;
     write_root.height        = TEX_SIZE;
 
     gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
-    SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
+    SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
     sample_root.output_gpu    = gpu::get_buffer_address(&device, output)!!;
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
@@ -106,7 +106,7 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: write_pipe,
-        root:     write_root_span.gpu,
+        root:     test_span_address(&device, write_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
@@ -120,7 +120,7 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: sample_pipe,
-        root:     sample_root_span.gpu,
+        root:     test_span_address(&device, sample_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
@@ -140,7 +140,7 @@ fn void bindless_texture_write_then_sample() @test {
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;
-    float* texels = (float*)out_span.cpu;
+    float* texels = (float*)test_span_mapping(&device, out_span).ptr;
     for (uint y = 0; y < TEX_SIZE; y++) {
         for (uint x = 0; x < TEX_SIZE; x++) {
             float* texel = &texels[(y * TEX_SIZE + x) * 4];

@@ -17,6 +17,11 @@ enum MemoryKind : int {
     // Transfer sources for staged uploads.
     STAGING,
 }
+enum MemoryClass : int {
+    CPU_WRITE,
+    GPU_PRIVATE,
+    CPU_READ,
+}
 
 <* Generation-checked identity for private readback state. *>
 struct ReadbackTicket {
@@ -34,17 +39,33 @@ fn bool ReadbackTicket.equals(self, ReadbackTicket other) @operator(==) {
         && self.generation == other.generation;
 }
 
-// Host-side view of a GPU-visible range. `cpu` may be null; `access` names
-// the selected queue roles admitted to the range.
+<* Non-owning identity and range into generic GPU data. *>
 struct GpuSpan {
-    GpuAddress       gpu;
-    void*            cpu;
-    usz              size;
-    BufferHandle     buffer;
-    AllocationHandle allocation;
-    usz              offset;
-    MemoryKind       kind;
-    QueueRoles       access;
+    ulong owner;
+    uint  index;
+    uint  generation;
+    usz   offset;
+    usz   size;
+}
+
+<* `size` must be nonzero; alignment zero selects 16 bytes. *>
+struct AllocationDesc {
+    usz         size;
+    usz         alignment;
+    MemoryClass memory_class;
+    QueueRoles  access;
+    ZString     debug_name;
+}
+
+<* Immutable allocation properties and actual mapping behavior. *>
+struct AllocationInfo {
+    usz         size;
+    usz         alignment;
+    MemoryClass memory_class;
+    QueueRoles  access;
+    bool        mapped;
+    bool        coherent;
+    bool        addressable;
 }
 
 struct FrameToken {
@@ -86,6 +107,98 @@ struct MemoryStats {
 fn bool range_fits(usz limit, usz offset, usz size) @private {
     if (offset > limit) return false;
     return size <= limit - offset;
+}
+
+fn bool memory_class_is_known(MemoryClass memory_class) @private {
+    switch (memory_class) {
+        case MemoryClass.CPU_WRITE:
+        case MemoryClass.GPU_PRIVATE:
+        case MemoryClass.CPU_READ:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn usz? normalized_allocation_alignment(usz alignment) @private {
+    const usz MIN_ALLOCATION_ALIGNMENT = 16;
+    if (alignment == 0) return MIN_ALLOCATION_ALIGNMENT;
+    if ((alignment & (alignment - 1)) != 0) return INVALID_ARGUMENT~;
+    return max(alignment, MIN_ALLOCATION_ALIGNMENT);
+}
+
+<* Allocate addressable generic GPU data. Free with `free_allocation`. *>
+fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (desc == null || desc.size == 0) return INVALID_ARGUMENT~;
+    if (!memory_class_is_known(desc.memory_class)) return INVALID_ARGUMENT~;
+    validate_queue_access(&operation, desc.access)!;
+
+    AllocationDesc normalized = *desc;
+    normalized.alignment = normalized_allocation_alignment(desc.alignment)!;
+    GpuAllocation allocation = operation.vtable.allocate_memory(
+        device,
+        &normalized,
+    )!;
+    retain_device_children(&operation);
+    return allocation;
+}
+
+<* Free quiescent storage; faults preserve the owning token. *>
+fn void? free_allocation(Device* device, GpuAllocation* allocation) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (allocation == null || !allocation.is_valid()) return INVALID_HANDLE~;
+    validate_resource_owner(
+        &operation,
+        allocation.owner,
+        ResourceOwnerKind.ALLOCATION,
+    )!;
+    operation.vtable.free_allocation(device, *allocation)!;
+    release_device_children(&operation);
+    *allocation = GPU_ALLOCATION_INVALID;
+}
+
+<* Return immutable properties for a live allocation. *>
+fn AllocationInfo? get_allocation_info(
+    Device* device,
+    GpuAllocation allocation,
+) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    validate_resource_owner(
+        &operation,
+        allocation.owner,
+        ResourceOwnerKind.ALLOCATION,
+    )!;
+    return operation.vtable.get_allocation_info(device, allocation);
+}
+
+<* Borrow the allocation's complete range. *>
+fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    validate_resource_owner(
+        &operation,
+        allocation.owner,
+        ResourceOwnerKind.ALLOCATION,
+    )!;
+    return operation.vtable.get_allocation_span(device, allocation);
+}
+
+<* Borrow the CPU mapping for a live host-visible span. *>
+fn char[]? get_span_mapping(Device* device, GpuSpan span) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.get_span_mapping(device, span);
+}
+
+<* Return the stable nonzero address of a live span. *>
+fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    return operation.vtable.get_span_address(device, span);
 }
 
 fn DeviceOperation? frame_operation(FrameToken* frame) @private {
@@ -171,8 +284,8 @@ struct TextureUploadDesc {
 <* Allocate a long-lived span from the persistent arena. `size` must be
    nonzero; `align` 0 means no requirement, otherwise a power of two
    (INVALID_ARGUMENT). `access` must be a non-empty subset of selected roles
-   and is preserved in the returned span. Its GPU address is stable until
-   freed. Ownership: free with free_persistent_span. *>
+   and is recorded in the arena's immutable allocation identity. The span's
+   GPU address is stable until freed. Ownership: free with free_persistent_span. *>
 fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
@@ -311,29 +424,19 @@ fn void? resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) {
    for validation testing. *>
 fn GpuSpan GpuSpan.unchecked_subspan(self, usz offset, usz size) {
     return {
-        .gpu    = (GpuAddress)((ulong)self.gpu + offset),
-        .cpu    = self.cpu == null ? null : (char*)self.cpu + offset,
-        .size       = size,
-        .buffer     = self.buffer,
-        .allocation = self.allocation,
+        .owner      = self.owner,
+        .index      = self.index,
+        .generation = self.generation,
         .offset     = self.offset + offset,
-        .kind       = self.kind,
-        .access     = self.access,
+        .size       = size,
     };
 }
 
-<* Derive a non-empty exact-sized sub-range within this immediate parent.
-   Faults INVALID_ARGUMENT for zero size, a range that escapes the parent, or
-   any derived address/offset addition that would overflow. *>
+<* Derive a non-empty exact-sized range within this immediate parent. *>
 fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
-    if (size == 0) return INVALID_ARGUMENT~;
-    if (!range_fits(self.size, offset, size)) return INVALID_ARGUMENT~;
-
-    ulong gpu_address = (ulong)self.gpu;
-    if ((ulong)offset > ulong::max - gpu_address) return INVALID_ARGUMENT~;
-    if (offset > usz::max - self.offset) return INVALID_ARGUMENT~;
-    if (self.cpu != null && (uptr)offset > uptr::max - (uptr)self.cpu) {
+    if (size == 0 || !range_fits(self.size, offset, size)) {
         return INVALID_ARGUMENT~;
     }
+    if (offset > usz::max - self.offset) return INVALID_ARGUMENT~;
     return self.unchecked_subspan(offset, size);
 }

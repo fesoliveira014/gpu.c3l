@@ -119,12 +119,12 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     gpu::BufferHandle output = gpu::create_buffer(device, &io_desc)!!;
     defer gpu::destroy_buffer(device, output)!!;
     gpu::GpuSpan in_span = gpu::get_buffer_span(device, input)!!;
-    float* in_data = (float*)in_span.cpu;
+    float* in_data = (float*)test_span_mapping(device, in_span).ptr;
     for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
 
     gpu::FrameToken frame_token = gpu::begin_frame(device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
-    ComputeRoot* root = (ComputeRoot*)root_span.cpu;
+    ComputeRoot* root = (ComputeRoot*)test_span_mapping(device, root_span).ptr;
     root.input_gpu  = gpu::get_buffer_address(device, input)!!;
     root.output_gpu = gpu::get_buffer_address(device, output)!!;
     root.count      = COUNT;
@@ -134,7 +134,7 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: pipeline,
-        root:     root_span.gpu,
+        root:     test_span_address(device, root_span),
         groups:   { (COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;
     gpu::BufferBarrier bar = {
@@ -151,7 +151,7 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     wait_test_queue(device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(device, output)!!;
-    float* out_data = (float*)out_span.cpu;
+    float* out_data = (float*)test_span_mapping(device, out_span).ptr;
     for (uint i = 0; i < COUNT; i++) assert(out_data[i] == (float)i * 2.0, "warm pipeline computes correctly");
     gpu::end_frame(&frame_token)!!;
 }

@@ -148,7 +148,7 @@ fn void verify_staging_payload(StagingReuseFixture* fixture, uint index, char[] 
         offset: 0,
         size:   0,
     )!!;
-    char* actual = (char*)fixture.spans[index].cpu;
+    char* actual = (char*)test_span_mapping(&fixture.device, fixture.spans[index]).ptr;
     foreach (i, value : expected) assert(actual[i] == value, "reused staging range preserves payload bytes");
 }
 
@@ -1179,7 +1179,7 @@ fn void texture_upload_helper_sampled() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
-    SampleRoot* root = (SampleRoot*)root_span.cpu;
+    SampleRoot* root = (SampleRoot*)test_span_mapping(&device, root_span).ptr;
     root.output_gpu    = gpu::get_buffer_address(&device, sample_out)!!;
     root.texture_index = tex_index;
     root.sampler_index = smp_index;
@@ -1191,7 +1191,7 @@ fn void texture_upload_helper_sampled() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: pipeline,
-        root:     root_span.gpu,
+        root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier out_bar = {
@@ -1208,7 +1208,7 @@ fn void texture_upload_helper_sampled() @test {
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, sample_out)!!;
-    float* sampled = (float*)out_span.cpu;
+    float* sampled = (float*)test_span_mapping(&device, out_span).ptr;
     assert(quantize_unorm8(sampled[1]) == 90, "sampled green matches helper upload");
     assert(quantize_unorm8(sampled[2]) == 160, "sampled blue matches helper upload");
     gpu::end_frame(&frame_token)!!;

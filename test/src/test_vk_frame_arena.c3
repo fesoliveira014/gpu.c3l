@@ -213,7 +213,8 @@ fn void frame_token_owns_its_device_token_value() @test {
     assert(span.size == 16, "frame token remains usable after source device storage changes");
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::FrameArenaState* arena = &state.frame_arenas[state.frame_index];
-    assert((uint)span.access == (uint)arena.access && (uint)span.access != 0,
+    vk::ResolvedSpan resolved = vk::resolve_span(state, &span)!!;
+    assert((uint)resolved.access == (uint)arena.access && (uint)resolved.access != 0,
         "frame spans preserve their backing arena access roles");
 
     gpu::end_frame(&frame)!!;
@@ -444,17 +445,21 @@ fn void frame_arena_alloc_and_reset() @test {
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
 
     gpu::GpuSpan a = gpu::alloc_frame_span(&frame, 100, 16)!!;
-    assert(a.cpu != null, "arena span is mapped");
+    char[] a_mapping = gpu::get_span_mapping(&device, a)!!;
+    gpu::GpuAddress a_address = gpu::get_span_address(&device, a)!!;
+    assert(a_mapping.ptr != null && a_mapping.len == 100, "arena span is mapped");
     assert(a.offset == 0, "first allocation offset is 0");
-    assert((ulong)a.gpu != 0, "arena GPU address is non-zero");
+    assert((ulong)a_address != 0, "arena GPU address is non-zero");
 
-    ulong base_gpu = (ulong)a.gpu;
-    char* base_cpu = (char*)a.cpu;
+    ulong base_gpu = (ulong)a_address;
+    char* base_cpu = a_mapping.ptr;
 
     gpu::GpuSpan b = gpu::alloc_frame_span(&frame, 50, 64)!!;
+    char[] b_mapping = gpu::get_span_mapping(&device, b)!!;
+    gpu::GpuAddress b_address = gpu::get_span_address(&device, b)!!;
     assert(b.offset == 128, "second allocation aligns up to 64 (align_up(100,64)=128)");
-    assert((ulong)b.gpu == base_gpu + 128, "GPU address is base + aligned offset");
-    assert((char*)b.cpu == base_cpu + 128, "CPU pointer is base + aligned offset");
+    assert((ulong)b_address == base_gpu + 128, "GPU address is base + aligned offset");
+    assert(b_mapping.ptr == base_cpu + 128, "CPU pointer is base + aligned offset");
 
     fault full = @catch(gpu::alloc_frame_span(&frame, gpu::DEFAULT_FRAME_ARENA_SIZE, 16));
     assert(full == gpu::ARENA_FULL, "over-allocation returns ARENA_FULL");

@@ -626,13 +626,20 @@ fn void? cmd_upload_buffer_impl(gpu::CommandList* commands, gpu::BufferHandle ds
         )~;
     }
     gpu::GpuSpan staging = allocated_staging;
-    mem::copy(staging.cpu, data.ptr, data.len);
-    vk_flush_buffer(&commands.device, staging.buffer, staging.offset, staging.size)!;
+    ResolvedSpan staging_resolved = resolve_span(state, &staging)!;
+    char[] staging_mapping = resolved_span_mapping(&staging_resolved)!;
+    mem::copy(staging_mapping.ptr, data.ptr, data.len);
+    vk_flush_buffer(
+        &commands.device,
+        staging_resolved.backing_buffer,
+        staging_resolved.offset,
+        staging_resolved.size,
+    )!;
 
     gpu::BufferCopyDesc copy = {
-        .src        = staging.buffer,
+        .src        = staging_resolved.backing_buffer,
         .dst        = dst,
-        .src_offset = staging.offset,
+        .src_offset = staging_resolved.offset,
         .dst_offset = offset,
         .size       = data.len,
     };
@@ -759,8 +766,15 @@ fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadD
         )~;
     }
     gpu::GpuSpan staging = allocated_staging;
-    mem::copy(staging.cpu, data.ptr, data.len);
-    vk_flush_buffer(&commands.device, staging.buffer, staging.offset, staging.size)!;
+    ResolvedSpan staging_resolved = resolve_span(state, &staging)!;
+    char[] staging_mapping = resolved_span_mapping(&staging_resolved)!;
+    mem::copy(staging_mapping.ptr, data.ptr, data.len);
+    vk_flush_buffer(
+        &commands.device,
+        staging_resolved.backing_buffer,
+        staging_resolved.offset,
+        staging_resolved.size,
+    )!;
 
     gpu::BufferTextureCopyDesc copy = {
         .src         = staging,
@@ -1247,6 +1261,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     gpu::CommandList commands = {};
     defer catch release_helper_command_on_fault(state, &commands);
     gpu::GpuSpan readback;
+    ResolvedSpan readback_resolved;
     fault allocation_fault;
     {
         state.helper_record_mutex.lock()!!;
@@ -1265,6 +1280,7 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
             allocation_fault = err;
         } else {
             readback = allocated_readback;
+            readback_resolved = resolve_span(state, &readback)!;
             gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
             vk_begin_commands_with_context(
                 state:          state,
@@ -1286,16 +1302,16 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
 
             gpu::BufferCopyDesc copy = {
                 .src        = src,
-                .dst        = readback.buffer,
+                .dst        = readback_resolved.backing_buffer,
                 .src_offset = offset,
-                .dst_offset = readback.offset,
+                .dst_offset = readback_resolved.offset,
                 .size       = out_data.len,
             };
             vk_cmd_copy_buffer(&commands, &copy)!;
 
             gpu::BufferBarrier host_read = {
-                .buffer        = readback.buffer,
-                .offset        = readback.offset,
+                .buffer        = readback_resolved.backing_buffer,
+                .offset        = readback_resolved.offset,
                 .size          = out_data.len,
                 .before_stage  = gpu::Stage.TRANSFER,
                 .after_stage   = gpu::Stage.HOST,
@@ -1323,8 +1339,14 @@ fn void? vk_readback_buffer_data(gpu::Device* device, gpu::BufferHandle src, usz
     }
 
     submit_and_wait(device, &commands)!;
-    vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
-    mem::copy(out_data.ptr, readback.cpu, out_data.len);
+    vk_invalidate_buffer(
+        device,
+        readback_resolved.backing_buffer,
+        readback_resolved.offset,
+        readback_resolved.size,
+    )!;
+    char[] readback_mapping = resolved_span_mapping(&readback_resolved)!;
+    mem::copy(out_data.ptr, readback_mapping.ptr, out_data.len);
     finish_helper_timeline(state, &helper_value, "readback_buffer_data")!;
 }
 
@@ -1393,6 +1415,7 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     gpu::CommandList commands = {};
     defer catch release_helper_command_on_fault(state, &commands);
     gpu::GpuSpan readback;
+    ResolvedSpan readback_resolved;
     fault allocation_fault;
     {
         state.helper_record_mutex.lock()!!;
@@ -1411,6 +1434,7 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
             allocation_fault = err;
         } else {
             readback = allocated_readback;
+            readback_resolved = resolve_span(state, &readback)!;
             gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
             vk_begin_commands_with_context(
                 state:          state,
@@ -1445,8 +1469,8 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
             vk_cmd_texture_barrier(&commands, &restore)!;
 
             gpu::BufferBarrier host_read = {
-                .buffer        = readback.buffer,
-                .offset        = readback.offset,
+                .buffer        = readback_resolved.backing_buffer,
+                .offset        = readback_resolved.offset,
                 .size          = out_data.len,
                 .before_stage  = gpu::Stage.TRANSFER,
                 .after_stage   = gpu::Stage.HOST,
@@ -1474,8 +1498,14 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     }
 
     submit_and_wait(device, &commands)!;
-    vk_invalidate_buffer(device, readback.buffer, readback.offset, readback.size)!;
-    mem::copy(out_data.ptr, readback.cpu, out_data.len);
+    vk_invalidate_buffer(
+        device,
+        readback_resolved.backing_buffer,
+        readback_resolved.offset,
+        readback_resolved.size,
+    )!;
+    char[] readback_mapping = resolved_span_mapping(&readback_resolved)!;
+    mem::copy(out_data.ptr, readback_mapping.ptr, out_data.len);
     finish_helper_timeline(state, &helper_value, "readback_texture_data")!;
 }
 
@@ -1743,12 +1773,13 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(gpu::CommandList* commands, gpu::
     gpu::ReadbackTicket ticket = allocated_ticket;
     defer catch (void)release_ticket(state, &ticket);
     ReadbackTicketState* ticket_data = resolve_readback_ticket(state, ticket)!;
+    ResolvedSpan ticket_span = resolve_span(state, &ticket_data.span)!;
 
     gpu::BufferCopyDesc copy = {
         .src        = src,
-        .dst        = ticket_data.span.buffer,
+        .dst        = ticket_span.backing_buffer,
         .src_offset = offset,
-        .dst_offset = ticket_data.span.offset,
+        .dst_offset = ticket_span.offset,
         .size       = size,
     };
     vk_cmd_copy_buffer(commands, &copy)!;
@@ -1858,11 +1889,16 @@ fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu:
     return ticket;
 }
 
-fn void? record_ticket_host_barrier(gpu::CommandList* commands, ReadbackTicketState* ticket) @private {
+fn void? record_ticket_host_barrier(
+    gpu::CommandList* commands,
+    ReadbackTicketState* ticket,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    ResolvedSpan span = resolve_span(state, &ticket.span)!;
     gpu::BufferBarrier host_read = {
-        .buffer        = ticket.span.buffer,
-        .offset        = ticket.span.offset,
-        .size          = ticket.span.size,
+        .buffer        = span.backing_buffer,
+        .offset        = span.offset,
+        .size          = span.size,
         .before_stage  = gpu::Stage.TRANSFER,
         .after_stage   = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE,
@@ -1965,8 +2001,15 @@ fn void? vk_resolve_readback(gpu::Device* device, gpu::ReadbackTicket* ticket, c
         )~;
     }
 
-    vk_invalidate_buffer(device, data.span.buffer, data.span.offset, data.span.size)!;
-    mem::copy(dest.ptr, data.span.cpu, (sz)data.span.size);
+    ResolvedSpan resolved_span = resolve_span(state, &data.span)!;
+    vk_invalidate_buffer(
+        device,
+        resolved_span.backing_buffer,
+        resolved_span.offset,
+        resolved_span.size,
+    )!;
+    char[] mapping = resolved_span_mapping(&resolved_span)!;
+    mem::copy(dest.ptr, mapping.ptr, (sz)resolved_span.size);
     release_readback_state(state, data);
     state.readback_tickets.free(*ticket)!;
     *ticket = {};

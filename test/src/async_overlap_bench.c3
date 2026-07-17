@@ -227,7 +227,7 @@ fn int main() {
     gpu::BufferHandle comp_root_buffer = gpu::create_buffer(&device, &comp_root_desc)!!;
     defer gpu::destroy_buffer(&device, comp_root_buffer)!!;
     gpu::GpuSpan comp_root_span = gpu::get_buffer_span(&device, comp_root_buffer)!!;
-    OverlapComputeRoot* comp_root = (OverlapComputeRoot*)comp_root_span.cpu;
+    OverlapComputeRoot* comp_root = (OverlapComputeRoot*)gpu::get_span_mapping(&device, comp_root_span)!!.ptr;
     comp_root.data_gpu = gpu::get_buffer_address(&device, data_buffer)!!;
     comp_root.elem_count = DISPATCH_GROUPS * OVERLAP_WORKGROUP;
 
@@ -292,7 +292,7 @@ fn int main() {
         gpu::ExecutableCommandList comp_cmd = record_compute(
             device:        &device,
             pipeline:      comp_pipeline,
-            root_gpu:      comp_root_span.gpu,
+            root_gpu:      gpu::get_span_address(&device, comp_root_span)!!,
             pool:          comp_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -318,10 +318,10 @@ fn int main() {
 
         frame_token = gpu::begin_frame(&device)!!;
         gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
-        OverlapFragRoot* frag_root = (OverlapFragRoot*)frag_span.cpu;
+        OverlapFragRoot* frag_root = (OverlapFragRoot*)gpu::get_span_mapping(&device, frag_span)!!.ptr;
         frag_root.iters = frag_iters;
         gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
-        float* verts = (float*)vertex_span.cpu;
+        float* verts = (float*)gpu::get_span_mapping(&device, vertex_span)!!.ptr;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
              3.0f, -1.0f, 2.0f, 0.0f,
@@ -332,8 +332,8 @@ fn int main() {
             device:        &device,
             pipeline:      gfx_pipeline,
             rt:            rt,
-            vertex_root:   vertex_span.gpu,
-            fragment_root: frag_span.gpu,
+            vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
+            fragment_root: gpu::get_span_address(&device, frag_span)!!,
             pool:          gfx_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -375,10 +375,10 @@ fn int main() {
         frame_token = gpu::begin_frame(&device)!!;
 
         gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
-        OverlapFragRoot* frag_root = (OverlapFragRoot*)frag_span.cpu;
+        OverlapFragRoot* frag_root = (OverlapFragRoot*)gpu::get_span_mapping(&device, frag_span)!!.ptr;
         frag_root.iters = frag_iters;
         gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
-        float* verts = (float*)vertex_span.cpu;
+        float* verts = (float*)gpu::get_span_mapping(&device, vertex_span)!!.ptr;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
              3.0f, -1.0f, 2.0f, 0.0f,
@@ -391,7 +391,7 @@ fn int main() {
         gpu::ExecutableCommandList a_compute = record_compute(
             device:        &device,
             pipeline:      comp_pipeline,
-            root_gpu:      comp_root_span.gpu,
+            root_gpu:      gpu::get_span_address(&device, comp_root_span)!!,
             pool:          comp_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -409,8 +409,8 @@ fn int main() {
             device:        &device,
             pipeline:      gfx_pipeline,
             rt:            rt,
-            vertex_root:   vertex_span.gpu,
-            fragment_root: frag_span.gpu,
+            vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
+            fragment_root: gpu::get_span_address(&device, frag_span)!!,
             pool:          gfx_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -437,7 +437,7 @@ fn int main() {
         gpu::ExecutableCommandList b_compute = record_compute(
             device:        &device,
             pipeline:      comp_pipeline,
-            root_gpu:      comp_root_span.gpu,
+            root_gpu:      gpu::get_span_address(&device, comp_root_span)!!,
             pool:          comp_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -455,8 +455,8 @@ fn int main() {
             device:        &device,
             pipeline:      gfx_pipeline,
             rt:            rt,
-            vertex_root:   vertex_span.gpu,
-            fragment_root: frag_span.gpu,
+            vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
+            fragment_root: gpu::get_span_address(&device, frag_span)!!,
             pool:          gfx_pool,
             timestamps_ok: timestamps_ok,
         );

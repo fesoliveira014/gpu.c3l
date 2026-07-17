@@ -255,8 +255,13 @@ fn void record_val_texture_transition(gpu::CommandList* cmd, gpu::TextureHandle 
     gpu::cmd_texture_barrier(cmd, &barrier)!!;
 }
 
-fn void write_val_triangle_verts(gpu::GpuSpan* span) {
-    float* verts = (float*)span.cpu;
+fn gpu::GpuAddress val_span_address(gpu::Device* device, gpu::GpuSpan span) {
+    return gpu::get_span_address(device, span)!!;
+}
+
+fn void write_val_triangle_verts(gpu::Device* device, gpu::GpuSpan* span) {
+    char[] mapping = gpu::get_span_mapping(device, *span)!!;
+    float* verts = (float*)mapping.ptr;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
          0.8f, -0.8f, 0.9f, 0.1f,
@@ -264,7 +269,6 @@ fn void write_val_triangle_verts(gpu::GpuSpan* span) {
     };
     for (uint i = 0; i < 12; i++) verts[i] = vertex_data[i];
 }
-
 fn void record_val_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target) {
     gpu::TextureBarrier to_attach = {
         .texture       = target,
@@ -373,8 +377,8 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     gpu::free_persistent_span(&device, stale)!!;
     gpu::GpuSpan replacement = gpu::alloc_persistent_span(&device, &reusable_desc)!!;
     defer gpu::free_persistent_span(&device, replacement)!!;
-    assert(replacement.allocation.index == stale_alias.allocation.index
-        && replacement.allocation.generation != stale_alias.allocation.generation,
+    assert(replacement.index == stale_alias.index
+        && replacement.generation != stale_alias.generation,
         "persistent allocation reuse advances the generation");
 
     gpu::TextureDesc copy_texture_desc = {
@@ -392,6 +396,19 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::ResolvedSpan buffer_span = vk::resolve_span(state, &span)!!;
+    vk::ResolvedSpan persistent_span = vk::resolve_span(state, &persistent)!!;
+    gpu::GpuSpan persistent_tail = persistent.checked_subspan(4, 4)!!;
+    vk::ResolvedSpan persistent_tail_span = vk::resolve_span(state, &persistent_tail)!!;
+    gpu::GpuSpan multi_access_head = multi_access.checked_subspan(0, 4)!!;
+    vk::ResolvedSpan multi_access_span = vk::resolve_span(state, &multi_access_head)!!;
+    assert(buffer_span.access.compute && !buffer_span.access.graphics,
+        "buffer span access comes from its live owner");
+    assert(persistent_span.access.compute && !persistent_span.access.graphics
+        && persistent_tail_span.access.compute && !persistent_tail_span.access.graphics,
+        "persistent subspans preserve immutable allocation access");
+    assert(multi_access_span.access.graphics && multi_access_span.access.compute,
+        "persistent subspans preserve every immutable allocation role");
     vk::CommandRecord* record = state.commands.get(commands.handle)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics, .compute };
@@ -433,73 +450,51 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
         == gpu::INVALID_ARGUMENT,
         "narrow persistent allocation access overrides its broad arena backing");
 
-    copy.src = persistent.checked_subspan(4, 4)!!;
-    copy.src.access = { .graphics };
+    copy.src = persistent_tail;
     assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
         == gpu::INVALID_ARGUMENT,
-        "a persistent subspan cannot widen its immutable allocation access");
+        "a persistent subspan retains its compute-only allocation access");
 
-    copy.src = multi_access.checked_subspan(0, 4)!!;
-    copy.src.access = { .graphics };
+    copy.src = multi_access;
+    copy.src.offset += multi_access.size;
     reset_sync_diagnostic(
         capture:        &capture,
         operation:      "cmd_copy_buffer_to_texture",
         debug_name:     null,
         rejected_field: "GpuSpan",
-        invariant:      "must identify one live allocation and preserve its immutable bounds and access",
+        invariant:      "span range must fit its live owner",
     );
     assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
         == gpu::INVALID_ARGUMENT,
-        "a persistent subspan cannot narrow its immutable allocation access");
+        "persistent span bounds cannot escape their immutable allocation");
     assert_sync_contract_diagnostic(
         capture:            &capture,
         expected_fault:     gpu::INVALID_ARGUMENT,
         resource_kind:      gpu::DebugResourceKind.PERSISTENT_SPAN,
         has_public_identity: true,
-        index:              multi_access.allocation.index,
-        generation:         multi_access.allocation.generation,
+        index:              multi_access.index,
+        generation:         multi_access.generation,
     );
-
-    copy.src = multi_access;
-    copy.src.offset += multi_access.size;
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
-        == gpu::INVALID_ARGUMENT,
-        "persistent span bounds cannot escape their immutable allocation");
 
     copy.src = stale_alias;
     reset_sync_diagnostic(
         capture:        &capture,
         operation:      "cmd_copy_buffer_to_texture",
         debug_name:     null,
-        rejected_field: "GpuSpan.allocation",
-        invariant:      "must identify one live allocation and preserve its immutable bounds and access",
+        rejected_field: "GpuSpan.identity",
+        invariant:      "must identify one live span owner",
     );
     assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
-        == gpu::INVALID_ARGUMENT,
+        == gpu::INVALID_HANDLE,
         "a stale persistent allocation generation cannot record commands");
     assert_sync_contract_diagnostic(
         capture:            &capture,
-        expected_fault:     gpu::INVALID_ARGUMENT,
+        expected_fault:     gpu::INVALID_HANDLE,
         resource_kind:      gpu::DebugResourceKind.PERSISTENT_SPAN,
         has_public_identity: false,
         index:              0,
         generation:         0,
     );
-
-    copy.src = span;
-    copy.src.access = { .graphics, .compute };
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
-        == gpu::INVALID_ARGUMENT,
-        "a forged span cannot widen its backing buffer access");
-    copy.src.access = {};
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
-        == gpu::INVALID_ARGUMENT,
-        "a forged span cannot erase its access metadata");
-    copy.src.access = (gpu::QueueRoles)0x8;
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
-        == gpu::INVALID_ARGUMENT,
-        "a forged span cannot introduce unknown access bits");
-
     record.queue = recorded_queue;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
 
@@ -594,7 +589,8 @@ fn void copy_without_transfer_usage_faults() @test {
 }
 
 fn void texture_copy_without_buffer_transfer_usage_faults() @test {
-    gpu::Device device = make_val_device();
+    SyncDiagnosticCapture capture = {};
+    gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
@@ -608,31 +604,71 @@ fn void texture_copy_without_buffer_transfer_usage_faults() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::BufferDesc plain_desc = { .size = 256, .usage = { .storage, .addressable }, .memory_kind = gpu::MemoryKind.DEVICE, .access = { .graphics, .compute, .transfer }};
+    gpu::BufferDesc plain_desc = {
+        .size        = 256,
+        .usage       = { .storage, .addressable },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .graphics, .compute, .transfer },
+        .debug_name  = "texture_copy_plain",
+    };
     gpu::BufferHandle plain = gpu::create_buffer(&device, &plain_desc)!!;
     defer gpu::destroy_buffer(&device, plain)!!;
     gpu::GpuSpan plain_span = gpu::get_buffer_span(&device, plain)!!;
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
+    gpu::CommandList cmd = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!,
+    )!!;
     defer discard_test_commands(&cmd)!!;
 
-    // Buffer usage is checked before the texture's tracked layout, so no
-    // barrier is needed to reach either fault.
-    gpu::BufferTextureCopyDesc up = { .src = plain_span, .texture = texture, .width = 4, .height = 4 };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     "texture_copy_plain",
+        rejected_field: "BufferUsage.transfer_src",
+        invariant:      "source buffer must include transfer_src usage",
+    );
+    gpu::BufferTextureCopyDesc up = {
+        .src = plain_span, .texture = texture, .width = 4, .height = 4,
+    };
     fault no_src_usage = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &up));
-    assert(no_src_usage == gpu::INVALID_ARGUMENT, "buffer-to-texture copy without buffer transfer_src faults INVALID_ARGUMENT");
+    assert(no_src_usage == gpu::INVALID_ARGUMENT,
+        "buffer-to-texture copy without buffer transfer_src faults INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      no_src_usage,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               plain.index,
+        generation:          plain.generation,
+    );
 
-    gpu::TextureBufferCopyDesc down = { .texture = texture, .dst = plain_span, .width = 4, .height = 4 };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_texture_to_buffer",
+        debug_name:     "texture_copy_plain",
+        rejected_field: "BufferUsage.transfer_dst",
+        invariant:      "destination buffer must include transfer_dst usage",
+    );
+    gpu::TextureBufferCopyDesc down = {
+        .texture = texture, .dst = plain_span, .width = 4, .height = 4,
+    };
     fault no_dst_usage = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &down));
-    assert(no_dst_usage == gpu::INVALID_ARGUMENT, "texture-to-buffer copy without buffer transfer_dst faults INVALID_ARGUMENT");
+    assert(no_dst_usage == gpu::INVALID_ARGUMENT,
+        "texture-to-buffer copy without buffer transfer_dst faults INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      no_dst_usage,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               plain.index,
+        generation:          plain.generation,
+    );
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
     defer discard_test_executable(&cmd_executable)!!;
     gpu::end_frame(&frame_token)!!;
 }
-
 fn void fill_without_transfer_dst_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -667,7 +703,7 @@ fn void indexed_draw_without_index_usage_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
-    write_val_triangle_verts(&verts_span);
+    write_val_triangle_verts(&device, &verts_span);
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -680,8 +716,8 @@ fn void indexed_draw_without_index_usage_faults() @test {
     fault no_index_usage = @catch(gpu::cmd_draw_indexed(
         commands:      &cmd,
         pipeline:      ctx.graphics,
-        vertex_root:   verts_span.gpu,
-        fragment_root: frag_span.gpu,
+        vertex_root:   val_span_address(&device, verts_span),
+        fragment_root: val_span_address(&device, frag_span),
         index_span:    bad_index_span,
         index_count:   3,
         instance_count: 1,
@@ -704,7 +740,7 @@ fn void indexed_draw_misaligned_offset_faults() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
-    write_val_triangle_verts(&verts_span);
+    write_val_triangle_verts(&device, &verts_span);
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
     // Frame-arena buffers carry .index usage; a 2-byte offset still misaligns
     // the default U32 index type (needs 4-byte alignment).
@@ -721,8 +757,8 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     fault misaligned_fault = @catch(gpu::cmd_draw_indexed(
         commands:      &cmd,
         pipeline:      ctx.graphics,
-        vertex_root:   verts_span.gpu,
-        fragment_root: frag_span.gpu,
+        vertex_root:   val_span_address(&device, verts_span),
+        fragment_root: val_span_address(&device, frag_span),
         index_span:    misaligned,
         index_count:   1,
         instance_count: 1,
@@ -748,7 +784,7 @@ fn void dispatch_with_graphics_pipeline_faults() @test {
     fault wrong_kind = @catch(gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: ctx.graphics,
-        root:     root_span.gpu,
+        root:     val_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     ));
     assert(wrong_kind == gpu::INVALID_ARGUMENT, "dispatch with a graphics pipeline faults INVALID_ARGUMENT");
@@ -849,9 +885,10 @@ fn void valid_copy_fill_and_draw_succeed() @test {
 
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
-    write_val_triangle_verts(&verts_span);
+    write_val_triangle_verts(&device, &verts_span);
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
-    FragRoot* frag_root = (FragRoot*)frag_span.cpu;
+    char[] frag_mapping = gpu::get_span_mapping(&device, frag_span)!!;
+    FragRoot* frag_root = (FragRoot*)frag_mapping.ptr;
     frag_root.texture_index = ctx.tex_index;
     frag_root.sampler_index = ctx.smp_index;
 
@@ -868,7 +905,7 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    gpu::cmd_draw(&cmd, ctx.graphics, verts_span.gpu, frag_span.gpu, 3, 1)!!;
+    gpu::cmd_draw(&cmd, ctx.graphics, val_span_address(&device, verts_span), val_span_address(&device, frag_span), 3, 1)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
@@ -1749,6 +1786,98 @@ fn void assert_sync_contract_diagnostic(
     assert(capture.invariant_matches, "invariant is exact");
 }
 
+fn void buffer_to_texture_access_diagnostic_precedes_buffer_usage() @test {
+    SyncDiagnosticCapture capture = {};
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     "copy_access_texture",
+        rejected_field: "TextureDesc.access",
+        invariant:      "access must include the operation queue role",
+    );
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureDesc texture_desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics },
+        .width      = 1,
+        .height     = 1,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .transfer_dst },
+        .debug_name = "copy_access_texture",
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    gpu::BufferDesc buffer_desc = {
+        .size        = 4,
+        .usage       = { .storage },
+        .memory_kind = gpu::MemoryKind.DEVICE,
+        .access      = { .transfer },
+        .debug_name  = "copy_access_buffer",
+    };
+    gpu::BufferHandle buffer = gpu::create_buffer(&device, &buffer_desc)!!;
+    defer gpu::destroy_buffer(&device, buffer)!!;
+    gpu::GpuSpan span = gpu::get_buffer_span(&device, buffer)!!;
+
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::BufferTextureCopyDesc copy = {
+        .src     = span,
+        .texture = texture,
+        .width   = 1,
+        .height  = 1,
+    };
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandRecord* record = state.commands.get(commands.handle)!!;
+    gpu::QueueRoles selected_roles = record.queue.roles;
+    // Keep diagnostic precedence independent of physical queue aliasing.
+    record.queue.roles = { .transfer };
+
+    fault copy_fault = @catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy));
+
+    assert(copy_fault == gpu::INVALID_ARGUMENT, "copy keeps INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      copy_fault,
+        resource_kind:       gpu::DebugResourceKind.TEXTURE,
+        has_public_identity: true,
+        index:               texture.index,
+        generation:          texture.generation,
+    );
+
+    vk::TextureSlot* texture_slot = state.textures.get(texture)!!;
+    gpu::QueueRoles texture_access = texture_slot.access;
+    texture_slot.access = { .transfer };
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_copy_buffer_to_texture",
+        debug_name:     "copy_access_buffer",
+        rejected_field: "BufferUsage.transfer_src",
+        invariant:      "source buffer must include transfer_src usage",
+    );
+    fault usage_fault = @catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy));
+    assert(usage_fault == gpu::INVALID_ARGUMENT, "copy usage keeps INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      usage_fault,
+        resource_kind:       gpu::DebugResourceKind.BUFFER,
+        has_public_identity: true,
+        index:               span.index,
+        generation:          span.generation,
+    );
+    texture_slot.access = texture_access;
+    record.queue.roles = selected_roles;
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::end_frame(&frame)!!;
+}
+
 fn void tranche_b_command_and_render_diagnostics() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);
@@ -1886,7 +2015,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     fault pipeline_fault = @catch(gpu::cmd_dispatch(
         commands:    &commands,
         pipeline:    draw.graphics,
-        root:        root.gpu,
+        root:        val_span_address(&device, root),
         groups:      { 1, 1, 1 },
     ));
     assert(pipeline_fault == gpu::INVALID_ARGUMENT, "pipeline-kind fault is unchanged");
@@ -1911,7 +2040,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     fault span_fault = @catch(gpu::cmd_dispatch_indirect(
         commands: &commands,
         pipeline: compute.pipeline,
-        root:     root.gpu,
+        root:     val_span_address(&device, root),
         args:     escaped_args,
     ));
     assert(span_fault == gpu::INVALID_ARGUMENT, "shared span fault is unchanged");
@@ -1927,7 +2056,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     fault span_without_callback = @catch(gpu::cmd_dispatch_indirect(
         commands: &commands,
         pipeline: compute.pipeline,
-        root:     root.gpu,
+        root:     val_span_address(&device, root),
         args:     escaped_args,
     ));
     assert(span_without_callback == span_fault,

@@ -137,7 +137,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::BufferHandle compute_root_buffer = gpu::create_buffer(&device, &compute_root_desc)!!;
     defer gpu::destroy_buffer(&device, compute_root_buffer)!!;
     gpu::GpuSpan compute_root_span = gpu::get_buffer_span(&device, compute_root_buffer)!!;
-    WriteRoot* compute_root = (WriteRoot*)compute_root_span.cpu;
+    WriteRoot* compute_root = (WriteRoot*)test_span_mapping(&device, compute_root_span).ptr;
     *compute_root = {
         .texture_index = texture_index,
         .width         = TEX_SIZE,
@@ -169,9 +169,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::BufferHandle sample_root_buffer = gpu::create_buffer(&device, &sample_root_desc)!!;
     defer gpu::destroy_buffer(&device, sample_root_buffer)!!;
     gpu::GpuSpan sample_root_span = gpu::get_buffer_span(&device, sample_root_buffer)!!;
-    SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
+    SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
     *sample_root = {
-        .output_gpu    = compute_output_span.gpu,
+        .output_gpu    = test_span_address(&device, compute_output_span),
         .texture_index = texture_index,
         .sampler_index = sampler_index,
         .width         = TEX_SIZE,
@@ -198,9 +198,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
          0.8f, -0.8f, 0.9f, 0.1f,
          0.0f,  0.8f, 0.5f, 0.9f,
     };
-    float* vertices = (float*)graphics_root_span.cpu;
+    float* vertices = (float*)test_span_mapping(&device, graphics_root_span).ptr;
     for (uint i = 0; i < vertex_data.len; i++) vertices[i] = vertex_data[i];
-    FragRoot* fragment_root = (FragRoot*)((char*)graphics_root_span.cpu + VERTEX_BYTES);
+    FragRoot* fragment_root = (FragRoot*)((char*)test_span_mapping(&device, graphics_root_span).ptr + VERTEX_BYTES);
     *fragment_root = {
         .texture_index = texture_index,
         .sampler_index = sampler_index,
@@ -285,7 +285,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::cmd_dispatch(
         commands: &compute_commands,
         pipeline: compute_pipeline,
-        root:     compute_root_span.gpu,
+        root:     test_span_address(&device, compute_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
     gpu::TextureBarrier write_to_sample = {
@@ -301,7 +301,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::cmd_dispatch(
         commands: &compute_commands,
         pipeline: sample_pipeline,
-        root:     sample_root_span.gpu,
+        root:     test_span_address(&device, sample_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
     gpu::BufferBarrier compute_output_to_host = {
@@ -340,11 +340,11 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = TARGET_SIZE, .height = TARGET_SIZE };
     gpu::cmd_begin_render_pass(&graphics_commands, &pass)!!;
-    gpu::GpuAddress fragment_root_gpu = (gpu::GpuAddress)((ulong)graphics_root_span.gpu + VERTEX_BYTES);
+    gpu::GpuAddress fragment_root_gpu = (gpu::GpuAddress)((ulong)test_span_address(&device, graphics_root_span) + VERTEX_BYTES);
     gpu::cmd_draw(
         commands:       &graphics_commands,
         pipeline:       graphics_pipeline,
-        vertex_root:    graphics_root_span.gpu,
+        vertex_root:    test_span_address(&device, graphics_root_span),
         fragment_root:  fragment_root_gpu,
         vertex_count:   3,
         instance_count: 1,
@@ -392,7 +392,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         size:   0,
     )!!;
 
-    float* compute_texels = (float*)compute_output_span.cpu;
+    float* compute_texels = (float*)test_span_mapping(&device, compute_output_span).ptr;
     for (uint y = 0; y < TEX_SIZE; y++) {
         for (uint x = 0; x < TEX_SIZE; x++) {
             float* texel = &compute_texels[(y * TEX_SIZE + x) * 4];
@@ -402,7 +402,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         }
     }
 
-    char* pixels = (char*)readback_span.cpu;
+    char* pixels = (char*)test_span_mapping(&device, readback_span).ptr;
     char* center = &pixels[(TARGET_SIZE / 2 * TARGET_SIZE + TARGET_SIZE / 2) * 4];
     assert(center[0] == (char)8, "center red comes from the compute-written descriptor");
     assert(center[1] == (char)8, "center green comes from the compute-written descriptor");
@@ -491,13 +491,13 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     gpu::GpuSpan write_root_span = gpu::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
-    WriteRoot* write_root = (WriteRoot*)write_root_span.cpu;
+    WriteRoot* write_root = (WriteRoot*)test_span_mapping(&device, write_root_span).ptr;
     write_root.texture_index = tex_index;
     write_root.width         = TEX;
     write_root.height        = TEX;
 
     gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
-    SampleRoot* sample_root = (SampleRoot*)sample_root_span.cpu;
+    SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
     sample_root.output_gpu    = gpu::get_buffer_address(&device, output)!!;
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
@@ -521,7 +521,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: write_pipe,
-        root:     write_root_span.gpu,
+        root:     test_span_address(&device, write_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
@@ -538,7 +538,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::cmd_dispatch(
         commands: &cmd,
         pipeline: sample_pipe,
-        root:     sample_root_span.gpu,
+        root:     test_span_address(&device, sample_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
@@ -557,7 +557,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
 
     gpu::GpuSpan out_span = gpu::get_buffer_span(&device, output)!!;
-    float* texels = (float*)out_span.cpu;
+    float* texels = (float*)test_span_mapping(&device, out_span).ptr;
     for (uint y = 0; y < TEX; y++) {
         for (uint x = 0; x < TEX; x++) {
             float* texel = &texels[(y * TEX + x) * 4];

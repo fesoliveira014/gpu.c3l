@@ -280,7 +280,7 @@ fn void cull_replay_renders_per_alias() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
 
     gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
-    float* verts = (float*)verts_span.cpu;
+    float* verts = (float*)test_span_mapping(&device, verts_span).ptr;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
          0.8f, -0.8f, 0.9f, 0.1f,
@@ -289,7 +289,7 @@ fn void cull_replay_renders_per_alias() @test {
     for (uint i = 0; i < 12; i++) verts[i] = vertex_data[i];
 
     gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
-    FragRoot* frag_root = (FragRoot*)frag_span.cpu;
+    FragRoot* frag_root = (FragRoot*)test_span_mapping(&device, frag_span).ptr;
     frag_root.texture_index = tex_index;
     frag_root.sampler_index = smp_index;
 
@@ -332,8 +332,8 @@ fn void cull_replay_renders_per_alias() @test {
         gpu::cmd_draw(
             commands:       &cmd,
             pipeline:       pipelines[i],
-            vertex_root:    verts_span.gpu,
-            fragment_root:  frag_span.gpu,
+            vertex_root:    test_span_address(&device, verts_span),
+            fragment_root:  test_span_address(&device, frag_span),
             vertex_count:   3,
             instance_count: 1,
         )!!;
@@ -371,14 +371,14 @@ fn void cull_replay_renders_per_alias() @test {
 
     gpu::invalidate_buffer(&device, rb_culled, 0, 0)!!;
     gpu::GpuSpan culled_span = gpu::get_buffer_span(&device, rb_culled)!!;
-    char* culled_pixels = (char*)culled_span.cpu;
+    char* culled_pixels = (char*)test_span_mapping(&device, culled_span).ptr;
     char* culled_center = &culled_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
     assert(culled_center[0] == (char)8 && culled_center[1] == (char)16 && culled_center[2] == (char)32,
         "back-face culled draw leaves the clear color");
 
     gpu::invalidate_buffer(&device, rb_drawn, 0, 0)!!;
     gpu::GpuSpan drawn_span = gpu::get_buffer_span(&device, rb_drawn)!!;
-    char* drawn_pixels = (char*)drawn_span.cpu;
+    char* drawn_pixels = (char*)test_span_mapping(&device, drawn_span).ptr;
     char* drawn_left = &drawn_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 4) * 4];
     char* drawn_right = &drawn_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE * 3 / 4) * 4];
     assert(drawn_left[0] == (char)255 && drawn_left[1] == (char)255 && drawn_left[2] == (char)255,
@@ -388,7 +388,7 @@ fn void cull_replay_renders_per_alias() @test {
 
     gpu::invalidate_buffer(&device, rb_reset, 0, 0)!!;
     gpu::GpuSpan reset_span = gpu::get_buffer_span(&device, rb_reset)!!;
-    char* reset_pixels = (char*)reset_span.cpu;
+    char* reset_pixels = (char*)test_span_mapping(&device, reset_span).ptr;
     char* reset_center = &reset_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
     assert(reset_center[0] == (char)255 && reset_center[1] == (char)255 && reset_center[2] == (char)255,
         "the next pass restores full viewport and scissor defaults");
@@ -444,8 +444,8 @@ fn void alias_survives_peer_destroy() @test {
     gpu::cmd_draw(
         commands:       &cmd,
         pipeline:       survivor,
-        vertex_root:    verts_span.gpu,
-        fragment_root:  frag_span.gpu,
+        vertex_root:    test_span_address(&device, verts_span),
+        fragment_root:  test_span_address(&device, frag_span),
         vertex_count:   3,
         instance_count: 1,
     )!!;

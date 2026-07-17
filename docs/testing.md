@@ -35,6 +35,7 @@ test_handles.c3
 test_ranges.c3
 test_texture_support.c3
 test_memory_policy.c3
+test_allocation_contract.c3
 test_shader_abi_layout.c3
 test_descriptor_heap_slots.c3
 test_diagnostics.c3
@@ -51,11 +52,13 @@ handle pack/unpack
 generation mismatch
 invalid handle values
 range alignment
-GpuSpan checked/unchecked offset math
+GpuSpan checked/unchecked identity-preserving offset math
+allocation descriptor validation and alignment normalization
+allocation ownership, token consumption, failed-free preservation, and child lifetime
+full/nested span mapping and address queries, unavailable mapping, and stale/cross-device rejection
 device registry concurrency, generation exhaustion, closing-state rejection,
 and active-operation destruction retry
-immediate-parent exact-fit, nested, zero-size, and out-of-parent slicing
-GPU-address, CPU-pointer, backing-offset, and requested-size overflow rejection
+immediate-parent exact-fit, nested, zero-size, out-of-parent, and offset-overflow slicing
 texture descriptor normalization and backend-profile validation
 arena bump allocation logic without Vulkan
 FrameToken size, copy/consumption, scoped-worker fault propagation, end-fault
@@ -84,6 +87,8 @@ test_vk_runtime.c3
 test_vk_device_request.c3
 test_vk_bootstrap.c3
 test_vk_vma_allocator.c3
+test_vk_allocation.c3
+test_vk_span_resolver.c3
 test_vk_buffer.c3
 test_vk_frame_arena.c3
 test_vk_persistent_arena.c3
@@ -107,6 +112,10 @@ query memory budget and stats
 create addressable VMA-backed buffers
 retrieve non-zero GPU address
 map/flush/invalidate paths
+independent allocation identity, capacity, generation reuse, and owner-domain checks
+atomic allocation rollback and CPU_WRITE/GPU_PRIVATE/CPU_READ policy
+native allocation info, exact mapping/address queries, checked subspans, and immediate free
+allocation-span stale/foreign/range rejection, stats, leak identity, and device-loss teardown
 frame-token generation, stale-alias rejection, allocation, end retry, and reset safety
 scoped helper with one observed end attempt after successful and faulting named workers
 owner-derived command finalization
@@ -252,9 +261,9 @@ fault-only; operation-aware result helpers own specialized backend mapping and
 emit exactly once with stable operation context.
 Queue tests cover compact completion packing, monotonicity, exhaustion, stale and foreign ownership, unpublished values, native poll/wait, timeout retry, and no public child allocation. Submission coverage includes deterministic empty-work targeting, contiguous publication, same-queue elision, distinct transfer/compute/graphics waits, foreign and later-sequence rejection, timeline-distance backpressure, sequence exhaustion, native failure rollback, device-loss discard, token consumption, and destruction readiness.
 
-Leak tests verify structured `resource_lifetime` delivery and identity/name
-metadata, stderr fallback without a callback, and callback-active reporting
-when `enable_validation = false`.
+Leak tests verify structured `resource_lifetime` delivery, including
+`GpuAllocation` identity/name metadata, stderr fallback without a callback,
+and callback-active reporting when `enable_validation = false`.
 Concurrency coverage uses a synchronized application-owned sink; callbacks are
 not assumed serialized or reentrant. Device-registry coverage includes
 simultaneous publication, destruction, closing overlap, and shared-runtime
@@ -280,7 +289,8 @@ Do not include development phase labels in test names.
 | Area | Required tests |
 |---|---|
 | Handles | pack/unpack, invalid handle, generation mismatch. |
-| Memory policy | memory kind translation, alignment, range validation. |
+| Memory policy | memory kind/class translation, alignment, range validation. |
+| Independent allocations | descriptor normalization; identity/capacity/reuse; all memory classes; info, mapping, address, checked subspans; rollback; immediate free; placement/lifetime rejection; leaks/stats. |
 | Vulkan bootstrap | create/destroy device, required feature checks. |
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Buffers | mapped buffer, device buffer, addressable buffer. |
@@ -350,7 +360,7 @@ git submodule update --init --recursive
 The blocking headless matrix is shared by Linux and Windows:
 
 ```text
-vk_bootstrap vk_command vk_texture vk_descriptor_heap vk_root_pointer
+vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
 vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
 vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading
 vk_queue vk_debug upload_bench_observation vk_device_request
@@ -517,7 +527,10 @@ Tests should cover specific faults:
 invalid handle -> INVALID_HANDLE
 arena exact-end fit -> success
 arena one-byte, alignment, or extent overflow -> ARENA_FULL
-zero allocation size or malformed alignment -> INVALID_ARGUMENT
+zero allocation size, malformed alignment, or unavailable span capability -> INVALID_ARGUMENT
+stale or foreign allocation/span identity -> INVALID_HANDLE
+live placement on free_allocation -> RESOURCE_IN_USE and unchanged token
+allocation table capacity -> SLOT_TABLE_FULL with no published token
 unsupported required feature -> UNSUPPORTED_FEATURE
 invalid command state -> COMMAND_RECORDING_ERROR
 invalid descriptor index -> INVALID_HANDLE or DESCRIPTOR_HEAP_FULL as appropriate

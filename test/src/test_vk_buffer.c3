@@ -34,10 +34,14 @@ fn void buffer_create_address_span() @test {
     };
     gpu::BufferHandle upload_buffer = gpu::create_buffer(&device, &upload_desc)!!;
     gpu::GpuSpan upload_span = gpu::get_buffer_span(&device, upload_buffer)!!;
-    assert(upload_span.cpu != null, "upload buffer span is mapped");
+    char[] upload_mapping = gpu::get_span_mapping(&device, upload_span)!!;
+    assert(upload_mapping.ptr != null && upload_mapping.len == 256,
+        "upload buffer exposes its exact mapping");
     assert(upload_span.size == 256, "span reports buffer size");
-    assert((uint)upload_span.access == (uint)upload_desc.access,
-        "span retains the buffer access roles");
+    assert(upload_span.owner == upload_buffer.owner
+        && upload_span.index == upload_buffer.index
+        && upload_span.generation == upload_buffer.generation,
+        "span retains the buffer identity");
 
     // Addressable buffer exposes a non-zero GPU address.
     gpu::BufferDesc addressable_desc = {
