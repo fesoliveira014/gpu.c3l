@@ -29,12 +29,11 @@ fn double record_global_barriers(gpu::Device* device) {
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
-fn double record_buffer_barriers(gpu::Device* device, gpu::BufferHandle buffer) {
+fn double record_buffer_barriers(gpu::Device* device, gpu::GpuSpan span) {
     gpu::FrameToken frame = gpu::begin_frame(device)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::BufferBarrier barrier = {
-        .buffer        = buffer,
-        .size          = 64,
+        .span          = span,
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.COMPUTE_SHADER,
         .before_hazard = gpu::Hazard.SHADER_WRITE,
@@ -135,7 +134,7 @@ fn int main() {
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     (void)record_global_barriers(&device);
-    (void)record_buffer_barriers(&device, buffer);
+    (void)record_buffer_barriers(&device, buffer_span);
     (void)record_indirect_dispatches(&device, pipeline, gpu::get_span_address(&device, buffer_span)!!, args);
 
     double[COMMAND_RECORD_REPETITIONS] global_results;
@@ -143,7 +142,7 @@ fn int main() {
     double[COMMAND_RECORD_REPETITIONS] indirect_results;
     for (uint i = 0; i < COMMAND_RECORD_REPETITIONS; i++) {
         global_results[i] = record_global_barriers(&device);
-        buffer_results[i] = record_buffer_barriers(&device, buffer);
+        buffer_results[i] = record_buffer_barriers(&device, buffer_span);
         indirect_results[i] = record_indirect_dispatches(&device, pipeline, gpu::get_span_address(&device, buffer_span)!!, args);
     }
 

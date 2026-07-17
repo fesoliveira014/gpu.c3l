@@ -72,6 +72,7 @@ fn void copy_upload_to_readback() @test {
     defer gpu::destroy_buffer(&device, readback)!!;
 
     gpu::GpuSpan up_span = gpu::get_buffer_span(&device, upload)!!;
+    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
     char[] up_mapping = gpu::get_span_mapping(&device, up_span)!!;
     char* src = up_mapping.ptr;
     for (uint i = 0; i < 256; i++) src[i] = (char)i;
@@ -80,10 +81,10 @@ fn void copy_upload_to_readback() @test {
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    gpu::BufferCopyDesc copy = { .src = upload, .dst = readback, .src_offset = 0, .dst_offset = 0, .size = 256 };
+    gpu::BufferCopyDesc copy = { .src = up_span, .dst = rb_span };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier bar = {
-        .buffer = readback, .offset = 0, .size = 256,
+        .span = rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -100,7 +101,6 @@ fn void copy_upload_to_readback() @test {
     )!!;
     gpu::wait_completion(completion, 1_000_000_000)!!;
 
-    gpu::GpuSpan rb_span = gpu::get_buffer_span(&device, readback)!!;
     char[] rb_mapping = gpu::get_span_mapping(&device, rb_span)!!;
     char* dst = rb_mapping.ptr;
     for (uint i = 0; i < 256; i++) assert(dst[i] == (char)i, "readback byte matches uploaded byte");

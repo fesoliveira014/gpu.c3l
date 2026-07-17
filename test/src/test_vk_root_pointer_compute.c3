@@ -58,7 +58,7 @@ fn void root_pointer_compute_readback() @test {
         groups:   { (COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;
     gpu::BufferBarrier bar = {
-        .buffer = output, .offset = 0, .size = COUNT * float::size,
+        .span = gpu::get_buffer_span(&device, output)!!,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };

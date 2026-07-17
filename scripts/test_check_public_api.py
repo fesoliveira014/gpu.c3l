@@ -5,6 +5,21 @@ import unittest
 from scripts import check_public_api
 
 
+def api_function(
+    name: str,
+    return_type: str,
+    *parameters: tuple[str, str],
+) -> dict:
+    return {
+        "name": name,
+        "return_type": {"name": return_type},
+        "members": [
+            {"name": parameter, "type": {"name": type_name}}
+            for parameter, type_name in parameters
+        ],
+    }
+
+
 def surface_module(*handles: str) -> dict:
     return {
         "functions": [{
@@ -148,6 +163,123 @@ def valid_document() -> dict:
                             {"name": "span", "type": {"name": "GpuSpan"}},
                         ],
                     },
+                    api_function(
+                        "cmd_copy_buffer",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("desc", "BufferCopyDesc*"),
+                    ),
+                    api_function(
+                        "cmd_fill_buffer",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("dst", "GpuSpan"),
+                        ("value", "uint"),
+                    ),
+                    api_function(
+                        "cmd_buffer_barrier",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("barrier", "BufferBarrier*"),
+                    ),
+                    api_function(
+                        "cmd_upload_buffer",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("dst", "GpuSpan"),
+                        ("data", "char[]"),
+                    ),
+                    api_function(
+                        "upload_buffer_data",
+                        "void?",
+                        ("device", "Device*"),
+                        ("dst", "GpuSpan"),
+                        ("data", "char[]"),
+                        ("next_stage", "Stage"),
+                        ("next_hazard", "Hazard"),
+                    ),
+                    api_function(
+                        "readback_buffer_data",
+                        "void?",
+                        ("device", "Device*"),
+                        ("src", "GpuSpan"),
+                        ("out_data", "char[]"),
+                        ("from_stage", "Stage"),
+                        ("from_hazard", "Hazard"),
+                    ),
+                    api_function(
+                        "cmd_readback_buffer",
+                        "ReadbackTicket?",
+                        ("commands", "CommandList*"),
+                        ("src", "GpuSpan"),
+                    ),
+                    api_function(
+                        "cmd_copy_buffer_to_texture",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("desc", "BufferTextureCopyDesc*"),
+                    ),
+                    api_function(
+                        "cmd_copy_texture_to_buffer",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("desc", "TextureBufferCopyDesc*"),
+                    ),
+                    api_function(
+                        "cmd_draw_indexed",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("pipeline", "PipelineHandle"),
+                        ("vertex_root", "GpuAddress"),
+                        ("fragment_root", "GpuAddress"),
+                        ("index_span", "GpuSpan"),
+                        ("index_count", "uint"),
+                        ("instance_count", "uint"),
+                        ("index_type", "IndexType"),
+                    ),
+                    api_function(
+                        "cmd_draw_indirect",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("pipeline", "PipelineHandle"),
+                        ("vertex_root", "GpuAddress"),
+                        ("fragment_root", "GpuAddress"),
+                        ("args", "GpuSpan"),
+                        ("draw_count", "uint"),
+                    ),
+                    api_function(
+                        "cmd_draw_indexed_indirect",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("pipeline", "PipelineHandle"),
+                        ("vertex_root", "GpuAddress"),
+                        ("fragment_root", "GpuAddress"),
+                        ("args", "GpuSpan"),
+                        ("draw_count", "uint"),
+                        ("index_span", "GpuSpan"),
+                        ("index_type", "IndexType"),
+                    ),
+                    api_function(
+                        "cmd_draw_indexed_indirect_count",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("pipeline", "PipelineHandle"),
+                        ("vertex_root", "GpuAddress"),
+                        ("fragment_root", "GpuAddress"),
+                        ("args", "GpuSpan"),
+                        ("count_span", "GpuSpan"),
+                        ("max_draw_count", "uint"),
+                        ("index_span", "GpuSpan"),
+                        ("index_type", "IndexType"),
+                    ),
+                    api_function(
+                        "cmd_dispatch_indirect",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("pipeline", "PipelineHandle"),
+                        ("root", "GpuAddress"),
+                        ("args", "GpuSpan"),
+                    ),
                 ],
                 "types": [
                     {
@@ -224,6 +356,93 @@ def valid_document() -> dict:
                             {"name": "generation", "type": {"name": "uint"}},
                             {"name": "offset", "type": {"name": "usz"}},
                             {"name": "size", "type": {"name": "usz"}},
+                        ],
+                    },
+                    {
+                        "name": "BufferCopyDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "src", "type": {"name": "GpuSpan"}},
+                            {"name": "dst", "type": {"name": "GpuSpan"}},
+                        ],
+                    },
+                    {
+                        "name": "BufferTextureCopyDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "src", "type": {"name": "GpuSpan"}},
+                            {
+                                "name": "row_length_texels",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "texture",
+                                "type": {"name": "TextureHandle"},
+                            },
+                            {"name": "mip", "type": {"name": "uint"}},
+                            {
+                                "name": "base_layer",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "layer_count",
+                                "type": {"name": "uint"},
+                            },
+                            {"name": "x", "type": {"name": "uint"}},
+                            {"name": "y", "type": {"name": "uint"}},
+                            {"name": "width", "type": {"name": "uint"}},
+                            {"name": "height", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "TextureBufferCopyDesc",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "texture",
+                                "type": {"name": "TextureHandle"},
+                            },
+                            {"name": "dst", "type": {"name": "GpuSpan"}},
+                            {
+                                "name": "row_length_texels",
+                                "type": {"name": "uint"},
+                            },
+                            {"name": "mip", "type": {"name": "uint"}},
+                            {
+                                "name": "base_layer",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "layer_count",
+                                "type": {"name": "uint"},
+                            },
+                            {"name": "x", "type": {"name": "uint"}},
+                            {"name": "y", "type": {"name": "uint"}},
+                            {"name": "width", "type": {"name": "uint"}},
+                            {"name": "height", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "BufferBarrier",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "span", "type": {"name": "GpuSpan"}},
+                            {
+                                "name": "before_stage",
+                                "type": {"name": "Stage"},
+                            },
+                            {
+                                "name": "after_stage",
+                                "type": {"name": "Stage"},
+                            },
+                            {
+                                "name": "before_hazard",
+                                "type": {"name": "Hazard"},
+                            },
+                            {
+                                "name": "after_hazard",
+                                "type": {"name": "Hazard"},
+                            },
                         ],
                     },
                     {"name": "ExecutableCommandList", "kind": "struct"},
@@ -399,6 +618,188 @@ class PublicApiCheckTests(unittest.TestCase):
                     f"missing {name}",
                     check_public_api.validate_document(document),
                 )
+
+    def test_rejects_span_operation_parameter_renaming(self) -> None:
+        for name in (
+            "cmd_copy_buffer",
+            "cmd_fill_buffer",
+            "cmd_buffer_barrier",
+            "cmd_upload_buffer",
+            "upload_buffer_data",
+            "readback_buffer_data",
+            "cmd_readback_buffer",
+            "cmd_copy_buffer_to_texture",
+            "cmd_copy_texture_to_buffer",
+            "cmd_draw_indexed",
+            "cmd_draw_indirect",
+            "cmd_draw_indexed_indirect",
+            "cmd_draw_indexed_indirect_count",
+            "cmd_dispatch_indirect",
+        ):
+            with self.subTest(name=name):
+                document = valid_document()
+                function = next(
+                    entry for entry in document["modules"]["gpu"]["functions"]
+                    if entry["name"] == name
+                )
+                function["members"][0]["name"] = "renamed"
+                self.assertIn(
+                    f"{name} has the wrong parameters",
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_non_span_index_indirect_and_texture_copy(self) -> None:
+        for name in (
+            "cmd_draw_indexed",
+            "cmd_draw_indirect",
+            "cmd_draw_indexed_indirect",
+            "cmd_draw_indexed_indirect_count",
+            "cmd_dispatch_indirect",
+        ):
+            with self.subTest(name=name):
+                document = valid_document()
+                function = next(
+                    entry for entry in document["modules"]["gpu"]["functions"]
+                    if entry["name"] == name
+                )
+                span = next(
+                    member for member in function["members"]
+                    if member["type"]["name"] == "GpuSpan"
+                )
+                span["type"]["name"] = "BufferHandle"
+                self.assertIn(
+                    f"{name} has the wrong parameters",
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_non_span_buffer_texture_copy_schemas(self) -> None:
+        for type_name, field_name, failure in (
+            (
+                "BufferTextureCopyDesc",
+                "src",
+                "BufferTextureCopyDesc must contain one source span",
+            ),
+            (
+                "TextureBufferCopyDesc",
+                "dst",
+                "TextureBufferCopyDesc must contain one destination span",
+            ),
+        ):
+            with self.subTest(type_name=type_name):
+                document = valid_document()
+                desc = next(
+                    entry for entry in document["modules"]["gpu"]["types"]
+                    if entry["name"] == type_name
+                )
+                field = next(
+                    member for member in desc["members"]
+                    if member["name"] == field_name
+                )
+                field["type"]["name"] = "BufferHandle"
+                self.assertIn(
+                    failure,
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_legacy_buffer_data_function_signatures(self) -> None:
+        legacy_parameters = {
+            "cmd_fill_buffer": (
+                "CommandList*",
+                "BufferHandle",
+                "usz",
+                "usz",
+                "uint",
+            ),
+            "cmd_upload_buffer": (
+                "CommandList*",
+                "BufferHandle",
+                "usz",
+                "char[]",
+            ),
+            "upload_buffer_data": (
+                "Device*",
+                "BufferHandle",
+                "usz",
+                "char[]",
+                "Stage",
+                "Hazard",
+            ),
+            "readback_buffer_data": (
+                "Device*",
+                "BufferHandle",
+                "usz",
+                "char[]",
+                "Stage",
+                "Hazard",
+            ),
+            "cmd_readback_buffer": (
+                "CommandList*",
+                "BufferHandle",
+                "usz",
+                "usz",
+            ),
+        }
+        for name, parameter_types in legacy_parameters.items():
+            with self.subTest(name=name):
+                document = valid_document()
+                function = next(
+                    entry for entry in document["modules"]["gpu"]["functions"]
+                    if entry["name"] == name
+                )
+                function["members"] = [
+                    {
+                        "name": f"parameter_{index}",
+                        "type": {"name": type_name},
+                    }
+                    for index, type_name in enumerate(parameter_types)
+                ]
+                self.assertIn(
+                    f"{name} has the wrong parameters",
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_legacy_buffer_copy_schema(self) -> None:
+        document = valid_document()
+        copy_desc = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "BufferCopyDesc"
+        )
+        copy_desc["members"] = [
+            {"name": "src", "type": {"name": "BufferHandle"}},
+            {"name": "dst", "type": {"name": "BufferHandle"}},
+            {"name": "src_offset", "type": {"name": "usz"}},
+            {"name": "dst_offset", "type": {"name": "usz"}},
+            {"name": "size", "type": {"name": "usz"}},
+        ]
+        self.assertIn(
+            "BufferCopyDesc must contain exactly source and destination spans",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_legacy_buffer_barrier_schema(self) -> None:
+        document = valid_document()
+        barrier = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "BufferBarrier"
+        )
+        barrier["members"] = [
+            {"name": "buffer", "type": {"name": "BufferHandle"}},
+            {"name": "offset", "type": {"name": "usz"}},
+            {"name": "size", "type": {"name": "usz"}},
+            *barrier["members"][1:],
+        ]
+        self.assertIn(
+            "BufferBarrier must contain exactly one span and semantic hazards",
+            check_public_api.validate_document(document),
+        )
+
+    def test_allows_buffer_handle_with_span_operations(self) -> None:
+        document = valid_document()
+        document["modules"]["gpu"]["types"].append({
+            "name": "BufferHandle",
+            "kind": "struct",
+        })
+        self.assertEqual(check_public_api.validate_document(document), [])
 
     def test_rejects_span_backend_details(self) -> None:
         document = valid_document()

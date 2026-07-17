@@ -90,10 +90,14 @@ Running example: `offscreen_triangle`, `multithreaded_recording`.
 Goal: overlap GPU work with CPU consumption.
 
 ```c3
-gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, buf, 0, size)!;
-// ... frames later:
+gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, result_span)!;
+```
+
+After submission and frame retirement:
+
+```c3
 if (gpu::poll_readback(&device, &ticket)!) {
-    gpu::resolve_readback(&device, &ticket, out)!;   // READBACK_NOT_READY if early
+    gpu::resolve_readback(&device, &ticket, out)!;
 }
 ```
 

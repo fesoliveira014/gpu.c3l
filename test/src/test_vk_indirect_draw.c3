@@ -151,7 +151,7 @@ fn void record_target_readback(
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = readback, .offset = rb_span.offset, .size = rb_span.size,
+        .span = *rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -381,9 +381,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     )!!;
 
     gpu::BufferBarrier args_ready = {
-        .buffer        = args_buffer,
-        .offset        = 0,
-        .size          = args_desc.size,
+        .span          = args_span,
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.INDIRECT_COMMAND,
         .before_hazard = gpu::Hazard.SHADER_WRITE,
@@ -394,21 +392,14 @@ fn void compute_generated_indexed_indirect_draw() @test {
     // Ticket on the same GPU-written args: order the compute writes before
     // the ticket's transfer read.
     gpu::BufferBarrier args_to_copy = {
-        .buffer        = args_buffer,
-        .offset        = 0,
-        .size          = args_desc.size,
+        .span          = args_span,
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.TRANSFER,
         .before_hazard = gpu::Hazard.SHADER_WRITE,
         .after_hazard  = gpu::Hazard.TRANSFER_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &args_to_copy)!!;
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(
-        commands: &cmd,
-        src:      args_buffer,
-        offset:   0,
-        size:     args_desc.size,
-    )!!;
+    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, args_span)!!;
 
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -589,9 +580,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier args_ready = {
-        .buffer        = dispatch_resolved.backing_buffer,
-        .offset        = dispatch_resolved.offset,
-        .size          = dispatch_args.size,
+        .span          = dispatch_args,
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.INDIRECT_COMMAND,
         .before_hazard = gpu::Hazard.SHADER_WRITE,
@@ -605,7 +594,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
         args:     dispatch_args,
     )!!;
     gpu::BufferBarrier host_read = {
-        .buffer = io_resolved.backing_buffer, .offset = io_resolved.offset, .size = io_resolved.size,
+        .span = io_span,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -741,12 +730,7 @@ fn void ticket_hybrid_and_short_dest() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     ulong fallbacks_before = vk::dedicated_fallback_count(state);
     for (uint i = 0; i < TICKETS; i++) {
-        tickets[i] = gpu::cmd_readback_buffer(
-            commands: &cmd,
-            src:      src,
-            offset:   0,
-            size:     CHUNK,
-        )!!;
+        tickets[i] = gpu::cmd_readback_buffer(&cmd, src_span)!!;
     }
     ulong dedicated_count = vk::dedicated_fallback_count(state) - fallbacks_before;
     assert(dedicated_count > 0, "arena saturation falls back to dedicated tickets");
@@ -808,12 +792,7 @@ fn void discard_cancels_command_readback_tickets() @test {
     gpu::BufferHandle src = gpu::create_buffer(&device, &src_desc)!!;
 
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(
-        commands: &commands,
-        src:      src,
-        offset:   0,
-        size:     1024,
-    )!!;
+    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&commands, gpu::get_buffer_span(&device, src)!!)!!;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
     gpu::discard_executable_commands(&commands_executable)!!;
@@ -842,12 +821,7 @@ fn void unresolved_readback_ticket_blocks_device_destruction() @test {
 
     gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(
-        commands: &commands,
-        src:      src,
-        offset:   0,
-        size:     1024,
-    )!!;
+    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&commands, gpu::get_buffer_span(&device, src)!!)!!;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
     gpu::ExecutableCommandList[1] lists = { commands_executable };

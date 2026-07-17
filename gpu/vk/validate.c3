@@ -16,7 +16,6 @@ struct ResolvedSpan {
 
 fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     if (state == null || span == null) return gpu::INVALID_HANDLE~;
-    if (span.size == 0) return gpu::INVALID_ARGUMENT~;
 
     BufferSlot* slot;
     gpu::BufferHandle backing_buffer;
@@ -68,6 +67,7 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         return gpu::INVALID_HANDLE~;
     }
 
+    if (span.size == 0) return gpu::INVALID_ARGUMENT~;
     if (!gpu::range_fits(slot.size, offset, span.size)) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -222,9 +222,9 @@ fn gpu::DebugResourceKind span_resource_kind(
     return gpu::DebugResourceKind.BUFFER;
 }
 
-fn void? validate_span_recording_access(
+fn void? validate_span_queue_access(
     VkDeviceState* state,
-    CommandRecord* record,
+    gpu::QueueRoles queue_roles,
     ResolvedSpan* resolved,
     gpu::GpuSpan* span,
     ZString operation,
@@ -243,13 +243,13 @@ fn void? validate_span_recording_access(
             generation:          span.generation,
             debug_name:          slot_name(&resolved.slot.debug_name[0]),
             rejected_field:      "GpuSpan",
-            invariant:           "resolved access must be a non-empty subset of the backing buffer access",
+            invariant:           "span access must be a non-empty subset of its owner access",
             backend_text:        null,
         )~;
     }
     return validate_operation_queue_access(
         state:          state,
-        queue_roles:    record.queue.roles,
+        queue_roles:    queue_roles,
         access:         resolved.access,
         resource_kind:  resource_kind,
         index:          span.index,
@@ -258,6 +258,50 @@ fn void? validate_span_recording_access(
         operation:      operation,
         rejected_field: "GpuSpan",
     );
+}
+
+fn void? validate_span_recording_access(
+    VkDeviceState* state,
+    CommandRecord* record,
+    ResolvedSpan* resolved,
+    gpu::GpuSpan* span,
+    ZString operation,
+) @private {
+    return validate_span_queue_access(
+        state:       state,
+        queue_roles: record.queue.roles,
+        resolved:    resolved,
+        span:        span,
+        operation:   operation,
+    );
+}
+
+fn void? validate_span_transfer_usage(
+    VkDeviceState* state,
+    ResolvedSpan* resolved,
+    gpu::GpuSpan* span,
+    bool source,
+    ZString operation,
+) @private {
+    bool supported = source
+        ? resolved.slot.usage.transfer_src
+        : resolved.slot.usage.transfer_dst;
+    if (supported) return;
+    return report_contract_failure(
+        state:               state,
+        operation:           operation,
+        public_fault:        gpu::INVALID_ARGUMENT,
+        resource_kind:       span_resource_kind(state, span),
+        has_public_identity: true,
+        index:               span.index,
+        generation:          span.generation,
+        debug_name:          slot_name(&resolved.slot.debug_name[0]),
+        rejected_field:      "GpuSpan",
+        invariant:           source
+            ? "source span must support copy reads"
+            : "destination span must support copy writes",
+        backend_text:        null,
+    )~;
 }
 
 fn ResolvedSpan? resolve_span_slot(
@@ -270,8 +314,6 @@ fn ResolvedSpan? resolve_span_slot(
     ResolvedSpan? result = resolve_span(state, span);
     if (catch span_fault = result) {
         if (operation == null) return span_fault~;
-        bool persistent = span != null
-            && span.owner == state.persistent_arena.allocations.owner;
         bool allocation_owner = span != null
             && span.owner == state.allocations.owner;
         bool has_identity = span_fault != gpu::INVALID_HANDLE;
@@ -309,9 +351,7 @@ fn ResolvedSpan? resolve_span_slot(
                 : rejected_field,
             invariant:           span_fault == gpu::INVALID_HANDLE
                 ? "must identify one live span owner"
-                : persistent || allocation_owner
-                    ? "span range must fit its live owner"
-                    : "span offset and size must fit the backing buffer",
+                : "span range must fit its live owner",
             backend_text:        null,
         )~;
     }
@@ -319,6 +359,7 @@ fn ResolvedSpan? resolve_span_slot(
     if (required > resolved.size) return gpu::INVALID_ARGUMENT~;
     return resolved;
 }
+
 <* Bytes per index element for `index_type`. *>
 fn usz index_element_size(gpu::IndexType index_type) => index_type == gpu::IndexType.U16 ? 2 : 4;
 

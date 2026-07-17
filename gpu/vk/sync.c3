@@ -4,50 +4,27 @@ import gpu @public;
 import vk;
 import std::io;
 
-fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* barrier) @private {
+fn void? vk_cmd_buffer_barrier(
+    gpu::CommandList* commands,
+    gpu::BufferBarrier* barrier,
+) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
-    BufferSlot* slot = state.buffers.get(barrier.buffer)!;
-    validate_buffer_recording_access(
+    ResolvedSpan resolved = resolve_span_slot(
+        state:          state,
+        span:           &barrier.span,
+        required:       0,
+        operation:      "cmd_buffer_barrier",
+        rejected_field: "BufferBarrier.span",
+    )!;
+    validate_span_recording_access(
         state:     state,
         record:    record,
-        slot:      slot,
-        handle:    barrier.buffer,
+        resolved:  &resolved,
+        span:      &barrier.span,
         operation: "cmd_buffer_barrier",
     )!;
-    // size 0 is the whole-buffer convention, matching flush/invalidate/fill.
-    if (!gpu::range_fits(slot.size, barrier.offset, barrier.size)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_buffer_barrier",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.BUFFER,
-            has_public_identity: true,
-            index:               barrier.buffer.index,
-            generation:          barrier.buffer.generation,
-            debug_name:          slot_name(&slot.debug_name[0]),
-            rejected_field:      "BufferBarrier.size",
-            invariant:           "offset and size must fit the buffer",
-            backend_text:        "buffer barrier range exceeds the buffer",
-        )~;
-    }
-    if (barrier.size == 0 && barrier.offset >= slot.size) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_buffer_barrier",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.BUFFER,
-            has_public_identity: true,
-            index:               barrier.buffer.index,
-            generation:          barrier.buffer.generation,
-            debug_name:          slot_name(&slot.debug_name[0]),
-            rejected_field:      "BufferBarrier.offset",
-            invariant:           "whole-buffer barrier offset must lie inside the buffer",
-            backend_text:        "whole-buffer barrier offset lies outside the buffer",
-        )~;
-    }
-    vk::DeviceSize barrier_size = barrier.size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)barrier.size;
 
     vk::BufferMemoryBarrier2 bar = vk::buffer_memory_barrier2()
         .set_src_stage_mask(stage_to_vk(barrier.before_stage))
@@ -56,9 +33,9 @@ fn void? vk_cmd_buffer_barrier(gpu::CommandList* commands, gpu::BufferBarrier* b
         .set_dst_access_mask(hazard_to_vk_access(barrier.after_hazard))
         .set_src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .set_buffer(slot.buffer)
-        .set_offset((vk::DeviceSize)barrier.offset)
-        .set_size(barrier_size);
+        .set_buffer(resolved.slot.buffer)
+        .set_offset((vk::DeviceSize)resolved.offset)
+        .set_size((vk::DeviceSize)resolved.size);
 
     vk::DependencyInfo dep = vk::dependency_info().set_buffer_memory_barriers((&bar)[:1]);
     vk::cmd_pipeline_barrier2(record.command_buffer, &dep);

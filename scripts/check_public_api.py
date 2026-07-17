@@ -196,7 +196,7 @@ def validate_document(document: dict) -> list[str]:
         if parameter_types != ("Queue", "SubmitDesc*"):
             failures.append("submit must take Queue and SubmitDesc*")
 
-    allocation_functions = {
+    required_functions = {
         "allocate_memory": (
             ("Device*", "AllocationDesc*"),
             "GpuAllocation?",
@@ -229,18 +229,187 @@ def validate_document(document: dict) -> list[str]:
             ("Device*", "GpuSpan"),
             "void?",
         ),
+        "cmd_copy_buffer": (
+            ("CommandList*", "BufferCopyDesc*"),
+            "void?",
+        ),
+        "cmd_fill_buffer": (
+            ("CommandList*", "GpuSpan", "uint"),
+            "void?",
+        ),
+        "cmd_buffer_barrier": (
+            ("CommandList*", "BufferBarrier*"),
+            "void?",
+        ),
+        "cmd_upload_buffer": (
+            ("CommandList*", "GpuSpan", "char[]"),
+            "void?",
+        ),
+        "upload_buffer_data": (
+            ("Device*", "GpuSpan", "char[]", "Stage", "Hazard"),
+            "void?",
+        ),
+        "readback_buffer_data": (
+            ("Device*", "GpuSpan", "char[]", "Stage", "Hazard"),
+            "void?",
+        ),
+        "cmd_readback_buffer": (
+            ("CommandList*", "GpuSpan"),
+            "ReadbackTicket?",
+        ),
+        "cmd_copy_buffer_to_texture": (
+            ("CommandList*", "BufferTextureCopyDesc*"),
+            "void?",
+        ),
+        "cmd_copy_texture_to_buffer": (
+            ("CommandList*", "TextureBufferCopyDesc*"),
+            "void?",
+        ),
+        "cmd_draw_indexed": (
+            (
+                "CommandList*",
+                "PipelineHandle",
+                "GpuAddress",
+                "GpuAddress",
+                "GpuSpan",
+                "uint",
+                "uint",
+                "IndexType",
+            ),
+            "void?",
+        ),
+        "cmd_draw_indirect": (
+            (
+                "CommandList*",
+                "PipelineHandle",
+                "GpuAddress",
+                "GpuAddress",
+                "GpuSpan",
+                "uint",
+            ),
+            "void?",
+        ),
+        "cmd_draw_indexed_indirect": (
+            (
+                "CommandList*",
+                "PipelineHandle",
+                "GpuAddress",
+                "GpuAddress",
+                "GpuSpan",
+                "uint",
+                "GpuSpan",
+                "IndexType",
+            ),
+            "void?",
+        ),
+        "cmd_draw_indexed_indirect_count": (
+            (
+                "CommandList*",
+                "PipelineHandle",
+                "GpuAddress",
+                "GpuAddress",
+                "GpuSpan",
+                "GpuSpan",
+                "uint",
+                "GpuSpan",
+                "IndexType",
+            ),
+            "void?",
+        ),
+        "cmd_dispatch_indirect": (
+            (
+                "CommandList*",
+                "PipelineHandle",
+                "GpuAddress",
+                "GpuSpan",
+            ),
+            "void?",
+        ),
     }
-    for name, contract in allocation_functions.items():
+    required_parameter_names = {
+        "cmd_copy_buffer": ("commands", "desc"),
+        "cmd_fill_buffer": ("commands", "dst", "value"),
+        "cmd_buffer_barrier": ("commands", "barrier"),
+        "cmd_upload_buffer": ("commands", "dst", "data"),
+        "upload_buffer_data": (
+            "device",
+            "dst",
+            "data",
+            "next_stage",
+            "next_hazard",
+        ),
+        "readback_buffer_data": (
+            "device",
+            "src",
+            "out_data",
+            "from_stage",
+            "from_hazard",
+        ),
+        "cmd_readback_buffer": ("commands", "src"),
+        "cmd_copy_buffer_to_texture": ("commands", "desc"),
+        "cmd_copy_texture_to_buffer": ("commands", "desc"),
+        "cmd_draw_indexed": (
+            "commands",
+            "pipeline",
+            "vertex_root",
+            "fragment_root",
+            "index_span",
+            "index_count",
+            "instance_count",
+            "index_type",
+        ),
+        "cmd_draw_indirect": (
+            "commands",
+            "pipeline",
+            "vertex_root",
+            "fragment_root",
+            "args",
+            "draw_count",
+        ),
+        "cmd_draw_indexed_indirect": (
+            "commands",
+            "pipeline",
+            "vertex_root",
+            "fragment_root",
+            "args",
+            "draw_count",
+            "index_span",
+            "index_type",
+        ),
+        "cmd_draw_indexed_indirect_count": (
+            "commands",
+            "pipeline",
+            "vertex_root",
+            "fragment_root",
+            "args",
+            "count_span",
+            "max_draw_count",
+            "index_span",
+            "index_type",
+        ),
+        "cmd_dispatch_indirect": (
+            "commands",
+            "pipeline",
+            "root",
+            "args",
+        ),
+    }
+    for name, contract in required_functions.items():
         expected_parameters, expected_return = contract
         function = functions.get(name)
         if function is None:
             failures.append(f"missing {name}")
             continue
+        members = function.get("members", [])
         parameter_types = tuple(
             member.get("type", {}).get("name")
-            for member in function.get("members", [])
+            for member in members
         )
-        if parameter_types != expected_parameters:
+        parameter_names = tuple(member.get("name") for member in members)
+        expected_names = required_parameter_names.get(name)
+        if (parameter_types != expected_parameters
+                or (expected_names is not None
+                    and parameter_names != expected_names)):
             failures.append(f"{name} has the wrong parameters")
         if function.get("return_type", {}).get("name") != expected_return:
             failures.append(f"{name} has the wrong return type")
@@ -252,6 +421,10 @@ def validate_document(document: dict) -> list[str]:
         ("DebugResourceKind", "enum"),
         ("AllocationDesc", "struct"),
         ("AllocationInfo", "struct"),
+        ("BufferCopyDesc", "struct"),
+        ("BufferTextureCopyDesc", "struct"),
+        ("TextureBufferCopyDesc", "struct"),
+        ("BufferBarrier", "struct"),
     ):
         definition = types.get(name)
         if definition is None or definition.get("kind") != kind:
@@ -297,6 +470,53 @@ def validate_document(document: dict) -> list[str]:
                 ("addressable", "bool"),
             ),
             "AllocationInfo must match the exact public schema",
+        ),
+        "BufferCopyDesc": (
+            (
+                ("src", "GpuSpan"),
+                ("dst", "GpuSpan"),
+            ),
+            "BufferCopyDesc must contain exactly source and destination spans",
+        ),
+        "BufferTextureCopyDesc": (
+            (
+                ("src", "GpuSpan"),
+                ("row_length_texels", "uint"),
+                ("texture", "TextureHandle"),
+                ("mip", "uint"),
+                ("base_layer", "uint"),
+                ("layer_count", "uint"),
+                ("x", "uint"),
+                ("y", "uint"),
+                ("width", "uint"),
+                ("height", "uint"),
+            ),
+            "BufferTextureCopyDesc must contain one source span",
+        ),
+        "TextureBufferCopyDesc": (
+            (
+                ("texture", "TextureHandle"),
+                ("dst", "GpuSpan"),
+                ("row_length_texels", "uint"),
+                ("mip", "uint"),
+                ("base_layer", "uint"),
+                ("layer_count", "uint"),
+                ("x", "uint"),
+                ("y", "uint"),
+                ("width", "uint"),
+                ("height", "uint"),
+            ),
+            "TextureBufferCopyDesc must contain one destination span",
+        ),
+        "BufferBarrier": (
+            (
+                ("span", "GpuSpan"),
+                ("before_stage", "Stage"),
+                ("after_stage", "Stage"),
+                ("before_hazard", "Hazard"),
+                ("after_hazard", "Hazard"),
+            ),
+            "BufferBarrier must contain exactly one span and semantic hazards",
         ),
         "MemoryClass": (
             (

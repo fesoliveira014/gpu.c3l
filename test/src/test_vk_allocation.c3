@@ -1035,33 +1035,22 @@ fn void native_mapped_visibility_round_trip() @test {
     }
     gpu::flush_mapped_span(&device, written)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
-    vk::AllocationSlot* write_slot = state.allocations.get(write)!!;
-    vk::AllocationSlot* read_slot = state.allocations.get(read)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
     defer (void)discard_test_commands(&commands);
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    vk::BufferCopy region = {
-        .src_offset = 3,
-        .dst_offset = 5,
-        .size       = 127,
+    gpu::BufferCopyDesc copy = {
+        .src = written,
+        .dst = copied,
     };
-    vk::cmd_copy_buffer(
-        command_buffer: record.command_buffer,
-        src_buffer:     write_slot.backing.buffer,
-        dst_buffer:     read_slot.backing.buffer,
-        region_count:   1,
-        p_regions:      &region,
-    );
-    gpu::GlobalBarrier host_read = {
+    gpu::cmd_copy_buffer(&commands, &copy)!!;
+    gpu::BufferBarrier host_read = {
+        .span          = copied,
         .before_stage  = gpu::Stage.TRANSFER,
         .after_stage   = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE,
         .after_hazard  = gpu::Hazard.HOST_READ,
     };
-    gpu::cmd_global_barrier(&commands, &host_read)!!;
+    gpu::cmd_buffer_barrier(&commands, &host_read)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer (void)discard_test_executable(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };
@@ -1076,6 +1065,149 @@ fn void native_mapped_visibility_round_trip() @test {
         assert(destination[i] == source[i],
             "completed GPU writes become visible after mapped-span invalidation");
     }
+}
+
+fn void native_allocation_spans_support_fill_upload_and_readback() @test {
+    gpu::Device device = create_allocation_test_device(
+        "gpu_allocation_data_operations_test",
+    );
+    defer (void)destroy_test_device(&device);
+    gpu::AllocationDesc private_desc = native_allocation_desc(
+        gpu::MemoryClass.GPU_PRIVATE,
+        "data_operations",
+    );
+    gpu::GpuAllocation allocation = gpu::allocate_memory(
+        &device,
+        &private_desc,
+    )!!;
+    defer (void)gpu::free_allocation(&device, &allocation);
+    gpu::GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
+
+    char[256] expected;
+    for (usz i = 0; i < expected.len; i++) {
+        expected[i] = (char)((i * 13 + 7) % 251);
+    }
+    gpu::upload_buffer_data(
+        device:      &device,
+        dst:         span,
+        data:        expected[..],
+        next_stage:  gpu::Stage.TRANSFER,
+        next_hazard: gpu::Hazard.TRANSFER_WRITE,
+    )!!;
+
+    const usz FILL_OFFSET = 64;
+    const usz FILL_SIZE = 16;
+    const char FILL_BYTE = 0x5A;
+    gpu::GpuSpan fill_span = span.checked_subspan(
+        FILL_OFFSET,
+        FILL_SIZE,
+    )!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer (void)discard_test_commands(&commands);
+    gpu::cmd_fill_buffer(&commands, fill_span, 0x5A5A_5A5A)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer (void)discard_test_executable(&executable);
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+
+    char[256] actual;
+    gpu::readback_buffer_data(
+        device:      &device,
+        src:         span,
+        out_data:    actual[..],
+        from_stage:  gpu::Stage.TRANSFER,
+        from_hazard: gpu::Hazard.TRANSFER_WRITE,
+    )!!;
+    for (usz i = 0; i < actual.len; i++) {
+        char wanted = i >= FILL_OFFSET && i < FILL_OFFSET + FILL_SIZE
+            ? FILL_BYTE
+            : expected[i];
+        assert(actual[i] == wanted,
+            "allocation-backed upload, fill, and readback preserve exact bytes");
+    }
+}
+
+fn void allocation_span_commands_reject_stale_and_foreign_owners_before_mutation() @test {
+    gpu::Device device = create_allocation_test_device(
+        "gpu_allocation_span_rejection_test",
+    );
+    defer (void)destroy_test_device(&device);
+    gpu::Device foreign_device = create_allocation_test_device(
+        "gpu_allocation_span_foreign_test",
+    );
+    defer (void)destroy_test_device(&foreign_device);
+    gpu::AllocationDesc desc = native_allocation_desc(
+        gpu::MemoryClass.GPU_PRIVATE,
+        "span_rejection",
+    );
+    gpu::GpuAllocation local = gpu::allocate_memory(&device, &desc)!!;
+    defer (void)gpu::free_allocation(&device, &local);
+    gpu::GpuAllocation stale_owner = gpu::allocate_memory(&device, &desc)!!;
+    gpu::GpuSpan stale = gpu::get_allocation_span(&device, stale_owner)!!;
+    gpu::free_allocation(&device, &stale_owner)!!;
+    gpu::GpuAllocation foreign = gpu::allocate_memory(
+        &foreign_device,
+        &desc,
+    )!!;
+    defer (void)gpu::free_allocation(&foreign_device, &foreign);
+
+    gpu::GpuSpan local_span = gpu::get_allocation_span(&device, local)!!;
+    gpu::GpuSpan foreign_span = gpu::get_allocation_span(
+        &foreign_device,
+        foreign,
+    )!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::device_backend_state_ptr(&device);
+    uint staging_before = state.staging_arena.retire_count;
+    uint readback_before = state.readback_arena.retire_count;
+    uint tickets_before = state.readback_tickets.next_new;
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer (void)discard_test_commands(&commands);
+    char[256] payload;
+    assert(@catch(gpu::cmd_upload_buffer(
+        &commands,
+        foreign_span,
+        payload[..],
+    )) == gpu::INVALID_HANDLE,
+        "recorded upload rejects a foreign allocation span");
+    assert(@catch(gpu::cmd_fill_buffer(&commands, stale, 0))
+        == gpu::INVALID_HANDLE,
+        "fill rejects a stale allocation span");
+    gpu::BufferCopyDesc copy = {
+        .src = local_span,
+        .dst = foreign_span,
+    };
+    assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
+        == gpu::INVALID_HANDLE,
+        "copy rejects a cross-device allocation span");
+    assert(@catch(gpu::cmd_readback_buffer(&commands, stale))
+        == gpu::INVALID_HANDLE,
+        "readback rejects a stale allocation span");
+    assert(state.staging_arena.retire_count == staging_before
+        && state.readback_arena.retire_count == readback_before
+        && state.readback_tickets.next_new == tickets_before,
+        "stale and foreign spans consume no transfer ranges or tickets");
+
+    gpu::cmd_fill_buffer(&commands, local_span, 0)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer (void)discard_test_executable(&executable);
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 }
 
 fn void live_allocation_blocks_normal_device_destruction() @test {

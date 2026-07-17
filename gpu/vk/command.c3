@@ -418,91 +418,149 @@ fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* des
             backend_text:        null,
         )~;
     }
-    BufferSlot* src = state.buffers.get(desc.src)!;
-    BufferSlot* dst = state.buffers.get(desc.dst)!;
-    validate_buffer_recording_access(
+    ResolvedSpan src = resolve_span_slot(
+        state:          state,
+        span:           &desc.src,
+        required:       0,
+        operation:      "cmd_copy_buffer",
+        rejected_field: "BufferCopyDesc.src",
+    )!;
+    ResolvedSpan dst = resolve_span_slot(
+        state:          state,
+        span:           &desc.dst,
+        required:       0,
+        operation:      "cmd_copy_buffer",
+        rejected_field: "BufferCopyDesc.dst",
+    )!;
+    validate_span_transfer_usage(
         state:     state,
-        record:    record,
-        slot:      src,
-        handle:    desc.src,
+        resolved:  &src,
+        span:      &desc.src,
+        source:    true,
         operation: "cmd_copy_buffer",
     )!;
-    validate_buffer_recording_access(
+    validate_span_transfer_usage(
         state:     state,
-        record:    record,
-        slot:      dst,
-        handle:    desc.dst,
+        resolved:  &dst,
+        span:      &desc.dst,
+        source:    false,
         operation: "cmd_copy_buffer",
     )!;
-    if (!src.usage.transfer_src) {
+    if (src.size != dst.size) {
         return report_contract_failure(
             state:               state,
             operation:           "cmd_copy_buffer",
             public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            resource_kind:       span_resource_kind(state, &desc.dst),
             has_public_identity: true,
-            index:               desc.src.index,
-            generation:          desc.src.generation,
-            debug_name:          slot_name(&src.debug_name[0]),
-            rejected_field:      "BufferUsage.transfer_src",
-            invariant:           "source buffer must include transfer_src usage",
+            index:               desc.dst.index,
+            generation:          desc.dst.generation,
+            debug_name:          slot_name(&dst.slot.debug_name[0]),
+            rejected_field:      "BufferCopyDesc.dst",
+            invariant:           "source and destination spans must have equal sizes",
             backend_text:        null,
         )~;
     }
-    if (!dst.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
-    if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
-    if (!gpu::range_fits(src.size, desc.src_offset, desc.size)) return gpu::INVALID_ARGUMENT~;
-    if (!gpu::range_fits(dst.size, desc.dst_offset, desc.size)) return gpu::INVALID_ARGUMENT~;
-    // Vulkan forbids overlapping regions within one buffer.
-    if (desc.src == desc.dst
-        && desc.src_offset < desc.dst_offset + desc.size
-        && desc.dst_offset < desc.src_offset + desc.size) {
-        return gpu::INVALID_ARGUMENT~;
+    if (src.slot.buffer == dst.slot.buffer
+        && src.offset < dst.offset + dst.size
+        && dst.offset < src.offset + src.size) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_copy_buffer",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       span_resource_kind(state, &desc.src),
+            has_public_identity: true,
+            index:               desc.src.index,
+            generation:          desc.src.generation,
+            debug_name:          slot_name(&src.slot.debug_name[0]),
+            rejected_field:      "BufferCopyDesc",
+            invariant:           "source and destination spans must not overlap",
+            backend_text:        null,
+        )~;
     }
+    validate_span_recording_access(
+        state:     state,
+        record:    record,
+        resolved:  &src,
+        span:      &desc.src,
+        operation: "cmd_copy_buffer",
+    )!;
+    validate_span_recording_access(
+        state:     state,
+        record:    record,
+        resolved:  &dst,
+        span:      &desc.dst,
+        operation: "cmd_copy_buffer",
+    )!;
 
     vk::BufferCopy region = {
-        .src_offset = (vk::DeviceSize)desc.src_offset,
-        .dst_offset = (vk::DeviceSize)desc.dst_offset,
-        .size       = (vk::DeviceSize)desc.size,
+        .src_offset = (vk::DeviceSize)src.offset,
+        .dst_offset = (vk::DeviceSize)dst.offset,
+        .size       = (vk::DeviceSize)src.size,
     };
-    vk::cmd_copy_buffer(record.command_buffer, src.buffer, dst.buffer, 1, &region);
+    vk::cmd_copy_buffer(
+        command_buffer: record.command_buffer,
+        src_buffer:     src.slot.buffer,
+        dst_buffer:     dst.slot.buffer,
+        region_count:   1,
+        p_regions:      &region,
+    );
 }
 
-fn void? vk_cmd_fill_buffer(gpu::CommandList* commands, gpu::BufferHandle buffer, usz offset, usz size, uint value) @private {
+fn void? vk_cmd_fill_buffer(
+    gpu::CommandList* commands,
+    gpu::GpuSpan dst,
+    uint value,
+) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
-    BufferSlot* slot = state.buffers.get(buffer)!;
-    validate_buffer_recording_access(
+    ResolvedSpan resolved = resolve_span_slot(
+        state:          state,
+        span:           &dst,
+        required:       0,
+        operation:      "cmd_fill_buffer",
+        rejected_field: "dst",
+    )!;
+    validate_span_transfer_usage(
         state:     state,
-        record:    record,
-        slot:      slot,
-        handle:    buffer,
+        resolved:  &resolved,
+        span:      &dst,
+        source:    false,
         operation: "cmd_fill_buffer",
     )!;
-    if (!slot.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
-    // Vulkan: offset and size must be 4-byte multiples; size 0 is the
-    // whole-buffer convention (translated to WHOLE_SIZE below).
-    if (offset % 4 != 0 || size % 4 != 0) {
-        ZString rejected_field = offset % 4 != 0 ? "offset" : "size";
+    if (resolved.offset % 4 != 0 || resolved.size % 4 != 0) {
+        ZString rejected_field = resolved.offset % 4 != 0
+            ? "GpuSpan.offset"
+            : "GpuSpan.size";
         return report_contract_failure(
             state:               state,
             operation:           "cmd_fill_buffer",
             public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.BUFFER,
+            resource_kind:       span_resource_kind(state, &dst),
             has_public_identity: true,
-            index:               buffer.index,
-            generation:          buffer.generation,
-            debug_name:          slot_name(&slot.debug_name[0]),
+            index:               dst.index,
+            generation:          dst.generation,
+            debug_name:          slot_name(&resolved.slot.debug_name[0]),
             rejected_field:      rejected_field,
-            invariant:           "offset and size must be 4-byte aligned",
+            invariant:           "span offset and size must be 4-byte aligned",
             backend_text:        null,
         )~;
     }
-    if (!gpu::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
-    if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
-    vk::DeviceSize fill_size = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
-    vk::cmd_fill_buffer(record.command_buffer, slot.buffer, (vk::DeviceSize)offset, fill_size, value);
+    validate_span_recording_access(
+        state:     state,
+        record:    record,
+        resolved:  &resolved,
+        span:      &dst,
+        operation: "cmd_fill_buffer",
+    )!;
+    vk::cmd_fill_buffer(
+        command_buffer: record.command_buffer,
+        dst_buffer:     resolved.slot.buffer,
+        dst_offset:     (vk::DeviceSize)resolved.offset,
+        size:           (vk::DeviceSize)resolved.size,
+        data:           value,
+    );
 }
 
 <* Validate and translate a buffer-image copy region. *>

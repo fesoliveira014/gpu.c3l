@@ -596,7 +596,10 @@ Free flow:
 
 ## 13. Readback arena
 
-Readback buffers may be explicit buffers or arena spans. They must support CPU invalidation before reads.
+Buffer readback consumes an exact source span. `readback_buffer_data` requires
+`out_data.len == src.size`; `cmd_readback_buffer` captures the same exact range
+in its ticket. Use `checked_subspan` for a partial readback. Internal readback
+storage supports CPU invalidation before reads.
 
 Blocking flow (the `readback_buffer_data` / `readback_texture_data` helpers):
 
@@ -618,7 +621,10 @@ returns `RESOURCE_IN_USE` from `destroy_device`.
 
 ## 14. Staging arena
 
-The staging arena exists to upload large data without creating many short-lived buffers.
+The staging arena uploads data without creating many short-lived buffers.
+
+`cmd_upload_buffer` and `upload_buffer_data` consume an exact destination span
+and require `data.len == dst.size`. Use `checked_subspan` for a partial upload.
 
 The staging and readback arenas place ranges with monotonic virtual offsets and
 map them to physical offsets with `virtual_start % arena_size`. Placement is

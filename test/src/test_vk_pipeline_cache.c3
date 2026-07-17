@@ -354,7 +354,7 @@ fn void cull_replay_renders_per_alias() @test {
         gpu::TextureBufferCopyDesc copy = { .texture = targets[i], .dst = rb_span };
         gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
         gpu::BufferBarrier host_read = {
-            .buffer = readbacks[i], .offset = 0, .size = CACHE_RT_BYTES,
+            .span = rb_span,
             .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
             .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
         };

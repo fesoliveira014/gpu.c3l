@@ -140,7 +140,7 @@ fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, 
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = readback, .offset = rb_span.offset, .size = rb_span.size,
+        .span = *rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -161,7 +161,7 @@ fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, g
     gpu::TextureBufferCopyDesc copy = { .texture = depth, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = readback, .offset = rb_span.offset, .size = rb_span.size,
+        .span = *rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -558,7 +558,7 @@ fn void sampled_depth_matches_readback() @test {
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier host_read = {
-        .buffer = out_resolved.backing_buffer, .offset = out_resolved.offset, .size = out_resolved.size,
+        .span = out_span,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -707,7 +707,7 @@ fn void compare_sampler_exact_results() @test {
         groups:   { 1, 1, 1 },
     )!!;
     gpu::BufferBarrier host_read = {
-        .buffer = out_resolved.backing_buffer, .offset = out_resolved.offset, .size = out_resolved.size,
+        .span = out_span,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };

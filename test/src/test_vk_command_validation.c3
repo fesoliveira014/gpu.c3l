@@ -415,9 +415,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
 
     gpu::cmd_fill_buffer(
         commands: &commands,
-        buffer:   buffer,
-        offset:   0,
-        size:     4,
+        dst:      gpu::get_buffer_span(&device, buffer)!!.checked_subspan(0, 4)!!,
         value:    0,
     )!!;
     record.queue.roles = { .graphics };
@@ -574,11 +572,17 @@ fn void copy_without_transfer_usage_faults() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
-    gpu::BufferCopyDesc no_src_usage_copy = { .src = plain, .dst = dst, .size = 64 };
+    gpu::BufferCopyDesc no_src_usage_copy = {
+        .src = gpu::get_buffer_span(&device, plain)!!,
+        .dst = gpu::get_buffer_span(&device, dst)!!,
+    };
     fault no_src_usage = @catch(gpu::cmd_copy_buffer(&cmd, &no_src_usage_copy));
     assert(no_src_usage == gpu::INVALID_ARGUMENT, "copy from a buffer without transfer_src faults INVALID_ARGUMENT");
 
-    gpu::BufferCopyDesc no_dst_usage_copy = { .src = src, .dst = plain, .size = 64 };
+    gpu::BufferCopyDesc no_dst_usage_copy = {
+        .src = gpu::get_buffer_span(&device, src)!!,
+        .dst = gpu::get_buffer_span(&device, plain)!!,
+    };
     fault no_dst_usage = @catch(gpu::cmd_copy_buffer(&cmd, &no_dst_usage_copy));
     assert(no_dst_usage == gpu::INVALID_ARGUMENT, "copy to a buffer without transfer_dst faults INVALID_ARGUMENT");
 
@@ -680,7 +684,7 @@ fn void fill_without_transfer_dst_faults() @test {
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    fault no_usage = @catch(gpu::cmd_fill_buffer(&cmd, buffer, 0, 64, 0));
+    fault no_usage = @catch(gpu::cmd_fill_buffer(&cmd, gpu::get_buffer_span(&device, buffer)!!, 0));
     assert(no_usage == gpu::INVALID_ARGUMENT, "fill on a buffer without transfer_dst faults INVALID_ARGUMENT");
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
@@ -894,9 +898,12 @@ fn void valid_copy_fill_and_draw_succeed() @test {
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    gpu::BufferCopyDesc copy = { .src = upload, .dst = readback, .size = 64 };
+    gpu::BufferCopyDesc copy = {
+        .src = gpu::get_buffer_span(&device, upload)!!,
+        .dst = gpu::get_buffer_span(&device, readback)!!,
+    };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
-    gpu::cmd_fill_buffer(&cmd, fill_target, 0, 64, 0)!!;
+    gpu::cmd_fill_buffer(&cmd, gpu::get_buffer_span(&device, fill_target)!!, 0)!!;
 
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -1334,7 +1341,7 @@ fn void buffer_barrier_range_beyond_buffer_faults() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
-        .buffer = buffer, .offset = 48, .size = 32,
+        .span = gpu::get_buffer_span(&device, buffer)!!.unchecked_subspan(48, 32),
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
     };
@@ -1359,7 +1366,7 @@ fn void buffer_barrier_boundary_exact_succeeds() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
-        .buffer = buffer, .offset = 32, .size = 32,
+        .span = gpu::get_buffer_span(&device, buffer)!!.checked_subspan(32, 32)!!,
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
     };
@@ -1371,7 +1378,7 @@ fn void buffer_barrier_boundary_exact_succeeds() @test {
     gpu::end_frame(&frame_token)!!;
 }
 
-fn void buffer_barrier_zero_size_whole_buffer_succeeds() @test {
+fn void buffer_barrier_zero_size_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
 
@@ -1383,11 +1390,12 @@ fn void buffer_barrier_zero_size_whole_buffer_succeeds() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferBarrier barrier = {
-        .buffer = buffer, .offset = 0, .size = 0,
+        .span = gpu::get_buffer_span(&device, buffer)!!.unchecked_subspan(0, 0),
         .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
         .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
     };
-    gpu::cmd_buffer_barrier(&cmd, &barrier)!!;
+    fault zero_size = @catch(gpu::cmd_buffer_barrier(&cmd, &barrier));
+    assert(zero_size == gpu::INVALID_ARGUMENT, "zero-size barrier span faults INVALID_ARGUMENT");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -1660,8 +1668,8 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     SyncDiagnosticCapture capture = {
         .expected_operation      = "cmd_buffer_barrier",
         .expected_debug_name     = "barrier_diagnostic_buffer",
-        .expected_rejected_field = "BufferBarrier.size",
-        .expected_invariant      = "offset and size must fit the buffer",
+        .expected_rejected_field = "BufferBarrier.span",
+        .expected_invariant      = "span range must fit its live owner",
     };
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
@@ -1680,9 +1688,7 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     gpu::BufferBarrier barrier = {
-        .buffer        = buffer,
-        .offset        = 48,
-        .size          = 32,
+        .span          = gpu::get_buffer_span(&device, buffer)!!.unchecked_subspan(48, 32),
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.COMPUTE_SHADER,
         .before_hazard = gpu::Hazard.SHADER_WRITE,
@@ -1711,28 +1717,27 @@ fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
     assert(capture.calls == 1, "null callback emits no additional diagnostic");
 
     state.debug_callback = &capture_sync_diagnostic;
-    capture.expected_rejected_field = "BufferBarrier.offset";
-    capture.expected_invariant = "whole-buffer barrier offset must lie inside the buffer";
-    barrier.offset = 64;
-    barrier.size = 0;
-    fault whole_with_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
+    capture.expected_rejected_field = "BufferBarrier.span";
+    capture.expected_invariant = "span range must fit its live owner";
+    barrier.span = gpu::get_buffer_span(&device, buffer)!!.unchecked_subspan(64, 0);
+    fault zero_with_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
 
-    assert(whole_with_callback == gpu::INVALID_ARGUMENT, "whole-buffer offset keeps INVALID_ARGUMENT");
-    assert(capture.calls == 2, "whole-buffer offset emits exactly one diagnostic");
-    assert(capture.operation_matches, "whole-buffer operation is cmd_buffer_barrier");
-    assert(capture.has_fault && capture.public_fault == whole_with_callback,
-        "whole-buffer diagnostic carries the unchanged fault");
-    assert(capture.resource_kind == gpu::DebugResourceKind.BUFFER, "whole-buffer resource kind is buffer");
+    assert(zero_with_callback == gpu::INVALID_ARGUMENT, "zero-size span keeps INVALID_ARGUMENT");
+    assert(capture.calls == 2, "zero-size span emits exactly one diagnostic");
+    assert(capture.operation_matches, "zero-size span operation is cmd_buffer_barrier");
+    assert(capture.has_fault && capture.public_fault == zero_with_callback,
+        "zero-size span diagnostic carries the unchanged fault");
+    assert(capture.resource_kind == gpu::DebugResourceKind.BUFFER, "zero-size span resource kind is buffer");
     assert(capture.has_public_identity && capture.index == buffer.index && capture.generation == buffer.generation,
-        "whole-buffer diagnostic preserves buffer identity");
-    assert(capture.debug_name_matches, "whole-buffer diagnostic preserves the debug name");
-    assert(capture.rejected_field_matches, "whole-buffer offset field is identified");
-    assert(capture.invariant_matches, "whole-buffer offset invariant is identified");
+        "zero-size span diagnostic preserves buffer identity");
+    assert(capture.debug_name_matches, "zero-size span diagnostic preserves the debug name");
+    assert(capture.rejected_field_matches, "zero-size span field is identified");
+    assert(capture.invariant_matches, "zero-size span invariant is identified");
 
     state.debug_callback = null;
-    fault whole_without_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
-    assert(whole_without_callback == whole_with_callback, "whole-buffer callback presence does not alter the fault");
-    assert(capture.calls == 2, "whole-buffer null callback emits no duplicate");
+    fault zero_without_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
+    assert(zero_without_callback == zero_with_callback, "callback presence does not alter the zero-size span fault");
+    assert(capture.calls == 2, "null callback emits no duplicate zero-size span diagnostic");
 
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
 
@@ -1935,13 +1940,16 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
 
-    gpu::BufferCopyDesc copy = { .src = plain, .dst = dst, .size = 16 };
+    gpu::BufferCopyDesc copy = {
+        .src = gpu::get_buffer_span(&device, plain)!!.checked_subspan(0, 16)!!,
+        .dst = gpu::get_buffer_span(&device, dst)!!.checked_subspan(0, 16)!!,
+    };
     reset_sync_diagnostic(
         capture:        &capture,
         operation:      "cmd_copy_buffer",
         debug_name:     "plain_buffer",
-        rejected_field: "BufferUsage.transfer_src",
-        invariant:      "source buffer must include transfer_src usage",
+        rejected_field: "GpuSpan",
+        invariant:      "source span must support copy reads",
     );
     fault copy_fault = @catch(gpu::cmd_copy_buffer(&commands, &copy));
     assert(copy_fault == gpu::INVALID_ARGUMENT, "copy usage fault is unchanged");
@@ -1962,14 +1970,12 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         capture:        &capture,
         operation:      "cmd_fill_buffer",
         debug_name:     "fill_buffer",
-        rejected_field: "offset",
-        invariant:      "offset and size must be 4-byte aligned",
+        rejected_field: "GpuSpan.offset",
+        invariant:      "span offset and size must be 4-byte aligned",
     );
     fault fill_fault = @catch(gpu::cmd_fill_buffer(
         commands: &commands,
-        buffer:   dst,
-        offset:   2,
-        size:     4,
+        dst:      gpu::get_buffer_span(&device, dst)!!.checked_subspan(2, 4)!!,
         value:    0,
     ));
     assert(fill_fault == gpu::INVALID_ARGUMENT, "fill alignment fault is unchanged");
@@ -1985,14 +1991,12 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         capture:        &capture,
         operation:      "cmd_fill_buffer",
         debug_name:     "fill_buffer",
-        rejected_field: "size",
-        invariant:      "offset and size must be 4-byte aligned",
+        rejected_field: "GpuSpan.size",
+        invariant:      "span offset and size must be 4-byte aligned",
     );
     fault fill_size_fault = @catch(gpu::cmd_fill_buffer(
         commands: &commands,
-        buffer:   dst,
-        offset:   0,
-        size:     2,
+        dst:      gpu::get_buffer_span(&device, dst)!!.checked_subspan(0, 2)!!,
         value:    0,
     ));
     assert(fill_size_fault == gpu::INVALID_ARGUMENT, "fill size-only alignment fault is unchanged");
@@ -2035,7 +2039,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         operation:      "cmd_dispatch_indirect",
         debug_name:     "indirect_args",
         rejected_field: "args",
-        invariant:      "span offset and size must fit the backing buffer",
+        invariant:      "span range must fit its live owner",
     );
     fault span_fault = @catch(gpu::cmd_dispatch_indirect(
         commands: &commands,

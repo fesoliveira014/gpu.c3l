@@ -95,7 +95,7 @@ fn void offscreen_clear_works() @test {
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
 
     gpu::BufferBarrier host_read = {
-        .buffer = readback, .offset = 0, .size = RT_BYTES,
+        .span = rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -275,7 +275,7 @@ fn void offscreen_textured_triangle() @test {
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = rb_span };
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = readback, .offset = 0, .size = RT_BYTES,
+        .span = rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -422,7 +422,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
         gpu::TextureBufferCopyDesc copy = { .texture = targets[i], .dst = region };
         gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
         gpu::BufferBarrier host_read = {
-            .buffer = readback, .offset = region.offset, .size = region.size,
+            .span = region,
             .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
             .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
         };
@@ -506,7 +506,7 @@ fn void offscreen_render_to_mip() @test {
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = rb_span, .mip = 1 };
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = readback, .offset = 0, .size = MIP1 * MIP1 * 4,
+        .span = rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };
@@ -715,9 +715,7 @@ fn void render_pass_state_machine() @test {
     // Copies and barriers are illegal inside a pass.
     fault fill_fault = @catch(gpu::cmd_fill_buffer(
         commands: &cmd,
-        buffer:   buffer,
-        offset:   0,
-        size:     64,
+        dst:      gpu::get_buffer_span(&device, buffer)!!,
         value:    0,
     ));
     assert(fill_fault == gpu::COMMAND_RECORDING_ERROR, "buffer fill inside a render pass faults COMMAND_RECORDING_ERROR");

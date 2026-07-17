@@ -59,6 +59,12 @@
         "import_surface_x11.c3"
       ]
     },
+    "span_data_operations": {
+      "type": "object-files",
+      "sources": [
+        "span_data_operations.c3"
+      ]
+    },
     "unit": {
       "type": "test",
       "sources": [

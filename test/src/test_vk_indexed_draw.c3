@@ -93,7 +93,7 @@ fn void u16v_draw(
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
     gpu::BufferBarrier host_read = {
-        .buffer = readback, .offset = rb_span.offset, .size = rb_span.size,
+        .span = *rb_span,
         .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
     };

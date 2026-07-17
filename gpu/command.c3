@@ -122,13 +122,11 @@ struct ExecutableCommandList {
 }
 $assert ExecutableCommandList::size <= ulong::size * 3;
 
-<* Byte-range copy for cmd_copy_buffer; src and dst ranges must not overlap. *>
+<* Byte-range copy for cmd_copy_buffer; src and dst must have equal size and
+   must not overlap. *>
 struct BufferCopyDesc {
-    BufferHandle src;
-    BufferHandle dst;
-    usz          src_offset;
-    usz          dst_offset;
-    usz          size;
+    GpuSpan src;
+    GpuSpan dst;
 }
 
 // Zero-value defaults: extent 0 is the full mip level, layer_count 0 is one
@@ -297,12 +295,13 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
     return vtable.cmd_copy_buffer(commands, desc);
 }
 
-<* Record a 32-bit-pattern fill over [offset, offset + size); offset and size must be 4-byte multiples, size 0 fills to the end. *>
-fn void? cmd_fill_buffer(CommandList* commands, BufferHandle buffer, usz offset, usz size, uint value) {
+<* Record a 32-bit-pattern fill over dst; its offset and size must be 4-byte
+   multiples. *>
+fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_fill_buffer(commands, buffer, offset, size, value);
+    return vtable.cmd_fill_buffer(commands, dst, value);
 }
 
 <* The texture's effective layout must be TRANSFER_DST; the caller records
@@ -324,7 +323,7 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
     return vtable.cmd_copy_texture_to_buffer(commands, desc);
 }
 
-<* Record an execution/memory barrier over a buffer range. *>
+<* Record an execution/memory barrier over one GPU span. *>
 fn void? cmd_buffer_barrier(CommandList* commands, BufferBarrier* barrier) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);

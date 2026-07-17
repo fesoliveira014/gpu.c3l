@@ -125,21 +125,50 @@ fn void range_and_alignment_validation() @test {
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    fault f8 = @catch(gpu::cmd_fill_buffer(&cmd, buf, 2, 4, 0xAB));
-    assert(f8 == gpu::INVALID_ARGUMENT, "misaligned fill offset faults");
-    fault f9 = @catch(gpu::cmd_fill_buffer(&cmd, buf, 0, 6, 0xAB));
-    assert(f9 == gpu::INVALID_ARGUMENT, "misaligned fill size faults");
-    fault f10 = @catch(gpu::cmd_fill_buffer(&cmd, buf, 0, 512, 0xAB));
-    assert(f10 == gpu::INVALID_ARGUMENT, "oversized fill faults");
-    gpu::cmd_fill_buffer(&cmd, buf, 0, 0, 0xAB)!!;
+    gpu::GpuSpan buffer_span = gpu::get_buffer_span(&device, buf)!!;
 
-    gpu::BufferCopyDesc overlap = { .src = buf, .dst = buf, .src_offset = 0, .dst_offset = 32, .size = 64 };
+    gpu::GpuSpan misaligned_offset = buffer_span.checked_subspan(2, 4)!!;
+    fault f8 = @catch(gpu::cmd_fill_buffer(&cmd, misaligned_offset, 0xAB));
+    assert(f8 == gpu::INVALID_ARGUMENT, "misaligned fill offset faults");
+    gpu::GpuSpan misaligned_size = buffer_span.checked_subspan(0, 6)!!;
+    fault f9 = @catch(gpu::cmd_fill_buffer(&cmd, misaligned_size, 0xAB));
+    assert(f9 == gpu::INVALID_ARGUMENT, "misaligned fill size faults");
+    gpu::GpuSpan oversized = buffer_span.unchecked_subspan(0, 512);
+    fault f10 = @catch(gpu::cmd_fill_buffer(&cmd, oversized, 0xAB));
+    assert(f10 == gpu::INVALID_ARGUMENT, "oversized fill faults");
+    gpu::GpuSpan zero_span = buffer_span.unchecked_subspan(0, 0);
+    fault zero_fill = @catch(gpu::cmd_fill_buffer(&cmd, zero_span, 0xAB));
+    assert(zero_fill == gpu::INVALID_ARGUMENT, "zero-size fill span faults");
+    gpu::cmd_fill_buffer(&cmd, buffer_span, 0xAB)!!;
+
+    gpu::BufferCopyDesc overlap = {
+        .src = buffer_span.checked_subspan(0, 64)!!,
+        .dst = buffer_span.checked_subspan(32, 64)!!,
+    };
     fault f11 = @catch(gpu::cmd_copy_buffer(&cmd, &overlap));
     assert(f11 == gpu::INVALID_ARGUMENT, "overlapping same-buffer copy faults");
-    gpu::BufferCopyDesc touching = { .src = buf, .dst = buf, .src_offset = 0, .dst_offset = 64, .size = 64 };
+    gpu::BufferCopyDesc touching = {
+        .src = buffer_span.checked_subspan(0, 64)!!,
+        .dst = buffer_span.checked_subspan(64, 64)!!,
+    };
     gpu::cmd_copy_buffer(&cmd, &touching)!!;
-    gpu::BufferCopyDesc disjoint = { .src = buf, .dst = buf, .src_offset = 0, .dst_offset = 128, .size = 64 };
+    gpu::BufferCopyDesc disjoint = {
+        .src = buffer_span.checked_subspan(0, 64)!!,
+        .dst = buffer_span.checked_subspan(128, 64)!!,
+    };
     gpu::cmd_copy_buffer(&cmd, &disjoint)!!;
+    gpu::BufferCopyDesc unequal = {
+        .src = buffer_span.checked_subspan(0, 64)!!,
+        .dst = buffer_span.checked_subspan(128, 32)!!,
+    };
+    fault unequal_fault = @catch(gpu::cmd_copy_buffer(&cmd, &unequal));
+    assert(unequal_fault == gpu::INVALID_ARGUMENT, "unequal copy spans fault");
+    gpu::BufferCopyDesc zero_copy = {
+        .src = zero_span,
+        .dst = buffer_span.checked_subspan(128, 64)!!,
+    };
+    fault zero_copy_fault = @catch(gpu::cmd_copy_buffer(&cmd, &zero_copy));
+    assert(zero_copy_fault == gpu::INVALID_ARGUMENT, "zero-size copy span faults");
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
