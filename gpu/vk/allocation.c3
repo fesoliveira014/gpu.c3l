@@ -22,6 +22,14 @@ alias AllocationGetAddressFn = fn vk::DeviceAddress (
 alias AllocationDestroyBufferFn = fn void (
     void*, vma::Allocator, vk::Buffer, vma::Allocation
 );
+alias AllocationAllocateMemoryFn = fn vk::Result (
+    void*, vma::Allocator, vk::MemoryRequirements*,
+    vma::AllocationCreateInfo*, vma::Allocation*, vma::AllocationInfo*
+);
+alias AllocationFreeMemoryFn = fn void (
+    void*, vma::Allocator, vma::Allocation
+);
+
 alias AllocationVisibilityFn = fn vk::Result (
     void*, vma::Allocator, vma::Allocation, vk::DeviceSize, vk::DeviceSize
 );
@@ -30,11 +38,18 @@ const uint ALLOCATION_CAPACITY = 4096;
 const uint ALLOCATION_FREE_NONE = 0;
 
 struct AllocationSlot {
-    BufferSlot       backing;
-    usz              alignment;
-    gpu::MemoryClass memory_class;
-    bool             coherent;
-    uint             live_placements;
+    vma::Allocation     raw_allocation;
+    vma::AllocationInfo raw_info;
+    usz                 size;
+    gpu::QueueRoles     access;
+    uint                memory_type_bits;
+    bool                texture_memory;
+    BufferSlot          backing;
+    usz                 alignment;
+    gpu::MemoryClass    memory_class;
+    bool                coherent;
+    uint                live_placements;
+    char[DEBUG_NAME_CAP] debug_name;
 }
 
 struct AllocationCell {
@@ -55,6 +70,8 @@ struct AllocationNativeOps {
     void*                           user_data;
     AllocationCreateBufferFn        create_buffer;
     AllocationGetRequirementsFn     get_memory_requirements;
+    AllocationAllocateMemoryFn      allocate_memory;
+    AllocationFreeMemoryFn          free_memory;
     AllocationGetMemoryPropertiesFn get_memory_properties;
     AllocationGetAddressFn          get_buffer_device_address;
     AllocationDestroyBufferFn       destroy_buffer;
@@ -207,10 +224,38 @@ fn vk::Result allocation_invalidate_real(
     return allocator.invalidate_allocation(allocation, offset, size);
 }
 
+fn vk::Result allocation_allocate_memory_real(
+    void* user_data,
+    vma::Allocator allocator,
+    vk::MemoryRequirements* requirements,
+    vma::AllocationCreateInfo* allocation_info,
+    vma::Allocation* out_allocation,
+    vma::AllocationInfo* out_info,
+) {
+    (void)user_data;
+    return allocator.allocate_memory(
+        requirements,
+        allocation_info,
+        out_allocation,
+        out_info,
+    );
+}
+
+fn void allocation_free_memory_real(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+) {
+    (void)user_data;
+    allocator.free_memory(allocation);
+}
+
 fn AllocationNativeOps allocation_native_ops_real() {
     return {
         .create_buffer             = &allocation_create_buffer_real,
         .get_memory_requirements   = &allocation_get_requirements_real,
+        .allocate_memory           = &allocation_allocate_memory_real,
+        .free_memory               = &allocation_free_memory_real,
         .get_memory_properties     = &allocation_get_properties_real,
         .get_buffer_device_address = &allocation_get_address_real,
         .destroy_buffer            = &allocation_destroy_buffer_real,
@@ -279,11 +324,93 @@ fn vk::BufferCreateInfo? allocation_buffer_create_info(
     return make_buffer_create_info(&backing, queue_families);
 }
 
+fn uint? texture_memory_type_bits(gpu::AllocationDesc* desc) {
+    uint memory_type_bits = uint::max;
+    foreach (&requirements : desc.texture_requirements) {
+        memory_type_bits &= requirements.compatibility.value;
+    }
+    if (memory_type_bits == 0) return gpu::INVALID_ARGUMENT~;
+    return memory_type_bits;
+}
+
+fn gpu::GpuAllocation? allocate_texture_memory_for_state_with_ops(
+    VkDeviceState* state,
+    gpu::AllocationDesc* desc,
+    AllocationNativeOps* ops,
+) {
+    uint memory_type_bits = texture_memory_type_bits(desc)!;
+    vk::MemoryRequirements requirements = {
+        .size             = (vk::DeviceSize)desc.size,
+        .alignment        = (vk::DeviceSize)desc.alignment,
+        .memory_type_bits = memory_type_bits,
+    };
+    vma::AllocationCreateInfo allocation_info = {
+        .flags            = { .can_alias },
+        .usage            = vma::MemoryUsage.GPU_ONLY,
+        .memory_type_bits = memory_type_bits,
+    };
+    vma::Allocation allocation;
+    vma::AllocationInfo native_info;
+    bool owns_allocation;
+    defer catch {
+        if (owns_allocation) {
+            ops.free_memory(ops.user_data, state.allocator, allocation);
+        }
+    }
+
+    check_device_result(state, ops.allocate_memory(
+        ops.user_data,
+        state.allocator,
+        &requirements,
+        &allocation_info,
+        &allocation,
+        &native_info,
+    ))!;
+    owns_allocation = true;
+
+    if (native_info.size < (vk::DeviceSize)desc.size
+        || native_info.memory_type >= 32
+        || native_info.offset % (vk::DeviceSize)desc.alignment != 0) {
+        return gpu::BACKEND_ERROR~;
+    }
+    uint selected_memory_type = 1 << native_info.memory_type;
+    if ((selected_memory_type & memory_type_bits) == 0) {
+        return gpu::BACKEND_ERROR~;
+    }
+
+    char[DEBUG_NAME_CAP] debug_name;
+    copy_debug_name(&debug_name[0], desc.debug_name);
+    if (desc.debug_name != null) {
+        state.allocator.set_allocation_name(allocation, desc.debug_name);
+    }
+    AllocationSlot slot = {
+        .raw_allocation   = allocation,
+        .raw_info         = native_info,
+        .size             = desc.size,
+        .access           = desc.access,
+        .memory_type_bits = memory_type_bits,
+        .texture_memory   = true,
+        .alignment        = desc.alignment,
+        .debug_name       = debug_name,
+        .memory_class     = gpu::MemoryClass.TEXTURE,
+    };
+
+    state.resource_mutex.lock()!!;
+    gpu::GpuAllocation? published = state.allocations.alloc(slot);
+    state.resource_mutex.unlock();
+    gpu::GpuAllocation result = published!;
+    owns_allocation = false;
+    return result;
+}
+
 fn gpu::GpuAllocation? allocate_memory_for_state_with_ops(
     VkDeviceState* state,
     gpu::AllocationDesc* desc,
     AllocationNativeOps* ops,
 ) {
+    if (desc.memory_class == gpu::MemoryClass.TEXTURE) {
+        return allocate_texture_memory_for_state_with_ops(state, desc, ops);
+    }
     uint[MAX_QUEUE_FAMILIES] families;
     uint family_count = resource_queue_families(
         state,
@@ -385,12 +512,15 @@ fn gpu::GpuAllocation? allocate_memory_for_state_with_ops(
             .debug_name      = debug_name,
             .internal        = true,
         },
+        .size            = desc.size,
+        .access          = desc.access,
         .alignment       = actual_alignment,
         .memory_class    = desc.memory_class,
         .coherent        = requires_mapping
             && native_info.mapped_data != null
             && ((uint)memory_properties
                 & (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT) != 0,
+        .debug_name      = debug_name,
         .live_placements = 0,
     };
 
@@ -408,13 +538,14 @@ fn gpu::AllocationInfo? allocation_info_for_state(
 ) {
     AllocationSlot* slot = state.allocations.get(allocation)!;
     return {
-        .size         = slot.backing.size,
+        .size         = slot.size,
         .alignment    = slot.alignment,
         .memory_class = slot.memory_class,
-        .access       = slot.backing.access,
-        .mapped       = slot.backing.cpu_base != null,
-        .coherent     = slot.coherent,
-        .addressable  = (ulong)slot.backing.gpu_base != 0,
+        .access       = slot.access,
+        .mapped       = !slot.texture_memory && slot.backing.cpu_base != null,
+        .coherent     = !slot.texture_memory && slot.coherent,
+        .addressable  = !slot.texture_memory
+            && (ulong)slot.backing.gpu_base != 0,
     };
 }
 
@@ -423,11 +554,12 @@ fn gpu::GpuSpan? allocation_span_for_state(
     gpu::GpuAllocation allocation,
 ) {
     AllocationSlot* slot = state.allocations.get(allocation)!;
+    if (slot.texture_memory) return gpu::INVALID_ARGUMENT~;
     return {
         .owner      = allocation.owner,
         .index      = allocation.index,
         .generation = allocation.generation,
-        .size       = slot.backing.size,
+        .size       = slot.size,
     };
 }
 
@@ -444,12 +576,20 @@ fn void? free_allocation_for_state_with_ops(
         released = *slot;
         state.allocations.free(allocation)!;
     }
-    ops.destroy_buffer(
-        ops.user_data,
-        state.allocator,
-        released.backing.buffer,
-        released.backing.allocation,
-    );
+    if (released.texture_memory) {
+        ops.free_memory(
+            ops.user_data,
+            state.allocator,
+            released.raw_allocation,
+        );
+    } else {
+        ops.destroy_buffer(
+            ops.user_data,
+            state.allocator,
+            released.backing.buffer,
+            released.backing.allocation,
+        );
+    }
 }
 
 fn NonCoherentRange? normalize_mapped_memory_range(
@@ -490,6 +630,7 @@ fn AllocationSlot*? resolve_mapped_allocation_span(
         .generation = span.generation,
     };
     AllocationSlot* slot = state.allocations.get(allocation)!;
+    if (slot.texture_memory) return gpu::INVALID_ARGUMENT~;
     if (span.size == 0
         || !gpu::range_fits(slot.backing.size, span.offset, span.size)) {
         return gpu::INVALID_ARGUMENT~;
@@ -624,12 +765,20 @@ fn void destroy_allocation_table_with_ops(
     if (state.allocations.slots.ptr == null) return;
     foreach (&cell : state.allocations.slots[:state.allocations.next_new]) {
         if (!cell.used) continue;
-        ops.destroy_buffer(
-            ops.user_data,
-            state.allocator,
-            cell.value.backing.buffer,
-            cell.value.backing.allocation,
-        );
+        if (cell.value.texture_memory) {
+            ops.free_memory(
+                ops.user_data,
+                state.allocator,
+                cell.value.raw_allocation,
+            );
+        } else {
+            ops.destroy_buffer(
+                ops.user_data,
+                state.allocator,
+                cell.value.backing.buffer,
+                cell.value.backing.allocation,
+            );
+        }
         cell.used = false;
     }
     mem::free(state.allocations.slots.ptr);

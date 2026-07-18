@@ -255,8 +255,10 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .cmd_texture_barrier = &vk_cmd_texture_barrier,
     .get_texture_format_support = &vk_get_texture_format_support,
     .supports_texture_desc      = &vk_supports_texture_desc,
-    .create_texture          = &vk_create_texture,
-    .destroy_texture         = &vk_destroy_texture,
+    .get_texture_requirements   = &vk_get_texture_requirements,
+    .create_texture             = &vk_create_texture,
+    .create_placed_texture      = &vk_create_placed_texture,
+    .destroy_texture            = &vk_destroy_texture,
     .create_texture_descriptor  = &vk_create_texture_descriptor,
     .destroy_texture_descriptor = &vk_destroy_texture_descriptor,
     .create_texture_descriptors = &vk_create_texture_descriptors,
@@ -774,8 +776,19 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
             foreach (&cell : state.textures.slots[:state.textures.next_new]) {
                 if (cell.used) {
                     destroy_cached_views(state, &cell.value);
-                    vk::destroy_image_view(state.device, cell.value.default_view, null);
-                    if (state.allocator != null) state.allocator.destroy_image(cell.value.image, cell.value.allocation);
+                    vk::destroy_image_view(
+                        state.device,
+                        cell.value.default_view,
+                        null,
+                    );
+                    if (cell.value.placed) {
+                        vk::destroy_image(state.device, cell.value.image, null);
+                    } else if (state.allocator != null) {
+                        state.allocator.destroy_image(
+                            cell.value.image,
+                            cell.value.allocation,
+                        );
+                    }
                 }
             }
             mem::free(state.textures.slots.ptr);

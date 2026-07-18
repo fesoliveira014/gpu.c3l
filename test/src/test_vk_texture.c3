@@ -2,6 +2,156 @@ module gpu_test;
 
 import gpu @public;
 import gpu::vk @public;
+import vma;
+import vk;
+
+struct PlacementNativeProbe {
+    vk::Result create_result;
+    vk::Result view_result;
+    uint       create_calls;
+    uint       view_calls;
+    uint       destroy_image_calls;
+    uint       destroy_view_calls;
+}
+
+struct PlacementFixture {
+    vk::VkDeviceState     state;
+    vk::AllocationCell[1] allocations;
+    vk::TextureCell[1]    textures;
+    vk::DeferredEntry[1]  deferred;
+    PlacementNativeProbe  probe;
+}
+
+fn vk::Result placement_probe_create_image(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+    vk::DeviceSize offset,
+    vk::ImageCreateInfo* image_info,
+    vk::Image* out_image,
+) {
+    (void)allocator;
+    (void)allocation;
+    (void)offset;
+    (void)image_info;
+    PlacementNativeProbe* probe = (PlacementNativeProbe*)user_data;
+    probe.create_calls++;
+    if (probe.create_result != vk::Result.SUCCESS) return probe.create_result;
+    *out_image = (vk::Image)(uptr)0x100;
+    return vk::Result.SUCCESS;
+}
+
+fn vk::Result placement_probe_create_view(
+    void* user_data,
+    vk::Device device,
+    vk::ImageViewCreateInfo* view_info,
+    vk::ImageView* out_view,
+) {
+    (void)device;
+    (void)view_info;
+    PlacementNativeProbe* probe = (PlacementNativeProbe*)user_data;
+    probe.view_calls++;
+    if (probe.view_result != vk::Result.SUCCESS) return probe.view_result;
+    *out_view = (vk::ImageView)(uptr)0x200;
+    return vk::Result.SUCCESS;
+}
+
+fn void placement_probe_destroy_image(
+    void* user_data,
+    vk::Device device,
+    vk::Image image,
+) {
+    (void)device;
+    (void)image;
+    PlacementNativeProbe* probe = (PlacementNativeProbe*)user_data;
+    probe.destroy_image_calls++;
+}
+
+fn void placement_probe_destroy_view(
+    void* user_data,
+    vk::Device device,
+    vk::ImageView view,
+) {
+    (void)device;
+    (void)view;
+    PlacementNativeProbe* probe = (PlacementNativeProbe*)user_data;
+    probe.destroy_view_calls++;
+}
+
+fn vk::TexturePlacementNativeOps placement_probe_ops(
+    PlacementNativeProbe* probe,
+) {
+    return {
+        .user_data             = probe,
+        .create_aliasing_image = &placement_probe_create_image,
+        .create_view           = &placement_probe_create_view,
+        .destroy_image         = &placement_probe_destroy_image,
+        .destroy_view          = &placement_probe_destroy_view,
+    };
+}
+
+fn gpu::GpuAllocation init_placement_fixture(PlacementFixture* fixture) {
+    const ulong OWNER = 119;
+    fixture.state.resource_owner = OWNER;
+    fixture.state.compute_family = 0;
+    fixture.state.allocations.owner = gpu::resource_owner_tag(
+        OWNER,
+        gpu::ResourceOwnerKind.ALLOCATION,
+    );
+    fixture.state.allocations.slots = fixture.allocations[..];
+    fixture.state.allocations.next_new = 1;
+    fixture.allocations[0] = {
+        .used       = true,
+        .generation = 1,
+        .value = {
+            .raw_allocation = (vma::Allocation)(void*)0x300,
+            .raw_info       = {
+                .memory_type = 1,
+                .size        = 256,
+            },
+            .size           = 256,
+            .access         = { .compute },
+            .texture_memory = true,
+            .memory_class   = gpu::MemoryClass.TEXTURE,
+        },
+    };
+    fixture.state.textures.owner = gpu::resource_owner_tag(
+        OWNER,
+        gpu::ResourceOwnerKind.TEXTURE,
+    );
+    fixture.state.textures.slots = fixture.textures[..];
+    fixture.state.resource_mutex.init()!!;
+    return {
+        .owner      = fixture.state.allocations.owner,
+        .index      = 0,
+        .generation = 1,
+    };
+}
+
+fn gpu::TextureDesc placement_test_desc() {
+    return {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .compute },
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .sampled },
+    };
+}
+
+fn gpu::TextureRequirements placement_test_requirements(
+    PlacementFixture* fixture,
+) {
+    return {
+        .size      = 64,
+        .alignment = 64,
+        .compatibility = {
+            .owner = fixture.state.allocations.owner,
+            .value = 0b0010,
+        },
+    };
+}
+
 
 // Headless (lavapipe): minimal texture lifecycle and whole-image barriers.
 
@@ -684,4 +834,338 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
 
     defer discard_test_executable(&commands_executable)!!;
     gpu::end_frame(&frame)!!;
+}
+
+fn void placed_texture_requirements_validate_and_release_storage() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc texture_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute },
+        .width     = 16,
+        .height    = 16,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .sampled, .storage },
+    };
+    gpu::TextureRequirements requirements =
+        gpu::get_texture_requirements(&device, &texture_desc)!!;
+    assert(requirements.size > 0
+        && requirements.alignment > 0
+        && requirements.compatibility.is_valid()
+        && !requirements.dedicated_only,
+        "a basic texture exposes reusable device-bound requirements");
+
+    gpu::TextureRequirements[1] queried = { requirements };
+    gpu::AllocationDesc allocation_desc = {
+        .size                 = requirements.size * 2,
+        .memory_class         = gpu::MemoryClass.TEXTURE,
+        .access               = texture_desc.access,
+        .texture_requirements = queried[..],
+    };
+    gpu::GpuAllocation allocation =
+        gpu::allocate_memory(&device, &allocation_desc)!!;
+    gpu::AllocationInfo info =
+        gpu::get_allocation_info(&device, allocation)!!;
+    assert(info.memory_class == gpu::MemoryClass.TEXTURE
+        && !info.mapped && !info.coherent && !info.addressable,
+        "texture memory exposes no generic mapping or address");
+    assert(@catch(gpu::get_allocation_span(&device, allocation))
+        == gpu::INVALID_ARGUMENT,
+        "texture memory cannot be borrowed as a generic data span");
+
+    gpu::TextureHandle first = gpu::create_placed_texture(
+        device:     &device,
+        desc:       &texture_desc,
+        allocation: allocation,
+        offset:     0,
+    )!!;
+    assert(@catch(gpu::create_placed_texture(
+        device:     &device,
+        desc:       &texture_desc,
+        allocation: allocation,
+        offset:     0,
+    )) == gpu::INVALID_ARGUMENT,
+        "live placement ranges cannot overlap");
+    assert(@catch(gpu::create_placed_texture(
+        device:     &device,
+        desc:       &texture_desc,
+        allocation: allocation,
+        offset:     allocation_desc.size,
+    )) == gpu::INVALID_ARGUMENT,
+        "placement ranges must fit in the allocation");
+    if (requirements.alignment > 1) {
+        assert(@catch(gpu::create_placed_texture(
+            device:     &device,
+            desc:       &texture_desc,
+            allocation: allocation,
+            offset:     1,
+        )) == gpu::INVALID_ARGUMENT,
+            "placement offsets must satisfy texture alignment");
+    }
+
+    gpu::TextureHandle second = gpu::create_placed_texture(
+        device:     &device,
+        desc:       &texture_desc,
+        allocation: allocation,
+        offset:     requirements.size,
+    )!!;
+    gpu::destroy_texture(&device, first)!!;
+    gpu::destroy_texture(&device, second)!!;
+    gpu::GpuAllocation stale = allocation;
+    gpu::free_allocation(&device, &allocation)!!;
+    assert(@catch(gpu::create_placed_texture(
+        device:     &device,
+        desc:       &texture_desc,
+        allocation: stale,
+        offset:     0,
+    )) == gpu::INVALID_HANDLE,
+        "released placement storage is stale");
+
+    gpu::AllocationDesc generic_desc = {
+        .size         = requirements.size,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = texture_desc.access,
+    };
+    gpu::GpuAllocation generic =
+        gpu::allocate_memory(&device, &generic_desc)!!;
+    assert(@catch(gpu::create_placed_texture(
+        device:     &device,
+        desc:       &texture_desc,
+        allocation: generic,
+        offset:     0,
+    )) == gpu::INVALID_ARGUMENT,
+        "generic data allocations cannot back textures");
+    gpu::free_allocation(&device, &generic)!!;
+}
+
+fn void placed_texture_validation_precedes_native_mutation() @test {
+    PlacementFixture fixture;
+    gpu::GpuAllocation allocation = init_placement_fixture(&fixture);
+    defer (void)fixture.state.resource_mutex.destroy();
+    vk::TexturePlacementNativeOps ops = placement_probe_ops(&fixture.probe);
+    gpu::TextureDesc desc = placement_test_desc();
+    gpu::TextureRequirements requirements =
+        placement_test_requirements(&fixture);
+
+    requirements.alignment = 0;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    requirements.alignment = 64;
+
+    requirements.dedicated_only = true;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::UNSUPPORTED_FEATURE);
+    requirements.dedicated_only = false;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       1,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       256,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       usz::max - 63,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+
+    requirements.compatibility.value = 0b0100;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    requirements.compatibility.value = 0b0010;
+    fixture.allocations[0].value.texture_memory = false;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.allocations[0].value.texture_memory = true;
+
+    gpu::TextureDesc wrong_access = desc;
+    wrong_access.access = { .graphics };
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &wrong_access,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    gpu::GpuAllocation stale = allocation;
+    stale.generation++;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    stale,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_HANDLE);
+
+    fixture.state.textures.next_new = 1;
+    fixture.allocations[0].value.live_placements = uint::max;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_RESOURCE_STATE);
+    fixture.allocations[0].value.live_placements = 0;
+
+    fixture.textures[0] = {
+        .used       = true,
+        .generation = 1,
+        .value = {
+            .placed           = true,
+            .placement        = allocation,
+            .placement_offset = 0,
+            .allocation_size  = 64,
+        },
+    };
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.textures[0].used = false;
+    fixture.state.deferred.entries = fixture.deferred[..];
+    fixture.state.deferred.count = 1;
+    fixture.deferred[0] = {
+        .kind             = vk::DeferredKind.PLACED_IMAGE,
+        .placement        = allocation,
+        .placement_offset = 0,
+        .placement_size   = 64,
+    };
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(fixture.probe.create_calls == 0
+        && fixture.probe.view_calls == 0
+        && fixture.allocations[0].value.live_placements == 0,
+        "every invalid placement stops before native mutation");
+}
+
+fn void placed_texture_publication_rolls_back_native_failures() @test {
+    PlacementFixture fixture;
+    gpu::GpuAllocation allocation = init_placement_fixture(&fixture);
+    defer (void)fixture.state.resource_mutex.destroy();
+    vk::TexturePlacementNativeOps ops = placement_probe_ops(&fixture.probe);
+    gpu::TextureDesc desc = placement_test_desc();
+    gpu::TextureRequirements requirements =
+        placement_test_requirements(&fixture);
+
+    fixture.probe.create_result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::OUT_OF_DEVICE_MEMORY);
+    assert(fixture.probe.create_calls == 1
+        && fixture.probe.view_calls == 0
+        && fixture.probe.destroy_image_calls == 0
+        && fixture.allocations[0].value.live_placements == 0,
+        "image creation failure publishes and retains nothing");
+
+    fixture.probe = {
+        .view_result = vk::Result.ERROR_OUT_OF_HOST_MEMORY,
+    };
+    ops = placement_probe_ops(&fixture.probe);
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::OUT_OF_HOST_MEMORY);
+    assert(fixture.probe.create_calls == 1
+        && fixture.probe.view_calls == 1
+        && fixture.probe.destroy_image_calls == 1
+        && fixture.probe.destroy_view_calls == 0
+        && fixture.allocations[0].value.live_placements == 0,
+        "view failure destroys the image and releases placement retention");
+
+    fixture.probe = {};
+    ops = placement_probe_ops(&fixture.probe);
+    fixture.state.textures.next_new = 1;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::SLOT_TABLE_FULL);
+    assert(fixture.probe.destroy_view_calls == 1
+        && fixture.probe.destroy_image_calls == 1
+        && fixture.allocations[0].value.live_placements == 0,
+        "publication failure rolls back view, image, and placement retention");
+
+    fixture.probe = {};
+    ops = placement_probe_ops(&fixture.probe);
+    fixture.state.textures.next_new = 0;
+    gpu::TextureHandle texture = vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )!!;
+    assert(texture.is_valid()
+        && fixture.probe.create_calls == 1
+        && fixture.probe.view_calls == 1
+        && fixture.allocations[0].value.live_placements == 1,
+        "successful placement publishes once and retains its allocation");
+    vk::TextureSlot* slot = fixture.state.textures.get(texture)!!;
+    ops.destroy_view(ops.user_data, fixture.state.device, slot.default_view);
+    ops.destroy_image(ops.user_data, fixture.state.device, slot.image);
+    fixture.state.textures.free(texture)!!;
+    fixture.allocations[0].value.live_placements--;
 }

@@ -268,10 +268,11 @@ and render-pass command constraints remain enforced.
 
 ### Independent allocations
 
-`allocate_memory` creates a `GpuAllocation` for generic GPU data.
-`MemoryClass` selects CPU-write, GPU-private, or CPU-read behavior without
-exposing backend heaps. `AllocationInfo` reports immutable properties and
-actual mapping, coherence, and address capabilities.
+`allocate_memory` creates a `GpuAllocation` for generic data or placed
+textures. `MemoryClass` selects CPU-write, GPU-private, CPU-read, or texture
+behavior without exposing backend heaps. `AllocationInfo` reports immutable
+properties and actual mapping, coherence, and address capabilities. Texture
+memory has none of the generic span, mapping, or address capabilities.
 
 The device owns each allocation in a generation-checked table and keeps native
 storage private. `get_allocation_span` borrows the complete range; mapping and
@@ -298,34 +299,13 @@ The Vulkan backend may use private `BufferHandle`, `BufferDesc`, and
 
 ### Textures
 
-Textures represent Vulkan images and their default views.
+Textures represent images and views without exposing backend objects.
+`create_texture` owns its storage. `get_texture_requirements` and
+`create_placed_texture` let the application group compatible textures into
+explicit allocations. Requirements are immutable device-owned values.
 
-Public uses:
-
-```text
-sampled textures
-storage textures
-color attachments
-depth/stencil attachments
-transfer sources/destinations
-```
-
-Backend slot:
-
-```text
-TextureSlot
-    vk::Image image
-    vma::Allocation allocation
-    vma::AllocationInfo allocation_info
-    vk::ImageView default_view
-    vk::ImageLayout layout
-    Format format
-    TextureUsage usage
-    uint width, height, depth
-    uint mip_levels
-    ushort generation
-    bool used
-```
+Placement validates memory class, compatibility, size, alignment, access, and
+overlap before native creation. Texture destruction never releases caller-owned storage.
 
 ### Texture and sampler descriptors
 

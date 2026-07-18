@@ -102,6 +102,21 @@ struct TextureFormatSupport {
     TextureSampleCountSupport sample_counts;
 }
 
+<* Opaque device-owned compatibility value returned by a texture requirements
+   query. *>
+struct TextureCompatibility {
+    ulong owner;
+    uint  value;
+}
+
+<* Storage requirements for one texture descriptor. *>
+struct TextureRequirements {
+    usz                  size;
+    usz                  alignment;
+    TextureCompatibility compatibility;
+    bool                 dedicated_only;
+}
+
 <* Creation parameters for create_texture. `access` must be a non-empty subset
    of the device's selected queue roles. *>
 struct TextureDesc {
@@ -153,6 +168,8 @@ struct SamplerDesc {
     CompareOp   compare;
     ZString     debug_name;
 }
+
+fn bool TextureCompatibility.is_valid(self) => self.owner != 0 && self.value != 0;
 
 fn uint texture_mip_levels(TextureDesc* desc) @private {
     return desc.mip_levels == 0 ? 1 : desc.mip_levels;
@@ -231,6 +248,15 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
     return operation.vtable.supports_texture_desc(device, desc);
 }
 
+<* Return exact storage requirements for a texture descriptor. *>
+fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* desc) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    validate_queue_access(&operation, desc.access)!;
+    return operation.vtable.get_texture_requirements(device, desc);
+}
+
 <* The handle owns the image; shader access goes through a TextureIndex.
    Ownership: release with destroy_texture. *>
 fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
@@ -243,7 +269,33 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     return texture;
 }
 
-<* Counterpart of create_texture; descriptors created from the texture must be destroyed first. *>
+<* Create a texture in caller-owned texture memory. *>
+fn TextureHandle? create_placed_texture(
+    Device* device,
+    TextureDesc* desc,
+    GpuAllocation allocation,
+    usz offset,
+) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    validate_queue_access(&operation, desc.access)!;
+    validate_resource_owner(
+        &operation,
+        allocation.owner,
+        ResourceOwnerKind.ALLOCATION,
+    )!;
+    TextureHandle texture = operation.vtable.create_placed_texture(
+        device:     device,
+        desc:       desc,
+        allocation: allocation,
+        offset:     offset,
+    )!;
+    retain_device_children(&operation);
+    return texture;
+}
+
+<* Destroy a texture after its descriptors. Placed storage remains caller-owned. *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);

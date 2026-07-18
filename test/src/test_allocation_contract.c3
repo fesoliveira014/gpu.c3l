@@ -12,6 +12,10 @@ struct AllocationStubState {
     uint           flush_calls;
     uint           invalidate_calls;
     uint           visibility_entries;
+    uint           requirements_calls;
+    uint           placed_texture_calls;
+    uint           texture_destroy_calls;
+    bool           texture_live;
     bool           live;
     bool           block_free;
 }
@@ -112,6 +116,56 @@ fn void? invalidate_stub_mapped_span(Device* device, GpuSpan span) {
     state.invalidate_calls++;
 }
 
+fn TextureRequirements? get_stub_texture_requirements(
+    Device* device,
+    TextureDesc* desc,
+) {
+    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    state.requirements_calls++;
+    if (!gpu::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
+    return {
+        .size          = 64,
+        .alignment     = 64,
+        .compatibility = {
+            .owner = gpu::resource_owner_tag(
+                state.owner,
+                ResourceOwnerKind.ALLOCATION,
+            ),
+            .value = 3,
+        },
+    };
+}
+
+fn TextureHandle? create_stub_placed_texture(
+    Device* device,
+    TextureDesc* desc,
+    GpuAllocation allocation,
+    usz offset,
+) {
+    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    state.placed_texture_calls++;
+    if (!gpu::texture_desc_valid(desc) || !state.live
+        || allocation != state.allocation || offset > state.seen_desc.size - 64) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    state.texture_live = true;
+    return {
+        .owner      = gpu::resource_owner_tag(
+            state.owner,
+            ResourceOwnerKind.TEXTURE,
+        ),
+        .index      = 0,
+        .generation = 1,
+    };
+}
+
+fn void? destroy_stub_texture(Device* device, TextureHandle texture) {
+    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    state.texture_destroy_calls++;
+    if (!state.texture_live || !texture.is_valid()) return gpu::INVALID_HANDLE~;
+    state.texture_live = false;
+}
+
 BackendVTable allocation_stub_vtable = {
     .destroy_device      = &destroy_allocation_stub,
     .allocate_memory     = &allocate_stub_memory,
@@ -122,6 +176,9 @@ BackendVTable allocation_stub_vtable = {
     .get_span_address       = &get_stub_span_address,
     .flush_mapped_span      = &flush_stub_mapped_span,
     .invalidate_mapped_span = &invalidate_stub_mapped_span,
+    .get_texture_requirements = &get_stub_texture_requirements,
+    .create_placed_texture     = &create_stub_placed_texture,
+    .destroy_texture           = &destroy_stub_texture,
 };
 
 fn Device create_allocation_stub_device(AllocationStubState* state) {
@@ -331,4 +388,130 @@ fn void mapping_availability_is_class_specific() @test {
 
     gpu::free_allocation(&device, &allocation)!!;
     gpu::destroy_device(&device)!!;
+}
+
+fn void texture_placement_contract_is_strongly_typed() @test {
+    TextureCompatibility compatibility = {
+        .owner = 1,
+        .value = 3,
+    };
+    TextureRequirements requirements = {
+        .size          = 64,
+        .alignment     = 64,
+        .compatibility = compatibility,
+    };
+    TextureRequirements[1] queried = { requirements };
+    AllocationDesc desc = {
+        .size                 = 128,
+        .memory_class         = MemoryClass.TEXTURE,
+        .access               = { .compute },
+        .texture_requirements = queried[..],
+    };
+
+    assert(desc.texture_requirements[0].compatibility.is_valid(),
+        "texture compatibility is an opaque typed value");
+}
+
+fn TextureDesc texture_allocation_desc() {
+    return {
+        .dimension = TextureDimension.TEX_2D,
+        .width     = 4,
+        .height    = 4,
+        .format    = Format.RGBA8_UNORM,
+        .usage     = { .sampled },
+        .access    = { .compute },
+    };
+}
+
+fn void texture_memory_requires_prequeried_compatibility() @test {
+    AllocationStubState state;
+    Device device = create_allocation_stub_device(&state);
+    TextureDesc texture_desc = texture_allocation_desc();
+
+    assert(@catch(gpu::get_texture_requirements(&device, null))
+        == gpu::INVALID_ARGUMENT);
+    assert(state.requirements_calls == 0,
+        "null descriptors stop before the backend requirements query");
+    TextureRequirements requirements = gpu::get_texture_requirements(
+        &device,
+        &texture_desc,
+    )!!;
+    assert(requirements.size == 64 && requirements.alignment == 64,
+        "texture requirements expose exact placement size and alignment");
+    assert(requirements.compatibility.is_valid() && !requirements.dedicated_only,
+        "requirements carry an opaque live compatibility value");
+
+    AllocationDesc missing = allocation_stub_desc(MemoryClass.TEXTURE);
+    assert(@catch(gpu::allocate_memory(&device, &missing))
+        == gpu::INVALID_ARGUMENT);
+    AllocationDesc generic = allocation_stub_desc(MemoryClass.GPU_PRIVATE);
+    TextureRequirements[1] queried = { requirements };
+    generic.texture_requirements = queried[..];
+    assert(@catch(gpu::allocate_memory(&device, &generic))
+        == gpu::INVALID_ARGUMENT);
+    assert(state.allocate_calls == 0,
+        "malformed texture-memory requests stop before allocation");
+
+    AllocationDesc desc = allocation_stub_desc(MemoryClass.TEXTURE);
+    desc.size = 128;
+    desc.texture_requirements = queried[..];
+    GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
+    assert(state.seen_desc.alignment == requirements.alignment,
+        "texture-memory alignment includes every queried requirement");
+
+    TextureHandle texture = gpu::create_placed_texture(
+        device:     &device,
+        desc:       &texture_desc,
+        allocation: allocation,
+        offset:     64,
+    )!!;
+    assert(state.placed_texture_calls == 1,
+        "valid placed creation dispatches exactly once");
+    gpu::destroy_texture(&device, texture)!!;
+    gpu::free_allocation(&device, &allocation)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void texture_memory_rejects_foreign_and_dedicated_requirements() @test {
+    AllocationStubState first_state;
+    AllocationStubState second_state;
+    Device first = create_allocation_stub_device(&first_state);
+    Device second = create_allocation_stub_device(&second_state);
+    TextureDesc texture_desc = texture_allocation_desc();
+    TextureRequirements requirements = gpu::get_texture_requirements(
+        &first,
+        &texture_desc,
+    )!!;
+    TextureRequirements[1] queried = { requirements };
+
+    AllocationDesc foreign = allocation_stub_desc(MemoryClass.TEXTURE);
+    foreign.size = 128;
+    foreign.texture_requirements = queried[..];
+    assert(@catch(gpu::allocate_memory(&second, &foreign))
+        == gpu::INVALID_HANDLE);
+    TextureRequirements incompatible_first = requirements;
+    TextureRequirements incompatible_second = requirements;
+    incompatible_first.compatibility.value = 1;
+    incompatible_second.compatibility.value = 2;
+    TextureRequirements[2] incompatible = {
+        incompatible_first,
+        incompatible_second,
+    };
+    AllocationDesc disjoint = allocation_stub_desc(MemoryClass.TEXTURE);
+    disjoint.size = 128;
+    disjoint.texture_requirements = incompatible[..];
+    assert(@catch(gpu::allocate_memory(&first, &disjoint))
+        == gpu::INVALID_ARGUMENT);
+    requirements.dedicated_only = true;
+    queried[0] = requirements;
+    AllocationDesc dedicated = allocation_stub_desc(MemoryClass.TEXTURE);
+    dedicated.size = 128;
+    dedicated.texture_requirements = queried[..];
+    assert(@catch(gpu::allocate_memory(&first, &dedicated))
+        == gpu::UNSUPPORTED_FEATURE);
+    assert(first_state.allocate_calls == 0 && second_state.allocate_calls == 0,
+        "foreign, incompatible, and dedicated requirements perform no allocation");
+
+    gpu::destroy_device(&first)!!;
+    gpu::destroy_device(&second)!!;
 }

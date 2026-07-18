@@ -25,9 +25,13 @@ struct AllocationNativeProbe {
     vk::DeviceSize             min_alignment;
     uint[3]                    queue_families;
     vk::MemoryRequirements     requirements;
+    vk::MemoryRequirements     raw_requirements;
+    vma::AllocationCreateInfo  raw_allocation_info;
     vk::MemoryPropertyFlags    memory_properties;
     char[64]                   mapping;
     uint                       create_count;
+    uint                       allocate_count;
+    uint                       free_count;
     uint                       requirements_count;
     uint                       properties_count;
     uint                       address_count;
@@ -535,10 +539,45 @@ fn void allocation_probe_destroy_buffer(
     probe.destroy_count++;
 }
 
+fn vk::Result allocation_probe_allocate_memory(
+    void* user_data,
+    vma::Allocator allocator,
+    vk::MemoryRequirements* requirements,
+    vma::AllocationCreateInfo* allocation_info,
+    vma::Allocation* out_allocation,
+    vma::AllocationInfo* out_info,
+) {
+    (void)allocator;
+    AllocationNativeProbe* probe = (AllocationNativeProbe*)user_data;
+    probe.allocate_count++;
+    probe.raw_requirements = *requirements;
+    probe.raw_allocation_info = *allocation_info;
+    *out_allocation = (vma::Allocation)(void*)0x500;
+    *out_info = {
+        .memory_type = 1,
+        .offset      = requirements.alignment,
+        .size        = requirements.size,
+    };
+    return vk::Result.SUCCESS;
+}
+
+fn void allocation_probe_free_memory(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+) {
+    (void)allocator;
+    (void)allocation;
+    AllocationNativeProbe* probe = (AllocationNativeProbe*)user_data;
+    probe.free_count++;
+}
+
 fn vk::AllocationNativeOps allocation_probe_ops(AllocationNativeProbe* probe) {
     return {
         .user_data                    = probe,
         .create_buffer                = &allocation_probe_create_buffer,
+        .allocate_memory              = &allocation_probe_allocate_memory,
+        .free_memory                  = &allocation_probe_free_memory,
         .get_memory_requirements      = &allocation_probe_get_requirements,
         .get_memory_properties        = &allocation_probe_get_properties,
         .get_buffer_device_address    = &allocation_probe_get_address,
@@ -716,6 +755,92 @@ fn void allocation_transaction_applies_memory_class_policy() @test {
     check_allocation_memory_policy(gpu::MemoryClass.CPU_WRITE);
     check_allocation_memory_policy(gpu::MemoryClass.CPU_READ);
     check_allocation_memory_policy(gpu::MemoryClass.GPU_PRIVATE);
+}
+
+fn void texture_memory_uses_raw_non_addressable_allocation() @test {
+    AllocationTransactionFixture fixture;
+    init_allocation_transaction_fixture(
+        &fixture,
+        AllocationFailurePoint.NONE,
+    );
+    defer (void)fixture.state.resource_mutex.destroy();
+    vk::AllocationNativeOps ops = allocation_probe_ops(&fixture.probe);
+    gpu::TextureRequirements[2] queried = {
+        {
+            .size      = 128,
+            .alignment = 64,
+            .compatibility = {
+                .owner = fixture.state.allocations.owner,
+                .value = 0b0110,
+            },
+        },
+        {
+            .size      = 64,
+            .alignment = 32,
+            .compatibility = {
+                .owner = fixture.state.allocations.owner,
+                .value = 0b0010,
+            },
+        },
+    };
+    gpu::AllocationDesc desc = {
+        .size                 = 256,
+        .alignment            = 64,
+        .memory_class         = gpu::MemoryClass.TEXTURE,
+        .access               = { .compute, .transfer },
+        .texture_requirements = queried[..],
+    };
+
+    gpu::GpuAllocation allocation = vk::allocate_memory_for_state_with_ops(
+        &fixture.state,
+        &desc,
+        &ops,
+    )!!;
+    assert(fixture.probe.allocate_count == 1
+        && fixture.probe.create_count == 0,
+        "texture memory uses raw allocation without creating a buffer");
+    assert(fixture.probe.raw_requirements.size == desc.size
+        && fixture.probe.raw_requirements.alignment == desc.alignment
+        && fixture.probe.raw_requirements.memory_type_bits == 0b0010,
+        "raw allocation intersects every queried compatibility mask");
+    assert(fixture.probe.raw_allocation_info.usage
+        == vma::MemoryUsage.GPU_ONLY
+        && fixture.probe.raw_allocation_info.flags.can_alias,
+        "raw texture memory uses an explicit device-local policy");
+
+    gpu::AllocationInfo info = vk::allocation_info_for_state(
+        &fixture.state,
+        allocation,
+    )!!;
+    assert(info.size == desc.size
+        && info.memory_class == gpu::MemoryClass.TEXTURE
+        && info.access == desc.access
+        && !info.mapped && !info.coherent && !info.addressable,
+        "texture allocation info exposes no generic data capabilities");
+    assert(@catch(vk::allocation_span_for_state(
+        &fixture.state,
+        allocation,
+    )) == gpu::INVALID_ARGUMENT,
+        "texture allocation cannot resolve to a generic span");
+    gpu::GpuSpan forged = {
+        .owner      = allocation.owner,
+        .index      = allocation.index,
+        .generation = allocation.generation,
+        .size       = desc.size,
+    };
+    assert(@catch(vk::resolve_span(&fixture.state, &forged))
+        == gpu::INVALID_ARGUMENT,
+        "forged texture spans stop before private-buffer resolution");
+
+
+    vk::free_allocation_for_state_with_ops(
+        &fixture.state,
+        allocation,
+        &ops,
+    )!!;
+    assert(fixture.probe.free_count == 1
+        && fixture.probe.destroy_count == 0,
+        "texture allocation release frees raw memory exactly once");
 }
 
 fn void allocation_table_pins_capacity_and_owner_domain() @test {

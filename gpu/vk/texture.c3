@@ -6,6 +6,28 @@ import std::thread;
 import vma;
 import std::atomic;
 
+alias TextureCreateAliasingImageFn = fn vk::Result (
+    void*, vma::Allocator, vma::Allocation, vk::DeviceSize,
+    vk::ImageCreateInfo*, vk::Image*
+);
+alias TextureCreateViewFn = fn vk::Result (
+    void*, vk::Device, vk::ImageViewCreateInfo*, vk::ImageView*
+);
+alias TextureDestroyImageFn = fn void (
+    void*, vk::Device, vk::Image
+);
+alias TextureDestroyViewFn = fn void (
+    void*, vk::Device, vk::ImageView
+);
+
+struct TexturePlacementNativeOps {
+    void*                        user_data;
+    TextureCreateAliasingImageFn create_aliasing_image;
+    TextureCreateViewFn          create_view;
+    TextureDestroyImageFn        destroy_image;
+    TextureDestroyViewFn         destroy_view;
+}
+
 // Concrete (non-generic) slot table for textures. Monomorphized twin of
 // gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
 const uint TEXTURE_FREE_NONE = 0;
@@ -39,6 +61,9 @@ struct TextureSlot {
     uint               array_layers;
     Atomic{int}        current_layout;
     bool               swapchain_owned;
+    bool               placed;
+    gpu::GpuAllocation placement;
+    usz                placement_offset;
     usz                allocation_size;
     char[DEBUG_NAME_CAP] debug_name;
     CachedView[MAX_CACHED_VIEWS] views;
@@ -466,6 +491,7 @@ fn void enqueue_cached_views(VkDeviceState* state, TextureSlot* slot, ulong reti
 fn vk::ImageCreateInfo make_texture_create_info(
     gpu::TextureDesc* desc,
     uint[] queue_families,
+    bool aliasing = false,
 ) @private {
     vk::ImageCreateInfo info = vk::image_create_info()
         .set_image_type(vk::ImageType.TYPE_2D)
@@ -477,6 +503,9 @@ fn vk::ImageCreateInfo make_texture_create_info(
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
         .set_initial_layout(vk::ImageLayout.UNDEFINED);
+    if (aliasing) {
+        info.flags = (vk::ImageCreateFlags)vk::ImageCreateFlagBits.ALIAS_BIT;
+    }
     if (queue_families.len >= 2) {
         info = info
             .set_sharing_mode(vk::SharingMode.CONCURRENT)
@@ -484,6 +513,71 @@ fn vk::ImageCreateInfo make_texture_create_info(
     }
     return info;
 }
+
+fn gpu::TextureRequirements? texture_requirements_for_state(
+    VkDeviceState* state,
+    gpu::TextureDesc* desc,
+) {
+    if (!gpu::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
+    if (!texture_desc_supported(state, desc)!) return gpu::UNSUPPORTED_FEATURE~;
+
+    uint[MAX_QUEUE_FAMILIES] families;
+    uint family_count = resource_queue_families(
+        state,
+        desc.access,
+        families[..],
+    );
+    vk::ImageCreateInfo image_info = make_texture_create_info(
+        desc,
+        families[:family_count],
+        true,
+    );
+    vk::DeviceImageMemoryRequirements query =
+        vk::device_image_memory_requirements().set_create_info(&image_info);
+    vk::MemoryDedicatedRequirements dedicated =
+        vk::memory_dedicated_requirements();
+    vk::MemoryRequirements2 result =
+        vk::memory_requirements2().set_next(&dedicated);
+    vk::get_device_image_memory_requirements(
+        state.device,
+        &query,
+        &result,
+    );
+
+    vk::MemoryRequirements* requirements = &result.memory_requirements;
+    usz size = (usz)requirements.size;
+    usz alignment = (usz)requirements.alignment;
+    if (requirements.size == 0
+        || (vk::DeviceSize)size != requirements.size
+        || requirements.alignment == 0
+        || (vk::DeviceSize)alignment != requirements.alignment
+        || requirements.memory_type_bits == 0) {
+        return gpu::BACKEND_ERROR~;
+    }
+    return {
+        .size      = size,
+        .alignment = alignment,
+        .compatibility = {
+            .owner = gpu::resource_owner_tag(
+                state.resource_owner,
+                gpu::ResourceOwnerKind.ALLOCATION,
+            ),
+            .value = requirements.memory_type_bits,
+        },
+        .dedicated_only = dedicated.requires_dedicated_allocation != 0,
+    };
+}
+
+fn gpu::TextureRequirements? vk_get_texture_requirements(
+    gpu::Device* device,
+    gpu::TextureDesc* desc,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    enter_tracked(state);
+    defer exit_tracked(state);
+    return texture_requirements_for_state(state, desc);
+}
+
 fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
@@ -592,6 +686,244 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     return gpu::SLOT_TABLE_FULL~;
 }
 
+fn vk::Result texture_create_aliasing_image_real(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+    vk::DeviceSize offset,
+    vk::ImageCreateInfo* image_info,
+    vk::Image* out_image,
+) {
+    (void)user_data;
+    return allocator.create_aliasing_image2(
+        allocation,
+        offset,
+        image_info,
+        out_image,
+    );
+}
+
+fn vk::Result texture_create_view_real(
+    void* user_data,
+    vk::Device device,
+    vk::ImageViewCreateInfo* view_info,
+    vk::ImageView* out_view,
+) {
+    (void)user_data;
+    return vk::create_image_view(device, view_info, null, out_view);
+}
+
+fn void texture_destroy_image_real(
+    void* user_data,
+    vk::Device device,
+    vk::Image image,
+) {
+    (void)user_data;
+    vk::destroy_image(device, image, null);
+}
+
+fn void texture_destroy_view_real(
+    void* user_data,
+    vk::Device device,
+    vk::ImageView view,
+) {
+    (void)user_data;
+    vk::destroy_image_view(device, view, null);
+}
+
+fn TexturePlacementNativeOps texture_placement_native_ops_real() {
+    return {
+        .create_aliasing_image = &texture_create_aliasing_image_real,
+        .create_view           = &texture_create_view_real,
+        .destroy_image         = &texture_destroy_image_real,
+        .destroy_view          = &texture_destroy_view_real,
+    };
+}
+
+fn bool placed_texture_overlaps(
+    VkDeviceState* state,
+    gpu::GpuAllocation placement,
+    usz offset,
+    usz size,
+) {
+    foreach (&cell : state.textures.slots[:state.textures.next_new]) {
+        if (!cell.used || !cell.value.placed
+            || cell.value.placement != placement) {
+            continue;
+        }
+        if (offset < cell.value.placement_offset + cell.value.allocation_size
+            && cell.value.placement_offset < offset + size) {
+            return true;
+        }
+    }
+    return deferred_placement_overlaps(
+        state,
+        placement,
+        offset,
+        size,
+    );
+}
+
+fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
+    VkDeviceState* state,
+    gpu::TextureDesc* desc,
+    gpu::GpuAllocation placement,
+    usz offset,
+    gpu::TextureRequirements requirements,
+    TexturePlacementNativeOps* ops,
+) {
+    if (requirements.size == 0
+        || requirements.alignment == 0
+        || (requirements.alignment & (requirements.alignment - 1)) != 0
+        || !requirements.compatibility.is_valid()
+        || requirements.compatibility.owner != state.allocations.owner) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (requirements.dedicated_only) return gpu::UNSUPPORTED_FEATURE~;
+    if (offset % requirements.alignment != 0) return gpu::INVALID_ARGUMENT~;
+
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    AllocationSlot* allocation = state.allocations.get(placement)!;
+    if (allocation.live_placements == uint::max) {
+        return gpu::INVALID_RESOURCE_STATE~;
+    }
+    if (!allocation.texture_memory
+        || !gpu::queue_roles_are_subset(desc.access, allocation.access)
+        || allocation.raw_info.memory_type >= 32) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    uint selected_memory_type = 1 << allocation.raw_info.memory_type;
+    if ((selected_memory_type & requirements.compatibility.value) == 0
+        || !gpu::range_fits(allocation.size, offset, requirements.size)
+        || placed_texture_overlaps(
+            state,
+            placement,
+            offset,
+            requirements.size,
+        )) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+
+    uint[MAX_QUEUE_FAMILIES] families;
+    uint family_count = resource_queue_families(
+        state,
+        desc.access,
+        families[..],
+    );
+    vk::ImageCreateInfo image_info = make_texture_create_info(
+        desc,
+        families[:family_count],
+        true,
+    );
+    uint mip_levels = gpu::texture_mip_levels(desc);
+    uint array_layers = gpu::texture_array_layers(desc);
+    TextureSlot slot = {
+        .format           = desc.format,
+        .usage            = desc.usage,
+        .access           = desc.access,
+        .width            = desc.width,
+        .height           = desc.height,
+        .mip_levels       = mip_levels,
+        .array_layers     = array_layers,
+        .placed           = true,
+        .placement        = placement,
+        .placement_offset = offset,
+        .allocation_size  = requirements.size,
+    };
+
+    bool retained_placement;
+    bool owns_image;
+    bool owns_view;
+    defer catch {
+        if (owns_view) {
+            ops.destroy_view(
+                ops.user_data,
+                state.device,
+                slot.default_view,
+            );
+        }
+        if (owns_image) {
+            ops.destroy_image(ops.user_data, state.device, slot.image);
+        }
+        if (retained_placement) allocation.live_placements--;
+    }
+
+    allocation.live_placements++;
+    retained_placement = true;
+    check_texture_create_device_result(
+        state: state,
+        result: ops.create_aliasing_image(
+            ops.user_data,
+            state.allocator,
+            allocation.raw_allocation,
+            (vk::DeviceSize)offset,
+            &image_info,
+            &slot.image,
+        ),
+    )!;
+    owns_image = true;
+
+    copy_debug_name(&slot.debug_name[0], desc.debug_name);
+    if (desc.debug_name != null) {
+        set_object_name(
+            state:         state,
+            object_type:   vk::ObjectType.IMAGE,
+            object_handle: (ulong)slot.image,
+            name:          desc.debug_name,
+        );
+    }
+
+    vk::ImageViewCreateInfo view_info = vk::image_view_create_info()
+        .set_image(slot.image)
+        .set_view_type(array_layers > 1
+            ? vk::ImageViewType.TYPE_2D_ARRAY
+            : vk::ImageViewType.TYPE_2D)
+        .set_format(format_to_vk(desc.format))
+        .set_subresource_range({
+            .aspect_mask      = format_aspect(desc.format),
+            .base_mip_level   = 0,
+            .level_count      = mip_levels,
+            .base_array_layer = 0,
+            .layer_count      = array_layers,
+        });
+    check_device_result(state, ops.create_view(
+        ops.user_data,
+        state.device,
+        &view_info,
+        &slot.default_view,
+    ))!;
+    owns_view = true;
+
+    gpu::TextureHandle handle = state.textures.alloc(slot)!;
+    owns_image = false;
+    owns_view = false;
+    retained_placement = false;
+    return handle;
+}
+
+fn gpu::TextureHandle? vk_create_placed_texture(
+    gpu::Device* device,
+    gpu::TextureDesc* desc,
+    gpu::GpuAllocation placement,
+    usz offset,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    enter_tracked(state);
+    defer exit_tracked(state);
+    gpu::TextureRequirements requirements =
+        texture_requirements_for_state(state, desc)!;
+    TexturePlacementNativeOps ops = texture_placement_native_ops_real();
+    return create_placed_texture_for_state_with_ops(
+        state:        state,
+        desc:         desc,
+        placement:    placement,
+        offset:       offset,
+        requirements: requirements,
+        ops:          &ops,
+    );
+}
+
 <* Frees the handle now; views, image, and allocation release is deferred
    until every referencing frame retires. *>
 fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @private {
@@ -610,6 +942,10 @@ fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @pri
     vk::Image image = slot.image;
     vma::Allocation allocation = slot.allocation;
     vk::ImageView default_view = slot.default_view;
+    bool placed = slot.placed;
+    gpu::GpuAllocation placement = slot.placement;
+    usz placement_offset = slot.placement_offset;
+    usz placement_size = slot.allocation_size;
     enqueue_cached_views(state, slot, retire);
     state.textures.free(handle)!;
     enqueue_deferred(
@@ -620,10 +956,15 @@ fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @pri
         allocation:     (vma::Allocation)null,
     );
     enqueue_deferred(
-        state:          state,
-        kind:           DeferredKind.IMAGE,
-        timeline_value: retire,
-        object:         (void*)image,
-        allocation:     allocation,
+        state:            state,
+        kind:             placed
+            ? DeferredKind.PLACED_IMAGE
+            : DeferredKind.IMAGE,
+        timeline_value:   retire,
+        object:           (void*)image,
+        allocation:       allocation,
+        placement:        placement,
+        placement_offset: placement_offset,
+        placement_size:   placement_size,
     );
 }

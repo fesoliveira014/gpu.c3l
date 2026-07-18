@@ -16,6 +16,7 @@ const uint DEFERRED_QUEUE_INITIAL_CAP = 64;
 enum DeferredKind : int {
     BUFFER,
     IMAGE,
+    PLACED_IMAGE,
     IMAGE_VIEW,
     PIPELINE,
     SHADER_MODULE,
@@ -24,8 +25,11 @@ enum DeferredKind : int {
 struct DeferredEntry {
     DeferredKind    kind;
     ulong           timeline_value;
-    void*           object;
-    vma::Allocation allocation;
+    void*              object;
+    vma::Allocation    allocation;
+    gpu::GpuAllocation placement;
+    usz                placement_offset;
+    usz                placement_size;
 }
 
 struct DeferredQueue {
@@ -48,6 +52,10 @@ fn void free_deferred_entry(VkDeviceState* state, DeferredEntry* entry) @private
             state.allocator.destroy_buffer((vk::Buffer)entry.object, entry.allocation);
         case DeferredKind.IMAGE:
             state.allocator.destroy_image((vk::Image)entry.object, entry.allocation);
+        case DeferredKind.PLACED_IMAGE:
+            vk::destroy_image(state.device, (vk::Image)entry.object, null);
+            AllocationSlot* slot = state.allocations.get(entry.placement)!!;
+            slot.live_placements--;
         case DeferredKind.IMAGE_VIEW:
             vk::destroy_image_view(state.device, (vk::ImageView)entry.object, null);
         case DeferredKind.PIPELINE:
@@ -82,6 +90,28 @@ fn void drain_deferred_to_bound(VkDeviceState* state, ulong bound) @private {
     }
 }
 
+fn bool deferred_placement_overlaps(
+    VkDeviceState* state,
+    gpu::GpuAllocation placement,
+    usz offset,
+    usz size,
+) {
+    DeferredQueue* queue = &state.deferred;
+    for (uint i = 0; i < queue.count; i++) {
+        DeferredEntry* entry =
+            &queue.entries[(queue.head + i) % (uint)queue.entries.len];
+        if (entry.kind != DeferredKind.PLACED_IMAGE
+            || entry.placement != placement) {
+            continue;
+        }
+        if (offset < entry.placement_offset + entry.placement_size
+            && entry.placement_offset < offset + size) {
+            return true;
+        }
+    }
+    return false;
+}
+
 fn void deferred_drain_shadow(VkDeviceState* state) @private {
     state.deferred_stats.drain_calls++;
     drain_deferred_to_bound(state, state.signaled_shadow);
@@ -94,11 +124,22 @@ fn void enqueue_deferred(
     ulong timeline_value,
     void* object,
     vma::Allocation allocation,
+    gpu::GpuAllocation placement = {},
+    usz placement_offset = 0,
+    usz placement_size = 0,
 ) @private {
     DeferredQueue* queue = &state.deferred;
     if (queue.count == queue.entries.len) grow_deferred_queue(state);
     uint idx = (queue.head + queue.count) % (uint)queue.entries.len;
-    queue.entries[idx] = { .kind = kind, .timeline_value = timeline_value, .object = object, .allocation = allocation };
+    queue.entries[idx] = {
+        .kind             = kind,
+        .timeline_value   = timeline_value,
+        .object           = object,
+        .allocation       = allocation,
+        .placement        = placement,
+        .placement_offset = placement_offset,
+        .placement_size   = placement_size,
+    };
     queue.count++;
     state.deferred_stats.pushed++;
     deferred_drain_shadow(state);

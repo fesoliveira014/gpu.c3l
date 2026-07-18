@@ -293,7 +293,7 @@ fn uint report_allocation_leaks(VkDeviceState* state) {
     if (state.allocations.slots.ptr == null) return 0;
     foreach (i, &cell : state.allocations.slots[:state.allocations.next_new]) {
         if (!cell.used) continue;
-        ZString name = slot_name(&cell.value.backing.debug_name[0]);
+        ZString name = slot_name(&cell.value.debug_name[0]);
         if (!report_resource_lifetime(
             state:               state,
             resource_kind:       gpu::DebugResourceKind.ALLOCATION,

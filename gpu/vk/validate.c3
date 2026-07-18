@@ -40,6 +40,7 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         };
         AllocationSlot* allocation_slot = state.allocations.get(allocation)!;
         backing_buffer = BUFFER_HANDLE_INVALID;
+        if (allocation_slot.texture_memory) return gpu::INVALID_ARGUMENT~;
         slot = &allocation_slot.backing;
         offset = span.offset;
         access = slot.access;
