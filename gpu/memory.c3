@@ -132,6 +132,7 @@ fn void? validate_texture_allocation(
     DeviceOperation* operation,
     AllocationDesc* desc,
     usz* alignment,
+    bool allow_dedicated = false,
 ) @private {
     if (desc.memory_class != MemoryClass.TEXTURE) {
         if (desc.texture_requirements.len != 0) return INVALID_ARGUMENT~;
@@ -154,7 +155,9 @@ fn void? validate_texture_allocation(
             texture_compatibility_owner(requirements.compatibility),
             ResourceOwnerKind.ALLOCATION,
         )!;
-        if (requirements.dedicated_only) return UNSUPPORTED_FEATURE~;
+        if (requirements.dedicated_only && !allow_dedicated) {
+            return UNSUPPORTED_FEATURE~;
+        }
         if (desc.size < requirements.size) return INVALID_ARGUMENT~;
         *alignment = max(*alignment, requirements.alignment);
     }

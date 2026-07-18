@@ -50,8 +50,13 @@ alias CreatePlacedTextureFn @private = fn TextureHandle? (
     GpuAllocation allocation,
     usz offset,
 );
-alias DestroyTextureFn @private          = fn void? (Device*, TextureHandle);
+alias CreateDedicatedTextureFn @private = fn DedicatedTexture? (
+    Device* device,
+    TextureDesc* desc,
+    AllocationDesc* allocation_desc,
+);
 alias CreateTextureDescriptorFn @private  = fn TextureIndex? (Device*, TextureHandle, TextureViewDesc*);
+alias DestroyTextureFn @private          = fn void? (Device*, TextureHandle);
 alias DestroyTextureDescriptorFn @private = fn void? (Device*, TextureIndex);
 alias CreateTextureDescriptorsFn @private = fn void? (Device*, TextureDescriptorDesc[], TextureIndex[]);
 alias CreateSamplerFn @private            = fn SamplerIndex? (Device*, SamplerDesc*);
@@ -162,6 +167,7 @@ struct BackendVTable @private {
     GetTextureRequirementsFn  get_texture_requirements;
     CreateTextureFn           create_texture;
     CreatePlacedTextureFn     create_placed_texture;
+    CreateDedicatedTextureFn  create_dedicated_texture;
     DestroyTextureFn          destroy_texture;
     CreateTextureDescriptorFn  create_texture_descriptor;
     DestroyTextureDescriptorFn destroy_texture_descriptor;

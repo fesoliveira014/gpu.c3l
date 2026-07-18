@@ -1030,6 +1030,17 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
         ops:          &ops,
     )) == gpu::INVALID_ARGUMENT);
     fixture.allocations[0].value.texture_memory = true;
+    fixture.allocations[0].value.dedicated_texture = true;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.allocations[0].value.dedicated_texture = false;
+
 
     gpu::TextureDesc wrong_access = desc;
     wrong_access.access = { .graphics };

@@ -113,6 +113,13 @@ def valid_document() -> dict:
                         ("allocation", "GpuAllocation"),
                         ("offset", "usz"),
                     ),
+                    api_function(
+                        "create_dedicated_texture",
+                        "DedicatedTexture?",
+                        ("device", "Device*"),
+                        ("desc", "TextureDesc*"),
+                        ("allocation_desc", "AllocationDesc*"),
+                    ),
                     {
                         "name": "free_allocation",
                         "return_type": {"name": "void?"},
@@ -391,6 +398,20 @@ def valid_document() -> dict:
                             {
                                 "name": "dedicated_only",
                                 "type": {"name": "bool"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "DedicatedTexture",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "texture",
+                                "type": {"name": "TextureHandle"},
+                            },
+                            {
+                                "name": "allocation",
+                                "type": {"name": "GpuAllocation"},
                             },
                         ],
                     },
@@ -1036,6 +1057,18 @@ class PublicApiCheckTests(unittest.TestCase):
             check_public_api.validate_document(document),
         )
 
+    def test_rejects_wrong_dedicated_texture_schema(self) -> None:
+        document = valid_document()
+        result = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "DedicatedTexture"
+        )
+        result["members"].pop()
+        self.assertIn(
+            "DedicatedTexture must expose exactly two ownership tokens",
+            check_public_api.validate_document(document),
+        )
+
     def test_rejects_wrong_placed_texture_signature(self) -> None:
         document = valid_document()
         function = next(
@@ -1045,6 +1078,18 @@ class PublicApiCheckTests(unittest.TestCase):
         function["members"].pop()
         self.assertIn(
             "create_placed_texture has the wrong parameters",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_wrong_dedicated_texture_signature(self) -> None:
+        document = valid_document()
+        function = next(
+            entry for entry in document["modules"]["gpu"]["functions"]
+            if entry["name"] == "create_dedicated_texture"
+        )
+        function["members"].pop()
+        self.assertIn(
+            "create_dedicated_texture has the wrong parameters",
             check_public_api.validate_document(document),
         )
 

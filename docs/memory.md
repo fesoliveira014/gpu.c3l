@@ -249,6 +249,13 @@ allocate_memory with MemoryClass.TEXTURE and all required compatibility values
 create_placed_texture at an aligned, non-overlapping offset
 ```
 
+Dedicated creation:
+
+```text
+get_texture_requirements
+create_dedicated_texture with an exact-size compatible AllocationDesc
+```
+
 Requirements are device-owned and opaque. Incompatible groups,
 dedicated-only requirements, insufficient size or access, stale allocations,
 and overlapping live or retiring placements fail before image creation.
@@ -258,6 +265,8 @@ and overlapping live or retiring placements fail before image creation.
 Destroying an owned texture releases its image allocation after retirement.
 Destroying a placed texture releases the image but not its `GpuAllocation`.
 `free_allocation` returns `RESOURCE_IN_USE` until every placed image retires.
+Dedicated creation returns separate texture and allocation tokens; destroy the
+texture before releasing its allocation.
 
 ## 10. Frame upload arena
 

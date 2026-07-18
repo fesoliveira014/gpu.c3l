@@ -44,6 +44,7 @@ struct AllocationSlot {
     gpu::QueueRoles     access;
     uint                memory_type_bits;
     bool                texture_memory;
+    bool                dedicated_texture;
     BufferSlot          backing;
     usz                 alignment;
     gpu::MemoryClass    memory_class;
