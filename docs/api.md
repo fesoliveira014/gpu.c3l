@@ -656,6 +656,8 @@ TextureSampleCountSupport
 TextureFormatSupport
     TextureFormatFeatures features
     TextureDimensionSupport dimensions
+    TextureSampleCountSupport sample_counts
+
 TextureCompatibility
     opaque device-owned value
 
@@ -664,8 +666,6 @@ TextureRequirements
     usz alignment
     TextureCompatibility compatibility
     bool dedicated_only
-
-    TextureSampleCountSupport sample_counts
 
 TextureDimension
     TEX_1D   (query false; creation faults INVALID_ARGUMENT)
