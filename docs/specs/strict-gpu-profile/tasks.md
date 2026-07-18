@@ -201,9 +201,9 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.6 Immediate caller-managed resource lifetime
 
-- [ ] Remove deferred core resource release from `gpu/vk/deferred.c3` and public destruction paths, resolving issue #199 and the lifetime portion of #200.
+- [x] Remove deferred core resource release from `gpu/vk/deferred.c3` and public destruction paths, resolving issue #199 and the lifetime portion of #200.
   - **Depends on:** 3.1, 4.1, and 4.5.
-  - **Contract:** destroying a GPU-visible resource is immediate and never waits or queues deferred work; no live recording, executable token, or incomplete submission may reference it; releasing an allocation with live placed textures faults without consuming it.
+  - **Contract:** destroying a non-WSI GPU-visible resource is immediate and never waits or queues deferred work; no live recording, executable token, or incomplete submission may reference it; releasing an allocation with live placed textures faults without consuming it. Swapchain destruction and resize remain under the presentation contract until 6.5.
   - **Edges:** resources referenced through raw GPU addresses or shader indices cannot always be discovered and remain a caller precondition; detectable command references must reject destruction.
   - **Verify:** every destruction-order permutation, no-wait instrumentation, placement rejection tests, and validation-clean teardown.
 
@@ -311,8 +311,8 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 - [ ] Integrate swapchain textures with shared texture views, transitions, render-pass commands, semantic queue roles, readiness, and completion in `gpu/swapchain.c3` and Vulkan WSI code.
   - **Depends on:** 3.5, 6.2, and 6.3.
-  - **Contract:** swapchain images use the ordinary resource and synchronization model; public presentation exposes no native semaphore or layout; resize and loss faults retain distinct retry contracts.
-  - **Edges:** acquire without render, present without completion, completion that does not cover rendering, resize during use, dormant surface, and device or surface loss.
+  - **Contract:** swapchain images use the ordinary resource and synchronization model; public presentation exposes no native semaphore or layout; destruction and resize never hide queue-idle waits; resize and loss faults retain distinct retry contracts.
+  - **Edges:** acquire without render, present without completion, completion that does not cover rendering, destruction or resize during use, dormant surface, and device or surface loss.
   - **Verify:** state-machine tests and validation-clean resize/acquire/render/present tests.
 
 ## Milestone 7 — Strict release

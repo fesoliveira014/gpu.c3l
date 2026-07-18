@@ -3,6 +3,7 @@ module gpu::vk @private;
 import gpu @public;
 import vk;
 import std::thread;
+import std::atomic::types;
 
 // Concrete slot table avoids a c3c 0.8.0 generic-instantiation codegen failure.
 const uint PIPELINE_FREE_NONE = 0;
@@ -12,6 +13,7 @@ struct PipelineSlot {
     vk::PipelineLayout layout;
     uint               entry;
     gpu::RasterState   raster;
+    Atomic{uint}        validation_references;
     gpu::DepthState    depth;
 }
 
@@ -90,7 +92,10 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     if (desc.push_constant_size < gpu::RootPush::size
         || desc.push_constant_size % 4 != 0
         || desc.push_constant_size > state.caps.max_push_constant_size) return gpu::INVALID_ARGUMENT~;
-    ShaderSlot* shader = state.shaders.get(desc.shader)!;
+    ShaderPipelineReference shader_reference =
+        retain_shader_for_pipeline(state, desc.shader)!;
+    defer release_shader_for_pipeline(state, shader_reference);
+    ShaderSlot* shader = shader_reference.slot;
     validate_shader_stage(
         state:          state,
         slot:           shader,
@@ -191,6 +196,12 @@ fn void? vk_destroy_pipeline(gpu::Device* device, gpu::PipelineHandle handle) @p
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     PipelineSlot* slot = state.pipelines.get(handle)!;
+    if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+        drain_completed_submission_references(state)!;
+        if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+            return gpu::RESOURCE_IN_USE~;
+        }
+    }
     uint entry_index = slot.entry;
     state.pipelines.free(handle)!;
     release_entry(state, entry_index);

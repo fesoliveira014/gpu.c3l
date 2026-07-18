@@ -383,21 +383,20 @@ Policy:
 ```text
 invalid handle              -> INVALID_HANDLE
 resource still referenced   -> RESOURCE_IN_USE or INVALID_RESOURCE_STATE
-valid destruction           -> retire slot and increment generation
+valid destruction           -> invalidate slot and increment generation
 ```
 
-### Deferred destruction
+### Immediate resource lifetime
 
-Vulkan resources cannot be destroyed while in use by the GPU. The backend maintains per-frame deferred destruction queues:
+Non-WSI resource destruction never waits or queues backend work. The caller
+must keep every GPU-visible resource alive until recording tokens are discarded
+and submitted completion points finish. Swapchain destruction and resize remain
+under the current presentation contract until strict presentation integration.
 
-```text
-retire_frame(frame_index)
-    destroy resources whose retire_timeline <= completed_timeline
-```
-
-Textures, pipelines, and shaders may defer native destruction after their
-public handles are consumed. Independent allocations require quiescence and
-free their private backing immediately.
+With validation enabled, the backend rejects destruction when an explicitly
+named span, texture, or pipeline is referenced by a recording token, executable
+token, or incomplete submission. GPU addresses and shader indices are opaque to
+the command stream, so their lifetime remains a caller precondition.
 
 ## 7. Frame model
 
@@ -406,7 +405,6 @@ Each frame-in-flight has:
 ```text
 frame upload arena
 command pool(s)
-deferred destruction list
 last submit timeline value
 ```
 

@@ -4,6 +4,7 @@ import gpu @public;
 import vk;
 import std::thread;
 import vma;
+import std::atomic::types;
 
 const usz MAX_BUFFERS = 4096;
 const uint BUFFER_FREE_NONE = 0;
@@ -53,6 +54,7 @@ struct BufferSlot {
     BufferUsage         usage;
     gpu::QueueRoles     access;
     gpu::MemoryKind     memory_kind;
+    Atomic{uint}        validation_references;
     char[DEBUG_NAME_CAP] debug_name;
     bool                internal;
 }
@@ -244,8 +246,6 @@ fn BufferHandle? vk_create_buffer(gpu::Device* device, BufferDesc* desc) @privat
     return create_buffer_for_state(state, desc);
 }
 
-<* Frees the handle now; buffer + allocation release is deferred until every
-   referencing frame retires. *>
 fn void? vk_destroy_buffer(gpu::Device* device, BufferHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
@@ -253,17 +253,16 @@ fn void? vk_destroy_buffer(gpu::Device* device, BufferHandle handle) @private {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     BufferSlot* slot = state.buffers.get(handle)!;
+    if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+        drain_completed_submission_references(state)!;
+        if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+            return gpu::RESOURCE_IN_USE~;
+        }
+    }
     vk::Buffer buffer = slot.buffer;
     vma::Allocation allocation = slot.allocation;
-    ulong retire = retire_timeline_value(state);
     state.buffers.free(handle)!;
-    enqueue_deferred(
-        state:          state,
-        kind:           DeferredKind.BUFFER,
-        timeline_value: retire,
-        object:         (void*)buffer,
-        allocation:     allocation,
-    );
+    state.allocator.destroy_buffer(buffer, allocation);
 }
 
 fn gpu::GpuAddress? vk_get_buffer_address(gpu::Device* device, BufferHandle handle) @private {

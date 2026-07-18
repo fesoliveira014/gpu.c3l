@@ -258,13 +258,13 @@ create_dedicated_texture with an exact-size compatible AllocationDesc
 
 Requirements are device-owned and opaque. Incompatible groups,
 dedicated-only requirements, insufficient size or access, stale allocations,
-and overlapping live or retiring placements fail before image creation.
+and overlapping live placements fail before image creation.
 
 ## 9. Texture lifetime
 
-Destroying an owned texture releases its image allocation after retirement.
+Destroying an owned texture releases its image allocation immediately.
 Destroying a placed texture releases the image but not its `GpuAllocation`.
-`free_allocation` returns `RESOURCE_IN_USE` until every placed image retires.
+`free_allocation` returns `RESOURCE_IN_USE` while a placed image is live.
 Dedicated creation returns separate texture and allocation tokens; destroy the
 texture before releasing its allocation.
 
@@ -550,32 +550,23 @@ arena:staging
 arena:readback
 ```
 
-## 17. Deferred destruction
+## 17. Immediate resource lifetime
 
-Independent allocations are not deferred. `free_allocation` requires
-quiescence and destroys its native buffer/allocation pair immediately.
+`free_allocation` and non-WSI core resource destruction release native ownership
+immediately. They never wait and never enqueue deferred release work. The caller
+must first discard recording or executable command tokens and wait for every
+submitted completion point that may reference the resource.
 
-`destroy_texture`, `destroy_pipeline`, and `destroy_shader` consume the
-public handle immediately, but submitted frames may still reference the native
-object. The backend queues it by
-`retire_timeline_value` and drains completed entries during `begin_frame` and
-enqueue. Accepted device teardown drains the remainder only after queue progress
-is complete; it never waits. Frames in flight therefore do not make individual
-resource destruction fail. A live texture descriptor still returns
-`RESOURCE_IN_USE` from `destroy_texture`.
+Validation tracks explicitly named spans, textures, and pipelines. A detected
+reference returns `RESOURCE_IN_USE` without consuming ownership. References
+reachable only through GPU addresses or shader indices cannot be enumerated and
+remain a caller precondition.
 
-Destroyed descriptors awaiting retirement do not count as live device children.
-Live descriptors do, so `destroy_device` returns `RESOURCE_IN_USE` until they
-are explicitly destroyed.
-
-`retire_timeline_value` also defers while off-frame work is pending: `submit`
-outside a frame bracket (threading.md Tier E, sanctioned for frame-loop-free
-apps) marks the affected semantic queue. Destroyed resources referenced by that
-work enter the deferred queue. A later `end_frame` chain covers every queue used
-since the last boundary and clears those markers only after successful submit.
-A frame-loop-free application waits on the latest `CompletionPoint` from each
-affected queue. Until those points complete, `destroy_device` returns
-`DEVICE_BUSY` without changing its token or state.
+A texture with live descriptors and an allocation with live placed or dedicated
+textures also return `RESOURCE_IN_USE`. Descriptor and sampler indices recycle
+immediately; stale shader data is therefore a caller lifetime violation.
+`destroy_device` remains non-blocking and returns `DEVICE_BUSY` while queue
+work is incomplete.
 
 ## 18. Defragmentation policy
 
@@ -597,6 +588,5 @@ readback path invalidates non-coherent memory
 staging path flushes non-coherent memory
 memory stats report VMA budget and live resources
 allocation names appear in debug reports
-destroyed textures/pipelines/shaders free their backend object only after
-    retire_timeline_value passes
+resource destruction never waits or queues deferred work
 ```

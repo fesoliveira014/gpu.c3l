@@ -28,6 +28,7 @@ struct PersistentAllocationState {
     usz                    offset;
     usz                    size;
     gpu::QueueRoles        access;
+    Atomic{uint}           validation_references;
 }
 
 struct PersistentAllocationCell {
@@ -279,12 +280,6 @@ fn void? report_unretired_frame(VkDeviceState* state) @private {
     return gpu::INVALID_RESOURCE_STATE~;
 }
 
-<* In-frame and off-frame-pending retires wait for the next end_frame value;
-   outside both, reclaim is immediate. *>
-fn ulong retire_timeline_value(VkDeviceState* state) {
-    ulong counter = state.timeline_counter.load(AtomicOrdering.RELAXED);
-    return (state.frame_active || state.off_frame_pending_queues.load(AtomicOrdering.RELAXED) != 0) ? counter + 1 : counter;
-}
 
 <* Reset an arena slot's cursor. Rejects if the slot has not yet retired. *>
 fn void? reset_frame_arena(VkDeviceState* state, uint index) {
@@ -360,14 +355,7 @@ fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* ou
     )!) {
         return report_unretired_frame(state);
     }
-    {
-        state.resource_mutex.lock()!!;
-        defer state.resource_mutex.unlock();
-        // The host wait above proved the timeline reached this value.
-        if (slot.frame_timeline_value > state.signaled_shadow) state.signaled_shadow = slot.frame_timeline_value;
-        deferred_drain(state)!;
-        state.frame_index = next_index;
-    }
+    state.frame_index = next_index;
 
     slot.cursor.store(0, AtomicOrdering.RELAXED);
     // Only pools dirtied since this slot last reset pay
@@ -627,8 +615,7 @@ fn void? end_frame_with_submit(gpu::FrameToken* frame, QueueSubmit2Fn submit_fn)
     }
     FrameArenaState* slot = &state.frame_arenas[state.frame_index];
 
-    // frame_timeline receives exactly one signal per frame (counter + 1),
-    // preserving retire_timeline_value's mid-frame contract.
+    // frame_timeline receives exactly one signal per frame.
     ulong frame_value = state.timeline_counter.load(AtomicOrdering.RELAXED) + 1;
 
     vk::SemaphoreSubmitInfo[2] waits;
@@ -874,6 +861,12 @@ fn void? vk_free_persistent_span(gpu::Device* device, gpu::GpuSpan span) @privat
         )~;
     }
 
+    if (allocation.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+        drain_completed_submission_references(state)!;
+        if (allocation.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+            return gpu::RESOURCE_IN_USE~;
+        }
+    }
     arena.virtual_block.free(allocation.allocation);
     arena.allocations.free(handle)!;
 }

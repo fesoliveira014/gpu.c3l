@@ -84,8 +84,14 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
     if (desc.depth_format != gpu::Format.UNDEFINED && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
     if (desc.color_formats.len == 0 && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
     check_polygon_mode_support(desc.raster.polygon_mode, state.caps.line_polygon_mode)!;
-    ShaderSlot* vertex_shader = state.shaders.get(desc.vertex_shader)!;
-    ShaderSlot* fragment_shader = state.shaders.get(desc.fragment_shader)!;
+    ShaderPipelineReference vertex_reference =
+        retain_shader_for_pipeline(state, desc.vertex_shader)!;
+    defer release_shader_for_pipeline(state, vertex_reference);
+    ShaderSlot* vertex_shader = vertex_reference.slot;
+    ShaderPipelineReference fragment_reference =
+        retain_shader_for_pipeline(state, desc.fragment_shader)!;
+    defer release_shader_for_pipeline(state, fragment_reference);
+    ShaderSlot* fragment_shader = fragment_reference.slot;
     validate_shader_stage(
         state:          state,
         slot:           vertex_shader,

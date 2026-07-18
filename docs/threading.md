@@ -201,7 +201,7 @@ rejected submit never leaves anything waiting on a value that will never
 signal. `end_frame` issues a single empty submit: the graphics-side frame
 signal, which waits each used queue's latest recorded aux value before
 signaling the frame value. A host-side wait on the frame value therefore
-covers every queue's work — arenas, command pools, descriptor retires, and
+covers every queue's work — arenas, command pools, and
 readback tickets stay safe under any queue topology, off-frame submissions
 included. `submit` sets the per-queue used flags unconditionally, not just
 while a frame is active, so an off-frame submission on a distinct compute or
@@ -248,9 +248,9 @@ racing `begin_frame`'s own per-slot reset.
 
 Tier E's `submit`/`present` may run outside a `begin_frame`/`end_frame`
 bracket — sanctioned for frame-loop-free apps and one-shot setup work.
-Resources a command list submitted off-frame refers to must not be freed while
-that work may still be in flight. Independent allocations are immediate: wait
-the returned `CompletionPoint` before `free_allocation`. Other resource
-destruction uses the deferred-release queue (docs/memory.md §17). A later
-`end_frame` may also cover the work. `destroy_device` queries every published queue
-sequence without blocking and returns `DEVICE_BUSY` while any is incomplete.
+Resource destruction is immediate and never waits. Discard recording or
+executable command tokens and wait for every returned `CompletionPoint` that
+may reference the resource before destroying it. Validation returns
+`RESOURCE_IN_USE` for detected explicit references. `destroy_device` queries
+every published queue sequence without blocking and returns `DEVICE_BUSY`
+while any is incomplete.

@@ -97,10 +97,9 @@ Two sizing rules that bite:
   per-type, per-stage aggregate, or all-pools update-after-bind limit is
   exceeded.
 
-- **Descriptor retires recycle a frame late.** A destroy inside frame N
-  retires against N's timeline value and only drains on a later frame — a
-  frame that destroys and recreates K descriptors needs K slots of headroom,
-  not zero. `bindless_stress` demonstrates both the failure and the sizing.
+- **Shader-visible indices have caller-managed lifetime.** Descriptor and
+  sampler slots recycle immediately. Wait or discard every use before destroy,
+  and do not leave stale indices in GPU-visible data.
 - **Frame-arena data is per frame in flight.** Every `alloc_frame_span`
   byte exists once per in-flight frame; large per-frame tables belong in
   persistent spans or allocations you rewrite (see `deferred_shading`'s lights).

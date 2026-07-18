@@ -163,6 +163,7 @@ fn TextureHandle? create_stub_placed_texture(
         .generation = 1,
     };
 }
+
 fn DedicatedTexture? create_stub_dedicated_texture(
     Device* device,
     TextureDesc* desc,
@@ -189,7 +190,6 @@ fn DedicatedTexture? create_stub_dedicated_texture(
         return { .texture = texture, .allocation = allocation };
     }
 }
-
 
 fn void? destroy_stub_texture(Device* device, TextureHandle texture) {
     AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);

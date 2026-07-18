@@ -235,7 +235,7 @@ fn void descriptor_sampler_failures_report_context() @test {
         expected_generation: 0,
         expected_operation:  "create_texture_descriptor",
         expected_field:      "DeviceDesc.texture_descriptor_capacity",
-        expected_invariant:  "must exceed live and retiring texture descriptors",
+        expected_invariant:  "must exceed live texture descriptors",
     );
     fault full = @catch(gpu::create_texture_descriptor(&device, texture, null));
     assert(full == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 1 && capture.matched,
@@ -283,7 +283,7 @@ fn void descriptor_sampler_failures_report_context() @test {
         expected_generation: 0,
         expected_operation:  "create_sampler",
         expected_field:      "DeviceDesc.sampler_descriptor_capacity",
-        expected_invariant:  "must exceed live and retiring samplers",
+        expected_invariant:  "must exceed live samplers",
     );
     fault sampler_full = @catch(gpu::create_sampler(&device, &sampler_desc));
     assert(sampler_full == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 4 && capture.matched,
@@ -375,34 +375,28 @@ fn void texture_descriptor_exhaustion_does_not_cache_failed_views() @test {
     gpu::destroy_texture_descriptor(&device, occupied)!!;
 }
 
-fn void texture_descriptor_deferred_reuse() @test {
-    gpu::Device device = make_heap_test_device(8, 4);
+fn void texture_descriptor_reuses_destroyed_slot_immediately() @test {
+    gpu::Device device = make_heap_test_device(1, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex first = gpu::create_texture_descriptor(&device, texture, null)!!;
-    ushort first_slot = first.slot;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    gpu::TextureIndex first =
+        gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::destroy_texture_descriptor(&device, first)!!;
 
-    gpu::TextureIndex during = gpu::create_texture_descriptor(&device, texture, null)!!;
-    assert(during.slot != first_slot, "slot is not reused while its frame is in flight");
+    gpu::TextureIndex recycled =
+        gpu::create_texture_descriptor(&device, texture, null)!!;
+    assert(recycled.slot == first.slot,
+        "destroyed descriptor slots are immediately reusable");
+    assert(recycled.generation != first.generation,
+        "immediate reuse advances the generation");
+    assert(@catch(gpu::destroy_texture_descriptor(&device, first))
+        == gpu::INVALID_HANDLE, "the released index is stale");
 
-    gpu::end_frame(&frame_token)!!;
-    // The frame fence signals GPU-side; idle so the timeline has passed.
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-
-    gpu::TextureIndex recycled = gpu::create_texture_descriptor(&device, texture, null)!!;
-    assert(recycled.slot == first_slot, "retired slot is recycled once the frame timeline passes");
-    assert(recycled.generation != first.generation, "recycled slot carries a new generation");
-
-    fault recycled_fault = @catch(gpu::destroy_texture_descriptor(&device, first));
-    assert(recycled_fault == gpu::INVALID_HANDLE, "the pre-recycle index is stale after reuse");
-
-    gpu::destroy_texture_descriptor(&device, during)!!;
     gpu::destroy_texture_descriptor(&device, recycled)!!;
+    gpu::end_frame(&frame)!!;
 }
 
 fn void texture_descriptor_stale_texture_rejected() @test {
@@ -459,7 +453,7 @@ fn void destroy_texture_with_live_descriptor_faults_and_recovers() @test {
     gpu::destroy_texture(&device, texture)!!;
 }
 
-fn void destroy_texture_retired_undrained_descriptor_succeeds() @test {
+fn void destroy_texture_after_descriptor_release_succeeds() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
@@ -751,17 +745,13 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
     for (uint i = 0; i < 7; i++) {
         occupied[i] = gpu::create_texture_descriptor(&device, texture, null)!!;
     }
-    gpu::TextureIndex retired = occupied[0];
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::destroy_texture_descriptor(&device, retired)!!;
-    gpu::end_frame(&frame_token)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::TextureIndex released = occupied[0];
+    gpu::destroy_texture_descriptor(&device, released)!!;
 
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
-    assert(heap.texture_retire.count > 0, "the fixture has a ready undrained descriptor retire");
 
     vk::TextureDescriptorCell[8] cells_before;
     uint[8] free_before;
@@ -771,8 +761,6 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
     }
     uint free_count_before = heap.texture_free_count;
     uint next_new_before = heap.texture_next_new;
-    uint retire_head_before = heap.texture_retire.head;
-    uint retire_count_before = heap.texture_retire.count;
 
     gpu::TextureViewDesc view = {
         .base_mip    = 1,
@@ -794,9 +782,6 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
 
     assert(heap.texture_free_count == free_count_before, "failure preserves free-list count");
     assert(heap.texture_next_new == next_new_before, "failure preserves the never-used slot cursor");
-    assert(heap.texture_retire.head == retire_head_before
-        && heap.texture_retire.count == retire_count_before,
-        "failure leaves ready retires undrained");
     for (uint i = 0; i < 8; i++) {
         vk::TextureDescriptorCell before = cells_before[i];
         vk::TextureDescriptorCell after = heap.texture_cells[i];
@@ -820,8 +805,7 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
     gpu::TextureIndex[2] committed;
     gpu::create_texture_descriptors(&device, valid[..], committed[..])!!;
     assert(committed[0].is_valid() && committed[1].is_valid(),
-        "a two-item batch commits using one never-used slot and one ready retire");
-    assert(heap.texture_retire.count == 0, "successful commit drains the ready retire");
+        "a two-item batch commits using one free and one never-used slot");
     foreach (index : committed) gpu::destroy_texture_descriptor(&device, index)!!;
     for (uint i = 1; i < 7; i++) {
         gpu::destroy_texture_descriptor(&device, occupied[i])!!;
@@ -865,6 +849,10 @@ fn void sampler_round_trip_and_exhaustion() @test {
 
     gpu::destroy_sampler(&device, a)!!;
     fault stale_fault = @catch(gpu::destroy_sampler(&device, a));
+    gpu::SamplerIndex recycled = gpu::create_sampler(&device, &desc)!!;
+    assert(recycled.slot == a.slot && recycled.generation != a.generation,
+        "destroyed sampler slots are immediately reusable");
+    gpu::destroy_sampler(&device, recycled)!!;
     assert(stale_fault == gpu::INVALID_HANDLE, "destroying a stale sampler index faults INVALID_HANDLE");
 
     gpu::destroy_sampler(&device, b)!!;
@@ -1281,7 +1269,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_generation: 0,
         expected_operation:  "create_texture_descriptors",
         expected_field:      "DeviceDesc.texture_descriptor_capacity",
-        expected_invariant:  "must fit the complete descriptor batch after live and retiring descriptors",
+        expected_invariant:  "must fit the complete descriptor batch",
     );
     fault capacity = @catch(gpu::create_texture_descriptors(&device, over_capacity[..], capacity_outputs[..]));
     assert(capacity == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 4 && capture.matched,
@@ -1422,29 +1410,6 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
     assert(address == gpu::BACKEND_ERROR && capture.calls == 3 && capture.matched,
         "descriptor bootstrap failure without VkResult is observable");
 
-    fault silent_retire = @catch(gpu::vk::check_descriptor_retire_backend_result(
-        state:     &state,
-        operation: null,
-        result:    vk::Result.ERROR_DEVICE_LOST,
-    ));
-    assert(silent_retire == gpu::DEVICE_LOST && capture.calls == 3,
-        "silent single-descriptor retire fallback does not emit a paired fault");
-
-    capture = {
-        .calls              = capture.calls,
-        .expected_fault     = gpu::DEVICE_LOST,
-        .expected_operation = "create_texture_descriptors",
-        .expected_text      = "Vulkan device lost",
-        .expected_result    = (int)vk::Result.ERROR_DEVICE_LOST,
-    };
-    fault batch_retire = @catch(gpu::vk::check_descriptor_retire_backend_result(
-        state:     &state,
-        operation: "create_texture_descriptors",
-        result:    vk::Result.ERROR_DEVICE_LOST,
-    ));
-    assert(batch_retire == gpu::DEVICE_LOST && capture.calls == 4 && capture.matched,
-        "batch texture-retire query reports its backend fault once");
-
     gpu::TextureHandle texture = { .owner = 1, .index = 7, .generation = 11 };
     vk::TextureSlot texture_slot;
     capture = {
@@ -1465,7 +1430,7 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
         slot:      &texture_slot,
         result:    vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
     ));
-    assert(view_backend == gpu::OUT_OF_DEVICE_MEMORY && capture.calls == 5 && capture.matched,
+    assert(view_backend == gpu::OUT_OF_DEVICE_MEMORY && capture.calls == 4 && capture.matched,
         "image-view creation reports operation and resolved texture identity");
 
     state.debug_callback = null;
@@ -1474,6 +1439,6 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
         operation: "create_device",
         result:    vk::Result.ERROR_FRAGMENTATION,
     ));
-    assert(fallback == pool && capture.calls == 5,
+    assert(fallback == pool && capture.calls == 4,
         "null callback preserves descriptor bootstrap fault without a duplicate");
 }

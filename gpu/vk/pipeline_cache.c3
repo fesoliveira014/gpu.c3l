@@ -276,18 +276,11 @@ fn uint? insert_entry(PipelineCacheTable* cache, PipelineCacheEntry value) {
     return idx;
 }
 
-<* Drops one alias; the pipeline's deferred release happens when the last
-   alias goes. Shared layouts are never destroyed here. *>
+<* Drop one alias and destroy the native pipeline with the last one. *>
 fn void release_entry(VkDeviceState* state, uint entry_index) {
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[entry_index];
     if (--entry.refcount > 0) return;
-    enqueue_deferred(
-        state:          state,
-        kind:           DeferredKind.PIPELINE,
-        timeline_value: retire_timeline_value(state),
-        object:         (void*)entry.pipeline,
-        allocation:     (vma::Allocation)null,
-    );
+    vk::destroy_pipeline(state.device, entry.pipeline, null);
     unlink_entry(&state.pipeline_cache, entry_index);
     entry.used = false;
     entry.next_free = state.pipeline_cache.free_head;

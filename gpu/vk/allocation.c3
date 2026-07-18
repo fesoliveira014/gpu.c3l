@@ -4,6 +4,7 @@ import gpu @public;
 import vk;
 import vma;
 import std::core::mem;
+import std::atomic::types;
 
 alias AllocationCreateBufferFn = fn vk::Result (
     void*, vma::Allocator, vk::BufferCreateInfo*,
@@ -49,6 +50,7 @@ struct AllocationSlot {
     usz                 alignment;
     gpu::MemoryClass    memory_class;
     bool                coherent;
+    Atomic{uint}       validation_references;
     uint                live_placements;
     char[DEBUG_NAME_CAP] debug_name;
 }
@@ -574,6 +576,13 @@ fn void? free_allocation_for_state_with_ops(
         state.resource_mutex.lock()!;
         defer state.resource_mutex.unlock();
         AllocationSlot* slot = state.allocations.get(allocation)!;
+        if (slot.live_placements > 0) return gpu::RESOURCE_IN_USE~;
+        if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+            drain_completed_submission_references(state)!;
+            if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+                return gpu::RESOURCE_IN_USE~;
+            }
+        }
         released = *slot;
         state.allocations.free(allocation)!;
     }

@@ -29,6 +29,8 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     if (desc.colors.len == 0 && desc.depth == null) return gpu::INVALID_ARGUMENT~;
     if (desc.width == 0 || desc.height == 0) return gpu::INVALID_ARGUMENT~;
     if (desc.colors.len > state.caps.max_color_attachments) return gpu::INVALID_ARGUMENT~;
@@ -281,6 +283,13 @@ fn void? bind_graphics_and_push(VkDeviceState* state, CommandRecord* record, gpu
     validate_descriptor_heap_binding(state)!;
     vk::CommandBuffer cb = record.command_buffer;
     PipelineSlot* slot = state.pipelines.get(handle)!;
+    track_command_reference(
+        state,
+        record,
+        handle.owner,
+        handle.index,
+        handle.generation,
+    )!;
     if (handle != record.last_pipeline) {
         if (slot.entry != record.last_entry) {
             vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.GRAPHICS, slot.pipeline);
@@ -304,6 +313,8 @@ fn void? vk_cmd_draw(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,
@@ -325,6 +336,8 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::PipelineHandle han
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,
@@ -358,6 +371,8 @@ fn void? vk_cmd_draw_indirect(gpu::CommandList* commands, gpu::PipelineHandle ha
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,
@@ -411,6 +426,8 @@ fn void? vk_cmd_draw_indexed_indirect(gpu::CommandList* commands, gpu::PipelineH
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,
@@ -461,6 +478,8 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Pip
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,

@@ -164,12 +164,19 @@ fn void? validate_texture_recording_access(
     gpu::TextureHandle handle,
     ZString operation,
 ) @private {
-    return validate_texture_queue_access(
+    validate_texture_queue_access(
         state:     state,
         queue_roles: record.queue.roles,
         slot:      slot,
         handle:    handle,
         operation: operation,
+    )!;
+    return track_command_reference(
+        state,
+        record,
+        handle.owner,
+        handle.index,
+        handle.generation,
     );
 }
 
@@ -232,12 +239,19 @@ fn void? validate_span_recording_access(
     gpu::GpuSpan* span,
     ZString operation,
 ) @private {
-    return validate_span_queue_access(
+    validate_span_queue_access(
         state:       state,
         queue_roles: record.queue.roles,
         resolved:    resolved,
         span:        span,
         operation:   operation,
+    )!;
+    return track_command_reference(
+        state,
+        record,
+        span.owner,
+        span.index,
+        span.generation,
     );
 }
 

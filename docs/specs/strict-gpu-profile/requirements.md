@@ -157,7 +157,7 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - Hot command recording performs no registry lock or hidden allocation per command.
 - Allocation and placed-texture ownership tests cover every destruction order.
 - Dedicated-texture tests prove transactional failure and publication of separate texture and allocation tokens.
-- Resource-release tests prove that core destruction never waits or defers and rejects live placements.
+- Resource-release tests prove that non-WSI core destruction never waits or defers and rejects live placements; strict presentation tests prove the same for swapchain destruction and resize.
 - Mapped-memory tests cover coherent and non-coherent flush/invalidate ranges.
 - Readback tests use a CPU-cached span, copy, completion point, mapped-span invalidation, and direct CPU access.
 - Queue-access tests cover single-role, same-family multi-role, and cross-family concurrent sharing.

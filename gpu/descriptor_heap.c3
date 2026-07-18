@@ -18,7 +18,7 @@ fn TextureIndex? create_texture_descriptor(Device* device, TextureHandle texture
     return index;
 }
 
-<* The slot is recycled only after in-flight frames retire. *>
+<* Release ownership and recycle the slot immediately. *>
 fn void? destroy_texture_descriptor(Device* device, TextureIndex index) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
@@ -59,7 +59,7 @@ fn SamplerIndex? create_sampler(Device* device, SamplerDesc* desc) {
     return index;
 }
 
-<* Counterpart of create_sampler; the heap slot recycles after in-flight frames retire. *>
+<* Release the sampler and recycle its heap slot immediately. *>
 fn void? destroy_sampler(Device* device, SamplerIndex index) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);

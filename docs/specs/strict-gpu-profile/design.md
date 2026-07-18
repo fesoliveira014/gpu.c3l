@@ -220,7 +220,7 @@ Completion points also establish host completion for mapped readback, resource r
 
 `free_allocation` consumes the owning token immediately. It returns `RESOURCE_IN_USE` without consuming the token when placed textures remain. A copied stale token fails by generation. A `GpuSpan` is non-owning and cannot free memory.
 
-Every strict-core `destroy_*` operation is also immediate: it never waits or enters a deferred-release queue. No live recording command list, executable command token, or incomplete submission may reference the resource.
+Every non-WSI strict-core `destroy_*` operation is also immediate: it never waits or enters a deferred-release queue. No live recording command list, executable command token, or incomplete submission may reference the resource. Strict presentation integration applies this rule to swapchain destruction and resize.
 
 Debug validation may detect references to explicitly named resources. References reached through GPU pointers or shader heap indices remain caller-managed because the command stream cannot enumerate them.
 
@@ -446,7 +446,7 @@ Diagnostic backend information may report backend name, API version, driver name
 - Device creation, dedicated texture creation, descriptor writes, and batch pipeline creation are transactional.
 - Invalid placed texture creation faults before backend mutation.
 - Device destruction returns `RESOURCE_IN_USE` for live children and retryable `DEVICE_BUSY` for incomplete work or active operations.
-- GPU-visible resource destruction has a caller-completion precondition and never waits or defers.
+- Non-WSI GPU-visible resource destruction has a caller-completion precondition and never waits or defers; strict presentation uses the same rule for WSI destruction and resize.
 - Releasing an allocation with live placed textures faults without consuming it.
 - Descriptor and sampler exhaustion publishes no partial allocation.
 - Failed command validation leaves recording state unchanged.
@@ -460,7 +460,7 @@ Diagnostic backend information may report backend name, API version, driver name
 - Command calls perform no process-global lock and no hidden pipeline compilation.
 - Recording storage is acquired in batches at command-list begin.
 - Completion points require no public allocation, table insertion, or caller-managed counter.
-- Resource and device destruction perform no hidden wait or deferred-release work.
+- Non-WSI resource and device destruction perform no hidden wait or deferred-release work; strict presentation extends that rule to swapchain destruction and resize.
 - GPU allocations are explicit so applications can batch and suballocate.
 - Shader hashing can be amortized through `prepare_shader_code`.
 - Pipeline creation can be batched and deduplicate shared IR.

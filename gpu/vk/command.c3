@@ -386,23 +386,19 @@ fn ulong? vk_discard_commands(
             : record.state == CommandState.RECORDING
                 || record.state == CommandState.RECORDING_RENDER_PASS;
         if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
+        release_command(state, handle);
     }
-
-    ulong canceled_tickets = cancel_command_readback_tickets_locked(
+    return cancel_command_readback_tickets_locked(
         state,
         handle,
     );
-    {
-        state.command_mutex.lock()!!;
-        defer state.command_mutex.unlock();
-        release_command(state, handle);
-    }
-    return canceled_tickets;
 }
 
 fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* desc) @private {
     CommandRecord* record = resolve_command(commands)!;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -515,6 +511,8 @@ fn void? vk_cmd_fill_buffer(
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     ResolvedSpan resolved = resolve_span_slot(
         state:          state,
         span:           &dst,
@@ -635,6 +633,8 @@ fn void? vk_cmd_copy_buffer_to_texture(
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     TextureSlot* texture = state.textures.get(desc.texture)!;
     ResolvedSpan buffer = resolve_span_slot(
         state:          state,
@@ -698,6 +698,8 @@ fn void? vk_cmd_copy_texture_to_buffer(
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     TextureSlot* texture = state.textures.get(desc.texture)!;
     validate_texture_recording_access(
         state:     state,
@@ -825,6 +827,13 @@ fn void? bind_compute_and_push(VkDeviceState* state, CommandRecord* record, gpu:
     validate_descriptor_heap_binding(state)!;
     vk::CommandBuffer cb = record.command_buffer;
     PipelineSlot* slot = state.pipelines.get(handle)!;
+    track_command_reference(
+        state,
+        record,
+        handle.owner,
+        handle.index,
+        handle.generation,
+    )!;
     if (handle != record.last_pipeline) {
         vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
         bind_descriptor_heap(
@@ -847,6 +856,8 @@ fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle,
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     if (catch limit_fault = gpu::validate_dispatch_groups(groups, state.caps.max_compute_work_group_count)) {
         return report_contract_failure(
             state:               state,
@@ -882,6 +893,8 @@ fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandl
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     validate_pipeline_kind(
         state:     state,
         handle:    handle,

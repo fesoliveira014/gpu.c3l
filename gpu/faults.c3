@@ -39,8 +39,7 @@ faultdef
     // A handle table hit capacity (buffers, textures, pipelines, ...);
     // for textures the capacity is DeviceDesc.texture_capacity.
     SLOT_TABLE_FULL,
-    // No free descriptor slot: capacity too small for live descriptors
-    // plus same-frame retires (they only recycle on a later frame).
+    // No free descriptor slot: capacity is too small for live descriptors.
     DESCRIPTOR_HEAP_FULL,
     // The driver rejected pipeline creation (invalid state combination or
     // internal compile failure).
