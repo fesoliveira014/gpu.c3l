@@ -50,7 +50,7 @@ gpu/vk/transfer.c3             upload/readback helpers and staging arenas
 gpu/vk/sync.c3                 barriers, timeline semaphores
 gpu/vk/render_pass.c3          dynamic rendering
 gpu/vk/swapchain.c3            swapchain lifecycle and presentation
-gpu/vk/deferred.c3             retired backend-object destruction
+gpu/vk/lifetime.c3             validation-only command resource tracking
 gpu/vk/debug.c3                debug names, leak reports
 gpu/vk/helpers.c3              enum and flag translation helpers
 gpu/vk/validate.c3             descriptor and command validation helpers
@@ -294,7 +294,7 @@ Each slot stores immutable size, class, access, alignment, capabilities, native
 ownership, and generation. Texture-memory slots reject span resolution.
 Creation rollback releases native ownership without publishing a token.
 
-`free_allocation` retires the generation, then destroys the generic buffer or
+`free_allocation` invalidates the generation, then destroys the generic buffer or
 frees raw texture memory. Live placements return `RESOURCE_IN_USE`. Normal
 device destruction is blocked
 by live public allocations; accepted loss/partial teardown releases remaining
@@ -416,13 +416,12 @@ Descriptor use is validated in debug builds, and device destruction reports leak
 
 Batch creation uses a prepare/commit transaction under the resource lock.
 Preparation validates every item and resolves its view without consuming
-descriptor slots, changing generations, draining ready retires, or writing
+descriptor slots, changing generations, or writing
 outputs. It records only cache misses created by the transaction. If a later
 item faults, those Vulkan image views are destroyed exactly once and their full
 prior cache cells are restored; default, pre-existing, and duplicate views are
-untouched. After complete preparation, commit drains the ready retire prefix,
-allocates every descriptor, publishes outputs, and performs the existing heap
-writes.
+untouched. After complete preparation, commit allocates every descriptor,
+publishes outputs, and performs the existing heap writes.
 
 ## 11. Shader and pipeline implementation
 
@@ -610,7 +609,7 @@ queue-owned completion points
 frame retirement
 queue submission order
 arena reset safety
-deferred destruction safety
+completion-based caller lifetime decisions
 ```
 
 Each selected queue identity owns one private timeline, monotonic sequence, and
@@ -718,29 +717,22 @@ optional command labels
 
 Object naming should happen immediately after successful backend object creation.
 
-## 18. Deferred destruction
+## 18. Immediate resource lifetime
 
-Independent allocations are different: the caller proves quiescence and
-`free_allocation` destroys the backing immediately.
+Non-WSI core destruction releases native objects immediately. The backend
+performs no wait and owns no deferred-release queue. Swapchain destruction and
+resize retain the current WSI wait contract until strict presentation
+integration.
 
-Other resources may be destroyed publicly before the GPU has finished using
-them.
+Validation-only command references cover explicitly named spans, textures, and
+pipelines across recording, executable, and incomplete submitted work.
+Destruction drains only already-completed reference records with non-blocking
+timeline queries; a remaining reference returns `RESOURCE_IN_USE`. GPU
+addresses and shader indices remain caller-managed because they cannot be
+enumerated from a command stream.
 
-Backend policy:
-
-```text
-remove public handle immediately
-push backend object to deferred destruction list with retire timeline
-free backend object after timeline completed
-```
-
-For VMA-backed resources:
-
-```text
-generic allocation: destroy buffer and allocation immediately
-texture allocation: free raw memory when no placement remains
-owned or placed image: destroy after retirement
-```
+Placed and dedicated textures retain their allocation until texture destruction.
+Releasing an allocation with a live placement returns `RESOURCE_IN_USE`.
 
 ## 19. Translation helpers
 

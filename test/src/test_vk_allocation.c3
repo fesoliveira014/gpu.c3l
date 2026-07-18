@@ -968,11 +968,6 @@ fn void allocation_queries_and_immediate_release() @test {
         "successful release destroys the paired buffer and VMA allocation");
     assert(@catch(fixture.state.allocations.get(allocation)) == gpu::INVALID_HANDLE,
         "successful release retires the public identity immediately");
-    assert(fixture.state.deferred.count == 0
-        && fixture.state.deferred_stats.pushed == 0
-        && fixture.state.deferred_stats.drain_calls == 0
-        && fixture.state.deferred_stats.host_queries == 0,
-        "independent release never enters deferred or wait machinery");
 }
 
 fn void allocation_table_teardown_destroys_each_live_pair_once() @test {

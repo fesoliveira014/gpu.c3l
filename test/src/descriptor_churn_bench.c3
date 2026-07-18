@@ -9,8 +9,8 @@ import std::os::env;
 import std::core::mem::allocators;
 
 // Advisory, not gating: texture-descriptor singles vs batched (N=16) vs
-// sampler create/destroy round trips at 1/2/4 workers, off-frame so retires
-// drain immediately. Reports ns/descriptor, scaling vs one thread, and the
+// sampler create/destroy round trips at 1/2/4 workers with immediate slot
+// reuse. Reports ns/descriptor, scaling vs one thread, and the
 // batch-vs-single ratio. DB-mode phases run only when
 // GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1 (same lavapipe caveat as
 // test_vk_descriptor_buffer.c3). Indicative on lavapipe.

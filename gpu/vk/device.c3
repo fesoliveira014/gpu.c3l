@@ -140,17 +140,12 @@ struct VkDeviceState {
     VkStrictHeapState          strict_heap;
     TransferArenaState         staging_arena;
     TransferArenaState         readback_arena;
+    SubmittedReferenceBatch[]   submitted_references;
+    uint                        submitted_reference_count;
+    uint                        submitted_reference_reserved;
     ReadbackTicketTable        readback_tickets;
     DedicatedRetireState       dedicated_staging;
-    // Thread-safe by construction (libc): deferred-queue growth may run on
-    // any destroying thread, outside any allocator's tracking scope.
     HostAllocator               host_allocator;
-    DeferredQueue              deferred;
-    // Consumer-side monotonic lower bound of the retired timeline; written
-    // only under resource_mutex, by a tier-3 query or begin_frame's post-wait
-    // fold — never by a signaler, so it can never cover unfinished work.
-    ulong                      signaled_shadow;
-    DeferredStats              deferred_stats;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
     bool                       frame_active;
@@ -165,8 +160,7 @@ struct VkDeviceState {
     ulong                      dedicated_fallbacks;
 }
 
-<* Snapshot of begin_frame's reset-loop counters, exposed for whitebox
-   dirty-skip accounting in tests (deferred_queue_count precedent). *>
+<* Whitebox snapshot of begin_frame reset-loop counters. *>
 struct PoolResetStats {
     uint reset;
     uint skipped;
@@ -638,7 +632,6 @@ fn gpu::Device? create_vk_device_with_selection(
         state.presentation.swapchains.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN);
         state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     }
-    state.deferred.entries = alloc::new_array(state.host_allocator, DeferredEntry, DEFERRED_QUEUE_INITIAL_CAP);
     create_transfer_arenas(state, desc)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.TRANSFER_ARENAS)!;
     if (state.strict_heap.enabled) {
@@ -747,8 +740,7 @@ fn void vk_destroy_device(void* backend_state) @private {
 fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @private {
     if (state == null) return;
     if (state.device != null) {
-        deferred_drain_all(state);
-        destroy_deferred_queue(state);
+        destroy_submitted_references(state);
         // Report before cleanup clears the diagnostic tables.
         if (state.validation || state.debug_callback != null) (void)report_resource_leaks(state);
         destroy_readback_tickets(state);

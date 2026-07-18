@@ -38,7 +38,7 @@ Backend API and driver versions are diagnostic information. Applications select 
 - Dedicated texture creation transactionally publishes separate texture and allocation tokens.
 - Samplers are immutable device-interned values and require no individual destruction. Strict sampler-heap publication returns a separate shader index; compatibility-only devices retain sampler identity without creating the strict heap.
 - VMA remains private.
-- Resource destruction is immediate. No live recording command list, executable command token, or incomplete submission may reference the resource.
+- Non-WSI resource destruction is immediate. No live recording command list, executable command token, or incomplete submission may reference the resource. Strict presentation integration applies the same no-hidden-wait rule to swapchain destruction and resize.
 - Readback uses a CPU-cached span, copy, completion point, mapped-span invalidation, and direct CPU access.
 
 Allocation-owning arenas and policies are outside the strict core. A future `gpu::alloc` module may provide frame, persistent, staging, readback, and deferred-release utilities over allocations, spans, and completion points.
@@ -95,6 +95,6 @@ The library does not translate shaders, emulate root pointers through descriptor
 - Device creation either enables the complete request or publishes no device.
 - Native pipeline compilation never occurs implicitly during draw or dispatch.
 - Public synchronization does not require resource lists for generic GPU memory.
-- Core resource and device destruction never hide waits or deferred release.
+- Non-WSI resource and device destruction never hide waits or deferred release; strict presentation extends that rule to swapchain destruction and resize.
 - Strict completion and readback require no frame lifecycle or public synchronization objects.
 - Public documentation and generated API references remain backend-neutral.

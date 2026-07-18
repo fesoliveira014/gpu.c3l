@@ -18,7 +18,6 @@ struct PlacementFixture {
     vk::VkDeviceState     state;
     vk::AllocationCell[1] allocations;
     vk::TextureCell[1]    textures;
-    vk::DeferredEntry[1]  deferred;
     PlacementNativeProbe  probe;
 }
 
@@ -1041,7 +1040,6 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
     )) == gpu::INVALID_ARGUMENT);
     fixture.allocations[0].value.dedicated_texture = false;
 
-
     gpu::TextureDesc wrong_access = desc;
     wrong_access.access = { .graphics };
     assert(@catch(vk::create_placed_texture_for_state_with_ops(
@@ -1094,22 +1092,6 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
         ops:          &ops,
     )) == gpu::INVALID_ARGUMENT);
     fixture.textures[0].used = false;
-    fixture.state.deferred.entries = fixture.deferred[..];
-    fixture.state.deferred.count = 1;
-    fixture.deferred[0] = {
-        .kind             = vk::DeferredKind.PLACED_IMAGE,
-        .placement        = allocation,
-        .placement_offset = 0,
-        .placement_size   = 64,
-    };
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       0,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
     assert(fixture.probe.create_calls == 0
         && fixture.probe.view_calls == 0
         && fixture.allocations[0].value.live_placements == 0,

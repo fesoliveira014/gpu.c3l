@@ -554,6 +554,8 @@ fn void? cmd_upload_buffer_impl(
 ) @private {
     CommandRecord* record = resolve_transfer_command(commands, operation)!;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -644,6 +646,8 @@ fn void? vk_cmd_upload_buffer(
 fn void? cmd_upload_texture_impl(gpu::CommandList* commands, gpu::TextureUploadDesc* desc, char[] data, TimelineTag tag, ZString operation, ZString mip_field) @private {
     CommandRecord* record = resolve_transfer_command(commands, operation)!;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -1624,6 +1628,8 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(
 ) @private {
     CommandRecord* record = resolve_transfer_command(commands, "cmd_readback_buffer")!;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,
@@ -1696,6 +1702,8 @@ fn gpu::ReadbackTicket? vk_cmd_readback_buffer(
 fn gpu::ReadbackTicket? vk_cmd_readback_texture(gpu::CommandList* commands, gpu::TextureHandle src, uint mip) @private {
     CommandRecord* record = resolve_transfer_command(commands, "cmd_readback_texture")!;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     if (record.state != CommandState.RECORDING) {
         return report_contract_failure(
             state:               state,

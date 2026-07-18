@@ -183,7 +183,6 @@ struct FrameLifecycleSnapshot {
     usz   cursor;
     ulong slot_timeline_value;
     ulong timeline_counter;
-    ulong signaled_shadow;
     ulong aux_compute_counter;
     ulong aux_compute_last_signaled;
     ulong aux_transfer_counter;
@@ -252,7 +251,6 @@ fn FrameLifecycleSnapshot frame_lifecycle_snapshot(vk::VkDeviceState* state) {
         .cursor                     = arena.cursor.load(AtomicOrdering.RELAXED),
         .slot_timeline_value        = arena.frame_timeline_value,
         .timeline_counter           = state.timeline_counter.load(AtomicOrdering.RELAXED),
-        .signaled_shadow            = state.signaled_shadow,
         .aux_compute_counter        = state.aux_compute_counter,
         .aux_compute_last_signaled  = state.aux_compute_last_signaled,
         .aux_transfer_counter       = state.aux_transfer_counter,
@@ -278,7 +276,6 @@ fn void assert_frame_lifecycle_unchanged(FrameLifecycleSnapshot before, FrameLif
     assert(after.cursor == before.cursor, "rejection preserves arena cursor");
     assert(after.slot_timeline_value == before.slot_timeline_value, "rejection preserves slot timeline value");
     assert(after.timeline_counter == before.timeline_counter, "rejection preserves frame timeline counter");
-    assert(after.signaled_shadow == before.signaled_shadow, "rejection preserves retired timeline shadow");
     assert(after.aux_compute_counter == before.aux_compute_counter, "rejection preserves compute counter");
     assert(after.aux_compute_last_signaled == before.aux_compute_last_signaled, "rejection preserves compute signal");
     assert(after.aux_transfer_counter == before.aux_transfer_counter, "rejection preserves transfer counter");

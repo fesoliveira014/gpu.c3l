@@ -34,6 +34,8 @@ struct CommandRecord {
     uint                         last_entry;
     PendingLayout[]              pending_layouts;
     uint                         pending_layout_count;
+    CommandResourceReference[]   references;
+    uint                         reference_count;
 }
 
 struct CommandCell {
@@ -107,6 +109,81 @@ fn CommandRecord*? resolve_command(gpu::CommandList* commands) {
     return state.commands.get(commands.handle);
 }
 
+fn void ensure_command_reference_capacity(
+    VkDeviceState* state,
+    CommandRecord* record,
+) {
+    if (record.reference_count < record.references.len) return;
+    usz capacity = record.references.len == 0
+        ? COMMAND_REFERENCE_INITIAL_CAPACITY
+        : record.references.len * 2;
+    CommandResourceReference[] grown = alloc::new_array(
+        state.host_allocator,
+        CommandResourceReference,
+        (sz)capacity,
+    );
+    for (uint i = 0; i < record.reference_count; i++) {
+        grown[i] = record.references[i];
+    }
+    if (record.references.ptr != null) {
+        alloc::free(state.host_allocator, record.references.ptr);
+    }
+    record.references = grown;
+}
+
+fn void? track_command_reference(
+    VkDeviceState* state,
+    CommandRecord* record,
+    ulong owner,
+    uint index,
+    uint generation,
+) {
+    if (!state.validation) return;
+    CommandResourceReference reference = {
+        .owner = owner, .index = index, .generation = generation,
+    };
+    for (uint i = 0; i < record.reference_count; i++) {
+        if (same_resource_reference(&record.references[i], &reference)) return;
+    }
+    ensure_command_reference_capacity(state, record);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    retain_validation_reference(state, reference)!;
+    record.references[record.reference_count++] = reference;
+}
+
+fn void free_command_references(
+    VkDeviceState* state,
+    CommandRecord* record,
+) {
+    if (record.references.ptr == null) {
+        record.reference_count = 0;
+        return;
+    }
+    release_validation_references(
+        state,
+        record.references,
+        record.reference_count,
+
+    );
+    alloc::free(state.host_allocator, record.references.ptr);
+    record.references = {};
+    record.reference_count = 0;
+}
+fn void rollback_command_references(
+    VkDeviceState* state,
+    CommandRecord* record,
+    uint checkpoint,
+) {
+    while (record.reference_count > checkpoint) {
+        record.reference_count--;
+        release_validation_reference(
+            state,
+            record.references[record.reference_count],
+        );
+    }
+}
+
 fn void free_pending_layouts(VkDeviceState* state, CommandRecord* record) {
     if (record.pending_layouts.ptr != null) {
         alloc::free(state.host_allocator, record.pending_layouts.ptr);
@@ -118,6 +195,7 @@ fn void free_pending_layouts(VkDeviceState* state, CommandRecord* record) {
 fn void release_command(VkDeviceState* state, gpu::CommandListHandle handle) {
     if (try record = state.commands.get(handle)) {
         free_pending_layouts(state, record);
+        free_command_references(state, record);
         (void)state.commands.free(handle);
     }
 }
@@ -151,11 +229,13 @@ fn void release_commands_for_context_frame(
     }
 }
 
-
 fn void destroy_command_table(VkDeviceState* state) {
     if (state.commands.slots.ptr == null) return;
     foreach (&cell : state.commands.slots[:state.commands.next_new]) {
-        if (cell.used) free_pending_layouts(state, &cell.value);
+        if (cell.used) {
+            free_pending_layouts(state, &cell.value);
+            free_command_references(state, &cell.value);
+        }
     }
     mem::free(state.commands.slots.ptr);
     state.commands = {};

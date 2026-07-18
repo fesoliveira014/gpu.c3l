@@ -11,6 +11,8 @@ fn void? vk_cmd_buffer_barrier(
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     ResolvedSpan resolved = resolve_span_slot(
         state:          state,
         span:           &barrier.span,
@@ -108,6 +110,8 @@ fn void? vk_cmd_texture_barrier(gpu::CommandList* commands, gpu::TextureBarrier*
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     TextureSlot* slot = state.textures.get(barrier.texture)!;
     validate_texture_recording_access(
         state:     state,
@@ -203,6 +207,11 @@ fn bool? vk_poll_completion(
     )!;
     if (current < sequence) return false;
     observe_queue_completion(state, completion, current);
+    release_completed_submission_references(
+        state,
+        queue_id,
+        current,
+    );
     return true;
 }
 
@@ -233,4 +242,9 @@ fn void? vk_wait_completion(
         ),
     )!;
     observe_queue_completion(state, completion, sequence);
+    release_completed_submission_references(
+        state,
+        queue_id,
+        sequence,
+    );
 }

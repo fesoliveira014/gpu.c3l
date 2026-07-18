@@ -16,6 +16,7 @@ struct ShaderSlot {
     vk::ShaderModule shader_module;
     gpu::ShaderStage stage;
     char[SHADER_ENTRY_POINT_CAP] entry_point;
+    uint             pipeline_build_count;
 }
 
 struct ShaderCell {
@@ -30,6 +31,11 @@ struct ShaderTable {
     ulong        owner;
     uint         free_head;
     uint         next_new;
+}
+
+struct ShaderPipelineReference {
+    gpu::ShaderHandle handle;
+    ShaderSlot*       slot;
 }
 
 fn gpu::ShaderHandle? ShaderTable.alloc(&self, ShaderSlot value) {
@@ -79,6 +85,31 @@ fn void? ShaderTable.free(&self, gpu::ShaderHandle h) {
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
     self.slots[idx].next_free = self.free_head;
     self.free_head = idx + 1;
+}
+
+fn ShaderPipelineReference? retain_shader_for_pipeline(
+    VkDeviceState* state,
+    gpu::ShaderHandle handle,
+) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    ShaderSlot* slot = state.shaders.get(handle)!;
+    if (slot.pipeline_build_count == uint::max) return gpu::DEVICE_BUSY~;
+    slot.pipeline_build_count++;
+    return {
+        .handle = handle,
+        .slot   = slot,
+    };
+}
+
+fn void release_shader_for_pipeline(
+    VkDeviceState* state,
+    ShaderPipelineReference reference,
+) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    ShaderSlot* slot = state.shaders.get(reference.handle)!!;
+    slot.pipeline_build_count--;
 }
 
 <* Fault SHADER_INVALID on any set other than 0 or a set-0 binding that breaks
@@ -329,8 +360,6 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
     return gpu::SLOT_TABLE_FULL~;
 }
 
-<* Frees the handle now; module release is deferred until frames referencing
-   its pipelines retire. *>
 fn void? vk_destroy_shader(gpu::Device* device, gpu::ShaderHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     enter_tracked(state);
@@ -338,14 +367,10 @@ fn void? vk_destroy_shader(gpu::Device* device, gpu::ShaderHandle handle) @priva
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     ShaderSlot* slot = state.shaders.get(handle)!;
-    vk::ShaderModule sh_module = slot.shader_module;
-    ulong retire = retire_timeline_value(state);
+    if (slot.pipeline_build_count > 0) {
+        return gpu::RESOURCE_IN_USE~;
+    }
+    vk::ShaderModule shader_module = slot.shader_module;
     state.shaders.free(handle)!;
-    enqueue_deferred(
-        state:          state,
-        kind:           DeferredKind.SHADER_MODULE,
-        timeline_value: retire,
-        object:         (void*)sh_module,
-        allocation:     (vma::Allocation)null,
-    );
+    vk::destroy_shader_module(state.device, shader_module, null);
 }

@@ -21,10 +21,7 @@ const uint HAMMER_ITERS = 32;
 const uint HELPER_HAMMER_THREADS = 2;
 const uint HELPER_HAMMER_ITERS = 300;
 const usz HELPER_HAMMER_PAYLOAD = 128;
-// Zero-slack: one payload width, so the two helpers must actually contend
-// for staging space. The deferred queue's allocator is pinned to the device,
-// so worker-thread destroys under this pressure are safe and this is the
-// tightest sizing that stays safe.
+// One payload width forces the two helpers to contend for staging space.
 const usz HELPER_HAMMER_TINY_STAGING = HELPER_HAMMER_PAYLOAD;
 
 const uint HELPER_RACE_ITERS = 100;
@@ -163,6 +160,55 @@ fn void same_descriptor_pipeline_race() @test {
         "refcount equals the number of racing creates");
     foreach (&a : args) gpu::destroy_pipeline(&device, a.handle)!!;
     assert(vk::pipeline_cache_entry_count(state) == 0, "all aliases released the entry");
+}
+
+struct ShaderPinArgs {
+    vk::VkDeviceState* state;
+    gpu::ShaderHandle  shader;
+    Atomic{uint}       entered;
+    Atomic{uint}       release;
+}
+
+fn int shader_pin_worker(void* arg) {
+    ShaderPinArgs* args = (ShaderPinArgs*)arg;
+    vk::ShaderPipelineReference reference =
+        vk::retain_shader_for_pipeline(args.state, args.shader)!!;
+    args.entered.store(1, AtomicOrdering.RELEASE);
+    while (args.release.load(AtomicOrdering.ACQUIRE) == 0) {
+        thread::yield();
+    }
+    vk::release_shader_for_pipeline(args.state, reference);
+    return 0;
+}
+
+fn void shader_destroy_rejects_concurrent_pipeline_build_pin() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = THR_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderHandle shader = gpu::create_shader(&device, &desc)!!;
+    defer (void)gpu::destroy_shader(&device, shader);
+    ShaderPinArgs args = {
+        .state  = (vk::VkDeviceState*)gpu::device_backend_state(device),
+        .shader = shader,
+    };
+    Thread worker;
+    worker.create(&shader_pin_worker, &args)!!;
+    while (args.entered.load(AtomicOrdering.ACQUIRE) == 0) {
+        thread::yield();
+    }
+
+    assert(@catch(gpu::destroy_shader(&device, shader))
+        == gpu::RESOURCE_IN_USE,
+        "an active pipeline build preserves its shader module");
+    args.release.store(1, AtomicOrdering.RELEASE);
+    worker.join()!!;
+
+    gpu::destroy_shader(&device, shader)!!;
+    shader = {};
 }
 
 struct SpanArgs {

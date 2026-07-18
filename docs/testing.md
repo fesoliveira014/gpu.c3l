@@ -254,7 +254,7 @@ mutation-free retry state. Pure range and direct reset helpers remain
 fault-only when no public operation context is supplied.
 
 Descriptor/cache completeness coverage adds batch rollback after cached-view
-creation, stale and exhausted descriptor identities, retire-query results,
+creation, stale and exhausted descriptor identities, immediate slot reuse,
 image-view backend results, descriptor bootstrap failures, pipeline-cache
 INCOMPLETE, a compatible-header corrupt-blob integration, and a deterministic
 cache-create seam whose retryable first attempt and successful empty second
@@ -501,9 +501,8 @@ compare with tolerance for floating formats
 Every backend test should end with:
 
 ```text
+wait every submitted completion point
 destroy all public resources
-drain deferred destruction
-wait device idle if needed
 destroy device
 assert no live resources
 ```
