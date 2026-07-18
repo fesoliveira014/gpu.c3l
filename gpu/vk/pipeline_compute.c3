@@ -197,7 +197,7 @@ fn void? vk_destroy_pipeline(gpu::Device* device, gpu::PipelineHandle handle) @p
     defer state.resource_mutex.unlock();
     PipelineSlot* slot = state.pipelines.get(handle)!;
     if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
-        drain_completed_submission_references(state)!;
+        drain_completed_submitted_commands(state)!;
         if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
             return gpu::RESOURCE_IN_USE~;
         }

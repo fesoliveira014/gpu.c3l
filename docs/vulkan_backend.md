@@ -531,11 +531,11 @@ device allocation failure and explicit device loss propagate without retry.
 ## 12. Command buffers
 
 `begin_commands(queue)` lazily creates a private recording-pool set for the
-calling thread and device. Each set contains one pool per frame slot for
-selected graphics and compute families. Compute aliases graphics when both use
-one family. A selected transfer role always has a separate pool, even when its
-family is shared. Blocking transfer helpers use a separate private set. Pool
-construction is transactional and uses the device host allocator.
+calling thread and device. Each set contains one pool per selected queue family.
+Compute aliases graphics when both use one family. A selected transfer role has
+a separate pool even when its family is shared. Blocking transfer helpers use a
+separate private set. Pool construction is transactional and uses the device
+host allocator.
 
 Public command values have two states:
 
@@ -545,8 +545,8 @@ ExecutableCommandList      ended, one-shot
 ```
 
 Both carry a device token and a `CommandListHandle`. The handle resolves to a
-device-owned `CommandRecord` with the native command buffer, exact public queue,
-frame slot, lifecycle state, binding cache, and pending texture transitions.
+device-owned `CommandRecord` with the native command buffer and pool, exact
+public queue, lifecycle state, binding cache, and pending texture transitions.
 Successful end consumes the recording token and returns the executable token.
 Submit or explicit executable discard consumes the ended token.
 
@@ -555,8 +555,9 @@ duplicate, non-executable, or wrong-queue tokens before claiming records. A
 failure before native acceptance restores every claim; success commits pending
 texture state and invalidates all aliases.
 
-A live command record prevents reset of its frame-slot pool. Applications must
-submit or discard every token before that slot is reused.
+Discard frees the native command buffer immediately. Submit transfers it to a
+completion-tracked batch; `poll_completion`, `wait_completion`, and bounded
+submit-side draining reclaim completed buffers.
 
 ## 13. Synchronization
 

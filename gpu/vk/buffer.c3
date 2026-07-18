@@ -254,7 +254,7 @@ fn void? vk_destroy_buffer(gpu::Device* device, BufferHandle handle) @private {
     defer state.resource_mutex.unlock();
     BufferSlot* slot = state.buffers.get(handle)!;
     if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
-        drain_completed_submission_references(state)!;
+        drain_completed_submitted_commands(state)!;
         if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
             return gpu::RESOURCE_IN_USE~;
         }

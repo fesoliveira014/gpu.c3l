@@ -50,10 +50,6 @@
     },
     // Advisory begin_frame reset-loop timing; executable so it never gates
     // CI. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
-    "context_reset_bench": {
-      "type": "executable",
-      "sources": [ "src/context_reset_bench.c3" ]
-    },
     "command_record_bench": {
       "type": "executable",
       "sources": [ "src/command_record_bench.c3" ]

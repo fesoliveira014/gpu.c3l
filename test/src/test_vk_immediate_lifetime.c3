@@ -121,7 +121,7 @@ fn void executable_references_reject_allocation_release() @test {
     dst.span = {};
 }
 
-fn void incomplete_submission_references_reject_release() @test {
+fn void incomplete_submitted_commands_retain_references() @test {
     gpu::Device device = make_lifetime_test_device();
     defer destroy_test_device(&device)!!;
 
@@ -150,7 +150,7 @@ fn void incomplete_submission_references_reject_release() @test {
     gpu::wait_completion(completion)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(state.submitted_reference_count == 0,
+    assert(state.submitted_command_count == 0,
         "waiting releases completed validation-reference batches");
     gpu::free_allocation(&device, &src.allocation)!!;
     src.span = {};
@@ -245,13 +245,13 @@ fn void failed_command_validation_retains_no_resource_reference() @test {
     gpu::discard_commands(&commands)!!;
 }
 
-fn void submitted_reference_reservations_prevent_capacity_overcommit() @test {
+fn void submitted_command_reservations_prevent_capacity_overcommit() @test {
     vk::VkDeviceState state = {
         .validation     = true,
         .host_allocator = &allocators::LIBC_ALLOCATOR,
     };
-    vk::ensure_submitted_reference_capacity(&state, 15);
-    state.submitted_reference_count = 15;
+    vk::ensure_submitted_command_capacity(&state, 15);
+    state.submitted_command_count = 15;
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
 
@@ -260,27 +260,27 @@ fn void submitted_reference_reservations_prevent_capacity_overcommit() @test {
     vk::CommandRecord*[1] first_records = { &first_record };
     vk::CommandRecord*[1] second_records = { &second_record };
 
-    uint first = vk::prepare_submitted_references(
+    uint first = vk::prepare_submitted_commands(
         &state,
         first_records[..],
     );
-    uint second = vk::prepare_submitted_references(
+    uint second = vk::prepare_submitted_commands(
         &state,
         second_records[..],
     );
     assert(first == 1 && second == 1,
         "each concurrent submit reserves its reference batch");
-    assert(state.submitted_reference_reserved == 2,
+    assert(state.submitted_command_reserved == 2,
         "both reservations remain visible until publish or cancellation");
-    assert(state.submitted_references.len >= 17,
+    assert(state.submitted_commands.len >= 17,
         "the second reservation grows capacity past the first reservation");
 
-    vk::cancel_submitted_reference_reservation(&state, second);
-    vk::cancel_submitted_reference_reservation(&state, first);
-    assert(state.submitted_reference_reserved == 0,
+    vk::cancel_submitted_command_reservation(&state, second);
+    vk::cancel_submitted_command_reservation(&state, first);
+    assert(state.submitted_command_reserved == 0,
         "cancellation releases every reserved batch");
-    state.submitted_reference_count = 0;
-    vk::destroy_submitted_references(&state);
+    state.submitted_command_count = 0;
+    vk::destroy_submitted_commands(&state);
 }
 
 fn void incomplete_reference_drain_is_deterministic() @test {
@@ -293,31 +293,31 @@ fn void incomplete_reference_drain_is_deterministic() @test {
         .bound    = true,
     }};
     state.queue_completions = completions[..];
-    vk::ensure_submitted_reference_capacity(&state, 1);
+    vk::ensure_submitted_command_capacity(&state, 1);
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,
         .roles  = { .graphics },
     };
-    state.submitted_references[0] = {
+    state.submitted_commands[0] = {
         .completion = gpu::make_completion_point(queue, 7)!!,
     };
-    state.submitted_reference_count = 1;
+    state.submitted_command_count = 1;
 
     lifetime_counter_value = 6;
-    vk::drain_completed_submission_references_with_query(
+    vk::drain_completed_submitted_commands_with_query(
         &state,
         &lifetime_counter_query,
     )!!;
-    assert(state.submitted_reference_count == 1,
+    assert(state.submitted_command_count == 1,
         "an incomplete counter preserves the submitted reference batch");
 
     lifetime_counter_value = 7;
-    vk::drain_completed_submission_references_with_query(
+    vk::drain_completed_submitted_commands_with_query(
         &state,
         &lifetime_counter_query,
     )!!;
-    assert(state.submitted_reference_count == 0,
+    assert(state.submitted_command_count == 0,
         "the reached counter releases the submitted reference batch");
-    vk::destroy_submitted_references(&state);
+    vk::destroy_submitted_commands(&state);
 }

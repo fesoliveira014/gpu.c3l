@@ -655,7 +655,7 @@ fn void two_helper_tiny_arena_hammer() @test {
         assert(!a.mismatch, "each helper's readback pattern matched its own upload despite tiny-arena reuse pressure");
     }
 
-    ulong resets_before_drain = vk::helper_pool_reset_count(state);
+    vk::CommandBufferStats before_drain = vk::command_buffer_stats(state);
     char[HELPER_HAMMER_PAYLOAD] drain_payload;
     foreach (&b : drain_payload) *b = (char)0xEE;
     gpu::upload_buffer_data(
@@ -665,8 +665,11 @@ fn void two_helper_tiny_arena_hammer() @test {
         next_stage:  gpu::Stage.TRANSFER,
         next_hazard: gpu::Hazard.TRANSFER_READ,
     )!!;
-    assert(vk::helper_pool_reset_count(state) > resets_before_drain,
-        "once concurrent hammering ends, the next sequential helper call reclaims the pool");
+    vk::CommandBufferStats after_drain = vk::command_buffer_stats(state);
+    assert(after_drain.allocated == before_drain.allocated + 1,
+        "the sequential helper allocates one command buffer");
+    assert(after_drain.freed == before_drain.freed + 1,
+        "the sequential helper reclaims its command buffer at completion");
 
     for (uint i = 0; i < HELPER_HAMMER_THREADS; i++) {
         free_owned_span(&device, &buffers[i])!!;
@@ -675,10 +678,6 @@ fn void two_helper_tiny_arena_hammer() @test {
 
 const uint SEQUENTIAL_HELPER_CALLS = 20;
 
-<* Deterministic counterpart to the concurrent hammer above: with a single
-   thread, reservation order and helper_record_mutex acquisition order always
-   agree, so the condition holds on every call but the first — the pool
-   never grows past one live buffer. *>
 fn void sequential_helper_calls_bound_the_pool_to_one_buffer() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
@@ -694,7 +693,7 @@ fn void sequential_helper_calls_bound_the_pool_to_one_buffer() @test {
     gpu::GpuSpan buffer_span = buffer.span;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    ulong resets_before = vk::helper_pool_reset_count(state);
+    vk::CommandBufferStats before = vk::command_buffer_stats(state);
 
     char[HELPER_HAMMER_PAYLOAD] payload;
     foreach (&b : payload) *b = (char)0xCD;
@@ -708,14 +707,18 @@ fn void sequential_helper_calls_bound_the_pool_to_one_buffer() @test {
         )!!;
     }
 
-    ulong resets_delta = vk::helper_pool_reset_count(state) - resets_before;
-    assert(resets_delta == SEQUENTIAL_HELPER_CALLS - 1,
-        "every sequential call but the first resets the helper pool, holding it at one live buffer");
+    vk::CommandBufferStats after = vk::command_buffer_stats(state);
+    assert(after.allocated == before.allocated + SEQUENTIAL_HELPER_CALLS,
+        "each helper call allocates one command buffer");
+    assert(after.freed == before.freed + SEQUENTIAL_HELPER_CALLS,
+        "each helper call reclaims its command buffer at completion");
+    assert(after.pending == before.pending,
+        "sequential helpers leave no pending command buffers");
 }
 
 const uint HELPER_FAULT_ITERS = 32;
 
-fn void failed_helpers_reclaim_command_records_on_pool_reset() @test {
+fn void failed_helpers_allocate_no_command_records() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);

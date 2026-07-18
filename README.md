@@ -44,7 +44,7 @@ gpu::cmd_dispatch(
   test gate across the whole suite
 - GPU-driven path: multi-draw indirect (+ count), draw tables via `gl_DrawID`
 - Tiered threading: automatic per-worker command pools, lock-free frame-arena
-  allocation, one submit
+  allocation, completion-driven command-buffer reclamation
 - Pipeline dedup cache + driver-cache save/load; swapchain with present-mode
   query; compare samplers, depth bias, MRT
 - Runs entirely on lavapipe (CPU Vulkan) — CI needs no GPU, and neither does

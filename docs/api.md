@@ -978,8 +978,8 @@ must have been recorded for that queue. Success consumes all tokens and returns
 one queue-owned `CompletionPoint`; failure publishes no point and preserves the
 tokens for retry or discard. An empty batch signals the selected queue.
 Duplicate or non-executable tokens fault `COMMAND_RECORDING_ERROR`; a token for
-another queue faults `INVALID_ARGUMENT`. A live unsubmitted token blocks its
-frame-slot pool reset until submitted or discarded.
+another queue faults `INVALID_ARGUMENT`. Discard reclaims an unsubmitted native
+buffer immediately; successful submission retains it until completion.
 
 `SubmitDesc.completion_waits` accepts published points from the same device.
 Cross-queue points become waits on their queue-owned timelines. Published points

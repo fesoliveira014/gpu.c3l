@@ -25,7 +25,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "resource_create_bench",
                 "descriptor_churn_bench",
                 "upload_throughput_bench",
-                "context_reset_bench",
                 "command_record_bench",
                 "frame_signal_bench",
                 "pipeline_cache_bench",

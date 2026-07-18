@@ -140,30 +140,20 @@ struct VkDeviceState {
     VkStrictHeapState          strict_heap;
     TransferArenaState         staging_arena;
     TransferArenaState         readback_arena;
-    SubmittedReferenceBatch[]   submitted_references;
-    uint                        submitted_reference_count;
-    uint                        submitted_reference_reserved;
+    SubmittedCommandBatch[]   submitted_commands;
+    uint                        submitted_command_count;
+    uint                        submitted_command_reserved;
+    ulong                       command_buffers_allocated;
+    ulong                       command_buffers_freed;
     ReadbackTicketTable        readback_tickets;
     DedicatedRetireState       dedicated_staging;
     HostAllocator               host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
     bool                       frame_active;
-    // begin_frame's reset-loop accounting for the current call; written
-    // only there, whitebox-exposed via pool_reset_stats.
-    uint                       pools_reset_last_frame;
-    uint                       pools_skipped_last_frame;
-    // Helper-path pool resets outside begin_frame; whitebox-exposed.
-    ulong                      helper_pool_resets;
     // Dedicated-fallback buffers created by transfer_alloc/ticket_alloc;
     // mutated only under transfer_mutex, whitebox-exposed.
     ulong                      dedicated_fallbacks;
-}
-
-<* Whitebox snapshot of begin_frame reset-loop counters. *>
-struct PoolResetStats {
-    uint reset;
-    uint skipped;
 }
 
 struct PhysicalDeviceSelection {
@@ -208,10 +198,6 @@ fn void exit_tracked(VkDeviceState* state) {
 
 fn bool boundary_blocked(VkDeviceState* state) {
     return state.validation && state.inflight_calls.load(AtomicOrdering.RELAXED) != 0;
-}
-
-fn PoolResetStats pool_reset_stats(VkDeviceState* state) {
-    return { .reset = state.pools_reset_last_frame, .skipped = state.pools_skipped_last_frame };
 }
 
 // One static vtable shared by every Vulkan device.
@@ -740,7 +726,7 @@ fn void vk_destroy_device(void* backend_state) @private {
 fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @private {
     if (state == null) return;
     if (state.device != null) {
-        destroy_submitted_references(state);
+        destroy_submitted_commands(state);
         // Report before cleanup clears the diagnostic tables.
         if (state.validation || state.debug_callback != null) (void)report_resource_leaks(state);
         destroy_readback_tickets(state);

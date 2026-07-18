@@ -23,10 +23,10 @@ struct PendingLayout {
 }
 
 struct CommandRecord {
-    vk::CommandBuffer            command_buffer;
+    vk::CommandBuffer       command_buffer;
+    vk::CommandPool         command_pool;
     RecordingContextHandle  context;
     gpu::Queue                   queue;
-    uint                         frame_index;
     CommandState                 state;
     uint                         active_render_width;
     uint                         active_render_height;
@@ -197,35 +197,6 @@ fn void release_command(VkDeviceState* state, gpu::CommandListHandle handle) {
         free_pending_layouts(state, record);
         free_command_references(state, record);
         (void)state.commands.free(handle);
-    }
-}
-
-fn bool frame_has_live_commands(VkDeviceState* state, uint frame_index) {
-    state.command_mutex.lock()!!;
-    defer state.command_mutex.unlock();
-    foreach (&cell : state.commands.slots[:state.commands.next_new]) {
-        if (cell.used && cell.value.frame_index == frame_index) return true;
-    }
-    return false;
-}
-
-fn void release_commands_for_context_frame(
-    VkDeviceState* state,
-    RecordingContextHandle context,
-    uint frame_index,
-) {
-    state.command_mutex.lock()!!;
-    defer state.command_mutex.unlock();
-    for (uint i = 0; i < state.commands.next_new; i++) {
-        CommandCell* cell = &state.commands.slots[i];
-        if (!cell.used || cell.value.frame_index != frame_index) continue;
-        if (cell.value.context != context) continue;
-        gpu::CommandListHandle handle = {
-            .owner = state.commands.owner,
-            .index = i,
-            .generation = cell.generation,
-        };
-        release_command(state, handle);
     }
 }
 

@@ -189,15 +189,10 @@ struct FrameLifecycleSnapshot {
     ulong aux_transfer_last_signaled;
     ulong queue_submits;
     ulong empty_signal_submits;
-    uint  pools_reset;
-    uint  pools_skipped;
     bool  frame_active;
     bool  compute_used;
     bool  transfer_used;
     bool  off_frame_pending;
-    bool  graphics_pool_dirty;
-    bool  compute_pool_dirty;
-    bool  transfer_pool_dirty;
 }
 
 fn void frame_token_owns_its_device_token_value() @test {
@@ -231,18 +226,6 @@ fn gpu::Device make_frame_lifecycle_device(uint frames_in_flight = 1) {
 
 fn FrameLifecycleSnapshot frame_lifecycle_snapshot(vk::VkDeviceState* state) {
     vk::FrameArenaState* arena = &state.frame_arenas[state.frame_index];
-    vk::PoolDirtyMask dirty;
-    foreach (&cell : state.recording_contexts.slots[
-        :state.recording_contexts.next_new
-    ]) {
-        if (!cell.used) continue;
-        vk::PoolDirtyMask context_dirty =
-            cell.value.pool_dirty[state.frame_index];
-        dirty.graphics = dirty.graphics || context_dirty.graphics;
-        dirty.compute = dirty.compute || context_dirty.compute;
-        dirty.transfer = dirty.transfer || context_dirty.transfer;
-    }
-    vk::PoolResetStats pool_stats = vk::pool_reset_stats(state);
     vk::SubmitStats submit_stats = vk::submit_stats(state);
     return {
         .frame_index                = state.frame_index,
@@ -257,15 +240,10 @@ fn FrameLifecycleSnapshot frame_lifecycle_snapshot(vk::VkDeviceState* state) {
         .aux_transfer_last_signaled = state.aux_transfer_last_signaled,
         .queue_submits              = submit_stats.queue_submits,
         .empty_signal_submits       = submit_stats.empty_signal_submits,
-        .pools_reset                = pool_stats.reset,
-        .pools_skipped              = pool_stats.skipped,
         .frame_active               = state.frame_active,
         .compute_used               = state.compute_used_since_frame,
         .transfer_used              = state.transfer_used_since_frame,
         .off_frame_pending          = state.off_frame_pending_queues.load(AtomicOrdering.RELAXED) != 0,
-        .graphics_pool_dirty        = dirty.graphics,
-        .compute_pool_dirty         = dirty.compute,
-        .transfer_pool_dirty        = dirty.transfer,
     };
 }
 
@@ -282,15 +260,10 @@ fn void assert_frame_lifecycle_unchanged(FrameLifecycleSnapshot before, FrameLif
     assert(after.aux_transfer_last_signaled == before.aux_transfer_last_signaled, "rejection preserves transfer signal");
     assert(after.queue_submits == before.queue_submits, "rejection performs no user queue submit");
     assert(after.empty_signal_submits == before.empty_signal_submits, "rejection performs no frame signal submit");
-    assert(after.pools_reset == before.pools_reset, "rejection preserves pool reset accounting");
-    assert(after.pools_skipped == before.pools_skipped, "rejection preserves pool skip accounting");
     assert(after.frame_active == before.frame_active, "rejection preserves lifecycle state");
     assert(after.compute_used == before.compute_used, "rejection preserves compute-used state");
     assert(after.transfer_used == before.transfer_used, "rejection preserves transfer-used state");
     assert(after.off_frame_pending == before.off_frame_pending, "rejection preserves off-frame state");
-    assert(after.graphics_pool_dirty == before.graphics_pool_dirty, "rejection preserves graphics-pool dirtiness");
-    assert(after.compute_pool_dirty == before.compute_pool_dirty, "rejection preserves compute-pool dirtiness");
-    assert(after.transfer_pool_dirty == before.transfer_pool_dirty, "rejection preserves transfer-pool dirtiness");
 }
 
 fn void frame_span_allocation_requires_active_frame() @test {
