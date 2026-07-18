@@ -42,7 +42,14 @@ alias CmdGlobalBarrierFn @private    = fn void? (CommandList*, GlobalBarrier*);
 alias CmdTextureBarrierFn @private   = fn void? (CommandList*, TextureBarrier*);
 alias GetTextureFormatSupportFn @private = fn TextureFormatSupport? (Device*, Format);
 alias SupportsTextureDescFn @private     = fn bool? (Device*, TextureDesc*);
+alias GetTextureRequirementsFn @private  = fn TextureRequirements? (Device*, TextureDesc*);
 alias CreateTextureFn @private           = fn TextureHandle? (Device*, TextureDesc*);
+alias CreatePlacedTextureFn @private = fn TextureHandle? (
+    Device* device,
+    TextureDesc* desc,
+    GpuAllocation allocation,
+    usz offset,
+);
 alias DestroyTextureFn @private          = fn void? (Device*, TextureHandle);
 alias CreateTextureDescriptorFn @private  = fn TextureIndex? (Device*, TextureHandle, TextureViewDesc*);
 alias DestroyTextureDescriptorFn @private = fn void? (Device*, TextureIndex);
@@ -152,8 +159,10 @@ struct BackendVTable @private {
     CmdTextureBarrierFn     cmd_texture_barrier;
     GetTextureFormatSupportFn get_texture_format_support;
     SupportsTextureDescFn     supports_texture_desc;
-    CreateTextureFn         create_texture;
-    DestroyTextureFn        destroy_texture;
+    GetTextureRequirementsFn  get_texture_requirements;
+    CreateTextureFn           create_texture;
+    CreatePlacedTextureFn     create_placed_texture;
+    DestroyTextureFn          destroy_texture;
     CreateTextureDescriptorFn  create_texture_descriptor;
     DestroyTextureDescriptorFn destroy_texture_descriptor;
     CreateTextureDescriptorsFn create_texture_descriptors;

@@ -185,7 +185,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.4 Texture requirements and placed creation
 
-- [ ] Add pre-creation texture requirements and placed texture creation in `gpu/texture.c3`, `gpu/vk/texture.c3`, and allocation placement tracking.
+- [x] Add pre-creation texture requirements and placed texture creation in `gpu/texture.c3`, `gpu/vk/texture.c3`, and allocation placement tracking.
   - **Depends on:** 4.1 and 2.4.
   - **Contract:** requirements precede allocation; placed creation validates compatibility, size, alignment, offset, queue access, and dedicated-only requirements before backend mutation; texture destruction never releases placement.
   - **Edges:** wrong memory class or type, overlapping live placement, out-of-range offset, alignment overflow, dedicated-required request, stale allocation, and failure after validation.

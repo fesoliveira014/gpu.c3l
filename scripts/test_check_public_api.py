@@ -99,6 +99,20 @@ def valid_document() -> dict:
                             },
                         ],
                     },
+                    api_function(
+                        "get_texture_requirements",
+                        "TextureRequirements?",
+                        ("device", "Device*"),
+                        ("desc", "TextureDesc*"),
+                    ),
+                    api_function(
+                        "create_placed_texture",
+                        "TextureHandle?",
+                        ("device", "Device*"),
+                        ("desc", "TextureDesc*"),
+                        ("allocation", "GpuAllocation"),
+                        ("offset", "usz"),
+                    ),
                     {
                         "name": "free_allocation",
                         "return_type": {"name": "void?"},
@@ -308,6 +322,10 @@ def valid_document() -> dict:
                                 "name": "CPU_READ",
                                 "type": {"name": "MemoryClass"},
                             },
+                            {
+                                "name": "TEXTURE",
+                                "type": {"name": "MemoryClass"},
+                            },
                         ],
                     },
                     {
@@ -348,7 +366,32 @@ def valid_document() -> dict:
                                 "type": {"name": "MemoryClass"},
                             },
                             {"name": "access", "type": {"name": "QueueRoles"}},
+                            {
+                                "name": "texture_requirements",
+                                "type": {"name": "TextureRequirements[]"},
+                            },
                             {"name": "debug_name", "type": {"name": "ZString"}},
+                        ],
+                    },
+                    {
+                        "name": "TextureCompatibility",
+                        "kind": "distinct type",
+                        "base_type": {"name": "uint128"},
+                    },
+                    {
+                        "name": "TextureRequirements",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "size", "type": {"name": "usz"}},
+                            {"name": "alignment", "type": {"name": "usz"}},
+                            {
+                                "name": "compatibility",
+                                "type": {"name": "TextureCompatibility"},
+                            },
+                            {
+                                "name": "dedicated_only",
+                                "type": {"name": "bool"},
+                            },
                         ],
                     },
                     {
@@ -969,6 +1012,42 @@ class PublicApiCheckTests(unittest.TestCase):
             check_public_api.validate_document(document),
         )
 
+    def test_rejects_wrong_texture_compatibility_storage(self) -> None:
+        document = valid_document()
+        compatibility = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "TextureCompatibility"
+        )
+        compatibility["base_type"]["name"] = "ulong"
+        self.assertIn(
+            "TextureCompatibility must be an opaque uint128 distinct type",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_wrong_texture_requirements_schema(self) -> None:
+        document = valid_document()
+        requirements = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "TextureRequirements"
+        )
+        requirements["members"].pop()
+        self.assertIn(
+            "TextureRequirements must match the exact public schema",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_wrong_placed_texture_signature(self) -> None:
+        document = valid_document()
+        function = next(
+            entry for entry in document["modules"]["gpu"]["functions"]
+            if entry["name"] == "create_placed_texture"
+        )
+        function["members"].pop()
+        self.assertIn(
+            "create_placed_texture has the wrong parameters",
+            check_public_api.validate_document(document),
+        )
+
     def test_rejects_wrong_persistent_alloc_desc_schema(self) -> None:
         document = valid_document()
         desc = next(
@@ -1004,7 +1083,7 @@ class PublicApiCheckTests(unittest.TestCase):
         )
         memory_class["members"].reverse()
         self.assertIn(
-            "MemoryClass must expose exactly the three semantic values",
+            "MemoryClass must expose exactly the four semantic values",
             check_public_api.validate_document(document),
         )
 

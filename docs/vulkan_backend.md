@@ -35,10 +35,10 @@ gpu/vk/instance.c3             shared instance construction
 gpu/vk/device.c3               physical device selection, logical device, feature chain
 gpu/vk/queue.c3                queue family selection, queue handles, submit
 gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
-gpu/vk/allocation.c3           independent allocation table and VMA backing
+gpu/vk/allocation.c3           generic-buffer and raw texture-memory allocations
 gpu/vk/memory.c3               memory kind policy, arenas, virtual allocator
 gpu/vk/buffer.c3               VkBuffer + VMA allocation path
-gpu/vk/texture.c3              VkImage + VMA allocation, views, layout tracking
+gpu/vk/texture.c3              owned/placed images, views, layout tracking
 gpu/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
 gpu/vk/shader.c3               SPIR-V modules and reflection validation
 gpu/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
@@ -273,12 +273,14 @@ allocator.stats_string
 
 ```text
 validate size, class, alignment, and semantic access
-derive exact admitted queue families
-build a private addressable buffer with the generic usage superset
-select VMA policy for CPU_WRITE, GPU_PRIVATE, or CPU_READ
-create the buffer/allocation pair with the requested minimum alignment
-require a mapping for CPU_WRITE and CPU_READ
-query actual alignment, memory properties, and a nonzero device address
+generic classes:
+    build a private addressable buffer with the generic usage superset
+    select CPU_WRITE, GPU_PRIVATE, or CPU_READ policy
+    require mapping for CPU_WRITE and CPU_READ
+    require a nonzero device address
+texture class:
+    intersect queried compatibility values
+    allocate raw device-local image memory without a buffer
 copy debug names
 publish the AllocationTable slot last
 ```
@@ -288,13 +290,13 @@ memory without a public mapping, and `CPU_READ` uses mapped random host access.
 These choices stay in `gpu::vk`; public code sees only `MemoryClass` and
 `AllocationInfo`.
 
-Each slot stores immutable size, class, access, alignment, mapping/coherence,
-address, debug name, and generation. Span resolution checks owner, generation,
-and bounds before deriving a mapping or address. Creation rollback destroys the
-private buffer/allocation pair without publishing a token.
+Each slot stores immutable size, class, access, alignment, capabilities, native
+ownership, and generation. Texture-memory slots reject span resolution.
+Creation rollback releases native ownership without publishing a token.
 
-`free_allocation` retires the generation and calls `allocator.destroy_buffer`
-immediately. Normal device destruction is blocked
+`free_allocation` retires the generation, then destroys the generic buffer or
+frees raw texture memory. Live placements return `RESOURCE_IN_USE`. Normal
+device destruction is blocked
 by live public allocations; accepted loss/partial teardown releases remaining
 table entries before destroying the allocator.
 
@@ -722,8 +724,9 @@ free backend object after timeline completed
 For VMA-backed resources:
 
 ```text
-independent allocation: allocator.destroy_buffer(buffer, allocation) immediately
-image: allocator.destroy_image(image, allocation) after retirement
+generic allocation: destroy buffer and allocation immediately
+texture allocation: free raw memory when no placement remains
+owned or placed image: destroy after retirement
 ```
 
 ## 19. Translation helpers

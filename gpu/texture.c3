@@ -1,5 +1,8 @@
 module gpu;
 
+<* Opaque device-owned compatibility value for texture placement. *>
+typedef TextureCompatibility = uint128;
+
 const uint DEFAULT_TEXTURE_CAPACITY = 1024;
 
 <* Texel format for textures and swapchain images. *>
@@ -102,6 +105,14 @@ struct TextureFormatSupport {
     TextureSampleCountSupport sample_counts;
 }
 
+<* Storage requirements for one texture descriptor. *>
+struct TextureRequirements {
+    usz                  size;
+    usz                  alignment;
+    TextureCompatibility compatibility;
+    bool                 dedicated_only;
+}
+
 <* Creation parameters for create_texture. `access` must be a non-empty subset
    of the device's selected queue roles. *>
 struct TextureDesc {
@@ -152,6 +163,22 @@ struct SamplerDesc {
     bool        compare_enable;
     CompareOp   compare;
     ZString     debug_name;
+}
+
+fn bool TextureCompatibility.is_valid(self) {
+    uint128 raw = (uint128)self;
+    ulong payload = (ulong)raw;
+    return (ulong)(raw >> 64) != 0
+        && (uint)payload != 0
+        && payload >> 32 == 0;
+}
+
+fn ulong texture_compatibility_owner(TextureCompatibility compatibility) @private {
+    return (ulong)((uint128)compatibility >> 64);
+}
+
+fn uint texture_compatibility_value(TextureCompatibility compatibility) @private {
+    return (uint)(uint128)compatibility;
 }
 
 fn uint texture_mip_levels(TextureDesc* desc) @private {
@@ -231,6 +258,15 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
     return operation.vtable.supports_texture_desc(device, desc);
 }
 
+<* Return exact storage requirements for a texture descriptor. *>
+fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* desc) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    validate_queue_access(&operation, desc.access)!;
+    return operation.vtable.get_texture_requirements(device, desc);
+}
+
 <* The handle owns the image; shader access goes through a TextureIndex.
    Ownership: release with destroy_texture. *>
 fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
@@ -243,7 +279,33 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     return texture;
 }
 
-<* Counterpart of create_texture; descriptors created from the texture must be destroyed first. *>
+<* Create a texture in caller-owned texture memory. *>
+fn TextureHandle? create_placed_texture(
+    Device* device,
+    TextureDesc* desc,
+    GpuAllocation allocation,
+    usz offset,
+) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    validate_queue_access(&operation, desc.access)!;
+    validate_resource_owner(
+        &operation,
+        allocation.owner,
+        ResourceOwnerKind.ALLOCATION,
+    )!;
+    TextureHandle texture = operation.vtable.create_placed_texture(
+        device:     device,
+        desc:       desc,
+        allocation: allocation,
+        offset:     offset,
+    )!;
+    retain_device_children(&operation);
+    return texture;
+}
+
+<* Destroy a texture after its descriptors. Placed storage remains caller-owned. *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);

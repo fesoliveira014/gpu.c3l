@@ -412,12 +412,14 @@ Backend-local Vulkan/VMA faults should not leak unless they carry useful public 
 MemoryClass.CPU_WRITE
 MemoryClass.GPU_PRIVATE
 MemoryClass.CPU_READ
+MemoryClass.TEXTURE
 
 AllocationDesc
     usz size
     usz alignment
     MemoryClass memory_class
     QueueRoles access
+    TextureRequirements[] texture_requirements
     ZString debug_name
 
 AllocationInfo
@@ -439,9 +441,10 @@ flush_mapped_span(Device*, GpuSpan) -> void?
 invalidate_mapped_span(Device*, GpuSpan) -> void?
 ```
 
-`CPU_WRITE` is mapped for host writes, `GPU_PRIVATE` is unmapped and
-GPU-preferred, and `CPU_READ` is mapped for host reads. These are behavioral
-classes, not backend heap or property selectors.
+`CPU_WRITE` is mapped for host writes, `GPU_PRIVATE` is addressable GPU
+data, and `CPU_READ` is mapped for host reads. `TEXTURE` is unmapped,
+non-addressable placement storage. These are behavioral classes, not backend
+heap or property selectors.
 
 `AllocationDesc.size` must be nonzero. Alignment zero selects 16 bytes; an
 explicit alignment must be a power of two and is raised to at least 16.
@@ -463,10 +466,9 @@ only live, mapped independent-allocation spans. Coherent ranges return success
 without native work; non-coherent alignment stays backend-private.
 
 `free_allocation` releases storage immediately, so all GPU use must be
-quiescent. Success invalidates the passed token and every borrowed span; faults
-preserve the token. `RESOURCE_IN_USE` is reserved for a live resource placement;
-the root module exposes no placement creation operation. A live allocation
-also prevents normal device destruction.
+quiescent. Success invalidates the token and every borrowed span; faults
+preserve it. A live placed texture returns `RESOURCE_IN_USE` without consuming
+the allocation. Any live allocation prevents normal device destruction.
 
 ### Arena memory selector
 
@@ -656,6 +658,15 @@ TextureFormatSupport
     TextureDimensionSupport dimensions
     TextureSampleCountSupport sample_counts
 
+TextureCompatibility
+    opaque device-owned value
+
+TextureRequirements
+    usz size
+    usz alignment
+    TextureCompatibility compatibility
+    bool dedicated_only
+
 TextureDimension
     TEX_1D   (query false; creation faults INVALID_ARGUMENT)
     TEX_2D   (current backend profile)
@@ -691,7 +702,9 @@ TextureDescriptorDesc
 ```text
 get_texture_format_support(Device* device, Format format) -> TextureFormatSupport?
 supports_texture_desc(Device* device, TextureDesc* desc) -> bool?
+get_texture_requirements(Device* device, TextureDesc* desc) -> TextureRequirements?
 create_texture(Device* device, TextureDesc* desc) -> TextureHandle?
+create_placed_texture(Device* device, TextureDesc* desc, GpuAllocation allocation, usz offset) -> TextureHandle?
 destroy_texture(Device* device, TextureHandle texture) -> void?
 create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) -> TextureIndex?
 destroy_texture_descriptor(Device* device, TextureIndex index) -> void?
@@ -707,7 +720,18 @@ corresponds to `INVALID_ARGUMENT` at creation; a structurally valid descriptor
 rejected by the adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion
 can still make creation fail after a true capability result.
 
-`TextureHandle` owns the image. `TextureIndex` is a descriptor heap entry used by shaders.
+`get_texture_requirements` returns size, alignment, a device-owned opaque
+compatibility value, and whether dedicated storage is required. Pass every
+requirement an allocation must support in
+`AllocationDesc.texture_requirements`; incompatible groups are rejected.
+
+`create_placed_texture` requires `MemoryClass.TEXTURE`, compatible memory,
+an aligned, in-bounds, non-overlapping range, and allocation access covering
+the texture access. Destroying the texture does not release its allocation.
+Dedicated-only requirements return `UNSUPPORTED_FEATURE`.
+
+`TextureHandle` owns the image. `TextureIndex` is a shader-visible
+descriptor heap entry.
 
 `create_texture_descriptors` batch-creates N descriptors under one lock hold, ending in one accumulated descriptor-set update in indexing mode (buffer mode writes per-item, already a mapped-memory store). `out_indices.len` must equal `descs.len` (`INVALID_ARGUMENT` otherwise); an empty `descs` is a no-op success. A zero-initialized `TextureDescriptorDesc.view` collapses to the default view, same as a null `view` to `create_texture_descriptor`.
 

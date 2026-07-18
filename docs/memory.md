@@ -116,21 +116,23 @@ generic allocation must provide a stable GPU address.
 
 ## 5. Independent allocations
 
-`GpuAllocation` owns device-scoped generic storage. `GpuSpan` borrows a range
-from an allocation or arena and stores only
+`GpuAllocation` owns device-scoped data or texture storage. `GpuSpan` borrows
+generic data from an allocation or arena and stores only
 `{ owner, index, generation, offset, size }`. Mapping, GPU address, access,
 memory class, and native backing remain in device state.
 
 ```text
 MemoryClass.CPU_WRITE    mapped for host writes
-MemoryClass.GPU_PRIVATE  unmapped, GPU-preferred
+MemoryClass.GPU_PRIVATE  unmapped, addressable GPU data
 MemoryClass.CPU_READ     mapped for host reads
+MemoryClass.TEXTURE      unmapped, non-addressable texture storage
 
 AllocationDesc
     size
     alignment
     memory_class
     access
+    texture_requirements
     debug_name
 
 allocate_memory
@@ -148,8 +150,9 @@ be a power of two and is normalized to at least 16. `AllocationInfo` reports
 the immutable size, actual alignment, class, access, mapping, coherence, and
 address capabilities.
 
-The Vulkan backend creates one private addressable buffer and VMA allocation,
-then publishes an `AllocationTable` slot only after all native work succeeds.
+Generic classes create a private addressable buffer and VMA allocation.
+`TEXTURE` creates raw device-local memory from queried compatibility masks.
+Both publish an `AllocationTable` slot only after native work succeeds.
 The table owns generation and liveness. Mapping, address, and visibility calls
 validate owner, generation, bounds, and required mapping before native use.
 `flush_mapped_span` and `invalidate_mapped_span` accept only independent
@@ -178,6 +181,7 @@ bounds or overflow checks.
 | CPU-written generic data | `MemoryClass.CPU_WRITE` | map, write, flush, then submit |
 | GPU-private generic data | `MemoryClass.GPU_PRIVATE` | upload or write from GPU commands |
 | CPU-read generic data | `MemoryClass.CPU_READ` | wait, invalidate, then read |
+| Placed textures | `MemoryClass.TEXTURE` | query requirements, allocate, create placed textures |
 | Per-frame roots and tables | `alloc_frame_span` | mapped, host-coherent, valid for the frame generation |
 | Long-lived CPU-written tables | `alloc_persistent_span` with `PERSISTENT_UPLOAD` | mapped and host-coherent until freed |
 | Upload and readback scratch | transfer helpers | staging and readback storage stay private |
@@ -189,9 +193,9 @@ policy selected by the corresponding API path.
 
 ## 7. Private buffer backing
 
-Generic allocations and arena ranges use private addressable Vulkan buffers.
-Independent allocations use a fixed native-usage superset; each arena uses the
-fixed usage required by its operations. Queue-family sharing derives from the
+Generic allocations and arena ranges use private addressable Vulkan buffers;
+texture allocations contain only compatible image memory. Generic allocations
+use a fixed native-usage superset. Queue-family sharing derives from the
 immutable `QueueRoles` access set. Creation publishes an allocation or span
 identity only after its native buffer, VMA allocation, mapping state, and
 nonzero device address are complete.
@@ -228,40 +232,32 @@ TextureUsage.TRANSFER_SRC -> VK_IMAGE_USAGE_TRANSFER_SRC_BIT
 TextureUsage.TRANSFER_DST -> VK_IMAGE_USAGE_TRANSFER_DST_BIT
 ```
 
-Backend creation flow:
+Owned creation:
 
 ```text
-1. Validate dimensions and format.
-2. Build vk::ImageCreateInfo.
-3. Build vma::AllocationCreateInfo.
-4. Call allocator.try_create_image.
-5. Create default vk::ImageView.
-6. Store initial layout.
-7. Set debug names.
-8. Return TextureHandle.
+validate descriptor and adapter support
+create image and allocation transactionally
+create the default view
+publish TextureHandle
 ```
 
-## 9. Texture slot
+Placed creation:
 
 ```text
-TextureSlot
-    vk::Image image
-    vma::Allocation allocation
-    vma::AllocationInfo allocation_info
-    vk::ImageView default_view
-    vk::ImageLayout layout
-    Format format
-    TextureUsage usage
-    QueueRoles access
-    uint width
-    uint height
-    uint depth
-    uint mip_levels
-    uint array_layers
-    ushort generation
-    bool used
-    bool pending_destroy
+get_texture_requirements
+allocate_memory with MemoryClass.TEXTURE and all required compatibility values
+create_placed_texture at an aligned, non-overlapping offset
 ```
+
+Requirements are device-owned and opaque. Incompatible groups,
+dedicated-only requirements, insufficient size or access, stale allocations,
+and overlapping live or retiring placements fail before image creation.
+
+## 9. Texture lifetime
+
+Destroying an owned texture releases its image allocation after retirement.
+Destroying a placed texture releases the image but not its `GpuAllocation`.
+`free_allocation` returns `RESOURCE_IN_USE` until every placed image retires.
 
 ## 10. Frame upload arena
 

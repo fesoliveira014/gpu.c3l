@@ -21,6 +21,7 @@ enum MemoryClass : int {
     CPU_WRITE,
     GPU_PRIVATE,
     CPU_READ,
+    TEXTURE,
 }
 
 <* Generation-checked identity for private readback state. *>
@@ -54,6 +55,7 @@ struct AllocationDesc {
     usz         alignment;
     MemoryClass memory_class;
     QueueRoles  access;
+    TextureRequirements[] texture_requirements;
     ZString     debug_name;
 }
 
@@ -112,6 +114,7 @@ fn bool memory_class_is_known(MemoryClass memory_class) @private {
         case MemoryClass.CPU_WRITE:
         case MemoryClass.GPU_PRIVATE:
         case MemoryClass.CPU_READ:
+        case MemoryClass.TEXTURE:
             return true;
         default:
             return false;
@@ -125,7 +128,40 @@ fn usz? normalized_allocation_alignment(usz alignment) @private {
     return max(alignment, MIN_ALLOCATION_ALIGNMENT);
 }
 
-<* Allocate addressable generic GPU data. Free with `free_allocation`. *>
+fn void? validate_texture_allocation(
+    DeviceOperation* operation,
+    AllocationDesc* desc,
+    usz* alignment,
+) @private {
+    if (desc.memory_class != MemoryClass.TEXTURE) {
+        if (desc.texture_requirements.len != 0) return INVALID_ARGUMENT~;
+        return;
+    }
+    if (desc.texture_requirements.len == 0) return INVALID_ARGUMENT~;
+
+    uint compatibility = uint::max;
+    foreach (&requirements : desc.texture_requirements) {
+        if (requirements.size == 0 || requirements.alignment == 0) {
+            return INVALID_ARGUMENT~;
+        }
+        compatibility &= texture_compatibility_value(requirements.compatibility);
+        if ((requirements.alignment & (requirements.alignment - 1)) != 0
+            || !requirements.compatibility.is_valid()) {
+            return INVALID_ARGUMENT~;
+        }
+        validate_resource_owner(
+            operation,
+            texture_compatibility_owner(requirements.compatibility),
+            ResourceOwnerKind.ALLOCATION,
+        )!;
+        if (requirements.dedicated_only) return UNSUPPORTED_FEATURE~;
+        if (desc.size < requirements.size) return INVALID_ARGUMENT~;
+        *alignment = max(*alignment, requirements.alignment);
+    }
+    if (compatibility == 0) return INVALID_ARGUMENT~;
+}
+
+<* Allocate caller-managed GPU storage. Free with `free_allocation`. *>
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
@@ -135,6 +171,7 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
 
     AllocationDesc normalized = *desc;
     normalized.alignment = normalized_allocation_alignment(desc.alignment)!;
+    validate_texture_allocation(&operation, desc, &normalized.alignment)!;
     GpuAllocation allocation = operation.vtable.allocate_memory(
         device,
         &normalized,
