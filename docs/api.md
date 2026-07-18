@@ -667,6 +667,10 @@ TextureRequirements
     TextureCompatibility compatibility
     bool dedicated_only
 
+DedicatedTexture
+    TextureHandle texture
+    GpuAllocation allocation
+
 TextureDimension
     TEX_1D   (query false; creation faults INVALID_ARGUMENT)
     TEX_2D   (current backend profile)
@@ -705,6 +709,7 @@ supports_texture_desc(Device* device, TextureDesc* desc) -> bool?
 get_texture_requirements(Device* device, TextureDesc* desc) -> TextureRequirements?
 create_texture(Device* device, TextureDesc* desc) -> TextureHandle?
 create_placed_texture(Device* device, TextureDesc* desc, GpuAllocation allocation, usz offset) -> TextureHandle?
+create_dedicated_texture(Device* device, TextureDesc* desc, AllocationDesc* allocation_desc) -> DedicatedTexture?
 destroy_texture(Device* device, TextureHandle texture) -> void?
 create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) -> TextureIndex?
 destroy_texture_descriptor(Device* device, TextureIndex index) -> void?
@@ -729,6 +734,12 @@ requirement an allocation must support in
 an aligned, in-bounds, non-overlapping range, and allocation access covering
 the texture access. Destroying the texture does not release its allocation.
 Dedicated-only requirements return `UNSUPPORTED_FEATURE`.
+
+`create_dedicated_texture` creates the image, allocates compatible dedicated
+memory, binds it, and publishes both ownership tokens atomically. The allocation
+size must equal the queried requirement; its alignment and access must cover the
+texture. Destroy the texture before releasing the allocation. A premature
+release returns `RESOURCE_IN_USE` without consuming the allocation.
 
 `TextureHandle` owns the image. `TextureIndex` is a shader-visible
 descriptor heap entry.

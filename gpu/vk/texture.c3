@@ -19,6 +19,19 @@ alias TextureDestroyImageFn = fn void (
 alias TextureDestroyViewFn = fn void (
     void*, vk::Device, vk::ImageView
 );
+alias TextureCreateImageFn = fn vk::Result (
+    void*, vk::Device, vk::ImageCreateInfo*, vk::Image*
+);
+alias TextureAllocateImageMemoryFn = fn vk::Result (
+    void*, vma::Allocator, vk::Image, vma::AllocationCreateInfo*,
+    vma::Allocation*, vma::AllocationInfo*
+);
+alias TextureBindImageMemoryFn = fn vk::Result (
+    void*, vma::Allocator, vma::Allocation, vk::Image
+);
+alias TextureFreeMemoryFn = fn void (
+    void*, vma::Allocator, vma::Allocation
+);
 
 struct TexturePlacementNativeOps {
     void*                        user_data;
@@ -26,6 +39,17 @@ struct TexturePlacementNativeOps {
     TextureCreateViewFn          create_view;
     TextureDestroyImageFn        destroy_image;
     TextureDestroyViewFn         destroy_view;
+}
+
+struct DedicatedTextureNativeOps {
+    void*                        user_data;
+    TextureCreateImageFn         create_image;
+    TextureAllocateImageMemoryFn allocate_memory;
+    TextureBindImageMemoryFn     bind_memory;
+    TextureCreateViewFn          create_view;
+    TextureDestroyImageFn        destroy_image;
+    TextureDestroyViewFn         destroy_view;
+    TextureFreeMemoryFn          free_memory;
 }
 
 // Concrete (non-generic) slot table for textures. Monomorphized twin of
@@ -749,6 +773,64 @@ fn TexturePlacementNativeOps texture_placement_native_ops_real() {
     };
 }
 
+fn vk::Result texture_create_image_real(
+    void* user_data,
+    vk::Device device,
+    vk::ImageCreateInfo* image_info,
+    vk::Image* out_image,
+) {
+    (void)user_data;
+    return vk::create_image(device, image_info, null, out_image);
+}
+
+fn vk::Result texture_allocate_image_memory_real(
+    void* user_data,
+    vma::Allocator allocator,
+    vk::Image image,
+    vma::AllocationCreateInfo* allocation_info,
+    vma::Allocation* out_allocation,
+    vma::AllocationInfo* out_info,
+) {
+    (void)user_data;
+    return allocator.allocate_memory_for_image(
+        image,
+        allocation_info,
+        out_allocation,
+        out_info,
+    );
+}
+
+fn vk::Result texture_bind_image_memory_real(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+    vk::Image image,
+) {
+    (void)user_data;
+    return allocator.bind_image_memory(allocation, image);
+}
+
+fn void texture_free_memory_real(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+) {
+    (void)user_data;
+    allocator.free_memory(allocation);
+}
+
+fn DedicatedTextureNativeOps dedicated_texture_native_ops_real() {
+    return {
+        .create_image    = &texture_create_image_real,
+        .allocate_memory = &texture_allocate_image_memory_real,
+        .bind_memory     = &texture_bind_image_memory_real,
+        .create_view     = &texture_create_view_real,
+        .destroy_image   = &texture_destroy_image_real,
+        .destroy_view    = &texture_destroy_view_real,
+        .free_memory     = &texture_free_memory_real,
+    };
+}
+
 fn bool placed_texture_overlaps(
     VkDeviceState* state,
     gpu::GpuAllocation placement,
@@ -800,6 +882,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     }
     if (!allocation.texture_memory
         || requirements.alignment > allocation.alignment
+        || allocation.dedicated_texture
         || !gpu::queue_roles_are_subset(desc.access, allocation.access)
         || allocation.raw_info.memory_type >= 32) {
         return gpu::INVALID_ARGUMENT~;
@@ -914,6 +997,212 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     return handle;
 }
 
+fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
+    VkDeviceState* state,
+    gpu::TextureDesc* desc,
+    gpu::AllocationDesc* allocation_desc,
+    gpu::TextureRequirements requirements,
+    DedicatedTextureNativeOps* ops,
+) {
+    if (desc == null || allocation_desc == null
+        || allocation_desc.memory_class != gpu::MemoryClass.TEXTURE
+        || allocation_desc.texture_requirements.len == 0
+        || allocation_desc.size != requirements.size
+        || allocation_desc.alignment < requirements.alignment
+        || !gpu::queue_roles_are_subset(desc.access, allocation_desc.access)
+        || requirements.size == 0
+        || requirements.alignment == 0
+        || (requirements.alignment & (requirements.alignment - 1)) != 0
+        || texture_compatibility_owner(requirements.compatibility)
+            != state.allocations.owner) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+
+    uint memory_type_bits = texture_compatibility_value(
+        requirements.compatibility,
+    );
+    foreach (&candidate : allocation_desc.texture_requirements) {
+        if (candidate.size == 0
+            || candidate.alignment == 0
+            || texture_compatibility_owner(candidate.compatibility)
+                != state.allocations.owner) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+        memory_type_bits &= texture_compatibility_value(
+            candidate.compatibility,
+        );
+    }
+    if (memory_type_bits == 0) return gpu::INVALID_ARGUMENT~;
+
+    uint[MAX_QUEUE_FAMILIES] families;
+    uint family_count = resource_queue_families(
+        state,
+        desc.access,
+        families[..],
+    );
+    vk::ImageCreateInfo image_info = make_texture_create_info(
+        desc,
+        families[:family_count],
+        true,
+    );
+    vma::AllocationCreateInfo native_allocation_desc = {
+        .flags            = { .dedicated_memory },
+        .usage            = vma::MemoryUsage.GPU_ONLY,
+        .memory_type_bits = memory_type_bits,
+    };
+    uint mip_levels = gpu::texture_mip_levels(desc);
+    uint array_layers = gpu::texture_array_layers(desc);
+    TextureSlot texture_slot = {
+        .format           = desc.format,
+        .usage            = desc.usage,
+        .access           = desc.access,
+        .width            = desc.width,
+        .height           = desc.height,
+        .mip_levels       = mip_levels,
+        .array_layers     = array_layers,
+        .placed           = true,
+        .placement_offset = 0,
+        .allocation_size  = requirements.size,
+    };
+    vma::AllocationInfo native_info;
+    vma::Allocation native_allocation;
+    bool owns_image;
+    bool owns_allocation;
+    bool owns_view;
+    defer catch {
+        if (owns_view) {
+            ops.destroy_view(
+                ops.user_data,
+                state.device,
+                texture_slot.default_view,
+            );
+        }
+        if (owns_image) {
+            ops.destroy_image(
+                ops.user_data,
+                state.device,
+                texture_slot.image,
+            );
+        }
+        if (owns_allocation) {
+            ops.free_memory(
+                ops.user_data,
+                state.allocator,
+                native_allocation,
+            );
+        }
+    }
+
+    check_texture_create_device_result(
+        state: state,
+        result: ops.create_image(
+            ops.user_data,
+            state.device,
+            &image_info,
+            &texture_slot.image,
+        ),
+    )!;
+    owns_image = true;
+    check_device_result(state, ops.allocate_memory(
+        ops.user_data,
+        state.allocator,
+        texture_slot.image,
+        &native_allocation_desc,
+        &native_allocation,
+        &native_info,
+    ))!;
+    owns_allocation = true;
+    if (native_info.size < (vk::DeviceSize)requirements.size
+        || native_info.memory_type >= 32
+        || native_info.offset
+            % (vk::DeviceSize)allocation_desc.alignment != 0) {
+        return gpu::BACKEND_ERROR~;
+    }
+    uint selected_memory_type = 1 << native_info.memory_type;
+    if ((selected_memory_type & memory_type_bits) == 0) {
+        return gpu::BACKEND_ERROR~;
+    }
+    check_device_result(state, ops.bind_memory(
+        ops.user_data,
+        state.allocator,
+        native_allocation,
+        texture_slot.image,
+    ))!;
+
+    vk::ImageViewCreateInfo view_info = vk::image_view_create_info()
+        .set_image(texture_slot.image)
+        .set_view_type(array_layers > 1
+            ? vk::ImageViewType.TYPE_2D_ARRAY
+            : vk::ImageViewType.TYPE_2D)
+        .set_format(format_to_vk(desc.format))
+        .set_subresource_range({
+            .aspect_mask      = format_aspect(desc.format),
+            .base_mip_level   = 0,
+            .level_count      = mip_levels,
+            .base_array_layer = 0,
+            .layer_count      = array_layers,
+        });
+    check_device_result(state, ops.create_view(
+        ops.user_data,
+        state.device,
+        &view_info,
+        &texture_slot.default_view,
+    ))!;
+    owns_view = true;
+
+    char[DEBUG_NAME_CAP] debug_name;
+    copy_debug_name(&debug_name[0], allocation_desc.debug_name);
+    AllocationSlot allocation_slot = {
+        .raw_allocation    = native_allocation,
+        .raw_info          = native_info,
+        .size              = requirements.size,
+        .access            = allocation_desc.access,
+        .memory_type_bits  = memory_type_bits,
+        .texture_memory    = true,
+        .dedicated_texture = true,
+        .alignment         = allocation_desc.alignment,
+        .memory_class      = gpu::MemoryClass.TEXTURE,
+        .debug_name        = debug_name,
+    };
+    copy_debug_name(&texture_slot.debug_name[0], desc.debug_name);
+    if (allocation_desc.debug_name != null) {
+        state.allocator.set_allocation_name(
+            native_allocation,
+            allocation_desc.debug_name,
+        );
+    }
+    if (desc.debug_name != null) {
+        set_object_name(
+            state:         state,
+            object_type:   vk::ObjectType.IMAGE,
+            object_handle: (ulong)texture_slot.image,
+            name:          desc.debug_name,
+        );
+    }
+
+    gpu::GpuAllocation allocation;
+    gpu::TextureHandle texture;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        allocation = state.allocations.alloc(allocation_slot)!;
+        texture_slot.placement = allocation;
+        gpu::TextureHandle? published =
+            state.textures.alloc(texture_slot);
+        if (catch err = published) {
+            state.allocations.free(allocation)!!;
+            return err~;
+        } else {
+            texture = published;
+        }
+        state.allocations.get(allocation)!!.live_placements = 1;
+    }
+    owns_view = false;
+    owns_image = false;
+    owns_allocation = false;
+    return { .texture = texture, .allocation = allocation };
+}
+
 fn gpu::TextureHandle? vk_create_placed_texture(
     gpu::Device* device,
     gpu::TextureDesc* desc,
@@ -933,6 +1222,27 @@ fn gpu::TextureHandle? vk_create_placed_texture(
         offset:       offset,
         requirements: requirements,
         ops:          &ops,
+    );
+}
+
+fn gpu::DedicatedTexture? vk_create_dedicated_texture(
+    gpu::Device* device,
+    gpu::TextureDesc* desc,
+    gpu::AllocationDesc* allocation_desc,
+) @private {
+    VkDeviceState* state =
+        (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    enter_tracked(state);
+    defer exit_tracked(state);
+    gpu::TextureRequirements requirements =
+        texture_requirements_for_state(state, desc)!;
+    DedicatedTextureNativeOps ops = dedicated_texture_native_ops_real();
+    return create_dedicated_texture_for_state_with_ops(
+        state:           state,
+        desc:            desc,
+        allocation_desc: allocation_desc,
+        requirements:    requirements,
+        ops:             &ops,
     );
 }
 

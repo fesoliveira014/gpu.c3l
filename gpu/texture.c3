@@ -113,6 +113,12 @@ struct TextureRequirements {
     bool                 dedicated_only;
 }
 
+<* Independently owned texture and allocation returned by dedicated creation. *>
+struct DedicatedTexture {
+    TextureHandle texture;
+    GpuAllocation allocation;
+}
+
 <* Creation parameters for create_texture. `access` must be a non-empty subset
    of the device's selected queue roles. *>
 struct TextureDesc {
@@ -303,6 +309,44 @@ fn TextureHandle? create_placed_texture(
     )!;
     retain_device_children(&operation);
     return texture;
+}
+
+<* Create a texture and its independently owned dedicated storage atomically. *>
+fn DedicatedTexture? create_dedicated_texture(
+    Device* device,
+    TextureDesc* desc,
+    AllocationDesc* allocation_desc,
+) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (desc == null || allocation_desc == null
+        || allocation_desc.size == 0
+        || allocation_desc.memory_class != MemoryClass.TEXTURE) {
+        return INVALID_ARGUMENT~;
+    }
+    validate_queue_access(&operation, desc.access)!;
+    validate_queue_access(&operation, allocation_desc.access)!;
+    if (!queue_roles_are_subset(desc.access, allocation_desc.access)) {
+        return INVALID_ARGUMENT~;
+    }
+
+    AllocationDesc normalized = *allocation_desc;
+    normalized.alignment = normalized_allocation_alignment(
+        allocation_desc.alignment,
+    )!;
+    validate_texture_allocation(
+        operation:       &operation,
+        desc:            allocation_desc,
+        alignment:       &normalized.alignment,
+        allow_dedicated: true,
+    )!;
+    DedicatedTexture created = operation.vtable.create_dedicated_texture(
+        device,
+        desc,
+        &normalized,
+    )!;
+    retain_device_children(&operation, 2);
+    return created;
 }
 
 <* Destroy a texture after its descriptors. Placed storage remains caller-owned. *>

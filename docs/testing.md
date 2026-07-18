@@ -117,6 +117,7 @@ atomic allocation rollback and CPU_WRITE/GPU_PRIVATE/CPU_READ policy
 mapped-span owner, liveness, mapping, coherence, atom-range, and backend-fault checks
 native allocation info, mapping/address queries, mapped visibility round trip, and immediate free
 allocation-span stale/foreign/range rejection, stats, leak identity, and device-loss teardown
+dedicated texture validation, transaction-step rollback, publication, and independent ownership
 frame-token generation, stale-alias rejection, allocation, end retry, and reset safety
 scoped helper with one observed end attempt after successful and faulting named workers
 owner-derived command finalization

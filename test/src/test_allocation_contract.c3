@@ -1,6 +1,7 @@
 module gpu_test;
 
 import gpu @public;
+
 struct AllocationStubState {
     ulong          owner;
     GpuAllocation  allocation;
@@ -12,6 +13,7 @@ struct AllocationStubState {
     uint           invalidate_calls;
     uint           visibility_entries;
     uint           requirements_calls;
+    uint           dedicated_texture_calls;
     uint           placed_texture_calls;
     uint           texture_destroy_calls;
     bool           texture_live;
@@ -45,7 +47,7 @@ fn void? free_stub_allocation(Device* device, GpuAllocation allocation) {
     AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
     state.free_calls++;
     if (!state.live || allocation != state.allocation) return gpu::INVALID_HANDLE~;
-    if (state.block_free) return gpu::RESOURCE_IN_USE~;
+    if (state.block_free || state.texture_live) return gpu::RESOURCE_IN_USE~;
     state.live = false;
 }
 
@@ -161,6 +163,33 @@ fn TextureHandle? create_stub_placed_texture(
         .generation = 1,
     };
 }
+fn DedicatedTexture? create_stub_dedicated_texture(
+    Device* device,
+    TextureDesc* desc,
+    AllocationDesc* allocation_desc,
+) {
+    AllocationStubState* state =
+        (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    state.dedicated_texture_calls++;
+    GpuAllocation allocation = allocate_stub_memory(
+        device,
+        allocation_desc,
+    )!;
+    TextureHandle? texture = create_stub_placed_texture(
+        device:     device,
+        desc:       desc,
+        allocation: allocation,
+        offset:     0,
+    );
+    if (catch err = texture) {
+        state.live = false;
+        state.allocation = {};
+        return err~;
+    } else {
+        return { .texture = texture, .allocation = allocation };
+    }
+}
+
 
 fn void? destroy_stub_texture(Device* device, TextureHandle texture) {
     AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
@@ -181,6 +210,7 @@ BackendVTable allocation_stub_vtable = {
     .invalidate_mapped_span = &invalidate_stub_mapped_span,
     .get_texture_requirements = &get_stub_texture_requirements,
     .create_placed_texture     = &create_stub_placed_texture,
+    .create_dedicated_texture  = &create_stub_dedicated_texture,
     .destroy_texture           = &destroy_stub_texture,
 };
 
@@ -521,4 +551,46 @@ fn void texture_memory_rejects_foreign_and_dedicated_requirements() @test {
 
     gpu::destroy_device(&first)!!;
     gpu::destroy_device(&second)!!;
+}
+
+fn void dedicated_texture_creation_publishes_independent_tokens() @test {
+    AllocationStubState state;
+    Device device = create_allocation_stub_device(&state);
+    TextureDesc texture_desc = texture_allocation_desc();
+    TextureRequirements requirements = gpu::get_texture_requirements(
+        &device,
+        &texture_desc,
+    )!!;
+    TextureRequirements[1] queried = { requirements };
+    AllocationDesc allocation_desc = {
+        .size                 = requirements.size,
+        .memory_class         = MemoryClass.TEXTURE,
+        .access               = texture_desc.access,
+        .texture_requirements = queried[..],
+        .debug_name           = "dedicated_texture_memory",
+    };
+
+    assert(@catch(gpu::create_dedicated_texture(
+        &device,
+        null,
+        &allocation_desc,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::create_dedicated_texture(
+        &device,
+        &texture_desc,
+        null,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(state.dedicated_texture_calls == 0,
+        "null descriptors stop before dedicated backend mutation");
+
+    DedicatedTexture created = gpu::create_dedicated_texture(
+        &device,
+        &texture_desc,
+        &allocation_desc,
+    )!!;
+    assert(created.texture.is_valid() && created.allocation.is_valid(),
+        "dedicated creation atomically returns two ownership tokens");
+    gpu::destroy_texture(&device, created.texture)!!;
+    gpu::free_allocation(&device, &created.allocation)!!;
+    gpu::destroy_device(&device)!!;
 }

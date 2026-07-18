@@ -258,6 +258,7 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .get_texture_requirements   = &vk_get_texture_requirements,
     .create_texture             = &vk_create_texture,
     .create_placed_texture      = &vk_create_placed_texture,
+    .create_dedicated_texture   = &vk_create_dedicated_texture,
     .destroy_texture            = &vk_destroy_texture,
     .create_texture_descriptor  = &vk_create_texture_descriptor,
     .destroy_texture_descriptor = &vk_destroy_texture_descriptor,

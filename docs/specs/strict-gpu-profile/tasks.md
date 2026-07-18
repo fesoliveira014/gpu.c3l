@@ -193,7 +193,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.5 Transactional dedicated textures
 
-- [ ] Add dedicated texture creation returning separate `Texture` and `GpuAllocation` tokens in `gpu/texture.c3` and `gpu/vk/texture.c3`.
+- [x] Add dedicated texture creation returning separate `Texture` and `GpuAllocation` tokens in `gpu/texture.c3` and `gpu/vk/texture.c3`.
   - **Depends on:** 4.4.
   - **Contract:** native texture, compatible memory, and binding are one transaction; failure publishes neither token; callers destroy the texture and release the allocation separately.
   - **Edges:** allocation failure after native texture creation, binding failure, publication failure, dedicated-only requirements, and both valid destruction orders subject to placement rules.

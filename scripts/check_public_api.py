@@ -228,6 +228,10 @@ def validate_document(document: dict) -> list[str]:
             ("Device*", "TextureDesc*", "GpuAllocation", "usz"),
             "TextureHandle?",
         ),
+        "create_dedicated_texture": (
+            ("Device*", "TextureDesc*", "AllocationDesc*"),
+            "DedicatedTexture?",
+        ),
         "free_allocation": (
             ("Device*", "GpuAllocation*"),
             "void?",
@@ -356,6 +360,11 @@ def validate_document(document: dict) -> list[str]:
     required_parameter_names = {
         "get_texture_requirements": ("device", "desc"),
         "create_placed_texture": ("device", "desc", "allocation", "offset"),
+        "create_dedicated_texture": (
+            "device",
+            "desc",
+            "allocation_desc",
+        ),
         "cmd_copy_buffer": ("commands", "desc"),
         "cmd_fill_buffer": ("commands", "dst", "value"),
         "cmd_buffer_barrier": ("commands", "barrier"),
@@ -452,6 +461,7 @@ def validate_document(document: dict) -> list[str]:
         ("AllocationDesc", "struct"),
         ("TextureCompatibility", "distinct type"),
         ("TextureRequirements", "struct"),
+        ("DedicatedTexture", "struct"),
         ("PersistentAllocDesc", "struct"),
         ("AllocationInfo", "struct"),
         ("BufferCopyDesc", "struct"),
@@ -507,6 +517,13 @@ def validate_document(document: dict) -> list[str]:
                 ("dedicated_only", "bool"),
             ),
             "TextureRequirements must match the exact public schema",
+        ),
+        "DedicatedTexture": (
+            (
+                ("texture", "TextureHandle"),
+                ("allocation", "GpuAllocation"),
+            ),
+            "DedicatedTexture must expose exactly two ownership tokens",
         ),
         "PersistentAllocDesc": (
             (

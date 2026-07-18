@@ -333,6 +333,19 @@ public TextureDesc
     -> return TextureHandle
 ```
 
+Placed creation uses queried image requirements, raw alias-capable VMA memory,
+and `create_aliasing_image2`. Dedicated creation is one transaction:
+
+```text
+create image
+allocate dedicated VMA memory for that image
+bind memory
+create default view
+publish TextureHandle and GpuAllocation under one lock
+```
+
+Any fault before publication destroys the temporary view, image, and allocation.
+
 Textures use the same one-family `EXCLUSIVE` or multi-family `CONCURRENT`
 rule as buffers, based only on `TextureDesc.access`.
 
