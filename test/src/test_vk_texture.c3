@@ -145,10 +145,10 @@ fn gpu::TextureRequirements placement_test_requirements(
     return {
         .size      = 64,
         .alignment = 64,
-        .compatibility = {
-            .owner = fixture.state.allocations.owner,
-            .value = 0b0010,
-        },
+        .compatibility = vk::texture_compatibility(
+            fixture.state.allocations.owner,
+            0b0010,
+        ),
     };
 }
 
@@ -993,7 +993,10 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
         ops:          &ops,
     )) == gpu::INVALID_ARGUMENT);
 
-    requirements.compatibility.value = 0b0100;
+    requirements.compatibility = vk::texture_compatibility(
+        fixture.state.allocations.owner,
+        0b0100,
+    );
     assert(@catch(vk::create_placed_texture_for_state_with_ops(
         state:        &fixture.state,
         desc:         &desc,
@@ -1002,7 +1005,10 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
         requirements: requirements,
         ops:          &ops,
     )) == gpu::INVALID_ARGUMENT);
-    requirements.compatibility.value = 0b0010;
+    requirements.compatibility = vk::texture_compatibility(
+        fixture.state.allocations.owner,
+        0b0010,
+    );
     fixture.allocations[0].value.texture_memory = false;
     assert(@catch(vk::create_placed_texture_for_state_with_ops(
         state:        &fixture.state,

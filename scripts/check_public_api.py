@@ -220,6 +220,14 @@ def validate_document(document: dict) -> list[str]:
             ("Device*", "AllocationDesc*"),
             "GpuAllocation?",
         ),
+        "get_texture_requirements": (
+            ("Device*", "TextureDesc*"),
+            "TextureRequirements?",
+        ),
+        "create_placed_texture": (
+            ("Device*", "TextureDesc*", "GpuAllocation", "usz"),
+            "TextureHandle?",
+        ),
         "free_allocation": (
             ("Device*", "GpuAllocation*"),
             "void?",
@@ -346,6 +354,8 @@ def validate_document(document: dict) -> list[str]:
         ),
     }
     required_parameter_names = {
+        "get_texture_requirements": ("device", "desc"),
+        "create_placed_texture": ("device", "desc", "allocation", "offset"),
         "cmd_copy_buffer": ("commands", "desc"),
         "cmd_fill_buffer": ("commands", "dst", "value"),
         "cmd_buffer_barrier": ("commands", "barrier"),
@@ -440,6 +450,8 @@ def validate_document(document: dict) -> list[str]:
         ("MemoryStats", "struct"),
         ("DebugResourceKind", "enum"),
         ("AllocationDesc", "struct"),
+        ("TextureCompatibility", "distinct type"),
+        ("TextureRequirements", "struct"),
         ("PersistentAllocDesc", "struct"),
         ("AllocationInfo", "struct"),
         ("BufferCopyDesc", "struct"),
@@ -450,6 +462,12 @@ def validate_document(document: dict) -> list[str]:
         definition = types.get(name)
         if definition is None or definition.get("kind") != kind:
             failures.append(f"missing {name} {kind}")
+
+    texture_compatibility = types.get("TextureCompatibility", {})
+    if texture_compatibility.get("base_type", {}).get("name") != "uint128":
+        failures.append(
+            "TextureCompatibility must be an opaque uint128 distinct type"
+        )
 
     public_type_schemas = {
         "GpuSpan": (
@@ -476,9 +494,19 @@ def validate_document(document: dict) -> list[str]:
                 ("alignment", "usz"),
                 ("memory_class", "MemoryClass"),
                 ("access", "QueueRoles"),
+                ("texture_requirements", "TextureRequirements[]"),
                 ("debug_name", "ZString"),
             ),
             "AllocationDesc must match the exact public schema",
+        ),
+        "TextureRequirements": (
+            (
+                ("size", "usz"),
+                ("alignment", "usz"),
+                ("compatibility", "TextureCompatibility"),
+                ("dedicated_only", "bool"),
+            ),
+            "TextureRequirements must match the exact public schema",
         ),
         "PersistentAllocDesc": (
             (
@@ -563,8 +591,9 @@ def validate_document(document: dict) -> list[str]:
                 ("CPU_WRITE", "MemoryClass"),
                 ("GPU_PRIVATE", "MemoryClass"),
                 ("CPU_READ", "MemoryClass"),
+                ("TEXTURE", "MemoryClass"),
             ),
-            "MemoryClass must expose exactly the three semantic values",
+            "MemoryClass must expose exactly the four semantic values",
         ),
         "DebugResourceKind": (
             tuple(

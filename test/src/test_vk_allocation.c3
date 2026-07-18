@@ -769,18 +769,18 @@ fn void texture_memory_uses_raw_non_addressable_allocation() @test {
         {
             .size      = 128,
             .alignment = 64,
-            .compatibility = {
-                .owner = fixture.state.allocations.owner,
-                .value = 0b0110,
-            },
+            .compatibility = vk::texture_compatibility(
+                fixture.state.allocations.owner,
+                0b0110,
+            ),
         },
         {
             .size      = 64,
             .alignment = 32,
-            .compatibility = {
-                .owner = fixture.state.allocations.owner,
-                .value = 0b0010,
-            },
+            .compatibility = vk::texture_compatibility(
+                fixture.state.allocations.owner,
+                0b0010,
+            ),
         },
     };
     gpu::AllocationDesc desc = {

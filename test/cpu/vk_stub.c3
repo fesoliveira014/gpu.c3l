@@ -321,6 +321,10 @@ fn void? free_stub_allocation(
     state.allocation = {};
     state.allocation_live = false;
 }
+fn gpu::TextureCompatibility stub_texture_compatibility(ulong owner, uint value) {
+    return (gpu::TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
+}
+
 
 fn gpu::TextureRequirements? get_stub_texture_requirements(
     gpu::Device* device,
@@ -334,13 +338,13 @@ fn gpu::TextureRequirements? get_stub_texture_requirements(
     return {
         .size      = 64,
         .alignment = 64,
-        .compatibility = {
-            .owner = gpu::resource_owner_tag(
+        .compatibility = stub_texture_compatibility(
+            gpu::resource_owner_tag(
                 state.resource_owner,
                 gpu::ResourceOwnerKind.ALLOCATION,
             ),
-            .value = 1,
-        },
+            1,
+        ),
     };
 }
 

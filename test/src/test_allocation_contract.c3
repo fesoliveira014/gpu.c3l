@@ -1,6 +1,10 @@
 module gpu_test;
 
 import gpu @public;
+fn TextureCompatibility test_texture_compatibility(ulong owner, uint value) {
+    return (TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
+}
+
 
 struct AllocationStubState {
     ulong          owner;
@@ -126,13 +130,13 @@ fn TextureRequirements? get_stub_texture_requirements(
     return {
         .size          = 64,
         .alignment     = 64,
-        .compatibility = {
-            .owner = gpu::resource_owner_tag(
+        .compatibility = test_texture_compatibility(
+            gpu::resource_owner_tag(
                 state.owner,
                 ResourceOwnerKind.ALLOCATION,
             ),
-            .value = 3,
-        },
+            3,
+        ),
     };
 }
 
@@ -391,10 +395,7 @@ fn void mapping_availability_is_class_specific() @test {
 }
 
 fn void texture_placement_contract_is_strongly_typed() @test {
-    TextureCompatibility compatibility = {
-        .owner = 1,
-        .value = 3,
-    };
+    TextureCompatibility compatibility = test_texture_compatibility(1, 3);
     TextureRequirements requirements = {
         .size          = 64,
         .alignment     = 64,
@@ -491,8 +492,15 @@ fn void texture_memory_rejects_foreign_and_dedicated_requirements() @test {
         == gpu::INVALID_HANDLE);
     TextureRequirements incompatible_first = requirements;
     TextureRequirements incompatible_second = requirements;
-    incompatible_first.compatibility.value = 1;
-    incompatible_second.compatibility.value = 2;
+    ulong owner = gpu::resource_owner_tag(
+        first_state.owner,
+        ResourceOwnerKind.ALLOCATION,
+    );
+    incompatible_first.compatibility = test_texture_compatibility(owner, 1);
+    incompatible_second.compatibility = test_texture_compatibility(
+        owner,
+        2,
+    );
     TextureRequirements[2] incompatible = {
         incompatible_first,
         incompatible_second,

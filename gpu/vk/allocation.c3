@@ -327,7 +327,7 @@ fn vk::BufferCreateInfo? allocation_buffer_create_info(
 fn uint? texture_memory_type_bits(gpu::AllocationDesc* desc) {
     uint memory_type_bits = uint::max;
     foreach (&requirements : desc.texture_requirements) {
-        memory_type_bits &= requirements.compatibility.value;
+        memory_type_bits &= texture_compatibility_value(requirements.compatibility);
     }
     if (memory_type_bits == 0) return gpu::INVALID_ARGUMENT~;
     return memory_type_bits;

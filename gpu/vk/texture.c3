@@ -132,6 +132,18 @@ fn void? TextureTable.free(&self, gpu::TextureHandle h) {
     self.free_head = idx + 1;
 }
 
+fn gpu::TextureCompatibility texture_compatibility(ulong owner, uint value) {
+    return (gpu::TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
+}
+
+fn ulong texture_compatibility_owner(gpu::TextureCompatibility compatibility) {
+    return (ulong)((uint128)compatibility >> 64);
+}
+
+fn uint texture_compatibility_value(gpu::TextureCompatibility compatibility) {
+    return (uint)(uint128)compatibility;
+}
+
 fn vk::Format format_to_vk(gpu::Format format) {
     switch (format) {
         case gpu::Format.R8_UNORM:          return vk::Format.R8_UNORM;
@@ -557,13 +569,10 @@ fn gpu::TextureRequirements? texture_requirements_for_state(
     return {
         .size      = size,
         .alignment = alignment,
-        .compatibility = {
-            .owner = gpu::resource_owner_tag(
-                state.resource_owner,
-                gpu::ResourceOwnerKind.ALLOCATION,
-            ),
-            .value = requirements.memory_type_bits,
-        },
+        .compatibility = texture_compatibility(
+            state.allocations.owner,
+            requirements.memory_type_bits,
+        ),
         .dedicated_only = dedicated.requires_dedicated_allocation != 0,
     };
 }
@@ -776,7 +785,8 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
         || requirements.alignment == 0
         || (requirements.alignment & (requirements.alignment - 1)) != 0
         || !requirements.compatibility.is_valid()
-        || requirements.compatibility.owner != state.allocations.owner) {
+        || texture_compatibility_owner(requirements.compatibility)
+            != state.allocations.owner) {
         return gpu::INVALID_ARGUMENT~;
     }
     if (requirements.dedicated_only) return gpu::UNSUPPORTED_FEATURE~;
@@ -794,7 +804,8 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
         return gpu::INVALID_ARGUMENT~;
     }
     uint selected_memory_type = 1 << allocation.raw_info.memory_type;
-    if ((selected_memory_type & requirements.compatibility.value) == 0
+    if ((selected_memory_type
+            & texture_compatibility_value(requirements.compatibility)) == 0
         || !gpu::range_fits(allocation.size, offset, requirements.size)
         || placed_texture_overlaps(
             state,

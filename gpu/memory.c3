@@ -144,14 +144,14 @@ fn void? validate_texture_allocation(
         if (requirements.size == 0 || requirements.alignment == 0) {
             return INVALID_ARGUMENT~;
         }
-        compatibility &= requirements.compatibility.value;
+        compatibility &= texture_compatibility_value(requirements.compatibility);
         if ((requirements.alignment & (requirements.alignment - 1)) != 0
             || !requirements.compatibility.is_valid()) {
             return INVALID_ARGUMENT~;
         }
         validate_resource_owner(
             operation,
-            requirements.compatibility.owner,
+            texture_compatibility_owner(requirements.compatibility),
             ResourceOwnerKind.ALLOCATION,
         )!;
         if (requirements.dedicated_only) return UNSUPPORTED_FEATURE~;

@@ -1,5 +1,8 @@
 module gpu;
 
+<* Opaque device-owned compatibility value for texture placement. *>
+typedef TextureCompatibility = uint128;
+
 const uint DEFAULT_TEXTURE_CAPACITY = 1024;
 
 <* Texel format for textures and swapchain images. *>
@@ -102,13 +105,6 @@ struct TextureFormatSupport {
     TextureSampleCountSupport sample_counts;
 }
 
-<* Opaque device-owned compatibility value returned by a texture requirements
-   query. *>
-struct TextureCompatibility {
-    ulong owner;
-    uint  value;
-}
-
 <* Storage requirements for one texture descriptor. *>
 struct TextureRequirements {
     usz                  size;
@@ -169,7 +165,21 @@ struct SamplerDesc {
     ZString     debug_name;
 }
 
-fn bool TextureCompatibility.is_valid(self) => self.owner != 0 && self.value != 0;
+fn bool TextureCompatibility.is_valid(self) {
+    uint128 raw = (uint128)self;
+    ulong payload = (ulong)raw;
+    return (ulong)(raw >> 64) != 0
+        && (uint)payload != 0
+        && payload >> 32 == 0;
+}
+
+fn ulong texture_compatibility_owner(TextureCompatibility compatibility) @private {
+    return (ulong)((uint128)compatibility >> 64);
+}
+
+fn uint texture_compatibility_value(TextureCompatibility compatibility) @private {
+    return (uint)(uint128)compatibility;
+}
 
 fn uint texture_mip_levels(TextureDesc* desc) @private {
     return desc.mip_levels == 0 ? 1 : desc.mip_levels;
