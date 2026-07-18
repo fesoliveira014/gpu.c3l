@@ -574,39 +574,7 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
         resource_name:       null,
     );
 
-    before = capture.calls;
-    fault readback_buffer = @catch(gpu::cmd_readback_buffer(&stale_alias, {}));
-    assert(readback_buffer == gpu::INVALID_HANDLE, "stale buffer readback keeps INVALID_HANDLE");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            readback_buffer,
-        operation:           "cmd_readback_buffer",
-        rejected_field:      "CommandList.handle",
-        invariant:           "command list handle must identify a live command list",
-        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
-        has_public_identity: false,
-        resource_index:      0,
-        resource_generation: 0,
-        resource_name:       null,
-    );
 
-    before = capture.calls;
-    fault readback_texture = @catch(gpu::cmd_readback_texture(&stale_alias, {}, 0));
-    assert(readback_texture == gpu::INVALID_HANDLE, "stale texture readback keeps INVALID_HANDLE");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            readback_texture,
-        operation:           "cmd_readback_texture",
-        rejected_field:      "CommandList.handle",
-        invariant:           "command list handle must identify a live command list",
-        resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
-        has_public_identity: false,
-        resource_index:      0,
-        resource_generation: 0,
-        resource_name:       null,
-    );
 }
 
 fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test {
@@ -795,42 +763,6 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         resource_name:       "exhaustion_texture",
     );
 
-    gpu::TextureBarrier to_src = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = gpu::TextureLayout.TRANSFER_DST,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
-    };
-    gpu::cmd_texture_barrier(&commands, &to_src)!!;
-    usz texture_readback_size = state.readback_arena.size;
-    uint texture_next_new = state.buffers.next_new;
-    uint texture_free_head = state.buffers.free_head;
-    state.readback_arena.size = 1;
-    state.buffers.next_new = (uint)state.buffers.slots.len;
-    state.buffers.free_head = 0;
-    before = capture.calls;
-    fault texture_ticket_full = @catch(gpu::cmd_readback_texture(&commands, texture, 0));
-    state.readback_arena.size = texture_readback_size;
-    state.buffers.next_new = texture_next_new;
-    state.buffers.free_head = texture_free_head;
-    assert(texture_ticket_full == gpu::SLOT_TABLE_FULL, "texture ticket exhaustion keeps SLOT_TABLE_FULL");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            texture_ticket_full,
-        operation:           "cmd_readback_texture",
-        rejected_field:      "mip",
-        invariant:           "readback capacity must be available for the ticket",
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
-        has_public_identity: true,
-        resource_index:      texture.index,
-        resource_generation: texture.generation,
-        resource_name:       "exhaustion_texture",
-    );
-
     usz blocking_readback_size = state.readback_arena.size;
     dedicated_count = state.dedicated_staging.count;
     state.readback_arena.size = 1;
@@ -861,32 +793,7 @@ fn void transfer_allocation_exhaustion_reports_at_public_owner() @test {
         resource_generation: buffer.span.generation,
         resource_name:       "exhaustion_buffer",
     );
-    usz readback_size = state.readback_arena.size;
-    uint next_new = state.buffers.next_new;
-    uint free_head = state.buffers.free_head;
-    state.readback_arena.size = 1;
-    state.buffers.next_new = (uint)state.buffers.slots.len;
-    state.buffers.free_head = 0;
-    before = capture.calls;
-    gpu::GpuSpan src = buffer.span.checked_subspan(0, 16)!!;
-    fault ticket_full = @catch(gpu::cmd_readback_buffer(&commands, src));
-    state.readback_arena.size = readback_size;
-    state.buffers.next_new = next_new;
-    state.buffers.free_head = free_head;
-    assert(ticket_full == gpu::SLOT_TABLE_FULL, "ticket fallback exhaustion keeps SLOT_TABLE_FULL");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            ticket_full,
-        operation:           "cmd_readback_buffer",
-        rejected_field:      "src",
-        invariant:           "readback capacity must be available for the span",
-        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
-        has_public_identity: true,
-        resource_index:      buffer.span.index,
-        resource_generation: buffer.span.generation,
-        resource_name:       "exhaustion_buffer",
-    );
+
 }
 
 fn void helper_recording_fault_does_not_poison_frame_slot() @test {
@@ -933,142 +840,6 @@ fn void helper_recording_fault_does_not_poison_frame_slot() @test {
         gpu::FrameToken frame = gpu::begin_frame(&device)!!;
         gpu::end_frame(&frame)!!;
     }
-}
-
-fn void readback_ticket_generation_exhaustion_retires_slot() @test {
-    vk::ReadbackTicketCell[1] cells;
-    cells[0].generation = vk::HANDLE_GENERATION_MAX;
-    vk::ReadbackTicketTable table = {
-        .slots     = cells[..],
-        .owner     = 1,
-        .free_head = 1,
-        .next_new  = 1,
-    };
-    vk::ReadbackTicketState state = { .range_end = 7 };
-
-    fault exhausted = @catch(table.alloc(state));
-
-    assert(exhausted == gpu::SLOT_TABLE_FULL, "exhausted readback ticket slot is not reused");
-    assert(table.free_head == vk::READBACK_TICKET_FREE_NONE, "exhausted readback ticket slot is retired");
-}
-
-<* An unrelated blocking helper's completion must never make an unsubmitted
-   ticket poll ready. *>
-fn void cmd_readback_ticket_not_ready_before_submit() @test {
-    TransferDiagnosticCapture capture;
-    gpu::Device device = make_transfer_test_device(capture: &capture);
-    defer destroy_test_device(&device)!!;
-
-    // Settle the timeline to a known baseline.
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::end_frame(&frame_token)!!;
-
-    OwnedSpan src = allocate_owned_span(
-        device:       &device,
-        size:         256,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "ticket_src",
-    )!!;
-    defer free_owned_span(&device, &src)!!;
-    gpu::GpuSpan src_span = src.span;
-
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    defer discard_test_commands(&cmd)!!;
-    uint before = capture.calls;
-    fault zero_size = @catch(gpu::cmd_readback_buffer(&cmd, src_span.unchecked_subspan(0, 0)));
-    assert(zero_size == gpu::INVALID_ARGUMENT, "zero ticket size keeps INVALID_ARGUMENT");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            zero_size,
-        operation:           "cmd_readback_buffer",
-        rejected_field:      "src",
-        invariant:           "span range must fit its live owner",
-        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
-        has_public_identity: true,
-        resource_index:      src.span.index,
-        resource_generation: src.span.generation,
-        resource_name:       "ticket_src",
-    );
-
-    before = capture.calls;
-    fault range_fault = @catch(gpu::cmd_readback_buffer(&cmd, src_span.unchecked_subspan(200, 64)));
-    assert(range_fault == gpu::INVALID_ARGUMENT, "ticket range past source keeps INVALID_ARGUMENT");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            range_fault,
-        operation:           "cmd_readback_buffer",
-        rejected_field:      "src",
-        invariant:           "span range must fit its live owner",
-        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
-        has_public_identity: true,
-        resource_index:      src.span.index,
-        resource_generation: src.span.generation,
-        resource_name:       "ticket_src",
-    );
-
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, src_span)!!;
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
-    // Deliberately never submit_test_queue(&device, gpu::QueueKind.GRAPHICS, ...): the ticket's copy never runs.
-
-    OwnedSpan unrelated = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "unrelated",
-    )!!;
-    defer free_owned_span(&device, &unrelated)!!;
-
-    char[64] payload;
-    foreach (&b : payload) *b = (char)0xAB;
-    gpu::upload_buffer_data(
-        device:      &device,
-        dst:         unrelated.span,
-        data:        payload[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_READ,
-    )!!;
-
-    assert(!gpu::poll_readback(&device, &ticket)!!, "an unrelated blocking helper must not retire an unsubmitted ticket");
-
-    char[256] dest;
-    before = capture.calls;
-    fault short_dest = @catch(gpu::resolve_readback(&device, &ticket, dest[:255]));
-    assert(short_dest == gpu::INVALID_ARGUMENT, "short ticket destination keeps INVALID_ARGUMENT");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            short_dest,
-        operation:           "resolve_readback",
-        rejected_field:      "dest",
-        invariant:           "destination must cover the complete ticket span",
-        resource_kind:       gpu::DebugResourceKind.NONE,
-        has_public_identity: false,
-        resource_index:      0,
-        resource_generation: 0,
-        resource_name:       null,
-    );
-
-    before = capture.calls;
-    fault not_ready = @catch(gpu::resolve_readback(&device, &ticket, dest[..]));
-    assert(not_ready == gpu::READBACK_NOT_READY, "resolve on an unsubmitted ticket faults READBACK_NOT_READY");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            not_ready,
-        operation:           "resolve_readback",
-        rejected_field:      "ticket",
-        invariant:           "ticket timeline value must be signaled before resolve",
-        resource_kind:       gpu::DebugResourceKind.NONE,
-        has_public_identity: false,
-        resource_index:      0,
-        resource_generation: 0,
-        resource_name:       null,
-    );
 }
 
 fn void oversized_upload_uses_dedicated_staging() @test {
@@ -1726,30 +1497,6 @@ fn void transfer_access_rejects_before_helper_or_arena_mutation() @test {
     );
     assert(state.staging_arena.retire_count == staging_before,
         "recorded upload access rejection consumes no staging range");
-
-    readback_before = state.readback_arena.retire_count;
-    uint tickets_before = state.readback_tickets.next_new;
-    before = capture.calls;
-    gpu::GpuSpan src = readback.span.checked_subspan(0, 8)!!;
-    fault command_readback = @catch(gpu::cmd_readback_buffer(&commands, src));
-    assert(command_readback == gpu::INVALID_ARGUMENT,
-        "recorded readback rejects a resource outside the recording role");
-    assert_transfer_rejection(
-        capture:             &capture,
-        before:              before,
-        returned:            command_readback,
-        operation:           "cmd_readback_buffer",
-        rejected_field:      "GpuSpan",
-        invariant:           "access must include the operation queue role",
-        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
-        has_public_identity: true,
-        resource_index:      readback.span.index,
-        resource_generation: readback.span.generation,
-        resource_name:       "compute_readback_only",
-    );
-    assert(state.readback_arena.retire_count == readback_before
-        && state.readback_tickets.next_new == tickets_before,
-        "recorded readback access rejection allocates no ticket or arena range");
 
     record.queue = recorded_queue;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;

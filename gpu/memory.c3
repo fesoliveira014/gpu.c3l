@@ -24,21 +24,6 @@ enum MemoryClass : int {
     TEXTURE,
 }
 
-<* Generation-checked identity for private readback state. *>
-struct ReadbackTicket {
-    ulong owner;
-    uint  index;
-    uint  generation;
-}
-$assert ReadbackTicket::size <= ulong::size * 2;
-
-<* True while the token names readback state; resolution consumes it. *>
-fn bool ReadbackTicket.is_valid(self) => self.owner != 0 && self.generation != 0;
-fn bool ReadbackTicket.equals(self, ReadbackTicket other) @operator(==) {
-    return self.owner == other.owner
-        && self.index == other.index
-        && self.generation == other.generation;
-}
 
 <* Non-owning identity and range into generic GPU data. *>
 struct GpuSpan {
@@ -449,56 +434,6 @@ fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char
     return operation.vtable.readback_texture_data(device, src, mip, out_data, from_stage, from_hazard, from_layout);
 }
 
-<* Record a non-blocking buffer readback into the caller's command list.
-   Source-side synchronization is the caller's barrier. The ticket holds its
-   range until resolve_readback, or until discard cancels the command. *>
-fn ReadbackTicket? cmd_readback_buffer(CommandList* commands, GpuSpan src) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    ReadbackTicket ticket = operation.vtable.cmd_readback_buffer(commands, src)!;
-    retain_device_children(&operation);
-    return ticket;
-}
-
-<* Record a non-blocking full-mip texture readback. The texture must carry
-   transfer_src usage and sit in the TRANSFER_SRC tracked layout; the caller
-   owns the barriers on both sides. *>
-fn ReadbackTicket? cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    ReadbackTicket ticket = operation.vtable.cmd_readback_texture(
-        commands,
-        src,
-        mip,
-    )!;
-    retain_device_children(&operation);
-    return ticket;
-}
-
-<* True once the ticket's data is resolvable; false for the consumed
-   original token. Stale aliases and invalid devices fault INVALID_HANDLE. *>
-fn bool? poll_readback(Device* device, ReadbackTicket* ticket) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    if (ticket == null) return INVALID_HANDLE~;
-    if (!ticket.is_valid()) return false;
-    validate_resource_owner(&operation, ticket.owner, ResourceOwnerKind.READBACK_TICKET)!;
-    return operation.vtable.poll_readback(device, ticket);
-}
-
-<* Copy the ticket's bytes into `dest` and release the underlying range.
-   Faults READBACK_NOT_READY before the ticket's timeline value signals and
-   INVALID_ARGUMENT on a consumed ticket or short `dest`; stale aliases fault
-   INVALID_HANDLE. *>
-fn void? resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    if (ticket == null) return INVALID_HANDLE~;
-    if (!ticket.is_valid()) return INVALID_ARGUMENT~;
-    validate_resource_owner(&operation, ticket.owner, ResourceOwnerKind.READBACK_TICKET)!;
-    operation.vtable.resolve_readback(device, ticket, dest)!;
-    release_device_children(&operation);
-}
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the
    caller has already proved the range, or deliberately needs an invalid span

@@ -407,41 +407,32 @@ fn void? vk_end_commands(gpu::CommandList* commands) @private {
     record.state = CommandState.EXECUTABLE;
 }
 
-fn ulong? vk_discard_commands(
+fn void? vk_discard_commands(
     gpu::Device* device,
     gpu::CommandListHandle handle,
     bool executable,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    state.transfer_mutex.lock()!!;
-    defer state.transfer_mutex.unlock();
-    {
-        state.resource_mutex.lock()!!;
-        defer state.resource_mutex.unlock();
-        state.command_mutex.lock()!!;
-        defer state.command_mutex.unlock();
-        CommandRecord* record = state.commands.get(handle)!;
-        bool state_matches = executable
-            ? record.state == CommandState.EXECUTABLE
-            : record.state == CommandState.RECORDING
-                || record.state == CommandState.RECORDING_RENDER_PASS;
-        if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
-        RecordingContextHandle context = record.context;
-        vk::CommandBuffer command_buffer = record.command_buffer;
-        vk::CommandPool command_pool = record.command_pool;
-        release_command(state, handle);
-        enqueue_retired_command_buffer_locked(
-            state:          state,
-            context_handle: context,
-            pool:           command_pool,
-            buffer:         command_buffer,
-        );
-    }
-    return cancel_command_readback_tickets_locked(
-        state,
-        handle,
-    );
-}
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    state.command_mutex.lock()!!;
+    defer state.command_mutex.unlock();
+    CommandRecord* record = state.commands.get(handle)!;
+    bool state_matches = executable
+        ? record.state == CommandState.EXECUTABLE
+        : record.state == CommandState.RECORDING
+            || record.state == CommandState.RECORDING_RENDER_PASS;
+    if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
+    RecordingContextHandle context = record.context;
+    vk::CommandBuffer command_buffer = record.command_buffer;
+    vk::CommandPool command_pool = record.command_pool;
+    release_command(state, handle);
+    enqueue_retired_command_buffer_locked(
+        state:          state,
+        context_handle: context,
+        pool:           command_pool,
+        buffer:         command_buffer,
+    );}
 
 fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* desc) @private {
     CommandRecord* record = resolve_command(commands)!;

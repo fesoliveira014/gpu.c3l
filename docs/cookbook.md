@@ -89,20 +89,10 @@ Running example: `offscreen_triangle`, `multithreaded_recording`.
 
 Goal: overlap GPU work with CPU consumption.
 
-```c3
-gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, result_span)!;
-```
-
-After submission and frame retirement:
-
-```c3
-if (gpu::poll_readback(&device, &ticket)!) {
-    gpu::resolve_readback(&device, &ticket, out)!;
-}
-```
-
-Running example: `image_processing` (histogram readback),
-`frustum_culling` (stats).
+Allocate a `CPU_READ` destination, record the copy, and keep the completion
+point returned by `submit`. Once `poll_completion` succeeds, call
+`invalidate_mapped_span` and read the mapped span. Reuse or free the allocation
+only after completion.
 
 ## 6. GPU-driven drawing (indirect + count)
 

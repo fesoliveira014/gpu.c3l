@@ -47,10 +47,6 @@ fn void check_span_data_operations(
         from_stage:  {},
         from_hazard: {},
     );
-    (void)gpu::cmd_readback_buffer(
-        commands: commands,
-        src:      src,
-    );
 
     gpu::BufferTextureCopyDesc buffer_to_texture = {
         .src     = src,

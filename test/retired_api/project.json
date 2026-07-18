@@ -67,6 +67,42 @@
         "submit_signals.c3"
       ]
     },
+    "readback_ticket": {
+      "type": "object-files",
+      "sources": [
+        "readback_ticket.c3"
+      ]
+    },
+    "cmd_readback_buffer": {
+      "type": "object-files",
+      "sources": [
+        "cmd_readback_buffer.c3"
+      ]
+    },
+    "cmd_readback_texture": {
+      "type": "object-files",
+      "sources": [
+        "cmd_readback_texture.c3"
+      ]
+    },
+    "poll_readback": {
+      "type": "object-files",
+      "sources": [
+        "poll_readback.c3"
+      ]
+    },
+    "resolve_readback": {
+      "type": "object-files",
+      "sources": [
+        "resolve_readback.c3"
+      ]
+    },
+    "readback_not_ready": {
+      "type": "object-files",
+      "sources": [
+        "readback_not_ready.c3"
+      ]
+    },
     "debug_semaphore": {
       "type": "object-files",
       "sources": [

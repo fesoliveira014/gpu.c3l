@@ -484,11 +484,10 @@ cmd_copy_buffer_to_texture
 cmd_copy_texture_to_buffer
 cmd_fill_buffer(command_list, dst_span, value)
 cmd_upload_buffer(command_list, dst_span, data)
-cmd_readback_buffer(command_list, src_span)
 ```
 
-Buffer copies use equal-size, non-overlapping spans. Fill, upload, and readback
-operate on the exact supplied span. Upload data and blocking-readback output
+Buffer copies use equal-size, non-overlapping spans. Fill and upload operate on
+the exact supplied span. Upload data and blocking-readback output
 lengths must match it. Use a checked subspan for a partial operation. Transfer
 helpers do not imply next-use barriers.
 

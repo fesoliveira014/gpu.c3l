@@ -284,10 +284,6 @@ def validate_document(document: dict) -> list[str]:
             ("Device*", "GpuSpan", "char[]", "Stage", "Hazard"),
             "void?",
         ),
-        "cmd_readback_buffer": (
-            ("CommandList*", "GpuSpan"),
-            "ReadbackTicket?",
-        ),
         "cmd_copy_buffer_to_texture": (
             ("CommandList*", "BufferTextureCopyDesc*"),
             "void?",
@@ -383,7 +379,6 @@ def validate_document(document: dict) -> list[str]:
             "from_stage",
             "from_hazard",
         ),
-        "cmd_readback_buffer": ("commands", "src"),
         "cmd_copy_buffer_to_texture": ("commands", "desc"),
         "cmd_copy_texture_to_buffer": ("commands", "desc"),
         "cmd_draw_indexed": (

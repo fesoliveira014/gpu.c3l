@@ -1289,7 +1289,6 @@ fn void allocation_span_commands_reject_stale_and_foreign_owners_before_mutation
         gpu::device_backend_state_ptr(&device);
     uint staging_before = state.staging_arena.retire_count;
     uint readback_before = state.readback_arena.retire_count;
-    uint tickets_before = state.readback_tickets.next_new;
 
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
@@ -1312,13 +1311,10 @@ fn void allocation_span_commands_reject_stale_and_foreign_owners_before_mutation
     assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
         == gpu::INVALID_HANDLE,
         "copy rejects a cross-device allocation span");
-    assert(@catch(gpu::cmd_readback_buffer(&commands, stale))
-        == gpu::INVALID_HANDLE,
-        "readback rejects a stale allocation span");
+
     assert(state.staging_arena.retire_count == staging_before
-        && state.readback_arena.retire_count == readback_before
-        && state.readback_tickets.next_new == tickets_before,
-        "stale and foreign spans consume no transfer ranges or tickets");
+        && state.readback_arena.retire_count == readback_before,
+        "stale and foreign spans consume no transfer ranges");
 
     gpu::cmd_fill_buffer(&commands, local_span, 0)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;

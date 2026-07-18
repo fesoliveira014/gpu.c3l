@@ -144,9 +144,7 @@ struct VkDeviceState {
     uint                       submitted_command_count;
     uint                       submitted_command_reserved;
     ulong                      command_buffers_allocated;
-    ulong                      command_buffers_freed;
-    ReadbackTicketTable        readback_tickets;
-    DedicatedRetireState       dedicated_staging;
+    ulong                      command_buffers_freed;    DedicatedRetireState       dedicated_staging;
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
@@ -271,10 +269,7 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .upload_texture_data     = &vk_upload_texture_data,
     .readback_buffer_data    = &vk_readback_buffer_data,
     .readback_texture_data   = &vk_readback_texture_data,
-    .cmd_readback_buffer     = &vk_cmd_readback_buffer,
-    .cmd_readback_texture    = &vk_cmd_readback_texture,
-    .poll_readback           = &vk_poll_readback,
-    .resolve_readback        = &vk_resolve_readback,
+
     .create_swapchain        = &vk_create_swapchain,
     .destroy_swapchain       = &vk_destroy_swapchain,
     .resize_swapchain        = &vk_resize_swapchain,
@@ -587,8 +582,7 @@ fn gpu::Device? create_vk_device_with_selection(
         AllocationCell,
         ALLOCATION_CAPACITY,
     );
-    state.readback_tickets.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.READBACK_TICKET);
-    state.readback_tickets.slots = mem::new_array(ReadbackTicketCell, READBACK_TICKET_CAPACITY);
+
     create_frame_resources(state, desc)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.FRAME_RESOURCES)!;
     create_persistent_arena(state, desc)!;
@@ -729,7 +723,6 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         destroy_submitted_commands(state);
         // Report before cleanup clears the diagnostic tables.
         if (state.validation || state.debug_callback != null) (void)report_resource_leaks(state);
-        destroy_readback_tickets(state);
         // Internal buffers and device-loss leftovers remain backend-owned.
         if (state.allocator != null && state.buffers.slots.ptr != null) {
             foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {

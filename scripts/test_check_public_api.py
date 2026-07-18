@@ -230,12 +230,6 @@ def valid_document() -> dict:
                         ("from_hazard", "Hazard"),
                     ),
                     api_function(
-                        "cmd_readback_buffer",
-                        "ReadbackTicket?",
-                        ("commands", "CommandList*"),
-                        ("src", "GpuSpan"),
-                    ),
-                    api_function(
                         "cmd_copy_buffer_to_texture",
                         "void?",
                         ("commands", "CommandList*"),
@@ -752,7 +746,6 @@ class PublicApiCheckTests(unittest.TestCase):
             "cmd_upload_buffer",
             "upload_buffer_data",
             "readback_buffer_data",
-            "cmd_readback_buffer",
             "cmd_copy_buffer_to_texture",
             "cmd_copy_texture_to_buffer",
             "cmd_draw_indexed",
@@ -856,12 +849,6 @@ class PublicApiCheckTests(unittest.TestCase):
                 "char[]",
                 "Stage",
                 "Hazard",
-            ),
-            "cmd_readback_buffer": (
-                "CommandList*",
-                "BufferHandle",
-                "usz",
-                "usz",
             ),
         }
         for name, parameter_types in legacy_parameters.items():

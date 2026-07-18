@@ -15,6 +15,12 @@ FIXTURES = {
     "timeline_caps": "timeline_semaphore",
     "submit_waits": "waits",
     "submit_signals": "signals",
+    "readback_ticket": "ReadbackTicket",
+    "cmd_readback_buffer": "cmd_readback_buffer",
+    "cmd_readback_texture": "cmd_readback_texture",
+    "poll_readback": "poll_readback",
+    "resolve_readback": "resolve_readback",
+    "readback_not_ready": "READBACK_NOT_READY",
     "debug_semaphore": "SEMAPHORE",
 }
 
