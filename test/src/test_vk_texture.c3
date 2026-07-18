@@ -110,6 +110,7 @@ fn gpu::GpuAllocation init_placement_fixture(PlacementFixture* fixture) {
                 .size        = 256,
             },
             .size           = 256,
+            .alignment      = 64,
             .access         = { .compute },
             .texture_memory = true,
             .memory_class   = gpu::MemoryClass.TEXTURE,
@@ -1009,6 +1010,16 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
         fixture.state.allocations.owner,
         0b0010,
     );
+    requirements.alignment = 128;
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    requirements.alignment = 64;
     fixture.allocations[0].value.texture_memory = false;
     assert(@catch(vk::create_placed_texture_for_state_with_ops(
         state:        &fixture.state,

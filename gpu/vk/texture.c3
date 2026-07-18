@@ -799,6 +799,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
         return gpu::INVALID_RESOURCE_STATE~;
     }
     if (!allocation.texture_memory
+        || requirements.alignment > allocation.alignment
         || !gpu::queue_roles_are_subset(desc.access, allocation.access)
         || allocation.raw_info.memory_type >= 32) {
         return gpu::INVALID_ARGUMENT~;

@@ -1,11 +1,6 @@
 module gpu_test;
 
 import gpu @public;
-fn TextureCompatibility test_texture_compatibility(ulong owner, uint value) {
-    return (TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
-}
-
-
 struct AllocationStubState {
     ulong          owner;
     GpuAllocation  allocation;
@@ -22,6 +17,10 @@ struct AllocationStubState {
     bool           texture_live;
     bool           live;
     bool           block_free;
+}
+
+fn TextureCompatibility test_texture_compatibility(ulong owner, uint value) {
+    return (TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
 }
 
 fn void destroy_allocation_stub(void* backend_state) {
