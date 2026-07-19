@@ -432,7 +432,8 @@ fn void? vk_discard_commands(
         context_handle: context,
         pool:           command_pool,
         buffer:         command_buffer,
-    );}
+    );
+}
 
 fn void? vk_cmd_copy_buffer(gpu::CommandList* commands, gpu::BufferCopyDesc* desc) @private {
     CommandRecord* record = resolve_command(commands)!;
