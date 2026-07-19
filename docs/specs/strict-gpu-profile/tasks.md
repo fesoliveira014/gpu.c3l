@@ -228,7 +228,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.2 Device-wide strict texture and sampler heaps
 
-- [ ] Finalize device-wide view publication and raw shader-visible indices in `gpu/descriptor_heap.c3`, `gpu/texture.c3`, `gpu/vk/descriptor_heap.c3`, and `gpu/vk/texture.c3`.
+- [x] Finalize device-wide view publication and raw shader-visible indices in `gpu/descriptor_heap.c3`, `gpu/texture.c3`, `gpu/vk/descriptor_heap.c3`, and `gpu/vk/texture.c3`.
   - **Depends on:** 5.1 and 4.4.
   - **Contract:** heap implementation selection is private; index width is ABI-pinned; CPU generation metadata validates API operations but is not embedded in shader values; caller lifetime covers indices stored in GPU memory.
   - **Edges:** capacity exhaustion, stale view, index reuse after completion, unsupported view kind, and concurrent publish/release.
