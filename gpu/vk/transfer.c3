@@ -889,15 +889,28 @@ fn void release_helper_command_on_fault(
     gpu::CommandList* commands,
 ) @private {
     if (commands == null || !commands.handle.is_valid()) return;
-    state.command_mutex.lock()!!;
-    defer state.command_mutex.unlock();
-    CommandRecord* record = state.commands.get(commands.handle)!!;
-    vk::CommandBuffer command_buffer = record.command_buffer;
-    vk::CommandPool command_pool = record.command_pool;
-    release_command(state, commands.handle);
-    vk::free_command_buffers(state.device, command_pool, 1, &command_buffer);
-    state.command_buffers_freed++;
-    *commands = {};
+    state.helper_record_mutex.lock()!!;
+    defer state.helper_record_mutex.unlock();
+    RecordingContextHandle context;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        CommandRecord* record = state.commands.get(commands.handle)!!;
+        context = record.context;
+        vk::CommandBuffer command_buffer = record.command_buffer;
+        vk::CommandPool command_pool = record.command_pool;
+        release_command(state, commands.handle);
+        enqueue_retired_command_buffer_locked(
+            state:          state,
+            context_handle: context,
+            pool:           command_pool,
+            buffer:         command_buffer,
+        );
+        *commands = {};
+    }
+    drain_retired_command_buffers(state, context);
 }
 
 fn void? finish_helper_timeline(VkDeviceState* state, ulong* helper_value, ZString operation) @private {
@@ -1407,6 +1420,7 @@ fn void? submit_and_wait_with(
 ) @private {
     CommandRecord* record = resolve_command(commands)!;
     gpu::Queue queue = record.queue;
+    RecordingContextHandle context = record.context;
     gpu::ExecutableCommandList[1] lists = {{
         .device = commands.device,
         .handle = commands.handle,
@@ -1414,12 +1428,16 @@ fn void? submit_and_wait_with(
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint point = vk_submit_with(queue, &submit, submit_fn)!;
     *commands = {};
-    return vk_wait_completion(
-        device,
-        gpu::completion_point_queue_id(point),
-        gpu::completion_point_sequence(point),
-        ulong::max,
-    );
+    vk_wait_completion(
+        device:     device,
+        queue_id:   gpu::completion_point_queue_id(point),
+        sequence:   gpu::completion_point_sequence(point),
+        timeout_ns: ulong::max,
+    )!;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    state.helper_record_mutex.lock()!!;
+    defer state.helper_record_mutex.unlock();
+    drain_retired_command_buffers(state, context);
 }
 
 <* Submit an ended helper list and wait for completion. *>

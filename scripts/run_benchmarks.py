@@ -40,7 +40,7 @@ CONTEXT_FIELDS = ("adapter:", "driver:", "validation:", "queues:")
 # A unit token alone is not enough: the startup header already declares
 # units=..., so the gate demands a number carrying the unit.
 MEASURED_VALUE = re.compile(
-    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|begin_frame|record|end_frame|create)|ms)\b"
+    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|end_frame|create)|ms)\b"
     r"|uploads_per_sec=\d"
 )
 

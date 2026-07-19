@@ -57,6 +57,8 @@ fn void assert_context_empty(gpu::vk::RecordingContextState* context) {
     assert(context.graphics_pools.ptr == null, "graphics array released");
     assert(context.compute_pools.ptr == null, "compute array or alias cleared");
     assert(context.transfer_pools.ptr == null, "transfer array released");
+    assert(context.retired_commands.ptr == null, "retired command array released");
+    assert(context.retired_command_count == 0, "retired command count cleared");
     assert(!context.compute_pools_distinct, "ownership flag cleared");
 }
 

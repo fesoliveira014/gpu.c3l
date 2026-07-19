@@ -23,19 +23,19 @@ struct PendingLayout {
 }
 
 struct CommandRecord {
-    vk::CommandBuffer       command_buffer;
-    vk::CommandPool         command_pool;
-    RecordingContextHandle  context;
-    gpu::Queue                   queue;
-    CommandState                 state;
-    uint                         active_render_width;
-    uint                         active_render_height;
-    gpu::PipelineHandle          last_pipeline;
-    uint                         last_entry;
-    PendingLayout[]              pending_layouts;
-    uint                         pending_layout_count;
-    CommandResourceReference[]   references;
-    uint                         reference_count;
+    vk::CommandBuffer           command_buffer;
+    vk::CommandPool             command_pool;
+    RecordingContextHandle      context;
+    gpu::Queue                  queue;
+    CommandState                state;
+    uint                        active_render_width;
+    uint                        active_render_height;
+    gpu::PipelineHandle         last_pipeline;
+    uint                        last_entry;
+    PendingLayout[]             pending_layouts;
+    uint                        pending_layout_count;
+    CommandResourceReference[]  references;
+    uint                        reference_count;
 }
 
 struct CommandCell {
@@ -164,12 +164,12 @@ fn void free_command_references(
         state,
         record.references,
         record.reference_count,
-
     );
     alloc::free(state.host_allocator, record.references.ptr);
     record.references = {};
     record.reference_count = 0;
 }
+
 fn void rollback_command_references(
     VkDeviceState* state,
     CommandRecord* record,

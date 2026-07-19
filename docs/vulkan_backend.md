@@ -555,9 +555,11 @@ duplicate, non-executable, or wrong-queue tokens before claiming records. A
 failure before native acceptance restores every claim; success commits pending
 texture state and invalidates all aliases.
 
-Discard frees the native command buffer immediately. Submit transfers it to a
-completion-tracked batch; `poll_completion`, `wait_completion`, and bounded
-submit-side draining reclaim completed buffers.
+Discard retires the native buffer to its recording context. Submit transfers it
+to a completion-tracked batch; completion observation retires the buffer to the
+same context. Only the context owner frees retired buffers, before allocating
+again; helper contexts drain under their recording mutex, and device teardown
+relies on command-pool destruction.
 
 ## 13. Synchronization
 

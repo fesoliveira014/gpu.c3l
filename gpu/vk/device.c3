@@ -140,14 +140,14 @@ struct VkDeviceState {
     VkStrictHeapState          strict_heap;
     TransferArenaState         staging_arena;
     TransferArenaState         readback_arena;
-    SubmittedCommandBatch[]   submitted_commands;
-    uint                        submitted_command_count;
-    uint                        submitted_command_reserved;
-    ulong                       command_buffers_allocated;
-    ulong                       command_buffers_freed;
+    SubmittedCommandBatch[]    submitted_commands;
+    uint                       submitted_command_count;
+    uint                       submitted_command_reserved;
+    ulong                      command_buffers_allocated;
+    ulong                      command_buffers_freed;
     ReadbackTicketTable        readback_tickets;
     DedicatedRetireState       dedicated_staging;
-    HostAllocator               host_allocator;
+    HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
     bool                       frame_active;

@@ -262,8 +262,9 @@ RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> c
 the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
 batch as `SUBMITTING`. Validation or native failure restores it without publishing
 queue progress. Success publishes one `CompletionPoint` and invalidates every
-submitted token and alias. Submitted native buffers are reclaimed when their
-completion point is observed; discarded buffers are reclaimed immediately.
+submitted token and alias. Completion observation and discard retire native
+buffers to their recording context. The context owner reclaims them before its
+next allocation; device teardown relies on command-pool destruction.
 Invalid transitions return faults,
 and render-pass command constraints remain enforced.
 

@@ -10,6 +10,7 @@ alias DestroyContextPoolFn @private = fn void (void*, vk::Device, vk::CommandPoo
 
 const uint MAX_RECORDING_CONTEXTS = 257;
 const uint MAX_THREAD_DEVICE_CONTEXTS = 64;
+const usz RETIRED_COMMAND_INITIAL_CAPACITY = 16;
 
 struct RecordingContextHandle {
     uint index;
@@ -19,6 +20,11 @@ struct RecordingContextHandle {
 struct ThreadRecordingContext {
     gpu::Device            device;
     RecordingContextHandle context;
+}
+
+struct RetiredCommandBuffer {
+    vk::CommandPool   pool;
+    vk::CommandBuffer buffer;
 }
 
 fn bool RecordingContextHandle.is_valid(self) => self.generation != 0;
@@ -39,12 +45,14 @@ struct ContextPoolOps @private {
 }
 
 struct RecordingContextState {
-    vk::CommandPool[] graphics_pools;
+    vk::CommandPool[]      graphics_pools;
     // Aliases graphics_pools when the compute queue shares the graphics
     // family; owned storage only when distinct (compute_pools_distinct).
-    vk::CommandPool[] compute_pools;
-    vk::CommandPool[] transfer_pools;
-    bool              compute_pools_distinct;
+    vk::CommandPool[]      compute_pools;
+    vk::CommandPool[]      transfer_pools;
+    RetiredCommandBuffer[] retired_commands;
+    uint                   retired_command_count;
+    bool                   compute_pools_distinct;
 }
 
 struct RecordingContextCell {
@@ -115,6 +123,11 @@ fn void destroy_context_pools_with_ops(
     RecordingContextState* context,
     ContextPoolOps* ops
 ) @private {
+    if (context.retired_commands.ptr != null) {
+        alloc::free(state.host_allocator, context.retired_commands.ptr);
+        context.retired_commands = {};
+    }
+    context.retired_command_count = 0;
     if (context.graphics_pools.ptr != null) {
         foreach (pool : context.graphics_pools) {
             if (pool != null) ops.destroy(ops.user_data, state.device, pool);
@@ -254,6 +267,66 @@ fn vk::CommandPool pool_for(
     return context.transfer_pools[0];
 }
 
+fn void enqueue_retired_command_buffer_locked(
+    VkDeviceState* state,
+    RecordingContextHandle context_handle,
+    vk::CommandPool pool,
+    vk::CommandBuffer buffer,
+) {
+    if (buffer == null) return;
+    RecordingContextState* context = state.recording_contexts.get(
+        context_handle,
+    )!!;
+    if (context.retired_command_count >= context.retired_commands.len) {
+        usz capacity = context.retired_commands.len == 0
+            ? RETIRED_COMMAND_INITIAL_CAPACITY
+            : context.retired_commands.len * 2;
+        RetiredCommandBuffer[] grown = alloc::new_array(
+            state.host_allocator,
+            RetiredCommandBuffer,
+            (sz)capacity,
+        );
+        for (uint i = 0; i < context.retired_command_count; i++) {
+            grown[i] = context.retired_commands[i];
+        }
+        if (context.retired_commands.ptr != null) {
+            alloc::free(state.host_allocator, context.retired_commands.ptr);
+        }
+        context.retired_commands = grown;
+    }
+    context.retired_commands[context.retired_command_count++] = {
+        .pool   = pool,
+        .buffer = buffer,
+    };
+}
+
+fn void drain_retired_command_buffers(
+    VkDeviceState* state,
+    RecordingContextHandle context_handle,
+) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    RecordingContextState* context = state.recording_contexts.get(
+        context_handle,
+    )!!;
+    if (context.retired_command_count == 0) return;
+
+    state.command_mutex.lock()!!;
+    defer state.command_mutex.unlock();
+    for (uint i = 0; i < context.retired_command_count; i++) {
+        RetiredCommandBuffer* retired = &context.retired_commands[i];
+        vk::free_command_buffers(
+            device:               state.device,
+            command_pool:         retired.pool,
+            command_buffer_count: 1,
+            p_command_buffers:    &retired.buffer,
+        );
+        state.command_buffers_freed++;
+        *retired = {};
+    }
+    context.retired_command_count = 0;
+}
+
 fn void? vk_begin_commands_with_context(
     VkDeviceState* state,
     gpu::Queue queue,
@@ -261,6 +334,7 @@ fn void? vk_begin_commands_with_context(
     gpu::CommandList* out_commands,
 ) @private {
     gpu::Device device = queue.device;
+    drain_retired_command_buffers(state, context_handle);
     RecordingContextState* context = state.recording_contexts.get(context_handle)!;
     vk::CommandPool pool = pool_for(context, queue);
     vk::CommandBufferAllocateInfo alloc = vk::command_buffer_allocate_info()
@@ -342,6 +416,8 @@ fn ulong? vk_discard_commands(
     state.transfer_mutex.lock()!!;
     defer state.transfer_mutex.unlock();
     {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
         CommandRecord* record = state.commands.get(handle)!;
@@ -350,11 +426,16 @@ fn ulong? vk_discard_commands(
             : record.state == CommandState.RECORDING
                 || record.state == CommandState.RECORDING_RENDER_PASS;
         if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
+        RecordingContextHandle context = record.context;
         vk::CommandBuffer command_buffer = record.command_buffer;
         vk::CommandPool command_pool = record.command_pool;
         release_command(state, handle);
-        vk::free_command_buffers(state.device, command_pool, 1, &command_buffer);
-        state.command_buffers_freed++;
+        enqueue_retired_command_buffer_locked(
+            state:          state,
+            context_handle: context,
+            pool:           command_pool,
+            buffer:         command_buffer,
+        );
     }
     return cancel_command_readback_tickets_locked(
         state,

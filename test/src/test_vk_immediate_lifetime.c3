@@ -321,3 +321,43 @@ fn void incomplete_reference_drain_is_deterministic() @test {
         "the reached counter releases the submitted reference batch");
     vk::destroy_submitted_commands(&state);
 }
+
+fn void completed_submission_release_boundary_is_exact() @test {
+    vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
+    };
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
+    state.command_mutex.init()!!;
+    defer (void)state.command_mutex.destroy();
+    vk::ensure_submitted_command_capacity(&state, 1);
+    gpu::Queue queue = {
+        .device = { .generation = 1 },
+        .id     = 0,
+        .roles  = { .graphics },
+    };
+    state.submitted_commands[0] = {
+        .completion = gpu::make_completion_point(queue, 7)!!,
+    };
+    state.submitted_command_count = 1;
+
+    vk::CommandBufferStats before = vk::command_buffer_stats(&state);
+    state.resource_mutex.lock()!!;
+    vk::release_completed_submitted_commands_locked(&state, 0, 6);
+    state.resource_mutex.unlock();
+    vk::CommandBufferStats incomplete = vk::command_buffer_stats(&state);
+    assert(incomplete.pending == before.pending,
+        "sequence N - 1 preserves the submitted command buffer");
+    assert(incomplete.freed == before.freed,
+        "sequence N - 1 cannot free the submitted command buffer");
+
+    state.resource_mutex.lock()!!;
+    vk::release_completed_submitted_commands_locked(&state, 0, 7);
+    state.resource_mutex.unlock();
+    vk::CommandBufferStats completed = vk::command_buffer_stats(&state);
+    assert(completed.pending == before.pending - 1,
+        "sequence N retires the submitted command buffer");
+    assert(completed.freed == before.freed,
+        "a null native buffer performs no backend free");
+    vk::destroy_submitted_commands(&state);
+}

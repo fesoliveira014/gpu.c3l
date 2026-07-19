@@ -16,6 +16,7 @@ struct CommandResourceReference {
 
 struct SubmittedCommandBatch {
     gpu::CompletionPoint       completion;
+    RecordingContextHandle     context;
     vk::CommandPool            command_pool;
     vk::CommandBuffer          command_buffer;
     CommandResourceReference[] references;
@@ -224,6 +225,7 @@ fn void publish_submitted_commands(
     state.submitted_command_reserved -= reservation;
     foreach (record : records) {
         state.submitted_commands[state.submitted_command_count++] = {
+            .context         = record.context,
             .command_pool    = record.command_pool,
             .command_buffer  = record.command_buffer,
             .completion      = completion,
@@ -246,17 +248,12 @@ fn void release_submitted_command_batch(
         batch.reference_count,
     );
     alloc::free(state.host_allocator, batch.references.ptr);
-    if (batch.command_buffer != null) {
-        state.command_mutex.lock()!!;
-        vk::free_command_buffers(
-            device:               state.device,
-            command_pool:         batch.command_pool,
-            command_buffer_count: 1,
-            p_command_buffers:    &batch.command_buffer,
-        );
-        state.command_buffers_freed++;
-        state.command_mutex.unlock();
-    }
+    enqueue_retired_command_buffer_locked(
+        state:          state,
+        context_handle: batch.context,
+        pool:           batch.command_pool,
+        buffer:         batch.command_buffer,
+    );
     state.submitted_command_count--;
     *batch = state.submitted_commands[state.submitted_command_count];
     state.submitted_commands[state.submitted_command_count] = {};

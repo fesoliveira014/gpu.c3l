@@ -333,7 +333,7 @@ fn void simultaneous_devices_submit_independently() @test {
     wait_test_queue(&second, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void discarded_command_buffer_is_reclaimed_immediately() @test {
+fn void discarded_command_buffer_is_reclaimed_by_recording_owner() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
@@ -346,12 +346,20 @@ fn void discarded_command_buffer_is_reclaimed_immediately() @test {
     defer discard_test_executable(&executable)!!;
     gpu::discard_executable_commands(&executable)!!;
 
-    vk::CommandBufferStats after = vk::command_buffer_stats(state);
-    assert(after.allocated == before.allocated + 1, "one native command buffer was allocated");
-    assert(after.freed == before.freed + 1, "discard reclaims the native command buffer");
-    assert(after.pending == before.pending, "discard does not create completion-tracked work");
+    vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
+    assert(discarded.allocated == before.allocated + 1, "one native command buffer was allocated");
+    assert(discarded.freed == before.freed, "discard leaves reclamation to the recording owner");
+    assert(discarded.pending == before.pending, "discard does not create completion-tracked work");
     fault stale = @catch(gpu::discard_executable_commands(&executable));
     assert(stale == gpu::INVALID_HANDLE, "discard invalidates the executable token");
+
+    gpu::CommandList next = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&next)!!;
+    vk::CommandBufferStats reclaimed = vk::command_buffer_stats(state);
+    assert(reclaimed.freed == before.freed + 1,
+        "the recording owner reclaims the discarded command buffer before allocating again");
 }
 
 fn void bad_command_state_rejected() @test {
@@ -432,8 +440,16 @@ fn void submitted_command_buffer_retires_at_completion() @test {
 
     gpu::wait_completion(completion, ulong::max)!!;
     vk::CommandBufferStats completed = vk::command_buffer_stats(state);
-    assert(completed.freed == before.freed + 1, "wait reclaims the completed native command buffer");
+    assert(completed.freed == before.freed, "wait leaves native reclamation to the recording owner");
     assert(completed.pending == before.pending, "wait retires the completion-tracked command buffer");
+
+    gpu::CommandList next = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&next)!!;
+    vk::CommandBufferStats reclaimed = vk::command_buffer_stats(state);
+    assert(reclaimed.freed == before.freed + 1,
+        "the recording owner reclaims the completed command buffer before allocating again");
 }
 
 fn void command_recording_does_not_require_frame_lifecycle() @test {

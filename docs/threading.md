@@ -237,8 +237,8 @@ timeout rather than an unbounded stall. Frame-scoped paths
 `cmd_readback_texture`) are unaffected: they still tag `frame_timeline` at
 `counter + 1`, retired only by `end_frame`. See docs/memory.md §13.1.
 Blocking helpers use a private recording context. Each helper waits for its
-queue completion, so its native command buffer is reclaimed before the call
-returns.
+queue completion, then reclaims its native command buffer while holding the
+helper recording mutex before the call returns.
 
 ## Off-frame submissions
 
