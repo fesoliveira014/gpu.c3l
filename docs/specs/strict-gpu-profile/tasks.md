@@ -252,7 +252,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.5 Explicit deterministic pipeline identity and batches
 
-- [ ] Redesign graphics and compute pipeline creation in `gpu/pipeline.c3`, `gpu/vk/pipeline_compute.c3`, `gpu/vk/pipeline_graphics.c3`, and `gpu/vk/pipeline_cache.c3` around explicit immutable state and batch deduplication.
+- [x] Redesign graphics and compute pipeline creation in `gpu/pipeline.c3`, `gpu/vk/pipeline_compute.c3`, `gpu/vk/pipeline_graphics.c3`, and `gpu/vk/pipeline_cache.c3` around explicit immutable state and batch deduplication.
   - **Depends on:** 5.4 and 5.3.
   - **Contract:** native compilation occurs during creation; shared shader IR deduplicates within a batch; depth/stencil is separate immutable state; viewport/scissor are dynamic; baseline blend state remains in graphics identity.
   - **Edges:** partial batch failure, cache failure, duplicate pipeline descriptions, shared shader stages, unsupported state, and transactional publication.
