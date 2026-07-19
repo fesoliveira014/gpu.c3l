@@ -33,9 +33,6 @@ faultdef
     // Destruction found a live owner: a device child, runtime dependent,
     // surface swapchain, or texture descriptor. Release the owner first.
     RESOURCE_IN_USE,
-    // A frame arena exhausted its configured capacity; raise the
-    // corresponding DeviceDesc size or split the work.
-    ARENA_FULL,
     // A handle table hit capacity (buffers, textures, pipelines, ...);
     // for textures the capacity is DeviceDesc.texture_capacity.
     SLOT_TABLE_FULL,

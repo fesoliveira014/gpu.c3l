@@ -438,7 +438,7 @@ fn void debug_names_do_not_require_validation() @test {
     vk::BufferDesc buffer_desc = {
         .size        = 64,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "names_without_validation",
     };
@@ -462,7 +462,7 @@ fn void leak_reporters_count_leaks() @test {
     vk::BufferDesc buf_desc = {
         .size        = 256,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "leaky_gpu_span_storage",
     };
@@ -576,7 +576,7 @@ fn void debug_name_copy_is_independent() @test {
     vk::BufferDesc desc = {
         .size        = 64,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = (ZString)&volatile_name[0],
     };
@@ -697,7 +697,7 @@ fn void live_backend_resource_is_reported_before_device_teardown() @test {
     vk::BufferDesc desc = {
         .size        = 128,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "canary_buffer",
     };
@@ -723,7 +723,7 @@ fn void callback_reports_leaks_without_validation() @test {
     vk::BufferDesc buffer_desc = {
         .size        = 128,
         .usage       = { .storage },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "leaky_gpu_span_storage",
     };

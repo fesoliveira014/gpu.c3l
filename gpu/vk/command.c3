@@ -369,8 +369,6 @@ fn void? vk_begin_commands(
 ) @private {
     gpu::Device device = queue.device;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     RecordingContextHandle context = thread_recording_context(state, device)!;
     return vk_begin_commands_with_context(
         state:          state,

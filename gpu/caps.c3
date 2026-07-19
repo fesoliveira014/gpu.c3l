@@ -31,8 +31,6 @@ struct DeviceDesc {
     uint                 sampler_descriptor_capacity;
     uint                 texture_capacity;
     uint                 pipeline_capacity;
-    usz                  frame_arena_size;
-    uint                 frames_in_flight;
     // Warm-start blob from get_pipeline_cache_data; empty = cold. Only read
     // during create_device_from_desc (the driver copies it).
     char[]               pipeline_cache_data;

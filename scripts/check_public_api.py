@@ -17,6 +17,18 @@ FORBIDDEN_TEXT = {
     "bufferhandle": "retired BufferHandle",
     "bufferdesc": "retired BufferDesc",
     "bufferusage": "retired BufferUsage",
+    "frametoken": "retired FrameToken",
+    "memorykind": "retired MemoryKind",
+    "begin_frame": "retired begin_frame",
+    "alloc_frame_span": "retired alloc_frame_span",
+    "end_frame": "retired end_frame",
+    "with_frame": "retired with_frame",
+    '"name":"default_frame_arena_size"': (
+        "retired DEFAULT_FRAME_ARENA_SIZE"
+    ),
+    '"name":"frame_arena_size"': "retired DeviceDesc.frame_arena_size",
+    '"name":"frames_in_flight"': "retired DeviceDesc.frames_in_flight",
+    "arena_full": "retired ARENA_FULL",
     "create_buffer": "retired public buffer lifecycle",
     "destroy_buffer": "retired public buffer lifecycle",
     "get_buffer_address": "retired public buffer lifecycle",
@@ -82,7 +94,6 @@ DEBUG_RESOURCE_KINDS = (
     "COMMAND_LIST",
     "TEXTURE_DESCRIPTOR",
     "SAMPLER",
-    "FRAME",
     "ALLOCATION",
 )
 
@@ -124,6 +135,17 @@ RETIRED_SOURCE_SYMBOLS = (
     "free_persistent_span(",
     "get_persistent_stats(",
     "PERSISTENT_SPAN",
+    "FrameToken",
+    "MemoryKind",
+    "begin_frame(",
+    "alloc_frame_span(",
+    "end_frame(",
+    "@with_frame",
+    "DEFAULT_FRAME_ARENA_SIZE",
+    "frame_arena_size",
+    "frames_in_flight",
+    "ARENA_FULL",
+    "FRAME,",
 )
 
 RETIRED_SOURCE_PATTERNS = {

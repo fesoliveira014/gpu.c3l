@@ -26,6 +26,7 @@ const ulong READINESS_SWAPCHAIN_INDEX_MASK =
 const ulong READINESS_SWAPCHAIN_GENERATION_MASK =
     (1ull << READINESS_SWAPCHAIN_GENERATION_BITS) - 1;
 const ulong ACQUIRE_TIMEOUT_NS = 1_000_000_000;
+const uint SWAPCHAIN_ACQUIRE_SLOT_COUNT = 2;
 
 struct SwapchainSlot {
     gpu::Surface             surface_owner;
@@ -796,12 +797,12 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
         )~;
     }
 
-    slot.acquire_semaphores = mem::new_array(vk::Semaphore, state.frames_in_flight);
+    slot.acquire_semaphores = mem::new_array(vk::Semaphore, SWAPCHAIN_ACQUIRE_SLOT_COUNT);
     slot.acquire_retirements = mem::new_array(
         gpu::CompletionPoint,
-        state.frames_in_flight,
+        SWAPCHAIN_ACQUIRE_SLOT_COUNT,
     );
-    for (uint i = 0; i < state.frames_in_flight; i++) {
+    for (uint i = 0; i < SWAPCHAIN_ACQUIRE_SLOT_COUNT; i++) {
         vk::SemaphoreCreateInfo semaphore_info = vk::semaphore_create_info();
         check_wsi_backend_result(
             context: &context,
@@ -874,7 +875,6 @@ fn void? wait_swapchain_queues_idle(
                 kind:    WsiResultKind.COMMON,
                 result:  vk::queue_wait_idle(queues[index]),
             )!;
-            clear_off_frame_queue_markers(state, queues[index]);
         }
     }
 }

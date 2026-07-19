@@ -145,10 +145,70 @@
         "readback_texture_data.c3"
       ]
     },
-    "memory_kind_staging": {
+    "memory_kind": {
       "type": "object-files",
       "sources": [
-        "memory_kind_staging.c3"
+        "memory_kind.c3"
+      ]
+    },
+    "frame_token": {
+      "type": "object-files",
+      "sources": [
+        "frame_token.c3"
+      ]
+    },
+    "begin_frame": {
+      "type": "object-files",
+      "sources": [
+        "begin_frame.c3"
+      ]
+    },
+    "alloc_frame_span": {
+      "type": "object-files",
+      "sources": [
+        "alloc_frame_span.c3"
+      ]
+    },
+    "end_frame": {
+      "type": "object-files",
+      "sources": [
+        "end_frame.c3"
+      ]
+    },
+    "with_frame": {
+      "type": "object-files",
+      "sources": [
+        "with_frame.c3"
+      ]
+    },
+    "default_frame_arena_size": {
+      "type": "object-files",
+      "sources": [
+        "default_frame_arena_size.c3"
+      ]
+    },
+    "frame_arena_size": {
+      "type": "object-files",
+      "sources": [
+        "frame_arena_size.c3"
+      ]
+    },
+    "frames_in_flight": {
+      "type": "object-files",
+      "sources": [
+        "frames_in_flight.c3"
+      ]
+    },
+    "debug_frame": {
+      "type": "object-files",
+      "sources": [
+        "debug_frame.c3"
+      ]
+    },
+    "arena_full": {
+      "type": "object-files",
+      "sources": [
+        "arena_full.c3"
       ]
     },
     "staging_arena_size": {

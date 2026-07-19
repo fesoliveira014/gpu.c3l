@@ -20,9 +20,6 @@ alias GetSpanMappingFn @private      = fn char[]? (Device*, GpuSpan);
 alias GetSpanAddressFn @private      = fn GpuAddress? (Device*, GpuSpan);
 alias FlushSpanFn @private           = fn void? (Device*, GpuSpan);
 alias InvalidateSpanFn @private      = fn void? (Device*, GpuSpan);
-alias BeginFrameFn @private          = fn void? (Device*, FrameToken* out_frame);
-alias AllocFrameSpanFn @private      = fn GpuSpan? (FrameToken*, usz size, usz align);
-alias EndFrameFn @private            = fn void? (FrameToken*);
 // Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
 alias BeginCommandsFn @private   = fn void? (Queue, CommandList* out_commands);
 alias EndCommandsFn @private     = fn void? (CommandList*);
@@ -118,9 +115,6 @@ struct BackendVTable @private {
     GetSpanAddressFn        get_span_address;
     FlushSpanFn             flush_mapped_span;
     InvalidateSpanFn        invalidate_mapped_span;
-    BeginFrameFn            begin_frame;
-    AllocFrameSpanFn        alloc_frame_span;
-    EndFrameFn              end_frame;
     BeginCommandsFn         begin_commands;
     EndCommandsFn           end_commands;
     DiscardCommandsFn       discard_commands;

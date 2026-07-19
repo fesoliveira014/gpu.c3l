@@ -934,7 +934,7 @@ fn void indirect_argument_validation() @test {
     vk::BufferDesc plain_desc = {
         .size        = 64,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
         .access      = { .graphics, .compute, .transfer },
     };
     vk::BufferHandle plain = vk::vk_create_buffer(&device, &plain_desc)!!;

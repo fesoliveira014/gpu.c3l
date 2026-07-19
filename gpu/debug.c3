@@ -20,7 +20,6 @@ enum DebugResourceKind : int {
     COMMAND_LIST,
     TEXTURE_DESCRIPTOR,
     SAMPLER,
-    FRAME,
     ALLOCATION,
 }
 

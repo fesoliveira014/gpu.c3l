@@ -193,8 +193,6 @@ fn void? copy_entry_point(char* dst, ZString name) @private {
    4-byte-aligned word buffer for the uint* code pointer Vulkan requires. *>
 fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     if (desc.spirv.len == 0 || desc.spirv.len % 4 != 0) {
         return report_contract_failure(
             state:               state,
@@ -362,8 +360,6 @@ fn gpu::ShaderHandle? vk_create_shader(gpu::Device* device, gpu::ShaderDesc* des
 
 fn void? vk_destroy_shader(gpu::Device* device, gpu::ShaderHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     ShaderSlot* slot = state.shaders.get(handle)!;

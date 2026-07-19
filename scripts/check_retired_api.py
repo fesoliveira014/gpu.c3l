@@ -29,7 +29,17 @@ FIXTURES = {
     "upload_texture_data": "upload_texture_data",
     "readback_buffer_data": "readback_buffer_data",
     "readback_texture_data": "readback_texture_data",
-    "memory_kind_staging": "STAGING",
+    "memory_kind": "MemoryKind",
+    "frame_token": "FrameToken",
+    "begin_frame": "begin_frame",
+    "alloc_frame_span": "alloc_frame_span",
+    "end_frame": "end_frame",
+    "with_frame": "with_frame",
+    "default_frame_arena_size": "DEFAULT_FRAME_ARENA_SIZE",
+    "frame_arena_size": "frame_arena_size",
+    "frames_in_flight": "frames_in_flight",
+    "debug_frame": "FRAME",
+    "arena_full": "ARENA_FULL",
     "staging_arena_size": "staging_arena_size",
     "readback_arena_size": "readback_arena_size",
     "default_staging_arena_size": "DEFAULT_STAGING_ARENA_SIZE",
@@ -57,16 +67,22 @@ INVALID_MEMBER_TYPES = {
     "staging_arena_size": "DeviceDesc",
     "readback_arena_size": "DeviceDesc",
     "persistent_arena_size": "DeviceDesc",
+    "frame_arena_size": "DeviceDesc",
+    "frames_in_flight": "DeviceDesc",
 }
 
 ENUM_VALUES = {
-    "memory_kind_staging": ("MemoryKind", "STAGING"),
+    "debug_frame": ("DebugResourceKind", "FRAME"),
     "debug_semaphore": ("DebugResourceKind", "SEMAPHORE"),
     "debug_persistent_span": ("DebugResourceKind", "PERSISTENT_SPAN"),
 }
 
 FIELD_OR_METHODS = {
     "timeline_caps": "DeviceCaps.timeline_semaphore",
+}
+
+MACRO_SYMBOLS = {
+    "with_frame",
 }
 
 
@@ -99,9 +115,13 @@ def diagnostic_points_to_retired_member(
         return False
 
     occurrence = occurrences[0]
-    first_column = occurrence.start() + 1
-    if occurrence.start() > 0 and source_line[occurrence.start() - 1] == ".":
-        first_column -= 1
+    first_index = occurrence.start()
+    while (
+        first_index > 0
+        and re.fullmatch(r"[A-Za-z0-9_:.@]", source_line[first_index - 1])
+    ):
+        first_index -= 1
+    first_column = first_index + 1
     last_column = occurrence.end()
     return first_column <= column <= last_column
 
@@ -116,7 +136,7 @@ def has_expected_diagnostic(
         for line in output.splitlines()
         if (match := ERROR_DIAGNOSTIC.search(line)) is not None
     ]
-    if not diagnostics:
+    if len(diagnostics) != 1:
         return False
 
     diagnostic = diagnostics[-1]
@@ -136,15 +156,41 @@ def has_expected_diagnostic(
         )
     if enum_value := ENUM_VALUES.get(target):
         enum_type, value = enum_value
-        return message == f"'{enum_type}' has no enumeration value '{value}'."
+        return (
+            message == f"'{enum_type}' has no enumeration value '{value}'."
+            and diagnostic_points_to_retired_member(
+                target,
+                retired_symbol,
+                diagnostic,
+            )
+        )
     if field_or_method := FIELD_OR_METHODS.get(target):
-        return message == f"There is no field or method '{field_or_method}'."
+        return (
+            message == f"There is no field or method '{field_or_method}'."
+            and diagnostic_points_to_retired_member(
+                target,
+                retired_symbol,
+                diagnostic,
+            )
+        )
 
-    return re.fullmatch(
-        rf"'gpu::{re.escape(retired_symbol)}' could not be found, "
-        r"(?:did you spell it right\?|did you perhaps want .+\?)",
-        message,
-    ) is not None
+    diagnostic_symbol = (
+        f"@{retired_symbol}"
+        if target in MACRO_SYMBOLS
+        else retired_symbol
+    )
+    return (
+        re.fullmatch(
+            rf"'gpu::{re.escape(diagnostic_symbol)}' could not be found, "
+            r"(?:did you spell it right\?|did you perhaps want .+\?)",
+            message,
+        ) is not None
+        and diagnostic_points_to_retired_member(
+            target,
+            retired_symbol,
+            diagnostic,
+        )
+    )
 
 
 def main() -> int:

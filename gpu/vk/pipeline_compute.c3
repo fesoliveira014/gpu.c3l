@@ -87,8 +87,6 @@ fn void? PipelineTable.free(&self, gpu::PipelineHandle h) {
    crashes c3c 0.8.0 codegen. *>
 fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::ComputePipelineDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     if (desc.push_constant_size < gpu::RootPush::size
         || desc.push_constant_size % 4 != 0
         || desc.push_constant_size > state.caps.max_push_constant_size) return gpu::INVALID_ARGUMENT~;
@@ -191,8 +189,6 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
 
 fn void? vk_destroy_pipeline(gpu::Device* device, gpu::PipelineHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     PipelineSlot* slot = state.pipelines.get(handle)!;

@@ -280,15 +280,6 @@ fn BufferUsage allocation_buffer_usage() {
     };
 }
 
-fn gpu::MemoryKind? allocation_memory_kind(gpu::MemoryClass memory_class) {
-    switch (memory_class) {
-        case gpu::MemoryClass.CPU_WRITE:   return gpu::MemoryKind.PERSISTENT_UPLOAD;
-        case gpu::MemoryClass.GPU_PRIVATE: return gpu::MemoryKind.DEVICE;
-        case gpu::MemoryClass.CPU_READ:    return gpu::MemoryKind.READBACK;
-        default:                           return gpu::INVALID_ARGUMENT~;
-    }
-}
-
 fn vma::AllocationCreateInfo? memory_class_to_vma(
     gpu::MemoryClass memory_class,
 ) {
@@ -319,10 +310,10 @@ fn vk::BufferCreateInfo? allocation_buffer_create_info(
     uint[] queue_families,
 ) {
     BufferDesc backing = {
-        .size        = desc.size,
-        .usage       = allocation_buffer_usage(),
-        .memory_kind = allocation_memory_kind(desc.memory_class)!,
-        .access      = desc.access,
+        .size         = desc.size,
+        .usage        = allocation_buffer_usage(),
+        .memory_class = desc.memory_class,
+        .access       = desc.access,
     };
     return make_buffer_create_info(&backing, queue_families);
 }
@@ -511,7 +502,7 @@ fn gpu::GpuAllocation? allocate_memory_for_state_with_ops(
             .size            = desc.size,
             .usage           = allocation_buffer_usage(),
             .access          = desc.access,
-            .memory_kind     = allocation_memory_kind(desc.memory_class)!,
+            .memory_class    = desc.memory_class,
             .debug_name      = debug_name,
             .internal        = true,
         },
@@ -709,8 +700,6 @@ fn void? vk_flush_mapped_span(
     gpu::GpuSpan span,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     AllocationNativeOps ops = allocation_native_ops_real();
     return flush_mapped_span_for_state_with_ops(state, span, &ops);
 }
@@ -720,8 +709,6 @@ fn void? vk_invalidate_mapped_span(
     gpu::GpuSpan span,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     AllocationNativeOps ops = allocation_native_ops_real();
     return invalidate_mapped_span_for_state_with_ops(state, span, &ops);
 }
@@ -731,8 +718,6 @@ fn gpu::GpuAllocation? vk_allocate_memory(
     gpu::AllocationDesc* desc,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     AllocationNativeOps ops = allocation_native_ops_real();
     return allocate_memory_for_state_with_ops(state, desc, &ops);
 }
@@ -742,8 +727,6 @@ fn void? vk_free_allocation(
     gpu::GpuAllocation allocation,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     AllocationNativeOps ops = allocation_native_ops_real();
     return free_allocation_for_state_with_ops(state, allocation, &ops);
 }
@@ -753,8 +736,6 @@ fn gpu::AllocationInfo? vk_get_allocation_info(
     gpu::GpuAllocation allocation,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     return allocation_info_for_state(state, allocation);
 }
 
@@ -763,8 +744,6 @@ fn gpu::GpuSpan? vk_get_allocation_span(
     gpu::GpuAllocation allocation,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     return allocation_span_for_state(state, allocation);
 }
 

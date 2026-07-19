@@ -123,9 +123,9 @@ fn gpu::GpuSpan init_mapped_visibility_fixture(
                 .allocation_info = { .offset = 4096, .size = (vk::DeviceSize)native_size },
                 .cpu_base = mapped ? &fixture.mapping[0] : null,
                 .size = logical_size,
-                .memory_kind = mapped
-                    ? gpu::MemoryKind.PERSISTENT_UPLOAD
-                    : gpu::MemoryKind.DEVICE,
+                .memory_class = mapped
+                    ? gpu::MemoryClass.CPU_WRITE
+                    : gpu::MemoryClass.GPU_PRIVATE,
             },
             .alignment = 64,
             .memory_class = mapped
@@ -433,9 +433,8 @@ fn void debug_resource_kind_ordinals_match_exact_schema() @test {
     assert((int)gpu::DebugResourceKind.COMMAND_LIST == 7);
     assert((int)gpu::DebugResourceKind.TEXTURE_DESCRIPTOR == 8);
     assert((int)gpu::DebugResourceKind.SAMPLER == 9);
-    assert((int)gpu::DebugResourceKind.FRAME == 10);
-    assert((int)gpu::DebugResourceKind.ALLOCATION == 11,
-        "allocation keeps the exact ordinal 11");
+    assert((int)gpu::DebugResourceKind.ALLOCATION == 10,
+        "allocation keeps the exact ordinal 10");
 }
 
 fn vk::Result allocation_probe_create_buffer(
