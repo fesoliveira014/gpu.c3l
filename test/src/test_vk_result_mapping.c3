@@ -119,20 +119,6 @@ fn void custom_result_routes_mark_the_reporting_device() @test {
     assert(@catch(gpu::get_device_caps(&texture_device)) == gpu::DEVICE_LOST, "texture-view loss marks its owner");
     gpu::destroy_device(&texture_device)!!;
 
-    gpu::vk::VkDeviceState helper_state;
-    gpu::Device helper_device = device_loss_fixture(&helper_state);
-    assert(
-        @catch(gpu::vk::check_helper_backend_result(
-            state:           &helper_state,
-            operation:       "upload_buffer_data",
-            result:          vk::Result.ERROR_DEVICE_LOST,
-            fault_is_public: false,
-        )) == gpu::DEVICE_LOST,
-        "swallowed-helper loss remains exact"
-    );
-    assert(@catch(gpu::get_device_caps(&helper_device)) == gpu::DEVICE_LOST, "helper loss marks its owner");
-    gpu::destroy_device(&helper_device)!!;
-
     gpu::vk::VkDeviceState wsi_state;
     gpu::Device wsi_device = device_loss_fixture(&wsi_state);
     gpu::vk::WsiDiagnosticContext context = {

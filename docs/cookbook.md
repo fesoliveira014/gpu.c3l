@@ -75,23 +75,21 @@ Running example: `bindless_texture_compute` (compute),
 
 ## 4. Blocking readback
 
-Goal: get results back on the CPU, simplest form.
+Goal: wait for a result and read it on the CPU.
 
-```c3
-gpu::readback_texture_data(device: &device, src: target, mip: 0,
-    out_data: pixels, from_stage: ..., from_hazard: ..., from_layout: ...)!;
-// round-trips the layout back to from_layout — the texture is left as found
-```
+Allocate `CPU_READ` memory, record the resource transition and copy into its
+span, then record a buffer barrier from `TRANSFER_WRITE` to `HOST_READ`.
+Submit, wait for the returned completion point, invalidate the mapped span, and
+read it. Free or reuse the allocation only after completion.
 
-Running example: `offscreen_triangle`, `multithreaded_recording`.
-
+Running examples: `offscreen_triangle`, `multithreaded_recording`.
 ## 5. Non-blocking readback
 
 Goal: overlap GPU work with CPU consumption.
 
-Allocate a `CPU_READ` destination, record the copy and a `TRANSFER_WRITE` to
-`HOST_READ` barrier on that destination, then keep the completion point returned
-by `submit`. Once `poll_completion` succeeds, call
+Allocate a CPU_READ destination, record the copy and a TRANSFER_WRITE to
+HOST_READ barrier on that destination, then keep the completion point returned
+by submit. Once poll_completion succeeds, call
 `invalidate_mapped_span` and read the mapped span. Reuse or free the allocation
 only after completion.
 
@@ -237,7 +235,7 @@ Running example: `present_mode_explorer`.
 | Class or arena | For | Pattern |
 |---|---|---|
 | `MemoryClass.CPU_WRITE` | CPU-written generic data | map, write, `flush_mapped_span`, submit |
-| `MemoryClass.GPU_PRIVATE` | GPU-only working sets | upload through an exact destination span |
+| `MemoryClass.GPU_PRIVATE` | GPU-only working sets | copy from caller-owned `CPU_WRITE` storage |
 | `MemoryClass.CPU_READ` | GPU-to-CPU results | wait, `invalidate_mapped_span`, read |
 | frame arena | roots and per-frame constants | `alloc_frame_span(&frame, ...)`; coherent and valid for that frame generation |
 | persistent arena | long-lived CPU-written tables | `alloc_persistent_span`; coherent until freed |

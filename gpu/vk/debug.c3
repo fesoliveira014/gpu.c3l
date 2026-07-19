@@ -261,7 +261,7 @@ fn ZString slot_name(char* name) @private {
     return name[0] != 0 ? (ZString)name : (ZString)"(unnamed)";
 }
 
-<* Library-internal allocations (arenas, dedicated transfers) are exempt. *>
+<* Library-owned arena allocations are exempt. *>
 fn void mark_buffer_internal(VkDeviceState* state, BufferHandle handle) {
     if (try slot = state.buffers.get(handle)) slot.internal = true;
 }

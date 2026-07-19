@@ -205,31 +205,6 @@ def valid_document() -> dict:
                         ("barrier", "BufferBarrier*"),
                     ),
                     api_function(
-                        "cmd_upload_buffer",
-                        "void?",
-                        ("commands", "CommandList*"),
-                        ("dst", "GpuSpan"),
-                        ("data", "char[]"),
-                    ),
-                    api_function(
-                        "upload_buffer_data",
-                        "void?",
-                        ("device", "Device*"),
-                        ("dst", "GpuSpan"),
-                        ("data", "char[]"),
-                        ("next_stage", "Stage"),
-                        ("next_hazard", "Hazard"),
-                    ),
-                    api_function(
-                        "readback_buffer_data",
-                        "void?",
-                        ("device", "Device*"),
-                        ("src", "GpuSpan"),
-                        ("out_data", "char[]"),
-                        ("from_stage", "Stage"),
-                        ("from_hazard", "Hazard"),
-                    ),
-                    api_function(
                         "cmd_copy_buffer_to_texture",
                         "void?",
                         ("commands", "CommandList*"),
@@ -743,9 +718,6 @@ class PublicApiCheckTests(unittest.TestCase):
             "cmd_copy_buffer",
             "cmd_fill_buffer",
             "cmd_buffer_barrier",
-            "cmd_upload_buffer",
-            "upload_buffer_data",
-            "readback_buffer_data",
             "cmd_copy_buffer_to_texture",
             "cmd_copy_texture_to_buffer",
             "cmd_draw_indexed",
@@ -819,7 +791,7 @@ class PublicApiCheckTests(unittest.TestCase):
                     check_public_api.validate_document(document),
                 )
 
-    def test_rejects_legacy_buffer_data_function_signatures(self) -> None:
+    def test_rejects_legacy_fill_signature(self) -> None:
         legacy_parameters = {
             "cmd_fill_buffer": (
                 "CommandList*",
@@ -827,28 +799,6 @@ class PublicApiCheckTests(unittest.TestCase):
                 "usz",
                 "usz",
                 "uint",
-            ),
-            "cmd_upload_buffer": (
-                "CommandList*",
-                "BufferHandle",
-                "usz",
-                "char[]",
-            ),
-            "upload_buffer_data": (
-                "Device*",
-                "BufferHandle",
-                "usz",
-                "char[]",
-                "Stage",
-                "Hazard",
-            ),
-            "readback_buffer_data": (
-                "Device*",
-                "BufferHandle",
-                "usz",
-                "char[]",
-                "Stage",
-                "Hazard",
             ),
         }
         for name, parameter_types in legacy_parameters.items():

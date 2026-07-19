@@ -217,8 +217,6 @@ DeviceDesc
     uint texture_descriptor_capacity      (0 = default; docs/limitations.md)
     uint sampler_descriptor_capacity
     uint texture_capacity
-    usz staging_arena_size
-    usz readback_arena_size
     uint frames_in_flight
     char[] pipeline_cache_data            (warm-start blob; §8)
     ZString application_name
@@ -383,15 +381,15 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, mismatched transfer payload length, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame |
-| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
+| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier` | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
 | `RESOURCE_IN_USE` | resource destruction, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, or incomplete submitted work explicitly references a resource; active pipeline creation uses a shader; a placed or dedicated texture depends on an allocation; a live descriptor owns a texture; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
-| `ARENA_FULL` | `alloc_frame_span`, staging/readback paths, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
+| `ARENA_FULL` | `alloc_frame_span`, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
 | `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `begin_commands`; `acquire_next_image`; persistent allocation; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; `create_texture_descriptors` checks this before creating anything, so an overflowing batch leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
@@ -572,24 +570,17 @@ flush. Callers still provide barriers, completion-point dependencies, host
 waits, and lifetime management. Call `free_persistent_span` only after all
 referencing work retires. Spans are scoped to their owning `Device`.
 
-### Span transfers
+### Host transfers
 
-Upload and blocking readback use exact spans:
+The strict core exposes primitives, not transfer policy. For uploads, allocate
+`CPU_WRITE` memory, copy into its mapping, flush it, record a copy, and retain
+the allocation until the returned completion point retires. For readback,
+allocate `CPU_READ` memory, record the copy and a `TRANSFER_WRITE` to
+`HOST_READ` barrier on the destination, submit, wait or poll, invalidate the
+span, then read its mapping.
 
-```text
-cmd_upload_buffer(CommandList* commands, GpuSpan dst, char[] data) -> void?
-upload_buffer_data(Device* device, GpuSpan dst, char[] data, Stage next_stage, Hazard next_hazard) -> void?
-readback_buffer_data(Device* device, GpuSpan src, char[] out_data, Stage from_stage, Hazard from_hazard) -> void?
-```
-
-`data.len` or `out_data.len` must equal the span size. Use
-`GpuSpan.checked_subspan` for a partial transfer. Recorded uploads add no
-barriers. Blocking helpers submit and wait: upload ends at
-`next_stage`/`next_hazard`; readback orders `from_stage`/`from_hazard`
-before the copy.
-
-Texture variants retain their texture-specific arguments. Non-blocking
-readback is documented below.
+Applications choose whether to reuse allocations, suballocate rings, or create
+one-shot storage. `GpuSpan.checked_subspan` defines partial transfers.
 
 ## 6. Texture API
 
@@ -1010,7 +1001,7 @@ are opaque. The backend keeps one admitted family exclusive and uses private
 concurrent sharing only for distinct admitted families.
 
 Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
-`TextureBufferCopyDesc`, `TextureUploadDesc`, `ClearColor`,
+`TextureBufferCopyDesc`, `ClearColor`,
 `ClearDepthStencil`) are documented in the generated reference.
 
 ### Dispatch
@@ -1218,7 +1209,6 @@ get_span_mapping
 
 The caller owns the allocation, barriers, completion point, and mapped data.
 No frame boundary or readback-specific token is required.
-
 ### Barriers
 
 ```text

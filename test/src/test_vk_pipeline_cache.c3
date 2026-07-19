@@ -231,7 +231,7 @@ fn void cull_replay_renders_per_alias() @test {
     defer gpu::destroy_sampler(&device, smp_index)!!;
 
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
-    gpu::upload_texture_data(
+    upload_test_texture_data(
         device:      &device,
         dst:         pattern,
         mip:         0,

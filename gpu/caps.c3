@@ -31,8 +31,6 @@ struct DeviceDesc {
     uint                 sampler_descriptor_capacity;
     uint                 texture_capacity;
     uint                 pipeline_capacity;
-    usz                  staging_arena_size;
-    usz                  readback_arena_size;
     usz                  frame_arena_size;
     usz                  persistent_arena_size;
     uint                 frames_in_flight;

@@ -158,14 +158,6 @@ A `[PASS]` for a `when_available` test on a same-family adapter proves only that
 the topology guard completed. The accompanying `not applicable` message must be
 recorded separately; only a run without that message is cross-family evidence.
 
-Staging-ring creation tests cover aliased, two-family, and tri-family topology,
-pinning ordered indices and exclusive/concurrent create info. Runtime reuse
-regressions cover GRAPHICS helper to recorded COMPUTE, GRAPHICS helper to
-recorded TRANSFER, and recorded COMPUTE to recorded TRANSFER. Each uses one
-live `Device`, exact physical range reuse, queue-local destinations, byte and
-fallback-count checks, and reports PASS only for distinct families; aliased
-topologies report N/A.
-
 ## 4. SDL3 windowed tests and samples
 
 SDL3 belongs to sample/test harnesses. The binding package dependency is `sdl3`; the import module is `sdl`.
@@ -366,7 +358,7 @@ The blocking headless matrix is shared by Linux and Windows:
 vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
 vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
 vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading
-vk_queue vk_debug upload_bench_observation vk_device_request
+vk_queue vk_debug vk_device_request
 ```
 
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.

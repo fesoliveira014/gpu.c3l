@@ -272,18 +272,6 @@ def validate_document(document: dict) -> list[str]:
             ("CommandList*", "BufferBarrier*"),
             "void?",
         ),
-        "cmd_upload_buffer": (
-            ("CommandList*", "GpuSpan", "char[]"),
-            "void?",
-        ),
-        "upload_buffer_data": (
-            ("Device*", "GpuSpan", "char[]", "Stage", "Hazard"),
-            "void?",
-        ),
-        "readback_buffer_data": (
-            ("Device*", "GpuSpan", "char[]", "Stage", "Hazard"),
-            "void?",
-        ),
         "cmd_copy_buffer_to_texture": (
             ("CommandList*", "BufferTextureCopyDesc*"),
             "void?",
@@ -364,21 +352,6 @@ def validate_document(document: dict) -> list[str]:
         "cmd_copy_buffer": ("commands", "desc"),
         "cmd_fill_buffer": ("commands", "dst", "value"),
         "cmd_buffer_barrier": ("commands", "barrier"),
-        "cmd_upload_buffer": ("commands", "dst", "data"),
-        "upload_buffer_data": (
-            "device",
-            "dst",
-            "data",
-            "next_stage",
-            "next_hazard",
-        ),
-        "readback_buffer_data": (
-            "device",
-            "src",
-            "out_data",
-            "from_stage",
-            "from_hazard",
-        ),
         "cmd_copy_buffer_to_texture": ("commands", "desc"),
         "cmd_copy_texture_to_buffer": ("commands", "desc"),
         "cmd_draw_indexed": (

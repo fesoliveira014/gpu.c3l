@@ -522,7 +522,7 @@ fn void transfer_only_texture_round_trips() @test {
 
     char[64] pixels;
     for (uint i = 0; i < 64; i++) pixels[i] = (char)i;
-    gpu::upload_texture_data(
+    upload_test_texture_data(
         device:      &device,
         dst:         tex,
         mip:         0,
@@ -533,7 +533,7 @@ fn void transfer_only_texture_round_trips() @test {
     )!!;
 
     char[64] readback;
-    gpu::readback_texture_data(
+    readback_test_texture_data(
         device:      &device,
         src:         tex,
         mip:         0,

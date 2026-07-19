@@ -173,7 +173,6 @@ VMA allocator through backend state
 descriptor heaps
 frame upload arenas
 persistent arenas
-readback/staging arenas
 pipeline cache
 debug and stats state
 ```
@@ -292,7 +291,7 @@ GPU use and destroys storage immediately.
 
 The public API has no buffer object. Generic GPU data is owned by
 `GpuAllocation`, borrowed as `GpuSpan`, and addressed as `GpuAddress`.
-Copy, fill, index, indirect, upload, and readback operations resolve spans to
+Copy, fill, index, indirect, upload, and readback workflows resolve spans to
 private native buffers.
 
 The Vulkan backend may use private `BufferHandle`, `BufferDesc`, and
@@ -483,14 +482,12 @@ cmd_copy_buffer(command_list, { src_span, dst_span })
 cmd_copy_buffer_to_texture
 cmd_copy_texture_to_buffer
 cmd_fill_buffer(command_list, dst_span, value)
-cmd_upload_buffer(command_list, dst_span, data)
 ```
 
-Buffer copies use equal-size, non-overlapping spans. Fill and upload operate on
-the exact supplied span. Upload data and blocking-readback output
-lengths must match it. Use a checked subspan for a partial operation. Transfer
-helpers do not imply next-use barriers.
-
+Transfers operate on caller-owned spans. Applications allocate and map
+`CPU_WRITE` or `CPU_READ` storage, record copies and barriers, and retain that
+storage until the submission completion point retires. The core owns no staging
+ring, readback pool, or blocking transfer path.
 ### Barriers
 
 Barriers are explicit:

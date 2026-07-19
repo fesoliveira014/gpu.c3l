@@ -69,7 +69,7 @@ define behavioral memory classes
 track owning allocations and non-owning span identities
 keep mappings, addresses, access, and native backing private
 translate resource policy to Vulkan/VMA
-own frame/persistent/staging/readback arenas
+own frame and persistent arenas
 validate bounds, capabilities, and lifetimes
 record explicit barriers
 ```
@@ -87,9 +87,6 @@ VkDeviceState
     AllocationTable allocations
     FrameArenaState[] frame_arenas
     PersistentArenaState persistent_arena
-    TransferArenaState staging_arena
-    TransferArenaState readback_arena
-    DedicatedRetireState dedicated_staging
 ```
 
 The persistent arena is reserved for `PERSISTENT_UPLOAD`; device-local
@@ -184,7 +181,6 @@ bounds or overflow checks.
 | Placed textures | `MemoryClass.TEXTURE` | query requirements, allocate, create placed textures |
 | Per-frame roots and tables | `alloc_frame_span` | mapped, host-coherent, valid for the frame generation |
 | Long-lived CPU-written tables | `alloc_persistent_span` with `PERSISTENT_UPLOAD` | mapped and host-coherent until freed |
-| Upload and readback scratch | transfer helpers | staging and readback storage stay private |
 
 `MemoryKind` is not an independent-allocation selector. Public code supplies it
 only through `PersistentAllocDesc`, where `PERSISTENT_UPLOAD` is mandatory.
@@ -315,8 +311,7 @@ FrameArenaState
 
 Frame-upload, persistent-arena, and descriptor-buffer storage require
 host-coherent memory, so their mapped writes need no flush. Independent
-allocations use the span visibility operations; transfer arenas handle
-visibility internally.
+allocations use the span visibility operations.
 
 Frame spans admit the selected graphics and compute roles, or transfer on a
 transfer-only device. The backing buffer uses the exact deduplicated families for
@@ -398,88 +393,17 @@ Free flow:
 3. Retire the allocation generation.
 ```
 
-## 12. Readback arena
+## 12. Host transfers
 
-Buffer readback consumes an exact source span. `readback_buffer_data` requires
-`out_data.len == src.size`. Use `checked_subspan` for a partial readback.
-Internal readback storage supports CPU invalidation before reads.
+Transfer storage is caller-owned. Uploads use `CPU_WRITE` allocations: map,
+write, flush, record a copy, and retain the allocation until completion.
+Readback uses `CPU_READ` allocations: record the copy and a destination barrier
+from `TRANSFER_WRITE` to `HOST_READ`, submit, wait or poll, invalidate, then
+read the mapping.
 
-Blocking flow (the `readback_buffer_data` / `readback_texture_data` helpers):
-
-```text
-1. Allocate an internal readback range.
-2. Record the GPU copy into that range.
-3. Record barrier transfer write -> host read if needed by backend policy.
-4. Submit and wait for timeline.
-5. Invalidate the allocation range if non-coherent.
-6. Read the range returned by `get_span_mapping`.
-```
-
-For non-blocking readback, allocate `CPU_READ` memory, record the copy and a
-`TRANSFER_WRITE` to `HOST_READ` barrier on its destination span, submit, and
-poll the returned completion point. After completion,
-invalidate the span and read its mapping. The caller controls allocation reuse
-and release.
-
-## 13. Staging arena
-
-The staging arena uploads data without creating many short-lived native allocations.
-
-`cmd_upload_buffer` and `upload_buffer_data` consume an exact destination span
-and require `data.len == dst.size`. Use `checked_subspan` for a partial upload.
-
-The staging and readback arenas place ranges with monotonic virtual offsets and
-map them to physical offsets with `virtual_start % arena_size`. Placement is
-planned before retire state is changed: alignment padding, the physical wrap
-gap, live-window capacity, and `virtual_end` are each checked with
-subtraction-first bounds before any addition is formed. An unrepresentable
-range behaves as `ARENA_FULL`, so the existing dedicated-buffer fallback
-remains available.
-
-Live virtual offsets are never wrapped. When retirement empties the queue, the
-next successful arena allocation normalizes the stale head and tail to zero.
-
-Upload flow:
-
-```text
-1. Allocate staging span.
-2. Copy source bytes to the range returned by `get_span_mapping`.
-3. Flush if non-coherent.
-4. Record copy to destination.
-5. Caller records destination next-use barrier.
-6. Staging span is recycled after submit timeline retires.
-```
-
-The staging and readback rings and dedicated transfer fallbacks are `EXCLUSIVE`
-when their admitted roles select one family. With multiple admitted families
-they are `CONCURRENT` across the exact deduplicated device order: graphics,
-compute, then transfer.
-
-Concurrent sharing removes queue-family ownership transfers only. Host
-flushes, barriers, submission ordering, queue completion, timeline retirement,
-and ring locking remain required. Each ring remains scoped to its owning
-`Device`.
-
-### 13.1 Which timeline retires a range
-
-Every staging range, dedicated staging buffer, and readback range carries a
-timeline tag decided at allocation time: `FRAME` (`frame_timeline`, tagged
-`counter + 1`) for in-frame command-list paths (`cmd_upload_buffer`,
-`cmd_upload_texture`), or `HELPER` (`helper_timeline`) for the blocking
-helpers (`upload_buffer_data`, `upload_texture_data`, `readback_buffer_data`,
-`readback_texture_data`). A blocking helper reserves its retire value once,
-under `transfer_mutex`, before its (single) allocation, and every range or
-dedicated buffer it tags carries that exact value — never the value another
-concurrent helper reserved, and never `frame_timeline`. Drains compare each
-entry against its own tagged timeline's current counter value, so one
-helper's completion can never retire another helper's or an unsubmitted
-list's ranges. See docs/threading.md §Helper timeline for the
-completion-side turnstile.
-
-Blocking helpers validate resource access against their single internal
-transfer role rather than a recording queue's merged role set, so a span
-admitted on a multi-role queue recording may still be rejected by a helper;
-this stricter check is intentional and deterministic across queue topologies.
+The core does not allocate staging rings, readback pools, dedicated fallbacks,
+or helper timelines. Applications may implement those policies over
+allocations, spans, commands, and completion points.
 
 ## 14. Mapped visibility
 
@@ -541,8 +465,6 @@ buffer:<debug_name>
 texture:<debug_name>
 arena:frame_upload:<frame_index>
 arena:persistent_upload
-arena:staging
-arena:readback
 ```
 
 ## 17. Immediate resource lifetime
@@ -579,8 +501,7 @@ independent allocations provide generation-checked ownership and range queries
 addressable spans return non-zero GpuAddress
 frame spans reset only after timeline retirement
 persistent spans support allocation/free/reuse
-readback path invalidates non-coherent memory
-staging path flushes non-coherent memory
+host transfer paths flush and invalidate non-coherent memory
 memory stats report VMA budget and live resources
 allocation names appear in debug reports
 resource destruction never waits or queues deferred work

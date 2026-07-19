@@ -81,24 +81,6 @@ alias CmdDrawIndexedIndirectCountFn @private = fn void? (CommandList*, PipelineH
 alias CmdDispatchIndirectFn @private   = fn void? (CommandList*, PipelineHandle, GpuAddress, GpuSpan);
 alias CmdBeginLabelFn @private         = fn void? (CommandList*, ZString, float[4]);
 alias CmdEndLabelFn @private           = fn void? (CommandList*);
-alias CmdUploadBufferFn @private       = fn void? (CommandList*, GpuSpan, char[]);
-alias CmdUploadTextureFn @private      = fn void? (CommandList*, TextureUploadDesc*, char[]);
-alias UploadBufferDataFn @private = fn void? (
-    Device* device,
-    GpuSpan dst,
-    char[] data,
-    Stage next_stage,
-    Hazard next_hazard,
-);
-alias UploadTextureDataFn @private     = fn void? (Device*, TextureHandle, uint, char[], Stage, Hazard, TextureLayout);
-alias ReadbackBufferDataFn @private = fn void? (
-    Device* device,
-    GpuSpan src,
-    char[] out_data,
-    Stage from_stage,
-    Hazard from_hazard,
-);
-alias ReadbackTextureDataFn @private   = fn void? (Device*, TextureHandle, uint, char[], Stage, Hazard, TextureLayout);
 alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
@@ -190,12 +172,6 @@ struct BackendVTable @private {
     CmdDispatchIndirectFn   cmd_dispatch_indirect;
     CmdBeginLabelFn         cmd_begin_label;
     CmdEndLabelFn           cmd_end_label;
-    CmdUploadBufferFn       cmd_upload_buffer;
-    CmdUploadTextureFn      cmd_upload_texture;
-    UploadBufferDataFn      upload_buffer_data;
-    UploadTextureDataFn     upload_texture_data;
-    ReadbackBufferDataFn    readback_buffer_data;
-    ReadbackTextureDataFn   readback_texture_data;
     CreateSwapchainFn       create_swapchain;
     DestroySwapchainFn      destroy_swapchain;
     ResizeSwapchainFn       resize_swapchain;

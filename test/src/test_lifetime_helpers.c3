@@ -96,3 +96,124 @@ fn void? destroy_test_device(gpu::Device* device) {
     }
     gpu::destroy_device(device)!;
 }
+
+fn void? upload_test_texture_data(
+    gpu::Device* device,
+    gpu::TextureHandle dst,
+    uint mip,
+    char[] data,
+    gpu::Stage next_stage,
+    gpu::Hazard next_hazard,
+    gpu::TextureLayout next_layout,
+) {
+    OwnedSpan upload = allocate_owned_span(
+        device:       device,
+        size:         data.len,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "test_texture_upload",
+    )!;
+    defer (void)free_owned_span(device, &upload);
+    char[] mapping = gpu::get_span_mapping(device, upload.span)!;
+    mapping[..] = data[..];
+    gpu::flush_mapped_span(device, upload.span)!;
+
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!;
+    defer (void)discard_test_commands(&commands);
+    gpu::TextureBarrier to_transfer = gpu::texture_transition(
+        texture: dst,
+        before:  gpu::TextureUse.UNDEFINED,
+        after:   gpu::TextureUse.TRANSFER_DESTINATION,
+    )!;
+    gpu::cmd_texture_barrier(&commands, &to_transfer)!;
+    gpu::BufferTextureCopyDesc copy = {
+        .src     = upload.span,
+        .texture = dst,
+        .mip     = mip,
+    };
+    gpu::cmd_copy_buffer_to_texture(&commands, &copy)!;
+    gpu::TextureBarrier next_use = {
+        .texture       = dst,
+        .before_stage  = gpu::Stage.TRANSFER,
+        .after_stage   = next_stage,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+        .after_hazard  = next_hazard,
+        .old_layout    = gpu::TextureLayout.TRANSFER_DST,
+        .new_layout    = next_layout,
+    };
+    gpu::cmd_texture_barrier(&commands, &next_use)!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
+    defer (void)discard_test_executable(&executable);
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
+    gpu::wait_completion(completion)!;
+}
+
+fn void? readback_test_texture_data(
+    gpu::Device* device,
+    gpu::TextureHandle src,
+    uint mip,
+    char[] out_data,
+    gpu::Stage from_stage,
+    gpu::Hazard from_hazard,
+    gpu::TextureLayout from_layout,
+) {
+    OwnedSpan readback = allocate_owned_span(
+        device:       device,
+        size:         out_data.len,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "test_texture_readback",
+    )!;
+    defer (void)free_owned_span(device, &readback);
+
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!;
+    defer (void)discard_test_commands(&commands);
+    gpu::TextureBarrier to_transfer = {
+        .texture       = src,
+        .before_stage  = from_stage,
+        .after_stage   = gpu::Stage.TRANSFER,
+        .before_hazard = from_hazard,
+        .after_hazard  = gpu::Hazard.TRANSFER_READ,
+        .old_layout    = from_layout,
+        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+    };
+    gpu::cmd_texture_barrier(&commands, &to_transfer)!;
+    gpu::TextureBufferCopyDesc copy = {
+        .texture = src,
+        .dst     = readback.span,
+        .mip     = mip,
+    };
+    gpu::cmd_copy_texture_to_buffer(&commands, &copy)!;
+    gpu::BufferBarrier host_read = {
+        .span          = readback.span,
+        .before_stage  = gpu::Stage.TRANSFER,
+        .after_stage   = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+        .after_hazard  = gpu::Hazard.HOST_READ,
+    };
+    gpu::cmd_buffer_barrier(&commands, &host_read)!;
+    gpu::TextureBarrier restore = {
+        .texture       = src,
+        .before_stage  = gpu::Stage.TRANSFER,
+        .after_stage   = from_stage,
+        .before_hazard = gpu::Hazard.TRANSFER_READ,
+        .after_hazard  = from_hazard,
+        .old_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        .new_layout    = from_layout,
+    };
+    gpu::cmd_texture_barrier(&commands, &restore)!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
+    defer (void)discard_test_executable(&executable);
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
+    gpu::wait_completion(completion)!;
+
+    gpu::invalidate_mapped_span(device, readback.span)!;
+    char[] mapping = gpu::get_span_mapping(device, readback.span)!;
+    out_data[..] = mapping[..];
+}

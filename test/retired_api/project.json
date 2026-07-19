@@ -103,6 +103,66 @@
         "readback_not_ready.c3"
       ]
     },
+    "cmd_upload_buffer": {
+      "type": "object-files",
+      "sources": [
+        "cmd_upload_buffer.c3"
+      ]
+    },
+    "cmd_upload_texture": {
+      "type": "object-files",
+      "sources": [
+        "cmd_upload_texture.c3"
+      ]
+    },
+    "upload_buffer_data": {
+      "type": "object-files",
+      "sources": [
+        "upload_buffer_data.c3"
+      ]
+    },
+    "upload_texture_data": {
+      "type": "object-files",
+      "sources": [
+        "upload_texture_data.c3"
+      ]
+    },
+    "readback_buffer_data": {
+      "type": "object-files",
+      "sources": [
+        "readback_buffer_data.c3"
+      ]
+    },
+    "readback_texture_data": {
+      "type": "object-files",
+      "sources": [
+        "readback_texture_data.c3"
+      ]
+    },
+    "staging_arena_size": {
+      "type": "object-files",
+      "sources": [
+        "staging_arena_size.c3"
+      ]
+    },
+    "readback_arena_size": {
+      "type": "object-files",
+      "sources": [
+        "readback_arena_size.c3"
+      ]
+    },
+    "default_staging_arena_size": {
+      "type": "object-files",
+      "sources": [
+        "default_staging_arena_size.c3"
+      ]
+    },
+    "default_readback_arena_size": {
+      "type": "object-files",
+      "sources": [
+        "default_readback_arena_size.c3"
+      ]
+    },
     "debug_semaphore": {
       "type": "object-files",
       "sources": [

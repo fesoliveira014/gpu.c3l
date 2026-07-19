@@ -67,8 +67,6 @@ const usz MAX_MEMORY_HEAPS = 16;
 const usz MAX_PERSISTENT_ALLOCATIONS = 4096;
 const usz DEFAULT_FRAME_ARENA_SIZE = 16 << 20;
 const usz DEFAULT_PERSISTENT_ARENA_SIZE = 64 << 20;
-const usz DEFAULT_STAGING_ARENA_SIZE = 32 << 20;
-const usz DEFAULT_READBACK_ARENA_SIZE = 8 << 20;
 
 // Per-heap memory usage snapshot.
 struct MemoryHeapBudget {
@@ -315,19 +313,6 @@ struct PersistentArenaStats {
     ulong allocation_count;
 }
 
-// Region for cmd_upload_texture; mirrors BufferTextureCopyDesc minus the
-// source span (the staging arena provides it).
-struct TextureUploadDesc {
-    TextureHandle texture;
-    uint          mip;
-    uint          base_layer;
-    uint          layer_count;
-    uint          x;
-    uint          y;
-    uint          width;
-    uint          height;
-}
-
 <* Allocate a long-lived span from the persistent arena. `size` must be
    nonzero; `align` 0 means no requirement, otherwise a power of two
    (INVALID_ARGUMENT). `access` must be a non-empty subset of selected roles
@@ -358,80 +343,6 @@ fn PersistentArenaStats? get_persistent_stats(Device* device) {
     return operation.vtable.get_persistent_stats(device);
 }
 
-<* Record an exact-span upload through the staging arena. `data.len` must equal
-   `dst.size`; the caller records destination barriers. *>
-fn void? cmd_upload_buffer(CommandList* commands, GpuSpan dst, char[] data) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.cmd_upload_buffer(commands, dst, data);
-}
-
-<* Texture flavor of cmd_upload_buffer. The region follows the copy-desc rules
-   (extent 0 = full mip); the tracked layout must be TRANSFER_DST. *>
-fn void? cmd_upload_texture(CommandList* commands, TextureUploadDesc* desc, char[] data) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    return operation.vtable.cmd_upload_texture(commands, desc, data);
-}
-
-<* Blocking exact-span upload followed by the caller-named next-use barrier.
-   `data.len` must equal `dst.size`; `dst` must admit the frame queue role. *>
-fn void? upload_buffer_data(
-    Device* device,
-    GpuSpan dst,
-    char[] data,
-    Stage next_stage,
-    Hazard next_hazard,
-) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.upload_buffer_data(
-        device:      device,
-        dst:         dst,
-        data:        data,
-        next_stage:  next_stage,
-        next_hazard: next_hazard,
-    );
-}
-
-<* Blocking full-mip texture upload. The texture must be tracked UNDEFINED
-   (transitioned in) or already TRANSFER_DST; anything else faults
-   INVALID_RESOURCE_STATE — re-uploading an in-use texture belongs in a
-   command stream with explicit barriers. Ends at the named next-use. *>
-fn void? upload_texture_data(Device* device, TextureHandle dst, uint mip, char[] data, Stage next_stage, Hazard next_hazard, TextureLayout next_layout) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.upload_texture_data(device, dst, mip, data, next_stage, next_hazard, next_layout);
-}
-
-<* Blocking exact-span readback. `out_data.len` must equal `src.size`; `src`
-   must admit the frame queue role. The hazards order prior writes. *>
-fn void? readback_buffer_data(
-    Device* device,
-    GpuSpan src,
-    char[] out_data,
-    Stage from_stage,
-    Hazard from_hazard,
-) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.readback_buffer_data(
-        device:      device,
-        src:         src,
-        out_data:    out_data,
-        from_stage:  from_stage,
-        from_hazard: from_hazard,
-    );
-}
-
-<* Blocking full-mip texture readback; round-trips from_layout → TRANSFER_SRC
-   → from_layout, leaving the texture as found. *>
-fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char[] out_data, Stage from_stage, Hazard from_hazard, TextureLayout from_layout) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.readback_texture_data(device, src, mip, out_data, from_stage, from_hazard, from_layout);
-}
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the
    caller has already proved the range, or deliberately needs an invalid span
