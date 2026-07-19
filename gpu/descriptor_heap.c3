@@ -1,8 +1,8 @@
 module gpu;
 
-const uint DEFAULT_TEXTURE_DESCRIPTORS = 4096;
-const uint DEFAULT_SAMPLER_DESCRIPTORS = 256;
-const uint MAX_DESCRIPTOR_SLOTS = 65_536;
+const uint DEFAULT_TEXTURE_HEAP_CAPACITY = 4096;
+const uint DEFAULT_SAMPLER_HEAP_CAPACITY = 256;
+const uint MAX_SHADER_HEAP_CAPACITY = 65_536;
 
 <* Publish one texture view in the strict shader-visible heap. The texture must
    carry sampled or storage usage. The returned owner-bearing view contains the

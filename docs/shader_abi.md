@@ -229,7 +229,7 @@ texture_heap[GPU_HEAP_SLOT(material.albedo_texture)]
 sampler_heap[GPU_HEAP_SLOT(material.material_sampler)]
 ```
 
-The exact shader spelling depends on descriptor buffer vs descriptor indexing implementation, but material records remain unchanged.
+The exact shader spelling depends on the private heap implementation, but material records remain unchanged.
 
 ## 9. Descriptor heap shader contract
 

@@ -67,6 +67,72 @@
         "texture_descriptor_desc.c3"
       ]
     },
+    "descriptor_heap_mode": {
+      "type": "object-files",
+      "sources": [
+        "descriptor_heap_mode.c3"
+      ]
+    },
+    "descriptor_heap_mode_field": {
+      "type": "object-files",
+      "sources": [
+        "descriptor_heap_mode_field.c3"
+      ]
+    },
+    "texture_descriptor_capacity": {
+      "type": "object-files",
+      "sources": [
+        "texture_descriptor_capacity.c3"
+      ]
+    },
+    "sampler_descriptor_capacity": {
+      "type": "object-files",
+      "sources": [
+        "sampler_descriptor_capacity.c3"
+      ]
+    },
+    "descriptor_buffer_caps": {
+      "type": "object-files",
+      "sources": [
+        "descriptor_buffer_caps.c3"
+      ]
+    },
+    "descriptor_indexing_caps": {
+      "type": "object-files",
+      "sources": [
+        "descriptor_indexing_caps.c3"
+      ]
+    },
+    "max_texture_descriptors_caps": {
+      "type": "object-files",
+      "sources": [
+        "max_texture_descriptors_caps.c3"
+      ]
+    },
+    "max_sampler_descriptors_caps": {
+      "type": "object-files",
+      "sources": [
+        "max_sampler_descriptors_caps.c3"
+      ]
+    },
+    "default_texture_descriptors": {
+      "type": "object-files",
+      "sources": [
+        "default_texture_descriptors.c3"
+      ]
+    },
+    "default_sampler_descriptors": {
+      "type": "object-files",
+      "sources": [
+        "default_sampler_descriptors.c3"
+      ]
+    },
+    "max_descriptor_slots": {
+      "type": "object-files",
+      "sources": [
+        "max_descriptor_slots.c3"
+      ]
+    },
     "buffer_handle": {
       "type": "object-files",
       "sources": [

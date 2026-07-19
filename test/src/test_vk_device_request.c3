@@ -37,43 +37,56 @@ fn uptr device_physical_adapter(gpu::Device* device) @private {
     return (uptr)state.physical_device;
 }
 
-fn void strict_heap_state_follows_request_and_mode() @test {
-    gpu::DeviceDesc desc = {
-        .descriptor_heap_mode        = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
-        .texture_descriptor_capacity = 7,
-        .sampler_descriptor_capacity = 9,
+fn gpu::vk::IndexingHeapLimits permissive_indexing_heap_limits() @private {
+    return {
+        .max_sampled_images           = uint::max,
+        .max_storage_images           = uint::max,
+        .max_samplers                 = uint::max,
+        .max_per_stage_sampled_images = uint::max,
+        .max_per_stage_storage_images = uint::max,
+        .max_per_stage_samplers       = uint::max,
+        .max_per_stage_resources      = uint::max,
+        .max_all_pools_descriptors    = uint::max,
     };
-    gpu::vk::VkStrictHeapState disabled = gpu::vk::resolve_strict_heap_state(false, &desc)!!;
-    gpu::vk::select_strict_heap_mode(
+}
+
+fn void strict_heap_state_selects_private_implementation() @test {
+    gpu::DeviceDesc desc = {
+        .texture_heap_capacity = 7,
+        .sampler_heap_capacity = 9,
+    };
+    gpu::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
+
+    gpu::vk::VkStrictHeapState disabled =
+        gpu::vk::resolve_strict_heap_state(false, &desc)!!;
+    gpu::vk::select_strict_heap_implementation(
         state:              &disabled,
-        requested:          desc.descriptor_heap_mode,
         indexing_supported: false,
         buffer_supported:   false,
+        indexing_limits:    limits,
     )!!;
     assert(!disabled.enabled, "an unrequested strict heap remains disabled");
-    assert(disabled.mode == gpu::DescriptorHeapMode.AUTO, "a disabled strict heap selects no backend mode");
+    assert(
+        disabled.implementation == gpu::vk::VkHeapImplementation.NONE,
+        "a disabled strict heap selects no private implementation"
+    );
     assert(disabled.texture_capacity == 0, "a disabled strict heap reserves no texture capacity");
     assert(disabled.sampler_capacity == 0, "a disabled strict heap reserves no sampler capacity");
     assert(disabled.descriptors.texture_cells.ptr == null, "a disabled strict heap owns no descriptor cells");
-    assert(
-        !gpu::vk::strict_heap_uses_descriptor_indexing(&disabled),
-        "a disabled strict heap requests no indexing features"
-    );
-    assert(
-        !gpu::vk::strict_heap_uses_descriptor_buffer(&disabled),
-        "a disabled strict heap requests no descriptor-buffer dispatch"
-    );
 
-    desc.descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING;
-    gpu::vk::VkStrictHeapState indexing = gpu::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::vk::select_strict_heap_mode(
+    gpu::vk::VkStrictHeapState indexing =
+        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::vk::select_strict_heap_implementation(
         state:              &indexing,
-        requested:          desc.descriptor_heap_mode,
         indexing_supported: true,
-        buffer_supported:   false,
+        buffer_supported:   true,
+        indexing_limits:    limits,
     )!!;
     assert(indexing.enabled, "a requested strict heap is enabled");
-    assert(indexing.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, "the indexing path remains exact");
+    assert(
+        indexing.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+        "indexing is preferred when it satisfies the semantic capacities"
+    );
     assert(indexing.texture_capacity == 7, "the requested texture capacity is preserved");
     assert(indexing.sampler_capacity == 9, "the requested sampler capacity is preserved");
     assert(gpu::vk::strict_heap_uses_descriptor_indexing(&indexing), "the indexing path requests indexing features");
@@ -82,17 +95,50 @@ fn void strict_heap_state_follows_request_and_mode() @test {
         "the indexing path requests no descriptor-buffer dispatch"
     );
 
-    desc.descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER;
-    gpu::vk::VkStrictHeapState buffer = gpu::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::vk::select_strict_heap_mode(
-        state:              &buffer,
-        requested:          desc.descriptor_heap_mode,
+    gpu::vk::IndexingHeapLimits constrained = limits;
+    constrained.max_sampled_images = 6;
+    gpu::vk::VkStrictHeapState fallback =
+        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::vk::select_strict_heap_implementation(
+        state:              &fallback,
+        indexing_supported: true,
+        buffer_supported:   true,
+        indexing_limits:    constrained,
+    )!!;
+    assert(
+        fallback.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+        "descriptor buffers are selected when indexing cannot provide the requested capacity"
+    );
+
+    gpu::vk::VkStrictHeapState buffer_only =
+        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::vk::select_strict_heap_implementation(
+        state:              &buffer_only,
         indexing_supported: false,
         buffer_supported:   true,
+        indexing_limits:    limits,
     )!!;
-    assert(buffer.mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, "the descriptor-buffer path remains exact");
-    assert(!gpu::vk::strict_heap_uses_descriptor_indexing(&buffer), "the buffer path requests no indexing features");
-    assert(gpu::vk::strict_heap_uses_descriptor_buffer(&buffer), "the buffer path requests descriptor-buffer dispatch");
+    assert(
+        buffer_only.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+        "descriptor buffers satisfy strict heaps when indexing is unavailable"
+    );
+
+    gpu::vk::VkStrictHeapState unavailable =
+        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    fault selection_fault = @catch(gpu::vk::select_strict_heap_implementation(
+        state:              &unavailable,
+        indexing_supported: false,
+        buffer_supported:   false,
+        indexing_limits:    limits,
+    ));
+    assert(
+        selection_fault == gpu::UNSUPPORTED_FEATURE,
+        "strict heap selection faults when no private implementation is available"
+    );
+    assert(
+        unavailable.implementation == gpu::vk::VkHeapImplementation.NONE,
+        "failed selection leaves the private implementation unpublished"
+    );
 }
 
 fn void adapter_request_creation_reuses_runtime_discovery() @test {
@@ -149,15 +195,14 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             "strict state owns its descriptor layout"
         );
         assert(
-            caps.max_texture_descriptors == device_state.strict_heap.texture_capacity,
+            caps.texture_heap_capacity == device_state.strict_heap.texture_capacity,
             "published texture capacity matches strict state"
         );
         assert(
-            caps.max_sampler_descriptors == device_state.strict_heap.sampler_capacity,
+            caps.sampler_heap_capacity == device_state.strict_heap.sampler_capacity,
             "published sampler capacity matches strict state"
         );
         if (gpu::vk::strict_heap_uses_descriptor_buffer(&device_state.strict_heap)) {
-            assert(caps.descriptor_buffer, "the selected descriptor-buffer path is published");
             assert(
                 gpu::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
                 "the selected descriptor-buffer path loads its dispatch"
@@ -167,7 +212,6 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
                 "the selected descriptor-buffer path owns its buffer"
             );
         } else {
-            assert(caps.descriptor_indexing, "the selected indexing path is published");
             assert(
                 !gpu::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
                 "the indexing path loads no descriptor-buffer dispatch"

@@ -69,14 +69,11 @@ multiDrawIndirect
 shaderDrawParameters
 ```
 
-Descriptor path:
-
-```text
-AUTO: prefer descriptor indexing, then descriptor buffer
-forced: descriptor indexing or descriptor buffer
-```
-
-Indexing is preferred because lavapipe (Mesa 25.0.7) miscompiles
+Shader heaps are selected automatically. Descriptor indexing is preferred when
+its features and limits satisfy the requested semantic capacities. Descriptor
+buffers provide the fallback only after an exact temporary layout preflight
+proves the same capacities fit the candidate's driver-reported limits. Indexing
+is preferred in part because lavapipe (Mesa 25.0.7) miscompiles
 descriptor-buffer image access.
 
 Device creation should fail with `UNSUPPORTED_FEATURE` if required features are missing.
@@ -149,8 +146,8 @@ must support timeline semaphores
 must support shaderInt64
 must support multiDrawIndirect
 must support shaderDrawParameters
-must support the heap non-uniform-indexing features
-must resolve a heap mode from the requested DescriptorHeapMode
+must support one exact shader-heap implementation
+must satisfy the requested semantic texture and sampler capacities
 must satisfy the default one-graphics, one-compute, one-transfer queue request;
 roles may alias or use separate families
 ```
@@ -352,7 +349,7 @@ The backend tracks image layout per texture. For complex subresource layout trac
 
 ### Descriptor indexing path
 
-Default under `DescriptorHeapMode.AUTO`.
+Preferred automatically when its features and limits satisfy the requested capacities.
 
 Uses:
 
@@ -370,11 +367,16 @@ the exact resource total `2T` against
 toward that limit. Its single update-after-bind pool contains `2T + S`
 descriptors and is checked against `maxUpdateAfterBindDescriptorsInAllPools`.
 Requests that exceed either aggregate or any per-type limit fail with
-`INVALID_ARGUMENT`; capacities are never clamped.
+`UNSUPPORTED_FEATURE`; capacities are never clamped.
 
 ### Descriptor buffer path
 
-Opt-in via `DescriptorHeapMode.DESCRIPTOR_BUFFER`. `AUTO` never selects it: lavapipe (Mesa 25.0.7) miscompiles descriptor-buffer image access.
+Selected automatically when descriptor indexing cannot satisfy the requested
+capacities and descriptor-buffer support is available. Candidate selection
+creates the exact layout temporarily and checks its driver-reported size
+against every descriptor-buffer range and address-space limit before ranking
+the adapter. Mesa 25.0.7 lavapipe miscompiles descriptor-buffer image access,
+so that path remains gated in native shader tests.
 
 Backend owns descriptor buffers for:
 

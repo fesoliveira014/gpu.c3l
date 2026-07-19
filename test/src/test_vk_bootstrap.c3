@@ -59,7 +59,6 @@ fn void device_create_destroy() @test {
         .backend              = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
         .enable_debug_names   = true,
-        .descriptor_heap_mode = gpu::DescriptorHeapMode.AUTO,
         .application_name     = "gpu_vk_bootstrap_test",
     };
 
@@ -115,30 +114,27 @@ fn void device_create_destroy() @test {
     assert(destroyed_fault == gpu::INVALID_HANDLE, "destroyed device use faults INVALID_HANDLE");
 }
 
-fn void device_heap_mode_and_capacities() @test {
+fn void device_heap_capacities() @test {
     gpu::DeviceDesc desc = {
-        .backend                     = gpu::BackendKind.VULKAN,
-        .enable_validation           = true,
-        .descriptor_heap_mode        = gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
-        .texture_descriptor_capacity = 64,
-        .sampler_descriptor_capacity = 8,
-        .application_name            = "gpu_vk_heap_mode_test",
+        .backend               = gpu::BackendKind.VULKAN,
+        .enable_validation     = true,
+        .texture_heap_capacity = 64,
+        .sampler_heap_capacity = 8,
+        .application_name      = "gpu_vk_heap_capacity_test",
     };
 
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
-    assert(caps.descriptor_indexing, "the indexing path is enabled");
-    assert(!caps.descriptor_buffer, "the unselected descriptor-buffer path is disabled");
-    assert(caps.max_texture_descriptors == 64, "texture capacity reflects the desc");
-    assert(caps.max_sampler_descriptors == 8, "sampler capacity reflects the desc");
+    assert(caps.texture_heap_capacity == 64, "texture capacity reflects the desc");
+    assert(caps.sampler_heap_capacity == 8, "sampler capacity reflects the desc");
     gpu::destroy_device(&device)!!;
 }
 
 fn void device_capacity_over_ceiling_rejected() @test {
     gpu::DeviceDesc desc = {
-        .backend                     = gpu::BackendKind.VULKAN,
-        .texture_descriptor_capacity = gpu::MAX_DESCRIPTOR_SLOTS + 1,
-        .application_name            = "gpu_vk_capacity_test",
+        .backend               = gpu::BackendKind.VULKAN,
+        .texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1,
+        .application_name      = "gpu_vk_capacity_test",
     };
 
     fault capacity_fault = @catch(gpu::create_device_from_desc(&desc));

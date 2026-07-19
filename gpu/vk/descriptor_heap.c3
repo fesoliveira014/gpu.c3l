@@ -12,18 +12,25 @@ const uint HEAP_SET = 0;
 const uint HEAP_BINDING_SAMPLED = 0;
 const uint HEAP_BINDING_STORAGE = 1;
 const uint HEAP_BINDING_SAMPLERS = 2;
+const uint TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP = 64;
+
+enum VkHeapImplementation : int {
+    NONE,
+    DESCRIPTOR_INDEXING,
+    DESCRIPTOR_BUFFER,
+}
 
 // Generations bump at destroy (stale indices reject immediately) and at
 // alloc (a live index is never generation 0).
-
 struct TextureDescriptorCell {
     gpu::TextureHandle owner;
     uint               generation;
     bool               used;
 }
 
-// Device limits governing the active heap mode. Indexing fields come from
-// PhysicalDeviceVulkan12Properties; buffer fields come from
+// Device limits governing the active heap implementation.
+// Indexing fields come from PhysicalDeviceVulkan12Properties; buffer fields
+// come from
 // PhysicalDeviceDescriptorBufferPropertiesEXT plus the computed layout size.
 struct HeapLimits {
     uint           max_sampled_images;
@@ -65,8 +72,6 @@ struct DescriptorHeapState {
     usz                     storage_descriptor_size;
     usz                     sampler_descriptor_size;
 }
-
-const uint TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP = 64;
 
 struct PendingTextureWrite {
     TextureSlot*  texture_slot;
@@ -131,13 +136,54 @@ fn void? check_descriptor_allocate_backend_result(
     );
 }
 
+fn VkHeapImplementation? resolve_heap_implementation(bool indexing_usable, bool buffer_usable) {
+    if (indexing_usable) return VkHeapImplementation.DESCRIPTOR_INDEXING;
+    if (buffer_usable) return VkHeapImplementation.DESCRIPTOR_BUFFER;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
 
+fn VkHeapImplementation? resolve_candidate_heap_implementation(
+    bool indexing_supported,
+    bool descriptor_buffer_supported,
+    bool descriptor_buffer_capacity_usable,
+    uint texture_capacity,
+    uint sampler_capacity,
+    IndexingHeapLimits indexing_limits,
+) {
+    bool indexing_usable = indexing_supported && indexing_heap_fits_limits(
+        texture_capacity,
+        sampler_capacity,
+        indexing_limits,
+    );
+    return resolve_heap_implementation(
+        indexing_usable,
+        descriptor_buffer_supported && descriptor_buffer_capacity_usable,
+    );
+}
+
+fn void? select_strict_heap_implementation(
+    VkStrictHeapState* state,
+    bool indexing_supported,
+    bool buffer_supported,
+    IndexingHeapLimits indexing_limits,
+) {
+    if (state == null) return gpu::INVALID_ARGUMENT~;
+    if (!state.enabled) return;
+    bool indexing_usable = indexing_supported && indexing_heap_fits_limits(
+        state.texture_capacity,
+        state.sampler_capacity,
+        indexing_limits,
+    );
+    VkHeapImplementation implementation =
+        resolve_heap_implementation(indexing_usable, buffer_supported)!;
+    state.implementation = implementation;
+}
 
 <* Texture capacity binds both SAMPLED_IMAGE and STORAGE_IMAGE, so on the
    indexing path it must satisfy both image limits. On the buffer path the
    bound quantity is the descriptor set's byte layout, not slot counts. *>
-fn bool heap_fits_limits(gpu::DescriptorHeapMode mode, uint tex_capacity, uint smp_capacity, HeapLimits limits) {
-    if (mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+fn bool heap_fits_limits(VkHeapImplementation implementation, uint tex_capacity, uint smp_capacity, HeapLimits limits) {
+    if (implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
         IndexingHeapLimits indexing_limits = {
             .max_sampled_images           = limits.max_sampled_images,
             .max_storage_images           = limits.max_storage_images,
@@ -163,12 +209,131 @@ fn bool heap_fits_limits(gpu::DescriptorHeapMode mode, uint tex_capacity, uint s
         && limits.layout_size <= limits.descriptor_buffer_address_space_size;
 }
 
+fn vk::Result create_descriptor_heap_layout(
+    vk::Device device,
+    VkHeapImplementation implementation,
+    uint tex_capacity,
+    uint smp_capacity,
+    vk::DescriptorSetLayout* out_layout,
+) @private {
+    vk::DescriptorSetLayoutBinding[3] bindings = {
+        {
+            .binding          = HEAP_BINDING_SAMPLED,
+            .descriptor_type  = vk::DescriptorType.SAMPLED_IMAGE,
+            .descriptor_count = tex_capacity,
+            .stage_flags      = vk::ShaderStageFlagBits.ALL,
+        },
+        {
+            .binding          = HEAP_BINDING_STORAGE,
+            .descriptor_type  = vk::DescriptorType.STORAGE_IMAGE,
+            .descriptor_count = tex_capacity,
+            .stage_flags      = vk::ShaderStageFlagBits.ALL,
+        },
+        {
+            .binding          = HEAP_BINDING_SAMPLERS,
+            .descriptor_type  = vk::DescriptorType.SAMPLER,
+            .descriptor_count = smp_capacity,
+            .stage_flags      = vk::ShaderStageFlagBits.ALL,
+        },
+    };
+
+    uint binding_flag_bits = (uint)vk::DescriptorBindingFlagBits.UPDATE_AFTER_BIND_BIT
+        | (uint)vk::DescriptorBindingFlagBits.UPDATE_UNUSED_WHILE_PENDING_BIT
+        | (uint)vk::DescriptorBindingFlagBits.PARTIALLY_BOUND_BIT;
+    vk::DescriptorBindingFlags[3] binding_flags = {
+        (vk::DescriptorBindingFlags)binding_flag_bits,
+        (vk::DescriptorBindingFlags)binding_flag_bits,
+        (vk::DescriptorBindingFlags)binding_flag_bits,
+    };
+    vk::DescriptorSetLayoutBindingFlagsCreateInfo flags_info =
+        vk::descriptor_set_layout_binding_flags_create_info()
+            .set_binding_flags(binding_flags[..]);
+
+    vk::DescriptorSetLayoutCreateInfo layout_info =
+        vk::descriptor_set_layout_create_info().set_bindings(bindings[..]);
+    if (implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
+        layout_info = layout_info
+            .set_next(&flags_info)
+            .set_flags(vk::DescriptorSetLayoutCreateFlagBits.UPDATE_AFTER_BIND_POOL_BIT);
+    } else {
+        layout_info = layout_info
+            .set_flags(vk::DescriptorSetLayoutCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT);
+    }
+    return vk::create_descriptor_set_layout(device, &layout_info, null, out_layout);
+}
+
+fn bool descriptor_buffer_candidate_fits(
+    vk::PhysicalDevice physical_device,
+    QueueFamilies* families,
+    bool draw_indirect_count,
+    uint texture_capacity,
+    uint sampler_capacity,
+) @private {
+    VkDeviceState probe = {
+        .physical_device     = physical_device,
+        .draw_indirect_count = draw_indirect_count,
+        .strict_heap         = {
+            .enabled          = true,
+            .implementation   = VkHeapImplementation.DESCRIPTOR_BUFFER,
+            .texture_capacity = texture_capacity,
+            .sampler_capacity = sampler_capacity,
+        },
+    };
+    if (catch create_logical_device(&probe, families, false)) return false;
+    defer vk::destroy_device(probe.device, null);
+
+    VkDeviceDispatchPlan dispatch_plan = { .descriptor_buffer = true };
+    probe.device_dispatch = load_vk_device_dispatch(
+        probe.device,
+        &vk::get_device_proc_addr,
+        dispatch_plan,
+    );
+    if (!device_dispatch_supports_descriptor_buffer(&probe.device_dispatch)) return false;
+
+    vk::DescriptorSetLayout layout;
+    vk::Result layout_result = create_descriptor_heap_layout(
+        device:         probe.device,
+        implementation: VkHeapImplementation.DESCRIPTOR_BUFFER,
+        tex_capacity:   texture_capacity,
+        smp_capacity:   sampler_capacity,
+        out_layout:     &layout,
+    );
+    if (layout_result != vk::Result.SUCCESS) return false;
+    defer vk::destroy_descriptor_set_layout(probe.device, layout, null);
+
+    vk::DeviceSize layout_size;
+    probe.device_dispatch.descriptor_buffer.get_descriptor_set_layout_size(
+        probe.device,
+        layout,
+        &layout_size,
+    );
+    vk::PhysicalDeviceDescriptorBufferPropertiesEXT properties =
+        vk::physical_device_descriptor_buffer_properties_ext();
+    vk::PhysicalDeviceProperties2 properties2 =
+        vk::physical_device_properties2().set_next(&properties);
+    vk::get_physical_device_properties2(physical_device, &properties2);
+    HeapLimits limits = {
+        .max_resource_descriptor_buffer_range   = properties.max_resource_descriptor_buffer_range,
+        .max_sampler_descriptor_buffer_range    = properties.max_sampler_descriptor_buffer_range,
+        .resource_descriptor_address_space_size = properties.resource_descriptor_buffer_address_space_size,
+        .sampler_descriptor_address_space_size  = properties.sampler_descriptor_buffer_address_space_size,
+        .descriptor_buffer_address_space_size   = properties.descriptor_buffer_address_space_size,
+        .layout_size                            = layout_size,
+    };
+    return heap_fits_limits(
+        implementation: VkHeapImplementation.DESCRIPTOR_BUFFER,
+        tex_capacity:   texture_capacity,
+        smp_capacity:   sampler_capacity,
+        limits:         limits,
+    );
+}
+
 fn void? create_descriptor_heap(VkDeviceState* state) {
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
     uint tex_capacity = state.strict_heap.texture_capacity;
     uint smp_capacity = state.strict_heap.sampler_capacity;
 
-    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
         IndexingHeapLimits limits = query_indexing_heap_limits(state.physical_device);
         bool fits = indexing_heap_fits_limits(
             tex_capacity,
@@ -197,13 +362,13 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
             return report_contract_failure(
                 state:               state,
                 operation:           "create_device",
-                public_fault:        gpu::INVALID_ARGUMENT,
+                public_fault:        gpu::UNSUPPORTED_FEATURE,
                 resource_kind:       gpu::DebugResourceKind.DEVICE,
                 has_public_identity: false,
                 index:               0,
                 generation:          0,
                 debug_name:          null,
-                rejected_field:      "DeviceDesc.texture_descriptor_capacity/sampler_descriptor_capacity",
+                rejected_field:      "DeviceDesc.texture_heap_capacity/sampler_heap_capacity",
                 invariant:           "descriptor capacities must fit device update-after-bind limits",
                 backend_text:        null,
             )~;
@@ -217,56 +382,19 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
     heap.texture_cells          = mem::new_array(TextureDescriptorCell, tex_capacity);
     heap.texture_free           = mem::new_array(uint, tex_capacity);
 
-    vk::DescriptorSetLayoutBinding[3] bindings = {
-        {
-            .binding          = HEAP_BINDING_SAMPLED,
-            .descriptor_type  = vk::DescriptorType.SAMPLED_IMAGE,
-            .descriptor_count = tex_capacity,
-            .stage_flags      = vk::ShaderStageFlagBits.ALL,
-        },
-        {
-            .binding          = HEAP_BINDING_STORAGE,
-            .descriptor_type  = vk::DescriptorType.STORAGE_IMAGE,
-            .descriptor_count = tex_capacity,
-            .stage_flags      = vk::ShaderStageFlagBits.ALL,
-        },
-        {
-            .binding          = HEAP_BINDING_SAMPLERS,
-            .descriptor_type  = vk::DescriptorType.SAMPLER,
-            .descriptor_count = smp_capacity,
-            .stage_flags      = vk::ShaderStageFlagBits.ALL,
-        },
-    };
-
-    // Update-after-bind flags require features only the indexing path enables.
-    uint binding_flag_bits = (uint)vk::DescriptorBindingFlagBits.UPDATE_AFTER_BIND_BIT
-        | (uint)vk::DescriptorBindingFlagBits.UPDATE_UNUSED_WHILE_PENDING_BIT
-        | (uint)vk::DescriptorBindingFlagBits.PARTIALLY_BOUND_BIT;
-    vk::DescriptorBindingFlags[3] binding_flags = {
-        (vk::DescriptorBindingFlags)binding_flag_bits,
-        (vk::DescriptorBindingFlags)binding_flag_bits,
-        (vk::DescriptorBindingFlags)binding_flag_bits,
-    };
-    vk::DescriptorSetLayoutBindingFlagsCreateInfo flags_info = vk::descriptor_set_layout_binding_flags_create_info()
-        .set_binding_flags(binding_flags[..]);
-
-    vk::DescriptorSetLayoutCreateInfo layout_info = vk::descriptor_set_layout_create_info()
-        .set_bindings(bindings[..]);
-    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
-        layout_info = layout_info
-            .set_next(&flags_info)
-            .set_flags(vk::DescriptorSetLayoutCreateFlagBits.UPDATE_AFTER_BIND_POOL_BIT);
-    } else {
-        layout_info = layout_info
-            .set_flags(vk::DescriptorSetLayoutCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT);
-    }
     check_backend_result(
         state:     state,
         operation: "create_device",
-        result:    vk::create_descriptor_set_layout(state.device, &layout_info, null, &heap.set_layout),
+        result:    create_descriptor_heap_layout(
+            device:         state.device,
+            implementation: state.strict_heap.implementation,
+            tex_capacity:   tex_capacity,
+            smp_capacity:   smp_capacity,
+            out_layout:     &heap.set_layout,
+        ),
     )!;
 
-    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
         vk::DescriptorPoolSize[3] pool_sizes = {
             { .type = vk::DescriptorType.SAMPLED_IMAGE, .descriptor_count = tex_capacity },
             { .type = vk::DescriptorType.STORAGE_IMAGE, .descriptor_count = tex_capacity },
@@ -347,10 +475,10 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
         .layout_size                          = layout_size,
     };
     bool fits = heap_fits_limits(
-        mode:         state.strict_heap.mode,
-        tex_capacity: state.strict_heap.texture_capacity,
-        smp_capacity: state.strict_heap.sampler_capacity,
-        limits:       limits,
+        implementation: state.strict_heap.implementation,
+        tex_capacity:   state.strict_heap.texture_capacity,
+        smp_capacity:   state.strict_heap.sampler_capacity,
+        limits:         limits,
     );
     if (!fits) {
         if (state.debug_callback == null) {
@@ -364,13 +492,13 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
         return report_contract_failure(
             state:               state,
             operation:           "create_device",
-            public_fault:        gpu::INVALID_ARGUMENT,
+            public_fault:        gpu::UNSUPPORTED_FEATURE,
             resource_kind:       gpu::DebugResourceKind.DEVICE,
             has_public_identity: false,
             index:               0,
             generation:          0,
             debug_name:          null,
-            rejected_field:      "DeviceDesc.texture_descriptor_capacity/sampler_descriptor_capacity",
+            rejected_field:      "DeviceDesc.texture_heap_capacity/sampler_heap_capacity",
             invariant:           "descriptor buffer layout must fit device limits",
             backend_text:        null,
         )~;
@@ -505,7 +633,7 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
         .image_layout = texture.usage.storage ? vk::ImageLayout.GENERAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
     };
 
-    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
         vk::WriteDescriptorSet[2] writes;
         uint write_count = 0;
         if (texture.usage.sampled) {
@@ -559,7 +687,7 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
 fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sampler) @private {
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
 
-    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
         vk::DescriptorImageInfo image_info = { .sampler = sampler };
         vk::WriteDescriptorSet write = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
@@ -589,7 +717,7 @@ fn void? validate_descriptor_heap_binding(VkDeviceState* state) {
 
 fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::PipelineLayout layout, vk::PipelineBindPoint bind_point) {
     validate_descriptor_heap_binding(state)!;
-    if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+    if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
         vk::cmd_bind_descriptor_sets(
             command_buffer:        cb,
             pipeline_bind_point:   bind_point,
@@ -727,7 +855,7 @@ fn gpu::TextureView? vk_create_texture_view(gpu::Device* device, gpu::TextureHan
             index:               0,
             generation:          0,
             debug_name:          null,
-            rejected_field:      "DeviceDesc.texture_descriptor_capacity",
+            rejected_field:      "DeviceDesc.texture_heap_capacity",
             invariant:           "must exceed live texture descriptors",
             backend_text:        null,
         )~;
@@ -876,7 +1004,7 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
             index:               0,
             generation:          0,
             debug_name:          null,
-            rejected_field:      "DeviceDesc.texture_descriptor_capacity",
+            rejected_field:      "DeviceDesc.texture_heap_capacity",
             invariant:           "must fit the complete descriptor batch",
             backend_text:        null,
         )~;
@@ -904,7 +1032,7 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
             commit_texture_descriptor_item(heap, descs[i].texture, &out_views[i]);
         }
 
-        if (state.strict_heap.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
+        if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
             uint max_writes = (uint)descs.len * 2;
             vk::WriteDescriptorSet[TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP] writes_stack;
             vk::DescriptorImageInfo[TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP] image_infos_stack;

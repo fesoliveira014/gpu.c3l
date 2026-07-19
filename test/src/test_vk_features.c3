@@ -130,28 +130,26 @@ fn void heap_indexing_gate() @test {
     assert(!gpu::vk::heap_shared_features_supported(&base, &empty), "empty 1.2 features fail the shared gate");
 }
 
-fn void heap_mode_auto_resolution() @test {
-    gpu::DescriptorHeapMode auto_mode = gpu::DescriptorHeapMode.AUTO;
+fn void heap_implementation_resolution_is_private() @test {
+    gpu::vk::VkHeapImplementation both =
+        gpu::vk::resolve_heap_implementation(true, true)!!;
+    assert(
+        both == gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+        "indexing is preferred when both private implementations are usable"
+    );
 
-    gpu::DescriptorHeapMode both = gpu::vk::resolve_heap_mode(auto_mode, true, true)!!;
-    assert(both == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, "AUTO prefers descriptor indexing");
+    gpu::vk::VkHeapImplementation buffer_only =
+        gpu::vk::resolve_heap_implementation(false, true)!!;
+    assert(
+        buffer_only == gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+        "descriptor buffers provide the private fallback"
+    );
 
-    gpu::DescriptorHeapMode buffer_only = gpu::vk::resolve_heap_mode(auto_mode, false, true)!!;
-    assert(buffer_only == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, "AUTO falls back to descriptor buffer");
-
-    fault auto_fault = @catch(gpu::vk::resolve_heap_mode(auto_mode, false, false));
-    assert(auto_fault == gpu::UNSUPPORTED_FEATURE, "AUTO with no supported path raises UNSUPPORTED_FEATURE");
-}
-
-fn void heap_mode_forced_resolution() @test {
-    gpu::DescriptorHeapMode forced = gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, true, true)!!;
-    assert(forced == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, "forced indexing wins over available buffer");
-
-    fault buffer_fault = @catch(gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER, true, false));
-    assert(buffer_fault == gpu::UNSUPPORTED_FEATURE, "forced buffer without support raises UNSUPPORTED_FEATURE");
-
-    fault indexing_fault = @catch(gpu::vk::resolve_heap_mode(gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING, false, true));
-    assert(indexing_fault == gpu::UNSUPPORTED_FEATURE, "forced indexing without support raises UNSUPPORTED_FEATURE");
+    fault unavailable = @catch(gpu::vk::resolve_heap_implementation(false, false));
+    assert(
+        unavailable == gpu::UNSUPPORTED_FEATURE,
+        "strict heaps require at least one exact implementation"
+    );
 }
 
 fn void line_polygon_mode_feature_support() @test {

@@ -14,21 +14,13 @@ enum QueueKind : int {
     TRANSFER,
 }
 
-// AUTO is the zero value so a zero-initialized DeviceDesc works everywhere.
-enum DescriptorHeapMode : int {
-    AUTO,
-    DESCRIPTOR_BUFFER,
-    DESCRIPTOR_INDEXING,
-}
-
 <* Device creation options. Zero-initialized fields select documented defaults. *>
 struct DeviceDesc {
     BackendKind          backend;
     bool                 enable_validation;
     bool                 enable_debug_names;
-    DescriptorHeapMode   descriptor_heap_mode;
-    uint                 texture_descriptor_capacity;
-    uint                 sampler_descriptor_capacity;
+    uint                 texture_heap_capacity;
+    uint                 sampler_heap_capacity;
     uint                 texture_capacity;
     uint                 pipeline_capacity;
     // Warm-start blob from get_pipeline_cache_data; empty = cold. Only read
@@ -49,18 +41,16 @@ struct DeviceCaps {
     bool dynamic_rendering;
     bool shader_int64;
     bool draw_indirect_count;
-    bool descriptor_buffer;
-    bool descriptor_indexing;
     bool async_compute;
     QueueCounts queues;
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
-    // Configured heap capacity (DeviceDesc.texture_descriptor_capacity), not
+    // Configured heap capacity (DeviceDesc.texture_heap_capacity), not
     // the hardware maximum; see create_device_from_desc's limit rejection.
-    uint max_texture_descriptors;
-    // Configured heap capacity (DeviceDesc.sampler_descriptor_capacity), not
+    uint texture_heap_capacity;
+    // Configured heap capacity (DeviceDesc.sampler_heap_capacity), not
     // the hardware maximum; see create_device_from_desc's limit rejection.
-    uint max_sampler_descriptors;
+    uint sampler_heap_capacity;
     // Effective MRT limit: the lesser of the library and selected device caps.
     uint max_color_attachments;
     // Raw selected-device limit for one Vulkan push-constant range.

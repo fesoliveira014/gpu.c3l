@@ -16,7 +16,6 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::DeviceDesc device_desc = {
         .backend              = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
-        .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
         .application_name     = "gpu_texture_heap_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;

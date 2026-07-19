@@ -5,15 +5,12 @@ import gpu::vk @public;
 import std::io;
 import std::thread;
 import std::time;
-import std::os::env;
 import std::core::mem::allocators;
 
 // Advisory, not gating: texture-view singles vs batched (N=16) vs
 // sampler intern-hit plus stable-publication lookups at 1/2/4 workers.
 // Reports ns/descriptor or ns/op, scaling vs one thread, and the
-// batch-vs-single ratio. DB-mode phases run only when
-// GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1 (same lavapipe caveat as
-// test_vk_descriptor_buffer.c3). Indicative on lavapipe.
+// batch-vs-single ratio. Indicative on lavapipe.
 
 const uint BENCH_ITERS_PER_WORKER = 320;
 const uint BENCH_BATCH_SIZE = 16;
@@ -150,29 +147,12 @@ fn void run_bench_suite(gpu::DeviceDesc* desc, ZString label) {
     io::printfn("%s: leaks=%d", label, leaks);
 }
 
-fn bool db_e2e_enabled() {
-    if (try value = env::tget_var("GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E")) {
-        return value == "1";
-    }
-    return false;
-}
-
 fn int main() {
     io::printfn("iterations=%d/worker units=ns/descriptor,ns/op", BENCH_ITERS_PER_WORKER);
-    gpu::DeviceDesc indexing_desc = {
+    gpu::DeviceDesc desc = {
         .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_descriptor_churn_bench",
     };
-    run_bench_suite(&indexing_desc, "indexing");
-
-    if (db_e2e_enabled()) {
-        gpu::DeviceDesc buffer_desc = {
-            .backend              = gpu::BackendKind.VULKAN,
-            .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
-            .application_name     = "gpu_descriptor_churn_bench_db",
-        };
-        run_bench_suite(&buffer_desc, "buffer");
-    }
-
+    run_bench_suite(&desc, "automatic heap");
     return 0;
 }
