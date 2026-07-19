@@ -43,7 +43,6 @@ token's retained device pin while another call can still be in flight.
 | `create_compute_pipeline` / `create_graphics_pipeline` / `destroy_pipeline` | S | driver compiles run in parallel; a same-key race compiles twice, converges to one entry |
 | `alloc_frame_span` | S | lock-free CAS bump through a current `FrameToken`; token copies may be shared during the active generation |
 | `alloc_persistent_span` / `free_persistent_span` | S | VMA virtual blocks are not internally synchronized; the library locks them |
-| `upload_buffer_data` / `upload_texture_data` / `readback_buffer_data` / `readback_texture_data` | S | use a separate private pool serialized by `helper_record_mutex` |
 | `get_memory_stats` / `build_memory_report` / `get_persistent_stats` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
 | `begin_commands` / `end_commands` / command discard | C | recording storage is automatic per worker |
 | every `cmd_*` recording call | C | confined to the list's thread |
@@ -108,30 +107,10 @@ swapchain.
 
 ## Lock order
 
-`helper_record_mutex → transfer_mutex → resource_mutex → command_mutex`, one
-direction only. Creation and destruction share a single `resource_mutex`
-(cold paths); command-record allocation, submit claims, and reclamation share
-`command_mutex`; and the transfer arenas share `transfer_mutex`.
-`helper_record_mutex` spans a blocking helper's recording window
-(`begin_commands` through `end_commands`) and is outermost because that
-window takes `transfer_mutex` internally for its allocation.
-
-Each selected queue identity owns one completion timeline and submission mutex.
-Roles that alias one native queue share that state. Submit releases
-`command_mutex` before locking the selected queue, checks completion headroom,
-reserves the next sequence immediately before the native call, and publishes only
-after success. Native failure rolls the reservation back while still locked. The
-queue mutex is released before public command tokens are invalidated, so
-command-record and queue locks are never nested.
-
-Dedicated-fallback staging/readback buffers (the arena ring miss path in
-`transfer_alloc`/`ticket_alloc`) create their VMA buffer without holding
-`transfer_mutex` — only the ring-capacity check and bookkeeping around it are
-locked — so a fallback's backend allocation never blocks concurrent arena
-allocations. A relock re-check covers the ring having filled during that
-unlocked window; on that fault the fresh buffer is destroyed before the
-call faults `ARENA_FULL`.
-
+Resource creation and destruction use `resource_mutex`; command-record
+allocation, submit claims, and reclamation use `command_mutex`. Submission
+releases `command_mutex` before locking the selected queue, so command-record
+and queue locks are not nested.
 ## Single-recorder texture discipline
 
 Within a frame, one thread owns a given texture's barriers and render
@@ -211,30 +190,6 @@ contract.
 `end_frame` builds its prospective frame value and wait chain without mutation,
 then commits retirement bookkeeping only after the graphics signal submit is
 accepted. A rejected signal leaves the active boundary exactly retryable.
-
-## Helper timeline
-
-Blocking helpers (`upload_buffer_data`, `upload_texture_data`,
-`readback_buffer_data`, `readback_texture_data`) never touch `frame_timeline`
-or the frame counter. Each reserves a value on a separate `helper_timeline`
-under `transfer_mutex`, before its (single) transfer allocation, and tags
-that allocation's arena range or dedicated buffer with it. At completion
-(after waiting for the helper submission's completion point) it signals
-`helper_timeline` to that value — turnstiled: it first waits for `helper_timeline` to reach
-`value - 1`, so concurrent helpers' completions land in strictly increasing
-order even when they finish out of reservation order, and one helper's
-completion can never retire another helper's or an unsubmitted list's
-resources. This turnstile wait carries no lock (it would deadlock a slower
-predecessor out of the very primitive it needs to reach its own signal — the
-wait-for-predecessor is itself the ordering guarantee) and is generous but
-finite; a helper that faults after reserving its value still signals it on
-every exit path, so one stuck helper costs its immediate successor one
-timeout rather than an unbounded stall. Frame-scoped upload paths
-(`cmd_upload_buffer`, `cmd_upload_texture`) still tag `frame_timeline` at
-`counter + 1`, retired only by `end_frame`. See docs/memory.md §13.1.
-Blocking helpers use a private recording context. Each helper waits for its
-queue completion, then reclaims its native command buffer while holding the
-helper recording mutex before the call returns.
 
 ## Off-frame submissions
 

@@ -123,7 +123,7 @@ fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
     ctx.smp_index = gpu::create_sampler(device, &sampler_desc)!!;
 
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
-    gpu::upload_texture_data(
+    upload_test_texture_data(
         device:      device,
         dst:         ctx.pattern,
         mip:         0,

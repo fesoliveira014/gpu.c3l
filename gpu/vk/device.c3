@@ -22,7 +22,6 @@ enum DeviceCreationCheckpoint : uint {
     FRAME_RESOURCES,
     PERSISTENT_ARENA,
     RECORDING_CONTEXTS,
-    TRANSFER_ARENAS,
     DESCRIPTOR_HEAP,
     PIPELINE_SHARED,
     BEFORE_PUBLICATION,
@@ -100,24 +99,14 @@ struct VkDeviceState {
     ulong                      aux_compute_last_signaled;
     ulong                      aux_transfer_counter;
     ulong                      aux_transfer_last_signaled;
-    // Blocking-helper completions signal here (turnstiled), never frame_timeline.
-    vk::Semaphore              helper_timeline;
     Atomic{ulong}              timeline_counter;
-    // Next helper reservation value; mutated only under transfer_mutex.
-    ulong                      helper_counter;
     // Set unconditionally by vk_submit so end_frame also waits off-frame use.
     bool                       compute_used_since_frame;
     bool                       transfer_used_since_frame;
     // Off-frame queues not yet covered by end_frame or observed completion.
     Atomic{uint}               off_frame_pending_queues;
-    // Lock order: helper_record_mutex -> transfer_mutex -> resource_mutex ->
-    // command_mutex. Queue mutexes are never nested with command_mutex.
-    // helper_record_mutex is outermost because the blocking helpers it wraps
-    // take transfer_mutex internally for their allocation.
-    Mutex                      helper_record_mutex;
     Mutex                      resource_mutex;
     Mutex                      command_mutex;
-    Mutex                      transfer_mutex;
     bool                       compute_queue_distinct;
     Atomic{int}                inflight_calls;
     uint                       frames_in_flight;
@@ -128,7 +117,6 @@ struct VkDeviceState {
     PersistentArenaState       persistent_arena;
     RecordingContextTable      recording_contexts;
     CommandTable               commands;
-    RecordingContextHandle     helper_context;
     ShaderTable                shaders;
     PipelineTable              pipelines;
     PipelineCacheTable         pipeline_cache;
@@ -138,21 +126,15 @@ struct VkDeviceState {
     TextureTable               textures;
     VkPresentationState        presentation;
     VkStrictHeapState          strict_heap;
-    TransferArenaState         staging_arena;
-    TransferArenaState         readback_arena;
     SubmittedCommandBatch[]    submitted_commands;
     uint                       submitted_command_count;
     uint                       submitted_command_reserved;
     ulong                      command_buffers_allocated;
     ulong                      command_buffers_freed;
-    DedicatedRetireState       dedicated_staging;
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
     bool                       frame_active;
-    // Dedicated-fallback buffers created by transfer_alloc/ticket_alloc;
-    // mutated only under transfer_mutex, whitebox-exposed.
-    ulong                      dedicated_fallbacks;
 }
 
 struct PhysicalDeviceSelection {
@@ -264,12 +246,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .cmd_dispatch_indirect   = &vk_cmd_dispatch_indirect,
     .cmd_begin_label         = &vk_cmd_begin_label,
     .cmd_end_label           = &vk_cmd_end_label,
-    .cmd_upload_buffer       = &vk_cmd_upload_buffer,
-    .cmd_upload_texture      = &vk_cmd_upload_texture,
-    .upload_buffer_data      = &vk_upload_buffer_data,
-    .upload_texture_data     = &vk_upload_texture_data,
-    .readback_buffer_data    = &vk_readback_buffer_data,
-    .readback_texture_data   = &vk_readback_texture_data,
 
     .create_swapchain        = &vk_create_swapchain,
     .destroy_swapchain       = &vk_destroy_swapchain,
@@ -381,10 +357,8 @@ fn gpu::Device? create_vk_device_with_selection(
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
     state.debug_names = desc.enable_debug_names;
-    state.helper_record_mutex.init()!;
     state.resource_mutex.init()!;
     state.command_mutex.init()!;
-    state.transfer_mutex.init()!;
 
     state.strict_heap = resolve_strict_heap_state(strict_requested, desc)!;
 
@@ -597,7 +571,6 @@ fn gpu::Device? create_vk_device_with_selection(
         gpu::ResourceOwnerKind.COMMAND,
     );
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
-    state.helper_context = create_builtin_recording_context(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.RECORDING_CONTEXTS)!;
     uint pipeline_capacity;
     if (state.strict_heap.enabled) {
@@ -613,8 +586,6 @@ fn gpu::Device? create_vk_device_with_selection(
         state.presentation.swapchains.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN);
         state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     }
-    create_transfer_arenas(state, desc)!;
-    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.TRANSFER_ARENAS)!;
     if (state.strict_heap.enabled) {
         create_descriptor_heap(state)!;
         reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;
@@ -805,10 +776,8 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         if (probe != null) probe.owned_instance_teardown_count++;
     }
     state.instance = (vk::Instance)null;
-    if (state.helper_record_mutex.is_initialized())  (void)state.helper_record_mutex.destroy();
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
     if (state.command_mutex.is_initialized())        (void)state.command_mutex.destroy();
-    if (state.transfer_mutex.is_initialized())       (void)state.transfer_mutex.destroy();
     if (state.presentation.queue_mutex.is_initialized()) (void)state.presentation.queue_mutex.destroy();
     mem::free(state);
 }

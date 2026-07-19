@@ -24,7 +24,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "arena_allocation_bench",
                 "resource_create_bench",
                 "descriptor_churn_bench",
-                "upload_throughput_bench",
                 "command_record_bench",
                 "frame_signal_bench",
                 "pipeline_cache_bench",
@@ -53,10 +52,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_measurements_require_iteration_count_and_units(self):
         runner = load_runner()
         runner.require_measurement("phase: iterations=100 12.5 ns/op", "target")
-        runner.require_measurement(
-            "iterations=40/worker units=uploads/s\nphase=A workers=1 uploads_per_sec=36680",
-            "target",
-        )
+
 
         with self.assertRaisesRegex(ValueError, "iteration count"):
             runner.require_measurement("phase: 12.5 ns/op", "target")

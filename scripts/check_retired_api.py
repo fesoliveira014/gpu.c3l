@@ -21,6 +21,16 @@ FIXTURES = {
     "poll_readback": "poll_readback",
     "resolve_readback": "resolve_readback",
     "readback_not_ready": "READBACK_NOT_READY",
+    "cmd_upload_buffer": "cmd_upload_buffer",
+    "cmd_upload_texture": "cmd_upload_texture",
+    "upload_buffer_data": "upload_buffer_data",
+    "upload_texture_data": "upload_texture_data",
+    "readback_buffer_data": "readback_buffer_data",
+    "readback_texture_data": "readback_texture_data",
+    "staging_arena_size": "staging_arena_size",
+    "readback_arena_size": "readback_arena_size",
+    "default_staging_arena_size": "DEFAULT_STAGING_ARENA_SIZE",
+    "default_readback_arena_size": "DEFAULT_READBACK_ARENA_SIZE",
     "debug_semaphore": "SEMAPHORE",
 }
 

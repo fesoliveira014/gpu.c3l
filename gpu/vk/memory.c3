@@ -158,12 +158,6 @@ fn void? create_frame_resources(VkDeviceState* state, gpu::DeviceDesc* desc) {
         p_allocator:   null,
         p_semaphore:   &state.aux_transfer_timeline,
     ))!;
-    check_device_result(state, vk::create_semaphore(
-        device:        state.device,
-        p_create_info: &semaphore_info,
-        p_allocator:   null,
-        p_semaphore:   &state.helper_timeline,
-    ))!;
 
     usz frame_arena_size = desc.frame_arena_size == 0 ? gpu::DEFAULT_FRAME_ARENA_SIZE : desc.frame_arena_size;
     state.frame_arenas = mem::new_array(FrameArenaState, state.frames_in_flight);
@@ -202,10 +196,6 @@ fn void destroy_frame_resources(VkDeviceState* state) @private {
     if (state.frame_arenas.ptr != null) {
         mem::free(state.frame_arenas.ptr);
         state.frame_arenas = {};
-    }
-    if (state.helper_timeline != null) {
-        vk::destroy_semaphore(state.device, state.helper_timeline, null);
-        state.helper_timeline = (vk::Semaphore)null;
     }
     if (state.aux_transfer_timeline != null) {
         vk::destroy_semaphore(state.device, state.aux_transfer_timeline, null);

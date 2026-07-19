@@ -36,7 +36,7 @@ gpu/vk/device.c3               physical device selection, logical device, featur
 gpu/vk/queue.c3                queue family selection, queue handles, submit
 gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
 gpu/vk/allocation.c3           generic-buffer and raw texture-memory allocations
-gpu/vk/memory.c3               memory kind policy, arenas, virtual allocator
+gpu/vk/memory.c3               memory classes, frame and persistent arenas
 gpu/vk/buffer.c3               VkBuffer + VMA allocation path
 gpu/vk/texture.c3              owned/placed images, views, layout tracking
 gpu/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
@@ -46,7 +46,6 @@ gpu/vk/pipeline_compute.c3     compute pipeline creation
 gpu/vk/pipeline_graphics.c3    graphics pipeline creation
 gpu/vk/command.c3              private recording pools and command encoding
 gpu/vk/command_state.c3        command-list state and handle tracking
-gpu/vk/transfer.c3             upload/readback helpers and staging arenas
 gpu/vk/sync.c3                 barriers, timeline semaphores
 gpu/vk/render_pass.c3          dynamic rendering
 gpu/vk/swapchain.c3            swapchain lifecycle and presentation
@@ -533,9 +532,8 @@ device allocation failure and explicit device loss propagate without retry.
 `begin_commands(queue)` lazily creates a private recording-pool set for the
 calling thread and device. Each set contains one pool per selected queue family.
 Compute aliases graphics when both use one family. A selected transfer role has
-a separate pool even when its family is shared. Blocking transfer helpers use a
-separate private set. Pool construction is transactional and uses the device
-host allocator.
+a separate pool even when its family is shared. Pool construction is
+transactional and uses the device host allocator.
 
 Public command values have two states:
 

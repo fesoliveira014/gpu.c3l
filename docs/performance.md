@@ -33,7 +33,6 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 | Allocation | 64-byte frame span | 100,000 | 10.9 ns/allocation |
 | Allocation | 64-byte persistent span | 4,096 | 92.7 ns/allocation; 35.7 ns/free |
 | Descriptor churn | Texture single / batch of 16 / sampler, one worker | 320 each | 523 / 330 / 563 ns/descriptor |
-| Upload recording | 256 KiB, 32 MiB arena, one / four workers | 40 per worker | 1,199 / 4,441 uploads/s |
 | Command reset | Idle / 15 worker pools | 2,000 each | 4,444 / 159,622 ns/begin_frame |
 | Command recording | Global / buffer barrier / indirect dispatch | 20,000 × 5 | 123 / 142 / 173 ns/record median |
 | Submission | Graphics / graphics+compute / all queues | 2,000 each | 45,514 / 131,617 / 149,877 ns/end_frame |

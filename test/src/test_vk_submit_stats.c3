@@ -509,40 +509,6 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     state.submit_stats = stats_before;
 }
 
-fn void helper_submit_failure_preserves_cleanup_token() @test {
-    gpu::Device device = make_submit_stats_test_device();
-    defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-
-    gpu::CommandList commands;
-    vk::vk_begin_commands_with_context(
-        state:          state,
-        queue:          queue,
-        context_handle: state.helper_context,
-        out_commands:   &commands,
-    )!!;
-    vk::vk_end_commands(&commands)!!;
-
-    fault submit_fault = @catch(vk::submit_and_wait_with(
-        &device,
-        &commands,
-        &reject_user_submit,
-    ));
-    assert(submit_fault == gpu::OUT_OF_HOST_MEMORY,
-        "helper submission preserves the native fault");
-    assert(commands.handle.is_valid(),
-        "helper submission failure preserves its cleanup token");
-
-    vk::release_helper_command_on_fault(state, &commands);
-    assert(!commands.handle.is_valid(),
-        "helper fault cleanup consumes the preserved token");
-}
-
 fn void completion_distance_backpressure_preserves_submit_state() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;

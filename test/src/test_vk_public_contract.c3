@@ -139,15 +139,6 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
             == gpu::INVALID_ARGUMENT,
         "cmd_set_scissor rejects a null scissor"
     );
-    char[] no_data = {};
-    assert(
-        @catch(gpu::cmd_upload_texture(
-            &commands,
-            (gpu::TextureUploadDesc*)null,
-            no_data,
-        )) == gpu::INVALID_ARGUMENT,
-        "cmd_upload_texture rejects a null descriptor"
-    );
     assert(
         @catch(gpu::cmd_begin_label(&commands, null))
             == gpu::INVALID_ARGUMENT,

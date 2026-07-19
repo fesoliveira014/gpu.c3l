@@ -130,12 +130,12 @@ Calls with four or more arguments, or calls that would exceed 120 characters, sh
 Preferred:
 
 ```c3
-upload_buffer_data(
-    device:      &device,
-    dst:         destination,
-    data:        bytes,
-    next_stage:  Stage.COMPUTE_SHADER,
-    next_hazard: Hazard.SHADER_READ,
+allocate_owned_span(
+    device:       &device,
+    size:         bytes.len,
+    memory_class: MemoryClass.CPU_WRITE,
+    access:       { .graphics, .transfer },
+    debug_name:   "upload",
 );
 ```
 

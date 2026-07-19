@@ -78,14 +78,12 @@ exists (else the limit is compile-time).
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
 | Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/device.c3`) | — | `SLOT_TABLE_FULL` |
-| Worker recording-pool caches per device | 256 worker caches; 257 contexts including the helper (`MAX_RECORDING_CONTEXTS` in `gpu/vk/command.c3`) | reuse a bounded worker pool | `SLOT_TABLE_FULL` |
+| Worker recording-pool caches per device | 256 (`MAX_RECORDING_CONTEXTS` in `gpu/vk/command.c3`) | reuse a bounded worker pool | `SLOT_TABLE_FULL` |
 | Swapchains | 8 (`MAX_SWAPCHAINS` in `gpu/swapchain.c3`) | — | `SLOT_TABLE_FULL` |
 | Color attachments per pass | Lesser of 8 (`MAX_COLOR_ATTACHMENTS` in `gpu/pipeline.c3`) and `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
 | Frame arena (per frame in flight) | 16 MiB (`DEFAULT_FRAME_ARENA_SIZE` in `gpu/memory.c3`) | `frame_arena_size` | `ARENA_FULL` |
 | Persistent arena | 64 MiB (`DEFAULT_PERSISTENT_ARENA_SIZE` in `gpu/memory.c3`) | `persistent_arena_size` | `ARENA_FULL` |
 | Live persistent allocations | 4096 (`MAX_PERSISTENT_ALLOCATIONS` in `gpu/memory.c3`) | — | `SLOT_TABLE_FULL` |
-| Staging arena | 32 MiB default (`DEFAULT_STAGING_ARENA_SIZE` in `gpu/memory.c3`) | `staging_arena_size` | `ARENA_FULL` |
-| Readback arena | 8 MiB default (`DEFAULT_READBACK_ARENA_SIZE` in `gpu/memory.c3`) | `readback_arena_size` | `ARENA_FULL` |
 
 Two sizing rules that bite:
 - **Packed descriptor ceilings are not guaranteed hardware capacities.** On the
