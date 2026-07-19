@@ -244,7 +244,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.4 Automatic shader-code identity
 
-- [ ] Replace public shader-module handles with lightweight `ShaderCode` values and library-computed content identity in `gpu/pipeline.c3`, `gpu/shader_abi.c3`, `gpu/vk/shader.c3`, and pipeline creation.
+- [x] Replace public shader-module handles with lightweight `ShaderCode` values and library-computed content identity in `gpu/pipeline.c3`, `gpu/shader_abi.c3`, `gpu/vk/shader.c3`, and pipeline creation.
   - **Depends on:** 2.3.
   - **Contract:** `prepare_shader_code` validates borrowed IR and computes an opaque process-local digest; the IR remains immutable and alive while used; collisions compare length and bytes; one-off creation may prepare raw IR internally; no public `ShaderHandle` exists.
   - **Edges:** empty or invalid IR, identical bytes from different storage, caller mutation of borrowed bytes, hash collision handling, and cross-device prepared data.
