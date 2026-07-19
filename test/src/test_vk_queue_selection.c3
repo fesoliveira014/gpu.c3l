@@ -13,6 +13,11 @@ const uint QF_G = (uint)vk::QueueFlagBits.GRAPHICS_BIT;
 const uint QF_C = (uint)vk::QueueFlagBits.COMPUTE_BIT;
 const uint QF_T = (uint)vk::QueueFlagBits.TRANSFER_BIT;
 
+struct DescriptorBufferCapacityProbeState {
+    uint calls;
+    bool fits;
+}
+
 fn vk::QueueFamilyProperties family(uint flags, uint count) {
     return { .queue_flags = (vk::QueueFlags)flags, .queue_count = count };
 }
@@ -139,8 +144,22 @@ fn vk::PhysicalDeviceCandidate candidate(uptr device, int score, bool suitable, 
     };
 }
 
-fn void descriptor_buffer_capacity_failure_falls_back_to_lower_candidate() @test {
-    vk::IndexingHeapLimits limits = {
+fn bool probe_descriptor_buffer_capacity(
+    void* user_data,
+    vk::PhysicalDevice physical_device,
+    vk::QueueFamilies* families,
+    bool draw_indirect_count,
+    uint texture_capacity,
+    uint sampler_capacity,
+) {
+    DescriptorBufferCapacityProbeState* state =
+        (DescriptorBufferCapacityProbeState*)user_data;
+    state.calls++;
+    return state.fits;
+}
+
+fn vk::IndexingHeapLimits permissive_candidate_indexing_limits() {
+    return {
         .max_sampled_images           = uint::max,
         .max_storage_images           = uint::max,
         .max_samplers                 = uint::max,
@@ -150,26 +169,109 @@ fn void descriptor_buffer_capacity_failure_falls_back_to_lower_candidate() @test
         .max_per_stage_resources      = uint::max,
         .max_all_pools_descriptors    = uint::max,
     };
-    fault preferred_fault = @catch(vk::resolve_candidate_heap_implementation(
-        indexing_supported:                 false,
-        descriptor_buffer_supported:        true,
-        descriptor_buffer_capacity_usable: false,
-        texture_capacity:                   4096,
-        sampler_capacity:                   256,
-        indexing_limits:                    limits,
+}
+
+fn vk::DescriptorBufferCapacityProbe descriptor_buffer_capacity_probe(
+    DescriptorBufferCapacityProbeState* state,
+) {
+    return {
+        .user_data = state,
+        .fits      = &probe_descriptor_buffer_capacity,
+    };
+}
+
+fn void indexing_usable_candidate_skips_descriptor_buffer_capacity_probe() @test {
+    DescriptorBufferCapacityProbeState state = { .fits = false };
+    vk::DescriptorBufferCapacityProbe probe = descriptor_buffer_capacity_probe(&state);
+    vk::VkHeapImplementation implementation =
+        vk::resolve_candidate_heap_implementation_with_probe(
+            indexing_supported:          true,
+            descriptor_buffer_supported: true,
+            texture_capacity:            4096,
+            sampler_capacity:            256,
+            indexing_limits:             permissive_candidate_indexing_limits(),
+            physical_device:             fake_physical_device(0xA0),
+            families:                    null,
+            draw_indirect_count:         true,
+            capacity_probe:              &probe,
+        )!!;
+    assert(
+        implementation == vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+        "an indexing-usable candidate succeeds through indexing"
+    );
+    assert(state.calls == 0, "indexing usability skips the descriptor-buffer capacity probe");
+}
+
+fn void descriptor_buffer_only_candidate_uses_capacity_probe_result() @test {
+    DescriptorBufferCapacityProbeState state = { .fits = true };
+    vk::DescriptorBufferCapacityProbe probe = descriptor_buffer_capacity_probe(&state);
+    vk::VkHeapImplementation implementation =
+        vk::resolve_candidate_heap_implementation_with_probe(
+            indexing_supported:          false,
+            descriptor_buffer_supported: true,
+            texture_capacity:            4096,
+            sampler_capacity:            256,
+            indexing_limits:             permissive_candidate_indexing_limits(),
+            physical_device:             fake_physical_device(0xA0),
+            families:                    null,
+            draw_indirect_count:         true,
+            capacity_probe:              &probe,
+        )!!;
+    assert(
+        implementation == vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+        "a descriptor-buffer-only candidate accepts a usable capacity"
+    );
+    assert(state.calls == 1, "descriptor-buffer-only selection invokes the capacity probe once");
+
+    state = { .fits = false };
+    fault capacity_fault = @catch(vk::resolve_candidate_heap_implementation_with_probe(
+        indexing_supported:          false,
+        descriptor_buffer_supported: true,
+        texture_capacity:            4096,
+        sampler_capacity:            256,
+        indexing_limits:             permissive_candidate_indexing_limits(),
+        physical_device:             fake_physical_device(0xA0),
+        families:                    null,
+        draw_indirect_count:         true,
+        capacity_probe:              &probe,
+    ));
+    assert(
+        capacity_fault == gpu::UNSUPPORTED_FEATURE,
+        "a descriptor-buffer-only candidate propagates capacity rejection"
+    );
+    assert(state.calls == 1, "capacity rejection still probes exactly once");
+}
+
+fn void descriptor_buffer_capacity_failure_falls_back_to_lower_candidate() @test {
+    DescriptorBufferCapacityProbeState state = { .fits = false };
+    vk::DescriptorBufferCapacityProbe probe = descriptor_buffer_capacity_probe(&state);
+    vk::IndexingHeapLimits limits = permissive_candidate_indexing_limits();
+    fault preferred_fault = @catch(vk::resolve_candidate_heap_implementation_with_probe(
+        indexing_supported:          false,
+        descriptor_buffer_supported: true,
+        texture_capacity:            4096,
+        sampler_capacity:            256,
+        indexing_limits:             limits,
+        physical_device:             fake_physical_device(0xA0),
+        families:                    null,
+        draw_indirect_count:         true,
+        capacity_probe:              &probe,
     ));
     assert(
         preferred_fault == gpu::UNSUPPORTED_FEATURE,
         "descriptor-buffer feature support alone does not satisfy semantic capacity"
     );
 
-    vk::VkHeapImplementation fallback = vk::resolve_candidate_heap_implementation(
-        indexing_supported:                 true,
-        descriptor_buffer_supported:        false,
-        descriptor_buffer_capacity_usable: false,
-        texture_capacity:                   4096,
-        sampler_capacity:                   256,
-        indexing_limits:                    limits,
+    vk::VkHeapImplementation fallback = vk::resolve_candidate_heap_implementation_with_probe(
+        indexing_supported:          true,
+        descriptor_buffer_supported: false,
+        texture_capacity:            4096,
+        sampler_capacity:            256,
+        indexing_limits:             limits,
+        physical_device:             fake_physical_device(0xB0),
+        families:                    null,
+        draw_indirect_count:         true,
+        capacity_probe:              &probe,
     )!!;
     assert(
         fallback == vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
@@ -177,14 +279,23 @@ fn void descriptor_buffer_capacity_failure_falls_back_to_lower_candidate() @test
     );
 
     vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(device: 0xA0, score: 100, suitable: preferred_fault != gpu::UNSUPPORTED_FEATURE),
-        candidate(device: 0xB0, score: 50, suitable: fallback != vk::VkHeapImplementation.NONE),
+        candidate(
+            device:   0xA0,
+            score:    100,
+            suitable: preferred_fault != gpu::UNSUPPORTED_FEATURE,
+        ),
+        candidate(
+            device:   0xB0,
+            score:    50,
+            suitable: fallback != vk::VkHeapImplementation.NONE,
+        ),
     };
     vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
     assert(
         selected.physical_device == fake_physical_device(0xB0),
         "capacity rejection falls back to the lower-scored viable adapter"
     );
+    assert(state.calls == 1, "only the descriptor-buffer candidate runs the capacity probe");
 }
 
 fn void later_unsuitable_high_score_does_not_replace_selection() @test {

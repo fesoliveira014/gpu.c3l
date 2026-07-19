@@ -253,7 +253,9 @@ Heap capacities are exact semantic creation requests, not clampable upper
 bounds. Device creation fails rather than clamping when a selected adapter cannot
 satisfy a requested capacity. On success,
 `DeviceCaps.texture_heap_capacity` and `DeviceCaps.sampler_heap_capacity`
-report the exact capacities of the created shader-visible heaps.
+report the exact capacities of the created shader-visible heaps. A capacity
+above the library hard ceiling is malformed and faults `INVALID_ARGUMENT`; a
+valid capacity unavailable on every adapter faults `UNSUPPORTED_FEATURE`.
 
 Creation:
 
@@ -372,7 +374,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; no adapter can provide the requested semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `cmd_texture_barrier` | an acquired swapchain image is pending during resize, or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
