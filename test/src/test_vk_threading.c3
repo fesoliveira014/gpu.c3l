@@ -16,6 +16,17 @@ const char[*] THR_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 const uint THR_THREADS = 4;
 const uint THR_ITERS = 32;
 const uint THR_ELEMENTS = 64;
+const usz THR_TRANSFER_BYTES = 256;
+
+struct TransferRecordArgs {
+    gpu::Device*                device;
+    uint                        worker_index;
+    OwnedSpan                   upload;
+    OwnedSpan                   intermediate;
+    OwnedSpan                   readback;
+    gpu::ExecutableCommandList  list;
+}
+
 fn gpu::Device make_thr_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -272,6 +283,134 @@ fn void worker_thread_reuses_private_recording_pool() @test {
     gpu::ExecutableCommandList[2] lists = args.executables;
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
+}
+
+fn char transfer_pattern(uint worker_index, usz byte_index) {
+    return (char)((byte_index * 17 + (usz)(worker_index + 1) * 31) % 251);
+}
+
+fn int explicit_transfer_worker(void* raw_args) {
+    TransferRecordArgs* args = (TransferRecordArgs*)raw_args;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        char[] upload_mapping = test_span_mapping(
+            args.device,
+            args.upload.span,
+        );
+        for (usz i = 0; i < upload_mapping.len; i++) {
+            upload_mapping[i] = transfer_pattern(args.worker_index, i);
+        }
+        gpu::flush_mapped_span(args.device, args.upload.span)!!;
+
+        gpu::Queue queue = gpu::get_queue(
+            args.device,
+            gpu::QueueKind.TRANSFER,
+        )!!;
+        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        defer (void)discard_test_commands(&commands);
+        gpu::BufferCopyDesc upload_copy = {
+            .src = args.upload.span,
+            .dst = args.intermediate.span,
+        };
+        gpu::cmd_copy_buffer(&commands, &upload_copy)!!;
+        gpu::BufferBarrier before_readback = {
+            .span          = args.intermediate.span,
+            .before_stage  = gpu::Stage.TRANSFER,
+            .after_stage   = gpu::Stage.TRANSFER,
+            .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+            .after_hazard  = gpu::Hazard.TRANSFER_READ,
+        };
+        gpu::cmd_buffer_barrier(&commands, &before_readback)!!;
+        gpu::BufferCopyDesc readback_copy = {
+            .src = args.intermediate.span,
+            .dst = args.readback.span,
+        };
+        gpu::cmd_copy_buffer(&commands, &readback_copy)!!;
+        gpu::BufferBarrier host_read = {
+            .span          = args.readback.span,
+            .before_stage  = gpu::Stage.TRANSFER,
+            .after_stage   = gpu::Stage.HOST,
+            .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+            .after_hazard  = gpu::Hazard.HOST_READ,
+        };
+        gpu::cmd_buffer_barrier(&commands, &host_read)!!;
+        args.list = gpu::end_commands(&commands)!!;
+    };
+    return 0;
+}
+
+fn void concurrent_caller_owned_explicit_transfers_preserve_bytes() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+
+    TransferRecordArgs[THR_THREADS] args = {};
+    defer {
+        foreach (&worker_args : args) {
+            (void)free_owned_span(&device, &worker_args.readback);
+            (void)free_owned_span(&device, &worker_args.intermediate);
+            (void)free_owned_span(&device, &worker_args.upload);
+        }
+    }
+    for (uint i = 0; i < THR_THREADS; i++) {
+        args[i].device = &device;
+        args[i].worker_index = i;
+        args[i].upload = allocate_owned_span(
+            device:       &device,
+            size:         THR_TRANSFER_BYTES,
+            memory_class: gpu::MemoryClass.CPU_WRITE,
+            access:       { .transfer },
+            debug_name:   "concurrent_transfer_upload",
+        )!!;
+        args[i].intermediate = allocate_owned_span(
+            device:       &device,
+            size:         THR_TRANSFER_BYTES,
+            memory_class: gpu::MemoryClass.GPU_PRIVATE,
+            access:       { .transfer },
+            debug_name:   "concurrent_transfer_intermediate",
+        )!!;
+        args[i].readback = allocate_owned_span(
+            device:       &device,
+            size:         THR_TRANSFER_BYTES,
+            memory_class: gpu::MemoryClass.CPU_READ,
+            access:       { .transfer },
+            debug_name:   "concurrent_transfer_readback",
+        )!!;
+    }
+
+    Thread[THR_THREADS] threads;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        threads[i].create(&explicit_transfer_worker, &args[i])!!;
+    }
+    foreach (&worker : threads) {
+        assert(worker.join()!! == 0, "every worker records its explicit transfer chain");
+    }
+
+    gpu::ExecutableCommandList[THR_THREADS] lists;
+    for (uint i = 0; i < THR_THREADS; i++) lists[i] = args[i].list;
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.TRANSFER,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+
+    for (uint i = 0; i < THR_THREADS; i++) {
+        gpu::invalidate_mapped_span(&device, args[i].readback.span)!!;
+        char[] readback_mapping = test_span_mapping(
+            &device,
+            args[i].readback.span,
+        );
+        for (usz byte_index = 0; byte_index < readback_mapping.len; byte_index++) {
+            assert(readback_mapping[byte_index] == transfer_pattern(i, byte_index),
+                "each worker's complete readback matches its distinct upload pattern");
+        }
+    }
+
+    foreach (&worker_args : args) {
+        free_owned_span(&device, &worker_args.readback)!!;
+        free_owned_span(&device, &worker_args.intermediate)!!;
+        free_owned_span(&device, &worker_args.upload)!!;
+    }
 }
 
 struct RecordArgs {
