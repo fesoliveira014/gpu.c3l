@@ -7,6 +7,13 @@ import unittest
 
 SCRIPT = pathlib.Path(__file__).with_name("run_benchmarks.py")
 UPLOAD_BENCHMARK = SCRIPT.parents[1] / "test" / "src" / "upload_throughput_bench.c3"
+ARENA_OUTPUT = "\n".join(
+    (
+        "frame: iterations=100000 size=64 align=16 12.5 ns/allocation",
+        "cpu_write allocate: iterations=4096 size=64 align=16 23.75 ns/allocation",
+        "cpu_write free: iterations=4096 8.25 ns/free",
+    )
+)
 
 
 def load_runner():
@@ -102,6 +109,29 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "workers=4 payload_bytes=262144 uploads_per_sec=12345",
                 "upload_throughput_bench",
             )
+
+    def test_arena_measurement_requires_cpu_write_allocate_phase(self):
+        runner = load_runner()
+        output = "\n".join((ARENA_OUTPUT.splitlines()[0], ARENA_OUTPUT.splitlines()[2]))
+        with self.assertRaisesRegex(ValueError, "cpu_write allocate"):
+            runner.require_measurement(output, "arena_allocation_bench")
+
+    def test_arena_measurement_requires_cpu_write_free_phase(self):
+        runner = load_runner()
+        output = "\n".join(ARENA_OUTPUT.splitlines()[:2])
+        with self.assertRaisesRegex(ValueError, "cpu_write free"):
+            runner.require_measurement(output, "arena_allocation_bench")
+
+    def test_arena_measurement_requires_exact_cpu_write_iteration_counts(self):
+        runner = load_runner()
+        for phase in ("allocate", "free"):
+            with self.subTest(phase=phase):
+                output = ARENA_OUTPUT.replace(
+                    f"cpu_write {phase}: iterations=4096",
+                    f"cpu_write {phase}: iterations=4095",
+                )
+                with self.assertRaisesRegex(ValueError, f"cpu_write {phase}"):
+                    runner.require_measurement(output, "arena_allocation_bench")
 
     def test_upload_target_rejects_generic_measurement(self):
         runner = load_runner()

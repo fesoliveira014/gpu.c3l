@@ -10,11 +10,16 @@ The public API uses:
 GpuAllocation
 GpuSpan
 GpuAddress
+MemoryKind
 MemoryClass
 AllocationDesc
 AllocationInfo
 TextureHandle
 ```
+
+`MemoryKind` remains exported as a backend/frame backing classification. No
+public descriptor or function accepts it; callers select `MemoryClass`, and the
+backend derives the concrete kind.
 
 The backend uses:
 

@@ -50,6 +50,32 @@ UPLOAD_MEASUREMENT = re.compile(
     r"\bworkers=\d+\s+payload_bytes=\d+\s+iterations=\d+\s+"
     r"uploads_per_sec=\d[\d,.]*\b"
 )
+ARENA_MEASUREMENTS = (
+    (
+        "frame",
+        re.compile(
+            r"^frame:\s+iterations=100000(?=\s|$)[^\r\n]*"
+            r"\d[\d,.]*\s?ns/allocation\s*$",
+            re.MULTILINE,
+        ),
+    ),
+    (
+        "cpu_write allocate",
+        re.compile(
+            r"^cpu_write allocate:\s+iterations=4096(?=\s|$)[^\r\n]*"
+            r"\d[\d,.]*\s?ns/allocation\s*$",
+            re.MULTILINE,
+        ),
+    ),
+    (
+        "cpu_write free",
+        re.compile(
+            r"^cpu_write free:\s+iterations=4096(?=\s|$)[^\r\n]*"
+            r"\d[\d,.]*\s?ns/free\s*$",
+            re.MULTILINE,
+        ),
+    ),
+)
 
 
 def require_context_fields(output):
@@ -59,6 +85,10 @@ def require_context_fields(output):
 
 
 def require_measurement(output, target):
+    if target == "arena_allocation_bench":
+        for phase, pattern in ARENA_MEASUREMENTS:
+            if not pattern.search(output):
+                raise ValueError(f"{target} is missing {phase} measurement")
     if not re.search(r"\biterations?=\S+", output):
         raise ValueError(f"{target} is missing an iteration count")
     is_upload = target == "upload_throughput_bench" or "uploads_per_sec=" in output
