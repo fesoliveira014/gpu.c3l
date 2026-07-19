@@ -2,6 +2,7 @@ module gpu_test;
 
 import gpu @public;
 import gpu::vk @public;
+import std::io;
 
 // Headless (lavapipe): recording/submit validation faults — mixed-queue
 // submits, usage/alignment, pipeline-kind and shader-stage mismatches.
@@ -504,9 +505,17 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     defer discard_test_executable(&commands_executable)!!;
 }
 
+fn bool val_distinct_graphics_compute_families(gpu::Device* device) {
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
+    if (state.graphics_family != state.compute_family) return true;
+    io::eprintfn("access-domain rejection not applicable: graphics and compute share family %d", state.graphics_family);
+    return false;
+}
+
 fn void allocation_span_outside_recording_access_rejects_copy_and_fill() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
+    if (!val_distinct_graphics_compute_families(&device)) return;
 
     OwnedSpan transfer_span = allocate_owned_span(
         device:       &device,
