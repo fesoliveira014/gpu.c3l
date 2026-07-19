@@ -11,9 +11,10 @@ two ideas:
   through 64-bit addresses; each dispatch/draw pushes one root address and the
   shader follows pointers from that struct. No binding numbers, set layouts,
   or descriptor churn for generic data.
-- **One bindless heap for textures.** `TextureIndex`/`SamplerIndex` are compact
-  generation-checked CPU tokens with shader-visible slots. Put them in your own
-  structs; the library-managed global heap is the only set that exists.
+- **One bindless heap for textures and samplers.** `TextureIndex` and
+  `SamplerIndex` are shader-visible slots for root data. Sampler state is
+  interned as a device-owned `Sampler` identity, then published once into the
+  strict heap.
 
 ```c3
 gpu::GpuSpan input_span = gpu::get_allocation_span(&device, input)!;

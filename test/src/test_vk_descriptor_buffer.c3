@@ -66,8 +66,8 @@ fn void descriptor_buffer_device_and_heap() @test {
     }
 
     gpu::SamplerDesc sampler_desc = {};
-    gpu::SamplerIndex sampler = gpu::create_sampler(&device, &sampler_desc)!!;
-    gpu::destroy_sampler(&device, sampler)!!;
+    gpu::Sampler sampler_identity = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex sampler = gpu::publish_sampler(&device, sampler_identity)!!;
 }
 
 fn void descriptor_buffer_compute_to_graphics() @test {
@@ -123,9 +123,8 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex sampler_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, sampler_index)!!;
-
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
     OwnedSpan compute_root_buffer = allocate_owned_span(
         device:       &device,
         size:         WriteRoot::size,
@@ -428,9 +427,8 @@ fn void descriptor_buffer_write_then_sample() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, smp_index)!!;
-
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
     OwnedSpan output = allocate_owned_span(
         device:       &device,
         size:         TEX * TEX * 16,

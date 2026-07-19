@@ -148,7 +148,7 @@ struct TextureViewDesc {
     uint   layer_count;
 }
 
-<* Creation parameters for create_sampler. *>
+<* Semantic parameters for intern_sampler. *>
 struct SamplerDesc {
     Filter      min_filter;
     Filter      mag_filter;
@@ -356,4 +356,13 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
     validate_resource_owner(&operation, texture.owner, ResourceOwnerKind.TEXTURE)!;
     operation.vtable.destroy_texture(device, texture)!;
     release_device_children(&operation);
+}
+
+<* Intern an immutable device-owned sampler identity. Identical semantic
+   descriptions return the same value; debug_name is not semantic. *>
+fn Sampler? intern_sampler(Device* device, SamplerDesc* desc) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    return operation.vtable.intern_sampler(device, desc);
 }

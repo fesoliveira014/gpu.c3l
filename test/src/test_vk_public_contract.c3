@@ -26,9 +26,9 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         "create_texture rejects a null descriptor"
     );
     assert(
-        @catch(gpu::create_sampler(&device, (gpu::SamplerDesc*)null))
+        @catch(gpu::intern_sampler(&device, (gpu::SamplerDesc*)null))
             == gpu::INVALID_ARGUMENT,
-        "create_sampler rejects a null descriptor"
+        "intern_sampler rejects a null descriptor"
     );
     assert(
         @catch(gpu::create_shader(&device, (gpu::ShaderDesc*)null))

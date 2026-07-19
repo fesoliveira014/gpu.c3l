@@ -6,7 +6,6 @@ import std::thread;
 import vma;
 import std::io;
 import std::core::mem;
-import std::math;
 
 // Heap binding convention (set 0), mirrored by include/shaders/descriptor_heap.glsl.
 const uint HEAP_SET = 0;
@@ -22,13 +21,6 @@ struct TextureDescriptorCell {
     ushort             generation;
     bool               used;
 }
-
-struct SamplerDescriptorCell {
-    vk::Sampler sampler;
-    ushort      generation;
-    bool        used;
-}
-
 
 // Device limits governing the active heap mode. Indexing fields come from
 // PhysicalDeviceVulkan12Properties; buffer fields come from
@@ -52,13 +44,10 @@ struct HeapLimits {
 
 struct DescriptorHeapState {
     TextureDescriptorCell[] texture_cells;
-    SamplerDescriptorCell[] sampler_cells;
     uint                    texture_next_new;
     uint                    sampler_next_new;
     uint[]                  texture_free;
     uint                    texture_free_count;
-    uint[]                  sampler_free;
-    uint                    sampler_free_count;
     vk::DescriptorSetLayout set_layout;
     // Indexing path.
     vk::DescriptorPool      descriptor_pool;
@@ -225,9 +214,7 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
     }
 
     heap.texture_cells          = mem::new_array(TextureDescriptorCell, tex_capacity);
-    heap.sampler_cells          = mem::new_array(SamplerDescriptorCell, smp_capacity);
     heap.texture_free           = mem::new_array(uint, tex_capacity);
-    heap.sampler_free           = mem::new_array(uint, smp_capacity);
 
     vk::DescriptorSetLayoutBinding[3] bindings = {
         {
@@ -444,17 +431,9 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
     }
 }
 
-<* Safe on a partial or zeroed heap; destroys every live sampler object. *>
+<* Safe on a partial or zeroed heap. *>
 fn void destroy_descriptor_heap(VkDeviceState* state) {
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
-    if (heap.sampler_cells.ptr != null) {
-        foreach (&cell : heap.sampler_cells[:heap.sampler_next_new]) {
-            if (cell.sampler != null) {
-                vk::destroy_sampler(state.device, cell.sampler, null);
-                cell.sampler = (vk::Sampler)null;
-            }
-        }
-    }
     if (heap.descriptor_pool != null) {
         vk::destroy_descriptor_pool(state.device, heap.descriptor_pool, null);
         heap.descriptor_pool = (vk::DescriptorPool)null;
@@ -468,9 +447,7 @@ fn void destroy_descriptor_heap(VkDeviceState* state) {
         heap.set_layout = (vk::DescriptorSetLayout)null;
     }
     if (heap.texture_cells.ptr != null)          { mem::free(heap.texture_cells.ptr); heap.texture_cells = {}; }
-    if (heap.sampler_cells.ptr != null)          { mem::free(heap.sampler_cells.ptr); heap.sampler_cells = {}; }
     if (heap.texture_free.ptr != null)           { mem::free(heap.texture_free.ptr); heap.texture_free = {}; }
-    if (heap.sampler_free.ptr != null)           { mem::free(heap.sampler_free.ptr); heap.sampler_free = {}; }
 }
 
 fn void report_descriptor_leaks(VkDeviceState* state) {
@@ -491,37 +468,13 @@ fn void report_descriptor_leaks(VkDeviceState* state) {
             }
         }
     }
-    if (heap.sampler_cells.ptr != null) {
-        foreach (i, &cell : heap.sampler_cells[:heap.sampler_next_new]) {
-            if (!cell.used) continue;
-            if (!report_resource_lifetime(
-                state:               state,
-                resource_kind:       gpu::DebugResourceKind.SAMPLER,
-                has_public_identity: true,
-                index:               (uint)i,
-                generation:          (uint)cell.generation,
-                debug_name:          null,
-                backend_text:        "sampler descriptor remains live",
-            )) {
-                io::eprintfn("gpu: leaked sampler descriptor slot %d", i);
-            }
-        }
-    }
 }
-
 
 fn TextureDescriptorCell*? texture_cell_get(DescriptorHeapState* heap, gpu::TextureIndex index) @private {
     uint slot = index.slot;
     if (slot >= heap.texture_cells.len || !heap.texture_cells[slot].used) return gpu::INVALID_HANDLE~;
     if (heap.texture_cells[slot].generation != index.generation) return gpu::INVALID_HANDLE~;
     return &heap.texture_cells[slot];
-}
-
-fn SamplerDescriptorCell*? sampler_cell_get(DescriptorHeapState* heap, gpu::SamplerIndex index) @private {
-    uint slot = index.slot;
-    if (slot >= heap.sampler_cells.len || !heap.sampler_cells[slot].used) return gpu::INVALID_HANDLE~;
-    if (heap.sampler_cells[slot].generation != index.generation) return gpu::INVALID_HANDLE~;
-    return &heap.sampler_cells[slot];
 }
 
 <* Sampled and/or storage descriptor per the texture's usage, same slot in
@@ -976,228 +929,4 @@ fn void? vk_destroy_texture_descriptor(gpu::Device* device, gpu::TextureIndex in
     cell.used = false;
     cell.generation = bump_generation(cell.generation);
     state.strict_heap.descriptors.texture_free[state.strict_heap.descriptors.texture_free_count++] = (uint)index.slot;
-}
-
-fn vk::Filter filter_to_vk(gpu::Filter filter) @private {
-    return filter == gpu::Filter.LINEAR ? vk::Filter.LINEAR : vk::Filter.NEAREST;
-}
-
-fn vk::SamplerAddressMode address_mode_to_vk(gpu::AddressMode mode) @private {
-    switch (mode) {
-        case gpu::AddressMode.REPEAT:          return vk::SamplerAddressMode.REPEAT;
-        case gpu::AddressMode.MIRRORED_REPEAT: return vk::SamplerAddressMode.MIRRORED_REPEAT;
-        case gpu::AddressMode.CLAMP_TO_EDGE:   return vk::SamplerAddressMode.CLAMP_TO_EDGE;
-        case gpu::AddressMode.CLAMP_TO_BORDER: return vk::SamplerAddressMode.CLAMP_TO_BORDER;
-        default:                               return vk::SamplerAddressMode.REPEAT;
-    }
-}
-
-<* Heap mutation faults with `sampler` still owned by the caller. *>
-fn gpu::SamplerIndex? publish_sampler(
-    VkDeviceState* state,
-    vk::Sampler sampler,
-) @private {
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-
-    uint slot;
-    if (heap.sampler_free_count > 0) {
-        slot = heap.sampler_free[--heap.sampler_free_count];
-    } else if (heap.sampler_next_new < heap.sampler_cells.len) {
-        slot = heap.sampler_next_new++;
-    } else {
-        return gpu::DESCRIPTOR_HEAP_FULL~;
-    }
-
-    SamplerDescriptorCell* cell = &heap.sampler_cells[slot];
-    cell.sampler = sampler;
-    cell.used = true;
-    cell.generation = bump_generation(cell.generation);
-
-    write_sampler_descriptor(state, slot, sampler);
-    return (gpu::SamplerIndex){
-        .slot = (ushort)slot,
-        .generation = cell.generation,
-    };
-}
-
-fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    if (!math::is_finite(desc.mip_lod_bias)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.mip_lod_bias",
-            invariant:           "must be finite",
-            backend_text:        null,
-        )~;
-    }
-    if (!math::is_finite(desc.min_lod)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.min_lod",
-            invariant:           "must be finite",
-            backend_text:        null,
-        )~;
-    }
-    if (!math::is_finite(desc.max_lod)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.max_lod",
-            invariant:           "must be finite",
-            backend_text:        null,
-        )~;
-    }
-    if (desc.min_lod > desc.max_lod) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.min_lod",
-            invariant:           "must not exceed SamplerDesc.max_lod",
-            backend_text:        null,
-        )~;
-    }
-    if (desc.anisotropy_enable && !math::is_finite(desc.max_anisotropy)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.max_anisotropy",
-            invariant:           "must be finite when anisotropy is enabled",
-            backend_text:        null,
-        )~;
-    }
-    if (desc.anisotropy_enable && state.max_sampler_anisotropy <= 0) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_sampler",
-            public_fault:        gpu::UNSUPPORTED_FEATURE,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.anisotropy_enable",
-            invariant:           "device must support sampler anisotropy",
-            backend_text:        null,
-        )~;
-    }
-    if (desc.anisotropy_enable && desc.max_anisotropy < 1.0f) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.max_anisotropy",
-            invariant:           "must be at least 1.0 when anisotropy is enabled",
-            backend_text:        null,
-        )~;
-    }
-
-    vk::SamplerCreateInfo sampler_info = vk::sampler_create_info()
-        .set_mag_filter(filter_to_vk(desc.mag_filter))
-        .set_min_filter(filter_to_vk(desc.min_filter))
-        .set_mipmap_mode(desc.mip_filter == gpu::Filter.LINEAR
-            ? vk::SamplerMipmapMode.LINEAR
-            : vk::SamplerMipmapMode.NEAREST)
-        .set_address_mode_u(address_mode_to_vk(desc.address_u))
-        .set_address_mode_v(address_mode_to_vk(desc.address_v))
-        .set_address_mode_w(address_mode_to_vk(desc.address_w))
-        .set_mip_lod_bias(desc.mip_lod_bias)
-        .set_anisotropy_enable(desc.anisotropy_enable ? vk::TRUE : vk::FALSE)
-        .set_max_anisotropy(desc.max_anisotropy > state.max_sampler_anisotropy ? state.max_sampler_anisotropy : desc.max_anisotropy)
-        .set_compare_enable(desc.compare_enable ? vk::TRUE : vk::FALSE)
-        .set_compare_op(compare_op_to_vk(desc.compare))
-        .set_min_lod(desc.min_lod)
-        .set_max_lod(desc.max_lod);
-
-    vk::Sampler sampler;
-    check_backend_result(
-        state:     state,
-        operation: "create_sampler",
-        result:    vk::create_sampler(state.device, &sampler_info, null, &sampler),
-    )!;
-
-    gpu::SamplerIndex? published = publish_sampler(state, sampler);
-    if (try index = published) return index;
-    fault publish_fault = @catch(published);
-    vk::destroy_sampler(state.device, sampler, null);
-    if (publish_fault != gpu::DESCRIPTOR_HEAP_FULL) return publish_fault~;
-    return report_contract_failure(
-        state:               state,
-        operation:           "create_sampler",
-        public_fault:        gpu::DESCRIPTOR_HEAP_FULL,
-        resource_kind:       gpu::DebugResourceKind.SAMPLER,
-        has_public_identity: false,
-        index:               0,
-        generation:          0,
-        debug_name:          null,
-        rejected_field:      "DeviceDesc.sampler_descriptor_capacity",
-        invariant:           "must exceed live samplers",
-        backend_text:        null,
-    )~;
-}
-
-fn void? vk_destroy_sampler(gpu::Device* device, gpu::SamplerIndex index) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    if (catch f = sampler_cell_get(&state.strict_heap.descriptors, index)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "destroy_sampler",
-            public_fault:        f,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "index",
-            invariant:           "sampler index must identify a live generation",
-            backend_text:        null,
-        )~;
-    }
-    SamplerDescriptorCell* cell = sampler_cell_get(&state.strict_heap.descriptors, index)!!;
-    vk::Sampler sampler = cell.sampler;
-    cell.sampler = (vk::Sampler)null;
-    cell.used = false;
-    cell.generation = bump_generation(cell.generation);
-    state.strict_heap.descriptors.sampler_free[state.strict_heap.descriptors.sampler_free_count++] = (uint)index.slot;
-    vk::destroy_sampler(state.device, sampler, null);
 }

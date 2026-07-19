@@ -398,6 +398,13 @@ internal heap remain scoped to their owning `Device`.
 Public indices map to descriptor entries. Neither path changes the public API
 or shader material records.
 
+Sampler identity is not owned by either descriptor path. Every device has an
+append-only sampler table keyed by normalized semantic state. Interning occurs
+under the resource mutex, creates at most one native sampler for an equal key,
+and retains it until device teardown. A strict-enabled device may publish that
+identity once into the selected sampler heap; repeated publication returns the
+same index, while a capacity fault leaves the identity unpublished and valid.
+
 ### Descriptor slot policy
 
 ```text
@@ -409,7 +416,9 @@ DescriptorSlot
     TextureHandle owner_texture
 ```
 
-Descriptor use is validated in debug builds, and device destruction reports leaks.
+Texture descriptor use is validated in debug builds, and device destruction
+reports texture descriptor leaks. Sampler entries are device-owned and are not
+reported as individually releasable leaks.
 
 Batch creation uses a prepare/commit transaction under the resource lock.
 Preparation validates every item and resolves its view without consuming

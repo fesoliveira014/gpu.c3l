@@ -20,6 +20,31 @@ struct DebugCapture {
     bool              messenger_failure_strings_match;
 }
 
+struct SamplerNameCapture {
+    uint           calls;
+    vk::ObjectType object_type;
+    ulong          object_handle;
+    bool           first_name_matches;
+}
+
+SamplerNameCapture* sampler_name_capture;
+
+fn vk::Result capture_sampler_name(
+    vk::Device device,
+    vk::DebugUtilsObjectNameInfoEXT* info,
+) {
+    SamplerNameCapture* capture = sampler_name_capture;
+    if (capture == null || device == null || info == null) {
+        return vk::Result.ERROR_UNKNOWN;
+    }
+    capture.calls++;
+    capture.object_type = info.object_type;
+    capture.object_handle = info.object_handle;
+    capture.first_name_matches = info.p_object_name != null
+        && ((ZString)info.p_object_name).str_view() == "first_sampler";
+    return vk::Result.SUCCESS;
+}
+
 fn void capture_debug_message(gpu::DebugMessage* message, void* user_data) {
     DebugCapture* capture = (DebugCapture*)user_data;
     capture.calls++;
@@ -446,6 +471,39 @@ fn void debug_names_do_not_require_validation() @test {
     vk::vk_destroy_buffer(&device, buffer)!!;
 }
 
+fn void interned_sampler_keeps_first_debug_name() @test {
+    gpu::DeviceDesc device_desc = {
+        .backend            = gpu::BackendKind.VULKAN,
+        .enable_debug_names = true,
+        .application_name   = "gpu_sampler_name_test",
+    };
+    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    SamplerNameCapture capture;
+    sampler_name_capture = &capture;
+    vk::PFN_vkSetDebugUtilsObjectNameEXT original =
+        state.device_dispatch.debug.set_object_name;
+    state.device_dispatch.debug.set_object_name = &capture_sampler_name;
+    defer {
+        state.device_dispatch.debug.set_object_name = original;
+        sampler_name_capture = null;
+    }
+
+    gpu::SamplerDesc first_desc = { .debug_name = "first_sampler" };
+    gpu::Sampler first = gpu::intern_sampler(&device, &first_desc)!!;
+    gpu::SamplerDesc duplicate_desc = first_desc;
+    duplicate_desc.debug_name = "later_sampler";
+    gpu::Sampler duplicate = gpu::intern_sampler(&device, &duplicate_desc)!!;
+
+    assert(first == duplicate, "debug names do not change sampler identity");
+    assert(capture.calls == 1, "only the first interned sampler assigns a native name");
+    assert(capture.object_type == vk::ObjectType.SAMPLER,
+        "the native name identifies a Vulkan sampler");
+    assert(capture.object_handle != 0, "the native name identifies the live object");
+    assert(capture.first_name_matches, "the first semantic description owns the debug name");
+}
+
 fn gpu::Device make_dbg_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -506,7 +564,8 @@ fn void leak_reporters_count_leaks() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex sampler = gpu::create_sampler(&device, &sampler_desc)!!;
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
 
     LeakCapture capture = {
         .metadata_valid        = true,
@@ -526,15 +585,15 @@ fn void leak_reporters_count_leaks() @test {
 
     vk::report_descriptor_leaks(state);
 
-    assert(capture.total == 7, "each reported resource or descriptor emits one warning");
+    assert(capture.total == 6, "each leaked resource or owned descriptor emits one warning");
     assert(capture.allocations == 1 && capture.gpu_spans == 1
         && capture.textures == 1 && capture.pipelines == 1,
         "allocation, GPU span, texture, and pipeline leak kinds are exact");
     assert(capture.shaders == 1,
         "private recording pools are not public resource leaks");
-    assert(capture.texture_descriptors == 1 && capture.samplers == 1,
-        "descriptor leak kinds are exact");
-    assert(capture.public_identities == 6,
+    assert(capture.texture_descriptors == 1 && capture.samplers == 0,
+        "device-owned samplers are not descriptor leaks");
+    assert(capture.public_identities == 5,
         "only strict public resources carry slot identities");
     assert(capture.private_span_identity_hidden,
         "private backing storage exposes no private handle identity");
@@ -549,8 +608,6 @@ fn void leak_reporters_count_leaks() @test {
     assert(tex_slot.allocation_size > 0, "texture leak line carries the allocation size");
 
     gpu::destroy_texture_descriptor(&device, texture_index)!!;
-    gpu::destroy_sampler(&device, sampler)!!;
-
     gpu::destroy_pipeline(&device, first_alias)!!;
     gpu::destroy_pipeline(&device, second_alias)!!;
     gpu::destroy_shader(&device, shader)!!;
@@ -559,7 +616,7 @@ fn void leak_reporters_count_leaks() @test {
     gpu::free_allocation(&device, &allocation)!!;
 
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
-    assert(capture.total == 7, "clean leak report emits nothing");
+    assert(capture.total == 6, "clean leak report emits nothing");
     gpu::destroy_device(&device)!!;
 }
 

@@ -9,8 +9,8 @@ import std::os::env;
 import std::core::mem::allocators;
 
 // Advisory, not gating: texture-descriptor singles vs batched (N=16) vs
-// sampler create/destroy round trips at 1/2/4 workers with immediate slot
-// reuse. Reports ns/descriptor, scaling vs one thread, and the
+// sampler intern-hit plus stable-publication lookups at 1/2/4 workers.
+// Reports ns/descriptor or ns/op, scaling vs one thread, and the
 // batch-vs-single ratio. DB-mode phases run only when
 // GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1 (same lavapipe caveat as
 // test_vk_descriptor_buffer.c3). Indicative on lavapipe.
@@ -37,7 +37,7 @@ fn ZString phase_name(BenchPhase phase) {
     switch (phase) {
         case BenchPhase.TEXTURE_SINGLE:  return "texture singles";
         case BenchPhase.TEXTURE_BATCHED: return "texture batched(16)";
-        default:                         return "samplers";
+        default:                         return "sampler intern+publish hits";
     }
 }
 
@@ -60,8 +60,8 @@ fn void run_texture_batched_op(gpu::Device* device, gpu::TextureHandle texture) 
 
 fn void run_sampler_op(gpu::Device* device) {
     gpu::SamplerDesc desc = {};
-    gpu::SamplerIndex index = gpu::create_sampler(device, &desc)!!;
-    gpu::destroy_sampler(device, index)!!;
+    gpu::Sampler sampler = gpu::intern_sampler(device, &desc)!!;
+    gpu::SamplerIndex index = gpu::publish_sampler(device, sampler)!!;
 }
 
 fn void run_phase_op(gpu::Device* device, BenchPhase phase, gpu::TextureHandle texture) {
@@ -111,8 +111,9 @@ fn double run_phase(gpu::Device* device, BenchPhase phase, gpu::TextureHandle[] 
         double ns_per_op = run_phase_worker_count(device, phase, textures, workers);
         if (workers == 1) { baseline_ns_per_op = ns_per_op; single_worker_ns = ns_per_op; }
         double scaling = baseline_ns_per_op / ns_per_op;
-        io::printfn("phase %s workers=%d: %.1f ns/descriptor, %.2fx scaling vs 1 thread",
-            phase_name(phase), workers, ns_per_op, scaling);
+        ZString unit = phase == BenchPhase.SAMPLER ? "ns/op" : "ns/descriptor";
+        io::printfn("phase %s workers=%d: %.1f %s, %.2fx scaling vs 1 thread",
+            phase_name(phase), workers, ns_per_op, unit, scaling);
     }
     return single_worker_ns;
 }
@@ -158,7 +159,7 @@ fn bool db_e2e_enabled() {
 }
 
 fn int main() {
-    io::printfn("iterations=%d/worker units=ns/descriptor", BENCH_ITERS_PER_WORKER);
+    io::printfn("iterations=%d/worker units=ns/descriptor,ns/op", BENCH_ITERS_PER_WORKER);
     gpu::DeviceDesc indexing_desc = {
         .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_descriptor_churn_bench",

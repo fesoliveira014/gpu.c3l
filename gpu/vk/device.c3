@@ -104,6 +104,7 @@ struct VkDeviceState {
     ComputeLayoutCache         compute_layout_cache;
     vk::PipelineCache          driver_cache;
     TextureTable               textures;
+    SamplerTable               samplers;
     VkPresentationState        presentation;
     VkStrictHeapState          strict_heap;
     SubmittedCommandBatch[]    submitted_commands;
@@ -192,8 +193,8 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .create_texture_descriptor  = &vk_create_texture_descriptor,
     .destroy_texture_descriptor = &vk_destroy_texture_descriptor,
     .create_texture_descriptors = &vk_create_texture_descriptors,
-    .create_sampler             = &vk_create_sampler,
-    .destroy_sampler            = &vk_destroy_sampler,
+    .intern_sampler             = &vk_intern_sampler,
+    .publish_sampler            = &vk_publish_sampler,
     .create_shader           = &vk_create_shader,
     .destroy_shader          = &vk_destroy_shader,
     .create_compute_pipeline = &vk_create_compute_pipeline,
@@ -546,6 +547,7 @@ fn gpu::Device? create_vk_device_with_selection(
     }
     state.textures.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.TEXTURE);
     state.textures.slots = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
+    create_sampler_table(state)!;
     if (state.presentation.enabled) {
         state.presentation.swapchains.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN);
         state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
@@ -669,6 +671,7 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         }
         if (state.validation || state.debug_callback != null) report_descriptor_leaks(state);
         destroy_descriptor_heap(state);
+        destroy_sampler_table(state);
         // Internal textures and device-loss leftovers remain backend-owned.
         if (state.textures.slots.ptr != null) {
             foreach (&cell : state.textures.slots[:state.textures.next_new]) {

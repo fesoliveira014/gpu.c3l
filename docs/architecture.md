@@ -16,6 +16,7 @@ GpuAllocation   -> owning generic GPU storage
 GpuSpan         -> non-owning identity and range
 GpuAddress      -> shader-visible data address
 TextureIndex    -> shader-visible texture heap index
+Sampler         -> immutable device-interned sampler identity
 SamplerIndex    -> shader-visible sampler heap index
 ```
 
@@ -198,14 +199,15 @@ changing the token or generation. Successful teardown increments the generation
 and invalidates the passed token. Device loss bypasses child and progress checks
 after pins retire; command tokens remain discardable after loss.
 
-Device-owned table handles, including `GpuAllocation`, carry an opaque
-device-and-kind owner plus a local slot and generation. Backend tables reject
-foreign owners before validating liveness and generation. `GpuSpan` carries
-the same identity plus offset and size, but does not own storage. Command tokens
-derive ownership from their device. Shader-visible indices and
-GPU addresses remain caller-lifetime values rather than ownership tokens.
-Descriptor release accepts `TextureIndex` and `SamplerIndex` values without
-device-owner metadata; `docs/limitations.md` describes the cross-device risk.
+Device-owned table handles and values, including `GpuAllocation` and `Sampler`,
+carry an opaque device-and-kind owner plus a local slot and generation. Backend
+tables reject foreign owners before validating liveness and generation.
+`GpuSpan` carries the same identity plus offset and size, but does not own
+storage. Command tokens derive ownership from their device. Shader-visible
+indices and GPU addresses remain caller-lifetime values rather than ownership
+tokens. Texture descriptor release accepts `TextureIndex` without device-owner
+metadata; `docs/limitations.md` describes the cross-device risk. `SamplerIndex`
+has no release operation and remains stable until its device is destroyed.
 
 ### Queues
 
@@ -313,13 +315,17 @@ overlap before native creation. Texture destruction never releases caller-owned 
 
 ### Texture and sampler descriptors
 
-`TextureHandle` owns the image. `TextureIndex` is the shader-visible descriptor heap index.
+`TextureHandle` owns the image. `TextureIndex` is the shader-visible descriptor
+heap index. `Sampler` is an immutable, owner-bearing identity interned from
+semantic state. `SamplerIndex` is its optional strict shader-heap publication.
 
 This separation matters:
 
 ```text
 TextureHandle -> lifetime and commands
 TextureIndex  -> shader-visible sampled/storage reference
+Sampler       -> device-lifetime immutable identity
+SamplerIndex  -> stable strict shader-visible reference
 ```
 
 Destroying a texture with live descriptors returns `RESOURCE_IN_USE`.
@@ -498,14 +504,19 @@ The public API exposes descriptor allocation and updates:
 ```text
 create_texture_descriptor(device, texture, view_desc) -> TextureIndex?
 destroy_texture_descriptor(device, index) -> void?
-create_sampler(device, desc) -> SamplerIndex?
-destroy_sampler(device, index) -> void?
+intern_sampler(device, desc) -> Sampler?
+publish_sampler(device, sampler) -> SamplerIndex?
 ```
 
 The strict request initializes one inline, device-owned heap group. Heap mode,
 capacities, descriptor objects, native features, dispatch, pipeline state, and
 published capabilities derive from that group. An unrequested group owns none
 of that state; current public request validation requires strict semantics.
+
+Sampler interning is independent of that optional heap group. The backend keeps
+one append-only sampler table per device, deduplicates equal effective state,
+and destroys every native sampler during device teardown. Strict publication
+adds at most one heap entry per identity and never transfers native ownership.
 
 `AUTO` prefers descriptor indexing and falls back to descriptor buffers when
 indexing is unavailable. Callers may force either path. Neither changes shader

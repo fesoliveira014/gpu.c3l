@@ -48,21 +48,12 @@ fn void? create_texture_descriptors(Device* device, TextureDescriptorDesc[] desc
     retain_device_children(&operation, (ulong)descs.len);
 }
 
-<* Samplers are pure heap entries; the descriptor is the resource.
-   Ownership: release with destroy_sampler. *>
-fn SamplerIndex? create_sampler(Device* device, SamplerDesc* desc) {
+<* Publish an interned sampler to the strict shader-visible heap. Requires
+   strict capability; repeated publication returns the same device-lifetime index. *>
+fn SamplerIndex? publish_sampler(Device* device, Sampler sampler) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    SamplerIndex index = operation.vtable.create_sampler(device, desc)!;
-    retain_device_children(&operation);
-    return index;
-}
-
-<* Release the sampler and recycle its heap slot immediately. *>
-fn void? destroy_sampler(Device* device, SamplerIndex index) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    operation.vtable.destroy_sampler(device, index)!;
-    release_device_children(&operation);
+    validate_resource_owner(&operation, sampler.owner, ResourceOwnerKind.SAMPLER)!;
+    if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
+    return operation.vtable.publish_sampler(device, sampler);
 }

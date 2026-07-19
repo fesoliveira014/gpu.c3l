@@ -521,9 +521,8 @@ fn void sampled_depth_matches_readback() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, smp_index)!!;
-
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DEPTH_SAMPLE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
     defer gpu::destroy_shader(&device, comp)!!;
@@ -679,9 +678,8 @@ fn void compare_sampler_exact_results() @test {
         .compare_enable = true,
         .compare        = gpu::CompareOp.LESS,
     };
-    gpu::SamplerIndex shadow_smp = gpu::create_sampler(&device, &shadow_desc)!!;
-    defer gpu::destroy_sampler(&device, shadow_smp)!!;
-
+    gpu::Sampler shadow_sampler = gpu::intern_sampler(&device, &shadow_desc)!!;
+    gpu::SamplerIndex shadow_smp = gpu::publish_sampler(&device, shadow_sampler)!!;
     gpu::ShaderDesc probe_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = SHADOW_PROBE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderHandle probe = gpu::create_shader(&device, &probe_sd)!!;
     defer gpu::destroy_shader(&device, probe)!!;

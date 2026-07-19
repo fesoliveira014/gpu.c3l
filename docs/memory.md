@@ -369,8 +369,10 @@ reachable only through GPU addresses or shader indices cannot be enumerated and
 remain a caller precondition.
 
 A texture with live descriptors and an allocation with live placed or dedicated
-textures also return `RESOURCE_IN_USE`. Descriptor and sampler indices recycle
+textures also return `RESOURCE_IN_USE`. Texture descriptor indices recycle
 immediately; stale shader data is therefore a caller lifetime violation.
+Sampler identities and published indices instead remain live until device
+teardown.
 `destroy_device` remains non-blocking and returns `DEVICE_BUSY` while queue
 work is incomplete.
 

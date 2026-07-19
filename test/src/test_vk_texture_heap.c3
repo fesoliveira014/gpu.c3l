@@ -44,9 +44,8 @@ fn void bindless_texture_write_then_sample() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, smp_index)!!;
-
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
     OwnedSpan output = allocate_owned_span(
         device:       &device,
         size:         TEX_SIZE * TEX_SIZE * 16,
@@ -197,10 +196,10 @@ fn void anisotropic_sampler_caps_honest() @test {
     };
     if (gpu::get_device_caps(&device)!!.max_sampler_anisotropy > 0) {
         // Creation succeeds (max_anisotropy clamps to the device limit).
-        gpu::SamplerIndex smp = gpu::create_sampler(&device, &aniso)!!;
-        gpu::destroy_sampler(&device, smp)!!;
+        gpu::Sampler sampler = gpu::intern_sampler(&device, &aniso)!!;
+        gpu::SamplerIndex smp = gpu::publish_sampler(&device, sampler)!!;
     } else {
-        fault err = @catch(gpu::create_sampler(&device, &aniso));
+        fault err = @catch(gpu::intern_sampler(&device, &aniso));
         assert(err == gpu::UNSUPPORTED_FEATURE, "expected UNSUPPORTED_FEATURE, got %s", err);
     }
 }
@@ -223,7 +222,7 @@ fn void anisotropy_range_validated() @test {
             .anisotropy_enable = true,
             .max_anisotropy    = value,
         };
-        fault f = @catch(gpu::create_sampler(&device, &desc));
+        fault f = @catch(gpu::intern_sampler(&device, &desc));
         assert(f == gpu::INVALID_ARGUMENT, "max_anisotropy < 1 faults INVALID_ARGUMENT");
     }
 
@@ -233,6 +232,6 @@ fn void anisotropy_range_validated() @test {
         .anisotropy_enable = true,
         .max_anisotropy    = 1.0e6f,
     };
-    gpu::SamplerIndex clamped = gpu::create_sampler(&device, &huge)!!;
-    gpu::destroy_sampler(&device, clamped)!!;
+    gpu::Sampler clamped_sampler = gpu::intern_sampler(&device, &huge)!!;
+    gpu::SamplerIndex clamped = gpu::publish_sampler(&device, clamped_sampler)!!;
 }

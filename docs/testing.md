@@ -71,6 +71,8 @@ null-safe, exactly-once structured debug dispatch and userdata preservation
 invalid-backend callback delivery with callback-enabled/disabled fault parity
 borrowed field and explicit absent-fault representation
 synthetic allocation sharing plans and exact buffer create-info mode/indices
+sampler identity canonicalization, semantic deduplication, table exhaustion,
+cross-device rejection, and concurrent convergence
 ```
 
 Pure CPU tests should be exhaustive where practical.
@@ -126,6 +128,8 @@ root-pointer compute shader
 TextureIndex sampling in compute
 offscreen render target clear/draw/readback
 dynamic viewport/scissor validation, clipping pixels, pass reset, and pipeline-alias persistence
+sampler interning, stable strict publication, publication exhaustion, concurrent
+intern-and-publish convergence, and device-owned teardown
 ```
 
 Allocation queue-family regressions pin aliased and distinct creation plans
@@ -339,7 +343,9 @@ The advisory benchmark runner builds these seven executable targets with
 `-O1`: `allocation_bench`, `resource_create_bench`,
 `descriptor_churn_bench`, `upload_throughput_bench`,
 `command_record_bench`, `pipeline_cache_bench`, and
-`async_overlap_bench`. The allocation target must emit exactly two phases for
+`async_overlap_bench`. Descriptor churn reports texture single/batch work in
+`ns/descriptor` and sampler intern-hit plus stable-publication lookup work in
+`ns/op`. The allocation target must emit exactly two phases for
 4,000 64-byte, 16-byte-aligned `CPU_WRITE` allocations:
 `cpu_write allocate` in `ns/allocation`, then `cpu_write free` in
 `ns/free`. Run the suite with `python scripts/run_benchmarks.py`; benchmark

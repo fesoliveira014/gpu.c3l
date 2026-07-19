@@ -74,12 +74,12 @@ fn int creation_storm_worker(void* arg) {
             .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
             .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
         };
-        gpu::SamplerIndex sampler = gpu::create_sampler(args.device, &sampler_desc)!!;
+        gpu::Sampler sampler_identity = gpu::intern_sampler(args.device, &sampler_desc)!!;
+        gpu::SamplerIndex sampler = gpu::publish_sampler(args.device, sampler_identity)!!;
 
         if (!buffer.allocation.is_valid() || !texture.is_valid() || !shader.is_valid() || !sampler.is_valid()) {
             args.failed = true;
         }
-        gpu::destroy_sampler(args.device, sampler)!!;
         gpu::destroy_shader(args.device, shader)!!;
         gpu::destroy_texture(args.device, texture)!!;
         free_owned_span(args.device, &buffer)!!;
@@ -100,6 +100,68 @@ fn void concurrent_creation_storm() @test {
     }
     foreach (&t : threads) t.join()!!;
     foreach (&a : args) assert(!a.failed, "every storm create yielded a valid handle");
+}
+
+struct SamplerRaceArgs {
+    gpu::Device*      device;
+    gpu::SamplerDesc* desc;
+    Atomic{uint}*     ready;
+    Atomic{bool}*     release;
+    gpu::Sampler      sampler;
+    gpu::SamplerIndex index;
+}
+
+fn int sampler_race_worker(void* raw_args) {
+    SamplerRaceArgs* args = (SamplerRaceArgs*)raw_args;
+    (void)args.ready.add(1, AtomicOrdering.RELEASE);
+    while (!args.release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    args.sampler = gpu::intern_sampler(args.device, args.desc)!!;
+    args.index = gpu::publish_sampler(args.device, args.sampler)!!;
+    return 0;
+}
+
+fn void concurrent_sampler_interning_and_publication_converges() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    gpu::SamplerDesc desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.LINEAR,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    Atomic{uint} ready;
+    Atomic{bool} release;
+    SamplerRaceArgs[THR_THREADS] args;
+    Thread[THR_THREADS] threads;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        args[i] = {
+            .device  = &device,
+            .desc    = &desc,
+            .ready   = &ready,
+            .release = &release,
+        };
+        threads[i].create(&sampler_race_worker, &args[i])!!;
+    }
+    while (ready.load(AtomicOrdering.ACQUIRE) < THR_THREADS) {
+        thread::yield();
+    }
+    release.store(true, AtomicOrdering.RELEASE);
+    foreach (&worker : threads) assert(worker.join()!! == 0);
+    for (uint i = 1; i < THR_THREADS; i++) {
+        assert(args[i].sampler == args[0].sampler,
+            "concurrent interning returns one sampler identity");
+        assert(args[i].index == args[0].index,
+            "concurrent publication returns one stable index");
+    }
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(state.samplers.count == 1,
+        "concurrent interning creates one native sampler cell");
+    assert(state.strict_heap.descriptors.sampler_next_new == 1,
+        "concurrent publication writes one strict heap entry");
 }
 
 struct PipelineRaceArgs {

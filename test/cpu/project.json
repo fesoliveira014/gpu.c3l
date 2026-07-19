@@ -64,12 +64,19 @@
         "span_data_operations.c3"
       ]
     },
+    "sampler_operations": {
+      "type": "object-files",
+      "sources": [
+        "sampler_operations.c3"
+      ]
+    },
     "unit": {
       "type": "test",
       "sources": [
         "../src/test_internal_helpers.c3",
         "../src/test_vk_internal_helpers.c3",
         "../src/test_handles.c3",
+        "../src/test_sampler_identity.c3",
         "../src/test_runtime.c3",
         "../src/test_device_request.c3",
         "../src/test_device_support.c3",

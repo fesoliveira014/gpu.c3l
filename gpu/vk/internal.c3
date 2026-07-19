@@ -20,6 +20,69 @@ struct HeapDescriptorTotals {
     ulong all_pools_descriptors;
 }
 
+struct SamplerKey {
+    gpu::Filter      min_filter;
+    gpu::Filter      mag_filter;
+    gpu::Filter      mip_filter;
+    gpu::AddressMode address_u;
+    gpu::AddressMode address_v;
+    gpu::AddressMode address_w;
+    float            mip_lod_bias;
+    float            min_lod;
+    float            max_lod;
+    bool             anisotropy_enable;
+    float            max_anisotropy;
+    bool             compare_enable;
+    gpu::CompareOp   compare;
+}
+
+fn float canonical_sampler_float(float value) {
+    return value == 0.0f ? 0.0f : value;
+}
+
+fn bool sampler_key_equal(SamplerKey* left, SamplerKey* right) {
+    return left.min_filter == right.min_filter
+        && left.mag_filter == right.mag_filter
+        && left.mip_filter == right.mip_filter
+        && left.address_u == right.address_u
+        && left.address_v == right.address_v
+        && left.address_w == right.address_w
+        && left.mip_lod_bias == right.mip_lod_bias
+        && left.min_lod == right.min_lod
+        && left.max_lod == right.max_lod
+        && left.anisotropy_enable == right.anisotropy_enable
+        && left.max_anisotropy == right.max_anisotropy
+        && left.compare_enable == right.compare_enable
+        && left.compare == right.compare;
+}
+
+fn SamplerKey canonical_sampler_key(
+    gpu::SamplerDesc* desc,
+    float device_max_anisotropy,
+) {
+    float max_anisotropy;
+    if (desc.anisotropy_enable) {
+        max_anisotropy = desc.max_anisotropy > device_max_anisotropy
+            ? device_max_anisotropy
+            : desc.max_anisotropy;
+    }
+    return {
+        .min_filter         = desc.min_filter,
+        .mag_filter         = desc.mag_filter,
+        .mip_filter         = desc.mip_filter,
+        .address_u          = desc.address_u,
+        .address_v          = desc.address_v,
+        .address_w          = desc.address_w,
+        .mip_lod_bias       = canonical_sampler_float(desc.mip_lod_bias),
+        .min_lod            = canonical_sampler_float(desc.min_lod),
+        .max_lod            = canonical_sampler_float(desc.max_lod),
+        .anisotropy_enable  = desc.anisotropy_enable,
+        .max_anisotropy     = canonical_sampler_float(max_anisotropy),
+        .compare_enable     = desc.compare_enable,
+        .compare            = desc.compare_enable ? desc.compare : {},
+    };
+}
+
 fn HeapDescriptorTotals descriptor_heap_totals(uint tex_capacity, uint smp_capacity) {
     return {
         .per_stage_resources   = (ulong)tex_capacity * 2,
