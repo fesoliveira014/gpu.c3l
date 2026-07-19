@@ -498,7 +498,8 @@ pass. The command list carries the active pass extent only while
 
 Viewport, scissor, and depth state are absent from `PipelineKey` and
 `PipelineSlot`. Explicit pipeline binding emits the native pipeline and heap
-binds. `cmd_set_depth_state` emits the Vulkan 1.3 dynamic depth commands and
+binds when the active cache entry changes; rebinding the same entry or an alias
+emits neither. `cmd_set_depth_state` emits the Vulkan 1.3 dynamic depth commands and
 marks depth state valid for the active pass. Draw and dispatch only validate
 active state, push roots, and execute; they never create a native pipeline.
 Viewport and scissor survive pipeline switches, while pass begin resets them to

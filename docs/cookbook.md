@@ -104,6 +104,8 @@ Goal: compute culls, GPU decides the draw count.
 ```c3
 // compute writes DrawIndirectCommand[] + a count word, then bind and execute:
 gpu::cmd_bind_pipeline(&cmd, pipeline)!;
+gpu::DepthState depth_state = {};
+gpu::cmd_set_depth_state(&cmd, &depth_state)!;
 gpu::cmd_draw_indirect(
     commands:      &cmd,
     vertex_root:   vroot,
