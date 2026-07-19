@@ -31,10 +31,8 @@ fn int main() {
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = BENCH_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = BENCH_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle vert = gpu::create_shader(&device, &vert_sd)!!;
-    defer gpu::destroy_shader(&device, vert)!!;
-    gpu::ShaderHandle frag = gpu::create_shader(&device, &frag_sd)!!;
-    defer gpu::destroy_shader(&device, frag)!!;
+    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
+    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc base = {

@@ -90,25 +90,18 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     if (desc.push_constant_size < gpu::RootPush::size
         || desc.push_constant_size % 4 != 0
         || desc.push_constant_size > state.caps.max_push_constant_size) return gpu::INVALID_ARGUMENT~;
-    ShaderPipelineReference shader_reference =
-        retain_shader_for_pipeline(state, desc.shader)!;
-    defer release_shader_for_pipeline(state, shader_reference);
-    ShaderSlot* shader = shader_reference.slot;
-    validate_shader_stage(
-        state:          state,
-        slot:           shader,
-        expected:       gpu::ShaderStage.COMPUTE,
-        operation:      "create_compute_pipeline",
-        rejected_field: "ComputePipelineDesc.shader",
-        handle:         desc.shader,
-    )!;
-
     PipelineKey key = build_compute_key(desc);
     ulong hash = hash_key(&key);
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
-        uint hit = find_entry(&state.pipeline_cache, hash, &key);
+        uint hit = find_entry(
+            &state.pipeline_cache,
+            hash,
+            &key,
+            &desc.shader,
+            null,
+        );
         if (hit != PIPELINE_ENTRY_NONE) {
             PipelineCacheEntry* entry = &state.pipeline_cache.entries[hit];
             entry.refcount++;
@@ -125,6 +118,14 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     }
 
     vk::PipelineLayout layout = get_compute_layout(state, desc.push_constant_size)!;
+    PipelineShaderModule shader = create_pipeline_shader_module(
+        state:          state,
+        code:           &desc.shader,
+        expected_stage: gpu::ShaderStage.COMPUTE,
+        operation:      "create_compute_pipeline",
+        rejected_field: "ComputePipelineDesc.shader",
+    )!;
+    defer destroy_pipeline_shader_module(state, &shader);
 
     vk::ComputePipelineCreateInfo pipe_info = vk::compute_pipeline_create_info();
     pipe_info.stage = vk::pipeline_shader_stage_create_info()
@@ -158,18 +159,29 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     uint entry_index;
-    uint raced = find_entry(&state.pipeline_cache, hash, &key);
+    uint raced = find_entry(
+        &state.pipeline_cache,
+        hash,
+        &key,
+        &desc.shader,
+        null,
+    );
     if (raced != PIPELINE_ENTRY_NONE) {
         vk::destroy_pipeline(state.device, pipeline, null);
         state.pipeline_cache.entries[raced].refcount++;
         entry_index = raced;
         pipeline = state.pipeline_cache.entries[raced].pipeline;
-    } else if (try idx = insert_entry(&state.pipeline_cache, {
-        .hash     = hash,
-        .key      = key,
-        .pipeline = pipeline,
-        .layout   = layout,
-    })) {
+    } else if (try idx = insert_entry(
+        state: state,
+        value: {
+            .hash     = hash,
+            .key      = key,
+            .pipeline = pipeline,
+            .layout   = layout,
+        },
+        first_shader:  &desc.shader,
+        second_shader: null,
+    )) {
         entry_index = idx;
     } else {
         vk::destroy_pipeline(state.device, pipeline, null);

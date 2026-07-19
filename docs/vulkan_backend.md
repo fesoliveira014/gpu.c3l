@@ -39,7 +39,7 @@ gpu/vk/allocation.c3           generic-buffer and raw texture-memory allocations
 gpu/vk/buffer.c3               VkBuffer + VMA allocation path
 gpu/vk/texture.c3              owned/placed images, views, layout tracking
 gpu/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
-gpu/vk/shader.c3               SPIR-V modules and reflection validation
+gpu/vk/shader.c3               temporary SPIR-V modules and reflection validation
 gpu/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
 gpu/vk/pipeline_compute.c3     compute pipeline creation
 gpu/vk/pipeline_graphics.c3    graphics pipeline creation
@@ -436,18 +436,14 @@ performs the selected heap writes.
 
 ## 11. Shader and pipeline implementation
 
-### Shader modules
+### Shader preparation and modules
 
-The backend consumes SPIR-V bytes.
-
-Responsibilities:
-
-```text
-create vk::ShaderModule
-store stage and entry point
-run reflection validation
-set debug names
-```
+`ShaderCode` is borrowed CPU-side IR with library-computed identity, not a
+backend object. Pipeline creation checks the in-memory cache before compiling.
+On a miss, the backend creates a temporary `vk::ShaderModule`, validates
+reflection against the requested pipeline ABI, compiles the pipeline, and
+destroys the module before returning. No shader-module handle or table crosses
+the public boundary.
 
 Reflection validation checks:
 
@@ -462,8 +458,9 @@ descriptor heap bindings match convention
 
 Compute pipeline creation:
 
-Before shader lookup, reject a push-constant size below `RootPush::size`, not
-divisible by four, or above `DeviceCaps.max_push_constant_size`. These public
+Before shader-code lookup, reject a push-constant size below
+`RootPush::size`, not divisible by four, or above
+`DeviceCaps.max_push_constant_size`. These public
 input faults return `INVALID_ARGUMENT` before any Vulkan call.
 
 ```text
@@ -505,9 +502,13 @@ flips, and off-pass overscan are not part of the portable public contract.
 ### Pipeline cache
 
 Two layers. A descriptor-keyed dedup cache (`PipelineKey` over immutable state,
-with refcounted aliases) sits in front of a driver `vk::PipelineCache`. The
-driver cache is created with `DeviceDesc.pipeline_cache_data` as initial data
-and exported through `get_pipeline_cache_size` / `get_pipeline_cache_data`.
+with refcounted aliases) sits in front of a driver `vk::PipelineCache`. Shader
+digests participate in the key, while cache matches also compare stage, entry
+point, length, and exact SPIR-V bytes. Cache entries clone those borrowed
+identity inputs with the device host allocator, so digest collisions stay
+distinct and a prepared value can be reused across devices. The driver cache is
+created with `DeviceDesc.pipeline_cache_data` as initial data and exported
+through `get_pipeline_cache_size` / `get_pipeline_cache_data`.
 
 Compute pipeline layouts are shared per push-constant size in a packed
 device-owned cache. Host storage uses pipeline capacity as an initial hint and
@@ -518,8 +519,8 @@ grows to the device's finite valid-size count.
 The context-free Vulkan result mapper handles success, host/device allocation
 failures, explicit device loss, and missing features, extensions, or layers.
 Operations with additional result semantics use dedicated mappers: backend
-bootstrap, surface and swapchain work, texture and shader creation, pipeline
-creation, descriptor allocation, and enumeration.
+bootstrap, surface and swapchain work, texture creation, shader-module creation,
+pipeline creation, descriptor allocation, and enumeration.
 Unclassified native failures are logged and surface as `BACKEND_ERROR`; they
 must never be inferred as device loss.
 

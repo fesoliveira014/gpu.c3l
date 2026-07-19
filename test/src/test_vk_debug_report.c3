@@ -550,7 +550,7 @@ fn void leak_reporters_count_leaks() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DBG_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &comp_sd)!!;
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
     gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = 8 };
     gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
@@ -583,19 +583,18 @@ fn void leak_reporters_count_leaks() @test {
         "one leaked allocation counted");
     assert(vk::report_texture_leaks(state) == 1, "one leaked texture counted");
     assert(vk::report_pipeline_leaks(state) == 1, "one leaked cache entry counted");
-    assert(vk::report_shader_leaks(state) == 1, "one leaked shader counted");
 
     vk::report_descriptor_leaks(state);
 
-    assert(capture.total == 6, "each leaked resource or owned descriptor emits one warning");
+    assert(capture.total == 5, "each leaked resource or owned descriptor emits one warning");
     assert(capture.allocations == 1 && capture.gpu_spans == 1
         && capture.textures == 1 && capture.pipelines == 1,
         "allocation, GPU span, texture, and pipeline leak kinds are exact");
-    assert(capture.shaders == 1,
-        "private recording pools are not public resource leaks");
+    assert(capture.shaders == 0,
+        "borrowed shader code is not a live resource");
     assert(capture.texture_descriptors == 1 && capture.samplers == 0,
         "device-owned samplers are not descriptor leaks");
-    assert(capture.public_identities == 5,
+    assert(capture.public_identities == 4,
         "only strict public resources carry slot identities");
     assert(capture.private_span_identity_hidden,
         "private backing storage exposes no private handle identity");
@@ -612,13 +611,12 @@ fn void leak_reporters_count_leaks() @test {
     gpu::destroy_texture_view(&device, texture_index_view)!!;
     gpu::destroy_pipeline(&device, first_alias)!!;
     gpu::destroy_pipeline(&device, second_alias)!!;
-    gpu::destroy_shader(&device, shader)!!;
     gpu::destroy_texture(&device, texture)!!;
     vk::vk_destroy_buffer(&device, buffer)!!;
     gpu::free_allocation(&device, &allocation)!!;
 
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
-    assert(capture.total == 6, "clean leak report emits nothing");
+    assert(capture.total == 5, "clean leak report emits nothing");
     gpu::destroy_device(&device)!!;
 }
 

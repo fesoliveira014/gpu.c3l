@@ -1,5 +1,5 @@
 // Reflection-validation fixture: declares a binding in set 1, which the heap
-// convention forbids. create_shader must fault SHADER_INVALID.
+// convention forbids. pipeline creation must fault SHADER_INVALID.
 #version 460
 
 layout(local_size_x = 1) in;

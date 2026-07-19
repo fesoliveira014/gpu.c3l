@@ -82,37 +82,18 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
     if (desc.depth_format != gpu::Format.UNDEFINED && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
     if (desc.color_formats.len == 0 && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
     check_polygon_mode_support(desc.raster.polygon_mode, state.caps.line_polygon_mode)!;
-    ShaderPipelineReference vertex_reference =
-        retain_shader_for_pipeline(state, desc.vertex_shader)!;
-    defer release_shader_for_pipeline(state, vertex_reference);
-    ShaderSlot* vertex_shader = vertex_reference.slot;
-    ShaderPipelineReference fragment_reference =
-        retain_shader_for_pipeline(state, desc.fragment_shader)!;
-    defer release_shader_for_pipeline(state, fragment_reference);
-    ShaderSlot* fragment_shader = fragment_reference.slot;
-    validate_shader_stage(
-        state:          state,
-        slot:           vertex_shader,
-        expected:       gpu::ShaderStage.VERTEX,
-        operation:      "create_graphics_pipeline",
-        rejected_field: "GraphicsPipelineDesc.vertex_shader",
-        handle:         desc.vertex_shader,
-    )!;
-    validate_shader_stage(
-        state:          state,
-        slot:           fragment_shader,
-        expected:       gpu::ShaderStage.FRAGMENT,
-        operation:      "create_graphics_pipeline",
-        rejected_field: "GraphicsPipelineDesc.fragment_shader",
-        handle:         desc.fragment_shader,
-    )!;
-
     PipelineKey key = build_graphics_key(desc);
     ulong hash = hash_key(&key);
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
-        uint hit = find_entry(&state.pipeline_cache, hash, &key);
+        uint hit = find_entry(
+            &state.pipeline_cache,
+            hash,
+            &key,
+            &desc.vertex_shader,
+            &desc.fragment_shader,
+        );
         if (hit != PIPELINE_ENTRY_NONE) {
             PipelineCacheEntry* entry = &state.pipeline_cache.entries[hit];
             entry.refcount++;
@@ -130,6 +111,22 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         }
     }
 
+    PipelineShaderModule vertex_shader = create_pipeline_shader_module(
+        state:          state,
+        code:           &desc.vertex_shader,
+        expected_stage: gpu::ShaderStage.VERTEX,
+        operation:      "create_graphics_pipeline",
+        rejected_field: "GraphicsPipelineDesc.vertex_shader",
+    )!;
+    defer destroy_pipeline_shader_module(state, &vertex_shader);
+    PipelineShaderModule fragment_shader = create_pipeline_shader_module(
+        state:          state,
+        code:           &desc.fragment_shader,
+        expected_stage: gpu::ShaderStage.FRAGMENT,
+        operation:      "create_graphics_pipeline",
+        rejected_field: "GraphicsPipelineDesc.fragment_shader",
+    )!;
+    defer destroy_pipeline_shader_module(state, &fragment_shader);
     @pool() {
         vk::Format[] color_formats = {};
         if (desc.color_formats.len > 0) {
@@ -255,18 +252,29 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         uint entry_index;
-        uint raced = find_entry(&state.pipeline_cache, hash, &key);
+        uint raced = find_entry(
+            &state.pipeline_cache,
+            hash,
+            &key,
+            &desc.vertex_shader,
+            &desc.fragment_shader,
+        );
         if (raced != PIPELINE_ENTRY_NONE) {
             vk::destroy_pipeline(state.device, pipeline, null);
             state.pipeline_cache.entries[raced].refcount++;
             entry_index = raced;
             pipeline = state.pipeline_cache.entries[raced].pipeline;
-        } else if (try idx = insert_entry(&state.pipeline_cache, {
-            .hash     = hash,
-            .key      = key,
-            .pipeline = pipeline,
-            .layout   = state.graphics_layout,
-        })) {
+        } else if (try idx = insert_entry(
+            state: state,
+            value: {
+                .hash     = hash,
+                .key      = key,
+                .pipeline = pipeline,
+                .layout   = state.graphics_layout,
+            },
+            first_shader:  &desc.vertex_shader,
+            second_shader: &desc.fragment_shader,
+        )) {
             entry_index = idx;
         } else {
             vk::destroy_pipeline(state.device, pipeline, null);

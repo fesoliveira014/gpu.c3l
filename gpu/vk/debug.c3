@@ -365,33 +365,11 @@ fn uint report_pipeline_leaks(VkDeviceState* state) {
     return count;
 }
 
-fn uint report_shader_leaks(VkDeviceState* state) {
-    uint count = 0;
-    if (state.shaders.slots.ptr == null) return 0;
-    foreach (i, &cell : state.shaders.slots[:state.shaders.next_new]) {
-        if (!cell.used) continue;
-        if (!report_resource_lifetime(
-            state:               state,
-            resource_kind:       gpu::DebugResourceKind.SHADER,
-            has_public_identity: true,
-            index:               (uint)i,
-            generation:          cell.generation,
-            debug_name:          null,
-            backend_text:        "shader remains live",
-        )) {
-            io::eprintfn("gpu: leaked shader (index %d)", i);
-        }
-        count++;
-    }
-    return count;
-}
-
 fn uint report_resource_leaks(VkDeviceState* state) {
     uint count = report_allocation_leaks(state);
     count += report_buffer_leaks(state);
     count += report_texture_leaks(state);
     count += report_pipeline_leaks(state);
-    count += report_shader_leaks(state);
     return count;
 }
 

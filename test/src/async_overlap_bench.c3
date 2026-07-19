@@ -256,18 +256,15 @@ fn int main() {
     defer gpu::destroy_texture(&device, rt)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = OVERLAP_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle comp_shader = gpu::create_shader(&device, &comp_sd)!!;
-    defer gpu::destroy_shader(&device, comp_shader)!!;
+    gpu::ShaderCode comp_shader = gpu::prepare_shader_code(&comp_sd)!!;
     gpu::ComputePipelineDesc comp_pipe_desc = { .shader = comp_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle comp_pipeline = gpu::create_compute_pipeline(&device, &comp_pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, comp_pipeline)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle vert_shader = gpu::create_shader(&device, &vert_sd)!!;
-    defer gpu::destroy_shader(&device, vert_shader)!!;
+    gpu::ShaderCode vert_shader = gpu::prepare_shader_code(&vert_sd)!!;
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OVERLAP_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle frag_shader = gpu::create_shader(&device, &frag_sd)!!;
-    defer gpu::destroy_shader(&device, frag_shader)!!;
+    gpu::ShaderCode frag_shader = gpu::prepare_shader_code(&frag_sd)!!;
     gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc gfx_pipe_desc = {
         .vertex_shader = vert_shader, .fragment_shader = frag_shader,
@@ -407,7 +404,6 @@ fn int main() {
     double[REPS] gfx_parts;
     double[REPS] comp_parts;
     double[REPS] intersections;
-
 
     for (uint rep = 0; rep < REPS; rep++) {
         OwnedSpan frag_owned = gpu_test::allocate_owned_span(

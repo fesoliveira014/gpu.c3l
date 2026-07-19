@@ -306,7 +306,6 @@ TextureHandle
 TextureView
 Sampler
 PipelineHandle
-ShaderHandle
 SwapchainHandle
 ```
 
@@ -374,18 +373,18 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; no adapter can provide the requested semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `cmd_texture_barrier` | an acquired swapchain image is pending during resize, or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
-| `RESOURCE_IN_USE` | resource destruction, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, or incomplete submitted work explicitly references a resource; active pipeline creation uses a shader; a placed or dedicated texture depends on an allocation; a live texture view owns a texture; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
+| `RESOURCE_IN_USE` | resource destruction, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, or incomplete submitted work explicitly references a resource; a placed or dedicated texture depends on an allocation; a live texture view owns a texture; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
 | `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `intern_sampler`; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `publish_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler publication leave existing entries untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
-| `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
+| `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V structure or backend reflection/module rejection |
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
@@ -715,7 +714,7 @@ backend publication.
 
 ## 8. Shader and pipeline API
 
-### Shader modules
+### Shader code
 
 ```text
 ShaderStage
@@ -729,17 +728,30 @@ ShaderDesc
     ZString entry_point
     ZString debug_name
 
-create_shader(Device* device, ShaderDesc* desc) -> ShaderHandle?
-destroy_shader(Device* device, ShaderHandle shader) -> void?
+ShaderCode
+    ShaderStage stage
+    char[] spirv
+    ZString entry_point
+    ZString debug_name
+    ulong digest
+
+prepare_shader_code(ShaderDesc* desc) -> ShaderCode?
 ```
 
-Shader compilation can be handled by tools or samples. The core library consumes SPIR-V bytes.
+Shader compilation can be handled by tools or samples. The core library consumes
+borrowed SPIR-V bytes. `prepare_shader_code` validates their basic structure,
+normalizes a null entry point to `main`, and computes the library-owned identity.
+The caller keeps the bytes and strings immutable and alive whenever the value is
+used. The digest is opaque and process-local: do not inspect, modify, serialize,
+or persist it. Stage, entry point, length, and exact bytes participate in shader
+identity; `debug_name` does not. One prepared value may be reused across
+pipelines and devices. There is no public shader-module handle.
 
 ### Compute pipelines
 
 ```text
 ComputePipelineDesc
-    ShaderHandle shader
+    ShaderCode shader
     uint push_constant_size
     ZString debug_name
 
@@ -782,8 +794,8 @@ BlendState
     BlendOp alpha_op
 
 GraphicsPipelineDesc
-    ShaderHandle vertex_shader
-    ShaderHandle fragment_shader
+    ShaderCode vertex_shader
+    ShaderCode fragment_shader
     PrimitiveTopology topology
     DepthState depth
     RasterState raster
@@ -804,11 +816,13 @@ using it; unsupported LINE creation returns `UNSUPPORTED_FEATURE`.
 ### Pipeline deduplication
 
 Pipeline creation deduplicates through a descriptor-keyed cache. Every create
-returns a fresh handle, but descriptors identical in immutable state (shaders,
-topology, polygon mode, blend, formats, and — for compute — push size) alias
-one backend pipeline underneath. Raster cull/front-face and depth
-test/write/compare state are applied per handle at draw time as dynamic state,
-so descriptors differing only there also share a backend pipeline.
+returns a fresh handle, but descriptors identical in immutable state (exact
+shader code identity, topology, polygon mode, blend, formats, and — for compute
+— push size) alias one backend pipeline underneath. Digest collisions are
+resolved by stage, entry point, length, and exact SPIR-V bytes. Raster
+cull/front-face and depth test/write/compare state are applied per handle at
+draw time as dynamic state, so descriptors differing only there also share a
+backend pipeline.
 
 Each successful create must be balanced by exactly one `destroy_pipeline`; the
 backend pipeline is destroyed when its last alias is released. Destroying a

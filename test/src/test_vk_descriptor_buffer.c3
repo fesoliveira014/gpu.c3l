@@ -254,8 +254,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     defer free_owned_span(&device, &readback)!!;
 
     gpu::ShaderDesc write_shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_WRITE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle write_shader = gpu::create_shader(&device, &write_shader_desc)!!;
-    defer gpu::destroy_shader(&device, write_shader)!!;
+    gpu::ShaderCode write_shader = gpu::prepare_shader_code(&write_shader_desc)!!;
     gpu::ComputePipelineDesc compute_pipeline_desc = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle compute_pipeline = gpu::create_compute_pipeline(&device, &compute_pipeline_desc)!!;
     gpu::ShaderDesc sample_shader_desc = {
@@ -263,8 +262,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .spirv       = DB_SAMPLE_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_shader_desc)!!;
-    defer gpu::destroy_shader(&device, sample_shader)!!;
+    gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_shader_desc)!!;
     gpu::ComputePipelineDesc sample_pipeline_desc = {
         .shader             = sample_shader,
         .push_constant_size = gpu::RootPush::size,
@@ -274,11 +272,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     defer gpu::destroy_pipeline(&device, compute_pipeline)!!;
 
     gpu::ShaderDesc vertex_shader_desc = { .stage = gpu::ShaderStage.VERTEX, .spirv = DB_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle vertex_shader = gpu::create_shader(&device, &vertex_shader_desc)!!;
-    defer gpu::destroy_shader(&device, vertex_shader)!!;
+    gpu::ShaderCode vertex_shader = gpu::prepare_shader_code(&vertex_shader_desc)!!;
     gpu::ShaderDesc fragment_shader_desc = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = DB_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle fragment_shader = gpu::create_shader(&device, &fragment_shader_desc)!!;
-    defer gpu::destroy_shader(&device, fragment_shader)!!;
+    gpu::ShaderCode fragment_shader = gpu::prepare_shader_code(&fragment_shader_desc)!!;
     gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc graphics_pipeline_desc = {
         .vertex_shader   = vertex_shader,
@@ -489,11 +485,9 @@ fn void descriptor_buffer_write_then_sample() @test {
     defer free_owned_span(&device, &output)!!;
 
     gpu::ShaderDesc write_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_WRITE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle write_shader = gpu::create_shader(&device, &write_sd)!!;
-    defer gpu::destroy_shader(&device, write_shader)!!;
+    gpu::ShaderCode write_shader = gpu::prepare_shader_code(&write_sd)!!;
     gpu::ShaderDesc sample_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_SAMPLE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_sd)!!;
-    defer gpu::destroy_shader(&device, sample_shader)!!;
+    gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_sd)!!;
 
     gpu::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pd)!!;

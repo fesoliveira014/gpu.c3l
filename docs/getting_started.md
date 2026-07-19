@@ -235,8 +235,7 @@ fn void? run() {
         .spirv       = DOUBLER_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &shader_desc)!;
-    defer (void)gpu::destroy_shader(&device, shader);
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!;
 
     gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!;

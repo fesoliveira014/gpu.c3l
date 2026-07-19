@@ -63,8 +63,6 @@ alias DestroyTextureViewFn @private      = fn void? (Device*, TextureView);
 alias CreateTextureViewsFn @private      = fn void? (Device*, TextureViewCreateDesc[], TextureView[]);
 alias InternSamplerFn @private            = fn Sampler? (Device*, SamplerDesc*);
 alias PublishSamplerFn @private           = fn SamplerIndex? (Device*, Sampler);
-alias CreateShaderFn @private          = fn ShaderHandle? (Device*, ShaderDesc*);
-alias DestroyShaderFn @private         = fn void? (Device*, ShaderHandle);
 alias CreateComputePipelineFn @private = fn PipelineHandle? (Device*, ComputePipelineDesc*);
 alias CreateGraphicsPipelineFn @private = fn PipelineHandle? (Device*, GraphicsPipelineDesc*);
 alias DestroyPipelineFn @private       = fn void? (Device*, PipelineHandle);
@@ -149,8 +147,6 @@ struct BackendVTable @private {
     CreateTextureViewsFn      create_texture_views;
     InternSamplerFn            intern_sampler;
     PublishSamplerFn           publish_sampler;
-    CreateShaderFn          create_shader;
-    DestroyShaderFn         destroy_shader;
     CreateComputePipelineFn create_compute_pipeline;
     CreateGraphicsPipelineFn create_graphics_pipeline;
     DestroyPipelineFn       destroy_pipeline;
@@ -217,7 +213,6 @@ enum ResourceOwnerKind @private {
     PIPELINE,
     SWAPCHAIN,
     COMMAND,
-    SHADER,
     COMPLETION_POINT,
 }
 

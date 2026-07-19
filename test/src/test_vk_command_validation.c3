@@ -75,11 +75,9 @@ fn gpu::Device make_val_device() {
 }
 
 <* Textured draw context, same shape as the indirect-draw tests: offscreen
-   shaders, one graphics pipeline, and a 1x1 white pattern feeding the
+   vertex/fragment code, one graphics pipeline, and a 1x1 white pattern feeding the
    fragment heap path. *>
 struct ValDrawCtx {
-    gpu::ShaderHandle   vert;
-    gpu::ShaderHandle   frag;
     gpu::PipelineHandle graphics;
     gpu::TextureHandle  pattern;
     gpu::TextureView    tex_view;
@@ -90,14 +88,14 @@ struct ValDrawCtx {
 fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
     ValDrawCtx ctx;
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
-    ctx.vert = gpu::create_shader(device, &vert_sd)!!;
+    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
-    ctx.frag = gpu::create_shader(device, &frag_sd)!!;
+    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc pipe_desc = {
-        .vertex_shader   = ctx.vert,
-        .fragment_shader = ctx.frag,
+        .vertex_shader   = vert,
+        .fragment_shader = frag,
         .topology        = gpu::PrimitiveTopology.TRIANGLES,
         .color_formats   = formats[..],
     };
@@ -141,8 +139,6 @@ fn void destroy_val_draw_ctx(gpu::Device* device, ValDrawCtx* ctx) {
     gpu::destroy_texture_view(device, ctx.tex_view)!!;
     gpu::destroy_texture(device, ctx.pattern)!!;
     gpu::destroy_pipeline(device, ctx.graphics)!!;
-    gpu::destroy_shader(device, ctx.frag)!!;
-    gpu::destroy_shader(device, ctx.vert)!!;
 }
 
 fn gpu::TextureHandle make_val_target(gpu::Device* device) {
@@ -225,22 +221,20 @@ fn bool val_has_cached_view(gpu::Device* device, gpu::TextureHandle texture, uin
 
 // Never actually dispatched, so the shader's ABI content is unused.
 struct ValComputeCtx {
-    gpu::ShaderHandle   shader;
     gpu::PipelineHandle pipeline;
 }
 
 fn ValComputeCtx make_val_compute_ctx(gpu::Device* device) {
     ValComputeCtx ctx;
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = VAL_COMP_SPIRV[..], .entry_point = "main" };
-    ctx.shader = gpu::create_shader(device, &comp_sd)!!;
-    gpu::ComputePipelineDesc comp_desc = { .shader = ctx.shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ComputePipelineDesc comp_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
     ctx.pipeline = gpu::create_compute_pipeline(device, &comp_desc)!!;
     return ctx;
 }
 
 fn void destroy_val_compute_ctx(gpu::Device* device, ValComputeCtx* ctx) {
     gpu::destroy_pipeline(device, ctx.pipeline)!!;
-    gpu::destroy_shader(device, ctx.shader)!!;
 }
 
 fn void record_val_texture_transition(gpu::CommandList* cmd, gpu::TextureHandle texture, gpu::TextureLayout new_layout, gpu::Stage after_stage, gpu::Hazard after_hazard) {
@@ -270,6 +264,7 @@ fn void write_val_triangle_verts(gpu::Device* device, gpu::GpuSpan* span) {
     };
     for (uint i = 0; i < 12; i++) verts[i] = vertex_data[i];
 }
+
 fn void record_val_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target) {
     gpu::TextureBarrier to_attach = {
         .texture       = target,
@@ -780,8 +775,7 @@ fn void draw_with_compute_pipeline_faults() @test {
     defer gpu::destroy_texture(&device, target)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = VAL_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle comp_shader = gpu::create_shader(&device, &comp_sd)!!;
-    defer gpu::destroy_shader(&device, comp_shader)!!;
+    gpu::ShaderCode comp_shader = gpu::prepare_shader_code(&comp_sd)!!;
     gpu::ComputePipelineDesc comp_desc = { .shader = comp_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle compute = gpu::create_compute_pipeline(&device, &comp_desc)!!;
     defer gpu::destroy_pipeline(&device, compute)!!;
@@ -812,8 +806,7 @@ fn void compute_pipeline_from_vertex_shader_faults() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle vert_shader = gpu::create_shader(&device, &vert_sd)!!;
-    defer gpu::destroy_shader(&device, vert_shader)!!;
+    gpu::ShaderCode vert_shader = gpu::prepare_shader_code(&vert_sd)!!;
 
     gpu::ComputePipelineDesc desc = { .shader = vert_shader, .push_constant_size = gpu::RootPush::size };
     fault wrong_stage = @catch(gpu::create_compute_pipeline(&device, &desc));
@@ -825,11 +818,9 @@ fn void graphics_pipeline_from_swapped_shader_stages_faults() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle vert_shader = gpu::create_shader(&device, &vert_sd)!!;
-    defer gpu::destroy_shader(&device, vert_shader)!!;
+    gpu::ShaderCode vert_shader = gpu::prepare_shader_code(&vert_sd)!!;
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle frag_shader = gpu::create_shader(&device, &frag_sd)!!;
-    defer gpu::destroy_shader(&device, frag_shader)!!;
+    gpu::ShaderCode frag_shader = gpu::prepare_shader_code(&frag_sd)!!;
 
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc swapped = {
@@ -1965,6 +1956,7 @@ fn void texture_copy_span_usage_diagnostics_are_semantic() @test {
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
 }
+
 fn void tranche_b_command_and_render_diagnostics() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);

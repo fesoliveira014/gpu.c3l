@@ -94,8 +94,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::ShaderDesc sample_sd = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_sd)!!;
-    defer gpu::destroy_shader(&device, sample_shader)!!;
+    gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_sd)!!;
     gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
@@ -255,8 +254,7 @@ fn void storage_write_direct_readback() @test {
     gpu::ShaderDesc write_sd = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderHandle write_shader = gpu::create_shader(&device, &write_sd)!!;
-    defer gpu::destroy_shader(&device, write_shader)!!;
+    gpu::ShaderCode write_shader = gpu::prepare_shader_code(&write_sd)!!;
     gpu::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pd)!!;
     defer gpu::destroy_pipeline(&device, write_pipe)!!;
@@ -475,8 +473,7 @@ fn void mip_subset_view_sampled() @test {
     gpu::ShaderDesc sample_sd = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_sd)!!;
-    defer gpu::destroy_shader(&device, sample_shader)!!;
+    gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_sd)!!;
     gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;

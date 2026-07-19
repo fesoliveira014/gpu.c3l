@@ -31,9 +31,9 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         "intern_sampler rejects a null descriptor"
     );
     assert(
-        @catch(gpu::create_shader(&device, (gpu::ShaderDesc*)null))
+        @catch(gpu::prepare_shader_code((gpu::ShaderDesc*)null))
             == gpu::INVALID_ARGUMENT,
-        "create_shader rejects a null descriptor"
+        "prepare_shader_code rejects a null descriptor"
     );
     assert(
         @catch(gpu::create_compute_pipeline(&device, (gpu::ComputePipelineDesc*)null))

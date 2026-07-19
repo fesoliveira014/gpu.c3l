@@ -20,8 +20,8 @@ const float NEAR_Z = 0.25f;
 const float FAR_Z = 0.75f;
 
 struct DepthCtx {
-    gpu::ShaderHandle vert;
-    gpu::ShaderHandle frag;
+    gpu::ShaderCode vert;
+    gpu::ShaderCode frag;
 }
 
 fn gpu::Device make_depth_device() {
@@ -33,18 +33,13 @@ fn gpu::Device make_depth_device() {
     return gpu::create_device_from_desc(&desc)!!;
 }
 
-fn DepthCtx make_depth_ctx(gpu::Device* device) {
+fn DepthCtx make_depth_ctx() {
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = DEPTH_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = DEPTH_FRAG_SPIRV[..], .entry_point = "main" };
     return {
-        .vert = gpu::create_shader(device, &vert_sd)!!,
-        .frag = gpu::create_shader(device, &frag_sd)!!,
+        .vert = gpu::prepare_shader_code(&vert_sd)!!,
+        .frag = gpu::prepare_shader_code(&frag_sd)!!,
     };
-}
-
-fn void destroy_depth_ctx(gpu::Device* device, DepthCtx* ctx) {
-    gpu::destroy_shader(device, ctx.frag)!!;
-    gpu::destroy_shader(device, ctx.vert)!!;
 }
 
 fn gpu::PipelineHandle make_depth_pipeline(gpu::Device* device, DepthCtx* ctx, gpu::DepthState depth, bool with_color = true) {
@@ -190,6 +185,7 @@ fn OwnedSpan make_readback(gpu::Device* device, usz size) {
         debug_name:   "depth_readback",
     )!!;
 }
+
 fn void submit_and_finish(gpu::Device* device, gpu::CommandList* commands) {
     gpu::ExecutableCommandList[1] lists = { gpu::end_commands(commands)!! };
     defer discard_test_executable(&lists[0])!!;
@@ -215,8 +211,7 @@ fn float* dp_center_depth(gpu::Device* device, gpu::GpuSpan* rb_span) {
 fn void depth_test_occludes_both_orders() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    DepthCtx ctx = make_depth_ctx(&device);
-    defer destroy_depth_ctx(&device, &ctx);
+    DepthCtx ctx = make_depth_ctx();
 
     gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
     gpu::PipelineHandle pipeline = make_depth_pipeline(&device, &ctx, tested);
@@ -305,8 +300,7 @@ fn void depth_test_occludes_both_orders() @test {
 fn void depth_write_toggle_honored() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    DepthCtx ctx = make_depth_ctx(&device);
-    defer destroy_depth_ctx(&device, &ctx);
+    DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle target = make_color_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
     gpu::TextureHandle depth = make_depth_texture(&device);
@@ -381,8 +375,7 @@ fn void depth_write_toggle_honored() @test {
 fn void depth_state_variants_share_entry() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    DepthCtx ctx = make_depth_ctx(&device);
-    defer destroy_depth_ctx(&device, &ctx);
+    DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle target = make_color_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
     gpu::TextureHandle depth = make_depth_texture(&device);
@@ -454,8 +447,7 @@ fn void depth_state_variants_share_entry() @test {
 fn void depth_only_pass_renders_footprint() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    DepthCtx ctx = make_depth_ctx(&device);
-    defer destroy_depth_ctx(&device, &ctx);
+    DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle depth = make_depth_texture(&device);
     defer gpu::destroy_texture(&device, depth)!!;
     OwnedSpan depth_rb = make_readback(&device, DP_DEPTH_BYTES);
@@ -507,8 +499,7 @@ fn void depth_only_pass_renders_footprint() @test {
 fn void sampled_depth_matches_readback() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    DepthCtx ctx = make_depth_ctx(&device);
-    defer destroy_depth_ctx(&device, &ctx);
+    DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle depth = make_depth_texture(&device, sampled: true);
     defer gpu::destroy_texture(&device, depth)!!;
 
@@ -525,8 +516,7 @@ fn void sampled_depth_matches_readback() @test {
     gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
     gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DEPTH_SAMPLE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle comp = gpu::create_shader(&device, &comp_sd)!!;
-    defer gpu::destroy_shader(&device, comp)!!;
+    gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
     gpu::ComputePipelineDesc comp_desc = { .shader = comp, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipeline = gpu::create_compute_pipeline(&device, &comp_desc)!!;
     defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
@@ -663,8 +653,7 @@ const char[*] SHADOW_PROBE_SPIRV = $embed("shaders/shadow_probe.comp.spv");
 fn void compare_sampler_exact_results() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    DepthCtx ctx = make_depth_ctx(&device);
-    defer destroy_depth_ctx(&device, &ctx);
+    DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle depth = make_depth_texture(&device, sampled: true);
     defer gpu::destroy_texture(&device, depth)!!;
 
@@ -683,8 +672,7 @@ fn void compare_sampler_exact_results() @test {
     gpu::Sampler shadow_sampler = gpu::intern_sampler(&device, &shadow_desc)!!;
     gpu::SamplerIndex shadow_smp = gpu::publish_sampler(&device, shadow_sampler)!!;
     gpu::ShaderDesc probe_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = SHADOW_PROBE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle probe = gpu::create_shader(&device, &probe_sd)!!;
-    defer gpu::destroy_shader(&device, probe)!!;
+    gpu::ShaderCode probe = gpu::prepare_shader_code(&probe_sd)!!;
     gpu::ComputePipelineDesc probe_desc = { .shader = probe, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle probe_pipeline = gpu::create_compute_pipeline(&device, &probe_desc)!!;
     defer gpu::destroy_pipeline(&device, probe_pipeline)!!;
@@ -795,8 +783,7 @@ fn gpu::PipelineHandle make_biased_pipeline(gpu::Device* device, DepthCtx* ctx, 
 fn void depth_bias_shifts_stored_depth() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    DepthCtx ctx = make_depth_ctx(&device);
-    defer destroy_depth_ctx(&device, &ctx);
+    DepthCtx ctx = make_depth_ctx();
 
     gpu::TextureHandle plain_depth = make_depth_texture(&device);
     defer gpu::destroy_texture(&device, plain_depth)!!;
