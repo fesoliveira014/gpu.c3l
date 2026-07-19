@@ -846,6 +846,35 @@ fn void graphics_pipeline_batch_reuses_shared_shader_modules() @test {
     foreach (pipeline : pipelines) gpu::destroy_pipeline(&device, pipeline)!!;
 }
 
+fn void graphics_pipeline_batch_revalidates_shared_shader_roles() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::GraphicsPipelineDesc[1] descs;
+    descs[0] = base_graphics_desc(&shaders, formats[..]);
+    descs[0].fragment_shader = descs[0].vertex_shader;
+    gpu::PipelineHandle[1] outputs = {
+        { .owner = 1, .index = 2, .generation = 3 },
+    };
+    gpu::PipelineHandle before = outputs[0];
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
+
+    fault stage_fault = @catch(gpu::create_graphics_pipelines(
+        &device,
+        descs[..],
+        outputs[..],
+    ));
+
+    assert(stage_fault == gpu::INVALID_ARGUMENT,
+        "batch shader reuse still validates each graphics shader role");
+    assert(outputs[0] == before, "shader-role failure leaves caller outputs unchanged");
+    assert(cache_entry_count(&device) == 0, "shader-role failure publishes no cache entry");
+    assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
+        "shader-role failure performs no native pipeline creation");
+}
+
 fn void pipeline_batch_shape_failure_preserves_outputs() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;

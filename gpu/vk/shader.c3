@@ -12,6 +12,7 @@ struct PipelineShaderModule {
 
 struct PipelineBatchShader {
     gpu::ShaderCode      code;
+    gpu::ShaderStage     expected_stage;
     PipelineShaderModule native;
 }
 
@@ -293,7 +294,9 @@ fn PipelineShaderModule*? get_pipeline_batch_shader(
     uint* shader_count,
 ) {
     foreach (&shader : shaders[:*shader_count]) {
-        if (shader.code == *code) return &shader.native;
+        if (shader.code == *code && shader.expected_stage == expected_stage) {
+            return &shader.native;
+        }
     }
     PipelineShaderModule native = create_pipeline_shader_module(
         state:          state,
@@ -302,7 +305,11 @@ fn PipelineShaderModule*? get_pipeline_batch_shader(
         operation:      operation,
         rejected_field: rejected_field,
     )!;
-    shaders[*shader_count] = { .code = *code, .native = native };
+    shaders[*shader_count] = {
+        .code           = *code,
+        .expected_stage = expected_stage,
+        .native         = native,
+    };
     PipelineShaderModule* result = &shaders[*shader_count].native;
     (*shader_count)++;
     return result;
