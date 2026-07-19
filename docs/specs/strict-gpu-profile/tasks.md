@@ -268,7 +268,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.7 Root-pointer shader ABI and generated work
 
-- [ ] Update `gpu/shader_abi.c3`, `scripts/gen_abi.py`, generated shader headers, shader tests, and strict samples for one root GPU address per participating stage and backend-neutral heap indices.
+- [x] Update `gpu/shader_abi.c3`, `scripts/gen_abi.py`, generated shader headers, shader tests, and strict samples for one root GPU address per participating stage and backend-neutral heap indices.
   - **Depends on:** 4.3, 5.2, and 5.6.
   - **Contract:** address and index widths are pinned; direct and indirect work use addresses; optional GPU-generated work is a separately queried semantic capability and is never CPU-emulated.
   - **Edges:** missing stage root, alignment, indirect/count overflow, unsupported generated work, and shared root-record layouts.
