@@ -54,11 +54,11 @@ fn double record_indirect_dispatches(
     gpu::GpuSpan args,
 ) {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
         gpu::cmd_dispatch_indirect(
             commands: &commands,
-            pipeline: pipeline,
             root:     root,
             args:     args,
         )!!;

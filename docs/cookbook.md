@@ -102,8 +102,15 @@ only after completion.
 Goal: compute culls, GPU decides the draw count.
 
 ```c3
-// compute writes DrawIndirectCommand[] + a count word, then one call:
-gpu::cmd_draw_indirect(&cmd, pipeline, vroot, froot, args_span, max_draws)!;
+// compute writes DrawIndirectCommand[] + a count word, then bind and execute:
+gpu::cmd_bind_pipeline(&cmd, pipeline)!;
+gpu::cmd_draw_indirect(
+    commands:      &cmd,
+    vertex_root:   vroot,
+    fragment_root: froot,
+    args:          args_span,
+    draw_count:    max_draws,
+)!;
 // with caps.draw_indirect_count: the _count variant reads the GPU count
 ```
 
@@ -167,8 +174,14 @@ gpu::SamplerDesc shadow_sampler_desc = {
 gpu::Sampler shadow_sampler = gpu::intern_sampler(&device, &shadow_sampler_desc)!;
 gpu::SamplerIndex shadow_sampler_index =
     gpu::publish_sampler(&device, shadow_sampler)!;
-// shadow pipeline: no color formats, depth D32, front-face culling +
-// .raster = { .depth_bias_slope = 1.0f } against acne
+// The shadow pipeline has no color formats, uses D32, and applies depth bias.
+gpu::cmd_bind_pipeline(&cmd, shadow_pipeline)!;
+gpu::DepthState depth_state = {
+    .test_enable  = true,
+    .write_enable = true,
+    .compare      = gpu::CompareOp.LESS,
+};
+gpu::cmd_set_depth_state(&cmd, &depth_state)!;
 ```
 
 ```glsl

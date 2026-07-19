@@ -532,9 +532,9 @@ fn int record_worker(void* arg) {
         gpu::CommandList commands = gpu::begin_commands(
             gpu::get_queue(args.device, gpu::QueueKind.GRAPHICS)!!,
         )!!;
+        bind_test_compute_pipeline(&commands, args.pipeline);
         gpu::cmd_dispatch(
             commands: &commands,
-            pipeline: args.pipeline,
             root:     test_span_address(args.device, args.root_span),
             groups:   {
                 (THR_ELEMENTS + 63) / 64,

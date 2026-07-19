@@ -346,8 +346,8 @@ fn void? vk_begin_commands_with_context(
         .context        = context_handle,
         .queue          = queue,
         .state          = CommandState.RECORDING,
-        .last_pipeline  = gpu::PIPELINE_HANDLE_INVALID,
-        .last_entry     = PIPELINE_ENTRY_NONE,
+        .active_pipeline  = gpu::PIPELINE_HANDLE_INVALID,
+        .active_entry     = PIPELINE_ENTRY_NONE,
     };
     {
         state.command_mutex.lock()!!;
@@ -843,41 +843,128 @@ fn ResolvedSpan? resolve_indirect_span(
     return resolved;
 }
 
-fn void? bind_compute_and_push(VkDeviceState* state, CommandRecord* record, gpu::PipelineHandle handle, gpu::GpuAddress root) @private {
+fn PipelineSlot*? active_pipeline_slot(
+    VkDeviceState* state,
+    CommandRecord* record,
+    PipelineKind expected_kind,
+    ZString operation,
+) @private {
+    if (!record.active_pipeline.is_valid()) return gpu::COMMAND_RECORDING_ERROR~;
+    validate_pipeline_kind(
+        state:     state,
+        handle:    record.active_pipeline,
+        kind:      expected_kind,
+        operation: operation,
+    )!;
+    return state.pipelines.get(record.active_pipeline);
+}
+
+fn void? validate_root_address(
+    VkDeviceState* state,
+    gpu::GpuAddress root,
+    ZString operation,
+    ZString rejected_field,
+) @private {
+    if (root != (gpu::GpuAddress)0) return;
+    return report_contract_failure(
+        state:               state,
+        operation:           operation,
+        public_fault:        gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+        debug_name:          null,
+        rejected_field:      rejected_field,
+        invariant:           "root GPU address must be nonzero",
+        backend_text:        null,
+    )~;
+}
+
+fn void? bind_pipeline_state(
+    VkDeviceState* state,
+    CommandRecord* record,
+    gpu::PipelineHandle pipeline,
+) @private {
     validate_descriptor_heap_binding(state)!;
-    vk::CommandBuffer cb = record.command_buffer;
-    PipelineSlot* slot = state.pipelines.get(handle)!;
+    PipelineSlot* slot = state.pipelines.get(pipeline)!;
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
     track_command_reference(
         state,
         record,
-        handle.owner,
-        handle.index,
-        handle.generation,
+        pipeline.owner,
+        pipeline.index,
+        pipeline.generation,
     )!;
-    if (handle != record.last_pipeline) {
-        vk::cmd_bind_pipeline(cb, vk::PipelineBindPoint.COMPUTE, slot.pipeline);
+    if (pipeline == record.active_pipeline) return;
+
+    if (slot.entry != record.active_entry) {
+        PipelineKind kind = (PipelineKind)state.pipeline_cache.entries[slot.entry].key.kind;
+        vk::PipelineBindPoint bind_point = kind == PipelineKind.COMPUTE
+            ? vk::PipelineBindPoint.COMPUTE
+            : vk::PipelineBindPoint.GRAPHICS;
+        vk::cmd_bind_pipeline(record.command_buffer, bind_point, slot.pipeline);
         bind_descriptor_heap(
             state:      state,
-            cb:         cb,
+            cb:         record.command_buffer,
             layout:     slot.layout,
-            bind_point: vk::PipelineBindPoint.COMPUTE,
+            bind_point: bind_point,
         )!;
-        record.last_pipeline = handle;
-        record.last_entry = slot.entry;
+        record.active_entry = slot.entry;
     }
-    gpu::RootPush push = { .root_gpu = root };
-    vk::cmd_push_constants(cb, slot.layout, vk::ShaderStageFlagBits.COMPUTE_BIT, 0, gpu::RootPush::size, &push);
+    record.active_pipeline = pipeline;
 }
 
-<* Pipeline and heap binds are skipped when the handle is unchanged since the
-   last bind; the heap otherwise rebinds because compute layouts differ in
-   push-constant range, which breaks descriptor set compatibility. *>
-fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::Vec3u groups) @private {
+fn void? vk_cmd_bind_pipeline(
+    gpu::CommandList* commands,
+    gpu::PipelineHandle pipeline,
+) @private {
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING
+        && record.state != CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    bind_pipeline_state(state, record, pipeline)!;
+}
+
+fn void push_compute_root(
+    CommandRecord* record,
+    PipelineSlot* slot,
+    gpu::GpuAddress root,
+) @private {
+    gpu::RootPush push = { .root_gpu = root };
+    vk::cmd_push_constants(
+        command_buffer: record.command_buffer,
+        layout:         slot.layout,
+        stage_flags:    vk::ShaderStageFlagBits.COMPUTE_BIT,
+        offset:         0,
+        size:           gpu::RootPush::size,
+        p_values:       &push,
+    );
+}
+
+fn void? vk_cmd_dispatch(
+    gpu::CommandList* commands,
+    gpu::GpuAddress root,
+    gpu::Vec3u groups,
+) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
-    uint reference_checkpoint = record.reference_count;
-    defer catch rollback_command_references(state, record, reference_checkpoint);
+    PipelineSlot* slot = active_pipeline_slot(
+        state:         state,
+        record:        record,
+        expected_kind: PipelineKind.COMPUTE,
+        operation:     "cmd_dispatch",
+    )!;
+    validate_root_address(
+        state:          state,
+        root:           root,
+        operation:      "cmd_dispatch",
+        rejected_field: "root",
+    )!;
     if (catch limit_fault = gpu::validate_dispatch_groups(groups, state.caps.max_compute_work_group_count)) {
         return report_contract_failure(
             state:               state,
@@ -893,34 +980,37 @@ fn void? vk_cmd_dispatch(gpu::CommandList* commands, gpu::PipelineHandle handle,
             backend_text:        null,
         )~;
     }
-    validate_pipeline_kind(
-        state:     state,
-        handle:    handle,
-        kind:      PipelineKind.COMPUTE,
-        operation: "cmd_dispatch",
-    )!;
-    vk::CommandBuffer cb = record.command_buffer;
-    bind_compute_and_push(
-        state:  state,
-        record: record,
-        handle: handle,
-        root:   root,
-    )!;
-    vk::cmd_dispatch(cb, groups.x, groups.y, groups.z);
+    push_compute_root(record, slot, root);
+    vk::cmd_dispatch(
+        command_buffer: record.command_buffer,
+        group_count_x:  groups.x,
+        group_count_y:  groups.y,
+        group_count_z:  groups.z,
+    );
 }
 
-fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandle handle, gpu::GpuAddress root, gpu::GpuSpan args) @private {
+fn void? vk_cmd_dispatch_indirect(
+    gpu::CommandList* commands,
+    gpu::GpuAddress root,
+    gpu::GpuSpan args,
+) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    PipelineSlot* slot = active_pipeline_slot(
+        state:         state,
+        record:        record,
+        expected_kind: PipelineKind.COMPUTE,
+        operation:     "cmd_dispatch_indirect",
+    )!;
+    validate_root_address(
+        state:          state,
+        root:           root,
+        operation:      "cmd_dispatch_indirect",
+        rejected_field: "root",
+    )!;
     uint reference_checkpoint = record.reference_count;
     defer catch rollback_command_references(state, record, reference_checkpoint);
-    validate_pipeline_kind(
-        state:     state,
-        handle:    handle,
-        kind:      PipelineKind.COMPUTE,
-        operation: "cmd_dispatch_indirect",
-    )!;
     ResolvedSpan args_buffer = resolve_indirect_span(
         state:          state,
         record:         record,
@@ -930,12 +1020,10 @@ fn void? vk_cmd_dispatch_indirect(gpu::CommandList* commands, gpu::PipelineHandl
         operation:      "cmd_dispatch_indirect",
         rejected_field: "args",
     )!;
-    vk::CommandBuffer cb = record.command_buffer;
-    bind_compute_and_push(
-        state:  state,
-        record: record,
-        handle: handle,
-        root:   root,
-    )!;
-    vk::cmd_dispatch_indirect(cb, args_buffer.slot.buffer, (vk::DeviceSize)args_buffer.offset);
+    push_compute_root(record, slot, root);
+    vk::cmd_dispatch_indirect(
+        record.command_buffer,
+        args_buffer.slot.buffer,
+        (vk::DeviceSize)args_buffer.offset,
+    );
 }

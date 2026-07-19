@@ -90,7 +90,7 @@ fn void identical_descs_alias_one_entry() @test {
     assert(cache_entry_count(&device) == 0, "last alias releases the entry");
 }
 
-fn void dynamic_state_and_blend_normalization_share_entries() @test {
+fn void immutable_state_and_blend_normalization_split_entries() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
@@ -100,17 +100,6 @@ fn void dynamic_state_and_blend_normalization_share_entries() @test {
     gpu::PipelineHandle base = gpu::create_graphics_pipeline(&device, &desc)!!;
     defer gpu::destroy_pipeline(&device, base)!!;
 
-    gpu::GraphicsPipelineDesc depth_variant = desc;
-    depth_variant.depth = {
-        .test_enable  = true,
-        .write_enable = true,
-        .compare      = gpu::CompareOp.LESS,
-    };
-    gpu::PipelineHandle separate_depth =
-        gpu::create_graphics_pipeline(&device, &depth_variant)!!;
-    defer gpu::destroy_pipeline(&device, separate_depth)!!;
-    assert(cache_entry_count(&device) == 1,
-        "separate depth state does not alter graphics pipeline identity");
 
     gpu::GraphicsPipelineDesc culled = desc;
     culled.raster.cull_mode = gpu::CullMode.BACK;
@@ -475,9 +464,9 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
             gpu::cmd_set_viewport(&cmd, &viewport)!!;
             gpu::cmd_set_scissor(&cmd, &scissor)!!;
         }
+        bind_test_graphics_pipeline(&cmd, pipelines[i]);
         gpu::cmd_draw(
             commands:       &cmd,
-            pipeline:       pipelines[i],
             vertex_root:    test_span_address(&device, verts_span),
             fragment_root:  test_span_address(&device, frag_span),
             vertex_count:   3,
@@ -601,9 +590,9 @@ fn void alias_survives_peer_destroy() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    bind_test_graphics_pipeline(&cmd, survivor);
     gpu::cmd_draw(
         commands:       &cmd,
-        pipeline:       survivor,
         vertex_root:    test_span_address(&device, verts_span),
         fragment_root:  test_span_address(&device, frag_span),
         vertex_count:   3,

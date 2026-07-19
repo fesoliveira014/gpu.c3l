@@ -178,7 +178,6 @@ fn void? validate_graphics_pipeline_desc(
 ) {
     if (desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS
         || !primitive_topology_valid(desc.topology)
-        || !compare_op_valid(desc.depth.compare)
         || !cull_mode_valid(desc.raster.cull_mode)
         || !front_face_valid(desc.raster.front_face)
         || !polygon_mode_valid(desc.raster.polygon_mode)
@@ -245,7 +244,6 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
                 .pipeline = entry.pipeline,
                 .layout   = entry.layout,
                 .entry    = hit,
-                .depth    = desc.depth,
             })) {
                 return handle;
             }
@@ -441,7 +439,6 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
             .pipeline = pipeline,
             .layout   = state.graphics_layout,
             .entry    = entry_index,
-            .depth    = desc.depth,
         })) {
             return handle;
         }

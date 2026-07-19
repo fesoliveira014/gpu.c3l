@@ -130,11 +130,12 @@ Calls with four or more arguments, or calls that would exceed 120 characters, sh
 Preferred:
 
 ```c3
-gpu::cmd_dispatch(
-    commands: &commands,
-    pipeline: pipeline,
-    root:     root_address,
-    groups:   { 8, 1, 1 },
+gpu::cmd_draw(
+    commands:       &commands,
+    vertex_root:    vertex_root,
+    fragment_root:  fragment_root,
+    vertex_count:   3,
+    instance_count: 1,
 )!;
 ```
 

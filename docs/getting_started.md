@@ -287,9 +287,9 @@ fn void? run_compute(
     gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
     gpu::CommandList cmd = gpu::begin_commands(queue)!;
     defer (void)gpu::discard_commands(&cmd);
+    gpu::cmd_bind_pipeline(&cmd, pipeline)!;
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: pipeline,
         root:     root_address,
         groups:   { (COUNT + 63) / 64, 1, 1 },
     )!;

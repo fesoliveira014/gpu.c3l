@@ -30,7 +30,7 @@ sampler references:
 Compute dispatch command:
 
 ```text
-cmd_dispatch(command_list, pipeline, root_gpu, groups)
+cmd_dispatch(command_list, root_gpu, groups)
 ```
 
 Shader receives:
@@ -62,7 +62,7 @@ output[i] = transform(input[i])
 Graphics draw command:
 
 ```text
-cmd_draw_indexed(command_list, pipeline, vertex_root, fragment_root, index_span, index_count, instance_count)
+cmd_draw_indexed(command_list, vertex_root, fragment_root, index_span, index_count, instance_count)
 ```
 
 Vertex shader receives `vertex_root`. Fragment shader receives `fragment_root`.

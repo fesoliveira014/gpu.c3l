@@ -196,7 +196,8 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
         .new_layout    = gpu::TextureLayout.TRANSFER_DST,
     };
     gpu::cmd_texture_barrier(&commands, &barrier)!!;
-    gpu::cmd_dispatch(&commands, pipeline, {}, { 1, 1, 1 })!!;
+    bind_test_compute_pipeline(&commands, pipeline);
+    gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 1, 1, 1 })!!;
 
     assert(@catch(gpu::destroy_texture(&device, texture))
         == gpu::RESOURCE_IN_USE, "recorded texture references reject destroy");

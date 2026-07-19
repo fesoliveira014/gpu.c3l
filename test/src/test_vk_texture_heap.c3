@@ -112,9 +112,9 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
     const uint GROUPS = (TEX_SIZE + 7) / 8;
+    bind_test_compute_pipeline(&cmd, write_pipe);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: write_pipe,
         root:     test_span_address(&device, write_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
@@ -126,9 +126,9 @@ fn void bindless_texture_write_then_sample() @test {
     )!!;
     gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
 
+    bind_test_compute_pipeline(&cmd, sample_pipe);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: sample_pipe,
         root:     test_span_address(&device, sample_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
@@ -188,9 +188,9 @@ fn void bindless_texture_write_then_sample() @test {
     )!!;
     gpu::cmd_texture_barrier(&reused_cmd, &reused_to_general)!!;
     const uint REUSED_GROUPS = (REUSED_TEX_SIZE + 7) / 8;
+    bind_test_compute_pipeline(&reused_cmd, write_pipe);
     gpu::cmd_dispatch(
         commands: &reused_cmd,
-        pipeline: write_pipe,
         root:     test_span_address(&device, write_root_span),
         groups:   { REUSED_GROUPS, REUSED_GROUPS, 1 },
     )!!;
@@ -200,9 +200,9 @@ fn void bindless_texture_write_then_sample() @test {
         after:   gpu::TextureUse.STORAGE_COMPUTE,
     )!!;
     gpu::cmd_texture_barrier(&reused_cmd, &reused_write_to_sample)!!;
+    bind_test_compute_pipeline(&reused_cmd, sample_pipe);
     gpu::cmd_dispatch(
         commands: &reused_cmd,
-        pipeline: sample_pipe,
         root:     test_span_address(&device, sample_root_span),
         groups:   { REUSED_GROUPS, REUSED_GROUPS, 1 },
     )!!;

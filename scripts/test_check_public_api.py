@@ -249,10 +249,37 @@ def valid_document() -> dict:
                         ("desc", "TextureBufferCopyDesc*"),
                     ),
                     api_function(
-                        "cmd_draw_indexed",
+                        "cmd_bind_pipeline",
                         "void?",
                         ("commands", "CommandList*"),
                         ("pipeline", "PipelineHandle"),
+                    ),
+                    api_function(
+                        "cmd_set_depth_state",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("depth", "DepthState*"),
+                    ),
+                    api_function(
+                        "cmd_dispatch",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("root", "GpuAddress"),
+                        ("groups", "Vec3u"),
+                    ),
+                    api_function(
+                        "cmd_draw",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("vertex_root", "GpuAddress"),
+                        ("fragment_root", "GpuAddress"),
+                        ("vertex_count", "uint"),
+                        ("instance_count", "uint"),
+                    ),
+                    api_function(
+                        "cmd_draw_indexed",
+                        "void?",
+                        ("commands", "CommandList*"),
                         ("vertex_root", "GpuAddress"),
                         ("fragment_root", "GpuAddress"),
                         ("index_span", "GpuSpan"),
@@ -264,7 +291,6 @@ def valid_document() -> dict:
                         "cmd_draw_indirect",
                         "void?",
                         ("commands", "CommandList*"),
-                        ("pipeline", "PipelineHandle"),
                         ("vertex_root", "GpuAddress"),
                         ("fragment_root", "GpuAddress"),
                         ("args", "GpuSpan"),
@@ -274,7 +300,6 @@ def valid_document() -> dict:
                         "cmd_draw_indexed_indirect",
                         "void?",
                         ("commands", "CommandList*"),
-                        ("pipeline", "PipelineHandle"),
                         ("vertex_root", "GpuAddress"),
                         ("fragment_root", "GpuAddress"),
                         ("args", "GpuSpan"),
@@ -286,7 +311,6 @@ def valid_document() -> dict:
                         "cmd_draw_indexed_indirect_count",
                         "void?",
                         ("commands", "CommandList*"),
-                        ("pipeline", "PipelineHandle"),
                         ("vertex_root", "GpuAddress"),
                         ("fragment_root", "GpuAddress"),
                         ("args", "GpuSpan"),
@@ -299,12 +323,49 @@ def valid_document() -> dict:
                         "cmd_dispatch_indirect",
                         "void?",
                         ("commands", "CommandList*"),
-                        ("pipeline", "PipelineHandle"),
                         ("root", "GpuAddress"),
                         ("args", "GpuSpan"),
                     ),
                 ],
                 "types": [
+                    {
+                        "name": "GraphicsPipelineDesc",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "vertex_shader",
+                                "type": {"name": "ShaderCode"},
+                            },
+                            {
+                                "name": "fragment_shader",
+                                "type": {"name": "ShaderCode"},
+                            },
+                            {
+                                "name": "topology",
+                                "type": {"name": "PrimitiveTopology"},
+                            },
+                            {
+                                "name": "raster",
+                                "type": {"name": "RasterState"},
+                            },
+                            {
+                                "name": "blend",
+                                "type": {"name": "BlendState"},
+                            },
+                            {
+                                "name": "color_formats",
+                                "type": {"name": "Format[]"},
+                            },
+                            {
+                                "name": "depth_format",
+                                "type": {"name": "Format"},
+                            },
+                            {
+                                "name": "debug_name",
+                                "type": {"name": "ZString"},
+                            },
+                        ],
+                    },
                     {
                         "name": "GpuAllocation",
                         "kind": "struct",
@@ -1000,6 +1061,46 @@ class PublicApiCheckTests(unittest.TestCase):
                 field["type"]["name"] = "BufferHandle"
                 self.assertIn(
                     failure,
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_dynamic_depth_in_graphics_pipeline_desc(self) -> None:
+        document = valid_document()
+        desc = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "GraphicsPipelineDesc"
+        )
+        desc["members"].insert(3, {
+            "name": "depth",
+            "type": {"name": "DepthState"},
+        })
+        self.assertIn(
+            "GraphicsPipelineDesc must not contain dynamic depth state",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_pipeline_bearing_execution_signatures(self) -> None:
+        for name in (
+            "cmd_dispatch",
+            "cmd_dispatch_indirect",
+            "cmd_draw",
+            "cmd_draw_indexed",
+            "cmd_draw_indirect",
+            "cmd_draw_indexed_indirect",
+            "cmd_draw_indexed_indirect_count",
+        ):
+            with self.subTest(name=name):
+                document = valid_document()
+                function = next(
+                    entry for entry in document["modules"]["gpu"]["functions"]
+                    if entry["name"] == name
+                )
+                function["members"].insert(1, {
+                    "name": "pipeline",
+                    "type": {"name": "PipelineHandle"},
+                })
+                self.assertIn(
+                    f"{name} has the wrong parameters",
                     check_public_api.validate_document(document),
                 )
 

@@ -146,9 +146,9 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
 
     const uint GROUPS = (UP_SIZE + 7) / 8;
+    bind_test_compute_pipeline(&cmd, sample_pipe);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: sample_pipe,
         root:     test_span_address(&device, sample_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
@@ -287,9 +287,9 @@ fn void storage_write_direct_readback() @test {
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
     const uint GROUPS = (UP_SIZE + 7) / 8;
+    bind_test_compute_pipeline(&cmd, write_pipe);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: write_pipe,
         root:     test_span_address(&device, root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
@@ -522,9 +522,9 @@ fn void mip_subset_view_sampled() @test {
         .new_layout    = gpu::TextureLayout.SHADER_READ,
     };
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
+    bind_test_compute_pipeline(&cmd, sample_pipe);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: sample_pipe,
         root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;

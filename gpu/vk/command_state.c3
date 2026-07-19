@@ -30,8 +30,9 @@ struct CommandRecord {
     CommandState                state;
     uint                        active_render_width;
     uint                        active_render_height;
-    gpu::PipelineHandle         last_pipeline;
-    uint                        last_entry;
+    gpu::PipelineHandle         active_pipeline;
+    uint                        active_entry;
+    bool                        depth_state_set;
     PendingLayout[]             pending_layouts;
     uint                        pending_layout_count;
     CommandResourceReference[]  references;

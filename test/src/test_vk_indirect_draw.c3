@@ -232,9 +232,9 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
 
     gpu::CommandList compute = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute)!!;
+    bind_test_compute_pipeline(&compute, pipeline);
     gpu::cmd_dispatch_indirect(
         commands: &compute,
-        pipeline: pipeline,
         root:     test_span_address(&device, compute_root_owned.span),
         args:     args_owned.span,
     )!!;
@@ -250,9 +250,9 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
 
     gpu::CommandList graphics = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&graphics)!!;
+    bind_test_compute_pipeline(&graphics, pipeline);
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
-        pipeline: pipeline,
         root:     test_span_address(&device, graphics_root_owned.span),
         args:     args_owned.span,
     )!!;
@@ -296,9 +296,9 @@ fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
 
     gpu::CommandList compute = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute)!!;
+    bind_test_compute_pipeline(&compute, pipeline);
     gpu::cmd_dispatch_indirect(
         commands: &compute,
-        pipeline: pipeline,
         root:     test_span_address(&device, compute_root_owned.span),
         args:     args_owned.span,
     )!!;
@@ -315,9 +315,9 @@ fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
 
     gpu::CommandList graphics = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&graphics)!!;
+    bind_test_compute_pipeline(&graphics, pipeline);
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
-        pipeline: pipeline,
         root:     test_span_address(&device, graphics_root_owned.span),
         args:     args_owned.span,
     )!!;
@@ -443,9 +443,9 @@ fn void compute_generated_indexed_indirect_draw() @test {
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
+    bind_test_compute_pipeline(&cmd, build_pipeline);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: build_pipeline,
         root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;
@@ -489,9 +489,9 @@ fn void compute_generated_indexed_indirect_draw() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     gpu::cmd_draw_indexed_indirect(
         commands:      &cmd,
-        pipeline:      ctx.pipeline,
         vertex_root:   test_span_address(&device, verts_span),
         fragment_root: test_span_address(&device, frag_span),
         args:          args_span,
@@ -597,9 +597,9 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     gpu::cmd_draw_indirect(
         commands:      &cmd,
-        pipeline:      ctx.pipeline,
         vertex_root:   test_span_address(&device, verts_span),
         fragment_root: test_span_address(&device, frag_span),
         args:          args_span,
@@ -701,9 +701,9 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
+    bind_test_compute_pipeline(&cmd, build_pipeline);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: build_pipeline,
         root:     test_span_address(&device, build_root_span),
         groups:   { 1, 1, 1 },
     )!!;
@@ -715,9 +715,9 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
         .after_hazard  = gpu::Hazard.INDIRECT_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &args_ready)!!;
+    bind_test_compute_pipeline(&cmd, double_pipeline);
     gpu::cmd_dispatch_indirect(
         commands: &cmd,
-        pipeline: double_pipeline,
         root:     test_span_address(&device, double_root_span),
         args:     dispatch_args,
     )!!;
@@ -854,9 +854,9 @@ fn void count_buffer_limits_draws() @test {
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
         gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        bind_test_graphics_pipeline(&cmd, ctx.pipeline);
         gpu::cmd_draw_indexed_indirect_count(
             commands:       &cmd,
-            pipeline:       ctx.pipeline,
             vertex_root:    test_span_address(&device, verts_span),
             fragment_root:  test_span_address(&device, frag_span),
             args:           args_span,
@@ -968,9 +968,9 @@ fn void indirect_argument_validation() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
 
+    bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     fault no_usage = @catch(gpu::cmd_draw_indirect(
         commands:      &cmd,
-        pipeline:      ctx.pipeline,
         vertex_root:   test_span_address(&device, verts_span),
         fragment_root: test_span_address(&device, frag_span),
         args:          plain_span,
@@ -979,9 +979,9 @@ fn void indirect_argument_validation() @test {
     assert(no_usage == gpu::INVALID_ARGUMENT, "args without indirect usage fault INVALID_ARGUMENT");
 
     gpu::GpuSpan misaligned = args_span.checked_subspan(2, 32)!!;
+    bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     fault align_fault = @catch(gpu::cmd_draw_indirect(
         commands:      &cmd,
-        pipeline:      ctx.pipeline,
         vertex_root:   test_span_address(&device, verts_span),
         fragment_root: test_span_address(&device, frag_span),
         args:          misaligned,
@@ -989,9 +989,9 @@ fn void indirect_argument_validation() @test {
     ));
     assert(align_fault == gpu::INVALID_ARGUMENT, "misaligned args offset faults INVALID_ARGUMENT");
 
+    bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     fault overrun = @catch(gpu::cmd_draw_indirect(
         commands:      &cmd,
-        pipeline:      ctx.pipeline,
         vertex_root:   test_span_address(&device, verts_span),
         fragment_root: test_span_address(&device, frag_span),
         args:          args_span,
