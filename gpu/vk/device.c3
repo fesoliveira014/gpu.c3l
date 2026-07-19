@@ -435,15 +435,21 @@ fn gpu::Device? create_vk_device_with_selection(
     }
     if (state.strict_heap.enabled) {
         bool indexing_supported = heap_indexing_supported(&features2.features, &features12);
+        IndexingHeapLimits indexing_limits = query_indexing_heap_limits(state.physical_device);
         bool buffer_supported;
-        if (heap_shared_features_supported(&features2.features, &features12)) {
-            buffer_supported = query_descriptor_buffer_support(state.physical_device)!;
+        if (strict_heap_needs_descriptor_buffer_query(
+            state:              &state.strict_heap,
+            indexing_supported: indexing_supported,
+            indexing_limits:    indexing_limits,
+            probe:              probe,
+        ) && heap_shared_features_supported(&features2.features, &features12)) {
+            buffer_supported = query_descriptor_buffer_support(state.physical_device, state)!;
         }
         select_strict_heap_implementation_for_creation(
             state:              &state.strict_heap,
             indexing_supported: indexing_supported,
             buffer_supported:   buffer_supported,
-            indexing_limits:    query_indexing_heap_limits(state.physical_device),
+            indexing_limits:    indexing_limits,
             probe:              probe,
         )!;
     }
@@ -835,6 +841,21 @@ fn bool strict_heap_uses_descriptor_buffer(VkStrictHeapState* state) {
         && state.implementation == VkHeapImplementation.DESCRIPTOR_BUFFER;
 }
 
+fn bool strict_heap_needs_descriptor_buffer_query(
+    VkStrictHeapState* state,
+    bool indexing_supported,
+    IndexingHeapLimits indexing_limits,
+    DeviceCreationProbe* probe,
+) {
+    if (state == null || !state.enabled) return false;
+    if (probe != null && probe.descriptor_buffer_override) return true;
+    return !indexing_supported || !indexing_heap_fits_limits(
+        state.texture_capacity,
+        state.sampler_capacity,
+        indexing_limits,
+    );
+}
+
 fn void? select_strict_heap_implementation_for_creation(
     VkStrictHeapState* state,
     bool indexing_supported,
@@ -861,15 +882,25 @@ fn void? select_strict_heap_implementation_for_creation(
 }
 
 fn bool? query_device_extension_support_mapped(
+    VkDeviceState* state,
     vk::PhysicalDevice physical_device,
     ZString extension,
     DeviceExtensionQueryFn extension_query,
 ) {
     bool? supported = extension_query(physical_device, extension);
     if (catch query_fault = supported) {
-        if (query_fault == vk::ERROR_OUT_OF_HOST_MEMORY) return gpu::OUT_OF_HOST_MEMORY~;
-        if (query_fault == vk::ERROR_OUT_OF_DEVICE_MEMORY) return gpu::OUT_OF_DEVICE_MEMORY~;
-        return gpu::BACKEND_ERROR~;
+        vk::Result result;
+        if (query_fault == vk::ERROR_OUT_OF_HOST_MEMORY) {
+            result = vk::Result.ERROR_OUT_OF_HOST_MEMORY;
+        } else if (query_fault == vk::ERROR_OUT_OF_DEVICE_MEMORY) {
+            result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY;
+        } else if (query_fault == vk::ERROR_LAYER_NOT_PRESENT) {
+            result = vk::Result.ERROR_LAYER_NOT_PRESENT;
+        } else {
+            return gpu::BACKEND_ERROR~;
+        }
+        check_backend_result(state, "query_device_extension_support", result)!;
+        return false;
     }
     return supported;
 }
@@ -878,11 +909,13 @@ fn bool? query_device_extension_support_mapped(
 fn bool? query_descriptor_buffer_support_with_query(
     vk::PhysicalDevice physical_device,
     DeviceExtensionQueryFn extension_query,
+    VkDeviceState* state = null,
 ) {
     if (!query_device_extension_support_mapped(
-        physical_device,
-        "VK_EXT_descriptor_buffer",
-        extension_query,
+        state:           state,
+        physical_device: physical_device,
+        extension:       "VK_EXT_descriptor_buffer",
+        extension_query: extension_query,
     )!) return false;
     vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features = vk::physical_device_descriptor_buffer_features_ext();
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&db_features);
@@ -890,10 +923,14 @@ fn bool? query_descriptor_buffer_support_with_query(
     return db_features.descriptor_buffer != 0;
 }
 
-fn bool? query_descriptor_buffer_support(vk::PhysicalDevice physical_device) @private {
+fn bool? query_descriptor_buffer_support(
+    vk::PhysicalDevice physical_device,
+    VkDeviceState* state = null,
+) @private {
     return query_descriptor_buffer_support_with_query(
         physical_device,
         &query_device_extension_support,
+        state,
     );
 }
 
