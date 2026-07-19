@@ -38,7 +38,7 @@ fn void init_span_resolver_fixture(SpanResolverFixture* fixture) {
             .size        = fixture.mapping.len,
             .usage       = { .storage, .addressable },
             .access      = { .compute, .transfer },
-            .memory_kind = gpu::MemoryKind.STAGING,
+            .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
         },
         .generation = 5,
         .used       = true,
@@ -132,7 +132,7 @@ fn void buffer_span_resolves_private_metadata() @test {
         "buffer span preserves its checked native range");
     assert(resolved.access == fixture.buffer_cells[0].value.access,
         "buffer span derives immutable access from the slot");
-    assert(resolved.memory_kind == gpu::MemoryKind.STAGING,
+    assert(resolved.memory_kind == gpu::MemoryKind.FRAME_UPLOAD,
         "buffer span derives its memory kind from the slot");
     assert(resolved.mapping == &fixture.mapping[8],
         "buffer span resolves its mapped address");

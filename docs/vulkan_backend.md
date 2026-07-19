@@ -546,18 +546,17 @@ Both carry a device token and a `CommandListHandle`. The handle resolves to a
 device-owned `CommandRecord` with the native command buffer and pool, exact
 public queue, lifecycle state, binding cache, and pending texture transitions.
 Successful end consumes the recording token and returns the executable token.
-Submit or explicit executable discard consumes the ended token.
+`submit` or explicit executable discard consumes the ended token.
 
 Submission preflights the batch under the command-table mutex. It rejects stale,
 duplicate, non-executable, or wrong-queue tokens before claiming records. A
 failure before native acceptance restores every claim; success commits pending
 texture state and invalidates all aliases.
 
-Discard retires the native buffer to its recording context. Submit transfers it
+Discard retires the native buffer to its recording context. `submit` transfers it
 to a completion-tracked batch; completion observation retires the buffer to the
 same context. Only the context owner frees retired buffers, before allocating
-again; helper contexts drain under their recording mutex, and device teardown
-relies on command-pool destruction.
+again; device teardown relies on command-pool destruction.
 
 ## 13. Synchronization
 

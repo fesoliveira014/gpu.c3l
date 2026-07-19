@@ -17,6 +17,31 @@ layers, runs the fixed suite once, and writes
 `test/build/benchmark-report.md`. Individual targets perform their documented
 warmups and repetitions.
 
+## Explicit upload throughput
+
+`upload_throughput_bench` measures the strict caller-owned replacement path at
+1, 2, and 4 persistent workers across bounded payload sizes. Worker threads and
+recording contexts are created once per combination, then one complete untimed
+warmup precedes payload-specific measured counts: 2,048 at 4 KiB, 512 at
+256 KiB, and 32 at 4 MiB. These fixed counts target roughly 100 ms or more per
+combination. Each worker reuses one `CPU_WRITE`
+allocation and one `GPU_PRIVATE` allocation only after waiting for the prior
+covering `CompletionPoint`. A measured iteration writes the mapped source,
+calls `flush_mapped_span`, records `cmd_copy_buffer`, batches executable lists
+on the submitting thread, submits, and waits before reuse.
+
+Run only this benchmark with:
+
+```sh
+c3c -O1 build upload_throughput_bench --path test
+./test/build/upload_throughput_bench
+```
+
+The output reports numeric `uploads_per_sec` values with worker and payload
+fields. Compare rates only with the same environment context emitted by
+`benchmark_info`; allocation-owning arena benchmarks measure a different
+path.
+
 ## Windows baseline
 
 Recorded 2026-07-13 with C3 0.8.0_2 on Windows 11:
@@ -43,6 +68,8 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 
 - Use frame spans for transient data; persistent allocation was about 8.5 times
   slower in this run.
+- Reuse caller-owned upload and destination allocations only after the covering
+  completion point is complete; free them only after all covering work completes.
 - Batch descriptor writes. Batches of 16 reduced one-worker texture descriptor
   cost by about 37%.
 - Reuse worker threads. Recording pools are cached per worker and only dirty pools reset.

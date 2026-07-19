@@ -15,6 +15,7 @@ BENCHMARK_TARGETS = (
     "arena_allocation_bench",
     "resource_create_bench",
     "descriptor_churn_bench",
+    "upload_throughput_bench",
     "command_record_bench",
     "frame_signal_bench",
     "pipeline_cache_bench",
@@ -25,6 +26,10 @@ BENCHMARK_METHODS = {
     "arena_allocation_bench": ("frame=100000; persistent=4096", "ns/allocation, ns/free"),
     "resource_create_bench": ("300/worker; workers=1,2,4", "ns/op"),
     "descriptor_churn_bench": ("320/worker; workers=1,2,4", "ns/descriptor"),
+    "upload_throughput_bench": (
+        "warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4",
+        "uploads/s",
+    ),
     "command_record_bench": ("20000/phase/repetition; repetitions=5", "ns/record"),
     "frame_signal_bench": ("2000/phase", "ns/end_frame, submits/frame"),
     "pipeline_cache_bench": ("cold=200; duplicate=200000", "ns/create"),
@@ -39,6 +44,11 @@ CONTEXT_FIELDS = ("adapter:", "driver:", "validation:", "queues:")
 # units=..., so the gate demands a number carrying the unit.
 MEASURED_VALUE = re.compile(
     r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|end_frame|create)|ms)\b"
+    r"|uploads_per_sec=\d[\d,.]*\b"
+)
+UPLOAD_MEASUREMENT = re.compile(
+    r"\bworkers=\d+\s+payload_bytes=\d+\s+iterations=\d+\s+"
+    r"uploads_per_sec=\d[\d,.]*\b"
 )
 
 
@@ -51,6 +61,12 @@ def require_context_fields(output):
 def require_measurement(output, target):
     if not re.search(r"\biterations?=\S+", output):
         raise ValueError(f"{target} is missing an iteration count")
+    is_upload = target == "upload_throughput_bench" or "uploads_per_sec=" in output
+    if is_upload:
+        if not re.search(r"\bunits=uploads/s\b", output):
+            raise ValueError(f"{target} is missing uploads/s units")
+        if not UPLOAD_MEASUREMENT.search(output):
+            raise ValueError(f"{target} is missing upload measurement fields")
     if not MEASURED_VALUE.search(output):
         raise ValueError(f"{target} is missing a measured value")
 

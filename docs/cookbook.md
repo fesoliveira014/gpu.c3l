@@ -43,7 +43,7 @@ gpu::TextureBarrier to_dst = gpu::texture_transition(
 )!;
 gpu::cmd_texture_barrier(&cmd, &to_dst)!;
 
-gpu::BufferTextureCopyDesc upload = { .src = staging_span, .texture = tex };
+gpu::BufferTextureCopyDesc upload = { .src = upload_span, .texture = tex };
 gpu::cmd_copy_buffer_to_texture(&cmd, &upload)!;
 
 gpu::TextureBarrier to_sample = gpu::texture_transition(
@@ -79,17 +79,18 @@ Goal: wait for a result and read it on the CPU.
 
 Allocate `CPU_READ` memory, record the resource transition and copy into its
 span, then record a buffer barrier from `TRANSFER_WRITE` to `HOST_READ`.
-Submit, wait for the returned completion point, invalidate the mapped span, and
-read it. Free or reuse the allocation only after completion.
+Call `submit`, wait for the returned completion point, invalidate the mapped
+span, and read it. Free or reuse the allocation only after completion.
 
 Running examples: `offscreen_triangle`, `multithreaded_recording`.
+
 ## 5. Non-blocking readback
 
 Goal: overlap GPU work with CPU consumption.
 
-Allocate a CPU_READ destination, record the copy and a TRANSFER_WRITE to
-HOST_READ barrier on that destination, then keep the completion point returned
-by submit. Once poll_completion succeeds, call
+Allocate a `CPU_READ` destination, record the copy and a `TRANSFER_WRITE` to
+`HOST_READ` barrier on that destination, then keep the completion point returned
+by `submit`. Once `poll_completion` succeeds, call
 `invalidate_mapped_span` and read the mapped span. Reuse or free the allocation
 only after completion.
 
@@ -234,7 +235,7 @@ Running example: `present_mode_explorer`.
 
 | Class or arena | For | Pattern |
 |---|---|---|
-| `MemoryClass.CPU_WRITE` | CPU-written generic data | map, write, `flush_mapped_span`, submit |
+| `MemoryClass.CPU_WRITE` | CPU-written generic data | map, write, `flush_mapped_span`, `submit` |
 | `MemoryClass.GPU_PRIVATE` | GPU-only working sets | copy from caller-owned `CPU_WRITE` storage |
 | `MemoryClass.CPU_READ` | GPU-to-CPU results | wait, `invalidate_mapped_span`, read |
 | frame arena | roots and per-frame constants | `alloc_frame_span(&frame, ...)`; coherent and valid for that frame generation |

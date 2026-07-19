@@ -474,8 +474,8 @@ normal device destruction.
 
 `MemoryKind` is not an independent-allocation selector. Public code uses it
 only in `PersistentAllocDesc`, where `PERSISTENT_UPLOAD` is required.
-Independent allocations use `MemoryClass`; frame and transfer APIs select
-their private backing policy.
+Independent allocations use `MemoryClass`; frame spans use private
+`FRAME_UPLOAD` backing.
 
 ### Frame spans
 
@@ -574,9 +574,9 @@ referencing work retires. Spans are scoped to their owning `Device`.
 
 The strict core exposes primitives, not transfer policy. For uploads, allocate
 `CPU_WRITE` memory, copy into its mapping, flush it, record a copy, and retain
-the allocation until the returned completion point retires. For readback,
+the allocation until the covered GPU work completes. For readback,
 allocate `CPU_READ` memory, record the copy and a `TRANSFER_WRITE` to
-`HOST_READ` barrier on the destination, submit, wait or poll, invalidate the
+`HOST_READ` barrier on the destination, `submit`, wait or poll, invalidate the
 span, then read its mapping.
 
 Applications choose whether to reuse allocations, suballocate rings, or create
@@ -969,8 +969,8 @@ one queue-owned `CompletionPoint`; failure publishes no point and preserves the
 tokens for retry or discard. An empty batch signals the selected queue.
 Duplicate or non-executable tokens fault `COMMAND_RECORDING_ERROR`; a token for
 another queue faults `INVALID_ARGUMENT`. Discard consumes an unsubmitted token.
-Internal command storage is reclaimed by its recording owner before that owner
-allocates again; helper calls reclaim completed storage before returning.
+Completed native command buffers return to their recording context. Only that
+context owner reclaims them, before its next allocation.
 
 `SubmitDesc.completion_waits` accepts published points from the same device.
 Cross-queue points become waits on their queue-owned timelines. Published points
@@ -992,8 +992,8 @@ malformed tokens and returns the stable device-local ID and supported roles.
 Backend family indices and native handles remain private. Resource descriptions
 require a non-empty subset of the selected roles. A queue may use a resource when
 at least one of its roles appears in the resource's `access` set. A `GpuSpan` also rejects empty,
-unknown, or wider-than-backing access metadata. These checks run before command,
-layout, helper-timeline, or transfer-arena mutation.
+unknown, or wider-than-backing access metadata. These checks run before command
+or tracked-layout mutation.
 
 Allocations reached only through root GPU pointers remain a caller contract:
 every reachable allocation must admit the recording role because nested pointers
@@ -1209,6 +1209,7 @@ get_span_mapping
 
 The caller owns the allocation, barriers, completion point, and mapped data.
 No frame boundary or readback-specific token is required.
+
 ### Barriers
 
 ```text

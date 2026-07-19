@@ -103,8 +103,8 @@ Two sizing rules that bite:
   persistent spans or allocations you rewrite (see `deferred_shading`'s lights).
 - **Pending texture transitions grow with the command record.** There is no
   16-texture recording cap; the backend starts at 16 entries and doubles the
-  host allocation as distinct textures are added. Submit or discard the token
-  to release that state.
+  host allocation as distinct textures are added. Call `submit` or discard the
+  token to release that state.
 
 ## 3. Driver and environment quirks
 

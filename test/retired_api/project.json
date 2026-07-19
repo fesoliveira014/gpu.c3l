@@ -115,6 +115,12 @@
         "cmd_upload_texture.c3"
       ]
     },
+    "texture_upload_desc": {
+      "type": "object-files",
+      "sources": [
+        "texture_upload_desc.c3"
+      ]
+    },
     "upload_buffer_data": {
       "type": "object-files",
       "sources": [
@@ -137,6 +143,12 @@
       "type": "object-files",
       "sources": [
         "readback_texture_data.c3"
+      ]
+    },
+    "memory_kind_staging": {
+      "type": "object-files",
+      "sources": [
+        "memory_kind_staging.c3"
       ]
     },
     "staging_arena_size": {

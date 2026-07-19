@@ -175,7 +175,7 @@ bounds or overflow checks.
 
 | Need | Public API | Contract |
 |---|---|---|
-| CPU-written generic data | `MemoryClass.CPU_WRITE` | map, write, flush, then submit |
+| CPU-written generic data | `MemoryClass.CPU_WRITE` | map, write, flush, then `submit` |
 | GPU-private generic data | `MemoryClass.GPU_PRIVATE` | upload or write from GPU commands |
 | CPU-read generic data | `MemoryClass.CPU_READ` | wait, invalidate, then read |
 | Placed textures | `MemoryClass.TEXTURE` | query requirements, allocate, create placed textures |
@@ -184,8 +184,8 @@ bounds or overflow checks.
 
 `MemoryKind` is not an independent-allocation selector. Public code supplies it
 only through `PersistentAllocDesc`, where `PERSISTENT_UPLOAD` is mandatory.
-`FRAME_UPLOAD`, `DEVICE`, `READBACK`, and `STAGING` describe private backing
-policy selected by the corresponding API path.
+`FRAME_UPLOAD`, `DEVICE`, and `READBACK` are backend selections derived from the
+corresponding public API path.
 
 ## 7. Private buffer backing
 
@@ -398,14 +398,14 @@ Free flow:
 Transfer storage is caller-owned. Uploads use `CPU_WRITE` allocations: map,
 write, flush, record a copy, and retain the allocation until completion.
 Readback uses `CPU_READ` allocations: record the copy and a destination barrier
-from `TRANSFER_WRITE` to `HOST_READ`, submit, wait or poll, invalidate, then
+from `TRANSFER_WRITE` to `HOST_READ`, `submit`, wait or poll, invalidate, then
 read the mapping.
 
-The core does not allocate staging rings, readback pools, dedicated fallbacks,
-or helper timelines. Applications may implement those policies over
+The core does not allocate transfer storage, choose fallback policy, or create
+additional completion state. Applications may implement pooling and reuse over
 allocations, spans, commands, and completion points.
 
-## 14. Mapped visibility
+## 13. Mapped visibility
 
 Call `flush_mapped_span` after CPU writes and before GPU use. After waiting or
 polling the relevant completion point, call `invalidate_mapped_span` before CPU
@@ -415,7 +415,7 @@ Both operations require a live, mapped independent-allocation span. Coherent
 memory returns success without native work. The backend rounds non-coherent
 ranges to atom boundaries and clamps the final atom to the native allocation.
 
-## 15. Memory budget and statistics
+## 14. Memory budget and statistics
 
 Public API:
 
@@ -447,7 +447,7 @@ live slot tables
 
 Call current-frame-index update during `begin_frame` so VMA budget tracking remains useful.
 
-## 16. Allocation names and user data
+## 15. Allocation names and user data
 
 Debug builds should set:
 
@@ -467,7 +467,7 @@ arena:frame_upload:<frame_index>
 arena:persistent_upload
 ```
 
-## 17. Immediate resource lifetime
+## 16. Immediate resource lifetime
 
 `free_allocation` and non-WSI core resource destruction release native ownership
 immediately. They never wait and never enqueue deferred release work. The caller
@@ -485,12 +485,12 @@ immediately; stale shader data is therefore a caller lifetime violation.
 `destroy_device` remains non-blocking and returns `DEVICE_BUSY` while queue
 work is incomplete.
 
-## 18. Defragmentation policy
+## 17. Defragmentation policy
 
 There is no automatic defragmentation. GPU addresses may be stored in root
 structs, tables, and indirect records, so allocations do not move.
 
-## 19. Memory acceptance criteria
+## 18. Memory acceptance criteria
 
 The memory layer is acceptable when:
 

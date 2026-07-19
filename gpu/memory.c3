@@ -14,8 +14,6 @@ enum MemoryKind : int {
     DEVICE,
     // GPU-to-CPU readback; invalidate before reading.
     READBACK,
-    // Transfer sources for staged uploads.
-    STAGING,
 }
 enum MemoryClass : int {
     CPU_WRITE,
@@ -342,7 +340,6 @@ fn PersistentArenaStats? get_persistent_stats(Device* device) {
     defer end_device_operation(&operation);
     return operation.vtable.get_persistent_stats(device);
 }
-
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the
    caller has already proved the range, or deliberately needs an invalid span
