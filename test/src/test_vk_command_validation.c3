@@ -2,6 +2,7 @@ module gpu_test;
 
 import gpu @public;
 import gpu::vk @public;
+import std::core::mem;
 import std::io;
 
 // Headless (lavapipe): recording/submit validation faults — mixed-queue
@@ -801,6 +802,152 @@ fn void draw_with_compute_pipeline_faults() @test {
     defer discard_test_executable(&cmd_executable)!!;
 }
 
+fn void explicit_pipeline_binding_state_is_transactional() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    gpu::TextureHandle target = make_val_target(&device);
+    defer gpu::destroy_texture(&device, target)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute },
+        debug_name:   "explicit_pipeline_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    gpu::GpuAddress root = val_span_address(&device, root_owned.span);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+
+    fault missing_pipeline = @catch(gpu::cmd_dispatch(
+        commands: &commands,
+        root:     root,
+        groups:   { 1, 1, 1 },
+    ));
+    assert(missing_pipeline == gpu::COMMAND_RECORDING_ERROR,
+        "dispatch without an active pipeline faults command state");
+
+    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+    fault wrong_compute_kind = @catch(gpu::cmd_dispatch(
+        commands: &commands,
+        root:     root,
+        groups:   { 1, 1, 1 },
+    ));
+    assert(wrong_compute_kind == gpu::INVALID_ARGUMENT,
+        "dispatch rejects an active graphics pipeline");
+
+    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
+    fault missing_compute_root = @catch(gpu::cmd_dispatch(
+        commands: &commands,
+        root:     (gpu::GpuAddress)0,
+        groups:   { 1, 1, 1 },
+    ));
+    assert(missing_compute_root == gpu::INVALID_ARGUMENT,
+        "dispatch rejects a missing compute root");
+    gpu::cmd_dispatch(
+        commands: &commands,
+        root:     root,
+        groups:   { 0, 0, 0 },
+    )!!;
+
+    ValComputeCtx stale = make_val_compute_ctx(&device);
+    gpu::PipelineHandle stale_handle = stale.pipeline;
+    gpu::destroy_pipeline(&device, stale_handle)!!;
+    fault stale_bind = @catch(gpu::cmd_bind_pipeline(&commands, stale_handle));
+    assert(stale_bind == gpu::INVALID_HANDLE, "binding a stale pipeline faults INVALID_HANDLE");
+    gpu::cmd_dispatch(
+        commands: &commands,
+        root:     root,
+        groups:   { 0, 0, 0 },
+    )!!;
+
+    record_val_target_to_attach(&commands, target);
+    gpu::ColorTargetDesc[1] colors = {{
+        .texture  = target,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+
+    fault missing_depth_state = @catch(gpu::cmd_draw(
+        commands:      &commands,
+        vertex_root:   root,
+        fragment_root: root,
+        vertex_count:  0,
+        instance_count: 0,
+    ));
+    assert(missing_depth_state == gpu::COMMAND_RECORDING_ERROR,
+        "draw requires explicit depth state in each render pass");
+
+    gpu::DepthState depth = {};
+    gpu::cmd_set_depth_state(&commands, &depth)!!;
+    fault missing_vertex_root = @catch(gpu::cmd_draw(
+        commands:      &commands,
+        vertex_root:   (gpu::GpuAddress)0,
+        fragment_root: root,
+        vertex_count:  0,
+        instance_count: 0,
+    ));
+    assert(missing_vertex_root == gpu::INVALID_ARGUMENT,
+        "draw rejects a missing vertex root");
+    fault missing_fragment_root = @catch(gpu::cmd_draw(
+        commands:      &commands,
+        vertex_root:   root,
+        fragment_root: (gpu::GpuAddress)0,
+        vertex_count:  0,
+        instance_count: 0,
+    ));
+    assert(missing_fragment_root == gpu::INVALID_ARGUMENT,
+        "draw rejects a missing fragment root");
+
+    gpu::DepthState invalid_depth = depth;
+    int invalid_compare = 99;
+    mem::copy(&invalid_depth.compare, &invalid_compare, int::size);
+    fault invalid_depth_fault = @catch(gpu::cmd_set_depth_state(
+        &commands,
+        &invalid_depth,
+    ));
+    assert(invalid_depth_fault == gpu::INVALID_ARGUMENT,
+        "invalid depth state faults before replacing valid command state");
+    gpu::cmd_draw(
+        commands:      &commands,
+        vertex_root:   root,
+        fragment_root: root,
+        vertex_count:  0,
+        instance_count: 0,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    fault reset_depth_state = @catch(gpu::cmd_draw(
+        commands:      &commands,
+        vertex_root:   root,
+        fragment_root: root,
+        vertex_count:  0,
+        instance_count: 0,
+    ));
+    assert(reset_depth_state == gpu::COMMAND_RECORDING_ERROR,
+        "render-pass begin resets explicit depth state");
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
+        "pipeline bind and execution perform no native compilation");
+}
 fn void compute_pipeline_from_vertex_shader_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
