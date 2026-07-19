@@ -285,7 +285,10 @@ implementations, no available implementation, and indexing limits below the
 requested capacities. Descriptor-buffer topology has deterministic create-info
 coverage for exclusive and concurrent paths. A private creation probe forces the
 real descriptor-buffer layout and descriptor-write path without exposing
-a public backend choice. The gated `GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1`
+a public backend choice. The probe records capability discovery and selection;
+coverage skips only when descriptor-buffer capability absence was proven before
+selection; Vulkan capability-query faults remain failures. The gated
+`GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1`
 workloads use the same private path; the Windows CI Mesa pin fails closed on an
 upgrade until shader E2E is re-evaluated and the retest version is updated.
 

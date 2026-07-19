@@ -10,7 +10,7 @@ import std::thread;
 
 // Disambiguates from vma::Allocator: std::core::mem's host-memory interface.
 alias HostAllocator = std::core::mem::alloc::Allocator;
-alias DeviceExtensionQuery = fn bool(vk::PhysicalDevice physical_device, ZString extension);
+alias DeviceExtensionQueryFn = fn bool?(vk::PhysicalDevice physical_device, ZString extension);
 alias DescriptorBufferCapacityProbeFn @private = fn bool (
     void*,
     vk::PhysicalDevice,
@@ -44,6 +44,9 @@ struct DeviceCreationProbe {
     uint                     rollback_count;
     uint                     owned_instance_teardown_count;
     bool                     descriptor_buffer_override;
+    bool                     descriptor_buffer_capability_checked;
+    bool                     descriptor_buffer_capability_available;
+    bool                     descriptor_buffer_selected;
 }
 
 struct DescriptorBufferCapacityProbe {
@@ -432,8 +435,10 @@ fn gpu::Device? create_vk_device_with_selection(
     }
     if (state.strict_heap.enabled) {
         bool indexing_supported = heap_indexing_supported(&features2.features, &features12);
-        bool buffer_supported = heap_shared_features_supported(&features2.features, &features12)
-            && query_descriptor_buffer_support(state.physical_device);
+        bool buffer_supported;
+        if (heap_shared_features_supported(&features2.features, &features12)) {
+            buffer_supported = query_descriptor_buffer_support(state.physical_device)!;
+        }
         select_strict_heap_implementation_for_creation(
             state:              &state.strict_heap,
             indexing_supported: indexing_supported,
@@ -847,17 +852,49 @@ fn void? select_strict_heap_implementation_for_creation(
     }
     if (state == null) return gpu::INVALID_ARGUMENT~;
     if (!state.enabled) return;
+    probe.descriptor_buffer_capability_checked   = true;
+    probe.descriptor_buffer_capability_available = buffer_supported;
+    probe.descriptor_buffer_selected             = false;
     if (!buffer_supported) return gpu::UNSUPPORTED_FEATURE~;
     state.implementation = VkHeapImplementation.DESCRIPTOR_BUFFER;
+    probe.descriptor_buffer_selected = true;
+}
+
+fn bool? query_device_extension_support_mapped(
+    vk::PhysicalDevice physical_device,
+    ZString extension,
+    DeviceExtensionQueryFn extension_query,
+) {
+    bool? supported = extension_query(physical_device, extension);
+    if (catch query_fault = supported) {
+        if (query_fault == vk::ERROR_OUT_OF_HOST_MEMORY) return gpu::OUT_OF_HOST_MEMORY~;
+        if (query_fault == vk::ERROR_OUT_OF_DEVICE_MEMORY) return gpu::OUT_OF_DEVICE_MEMORY~;
+        return gpu::BACKEND_ERROR~;
+    }
+    return supported;
 }
 
 <* The feature struct is only chained once the extension is confirmed. *>
-fn bool query_descriptor_buffer_support(vk::PhysicalDevice physical_device) @private {
-    if (!device_supports_extension(physical_device, "VK_EXT_descriptor_buffer")) return false;
+fn bool? query_descriptor_buffer_support_with_query(
+    vk::PhysicalDevice physical_device,
+    DeviceExtensionQueryFn extension_query,
+) {
+    if (!query_device_extension_support_mapped(
+        physical_device,
+        "VK_EXT_descriptor_buffer",
+        extension_query,
+    )!) return false;
     vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features = vk::physical_device_descriptor_buffer_features_ext();
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&db_features);
     vk::get_physical_device_features2(physical_device, &features2);
     return db_features.descriptor_buffer != 0;
+}
+
+fn bool? query_descriptor_buffer_support(vk::PhysicalDevice physical_device) @private {
+    return query_descriptor_buffer_support_with_query(
+        physical_device,
+        &query_device_extension_support,
+    );
 }
 
 fn IndexingHeapLimits query_indexing_heap_limits(vk::PhysicalDevice physical_device) @private {
@@ -967,9 +1004,12 @@ fn bool candidate_satisfies(
 
     bool indexing_supported =
         heap_indexing_supported(&features2.features, &features12);
-    bool descriptor_buffer_supported =
-        heap_shared_features_supported(&features2.features, &features12)
-            && query_descriptor_buffer_support(candidate);
+    bool descriptor_buffer_supported;
+    if (heap_shared_features_supported(&features2.features, &features12)) {
+        if (try supported = query_descriptor_buffer_support(candidate)) {
+            descriptor_buffer_supported = supported;
+        }
+    }
     IndexingHeapLimits indexing_limits = query_indexing_heap_limits(candidate);
     DescriptorBufferCapacityProbe capacity_probe =
         real_descriptor_buffer_capacity_probe();
@@ -1178,18 +1218,31 @@ fn void? create_logical_device_with_queue_infos(
 }
 
 <* True if `physical_device` advertises the named device extension. *>
-fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString name) @private {
+fn bool? query_device_extension_support(
+    vk::PhysicalDevice physical_device,
+    ZString name,
+) @private {
     uint count = 0;
-    if (catch vk::try_enumerate_device_extension_properties(physical_device, null, &count, null)) return false;
+    vk::try_enumerate_device_extension_properties(physical_device, null, &count, null)!;
     if (count == 0) return false;
 
     @pool() {
         vk::ExtensionProperties[] properties = mem::talloc_array(vk::ExtensionProperties, (sz)count);
-        if (catch vk::try_enumerate_device_extension_properties(physical_device, null, &count, properties.ptr)) return false;
+        vk::try_enumerate_device_extension_properties(
+            physical_device,
+            null,
+            &count,
+            properties.ptr,
+        )!;
         for (uint i = 0; i < count; i++) {
             if (((ZString)&properties[i].extension_name[0]).str_view() == name.str_view()) return true;
         }
     };
+    return false;
+}
+
+fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString name) @private {
+    if (try supported = query_device_extension_support(physical_device, name)) return supported;
     return false;
 }
 

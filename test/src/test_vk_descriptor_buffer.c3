@@ -20,30 +20,59 @@ fn bool db_e2e_enabled() {
     return false;
 }
 
-fn bool descriptor_buffer_creation_is_unavailable(fault err) {
-    return err == gpu::UNSUPPORTED_FEATURE;
+fn bool descriptor_buffer_creation_is_unavailable(
+    gpu::vk::DeviceCreationProbe* probe,
+    fault err,
+) {
+    return err == gpu::UNSUPPORTED_FEATURE
+        && probe != null
+        && probe.descriptor_buffer_capability_checked
+        && !probe.descriptor_buffer_capability_available
+        && !probe.descriptor_buffer_selected;
 }
 
 fn void descriptor_buffer_creation_skip_policy_is_exact() @test {
+    gpu::vk::DeviceCreationProbe unprobed = {};
+    gpu::vk::DeviceCreationProbe unavailable = {
+        .descriptor_buffer_capability_checked = true,
+    };
+    gpu::vk::DeviceCreationProbe advertised = {
+        .descriptor_buffer_capability_checked   = true,
+        .descriptor_buffer_capability_available = true,
+    };
+    gpu::vk::DeviceCreationProbe selected = {
+        .descriptor_buffer_capability_checked   = true,
+        .descriptor_buffer_capability_available = true,
+        .descriptor_buffer_selected             = true,
+    };
+
     assert(
-        descriptor_buffer_creation_is_unavailable(gpu::UNSUPPORTED_FEATURE),
+        descriptor_buffer_creation_is_unavailable(&unavailable, gpu::UNSUPPORTED_FEATURE),
         "unavailable descriptor-buffer support may skip"
     );
     assert(
-        !descriptor_buffer_creation_is_unavailable(gpu::BACKEND_ERROR),
-        "backend failure must fail descriptor-buffer coverage"
+        !descriptor_buffer_creation_is_unavailable(&unprobed, gpu::UNSUPPORTED_FEATURE),
+        "unproven capability absence must fail descriptor-buffer coverage"
     );
     assert(
-        !descriptor_buffer_creation_is_unavailable(gpu::INVALID_ARGUMENT),
-        "malformed creation must fail descriptor-buffer coverage"
+        !descriptor_buffer_creation_is_unavailable(&advertised, gpu::UNSUPPORTED_FEATURE),
+        "advertised descriptor-buffer support must fail creation regressions"
+    );
+    assert(
+        !descriptor_buffer_creation_is_unavailable(&selected, gpu::UNSUPPORTED_FEATURE),
+        "selected descriptor-buffer paths must fail later regressions"
+    );
+    assert(
+        !descriptor_buffer_creation_is_unavailable(&unavailable, gpu::BACKEND_ERROR),
+        "backend failure must fail descriptor-buffer coverage"
     );
 }
 
-fn gpu::Device? create_descriptor_buffer_test_device(gpu::DeviceDesc* desc) {
-    gpu::vk::DeviceCreationProbe probe = {
-        .descriptor_buffer_override = true,
-    };
-    return gpu::vk::create_vk_device_from_desc_with_probe(desc, &probe);
+fn gpu::Device? create_descriptor_buffer_test_device(
+    gpu::DeviceDesc* desc,
+    gpu::vk::DeviceCreationProbe* probe,
+) {
+    return gpu::vk::create_vk_device_from_desc_with_probe(desc, probe);
 }
 
 fn void descriptor_buffer_device_and_heap() @test {
@@ -55,14 +84,17 @@ fn void descriptor_buffer_device_and_heap() @test {
         .application_name      = "gpu_descriptor_buffer_test",
     };
 
-    gpu::Device? maybe_device = create_descriptor_buffer_test_device(&desc);
+    gpu::vk::DeviceCreationProbe probe = {
+        .descriptor_buffer_override = true,
+    };
+    gpu::Device? maybe_device = create_descriptor_buffer_test_device(&desc, &probe);
     if (catch err = maybe_device) {
         assert(
-            descriptor_buffer_creation_is_unavailable(err),
+            descriptor_buffer_creation_is_unavailable(&probe, err),
             "descriptor-buffer device/heap creation failed unexpectedly: %s",
             err
         );
-        io::eprintfn("descriptor_buffer_device_and_heap: no capable adapter, skipping");
+        io::eprintfn("descriptor_buffer_device_and_heap: descriptor-buffer capability unavailable, skipping");
         return;
     }
     gpu::Device device = maybe_device;
@@ -117,14 +149,17 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .enable_validation    = true,
         .application_name     = "gpu_descriptor_buffer_compute_to_graphics",
     };
-    gpu::Device? maybe_device = create_descriptor_buffer_test_device(&device_desc);
+    gpu::vk::DeviceCreationProbe probe = {
+        .descriptor_buffer_override = true,
+    };
+    gpu::Device? maybe_device = create_descriptor_buffer_test_device(&device_desc, &probe);
     if (catch err = maybe_device) {
         assert(
-            descriptor_buffer_creation_is_unavailable(err),
+            descriptor_buffer_creation_is_unavailable(&probe, err),
             "strict device creation failed unexpectedly: %s",
             err
         );
-        io::eprintfn("descriptor_buffer_compute_to_graphics: no capable adapter, skipping");
+        io::eprintfn("descriptor_buffer_compute_to_graphics: descriptor-buffer capability unavailable, skipping");
         return;
     }
     gpu::Device device = maybe_device;
@@ -433,14 +468,17 @@ fn void descriptor_buffer_write_then_sample() @test {
         .enable_validation    = true,
         .application_name     = "gpu_descriptor_buffer_e2e",
     };
-    gpu::Device? maybe_device = create_descriptor_buffer_test_device(&device_desc);
+    gpu::vk::DeviceCreationProbe probe = {
+        .descriptor_buffer_override = true,
+    };
+    gpu::Device? maybe_device = create_descriptor_buffer_test_device(&device_desc, &probe);
     if (catch err = maybe_device) {
         assert(
-            descriptor_buffer_creation_is_unavailable(err),
+            descriptor_buffer_creation_is_unavailable(&probe, err),
             "descriptor-buffer shader E2E creation failed unexpectedly: %s",
             err
         );
-        io::eprintfn("descriptor_buffer_write_then_sample: no capable adapter, skipping");
+        io::eprintfn("descriptor_buffer_write_then_sample: descriptor-buffer capability unavailable, skipping");
         return;
     }
     gpu::Device device = maybe_device;

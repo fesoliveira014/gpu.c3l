@@ -354,7 +354,7 @@ jobs:
           c3c test vk_texture_heap --path test \
             --test-filter descriptor_buffer_device_and_heap --test-show-output 2>&1 \
             | tee /tmp/descriptor-buffer.txt
-          if grep -Fq "no capable adapter" /tmp/descriptor-buffer.txt; then
+          if grep -Fq "descriptor-buffer capability unavailable" /tmp/descriptor-buffer.txt; then
             echo "::notice::descriptor-buffer layout/write path not exercised on this adapter"
             echo "Descriptor-buffer layout/write: NOT EXERCISED (adapter support unavailable)." >> "$GITHUB_STEP_SUMMARY"
           elif ! grep -Fq "Testing gpu_test::descriptor_buffer_device_and_heap" /tmp/descriptor-buffer.txt; then
