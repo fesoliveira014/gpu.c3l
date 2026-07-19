@@ -2,6 +2,7 @@ module gpu_test;
 
 import gpu @public;
 import gpu::vk @public;
+import vk;
 import std::atomic;
 import std::io;
 
@@ -178,6 +179,12 @@ fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
         overridden.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
         "the private creation probe can exercise descriptor-buffer runtime paths"
     );
+    assert(
+        probe.descriptor_buffer_capability_checked
+            && probe.descriptor_buffer_capability_available
+            && probe.descriptor_buffer_selected,
+        "the probe records advertised capability and completed selection"
+    );
 
     gpu::vk::VkStrictHeapState unsupported =
         gpu::vk::resolve_strict_heap_state(true, &desc)!!;
@@ -190,6 +197,72 @@ fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
             probe:              &probe,
         )) == gpu::UNSUPPORTED_FEATURE,
         "the private override never bypasses descriptor-buffer feature support"
+    );
+    assert(
+        probe.descriptor_buffer_capability_checked
+            && !probe.descriptor_buffer_capability_available
+            && !probe.descriptor_buffer_selected,
+        "the probe distinguishes proven capability absence from later failure"
+    );
+}
+
+fn bool? descriptor_buffer_extension_absent(
+    vk::PhysicalDevice physical_device,
+    ZString extension,
+) {
+    return false;
+}
+
+fn bool? descriptor_buffer_extension_query_host_oom(
+    vk::PhysicalDevice physical_device,
+    ZString extension,
+) {
+    return vk::ERROR_OUT_OF_HOST_MEMORY~;
+}
+
+fn bool? descriptor_buffer_extension_query_device_oom(
+    vk::PhysicalDevice physical_device,
+    ZString extension,
+) {
+    return vk::ERROR_OUT_OF_DEVICE_MEMORY~;
+}
+
+fn bool? descriptor_buffer_extension_query_layer_missing(
+    vk::PhysicalDevice physical_device,
+    ZString extension,
+) {
+    return vk::ERROR_LAYER_NOT_PRESENT~;
+}
+
+fn void descriptor_buffer_capability_query_distinguishes_absence_and_failure() @test {
+    vk::PhysicalDevice physical_device = (vk::PhysicalDevice)(uptr)0xA0;
+    assert(
+        !gpu::vk::query_descriptor_buffer_support_with_query(
+            physical_device,
+            &descriptor_buffer_extension_absent,
+        )!!,
+        "confirmed extension absence is unsupported capability"
+    );
+    assert(
+        @catch(gpu::vk::query_descriptor_buffer_support_with_query(
+            physical_device,
+            &descriptor_buffer_extension_query_host_oom,
+        )) == gpu::OUT_OF_HOST_MEMORY,
+        "extension-query host OOM maps into the public fault taxonomy"
+    );
+    assert(
+        @catch(gpu::vk::query_descriptor_buffer_support_with_query(
+            physical_device,
+            &descriptor_buffer_extension_query_device_oom,
+        )) == gpu::OUT_OF_DEVICE_MEMORY,
+        "extension-query device OOM maps into the public fault taxonomy"
+    );
+    assert(
+        @catch(gpu::vk::query_descriptor_buffer_support_with_query(
+            physical_device,
+            &descriptor_buffer_extension_query_layer_missing,
+        )) == gpu::BACKEND_ERROR,
+        "unexpected layer failure maps to a public backend error"
     );
 }
 
