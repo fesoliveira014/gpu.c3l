@@ -401,9 +401,8 @@ Free flow:
 ## 12. Readback arena
 
 Buffer readback consumes an exact source span. `readback_buffer_data` requires
-`out_data.len == src.size`; `cmd_readback_buffer` captures the same exact range
-in its ticket. Use `checked_subspan` for a partial readback. Internal readback
-storage supports CPU invalidation before reads.
+`out_data.len == src.size`. Use `checked_subspan` for a partial readback.
+Internal readback storage supports CPU invalidation before reads.
 
 Blocking flow (the `readback_buffer_data` / `readback_texture_data` helpers):
 
@@ -416,12 +415,11 @@ Blocking flow (the `readback_buffer_data` / `readback_texture_data` helpers):
 6. Read the range returned by `get_span_mapping`.
 ```
 
-Non-blocking readback records a copy with `cmd_readback_buffer` or
-`cmd_readback_texture` and returns a `ReadbackTicket`. `poll_readback` is
-non-blocking; `resolve_readback` copies and releases completed state, or faults
-`READBACK_NOT_READY`. The ticket owns its range until resolution. Discarding
-the command cancels its unsubmitted tickets. An unresolved submitted ticket
-returns `RESOURCE_IN_USE` from `destroy_device`.
+For non-blocking readback, allocate `CPU_READ` memory, record the copy and a
+`TRANSFER_WRITE` to `HOST_READ` barrier on its destination span, submit, and
+poll the returned completion point. After completion,
+invalidate the span and read its mapping. The caller controls allocation reuse
+and release.
 
 ## 13. Staging arena
 
@@ -438,11 +436,8 @@ subtraction-first bounds before any addition is formed. An unrepresentable
 range behaves as `ARENA_FULL`, so the existing dedicated-buffer fallback
 remains available.
 
-Live virtual offsets are never wrapped or rebased because `virtual_end` also
-identifies pinned readback-ticket ranges. When retirement leaves the queue
-empty, the next successful arena allocation normalizes the stale head and tail
-to zero; an outstanding pinned ticket keeps the queue nonempty and therefore
-prevents normalization.
+Live virtual offsets are never wrapped. When retirement empties the queue, the
+next successful arena allocation normalizes the stale head and tail to zero.
 
 Upload flow:
 

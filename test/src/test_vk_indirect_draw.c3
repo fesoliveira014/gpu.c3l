@@ -5,10 +5,8 @@ import gpu::vk @public;
 import vk;
 import std::io;
 
-// Headless (lavapipe): GPU-driven indirect execution and readback tickets.
-// A compute pass builds draw/dispatch arguments through the root-pointer ABI;
-// explicit barriers order the writes before indirect consumption; tickets
-// read the GPU-written args back without blocking the recording frame.
+// Headless (lavapipe): GPU-driven indirect execution. A compute pass builds
+// arguments through the root-pointer ABI and explicit barriers order access.
 
 const char[*] IND_VERT_SPIRV  = $embed("shaders/offscreen.vert.spv");
 const char[*] IND_FRAG_SPIRV  = $embed("shaders/offscreen.frag.spv");
@@ -27,13 +25,12 @@ struct IndDrawCtx {
     gpu::SamplerIndex   smp_index;
 }
 
-fn gpu::Device make_ind_device(usz readback_arena_size = 0) {
+fn gpu::Device make_ind_device() {
     gpu::DeviceDesc desc = {
-        .backend             = gpu::BackendKind.VULKAN,
-        .enable_validation   = true,
-        .frames_in_flight    = 2,
-        .readback_arena_size = readback_arena_size,
-        .application_name    = "gpu_indirect_test",
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .frames_in_flight  = 2,
+        .application_name  = "gpu_indirect_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
 }
@@ -337,6 +334,15 @@ fn void compute_generated_indexed_indirect_draw() @test {
     defer free_owned_span(&device, &args)!!;
     gpu::GpuSpan args_span = args.span;
 
+    OwnedSpan args_readback = allocate_owned_span(
+        device:       &device,
+        size:         2 * gpu::DrawIndexedIndirectCommand::size,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "indexed_args_readback",
+    )!!;
+    defer free_owned_span(&device, &args_readback)!!;
+
     OwnedSpan readback = allocate_owned_span(
         device:       &device,
         size:         IND_RT_BYTES,
@@ -389,8 +395,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     };
     gpu::cmd_buffer_barrier(&cmd, &args_ready)!!;
 
-    // Ticket on the same GPU-written args: order the compute writes before
-    // the ticket's transfer read.
+    // Read the GPU-written arguments through ordinary caller-owned memory.
     gpu::BufferBarrier args_to_copy = {
         .span          = args_span,
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
@@ -399,7 +404,19 @@ fn void compute_generated_indexed_indirect_draw() @test {
         .after_hazard  = gpu::Hazard.TRANSFER_READ,
     };
     gpu::cmd_buffer_barrier(&cmd, &args_to_copy)!!;
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, args_span)!!;
+    gpu::BufferCopyDesc args_copy = {
+        .src = args_span,
+        .dst = args_readback.span,
+    };
+    gpu::cmd_copy_buffer(&cmd, &args_copy)!!;
+    gpu::BufferBarrier args_host_read = {
+        .span          = args_readback.span,
+        .before_stage  = gpu::Stage.TRANSFER,
+        .after_stage   = gpu::Stage.HOST,
+        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
+        .after_hazard  = gpu::Hazard.HOST_READ,
+    };
+    gpu::cmd_buffer_barrier(&cmd, &args_host_read)!!;
 
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -425,37 +442,32 @@ fn void compute_generated_indexed_indirect_draw() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-
-    assert(!gpu::poll_readback(&device, &ticket)!!, "ticket is not resolvable before the frame ends");
-    fault early = @catch(gpu::resolve_readback(&device, &ticket, (char[])((char*)&ticket)[:1]));
-    assert(early == gpu::INVALID_ARGUMENT || early == gpu::READBACK_NOT_READY, "early resolve is rejected");
-
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
     gpu::end_frame(&frame_token)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::invalidate_mapped_span(&device, readback.span)!!;
     char* center = center_pixel(&device, &rb_span);
     assert(center[0] == (char)255 && center[1] == (char)255 && center[2] == (char)255,
         "compute-generated indexed indirect draw renders the triangle");
 
-    assert(gpu::poll_readback(&device, &ticket)!!, "ticket resolvable after the recording frame ends");
-    gpu::DrawIndexedIndirectCommand[2] got;
-    gpu::ReadbackTicket stale_ticket = ticket;
-    gpu::resolve_readback(&device, &ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size])!!;
+    gpu::invalidate_mapped_span(&device, args_readback.span)!!;
+    gpu::DrawIndexedIndirectCommand* got =
+        (gpu::DrawIndexedIndirectCommand*)test_span_mapping(
+            &device,
+            args_readback.span,
+        ).ptr;
     for (uint i = 0; i < 2; i++) {
-        assert(got[i].index_count == 3 && got[i].instance_count == 1, "GPU-written args read back intact");
-        assert(got[i].first_index == 0 && got[i].vertex_offset == 0 && got[i].first_instance == 0,
+        assert(got[i].index_count == 3 && got[i].instance_count == 1,
+            "GPU-written args read back intact");
+        assert(got[i].first_index == 0 && got[i].vertex_offset == 0
+            && got[i].first_instance == 0,
             "GPU-written arg tail fields read back intact");
     }
-
-    fault again = @catch(gpu::resolve_readback(&device, &ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size]));
-    assert(again == gpu::INVALID_ARGUMENT, "double resolve faults INVALID_ARGUMENT");
-    assert(!gpu::poll_readback(&device, &ticket)!!, "poll on a resolved ticket is false");
-    fault stale = @catch(gpu::resolve_readback(&device, &stale_ticket, ((char*)&got)[:2 * gpu::DrawIndexedIndirectCommand::size]));
-    assert(stale == gpu::INVALID_HANDLE, "stale ticket alias faults INVALID_HANDLE");
-    fault stale_poll = @catch(gpu::poll_readback(&device, &stale_ticket));
-    assert(stale_poll == gpu::INVALID_HANDLE, "poll on a stale ticket alias faults INVALID_HANDLE");
 }
 
 fn void plain_indirect_draw_from_frame_span() @test {
@@ -704,60 +716,6 @@ fn void count_buffer_limits_draws() @test {
     gpu::end_frame(&frame_token)!!;
 }
 
-fn void ticket_hybrid_and_short_dest() @test {
-    // 4 KB readback arena: a few 1 KB tickets pin it full, forcing the
-    // dedicated fallback.
-    gpu::Device device = make_ind_device(readback_arena_size: 4096);
-    defer destroy_test_device(&device)!!;
-
-    const usz CHUNK = 1024;
-    const uint TICKETS = 6;
-    OwnedSpan src = allocate_owned_span(
-        device:       &device,
-        size:         CHUNK,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "ticket_source",
-    )!!;
-    defer free_owned_span(&device, &src)!!;
-    gpu::GpuSpan src_span = src.span;
-    char* src_bytes = (char*)test_span_mapping(&device, src_span).ptr;
-    for (usz i = 0; i < CHUNK; i++) src_bytes[i] = (char)(i % 251);
-    gpu::flush_mapped_span(&device, src.span)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::ReadbackTicket[TICKETS] tickets;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    ulong fallbacks_before = vk::dedicated_fallback_count(state);
-    for (uint i = 0; i < TICKETS; i++) {
-        tickets[i] = gpu::cmd_readback_buffer(&cmd, src_span)!!;
-    }
-    ulong dedicated_count = vk::dedicated_fallback_count(state) - fallbacks_before;
-    assert(dedicated_count > 0, "arena saturation falls back to dedicated tickets");
-    assert(dedicated_count < TICKETS, "early tickets are arena-backed");
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
-    gpu::ExecutableCommandList[1] lists = { cmd_executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    gpu::end_frame(&frame_token)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-
-    char[CHUNK] dest;
-    fault short_dest = @catch(gpu::resolve_readback(&device, &tickets[0], dest[:CHUNK - 1]));
-    assert(short_dest == gpu::INVALID_ARGUMENT, "short dest faults INVALID_ARGUMENT");
-
-    for (uint i = 0; i < TICKETS; i++) {
-        assert(gpu::poll_readback(&device, &tickets[i])!!, "all tickets resolvable after the frame");
-        gpu::resolve_readback(&device, &tickets[i], dest[..])!!;
-        for (usz b = 0; b < CHUNK; b++) {
-            assert(dest[b] == (char)(b % 251), "ticket bytes intact on both arena and dedicated paths");
-        }
-    }
-}
-
 fn void discard_consumes_active_render_pass_recording() @test {
     gpu::Device device = make_ind_device();
     gpu::TextureHandle target = make_ind_target(&device);
@@ -780,63 +738,6 @@ fn void discard_consumes_active_render_pass_recording() @test {
     assert(!commands.handle.is_valid(),
         "discard consumes a recording with an active render pass");
     gpu::destroy_texture(&device, target)!!;
-    gpu::destroy_device(&device)!!;
-}
-
-fn void discard_cancels_command_readback_tickets() @test {
-    gpu::Device device = make_ind_device(readback_arena_size: 1);
-    OwnedSpan src = allocate_owned_span(
-        device:       &device,
-        size:         1024,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "discarded_ticket_source",
-    )!!;
-
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&commands, src.span)!!;
-    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&commands_executable)!!;
-    gpu::discard_executable_commands(&commands_executable)!!;
-
-    fault poll_fault = @catch(gpu::poll_readback(&device, &ticket));
-    assert(poll_fault == gpu::INVALID_HANDLE,
-        "discard makes attached readback tickets stale");
-    char[1024] dest;
-    fault resolve_fault = @catch(gpu::resolve_readback(&device, &ticket, dest[..]));
-    assert(resolve_fault == gpu::INVALID_HANDLE,
-        "discard releases attached readback state");
-
-    free_owned_span(&device, &src)!!;
-    gpu::destroy_device(&device)!!;
-}
-
-fn void unresolved_readback_ticket_blocks_device_destruction() @test {
-    gpu::Device device = make_ind_device(readback_arena_size: 1);
-    OwnedSpan src = allocate_owned_span(
-        device:       &device,
-        size:         1024,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "unresolved_ticket_source",
-    )!!;
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&commands, src.span)!!;
-    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&commands_executable)!!;
-    gpu::ExecutableCommandList[1] lists = { commands_executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    gpu::end_frame(&frame)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    free_owned_span(&device, &src)!!;
-
-    assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
-        "an unresolved readback ticket blocks device destruction");
-    char[1024] dest;
-    gpu::resolve_readback(&device, &ticket, dest[..])!!;
     gpu::destroy_device(&device)!!;
 }
 

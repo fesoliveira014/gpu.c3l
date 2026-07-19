@@ -29,7 +29,7 @@ alias GetPersistentStatsFn @private  = fn PersistentArenaStats? (Device*);
 // Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
 alias BeginCommandsFn @private   = fn void? (Queue, CommandList* out_commands);
 alias EndCommandsFn @private     = fn void? (CommandList*);
-alias DiscardCommandsFn @private = fn ulong? (Device*, CommandListHandle, bool executable);
+alias DiscardCommandsFn @private = fn void? (Device*, CommandListHandle, bool executable);
 alias SubmitFn @private          = fn CompletionPoint? (Queue, SubmitDesc*);
 alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
 alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
@@ -99,10 +99,6 @@ alias ReadbackBufferDataFn @private = fn void? (
     Hazard from_hazard,
 );
 alias ReadbackTextureDataFn @private   = fn void? (Device*, TextureHandle, uint, char[], Stage, Hazard, TextureLayout);
-alias CmdReadbackBufferFn @private     = fn ReadbackTicket? (CommandList*, GpuSpan);
-alias CmdReadbackTextureFn @private    = fn ReadbackTicket? (CommandList*, TextureHandle, uint);
-alias PollReadbackFn @private          = fn bool? (Device*, ReadbackTicket*);
-alias ResolveReadbackFn @private       = fn void? (Device*, ReadbackTicket*, char[]);
 alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
@@ -200,10 +196,6 @@ struct BackendVTable @private {
     UploadTextureDataFn     upload_texture_data;
     ReadbackBufferDataFn    readback_buffer_data;
     ReadbackTextureDataFn   readback_texture_data;
-    CmdReadbackBufferFn     cmd_readback_buffer;
-    CmdReadbackTextureFn    cmd_readback_texture;
-    PollReadbackFn          poll_readback;
-    ResolveReadbackFn       resolve_readback;
     CreateSwapchainFn       create_swapchain;
     DestroySwapchainFn      destroy_swapchain;
     ResizeSwapchainFn       resize_swapchain;
@@ -254,7 +246,6 @@ enum ResourceOwnerKind @private {
     SWAPCHAIN,
     COMMAND,
     SHADER,
-    READBACK_TICKET,
     COMPLETION_POINT,
 }
 

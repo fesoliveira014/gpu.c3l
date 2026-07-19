@@ -290,8 +290,9 @@ token. Most public operations take a short-lived atomic pin before reading
 backend state. `begin_commands` transfers its pin to the returned command token;
 recording calls borrow that pin without acquiring another one.
 
-`destroy_device` never waits. Live resources, frames, command lists, persistent spans, swapchains, descriptors, and readback
-tickets return `RESOURCE_IN_USE`. Active operations, incomplete queue work, or
+`destroy_device` never waits. Live resources, frames, command lists,
+persistent spans, swapchains, and descriptors return `RESOURCE_IN_USE`.
+Active operations, incomplete queue work, or
 a closing slot return retryable `DEVICE_BUSY`. Every failed attempt preserves
 the token, generation, and backend state. Success increments the generation
 and invalidates the passed token. A lost device bypasses child and progress
@@ -382,8 +383,8 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors`; `resolve_readback` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, mismatched transfer payload length, undersized output, a consumed `ReadbackTicket`, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
-| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit`; readback polling/resolution | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame, or readback alias |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/upload/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, mismatched transfer payload length, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier`, readback helpers | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
@@ -398,7 +399,6 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
-| `READBACK_NOT_READY` | `resolve_readback` | ticket's timeline value not reached; `poll_readback` first |
 | `WAIT_TIMEOUT` | `wait_completion`, `begin_frame`, `acquire_next_image` | bounded wait or transient image unavailability; retry with the unchanged completion point or resource |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
@@ -891,7 +891,6 @@ handle twice faults `INVALID_HANDLE` and never affects other aliases. Handles
 must not be compared to decide whether two pipelines are "the same object" —
 distinct handles may or may not share backend state.
 
-
 ### Pipeline cache
 
 Identical immutable-state descriptors alias one backend pipeline (in-memory
@@ -971,7 +970,7 @@ retain the device until consumed.
 
 `discard_commands` consumes unfinished recording. Use
 `discard_executable_commands` for an ended token that will not be submitted.
-Both remain available after device loss and cancel attached readback tickets.
+Both remain available after device loss.
 
 Submission targets an explicit `Queue`. Every executable token in the batch
 must have been recorded for that queue. Success consumes all tokens and returns
@@ -1202,40 +1201,23 @@ Copy spans must be nonzero, equal in size, and non-overlapping.
 size must be 4-byte aligned. There is no zero-size shorthand. Callers provide
 the surrounding barriers.
 
-### Readback tickets
+### Direct readback
 
-Non-blocking readback: record now, resolve later.
+Use a caller-owned `CPU_READ` allocation as the copy destination:
 
 ```text
-ReadbackTicket                   (generation-checked token)
-
-cmd_readback_buffer(CommandList* commands, GpuSpan src) -> ReadbackTicket?
-cmd_readback_texture(CommandList* commands, TextureHandle src, uint mip) -> ReadbackTicket?
-poll_readback(Device* device, ReadbackTicket* ticket) -> bool?
-resolve_readback(Device* device, ReadbackTicket* ticket, char[] dest) -> void?
+allocate_memory(CPU_READ)
+get_allocation_span
+cmd_copy_buffer or cmd_copy_texture_to_buffer
+cmd_buffer_barrier(TRANSFER_WRITE -> HOST_READ) on the destination
+submit
+poll_completion or wait_completion
+invalidate_mapped_span
+get_span_mapping
 ```
 
-Buffer readback copies the exact nonzero source span. Recording inserts only
-the internal transfer→host barrier on the destination; source-side ordering
-(and, for textures, the `TRANSFER_SRC` layout) is the caller's responsibility.
-
-Readiness is frame-boundary granular: a ticket's copy is a Tier C recording
-that always retires on the frame timeline, which only `end_frame` signals
-(blocking helpers signal a separate helper timeline and never retire a
-ticket, including one an unrelated helper happens to finish while it sits
-unsubmitted — see docs/threading.md §Helper timeline). A ticket recorded in
-frame N resolves after frame N ends; applications that never run the frame
-loop never signal tickets.
-
-Tickets hold a pinned readback-arena range until resolved. An unresolved ticket
-blocks arena reclamation behind it and returns `RESOURCE_IN_USE` from
-`destroy_device`; an arena overflow uses a dedicated buffer released at
-resolution. Discarding the command that created an unsubmitted ticket cancels
-it, and later ticket use faults `INVALID_HANDLE`.
-
-`resolve_readback` faults `READBACK_NOT_READY` before completion and
-`INVALID_ARGUMENT` for a consumed token or short destination. A stale alias
-faults `INVALID_HANDLE`. Device-loss cleanup releases unresolved backend state.
+The caller owns the allocation, barriers, completion point, and mapped data.
+No frame boundary or readback-specific token is required.
 
 ### Barriers
 

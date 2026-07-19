@@ -44,11 +44,8 @@ token's retained device pin while another call can still be in flight.
 | `alloc_frame_span` | S | lock-free CAS bump through a current `FrameToken`; token copies may be shared during the active generation |
 | `alloc_persistent_span` / `free_persistent_span` | S | VMA virtual blocks are not internally synchronized; the library locks them |
 | `upload_buffer_data` / `upload_texture_data` / `readback_buffer_data` / `readback_texture_data` | S | use a separate private pool serialized by `helper_record_mutex` |
-| `cmd_readback_buffer` / `cmd_readback_texture` | C | records into the caller's list |
-| `poll_readback` | S | lock-free |
-| `resolve_readback` | S | |
 | `get_memory_stats` / `build_memory_report` / `get_persistent_stats` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
-| `begin_commands` / `end_commands` / command discard | C | recording storage is automatic per worker; discard also cancels attached readback tickets |
+| `begin_commands` / `end_commands` / command discard | C | recording storage is automatic per worker |
 | every `cmd_*` recording call | C | confined to the list's thread |
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
@@ -201,9 +198,9 @@ rejected submit never leaves anything waiting on a value that will never
 signal. `end_frame` issues a single empty submit: the graphics-side frame
 signal, which waits each used queue's latest recorded aux value before
 signaling the frame value. A host-side wait on the frame value therefore
-covers every queue's work — arenas, command pools, and
-readback tickets stay safe under any queue topology, off-frame submissions
-included. `submit` sets the per-queue used flags unconditionally, not just
+covers every queue's work, including arenas and command pools, under any queue
+topology, off-frame submissions included. `submit` sets the per-queue used
+flags unconditionally, not just
 while a frame is active, so an off-frame submission on a distinct compute or
 transfer queue is still waited by the next `end_frame`'s chain (off-frame
 graphics-queue submits need no flag: the frame signal already runs on that
@@ -232,9 +229,8 @@ predecessor out of the very primitive it needs to reach its own signal — the
 wait-for-predecessor is itself the ordering guarantee) and is generous but
 finite; a helper that faults after reserving its value still signals it on
 every exit path, so one stuck helper costs its immediate successor one
-timeout rather than an unbounded stall. Frame-scoped paths
-(`cmd_upload_buffer`, `cmd_upload_texture`, `cmd_readback_buffer`,
-`cmd_readback_texture`) are unaffected: they still tag `frame_timeline` at
+timeout rather than an unbounded stall. Frame-scoped upload paths
+(`cmd_upload_buffer`, `cmd_upload_texture`) still tag `frame_timeline` at
 `counter + 1`, retired only by `end_frame`. See docs/memory.md §13.1.
 Blocking helpers use a private recording context. Each helper waits for its
 queue completion, then reclaims its native command buffer while holding the

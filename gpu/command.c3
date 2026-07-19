@@ -251,7 +251,7 @@ fn void? discard_commands(CommandList* commands) {
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     CommandList consumed = *commands;
-    ulong canceled_tickets = vtable.discard_commands(
+    vtable.discard_commands(
         &consumed.device,
         consumed.handle,
         false,
@@ -259,7 +259,7 @@ fn void? discard_commands(CommandList* commands) {
     *commands = {};
     bool released_lease = release_command_pin_lease(&operation, &consumed);
     if (released_lease || !operation.owns_pin) {
-        release_device_children(&operation, canceled_tickets + 1);
+        release_device_children(&operation);
         (void)release_retained_device_pins(&operation);
     }
 }
@@ -270,7 +270,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     ExecutableCommandList consumed = *commands;
-    ulong canceled_tickets = vtable.discard_commands(
+    vtable.discard_commands(
         &consumed.device,
         consumed.handle,
         true,
@@ -281,7 +281,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
         &consumed,
     );
     if (released_lease || !operation.owns_pin) {
-        release_device_children(&operation, canceled_tickets + 1);
+        release_device_children(&operation);
         (void)release_retained_device_pins(&operation);
     }
 }

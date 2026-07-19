@@ -54,9 +54,6 @@ faultdef
     // A cmd_* call outside its required recording state (not recording,
     // wrong pass phase, or list already ended).
     COMMAND_RECORDING_ERROR,
-    // resolve_readback called before the ticket's timeline value was
-    // reached; poll_readback first.
-    READBACK_NOT_READY,
     // A bounded host wait elapsed before its target, or image acquisition
     // reported transient unavailability. The operation is safe to retry
     // without changing the resource being waited on.

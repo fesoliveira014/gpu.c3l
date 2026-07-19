@@ -89,20 +89,11 @@ Running example: `offscreen_triangle`, `multithreaded_recording`.
 
 Goal: overlap GPU work with CPU consumption.
 
-```c3
-gpu::ReadbackTicket ticket = gpu::cmd_readback_buffer(&cmd, result_span)!;
-```
-
-After submission and frame retirement:
-
-```c3
-if (gpu::poll_readback(&device, &ticket)!) {
-    gpu::resolve_readback(&device, &ticket, out)!;
-}
-```
-
-Running example: `image_processing` (histogram readback),
-`frustum_culling` (stats).
+Allocate a `CPU_READ` destination, record the copy and a `TRANSFER_WRITE` to
+`HOST_READ` barrier on that destination, then keep the completion point returned
+by `submit`. Once `poll_completion` succeeds, call
+`invalidate_mapped_span` and read the mapped span. Reuse or free the allocation
+only after completion.
 
 ## 6. GPU-driven drawing (indirect + count)
 
@@ -281,7 +272,8 @@ gpu::GpuAddress address = gpu::get_span_address(&device, header)!;
 invalidates the token only after success and requires all GPU use to be
 quiescent. `CPU_WRITE` and `CPU_READ` are mapped; `GPU_PRIVATE` is not.
 Use `AllocationInfo` for actual capabilities. Flush CPU writes before GPU use.
-For readback, wait or poll completion, invalidate the `CPU_READ` span, then read
+For readback, record a `TRANSFER_WRITE` to `HOST_READ` barrier on the
+destination, wait or poll completion, invalidate the `CPU_READ` span, then read
 its mapping. Running example: `memory_report`.
 
 ## 15. Pair fallible frame work

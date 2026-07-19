@@ -128,7 +128,7 @@ fn void? command_pin_begin(
 
 fn void? command_pin_end(gpu::CommandList* commands) {}
 
-fn ulong? command_pin_discard(
+fn void? command_pin_discard(
     gpu::Device* device,
     gpu::CommandListHandle handle,
     bool executable,
@@ -137,7 +137,6 @@ fn ulong? command_pin_discard(
     CommandPinFixture* fixture =
         (CommandPinFixture*)gpu::device_backend_state_ptr(device);
     if (fixture == null) return gpu::INVALID_HANDLE~;
-    return 0;
 }
 
 fn void? command_pin_global_barrier(
@@ -735,6 +734,15 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
         backend_state: &blocking_fixture,
     )!!;
     gpu::Device stale = closing;
+    gpu::Queue closing_queue = {
+        .device = stale,
+        .id     = 0,
+        .roles  = { .graphics },
+    };
+    gpu::CompletionPoint closing_point = gpu::make_completion_point(
+        closing_queue,
+        1,
+    )!!;
 
     DestroyWorkerArgs destroy_args = { .device = closing };
     Thread destroyer;
@@ -743,8 +751,8 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
         thread::yield();
     }
     fault closing_fault = @catch(gpu::get_device_caps(&stale));
-    gpu::ReadbackTicket ticket;
-    fault poll_fault = @catch(gpu::poll_readback(&stale, &ticket));
+    fault poll_fault = @catch(gpu::poll_completion(closing_point));
+
     gpu::Device concurrent_destroy = stale;
     fault concurrent_destroy_fault = @catch(gpu::destroy_device(&concurrent_destroy));
     bool concurrent_destroy_preserved = concurrent_destroy.is_valid();
@@ -771,7 +779,9 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
     assert(survivor_created, "registration succeeds while another slot is closing");
     assert(destroy_result == 0 && !destroy_args.failed, "the closing device finishes destruction");
     assert(closing_fault == gpu::DEVICE_BUSY, "operations reject a closing device with DEVICE_BUSY");
-    assert(poll_fault == gpu::DEVICE_BUSY, "non-blocking queries report a closing device");
+    assert(poll_fault == gpu::DEVICE_BUSY,
+        "completion polling rejects a closing device with DEVICE_BUSY");
+
     assert(concurrent_destroy_fault == gpu::DEVICE_BUSY, "a second destruction attempt is retryable");
     assert(concurrent_destroy_preserved, "a busy destruction attempt preserves its token");
     assert(
