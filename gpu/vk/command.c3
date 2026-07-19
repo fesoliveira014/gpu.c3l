@@ -8,7 +8,7 @@ import std::core::mem;
 alias CreateContextPoolFn @private = fn vk::CommandPool? (void*, vk::Device, uint);
 alias DestroyContextPoolFn @private = fn void (void*, vk::Device, vk::CommandPool);
 
-const uint MAX_RECORDING_CONTEXTS = 257;
+const uint MAX_RECORDING_CONTEXTS = 256;
 const uint MAX_THREAD_DEVICE_CONTEXTS = 64;
 const usz RETIRED_COMMAND_INITIAL_CAPACITY = 16;
 
