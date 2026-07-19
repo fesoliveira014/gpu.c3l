@@ -78,13 +78,6 @@ struct SwapchainHandle {
 }
 $assert SwapchainHandle::size <= ulong::size * 2;
 
-struct ShaderHandle {
-    ulong owner;
-    uint  index;
-    uint  generation;
-}
-$assert ShaderHandle::size <= ulong::size * 2;
-
 struct CommandListHandle {
     ulong owner;
     uint  index;
@@ -99,7 +92,6 @@ const TextureView       TEXTURE_VIEW_INVALID        = {};
 const Sampler           SAMPLER_INVALID             = {};
 const PipelineHandle    PIPELINE_HANDLE_INVALID     = {};
 const SwapchainHandle   SWAPCHAIN_HANDLE_INVALID    = {};
-const ShaderHandle      SHADER_HANDLE_INVALID       = {};
 const CommandListHandle COMMAND_LIST_HANDLE_INVALID = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
@@ -142,12 +134,6 @@ fn bool PipelineHandle.equals(self, PipelineHandle other) @operator(==) {
 }
 fn bool SwapchainHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
-    return self.owner == other.owner
-        && self.index == other.index
-        && self.generation == other.generation;
-}
-fn bool ShaderHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
-fn bool ShaderHandle.equals(self, ShaderHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;

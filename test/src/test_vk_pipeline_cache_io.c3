@@ -5,7 +5,6 @@ import gpu::vk @public;
 import std::core::mem;
 import vk;
 
-
 const char[*] CACHE_IO_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
 struct CacheDiagnosticCapture {
@@ -98,8 +97,7 @@ fn gpu::PipelineHandle build_cache_io_pipeline(gpu::Device* device) {
     gpu::ShaderDesc shader_desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_IO_COMP_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderHandle shader = gpu::create_shader(device, &shader_desc)!!;
-    defer gpu::destroy_shader(device, shader)!!;
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
     return gpu::create_compute_pipeline(device, &pipe_desc)!!;
 }

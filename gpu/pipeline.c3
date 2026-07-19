@@ -1,11 +1,16 @@
 module gpu;
 
-const uint MAX_SHADERS           = 256;
-// Default DeviceDesc.pipeline_capacity when zero.
-const uint MAX_PIPELINES         = 256;
-const uint MAX_COLOR_ATTACHMENTS = 8;
+import std::core::mem;
+import std::hash::fnv64a;
 
-<* Pipeline stage a shader module targets. *>
+// Default DeviceDesc.pipeline_capacity when zero.
+const uint MAX_PIPELINES                  = 256;
+const uint MAX_COLOR_ATTACHMENTS          = 8;
+const uint SPIRV_MAGIC @private           = 0x07230203;
+const usz SPIRV_HEADER_SIZE @private      = 20;
+const usz SHADER_ENTRY_POINT_CAP @private = 64;
+
+<* Shader stage associated with SPIR-V code. *>
 enum ShaderStage : int {
     COMPUTE,
     VERTEX,
@@ -78,13 +83,23 @@ enum IndexType : int {
     U16,
 }
 
-<* Inputs to create_shader; the SPIR-V bytes must match `stage`. *>
+<* Borrowed SPIR-V preparation input; the bytes must match `stage`. *>
 struct ShaderDesc {
     ShaderStage stage;
     char[]      spirv;
     // Null selects "main".
     ZString     entry_point;
     ZString     debug_name;
+}
+
+<* Borrowed shader IR with library-computed process-local identity. Keep the
+   referenced bytes immutable and alive while using this value. *>
+struct ShaderCode {
+    ShaderStage stage;
+    char[]      spirv;
+    ZString     entry_point;
+    ZString     debug_name;
+    ulong       digest;
 }
 
 <* Depth test/write state; the zero value means depth off. *>
@@ -120,7 +135,7 @@ struct BlendState {
 <* Inputs to create_compute_pipeline; the layout is the global heap set plus
    a push range of push_constant_size bytes. *>
 struct ComputePipelineDesc {
-    ShaderHandle shader;
+    ShaderCode shader;
     // At least RootPush::size, four-byte aligned, and no greater than
     // DeviceCaps.max_push_constant_size.
     uint         push_constant_size;
@@ -130,8 +145,8 @@ struct ComputePipelineDesc {
 <* Inputs to create_graphics_pipeline, targeting dynamic rendering. The layout
    is fixed: the global heap set plus a 16-byte vertex/fragment root push range. *>
 struct GraphicsPipelineDesc {
-    ShaderHandle      vertex_shader;
-    ShaderHandle      fragment_shader;
+    ShaderCode        vertex_shader;
+    ShaderCode        fragment_shader;
     PrimitiveTopology topology;
     DepthState        depth;
     RasterState       raster;
@@ -141,23 +156,76 @@ struct GraphicsPipelineDesc {
     ZString           debug_name;
 }
 
-<* Create a shader module from SPIR-V bytes. Ownership: release with destroy_shader. *>
-fn ShaderHandle? create_shader(Device* device, ShaderDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    ShaderHandle shader = operation.vtable.create_shader(device, desc)!;
-    retain_device_children(&operation);
-    return shader;
+fn bool ShaderCode.is_valid(self) {
+    if (self.digest == 0
+        || !shader_stage_valid(self.stage)
+        || self.spirv.ptr == null
+        || self.spirv.len < SPIRV_HEADER_SIZE
+        || self.spirv.len % uint::size != 0
+        || self.entry_point == null) return false;
+
+    uint magic;
+    mem::copy(&magic, self.spirv.ptr, uint::size);
+    usz entry_point_len = self.entry_point.str_view().len;
+    return magic == SPIRV_MAGIC
+        && entry_point_len > 0
+        && entry_point_len < SHADER_ENTRY_POINT_CAP;
 }
 
-<* Counterpart of create_shader; pipelines already built from it stay valid. *>
-fn void? destroy_shader(Device* device, ShaderHandle shader) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(&operation, shader.owner, ResourceOwnerKind.SHADER)!;
-    operation.vtable.destroy_shader(device, shader)!;
-    release_device_children(&operation);
+fn bool ShaderCode.equals(self, ShaderCode other) @operator(==) {
+    if (!self.is_valid() || !other.is_valid()) {
+        return !self.is_valid()
+            && !other.is_valid()
+            && self.spirv.ptr == other.spirv.ptr
+            && self.spirv.len == other.spirv.len;
+    }
+    return self.digest == other.digest
+        && self.stage == other.stage
+        && self.entry_point.str_view() == other.entry_point.str_view()
+        && self.spirv.len == other.spirv.len
+        && mem::equals(self.spirv, other.spirv);
+}
+
+fn bool shader_stage_valid(ShaderStage stage) @private {
+    switch (stage) {
+        case ShaderStage.COMPUTE:
+        case ShaderStage.VERTEX:
+        case ShaderStage.FRAGMENT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn ulong shader_code_digest(char[] spirv) @private {
+    ulong digest = fnv64a::hash(spirv);
+    return digest == 0 ? 1 : digest;
+}
+
+<* Validate borrowed SPIR-V and compute its opaque process-local identity. *>
+fn ShaderCode? prepare_shader_code(ShaderDesc* desc) {
+    if (desc == null) return INVALID_ARGUMENT~;
+    if (!shader_stage_valid(desc.stage)) return INVALID_ARGUMENT~;
+    if (desc.spirv.ptr == null
+        || desc.spirv.len < SPIRV_HEADER_SIZE
+        || desc.spirv.len % uint::size != 0) return SHADER_INVALID~;
+
+    uint magic;
+    mem::copy(&magic, desc.spirv.ptr, uint::size);
+    if (magic != SPIRV_MAGIC) return SHADER_INVALID~;
+
+    ZString entry_point = desc.entry_point == null ? "main" : desc.entry_point;
+    usz entry_point_len = entry_point.str_view().len;
+    if (entry_point_len == 0 || entry_point_len >= SHADER_ENTRY_POINT_CAP) {
+        return INVALID_ARGUMENT~;
+    }
+    return {
+        .stage       = desc.stage,
+        .spirv       = desc.spirv,
+        .entry_point = entry_point,
+        .debug_name  = desc.debug_name,
+        .digest      = shader_code_digest(desc.spirv),
+    };
 }
 
 <* Create a compute pipeline. Identical descriptors may alias one backend

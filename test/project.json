@@ -48,7 +48,7 @@
       "type": "executable",
       "sources": [ "src/command_record_bench.c3" ]
     },
-    // Advisory two-phase creation timing across worker counts 1/2/4;
+    // Advisory resource and shader-code operation timing across worker counts 1/2/4;
     // executable so it never gates CI. Needs an ICD — pin lavapipe via
     // VK_DRIVER_FILES.
     "resource_create_bench": {

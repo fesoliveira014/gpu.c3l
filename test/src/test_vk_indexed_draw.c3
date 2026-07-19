@@ -32,6 +32,7 @@ fn OwnedSpan u16v_upload(gpu::Device* device, usz size, ZString debug_name) {
         debug_name:   debug_name,
     )!!;
 }
+
 fn void u16v_draw(
     gpu::Device* device,
     gpu::PipelineHandle pipeline,
@@ -117,10 +118,8 @@ fn void u16_and_u32_indexed_draws_match() @test {
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = U16V_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = U16V_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle vert = gpu::create_shader(&device, &vert_sd)!!;
-    defer gpu::destroy_shader(&device, vert)!!;
-    gpu::ShaderHandle frag = gpu::create_shader(&device, &frag_sd)!!;
-    defer gpu::destroy_shader(&device, frag)!!;
+    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
+    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc pd = {
         .vertex_shader   = vert,

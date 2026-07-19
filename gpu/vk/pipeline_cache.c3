@@ -25,8 +25,8 @@ enum PipelineKind : int {
 // byte view deterministic for hashing. Dynamic-able state (viewport, scissor,
 // cull, front face, depth test/write/compare) and debug_name stay out.
 struct PipelineKey {
-    ulong vertex_shader;
-    ulong fragment_shader;
+    ulong vertex_shader_digest;
+    ulong fragment_shader_digest;
     uint  color_format_count;
     uint  push_constant_size;
     int[gpu::MAX_COLOR_ATTACHMENTS] color_formats;
@@ -47,6 +47,8 @@ $assert PipelineKey::size == 120;
 struct PipelineCacheEntry {
     ulong              hash;
     PipelineKey        key;
+    gpu::ShaderCode    first_shader;
+    gpu::ShaderCode    second_shader;
     vk::Pipeline       pipeline;
     vk::PipelineLayout layout;
     uint               refcount;
@@ -176,22 +178,67 @@ fn void? create_driver_pipeline_cache(VkDeviceState* state, char[] cache_data) @
     return create_driver_pipeline_cache_with_ops(state, cache_data, &ops);
 }
 
-fn ulong shader_local_key(gpu::ShaderHandle shader) @private {
-    return (ulong)shader.index | ((ulong)shader.generation << 32);
+fn gpu::ShaderCode clone_shader_code(
+    VkDeviceState* state,
+    gpu::ShaderCode* source,
+) @private {
+    char[] spirv = alloc::new_array(
+        state.host_allocator,
+        char,
+        (sz)source.spirv.len,
+    );
+    mem::copy(spirv.ptr, source.spirv.ptr, source.spirv.len);
+    String entry_point = source.entry_point.str_view();
+    char[] entry_storage = alloc::new_array(
+        state.host_allocator,
+        char,
+        (sz)(entry_point.len + 1),
+    );
+    mem::copy(entry_storage.ptr, entry_point.ptr, entry_point.len);
+    entry_storage[entry_point.len] = 0;
+    return {
+        .stage       = source.stage,
+        .spirv       = spirv,
+        .entry_point = (ZString)entry_storage.ptr,
+        .digest      = source.digest,
+    };
+}
+
+fn void free_cloned_shader_code(
+    VkDeviceState* state,
+    gpu::ShaderCode* code,
+) @private {
+    if (code.spirv.ptr != null) {
+        alloc::free(state.host_allocator, code.spirv.ptr);
+    }
+    if (code.entry_point != null) {
+        alloc::free(state.host_allocator, (char*)code.entry_point);
+    }
+    *code = {};
+}
+
+fn bool cached_shader_codes_match(
+    PipelineCacheEntry* entry,
+    gpu::ShaderCode* first_shader,
+    gpu::ShaderCode* second_shader,
+) @private {
+    if (first_shader == null || !(entry.first_shader == *first_shader)) return false;
+    if (second_shader == null) return !entry.second_shader.is_valid();
+    return entry.second_shader == *second_shader;
 }
 
 fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
     PipelineKey key;
-    key.kind               = (int)PipelineKind.GRAPHICS;
-    key.vertex_shader      = shader_local_key(desc.vertex_shader);
-    key.fragment_shader    = shader_local_key(desc.fragment_shader);
-    key.topology           = (int)desc.topology;
-    key.polygon_mode       = (int)desc.raster.polygon_mode;
-    key.bias_constant      = desc.raster.depth_bias_constant;
-    key.bias_slope         = desc.raster.depth_bias_slope;
-    key.bias_clamp         = desc.raster.depth_bias_clamp;
-    key.depth_format       = (int)desc.depth_format;
-    key.color_format_count = (uint)desc.color_formats.len;
+    key.kind                   = (int)PipelineKind.GRAPHICS;
+    key.vertex_shader_digest   = desc.vertex_shader.digest;
+    key.fragment_shader_digest = desc.fragment_shader.digest;
+    key.topology               = (int)desc.topology;
+    key.polygon_mode           = (int)desc.raster.polygon_mode;
+    key.bias_constant          = desc.raster.depth_bias_constant;
+    key.bias_slope             = desc.raster.depth_bias_slope;
+    key.bias_clamp             = desc.raster.depth_bias_clamp;
+    key.depth_format           = (int)desc.depth_format;
+    key.color_format_count     = (uint)desc.color_formats.len;
     foreach (i, format : desc.color_formats) key.color_formats[i] = (int)format;
     if (desc.blend.enable) {
         key.blend_enable = 1;
@@ -205,9 +252,9 @@ fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
 
 fn PipelineKey build_compute_key(gpu::ComputePipelineDesc* desc) @private {
     PipelineKey key;
-    key.kind               = (int)PipelineKind.COMPUTE;
-    key.vertex_shader      = shader_local_key(desc.shader);
-    key.push_constant_size = desc.push_constant_size;
+    key.kind                 = (int)PipelineKind.COMPUTE;
+    key.vertex_shader_digest = desc.shader.digest;
+    key.push_constant_size   = desc.push_constant_size;
     return key;
 }
 
@@ -249,17 +296,33 @@ fn void unlink_entry(PipelineCacheTable* cache, uint idx) @private {
 }
 
 <* Index of the live entry matching hash+key, or PIPELINE_ENTRY_NONE. *>
-fn uint find_entry(PipelineCacheTable* cache, ulong hash, PipelineKey* key) {
+fn uint find_entry(
+    PipelineCacheTable* cache,
+    ulong hash,
+    PipelineKey* key,
+    gpu::ShaderCode* first_shader,
+    gpu::ShaderCode* second_shader,
+) {
     uint bucket = bucket_for(hash, (uint)cache.bucket_heads.len);
     for (uint cur = cache.bucket_heads[bucket]; cur != 0; ) {
         PipelineCacheEntry* entry = &cache.entries[cur - 1];
-        if (entry.hash == hash && key_equals(&entry.key, key)) return cur - 1;
+        if (entry.hash == hash
+            && key_equals(&entry.key, key)
+            && cached_shader_codes_match(entry, first_shader, second_shader)) {
+            return cur - 1;
+        }
         cur = entry.next_in_bucket;
     }
     return PIPELINE_ENTRY_NONE;
 }
 
-fn uint? insert_entry(PipelineCacheTable* cache, PipelineCacheEntry value) {
+fn uint? insert_entry(
+    VkDeviceState* state,
+    PipelineCacheEntry value,
+    gpu::ShaderCode* first_shader,
+    gpu::ShaderCode* second_shader,
+) {
+    PipelineCacheTable* cache = &state.pipeline_cache;
     uint idx;
     if (cache.free_head != PIPELINE_FREE_NONE) {
         idx = cache.free_head - 1;
@@ -268,6 +331,10 @@ fn uint? insert_entry(PipelineCacheTable* cache, PipelineCacheEntry value) {
         idx = cache.next_new++;
     } else {
         return gpu::SLOT_TABLE_FULL~;
+    }
+    value.first_shader = clone_shader_code(state, first_shader);
+    if (second_shader != null) {
+        value.second_shader = clone_shader_code(state, second_shader);
     }
     cache.entries[idx] = value;
     cache.entries[idx].used = true;
@@ -281,6 +348,8 @@ fn void release_entry(VkDeviceState* state, uint entry_index) {
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[entry_index];
     if (--entry.refcount > 0) return;
     vk::destroy_pipeline(state.device, entry.pipeline, null);
+    free_cloned_shader_code(state, &entry.first_shader);
+    free_cloned_shader_code(state, &entry.second_shader);
     unlink_entry(&state.pipeline_cache, entry_index);
     entry.used = false;
     entry.next_free = state.pipeline_cache.free_head;
@@ -463,7 +532,11 @@ fn usz? vk_get_pipeline_cache_data(gpu::Device* device, char[] out) @private {
 fn void destroy_pipeline_shared(VkDeviceState* state) {
     if (state.pipeline_cache.entries.ptr != null) {
         foreach (&entry : state.pipeline_cache.entries[:state.pipeline_cache.next_new]) {
-            if (entry.used) vk::destroy_pipeline(state.device, entry.pipeline, null);
+            if (entry.used) {
+                vk::destroy_pipeline(state.device, entry.pipeline, null);
+                free_cloned_shader_code(state, &entry.first_shader);
+                free_cloned_shader_code(state, &entry.second_shader);
+            }
         }
         mem::free(state.pipeline_cache.entries.ptr);
         state.pipeline_cache.entries = {};

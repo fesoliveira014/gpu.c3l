@@ -71,7 +71,7 @@ exists (else the limit is compile-time).
 | Sampler mip LOD bias | Absolute value up to selected-device `maxSamplerLodBias`, reported by `DeviceCaps.max_sampler_lod_bias` | — | `INVALID_ARGUMENT` |
 | Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY` in `gpu/texture.c3`; `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
 | Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
-| Live pipelines / shaders | 256 each by default (`MAX_PIPELINES`, `MAX_SHADERS` in `gpu/pipeline.c3`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
+| Live pipelines | 256 by default (`MAX_PIPELINES` in `gpu/pipeline.c3`) | `pipeline_capacity` | `SLOT_TABLE_FULL` |
 | Compute push-constant range | Selected-device `maxPushConstantsSize`, reported by `DeviceCaps.max_push_constant_size` | — | `INVALID_ARGUMENT` |
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |

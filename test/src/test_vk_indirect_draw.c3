@@ -17,8 +17,6 @@ const uint IND_RT = 16;
 const usz IND_RT_BYTES = IND_RT * IND_RT * 4;
 
 struct IndDrawCtx {
-    gpu::ShaderHandle   vert;
-    gpu::ShaderHandle   frag;
     gpu::PipelineHandle pipeline;
     gpu::TextureHandle  pattern;
     gpu::TextureView    tex_view;
@@ -35,19 +33,19 @@ fn gpu::Device make_ind_device() {
     return gpu::create_device_from_desc(&desc)!!;
 }
 
-<* Textured draw context: offscreen shaders, one graphics pipeline, and a 1x1
+<* Textured draw context: offscreen vertex/fragment code, one graphics pipeline, and a 1x1
    white pattern feeding the fragment heap path. *>
 fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
     IndDrawCtx ctx;
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = IND_VERT_SPIRV[..], .entry_point = "main" };
-    ctx.vert = gpu::create_shader(device, &vert_sd)!!;
+    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = IND_FRAG_SPIRV[..], .entry_point = "main" };
-    ctx.frag = gpu::create_shader(device, &frag_sd)!!;
+    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc pipe_desc = {
-        .vertex_shader   = ctx.vert,
-        .fragment_shader = ctx.frag,
+        .vertex_shader   = vert,
+        .fragment_shader = frag,
         .topology        = gpu::PrimitiveTopology.TRIANGLES,
         .color_formats   = formats[..],
     };
@@ -91,8 +89,6 @@ fn void destroy_ind_draw_ctx(gpu::Device* device, IndDrawCtx* ctx) {
     gpu::destroy_texture_view(device, ctx.tex_view)!!;
     gpu::destroy_texture(device, ctx.pattern)!!;
     gpu::destroy_pipeline(device, ctx.pipeline)!!;
-    gpu::destroy_shader(device, ctx.frag)!!;
-    gpu::destroy_shader(device, ctx.vert)!!;
 }
 
 fn gpu::TextureHandle make_ind_target(gpu::Device* device) {
@@ -167,18 +163,15 @@ fn bool distinct_graphics_compute_families(gpu::Device* device, ZString test_nam
     return false;
 }
 
-fn gpu::PipelineHandle make_cross_family_compute_pipeline(
-    gpu::Device* device,
-    gpu::ShaderHandle* out_shader,
-) {
+fn gpu::PipelineHandle make_cross_family_compute_pipeline(gpu::Device* device) {
     gpu::ShaderDesc shader_desc = {
         .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = IND_DOUBLE_SPIRV[..],
         .entry_point = "main",
     };
-    *out_shader = gpu::create_shader(device, &shader_desc)!!;
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
-        .shader             = *out_shader,
+        .shader             = shader,
         .push_constant_size = gpu::RootPush::size,
     };
     return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
@@ -225,9 +218,7 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
     defer destroy_test_device(&device)!!;
     if (!distinct_graphics_compute_families(&device, "same-range caller-owned span")) return;
 
-    gpu::ShaderHandle shader;
-    gpu::PipelineHandle pipeline = make_cross_family_compute_pipeline(&device, &shader);
-    defer gpu::destroy_shader(&device, shader)!!;
+    gpu::PipelineHandle pipeline = make_cross_family_compute_pipeline(&device);
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     OwnedSpan args_owned = alloc_cross_family_indirect_args(
         &device,
@@ -291,9 +282,7 @@ fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     defer destroy_test_device(&device)!!;
     if (!distinct_graphics_compute_families(&device, "reused caller-owned span")) return;
 
-    gpu::ShaderHandle shader;
-    gpu::PipelineHandle pipeline = make_cross_family_compute_pipeline(&device, &shader);
-    defer gpu::destroy_shader(&device, shader)!!;
+    gpu::PipelineHandle pipeline = make_cross_family_compute_pipeline(&device);
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     OwnedSpan args_owned = alloc_cross_family_indirect_args(
         &device,
@@ -343,6 +332,7 @@ fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     )!!;
     gpu::wait_completion(graphics_completion)!!;
 }
+
 fn void compute_generated_indexed_indirect_draw() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
@@ -352,8 +342,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     defer gpu::destroy_texture(&device, target)!!;
 
     gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle build_shader = gpu::create_shader(&device, &build_sd)!!;
-    defer gpu::destroy_shader(&device, build_shader)!!;
+    gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_sd)!!;
     gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!!;
     defer gpu::destroy_pipeline(&device, build_pipeline)!!;
@@ -639,15 +628,13 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle build_shader = gpu::create_shader(&device, &build_sd)!!;
-    defer gpu::destroy_shader(&device, build_shader)!!;
+    gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_sd)!!;
     gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!!;
     defer gpu::destroy_pipeline(&device, build_pipeline)!!;
 
     gpu::ShaderDesc double_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_DOUBLE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle double_shader = gpu::create_shader(&device, &double_sd)!!;
-    defer gpu::destroy_shader(&device, double_shader)!!;
+    gpu::ShaderCode double_shader = gpu::prepare_shader_code(&double_sd)!!;
     gpu::ComputePipelineDesc double_desc = { .shader = double_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle double_pipeline = gpu::create_compute_pipeline(&device, &double_desc)!!;
     defer gpu::destroy_pipeline(&device, double_pipeline)!!;

@@ -112,7 +112,6 @@ struct VkDeviceState {
     bool                       compute_queue_distinct;
     RecordingContextTable      recording_contexts;
     CommandTable               commands;
-    ShaderTable                shaders;
     PipelineTable              pipelines;
     PipelineCacheTable         pipeline_cache;
     vk::PipelineLayout         graphics_layout;
@@ -209,8 +208,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .create_texture_views       = &vk_create_texture_views,
     .intern_sampler             = &vk_intern_sampler,
     .publish_sampler            = &vk_publish_sampler,
-    .create_shader           = &vk_create_shader,
-    .destroy_shader          = &vk_destroy_shader,
     .create_compute_pipeline = &vk_create_compute_pipeline,
     .create_graphics_pipeline = &vk_create_graphics_pipeline,
     .destroy_pipeline        = &vk_destroy_pipeline,
@@ -555,8 +552,6 @@ fn gpu::Device? create_vk_device_with_selection(
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.RECORDING_CONTEXTS)!;
     uint pipeline_capacity;
     if (state.strict_heap.enabled) {
-        state.shaders.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SHADER);
-        state.shaders.slots = mem::new_array(ShaderCell, gpu::MAX_SHADERS);
         pipeline_capacity = resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
         state.pipelines.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.PIPELINE);
         state.pipelines.slots = mem::new_array(PipelineCell, pipeline_capacity);
@@ -739,13 +734,6 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
             state.pipelines.slots = {};
         }
         destroy_pipeline_shared(state);
-        if (state.shaders.slots.ptr != null) {
-            foreach (&cell : state.shaders.slots[:state.shaders.next_new]) {
-                if (cell.used) vk::destroy_shader_module(state.device, cell.value.shader_module, null);
-            }
-            mem::free(state.shaders.slots.ptr);
-            state.shaders.slots = {};
-        }
         destroy_command_table(state);
         if (state.recording_contexts.slots.ptr != null) {
             foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {

@@ -133,6 +133,36 @@
         "max_descriptor_slots.c3"
       ]
     },
+    "shader_handle": {
+      "type": "object-files",
+      "sources": [
+        "shader_handle.c3"
+      ]
+    },
+    "shader_handle_invalid": {
+      "type": "object-files",
+      "sources": [
+        "shader_handle_invalid.c3"
+      ]
+    },
+    "max_shaders": {
+      "type": "object-files",
+      "sources": [
+        "max_shaders.c3"
+      ]
+    },
+    "create_shader": {
+      "type": "object-files",
+      "sources": [
+        "create_shader.c3"
+      ]
+    },
+    "destroy_shader": {
+      "type": "object-files",
+      "sources": [
+        "destroy_shader.c3"
+      ]
+    },
     "buffer_handle": {
       "type": "object-files",
       "sources": [

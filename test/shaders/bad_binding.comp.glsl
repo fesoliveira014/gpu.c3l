@@ -1,5 +1,5 @@
 // Reflection-validation fixture: set-0 binding 0 as a combined image sampler,
-// where the convention requires a sampled image array. create_shader must
+// where the convention requires a sampled image array. pipeline creation must
 // fault SHADER_INVALID.
 #version 460
 

@@ -119,8 +119,7 @@ fn int main() {
         .spirv       = COMMAND_BENCH_SHADER_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &shader_desc)!!;
-    defer gpu::destroy_shader(&device, shader)!!;
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader             = shader,
         .push_constant_size = gpu::RootPush::size,

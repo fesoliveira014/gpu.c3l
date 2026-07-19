@@ -174,7 +174,7 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
         .spirv       = LIFETIME_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &shader_desc)!!;
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader = shader,
         .push_constant_size = gpu::RootPush::size,
@@ -202,7 +202,6 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
         == gpu::RESOURCE_IN_USE, "recorded texture references reject destroy");
     assert(@catch(gpu::destroy_pipeline(&device, pipeline))
         == gpu::RESOURCE_IN_USE, "recorded pipeline references reject destroy");
-    gpu::destroy_shader(&device, shader)!!;
 
     gpu::discard_commands(&commands)!!;
     gpu::destroy_texture(&device, texture)!!;
@@ -210,6 +209,7 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
     gpu::destroy_pipeline(&device, pipeline)!!;
     pipeline = {};
 }
+
 fn void failed_command_validation_retains_no_resource_reference() @test {
     gpu::Device device = make_lifetime_test_device();
 

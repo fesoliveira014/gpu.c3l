@@ -68,7 +68,7 @@ fn int creation_storm_worker(void* arg) {
             gpu::create_texture_view(args.device, texture, null)!!;
 
         gpu::ShaderDesc shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
-        gpu::ShaderHandle shader = gpu::create_shader(args.device, &shader_desc)!!;
+        gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
 
         gpu::SamplerDesc sampler_desc = {
             .min_filter = gpu::Filter.NEAREST,
@@ -85,7 +85,6 @@ fn int creation_storm_worker(void* arg) {
             || !shader.is_valid() || !sampler.is_valid()) {
             args.failed = true;
         }
-        gpu::destroy_shader(args.device, shader)!!;
         gpu::destroy_texture_view(args.device, view)!!;
         gpu::destroy_texture(args.device, texture)!!;
         free_owned_span(args.device, &buffer)!!;
@@ -306,7 +305,7 @@ fn void concurrent_sampler_interning_and_publication_converges() @test {
 
 struct PipelineRaceArgs {
     gpu::Device*        device;
-    gpu::ShaderHandle   shader;
+    gpu::ShaderCode     shader;
     gpu::PipelineHandle handle;
 }
 
@@ -324,8 +323,7 @@ fn void same_descriptor_pipeline_race() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &comp_sd)!!;
-    defer gpu::destroy_shader(&device, shader)!!;
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
 
     PipelineRaceArgs[THR_THREADS] args;
     Thread[THR_THREADS] threads;
@@ -342,55 +340,6 @@ fn void same_descriptor_pipeline_race() @test {
         "refcount equals the number of racing creates");
     foreach (&a : args) gpu::destroy_pipeline(&device, a.handle)!!;
     assert(vk::pipeline_cache_entry_count(state) == 0, "all aliases released the entry");
-}
-
-struct ShaderPinArgs {
-    vk::VkDeviceState* state;
-    gpu::ShaderHandle  shader;
-    Atomic{uint}       entered;
-    Atomic{uint}       release;
-}
-
-fn int shader_pin_worker(void* arg) {
-    ShaderPinArgs* args = (ShaderPinArgs*)arg;
-    vk::ShaderPipelineReference reference =
-        vk::retain_shader_for_pipeline(args.state, args.shader)!!;
-    args.entered.store(1, AtomicOrdering.RELEASE);
-    while (args.release.load(AtomicOrdering.ACQUIRE) == 0) {
-        thread::yield();
-    }
-    vk::release_shader_for_pipeline(args.state, reference);
-    return 0;
-}
-
-fn void shader_destroy_rejects_concurrent_pipeline_build_pin() @test {
-    gpu::Device device = make_thr_device();
-    defer destroy_test_device(&device)!!;
-    gpu::ShaderDesc desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
-        .spirv       = THR_COMP_SPIRV[..],
-        .entry_point = "main",
-    };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &desc)!!;
-    defer (void)gpu::destroy_shader(&device, shader);
-    ShaderPinArgs args = {
-        .state  = (vk::VkDeviceState*)gpu::device_backend_state(device),
-        .shader = shader,
-    };
-    Thread worker;
-    worker.create(&shader_pin_worker, &args)!!;
-    while (args.entered.load(AtomicOrdering.ACQUIRE) == 0) {
-        thread::yield();
-    }
-
-    assert(@catch(gpu::destroy_shader(&device, shader))
-        == gpu::RESOURCE_IN_USE,
-        "an active pipeline build preserves its shader module");
-    args.release.store(1, AtomicOrdering.RELEASE);
-    worker.join()!!;
-
-    gpu::destroy_shader(&device, shader)!!;
-    shader = {};
 }
 
 struct ReuseWorkerArgs {
@@ -611,12 +560,10 @@ fn void parallel_recording_across_workers() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderHandle shader = gpu::create_shader(&device, &comp_sd)!!;
-    defer gpu::destroy_shader(&device, shader)!!;
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
     gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-
 
     RecordArgs[THR_THREADS] args;
     OwnedSpan[THR_THREADS] io_owned;
@@ -702,11 +649,11 @@ fn int layout_record_worker(void* arg) {
     };
     return 0;
 }
+
 <* Concurrent layout records keep their pending state isolated. *>
 fn void parallel_recording_disjoint_texture_layouts() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
-
 
     gpu::TextureHandle[THR_THREADS] textures;
     for (uint i = 0; i < THR_THREADS; i++) {

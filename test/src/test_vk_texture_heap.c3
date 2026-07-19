@@ -57,13 +57,11 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::ShaderDesc write_shader_desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderHandle write_shader = gpu::create_shader(&device, &write_shader_desc)!!;
-    defer gpu::destroy_shader(&device, write_shader)!!;
+    gpu::ShaderCode write_shader = gpu::prepare_shader_code(&write_shader_desc)!!;
     gpu::ShaderDesc sample_shader_desc = {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderHandle sample_shader = gpu::create_shader(&device, &sample_shader_desc)!!;
-    defer gpu::destroy_shader(&device, sample_shader)!!;
+    gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_shader_desc)!!;
 
     gpu::ComputePipelineDesc write_pipe_desc = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pipe_desc)!!;

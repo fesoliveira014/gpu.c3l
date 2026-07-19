@@ -336,7 +336,14 @@ Destroying a texture with live views returns `RESOURCE_IN_USE`. Destroying a
 view immediately recycles its index, so every GPU reference must already be
 complete and stale shader data must be removed.
 
-### Pipelines
+### Shader code and pipelines
+
+`ShaderCode` is borrowed CPU-side SPIR-V prepared by the library. Its opaque,
+process-local identity is derived from the bytes; stage and entry point complete
+the identity, while debug names do not. Callers keep the borrowed inputs
+immutable and alive while using the value. The same prepared code may be reused
+for multiple pipelines and devices. Native shader modules are temporary pipeline
+construction details, never public resources.
 
 Pipelines are immutable shader execution objects. Creation is split by kind:
 
@@ -345,7 +352,12 @@ create_compute_pipeline(device, ComputePipelineDesc)   -> PipelineHandle?
 create_graphics_pipeline(device, GraphicsPipelineDesc) -> PipelineHandle?
 ```
 
-Graphics pipelines include the Vulkan-required immutable state. Viewport, scissor, cull mode, front face, and supported depth state are dynamic. The pipeline cache deduplicates the remaining blend/depth/raster state and fronts a serializable driver cache: `get_pipeline_cache_size` / `get_pipeline_cache_data` export the driver blob, and `DeviceDesc.pipeline_cache_data` warm-starts it at device creation.
+Graphics pipelines include the Vulkan-required immutable state. Viewport, scissor,
+cull mode, front face, and supported depth state are dynamic. The pipeline cache
+deduplicates exact shader-code identity plus the remaining blend/depth/raster
+state and fronts a serializable driver cache: `get_pipeline_cache_size` /
+`get_pipeline_cache_data` export the driver blob, and
+`DeviceDesc.pipeline_cache_data` warm-starts it at device creation.
 
 ### Synchronization
 
