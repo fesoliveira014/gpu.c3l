@@ -206,6 +206,58 @@ fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
     );
 }
 
+fn void descriptor_buffer_query_is_needed_only_for_fallback_or_override() @test {
+    gpu::DeviceDesc desc = {
+        .texture_heap_capacity = 7,
+        .sampler_heap_capacity = 9,
+    };
+    gpu::vk::VkStrictHeapState state =
+        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
+    assert(
+        !gpu::vk::strict_heap_needs_descriptor_buffer_query(
+            state:              &state,
+            indexing_supported: true,
+            indexing_limits:    limits,
+            probe:              null,
+        ),
+        "a usable indexing heap does not require a descriptor-buffer query"
+    );
+
+    gpu::vk::IndexingHeapLimits constrained = limits;
+    constrained.max_sampled_images = 6;
+    assert(
+        gpu::vk::strict_heap_needs_descriptor_buffer_query(
+            state:              &state,
+            indexing_supported: true,
+            indexing_limits:    constrained,
+            probe:              null,
+        ),
+        "an indexing-capacity shortfall requires descriptor-buffer fallback evidence"
+    );
+    assert(
+        gpu::vk::strict_heap_needs_descriptor_buffer_query(
+            state:              &state,
+            indexing_supported: false,
+            indexing_limits:    limits,
+            probe:              null,
+        ),
+        "missing indexing features require descriptor-buffer fallback evidence"
+    );
+
+    gpu::vk::DeviceCreationProbe probe = {
+        .descriptor_buffer_override = true,
+    };
+    assert(
+        gpu::vk::strict_heap_needs_descriptor_buffer_query(
+            state:              &state,
+            indexing_supported: true,
+            indexing_limits:    limits,
+            probe:              &probe,
+        ),
+        "the private override always requires descriptor-buffer capability evidence"
+    );
+}
 fn bool? descriptor_buffer_extension_absent(
     vk::PhysicalDevice physical_device,
     ZString extension,
@@ -261,8 +313,8 @@ fn void descriptor_buffer_capability_query_distinguishes_absence_and_failure() @
         @catch(gpu::vk::query_descriptor_buffer_support_with_query(
             physical_device,
             &descriptor_buffer_extension_query_layer_missing,
-        )) == gpu::BACKEND_ERROR,
-        "unexpected layer failure maps to a public backend error"
+        )) == gpu::UNSUPPORTED_FEATURE,
+        "a missing extension layer maps through the public unsupported-feature taxonomy"
     );
 }
 
