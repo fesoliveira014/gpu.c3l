@@ -6,7 +6,6 @@ import gpu::vk @public;
 uint resource_access_allocations;
 uint resource_access_texture_queries;
 uint resource_access_texture_creates;
-uint resource_access_persistent_allocations;
 
 fn void destroy_resource_access_device(void* backend_state) {
     (void)backend_state;
@@ -42,22 +41,11 @@ fn gpu::TextureHandle? create_resource_access_texture(
     return gpu::OUT_OF_DEVICE_MEMORY~;
 }
 
-fn gpu::GpuSpan? alloc_resource_access_persistent(
-    gpu::Device* device,
-    gpu::PersistentAllocDesc* desc,
-) {
-    (void)device;
-    (void)desc;
-    resource_access_persistent_allocations++;
-    return gpu::ARENA_FULL~;
-}
-
 gpu::BackendVTable resource_access_vtable = {
     .destroy_device        = &destroy_resource_access_device,
     .allocate_memory       = &allocate_resource_access_memory,
     .supports_texture_desc = &supports_resource_access_texture,
     .create_texture        = &create_resource_access_texture,
-    .alloc_persistent_span = &alloc_resource_access_persistent,
 };
 
 fn gpu::Device create_compute_only_resource_access_device(int* state) {
@@ -95,14 +83,6 @@ fn gpu::TextureDesc resource_access_texture_desc(gpu::QueueRoles access) {
         .format    = gpu::Format.R8_UNORM,
         .usage     = { .storage },
         .access    = access,
-    };
-}
-
-fn gpu::PersistentAllocDesc resource_access_persistent_desc(gpu::QueueRoles access) {
-    return {
-        .size        = 64,
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access      = access,
     };
 }
 
@@ -153,36 +133,6 @@ fn void resource_access_rejects_invalid_texture_domains_before_backend() @test {
     assert(@catch(gpu::create_texture(&device, &accepted)) == gpu::OUT_OF_DEVICE_MEMORY);
     assert(resource_access_texture_queries == 1, "selected compute access reaches support query");
     assert(resource_access_texture_creates == 1, "selected compute access reaches texture creation");
-
-    gpu::destroy_device(&device)!!;
-}
-
-fn void resource_access_rejects_invalid_persistent_domains_before_backend() @test {
-    int state;
-    gpu::Device device = create_compute_only_resource_access_device(&state);
-    resource_access_persistent_allocations = 0;
-
-    gpu::PersistentAllocDesc empty = resource_access_persistent_desc({});
-    assert(@catch(gpu::alloc_persistent_span(&device, &empty)) == gpu::INVALID_ARGUMENT);
-
-    gpu::PersistentAllocDesc unavailable =
-        resource_access_persistent_desc({ .graphics });
-    assert(@catch(gpu::alloc_persistent_span(&device, &unavailable))
-        == gpu::INVALID_ARGUMENT);
-
-    gpu::PersistentAllocDesc unknown =
-        resource_access_persistent_desc((gpu::QueueRoles)0x40);
-    assert(@catch(gpu::alloc_persistent_span(&device, &unknown))
-        == gpu::INVALID_ARGUMENT);
-    assert(resource_access_persistent_allocations == 0,
-        "invalid domains do not reach persistent allocation");
-
-    gpu::PersistentAllocDesc accepted =
-        resource_access_persistent_desc({ .compute });
-    assert(@catch(gpu::alloc_persistent_span(&device, &accepted))
-        == gpu::ARENA_FULL);
-    assert(resource_access_persistent_allocations == 1,
-        "selected compute access reaches persistent allocation");
 
     gpu::destroy_device(&device)!!;
 }

@@ -17,6 +17,13 @@ def load_runner():
 
 
 class BenchmarkRunnerTests(unittest.TestCase):
+    def test_arena_benchmark_uses_explicit_cpu_write_allocations(self):
+        runner = load_runner()
+        self.assertEqual(
+            runner.BENCHMARK_METHODS["arena_allocation_bench"],
+            ("frame=100000; cpu_write=4096", "ns/allocation, ns/free"),
+        )
+
     def test_suite_order_covers_stabilization_baselines(self):
         runner = load_runner()
         self.assertEqual(

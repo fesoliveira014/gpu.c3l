@@ -638,9 +638,8 @@ struct BoundaryArgs {
 fn int boundary_worker(void* arg) {
     BoundaryArgs* args = (BoundaryArgs*)arg;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-    // Park inside a Tier S call: a large persistent alloc under the lock is
-    // too fast to hold reliably, so hold the phase counter open by looping
-    // creates until told to stop.
+    // One allocation under the lock is too fast to hold reliably, so churn
+    // allocations until told to stop.
     while (args.release.load(AtomicOrdering.RELAXED) == 0) {
         OwnedSpan buffer = allocate_owned_span(
             device:       args.device,

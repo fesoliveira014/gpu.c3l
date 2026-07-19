@@ -23,7 +23,7 @@ BENCHMARK_TARGETS = (
 )
 
 BENCHMARK_METHODS = {
-    "arena_allocation_bench": ("frame=100000; persistent=4096", "ns/allocation, ns/free"),
+    "arena_allocation_bench": ("frame=100000; cpu_write=4096", "ns/allocation, ns/free"),
     "resource_create_bench": ("300/worker; workers=1,2,4", "ns/op"),
     "descriptor_churn_bench": ("320/worker; workers=1,2,4", "ns/descriptor"),
     "upload_throughput_bench": (

@@ -58,7 +58,6 @@ struct LeakCapture {
 
     uint texture_descriptors;
     uint samplers;
-    uint persistent_spans;
     uint public_identities;
     bool metadata_valid;
     gpu::PipelineHandle expected_pipeline_a;
@@ -119,7 +118,6 @@ fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
 
         case gpu::DebugResourceKind.TEXTURE_DESCRIPTOR: capture.texture_descriptors++;
         case gpu::DebugResourceKind.SAMPLER:            capture.samplers++;
-        case gpu::DebugResourceKind.PERSISTENT_SPAN:    capture.persistent_spans++;
         default: capture.metadata_valid = false;
     }
 }
@@ -566,22 +564,8 @@ fn void leak_reporters_count_leaks() @test {
     vk::vk_destroy_buffer(&device, buffer)!!;
     gpu::free_allocation(&device, &allocation)!!;
 
-    gpu::PersistentAllocDesc persistent_desc = {
-        .size        = 64,
-        .align       = 16,
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access      = { .graphics, .compute, .transfer },
-        .debug_name  = "leaky_persistent_span",
-    };
-    gpu::GpuSpan persistent = gpu::alloc_persistent_span(&device, &persistent_desc)!!;
-    assert(vk::report_resource_leaks(state) == 1, "one persistent span leak counted");
-    assert(capture.total == 8 && capture.persistent_spans == 1,
-        "persistent allocation summary emits one structured warning");
-    assert(capture.metadata_valid, "persistent warning uses the same resource-lifetime contract");
-    gpu::free_persistent_span(&device, persistent)!!;
-
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
-    assert(capture.total == 8, "clean leak report emits nothing");
+    assert(capture.total == 7, "clean leak report emits nothing");
     gpu::destroy_device(&device)!!;
 }
 

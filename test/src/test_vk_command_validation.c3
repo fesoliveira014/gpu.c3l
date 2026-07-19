@@ -352,33 +352,46 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     defer free_owned_span(&device, &span_buffer)!!;
     gpu::GpuSpan span = span_buffer.span;
 
-    gpu::PersistentAllocDesc persistent_desc = {
-        .size        = 8,
-        .align       = 4,
-        .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
-        .access      = { .compute },
-    };
-    gpu::GpuSpan persistent = gpu::alloc_persistent_span(&device, &persistent_desc)!!;
-    defer gpu::free_persistent_span(&device, persistent)!!;
-
-    gpu::PersistentAllocDesc multi_access_desc = persistent_desc;
-    multi_access_desc.access = { .graphics, .compute };
-    gpu::GpuSpan multi_access = gpu::alloc_persistent_span(
-        &device,
-        &multi_access_desc,
+    OwnedSpan compute_only_owned = allocate_owned_span(
+        device:       &device,
+        size:         8,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "compute_only_allocation",
     )!!;
-    defer gpu::free_persistent_span(&device, multi_access)!!;
+    defer free_owned_span(&device, &compute_only_owned)!!;
+    gpu::GpuSpan compute_only = compute_only_owned.span;
 
-    gpu::PersistentAllocDesc reusable_desc = persistent_desc;
-    reusable_desc.access = { .graphics };
-    gpu::GpuSpan stale = gpu::alloc_persistent_span(&device, &reusable_desc)!!;
-    gpu::GpuSpan stale_alias = stale;
-    gpu::free_persistent_span(&device, stale)!!;
-    gpu::GpuSpan replacement = gpu::alloc_persistent_span(&device, &reusable_desc)!!;
-    defer gpu::free_persistent_span(&device, replacement)!!;
-    assert(replacement.index == stale_alias.index
-        && replacement.generation != stale_alias.generation,
-        "persistent allocation reuse advances the generation");
+    OwnedSpan multi_access_owned = allocate_owned_span(
+        device:       &device,
+        size:         8,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute },
+        debug_name:   "multi_access_allocation",
+    )!!;
+    defer free_owned_span(&device, &multi_access_owned)!!;
+    gpu::GpuSpan multi_access = multi_access_owned.span;
+
+    OwnedSpan stale_owned = allocate_owned_span(
+        device:       &device,
+        size:         8,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "stale_allocation",
+    )!!;
+    gpu::GpuSpan stale_alias = stale_owned.span;
+    free_owned_span(&device, &stale_owned)!!;
+    OwnedSpan replacement_owned = allocate_owned_span(
+        device:       &device,
+        size:         8,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "replacement_allocation",
+    )!!;
+    defer free_owned_span(&device, &replacement_owned)!!;
+    assert(replacement_owned.span.index == stale_alias.index
+        && replacement_owned.span.generation != stale_alias.generation,
+        "allocation reuse advances the generation");
 
     gpu::TextureDesc copy_texture_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -396,18 +409,18 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::ResolvedSpan buffer_span = vk::resolve_span(state, &span)!!;
-    vk::ResolvedSpan persistent_span = vk::resolve_span(state, &persistent)!!;
-    gpu::GpuSpan persistent_tail = persistent.checked_subspan(4, 4)!!;
-    vk::ResolvedSpan persistent_tail_span = vk::resolve_span(state, &persistent_tail)!!;
+    vk::ResolvedSpan compute_only_span = vk::resolve_span(state, &compute_only)!!;
+    gpu::GpuSpan compute_only_tail = compute_only.checked_subspan(4, 4)!!;
+    vk::ResolvedSpan compute_only_tail_span = vk::resolve_span(state, &compute_only_tail)!!;
     gpu::GpuSpan multi_access_head = multi_access.checked_subspan(0, 4)!!;
     vk::ResolvedSpan multi_access_span = vk::resolve_span(state, &multi_access_head)!!;
     assert(buffer_span.access.compute && !buffer_span.access.graphics,
         "allocation span access comes from its live owner");
-    assert(persistent_span.access.compute && !persistent_span.access.graphics
-        && persistent_tail_span.access.compute && !persistent_tail_span.access.graphics,
-        "persistent subspans preserve immutable allocation access");
+    assert(compute_only_span.access.compute && !compute_only_span.access.graphics
+        && compute_only_tail_span.access.compute && !compute_only_tail_span.access.graphics,
+        "allocation subspans preserve immutable access");
     assert(multi_access_span.access.graphics && multi_access_span.access.compute,
-        "persistent subspans preserve every immutable allocation role");
+        "allocation subspans preserve every immutable role");
     vk::CommandRecord* record = state.commands.get(commands.handle)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics, .compute };
@@ -442,35 +455,35 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
         == gpu::INVALID_ARGUMENT,
         "span access, not only backing-buffer access, gates the recording role");
 
-    copy.src = persistent;
+    copy.src = compute_only;
     assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
         == gpu::INVALID_ARGUMENT,
-        "narrow persistent allocation access overrides its broad arena backing");
+        "compute-only allocation access rejects graphics recording");
 
-    copy.src = persistent_tail;
+    copy.src = compute_only_tail;
     assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
         == gpu::INVALID_ARGUMENT,
-        "a persistent subspan retains its compute-only allocation access");
+        "an allocation subspan retains compute-only access");
 
     copy.src = multi_access;
     copy.src.offset += multi_access.size;
     reset_sync_diagnostic(
         capture:        &capture,
         operation:      "cmd_copy_buffer_to_texture",
-        debug_name:     null,
+        debug_name:     "multi_access_allocation",
         rejected_field: "GpuSpan",
         invariant:      "span range must fit its live owner",
     );
     assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
         == gpu::INVALID_ARGUMENT,
-        "persistent span bounds cannot escape their immutable allocation");
+        "allocation span bounds cannot escape their owner");
     assert_sync_contract_diagnostic(
-        capture:            &capture,
-        expected_fault:     gpu::INVALID_ARGUMENT,
-        resource_kind:      gpu::DebugResourceKind.PERSISTENT_SPAN,
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: true,
-        index:              multi_access.index,
-        generation:         multi_access.generation,
+        index:               multi_access.index,
+        generation:          multi_access.generation,
     );
 
     copy.src = stale_alias;
@@ -483,14 +496,14 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     );
     assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &copy))
         == gpu::INVALID_HANDLE,
-        "a stale persistent allocation generation cannot record commands");
+        "a stale allocation generation cannot record commands");
     assert_sync_contract_diagnostic(
-        capture:            &capture,
-        expected_fault:     gpu::INVALID_HANDLE,
-        resource_kind:      gpu::DebugResourceKind.PERSISTENT_SPAN,
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_HANDLE,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
         has_public_identity: false,
-        index:              0,
-        generation:         0,
+        index:               0,
+        generation:          0,
     );
     record.queue = recorded_queue;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;

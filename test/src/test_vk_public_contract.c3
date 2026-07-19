@@ -47,11 +47,6 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         "create_graphics_pipeline rejects a null descriptor"
     );
     assert(
-        @catch(gpu::alloc_persistent_span(&device, (gpu::PersistentAllocDesc*)null))
-            == gpu::INVALID_ARGUMENT,
-        "alloc_persistent_span rejects a null descriptor"
-    );
-    assert(
         @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, (gpu::SubmitDesc*)null))
             == gpu::INVALID_ARGUMENT,
         "submit rejects a null descriptor"
