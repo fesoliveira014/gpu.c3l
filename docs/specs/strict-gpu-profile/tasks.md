@@ -177,7 +177,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.3 Span/address data operations
 
-- [ ] Migrate copies, fills, index data, indirect arguments, upload, and readback from `BufferHandle` to spans or addresses in `gpu/command.c3`, transfer helpers, shader ABI, tests, benchmarks, and samples.
+- [x] Migrate copies, fills, index data, indirect arguments, upload, and readback from `BufferHandle` to spans or addresses in `gpu/command.c3`, transfer helpers, shader ABI, tests, benchmarks, and samples.
   - **Depends on:** 4.1, 4.2, and 3.4.
   - **Contract:** no generic buffer object remains in the strict public surface; operations validate ranges and admitted queue roles before recording mutation.
   - **Edges:** overlapping copy, alignment, indirect/count bounds, address-only lifetime responsibility, and cross-device spans.
@@ -209,7 +209,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.7 Remove root allocation policy and frame/readback wrappers
 
-- [ ] Remove `FrameToken`, root `begin_frame`/`end_frame`, `@with_frame`, frame/persistent arenas, readback tickets, and deferred-release helpers from public source, docs, tests, and samples; replace usage with allocations, mapped spans, commands, and completion points.
+- [x] Remove `FrameToken`, root `begin_frame`/`end_frame`, `@with_frame`, frame/persistent arenas, readback tickets, and deferred-release helpers from public source, docs, tests, and samples; replace usage with allocations, mapped spans, commands, and completion points.
   - **Depends on:** 3.1–3.4 and 4.1–4.6.
   - **Contract:** readback is CPU-cached span → record copy → submit → wait or poll → invalidate → direct CPU access; frame-scoped allocation policy remains application code and a possible future `gpu::alloc` extension.
   - **Edges:** samples must demonstrate safe reuse and release from completion points without implying automatic ownership tracking.
