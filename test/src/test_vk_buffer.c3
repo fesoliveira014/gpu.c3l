@@ -70,7 +70,6 @@ fn void span_range_and_alignment_validation() @test {
     gpu::DeviceDesc device_desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_range_validation_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
@@ -102,14 +101,6 @@ fn void span_range_and_alignment_validation() @test {
     assert(@catch(gpu::invalidate_mapped_span(&device, oversized_mapping))
         == gpu::INVALID_ARGUMENT,
         "oversized invalidate range faults");
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    assert(@catch(gpu::alloc_frame_span(&frame_token, 64, 0)) == gpu::INVALID_ARGUMENT,
-        "zero alignment faults");
-    assert(@catch(gpu::alloc_frame_span(&frame_token, 64, 3)) == gpu::INVALID_ARGUMENT,
-        "non-power-of-two alignment faults");
-    assert(@catch(gpu::alloc_frame_span(&frame_token, 0, 16)) == gpu::INVALID_ARGUMENT,
-        "zero-size span faults");
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
@@ -173,5 +164,4 @@ fn void span_range_and_alignment_validation() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
     gpu::wait_completion(completion)!!;
-    gpu::end_frame(&frame_token)!!;
 }

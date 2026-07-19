@@ -156,7 +156,6 @@ fn void swapchain_requires_a_presentation_request() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_swapchain_gate_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
@@ -296,7 +295,6 @@ fn void present_path_guards_precede_native_mutation() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_present_guard_test",
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
@@ -546,7 +544,6 @@ fn void unsubmitted_acquire_is_consumed_before_teardown() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_acquire_teardown_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
@@ -732,7 +729,6 @@ fn void swapchain_info_query_rejects_invalid_handle() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_swapchain_info_invalid_handle_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;

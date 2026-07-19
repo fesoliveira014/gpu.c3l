@@ -83,8 +83,8 @@ fn void assert_shader_rejection(
 
 fn gpu::Device make_diagnostic_reflection_test_device(ShaderDiagnosticCapture* capture) {
     gpu::DeviceDesc desc = {
-        .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2,
-        .debug_callback = capture == null ? null : &capture_shader_diagnostic,
+        .backend         = gpu::BackendKind.VULKAN,
+        .debug_callback  = capture == null ? null : &capture_shader_diagnostic,
         .debug_user_data = capture,
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -94,7 +94,6 @@ fn gpu::Device make_reflection_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_shader_reflection_test",
     };
     return gpu::create_device_from_desc(&desc)!!;

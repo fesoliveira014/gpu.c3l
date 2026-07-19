@@ -29,7 +29,6 @@ fn void device_destroy_readiness_never_waits() @test {
     vk::VkDeviceState state = {
         .queue_completions = completions[..],
     };
-    state.off_frame_pending_queues.store(1, AtomicOrdering.RELAXED);
     destroy_counter_calls = 0;
     destroy_counter_result = vk::Result.SUCCESS;
     destroy_counter_value = 2;
@@ -44,20 +43,7 @@ fn void device_destroy_readiness_never_waits() @test {
     destroy_counter_value = 3;
     assert(
         vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
-        "completed off-frame work ignores stale marker bookkeeping"
-    );
-
-    state.timeline_counter.store(7, AtomicOrdering.RELAXED);
-    destroy_counter_value = 6;
-    assert(
-        !vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
-        "an incomplete retirement timeline is busy"
-    );
-
-    destroy_counter_value = 7;
-    assert(
-        vk::device_destroy_ready_with_query(&state, &query_destroy_counter)!!,
-        "completed queue and frame timelines make destruction ready"
+        "completed queue work makes destruction ready"
     );
 
     destroy_counter_result = vk::Result.ERROR_DEVICE_LOST;
@@ -73,7 +59,6 @@ fn void device_create_destroy() @test {
         .backend              = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
         .enable_debug_names   = true,
-        .frames_in_flight     = 2,
         .descriptor_heap_mode = gpu::DescriptorHeapMode.AUTO,
         .application_name     = "gpu_vk_bootstrap_test",
     };
@@ -134,7 +119,6 @@ fn void device_heap_mode_and_capacities() @test {
     gpu::DeviceDesc desc = {
         .backend                     = gpu::BackendKind.VULKAN,
         .enable_validation           = true,
-        .frames_in_flight            = 2,
         .descriptor_heap_mode        = gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
         .texture_descriptor_capacity = 64,
         .sampler_descriptor_capacity = 8,

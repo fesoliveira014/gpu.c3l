@@ -9,7 +9,7 @@ const uint DEVICE_REGISTRY_THREAD_COUNT = 8;
 struct DeviceRegistryWorkerArgs {
     Atomic{uint}* ready;
     Atomic{bool}* release;
-    FrameFixture  fixture;
+    DeviceFixture fixture;
     gpu::Device   device;
     bool          failed;
 }
@@ -267,7 +267,7 @@ fn int device_registry_worker(void* raw_args) {
     gpu::Device? registered = gpu::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          {},
-        vtable:        &frame_fixture_vtable,
+        vtable:        &device_fixture_vtable,
         backend_state: &args.fixture,
     );
     if (catch registration_fault = registered) {
@@ -604,6 +604,15 @@ fn void device_handles_are_compact_structured_tokens() @test {
 }
 
 fn void forged_device_tokens_are_rejected() @test {
+    gpu::Device zero_generation = {
+        .index      = 7,
+        .generation = 0,
+    };
+    assert(
+        @catch(gpu::get_device_caps(&zero_generation)) == gpu::INVALID_HANDLE,
+        "zero-generation device tokens are rejected"
+    );
+
     gpu::Device reserved = {
         .index      = 0,
         .generation = 1,
@@ -625,8 +634,8 @@ fn void forged_device_tokens_are_rejected() @test {
 }
 
 fn void device_loss_isolated_to_marked_slot() @test {
-    FrameFixture first_fixture;
-    FrameFixture second_fixture;
+    DeviceFixture first_fixture;
+    DeviceFixture second_fixture;
     gpu::Device first = fixture_device(&first_fixture);
     gpu::Device second = fixture_device(&second_fixture);
 
@@ -636,19 +645,21 @@ fn void device_loss_isolated_to_marked_slot() @test {
         @catch(gpu::get_device_caps(&first)) == gpu::DEVICE_LOST,
         "the affected device stays lost"
     );
-    gpu::FrameToken second_frame = gpu::begin_frame(&second)!!;
-    gpu::end_frame(&second_frame)!!;
-    assert(second_fixture.begin_calls == 1, "a peer device remains usable");
+    assert(
+        gpu::get_device_backend(&second)!! == gpu::BackendKind.VULKAN,
+        "a peer device remains usable"
+    );
 
     gpu::Device stale = first;
     gpu::device_slots[first.index].live_children.store(1, AtomicOrdering.RELAXED);
     gpu::destroy_device(&first)!!;
-    FrameFixture replacement_fixture;
+    DeviceFixture replacement_fixture;
     gpu::Device replacement = fixture_device(&replacement_fixture);
     gpu::mark_device_lost(&stale);
-    gpu::FrameToken replacement_frame = gpu::begin_frame(&replacement)!!;
-    gpu::end_frame(&replacement_frame)!!;
-    assert(replacement_fixture.begin_calls == 1, "slot reuse clears lost state");
+    assert(
+        gpu::get_device_backend(&replacement)!! == gpu::BackendKind.VULKAN,
+        "slot reuse clears lost state"
+    );
 
     gpu::destroy_device(&second)!!;
     gpu::destroy_device(&replacement)!!;
@@ -662,7 +673,7 @@ fn void exhausted_device_slots_are_retired() @test {
     control.generation = gpu::MAX_DEVICE_GENERATION - 1;
     slot.control.store((ulong)control, AtomicOrdering.RELAXED);
 
-    FrameFixture penultimate_fixture;
+    DeviceFixture penultimate_fixture;
     gpu::Device penultimate = fixture_device(&penultimate_fixture);
     assert(penultimate.index == 0, "the seeded slot publishes its current generation");
     assert(penultimate.generation == gpu::MAX_DEVICE_GENERATION - 1, "registration does not advance generation");
@@ -672,7 +683,7 @@ fn void exhausted_device_slots_are_retired() @test {
     assert(control.state == gpu::DEVICE_SLOT_FREE, "the final generation remains publishable");
     assert(control.generation == gpu::MAX_DEVICE_GENERATION, "successful destruction advances to the final generation");
 
-    FrameFixture final_fixture;
+    DeviceFixture final_fixture;
     gpu::Device final = fixture_device(&final_fixture);
     assert(final.index == 0, "the final generation publishes from the seeded slot");
     assert(final.generation == gpu::MAX_DEVICE_GENERATION, "registration preserves the final generation");
@@ -757,13 +768,13 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
     fault concurrent_destroy_fault = @catch(gpu::destroy_device(&concurrent_destroy));
     bool concurrent_destroy_preserved = concurrent_destroy.is_valid();
 
-    FrameFixture survivor_fixture;
+    DeviceFixture survivor_fixture;
     gpu::Device survivor;
     bool survivor_created = true;
     gpu::Device? registered = gpu::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          {},
-        vtable:        &frame_fixture_vtable,
+        vtable:        &device_fixture_vtable,
         backend_state: &survivor_fixture,
     );
     if (catch registration_fault = registered) {
@@ -955,29 +966,8 @@ fn void child_published_while_closing_blocks_destruction() @test {
         "the late child publication remains owned by the live device");
 }
 
-fn void live_frames_block_device_destruction_without_closing() @test {
-    FrameFixture fixture;
-    gpu::Device device = fixture_device(&fixture);
-    gpu::Device original = device;
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-
-    fault destroy_fault = @catch(gpu::destroy_device(&device));
-    gpu::DeviceSlot* slot = &gpu::device_slots[original.index];
-    gpu::DeviceSlotControl control = (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-
-    assert(destroy_fault == gpu::RESOURCE_IN_USE, "a live frame blocks device destruction");
-    assert(device == original, "child rejection preserves the device token");
-    assert(control.state == gpu::DEVICE_SLOT_LIVE, "child rejection never publishes closing state");
-    assert(control.generation == original.generation, "child rejection preserves generation");
-
-    if (destroy_fault == gpu::RESOURCE_IN_USE) {
-        gpu::end_frame(&frame)!!;
-        gpu::destroy_device(&device)!!;
-    }
-}
-
 fn void successful_device_destruction_advances_generation() @test {
-    FrameFixture fixture;
+    DeviceFixture fixture;
     gpu::Device device = fixture_device(&fixture);
     uint index = device.index;
     uint generation = device.generation;
