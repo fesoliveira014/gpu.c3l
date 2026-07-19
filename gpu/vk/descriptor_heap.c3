@@ -142,25 +142,6 @@ fn VkHeapImplementation? resolve_heap_implementation(bool indexing_usable, bool 
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn VkHeapImplementation? resolve_candidate_heap_implementation(
-    bool indexing_supported,
-    bool descriptor_buffer_supported,
-    bool descriptor_buffer_capacity_usable,
-    uint texture_capacity,
-    uint sampler_capacity,
-    IndexingHeapLimits indexing_limits,
-) {
-    bool indexing_usable = indexing_supported && indexing_heap_fits_limits(
-        texture_capacity,
-        sampler_capacity,
-        indexing_limits,
-    );
-    return resolve_heap_implementation(
-        indexing_usable,
-        descriptor_buffer_supported && descriptor_buffer_capacity_usable,
-    );
-}
-
 fn void? select_strict_heap_implementation(
     VkStrictHeapState* state,
     bool indexing_supported,

@@ -11,6 +11,14 @@ import std::thread;
 // Disambiguates from vma::Allocator: std::core::mem's host-memory interface.
 alias HostAllocator = std::core::mem::alloc::Allocator;
 alias DeviceExtensionQuery = fn bool(vk::PhysicalDevice physical_device, ZString extension);
+alias DescriptorBufferCapacityProbeFn @private = fn bool (
+    void*,
+    vk::PhysicalDevice,
+    QueueFamilies*,
+    bool,
+    uint,
+    uint,
+);
 alias SemaphoreCounterQueryFn @private = fn vk::Result (
     vk::Device,
     vk::Semaphore,
@@ -35,6 +43,12 @@ struct DeviceCreationProbe {
     DeviceCreationCheckpoint reached;
     uint                     rollback_count;
     uint                     owned_instance_teardown_count;
+    bool                     descriptor_buffer_override;
+}
+
+struct DescriptorBufferCapacityProbe {
+    void*                           user_data;
+    DescriptorBufferCapacityProbeFn fits;
 }
 
 struct VkPresentationState {
@@ -423,11 +437,12 @@ fn gpu::Device? create_vk_device_with_selection(
         bool indexing_supported = heap_indexing_supported(&features2.features, &features12);
         bool buffer_supported = heap_shared_features_supported(&features2.features, &features12)
             && query_descriptor_buffer_support(state.physical_device);
-        select_strict_heap_implementation(
+        select_strict_heap_implementation_for_creation(
             state:              &state.strict_heap,
             indexing_supported: indexing_supported,
             buffer_supported:   buffer_supported,
             indexing_limits:    query_indexing_heap_limits(state.physical_device),
+            probe:              probe,
         )!;
     }
 
@@ -827,6 +842,27 @@ fn bool strict_heap_uses_descriptor_buffer(VkStrictHeapState* state) {
         && state.implementation == VkHeapImplementation.DESCRIPTOR_BUFFER;
 }
 
+fn void? select_strict_heap_implementation_for_creation(
+    VkStrictHeapState* state,
+    bool indexing_supported,
+    bool buffer_supported,
+    IndexingHeapLimits indexing_limits,
+    DeviceCreationProbe* probe,
+) {
+    if (probe == null || !probe.descriptor_buffer_override) {
+        return select_strict_heap_implementation(
+            state:              state,
+            indexing_supported: indexing_supported,
+            buffer_supported:   buffer_supported,
+            indexing_limits:    indexing_limits,
+        );
+    }
+    if (state == null) return gpu::INVALID_ARGUMENT~;
+    if (!state.enabled) return;
+    if (!buffer_supported) return gpu::UNSUPPORTED_FEATURE~;
+    state.implementation = VkHeapImplementation.DESCRIPTOR_BUFFER;
+}
+
 <* The feature struct is only chained once the extension is confirmed. *>
 fn bool query_descriptor_buffer_support(vk::PhysicalDevice physical_device) @private {
     if (!device_supports_extension(physical_device, "VK_EXT_descriptor_buffer")) return false;
@@ -850,6 +886,63 @@ fn IndexingHeapLimits query_indexing_heap_limits(vk::PhysicalDevice physical_dev
         .max_per_stage_resources      = props.max_per_stage_update_after_bind_resources,
         .max_all_pools_descriptors    = props.max_update_after_bind_descriptors_in_all_pools,
     };
+}
+
+fn bool descriptor_buffer_capacity_probe_real(
+    void* user_data,
+    vk::PhysicalDevice physical_device,
+    QueueFamilies* families,
+    bool draw_indirect_count,
+    uint texture_capacity,
+    uint sampler_capacity,
+) @private {
+    return descriptor_buffer_candidate_fits(
+        physical_device:     physical_device,
+        families:            families,
+        draw_indirect_count: draw_indirect_count,
+        texture_capacity:    texture_capacity,
+        sampler_capacity:    sampler_capacity,
+    );
+}
+
+fn DescriptorBufferCapacityProbe real_descriptor_buffer_capacity_probe() @private {
+    return { .fits = &descriptor_buffer_capacity_probe_real };
+}
+
+fn VkHeapImplementation? resolve_candidate_heap_implementation_with_probe(
+    bool indexing_supported,
+    bool descriptor_buffer_supported,
+    uint texture_capacity,
+    uint sampler_capacity,
+    IndexingHeapLimits indexing_limits,
+    vk::PhysicalDevice physical_device,
+    QueueFamilies* families,
+    bool draw_indirect_count,
+    DescriptorBufferCapacityProbe* capacity_probe,
+) {
+    bool indexing_usable = indexing_supported && indexing_heap_fits_limits(
+        texture_capacity,
+        sampler_capacity,
+        indexing_limits,
+    );
+    bool descriptor_buffer_capacity_usable = false;
+    if (!indexing_usable && descriptor_buffer_supported) {
+        if (capacity_probe == null || capacity_probe.fits == null) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+        descriptor_buffer_capacity_usable = capacity_probe.fits(
+            capacity_probe.user_data,
+            physical_device,
+            families,
+            draw_indirect_count,
+            texture_capacity,
+            sampler_capacity,
+        );
+    }
+    return resolve_heap_implementation(
+        indexing_usable,
+        descriptor_buffer_supported && descriptor_buffer_capacity_usable,
+    );
 }
 
 fn bool candidate_satisfies(
@@ -890,28 +983,18 @@ fn bool candidate_satisfies(
         heap_shared_features_supported(&features2.features, &features12)
             && query_descriptor_buffer_support(candidate);
     IndexingHeapLimits indexing_limits = query_indexing_heap_limits(candidate);
-    bool indexing_usable = indexing_supported && indexing_heap_fits_limits(
-        resolved_tex,
-        resolved_smp,
-        indexing_limits,
-    );
-    bool descriptor_buffer_capacity_usable = false;
-    if (!indexing_usable && descriptor_buffer_supported) {
-        descriptor_buffer_capacity_usable = descriptor_buffer_candidate_fits(
-            physical_device:    candidate,
-            families:           families,
-            draw_indirect_count: features12.draw_indirect_count != 0,
-            texture_capacity:   resolved_tex,
-            sampler_capacity:   resolved_smp,
-        );
-    }
-    if (catch implementation_fault = resolve_candidate_heap_implementation(
-        indexing_supported:                 indexing_supported,
-        descriptor_buffer_supported:        descriptor_buffer_supported,
-        descriptor_buffer_capacity_usable: descriptor_buffer_capacity_usable,
-        texture_capacity:                   resolved_tex,
-        sampler_capacity:                   resolved_smp,
-        indexing_limits:                    indexing_limits,
+    DescriptorBufferCapacityProbe capacity_probe =
+        real_descriptor_buffer_capacity_probe();
+    if (catch implementation_fault = resolve_candidate_heap_implementation_with_probe(
+        indexing_supported:          indexing_supported,
+        descriptor_buffer_supported: descriptor_buffer_supported,
+        texture_capacity:            resolved_tex,
+        sampler_capacity:            resolved_smp,
+        indexing_limits:             indexing_limits,
+        physical_device:             candidate,
+        families:                    families,
+        draw_indirect_count:         features12.draw_indirect_count != 0,
+        capacity_probe:              &capacity_probe,
     )) return false;
     return true;
 }
