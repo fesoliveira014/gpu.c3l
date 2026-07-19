@@ -130,6 +130,106 @@ fn void heap_indexing_gate() @test {
     assert(!gpu::vk::heap_shared_features_supported(&base, &empty), "empty 1.2 features fail the shared gate");
 }
 
+fn vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT
+generated_work_properties() {
+    vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT properties =
+        vk::physical_device_device_generated_commands_properties_ext();
+    properties.max_indirect_sequence_count = 4096;
+    properties.max_indirect_commands_token_count = 2;
+    properties.max_indirect_commands_token_offset = 16;
+    properties.max_indirect_commands_indirect_stride = 40;
+    properties.supported_indirect_commands_shader_stages =
+        vk::ShaderStageFlagBits.VERTEX_BIT
+        | vk::ShaderStageFlagBits.FRAGMENT_BIT
+        | vk::ShaderStageFlagBits.COMPUTE_BIT;
+    return properties;
+}
+
+fn void generated_work_support_requires_the_complete_semantic_profile() @test {
+    vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT features =
+        vk::physical_device_device_generated_commands_features_ext()
+            .set_device_generated_commands(vk::TRUE);
+    vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT properties =
+        generated_work_properties();
+
+    gpu::vk::GeneratedWorkSupport supported =
+        gpu::vk::resolve_generated_work_support(
+            extension_supported: true,
+            features:            &features,
+            properties:          &properties,
+        );
+    assert(supported.enabled);
+    assert(supported.max_count == 4096);
+
+    gpu::vk::GeneratedWorkSupport missing_extension =
+        gpu::vk::resolve_generated_work_support(
+            extension_supported: false,
+            features:            &features,
+            properties:          &properties,
+        );
+    assert(!missing_extension.enabled && missing_extension.max_count == 0);
+
+    features.device_generated_commands = vk::FALSE;
+    gpu::vk::GeneratedWorkSupport missing_feature =
+        gpu::vk::resolve_generated_work_support(
+            extension_supported: true,
+            features:            &features,
+            properties:          &properties,
+        );
+    assert(!missing_feature.enabled && missing_feature.max_count == 0);
+}
+
+fn void generated_work_support_rejects_incomplete_layout_limits() @test {
+    vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT features =
+        vk::physical_device_device_generated_commands_features_ext()
+            .set_device_generated_commands(vk::TRUE);
+    vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT properties =
+        generated_work_properties();
+
+    properties.supported_indirect_commands_shader_stages =
+        vk::ShaderStageFlagBits.VERTEX_BIT
+        | vk::ShaderStageFlagBits.FRAGMENT_BIT;
+    assert(!gpu::vk::resolve_generated_work_support(
+        extension_supported: true,
+        features:            &features,
+        properties:          &properties,
+    ).enabled);
+
+    properties = generated_work_properties();
+    properties.max_indirect_commands_token_count = 1;
+    assert(!gpu::vk::resolve_generated_work_support(
+        extension_supported: true,
+        features:            &features,
+        properties:          &properties,
+    ).enabled);
+
+    properties = generated_work_properties();
+    properties.max_indirect_commands_token_offset = 15;
+    assert(!gpu::vk::resolve_generated_work_support(
+        extension_supported: true,
+        features:            &features,
+        properties:          &properties,
+    ).enabled);
+
+    properties = generated_work_properties();
+    properties.max_indirect_commands_indirect_stride = 39;
+    assert(!gpu::vk::resolve_generated_work_support(
+        extension_supported: true,
+        features:            &features,
+        properties:          &properties,
+    ).enabled);
+
+    properties = generated_work_properties();
+    properties.max_indirect_sequence_count = 0;
+    gpu::vk::GeneratedWorkSupport zero_count =
+        gpu::vk::resolve_generated_work_support(
+            extension_supported: true,
+            features:            &features,
+            properties:          &properties,
+        );
+    assert(!zero_count.enabled && zero_count.max_count == 0);
+}
+
 fn void heap_implementation_resolution_is_private() @test {
     gpu::vk::VkHeapImplementation both =
         gpu::vk::resolve_heap_implementation(true, true)!!;

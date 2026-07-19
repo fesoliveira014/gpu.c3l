@@ -65,7 +65,7 @@ caller-owned allocation and completion lifetime contracts
 MemoryClass policy table completeness
 Format translation table completeness through pure tables if separated
 BarrierDesc validation
-shader ABI sizeof/offset checks
+shader ABI scalar widths plus generated-work record sizes, offsets, and strides
 TextureView owner/generation validation and descriptor-heap free-list reuse
 null-safe, exactly-once structured debug dispatch and userdata preservation
 invalid-backend callback delivery with callback-enabled/disabled fault parity
@@ -106,6 +106,7 @@ two independent Vulkan runtimes and borrowed-adapter invalidation
 exact-adapter request creation with runtime-instance reuse and retention
 surface-aware queue selection and presentation-request gating
 create/destroy Vulkan device
+generated-work extension, feature, stage, layout-limit, and public-cap coherence
 create/destroy VMA allocator
 query memory budget and stats
 create addressable VMA-backed allocation storage

@@ -69,6 +69,11 @@ fn void device_create_destroy() @test {
     assert(gpu::get_device_caps(&device)!!.buffer_device_address, "buffer_device_address cap true");
     assert(gpu::get_device_caps(&device)!!.synchronization2, "synchronization2 cap true");
     assert(gpu::get_device_caps(&device)!!.dynamic_rendering, "dynamic_rendering cap true");
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    assert(
+        caps.generated_work == (caps.max_generated_work_count > 0),
+        "generated-work support and its device limit are coherent"
+    );
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::PhysicalDeviceFeatures features;
     vk::get_physical_device_features(state.physical_device, &features);

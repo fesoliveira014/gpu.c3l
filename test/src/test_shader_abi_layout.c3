@@ -6,6 +6,13 @@ import gpu;
 // gpu/shader_abi.c3 already carries compile-time asserts; these runtime checks
 // pin the same values as an executable acceptance record.
 
+fn void shader_visible_scalar_widths() @test {
+    assert(GpuAddress::size == ulong::size);
+    assert(GpuAddress::size == 8);
+    assert(TextureIndex::size == uint::size);
+    assert(SamplerIndex::size == uint::size);
+}
+
 fn void root_push_layout() @test {
     assert(RootPush::size == 8);
     assert($reflect(RootPush.root_gpu).offset == 0);
@@ -24,6 +31,24 @@ fn void indirect_command_layouts() @test {
     assert($reflect(DrawIndexedIndirectCommand.vertex_offset).offset == 12);
     assert(DispatchIndirectCommand::size == 12);
     assert($reflect(DispatchIndirectCommand.z).offset == 8);
+}
+
+fn void generated_work_record_layouts() @test {
+    assert(GeneratedDrawRecord::size == 32);
+    assert($reflect(GeneratedDrawRecord.vertex_root_gpu).offset == 0);
+    assert($reflect(GeneratedDrawRecord.fragment_root_gpu).offset == 8);
+    assert($reflect(GeneratedDrawRecord.arguments).offset == 16);
+
+    assert(GeneratedDrawIndexedRecord::size == 40);
+    assert($reflect(GeneratedDrawIndexedRecord.vertex_root_gpu).offset == 0);
+    assert($reflect(GeneratedDrawIndexedRecord.fragment_root_gpu).offset == 8);
+    assert($reflect(GeneratedDrawIndexedRecord.arguments).offset == 16);
+    assert($reflect(GeneratedDrawIndexedRecord._pad0).offset == 36);
+
+    assert(GeneratedDispatchRecord::size == 24);
+    assert($reflect(GeneratedDispatchRecord.root_gpu).offset == 0);
+    assert($reflect(GeneratedDispatchRecord.arguments).offset == 8);
+    assert($reflect(GeneratedDispatchRecord._pad0).offset == 20);
 }
 
 fn void vector_alias_layouts() @test {

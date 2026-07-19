@@ -25,7 +25,11 @@ alias SemaphoreCounterQueryFn @private = fn vk::Result (
     ulong*,
 );
 
-const ZString SWAPCHAIN_EXTENSION = "VK_KHR_swapchain";
+const ZString SWAPCHAIN_EXTENSION      = "VK_KHR_swapchain";
+const ZString GENERATED_WORK_EXTENSION = "VK_EXT_device_generated_commands";
+const uint GENERATED_WORK_TOKEN_COUNT  = 2;
+const uint GENERATED_WORK_TOKEN_OFFSET = 16;
+const uint GENERATED_WORK_RECORD_SIZE  = 40;
 
 enum DeviceCreationCheckpoint : uint {
     NONE,
@@ -106,6 +110,7 @@ struct VkDeviceState {
     void*                      debug_user_data;
     bool                       memory_budget_enabled;
     bool                       draw_indirect_count;
+    GeneratedWorkSupport       generated_work;
     float                      max_sampler_anisotropy;
     BufferTable                buffers;
     AllocationTable            allocations;
@@ -150,13 +155,67 @@ struct PhysicalDeviceCandidate {
     bool                    suitable;
 }
 
+struct GeneratedWorkSupport {
+    bool enabled;
+    uint max_count;
+}
+
 struct CapsInputs {
-    bool strict_enabled;
-    bool presentation_enabled;
-    bool async_compute;
-    bool line_polygon_mode;
-    uint texture_capacity;
-    uint sampler_capacity;
+    bool                 strict_enabled;
+    bool                 presentation_enabled;
+    bool                 async_compute;
+    bool                 line_polygon_mode;
+    uint                 texture_capacity;
+    uint                 sampler_capacity;
+    GeneratedWorkSupport generated_work;
+}
+
+fn GeneratedWorkSupport resolve_generated_work_support(
+    bool extension_supported,
+    vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT* features,
+    vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT* properties,
+) {
+    if (!extension_supported
+        || features == null
+        || properties == null
+        || features.device_generated_commands == 0) return {};
+
+    vk::ShaderStageFlags required_stages =
+        vk::ShaderStageFlagBits.VERTEX_BIT
+        | vk::ShaderStageFlagBits.FRAGMENT_BIT
+        | vk::ShaderStageFlagBits.COMPUTE_BIT;
+    if ((properties.supported_indirect_commands_shader_stages
+            & required_stages) != required_stages
+        || properties.max_indirect_sequence_count == 0
+        || properties.max_indirect_commands_token_count
+            < GENERATED_WORK_TOKEN_COUNT
+        || properties.max_indirect_commands_token_offset
+            < GENERATED_WORK_TOKEN_OFFSET
+        || properties.max_indirect_commands_indirect_stride
+            < GENERATED_WORK_RECORD_SIZE) return {};
+
+    return {
+        .enabled   = true,
+        .max_count = properties.max_indirect_sequence_count,
+    };
+}
+
+fn GeneratedWorkSupport query_generated_work_support(
+    vk::PhysicalDevice physical_device,
+    bool extension_supported,
+    vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT* features,
+) @private {
+    if (!extension_supported) return {};
+    vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT properties =
+        vk::physical_device_device_generated_commands_properties_ext();
+    vk::PhysicalDeviceProperties2 properties2 =
+        vk::physical_device_properties2().set_next(&properties);
+    vk::get_physical_device_properties2(physical_device, &properties2);
+    return resolve_generated_work_support(
+        extension_supported: extension_supported,
+        features:            features,
+        properties:          &properties,
+    );
 }
 
 fn vk::Result real_semaphore_counter_query(
@@ -424,10 +483,24 @@ fn gpu::Device? create_vk_device_with_selection(
             )!;
     }
 
-    vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
-    vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
-    vk::PhysicalDeviceVulkan11Features features11 = vk::physical_device_vulkan11features().set_next(&features12);
-    vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
+    bool generated_work_extension = state.strict_heap.enabled
+        && device_supports_extension(
+            state.physical_device,
+            GENERATED_WORK_EXTENSION,
+        );
+    vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT generated_work_features =
+        vk::physical_device_device_generated_commands_features_ext();
+    vk::PhysicalDeviceVulkan13Features features13 =
+        vk::physical_device_vulkan13features();
+    if (generated_work_extension) {
+        features13 = features13.set_next(&generated_work_features);
+    }
+    vk::PhysicalDeviceVulkan12Features features12 =
+        vk::physical_device_vulkan12features().set_next(&features13);
+    vk::PhysicalDeviceVulkan11Features features11 =
+        vk::physical_device_vulkan11features().set_next(&features12);
+    vk::PhysicalDeviceFeatures2 features2 =
+        vk::physical_device_features2().set_next(&features11);
     vk::get_physical_device_features2(state.physical_device, &features2);
     check_required_features(
         base: &features2.features,
@@ -436,6 +509,11 @@ fn gpu::Device? create_vk_device_with_selection(
         v13:  &features13,
     )!;
     state.draw_indirect_count = features12.draw_indirect_count != 0;
+    state.generated_work = query_generated_work_support(
+        physical_device:     state.physical_device,
+        extension_supported: generated_work_extension,
+        features:            &generated_work_features,
+    );
     bool line_polygon_mode = line_polygon_mode_supported(&features2.features);
 
     if (features2.features.sampler_anisotropy != 0) {
@@ -597,6 +675,7 @@ fn gpu::Device? create_vk_device_with_selection(
         .line_polygon_mode    = line_polygon_mode,
         .texture_capacity     = state.strict_heap.texture_capacity,
         .sampler_capacity     = state.strict_heap.sampler_capacity,
+        .generated_work      = state.generated_work,
     };
     state.caps = build_caps(
         base:                    &features2.features,
@@ -1196,14 +1275,24 @@ fn void? create_logical_device_with_queue_infos(
     bool line_polygon_mode,
 ) @private {
 
-    vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features = vk::physical_device_descriptor_buffer_features_ext()
-        .set_descriptor_buffer(vk::TRUE);
-    vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features()
-        .set_dynamic_rendering(vk::TRUE)
-        .set_synchronization2(vk::TRUE)
-        .set_maintenance4(vk::TRUE);
+    vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT generated_work_features =
+        vk::physical_device_device_generated_commands_features_ext()
+            .set_device_generated_commands(vk::TRUE);
+    vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features =
+        vk::physical_device_descriptor_buffer_features_ext()
+            .set_descriptor_buffer(vk::TRUE);
+    vk::PhysicalDeviceVulkan13Features features13 =
+        vk::physical_device_vulkan13features()
+            .set_dynamic_rendering(vk::TRUE)
+            .set_synchronization2(vk::TRUE)
+            .set_maintenance4(vk::TRUE);
     if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
+        if (state.generated_work.enabled) {
+            db_features = db_features.set_next(&generated_work_features);
+        }
         features13 = features13.set_next(&db_features);
+    } else if (state.generated_work.enabled) {
+        features13 = features13.set_next(&generated_work_features);
     }
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features()
         .set_buffer_device_address(vk::TRUE)
@@ -1239,9 +1328,12 @@ fn void? create_logical_device_with_queue_infos(
     }
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[3] extensions;
+    ZString[4] extensions;
     uint extension_count = 0;
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
+    if (state.generated_work.enabled) {
+        extensions[extension_count++] = GENERATED_WORK_EXTENSION;
+    }
     if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
         extensions[extension_count++] = "VK_EXT_descriptor_buffer";
     }
@@ -1321,6 +1413,7 @@ fn gpu::DeviceCaps build_caps(
         .dynamic_rendering          = v13.dynamic_rendering != 0,
         .shader_int64               = base.shader_int64 != 0,
         .draw_indirect_count        = v12.draw_indirect_count != 0,
+        .generated_work             = inputs.generated_work.enabled,
         .async_compute              = inputs.async_compute,
         .line_polygon_mode          = inputs.line_polygon_mode,
         .texture_heap_capacity      = inputs.texture_capacity,
@@ -1334,6 +1427,7 @@ fn gpu::DeviceCaps build_caps(
             .z = props.limits.max_compute_work_group_count[2],
         },
         .max_draw_indirect_count    = props.limits.max_draw_indirect_count,
+        .max_generated_work_count   = inputs.generated_work.max_count,
         .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
         .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
         .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,

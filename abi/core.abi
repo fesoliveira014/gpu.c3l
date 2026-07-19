@@ -34,3 +34,23 @@ extern struct DispatchIndirectCommand {
     uint y;
     uint z;
 }
+
+// GPU-writable roots and arguments consumed as one generated work item.
+struct GeneratedDrawRecord {
+    GpuAddress          vertex_root_gpu;
+    GpuAddress          fragment_root_gpu;
+    DrawIndirectCommand arguments;
+}
+
+struct GeneratedDrawIndexedRecord {
+    GpuAddress                 vertex_root_gpu;
+    GpuAddress                 fragment_root_gpu;
+    DrawIndexedIndirectCommand arguments;
+    uint                       _pad0;
+}
+
+struct GeneratedDispatchRecord {
+    GpuAddress              root_gpu;
+    DispatchIndirectCommand arguments;
+    uint                    _pad0;
+}

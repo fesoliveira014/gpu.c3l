@@ -34,4 +34,23 @@ struct DispatchIndirectCommand {
     uint z;
 };
 
+struct GeneratedDrawRecord {
+    uint64_t vertex_root_gpu;
+    uint64_t fragment_root_gpu;
+    DrawIndirectCommand arguments;
+};
+
+struct GeneratedDrawIndexedRecord {
+    uint64_t vertex_root_gpu;
+    uint64_t fragment_root_gpu;
+    DrawIndexedIndirectCommand arguments;
+    uint _pad0;
+};
+
+struct GeneratedDispatchRecord {
+    uint64_t root_gpu;
+    DispatchIndirectCommand arguments;
+    uint _pad0;
+};
+
 #endif

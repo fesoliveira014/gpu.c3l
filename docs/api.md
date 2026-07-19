@@ -225,6 +225,7 @@ DeviceCaps
     bool dynamic_rendering
     bool shader_int64
     bool draw_indirect_count
+    bool generated_work
     bool async_compute
     QueueCounts queues
     bool line_polygon_mode
@@ -234,6 +235,7 @@ DeviceCaps
     uint max_push_constant_size
     Vec3u max_compute_work_group_count
     uint max_draw_indirect_count
+    uint max_generated_work_count
     usz min_uniform_alignment
     usz min_storage_alignment
     usz min_texel_buffer_alignment
@@ -246,8 +248,11 @@ get_device_caps(Device*)         -> DeviceCaps?
 ```
 
 `strict_enabled` reports whether strict semantics were requested and enabled.
-Query request support before creation. Heap implementation details are private
-and are not exposed as behavior-selection capabilities.
+Query request support before creation. `generated_work` is true only when the
+created strict device enables GPU-written root and work records for graphics
+and compute. A supported device reports a nonzero `max_generated_work_count`;
+an unsupported device reports false and zero. Heap and generated-work
+implementation mechanisms remain private.
 
 Heap capacities are exact semantic creation requests, not clampable upper
 bounds. Device creation fails rather than clamping when a selected adapter cannot
@@ -387,7 +392,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V structure or backend reflection/module rejection |
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
-| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
+| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, execution without a bound pipeline, draw without required per-pass depth state, duplicate command token in one submit batch, or token that is already being submitted |
 | `WAIT_TIMEOUT` | `wait_completion`, `acquire_next_image` | bounded wait or transient image unavailability; retry with the unchanged completion point or resource |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
@@ -1120,11 +1125,21 @@ DrawIndirectCommand        { vertex_count, instance_count, first_vertex, first_i
 DrawIndexedIndirectCommand { index_count, instance_count, first_index, vertex_offset, first_instance }
 DispatchIndirectCommand    { x, y, z }
 
+GeneratedDrawRecord        { vertex_root_gpu, fragment_root_gpu, arguments }
+GeneratedDrawIndexedRecord { vertex_root_gpu, fragment_root_gpu, arguments, _pad0 }
+GeneratedDispatchRecord    { root_gpu, arguments, _pad0 }
+
 cmd_draw_indirect(commands, vertex_root, fragment_root, args, draw_count) -> void?
 cmd_draw_indexed_indirect(commands, vertex_root, fragment_root, args, draw_count, index_span, index_type) -> void?
 cmd_draw_indexed_indirect_count(commands, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type) -> void?
 cmd_dispatch_indirect(commands, root, args) -> void?
 ```
+
+The generated records have fixed std430 strides of 32, 40, and 24 bytes. They
+pair the roots and arguments written by a GPU producer without a parallel
+`gl_DrawID` lookup table. `DeviceCaps.generated_work` reports whether the
+created device supports all three layouts. The existing shared-root commands
+remain the portable public execution path.
 
 Argument spans must support indirect-command reads, be 4-byte aligned, and
 contain `draw_count` (or `max_draw_count`) times the tight argument size. One
