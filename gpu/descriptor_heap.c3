@@ -4,9 +4,16 @@ const uint DEFAULT_TEXTURE_HEAP_CAPACITY = 4096;
 const uint DEFAULT_SAMPLER_HEAP_CAPACITY = 256;
 const uint MAX_SHADER_HEAP_CAPACITY = 65_536;
 
-<* Publish one texture view in the strict shader-visible heap. The texture must
-   carry sampled or storage usage. The returned owner-bearing view contains the
-   raw generation-free index stored in shader data. *>
+<* One create_texture_views input. A zero-initialized view description selects
+   the default view, matching a null description passed to create_texture_view. *>
+struct TextureViewCreateDesc {
+    TextureHandle   texture;
+    TextureViewDesc view;
+}
+
+<* Publish one texture view in the strict shader-visible heap. Requires strict
+   capability, and the texture must carry sampled or storage usage. The returned
+   owner-bearing view contains the raw generation-free index stored in shader data. *>
 fn TextureView? create_texture_view(
     Device* device,
     TextureHandle texture,
@@ -15,6 +22,7 @@ fn TextureView? create_texture_view(
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     validate_resource_owner(&operation, texture.owner, ResourceOwnerKind.TEXTURE)!;
+    if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     TextureView view = operation.vtable.create_texture_view(device, texture, desc)!;
     retain_device_children(&operation);
     return view;
@@ -30,16 +38,9 @@ fn void? destroy_texture_view(Device* device, TextureView view) {
     release_device_children(&operation);
 }
 
-<* One create_texture_views input. A zero-initialized view description selects
-   the default view, matching a null description passed to create_texture_view. *>
-struct TextureViewCreateDesc {
-    TextureHandle   texture;
-    TextureViewDesc view;
-}
-
-<* Batch-publish texture views. `out_views.len` must equal `descs.len`; an empty
-   batch succeeds. A fault leaves heap allocation, generations, cached native
-   views, and outputs unchanged. *>
+<* Batch-publish texture views. Requires strict capability.
+   `out_views.len` must equal `descs.len`; an empty batch succeeds. A fault leaves
+   heap allocation, generations, cached native views, and outputs unchanged. *>
 fn void? create_texture_views(
     Device* device,
     TextureViewCreateDesc[] descs,
@@ -47,9 +48,21 @@ fn void? create_texture_views(
 ) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
+    if (out_views.len != descs.len) {
+        return report_device_contract_failure(
+            operation:      &operation,
+            operation_name: "create_texture_views",
+            public_fault:   INVALID_ARGUMENT,
+            resource_kind:  DebugResourceKind.TEXTURE_DESCRIPTOR,
+            rejected_field: "out_views",
+            invariant:      "output count must match descriptor count",
+        )~;
+    }
+    if (descs.len == 0) return;
     foreach (&desc : descs) {
         validate_resource_owner(&operation, desc.texture.owner, ResourceOwnerKind.TEXTURE)!;
     }
+    if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     operation.vtable.create_texture_views(device, descs, out_views)!;
     retain_device_children(&operation, (ulong)descs.len);
 }

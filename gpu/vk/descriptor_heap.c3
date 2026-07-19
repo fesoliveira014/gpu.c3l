@@ -834,6 +834,8 @@ fn gpu::TextureView? vk_create_texture_view(gpu::Device* device, gpu::TextureHan
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
+    state.texture_view_cache_mutex.lock()!!;
+    defer state.texture_view_cache_mutex.unlock();
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
     TextureSlot* texture_slot = resolve_descriptor_texture(
         state:         state,
@@ -884,6 +886,7 @@ fn gpu::TextureView? vk_create_texture_view(gpu::Device* device, gpu::TextureHan
         texture_slot,
         image_view,
     );
+    commit_texture_view_creations(state, (&creation)[:1]);
     return result;
 }
 
@@ -990,6 +993,8 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
     if (descs.len == 0) return;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
+    state.texture_view_cache_mutex.lock()!!;
+    defer state.texture_view_cache_mutex.unlock();
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
 
     uint headroom = heap.texture_free_count
@@ -1025,7 +1030,7 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
                 rollback_texture_view_creations(state, creations[:creation_count]);
                 return f~;
             }
-            if (creation.cell != null) creations[creation_count++] = creation;
+            if (creation.cache != null) creations[creation_count++] = creation;
         }
 
         for (uint i = 0; i < descs.len; i++) {
@@ -1066,6 +1071,7 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
                 );
             }
         }
+        commit_texture_view_creations(state, creations[:creation_count]);
     };
 }
 

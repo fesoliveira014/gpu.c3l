@@ -93,6 +93,7 @@ struct VkDeviceState {
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;
+    Mutex                      texture_view_cache_mutex;
     Mutex                      command_mutex;
     bool                       compute_queue_distinct;
     RecordingContextTable      recording_contexts;
@@ -156,8 +157,9 @@ fn void? reach_device_creation_checkpoint(
 
 // One static vtable shared by every Vulkan device.
 const gpu::BackendVTable VK_VTABLE @private = {
-    .check_device_destroy = &vk_check_device_destroy,
-    .destroy_device       = &vk_destroy_device,
+    .check_device_destroy    = &vk_check_device_destroy,
+    .destroy_device          = &vk_destroy_device,
+    .report_contract_failure = &vk_report_root_contract_failure,
     .get_memory_stats     = &vk_get_memory_stats,
     .build_memory_report  = &vk_build_memory_report,
     .allocate_memory        = &vk_allocate_memory,
@@ -325,6 +327,7 @@ fn gpu::Device? create_vk_device_with_selection(
     state.debug_user_data = desc.debug_user_data;
     state.debug_names = desc.enable_debug_names;
     state.resource_mutex.init()!;
+    state.texture_view_cache_mutex.init()!;
     state.command_mutex.init()!;
 
     state.strict_heap = resolve_strict_heap_state(strict_requested, desc)!;
@@ -629,6 +632,29 @@ fn bool? device_destroy_ready_with_query(
     return true;
 }
 
+fn fault vk_report_root_contract_failure(
+    void* backend_state,
+    ZString operation,
+    fault public_fault,
+    gpu::DebugResourceKind resource_kind,
+    ZString rejected_field,
+    ZString invariant,
+) @private {
+    return report_contract_failure(
+        state:               (VkDeviceState*)backend_state,
+        operation:           operation,
+        public_fault:        public_fault,
+        resource_kind:       resource_kind,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+        debug_name:          null,
+        rejected_field:      rejected_field,
+        invariant:           invariant,
+        backend_text:        null,
+    );
+}
+
 fn void? vk_check_device_destroy(void* backend_state) @private {
     VkDeviceState* state = (VkDeviceState*)backend_state;
     if (!device_destroy_ready_with_query(state, &real_semaphore_counter_query)!) {
@@ -728,6 +754,7 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
     }
     state.instance = (vk::Instance)null;
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
+    if (state.texture_view_cache_mutex.is_initialized()) (void)state.texture_view_cache_mutex.destroy();
     if (state.command_mutex.is_initialized())        (void)state.command_mutex.destroy();
     if (state.presentation.queue_mutex.is_initialized()) (void)state.presentation.queue_mutex.destroy();
     mem::free(state);

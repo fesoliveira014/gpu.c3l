@@ -1620,66 +1620,44 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
     defer discard_test_executable(&cmd_executable)!!;
 }
 
-fn void render_pass_view_cache_rolls_back_on_later_resolution_fault() @test {
+fn void render_pass_view_cache_grows_past_initial_capacity() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    gpu::TextureHandle first = make_val_color_target(
+    gpu::TextureHandle texture = make_val_color_target(
         device:     &device,
-        width:      16,
-        height:     16,
-        mip_levels: 5,
+        width:      512,
+        height:     512,
+        mip_levels: 10,
     );
-    defer gpu::destroy_texture(&device, first)!!;
-    gpu::TextureHandle saturated = make_val_color_target(
-        device:     &device,
-        width:      16,
-        height:     16,
-        mip_levels: 5,
-    );
-    defer gpu::destroy_texture(&device, saturated)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    SyncDiagnosticCapture capture;
-    reset_sync_diagnostic(
-        capture:        &capture,
-        operation:      "cmd_begin_render_pass",
-        debug_name:     "(unnamed)",
-        rejected_field: "texture view cache",
-        invariant:      "texture must have free cached-view capacity",
-    );
-    state.debug_callback = &capture_sync_diagnostic;
-    state.debug_user_data = &capture;
-    vk::TextureSlot* saturated_slot = &state.textures.slots[saturated.index].value;
-    foreach (&cached : saturated_slot.views) cached.used = true;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::CommandList cmd = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
     defer discard_test_commands(&cmd)!!;
-    record_val_target_to_attach(&cmd, first);
-    record_val_target_to_attach(&cmd, saturated);
+    record_val_target_to_attach(&cmd, texture);
 
-    uint first_cached_before = val_cached_view_count(&device, first);
-    gpu::ColorTargetDesc[2] colors = {
-        { .texture = first, .mip_level = 1 },
-        { .texture = saturated, .mip_level = 1 },
-    };
-    gpu::RenderPassDesc pass = { .colors = colors[..], .width = 8, .height = 8 };
-    fault view_fault = @catch(gpu::cmd_begin_render_pass(&cmd, &pass));
-    state.debug_callback = null;
-    foreach (&cached : saturated_slot.views) cached.used = false;
+    for (uint mip = 0; mip <= vk::INITIAL_CACHED_VIEW_CAPACITY; mip++) {
+        gpu::ColorTargetDesc[1] colors = {
+            { .texture = texture, .mip_level = mip },
+        };
+        gpu::RenderPassDesc pass = {
+            .colors = colors[..],
+            .width  = 1,
+            .height = 1,
+        };
+        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        gpu::cmd_end_render_pass(&cmd)!!;
+    }
 
-    assert(view_fault == gpu::SLOT_TABLE_FULL, "later saturated view cache faults SLOT_TABLE_FULL");
-    assert_sync_contract_diagnostic(
-        capture:             &capture,
-        expected_fault:      view_fault,
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
-        has_public_identity: true,
-        index:               saturated.index,
-        generation:          saturated.generation,
-    );
-    assert(val_cached_view_count(&device, first) == first_cached_before,
-        "later view resolution fault rolls back the earlier cached view");
-    assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "view resolution fault records no pass");
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(val_cached_view_count(&device, texture)
+        == vk::INITIAL_CACHED_VIEW_CAPACITY + 1,
+        "render-pass subresource views grow past the initial cache capacity");
+    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
+    assert(slot.views.len > vk::INITIAL_CACHED_VIEW_CAPACITY,
+        "render-pass cache storage grows with distinct live native views");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
     defer discard_test_executable(&cmd_executable)!!;
 }
 

@@ -35,7 +35,6 @@ fn void bindless_texture_write_then_sample() @test {
 
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, null)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
-    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
 
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
@@ -155,12 +154,86 @@ fn void bindless_texture_write_then_sample() @test {
     )!!;
     gpu::wait_completion(completion)!!;
 
-    gpu::invalidate_mapped_span(&device, output.span)!!;
-    gpu::GpuSpan out_span = output.span;
-    float* texels = (float*)test_span_mapping(&device, out_span).ptr;
-    for (uint y = 0; y < TEX_SIZE; y++) {
-        for (uint x = 0; x < TEX_SIZE; x++) {
-            float* texel = &texels[(y * TEX_SIZE + x) * 4];
+    assert_heap_pattern(&device, output.span, TEX_SIZE);
+
+    gpu::destroy_texture_view(&device, tex_index_view)!!;
+    const uint REUSED_TEX_SIZE = 8;
+    gpu::TextureDesc reused_desc = tex_desc;
+    reused_desc.width = REUSED_TEX_SIZE;
+    reused_desc.height = REUSED_TEX_SIZE;
+    reused_desc.debug_name = "heap_reused_target";
+    gpu::TextureHandle reused_texture = gpu::create_texture(&device, &reused_desc)!!;
+    defer gpu::destroy_texture(&device, reused_texture)!!;
+    gpu::TextureView reused_view = gpu::create_texture_view(&device, reused_texture, null)!!;
+    assert(reused_view.index == tex_index,
+        "completed texture-view release recycles the same raw shader index");
+    assert(reused_view.generation != tex_index_view.generation,
+        "recycled texture-view ownership advances its CPU generation");
+
+    write_root.texture_index = reused_view.index;
+    write_root.width = REUSED_TEX_SIZE;
+    write_root.height = REUSED_TEX_SIZE;
+    sample_root.texture_index = reused_view.index;
+    sample_root.width = REUSED_TEX_SIZE;
+    sample_root.height = REUSED_TEX_SIZE;
+    gpu::flush_mapped_span(&device, write_root_span)!!;
+    gpu::flush_mapped_span(&device, sample_root_span)!!;
+
+    gpu::CommandList reused_cmd = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!,
+    )!!;
+    defer discard_test_commands(&reused_cmd)!!;
+    gpu::TextureBarrier reused_to_general = gpu::texture_transition(
+        texture: reused_texture,
+        before:  gpu::TextureUse.UNDEFINED,
+        after:   gpu::TextureUse.STORAGE_COMPUTE,
+    )!!;
+    gpu::cmd_texture_barrier(&reused_cmd, &reused_to_general)!!;
+    const uint REUSED_GROUPS = (REUSED_TEX_SIZE + 7) / 8;
+    gpu::cmd_dispatch(
+        commands: &reused_cmd,
+        pipeline: write_pipe,
+        root:     test_span_address(&device, write_root_span),
+        groups:   { REUSED_GROUPS, REUSED_GROUPS, 1 },
+    )!!;
+    gpu::TextureBarrier reused_write_to_sample = gpu::texture_transition(
+        texture: reused_texture,
+        before:  gpu::TextureUse.STORAGE_COMPUTE,
+        after:   gpu::TextureUse.STORAGE_COMPUTE,
+    )!!;
+    gpu::cmd_texture_barrier(&reused_cmd, &reused_write_to_sample)!!;
+    gpu::cmd_dispatch(
+        commands: &reused_cmd,
+        pipeline: sample_pipe,
+        root:     test_span_address(&device, sample_root_span),
+        groups:   { REUSED_GROUPS, REUSED_GROUPS, 1 },
+    )!!;
+    gpu::cmd_buffer_barrier(&reused_cmd, &out_bar)!!;
+
+    gpu::ExecutableCommandList reused_executable = gpu::end_commands(&reused_cmd)!!;
+    defer discard_test_executable(&reused_executable)!!;
+    gpu::ExecutableCommandList[1] reused_lists = { reused_executable };
+    gpu::SubmitDesc reused_submit = { .command_lists = reused_lists[..] };
+    gpu::CompletionPoint reused_completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &reused_submit,
+    )!!;
+    gpu::wait_completion(reused_completion)!!;
+    assert_heap_pattern(&device, output.span, REUSED_TEX_SIZE);
+    gpu::destroy_texture_view(&device, reused_view)!!;
+}
+
+fn void assert_heap_pattern(
+    gpu::Device* device,
+    gpu::GpuSpan output,
+    uint size,
+) {
+    gpu::invalidate_mapped_span(device, output)!!;
+    float* texels = (float*)test_span_mapping(device, output).ptr;
+    for (uint y = 0; y < size; y++) {
+        for (uint x = 0; x < size; x++) {
+            float* texel = &texels[(y * size + x) * 4];
             // GPU UNORM8 dequantization can differ from (float)n/255 by an ulp; compare bytes.
             assert(quantize_unorm8(texel[0]) == x, "red channel matches the written pattern");
             assert(quantize_unorm8(texel[1]) == y, "green channel matches the written pattern");

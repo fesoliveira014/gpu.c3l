@@ -95,10 +95,12 @@ destroy every swapchain and child resource.
 
 ## Lock order
 
-Resource creation and destruction use `resource_mutex`; command-record
-allocation, submit claims, and reclamation use `command_mutex`. Submission
-releases `command_mutex` before locking the selected queue, so command-record
-and queue locks are not nested.
+Resource creation and destruction use `resource_mutex`; texture-view cache
+publication and render-pass resolution use `texture_view_cache_mutex`;
+command-record allocation, submit claims, and reclamation use `command_mutex`.
+When both resource and view-cache locks are needed, resource comes first.
+Submission releases `command_mutex` before locking the selected queue, so
+command-record and queue locks are not nested.
 
 ## Single-recorder texture discipline
 
