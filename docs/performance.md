@@ -78,8 +78,8 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 
 - Reuse caller-owned upload and destination allocations only after the covering
   completion point is complete; free them only after all covering work completes.
-- Batch descriptor writes. Batches of 16 reduced one-worker texture descriptor
-  cost by about 37%.
+- Batch descriptor writes. Batches of 16 reduced one-worker texture-view
+  publication cost by about 37%.
 - Reuse worker threads. Recording pools are cached per worker and only dirty pools reset.
 - Submit only useful work and retain the completion points that govern reuse.
 - Cache pipelines. A cached duplicate was about 108 times cheaper than a cold

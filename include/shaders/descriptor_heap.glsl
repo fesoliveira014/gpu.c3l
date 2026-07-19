@@ -5,9 +5,9 @@
 //   set 0, binding 1  storage images
 //   set 0, binding 2  samplers
 //
-// TextureIndex/SamplerIndex values are packed uints: slot in the low 16 bits,
-// generation in the high 16. Pass them straight from material records; the
-// helpers mask the slot. Both backend descriptor paths use identical GLSL.
+// TextureIndex/SamplerIndex values are generation-free uints. Zero is invalid;
+// live values encode the zero-based heap slot plus one. Both backend descriptor
+// paths use identical GLSL.
 //
 // Layout convention: a texture must sit in the layout its usage implies when
 // shaders access it — sampled-only textures in SHADER_READ, storage-capable
@@ -26,14 +26,14 @@ layout(set = 0, binding = 2) uniform sampler gpu_sampler_heap[];
 // SPIR-V samplers are untyped, so both views share binding 2.
 layout(set = 0, binding = 2) uniform samplerShadow gpu_shadow_sampler_heap[];
 
-#define GPU_HEAP_SLOT_MASK 0xFFFFu
+#define GPU_HEAP_SLOT(index) ((index) - 1u)
 
 // Explicit-LOD sampling: usable from compute, where derivatives don't exist.
 vec4 sample_texture_2d(uint tex_index, uint smp_index, vec2 uv) {
     return textureLod(
         sampler2D(
-            gpu_texture_heap[nonuniformEXT(tex_index & GPU_HEAP_SLOT_MASK)],
-            gpu_sampler_heap[nonuniformEXT(smp_index & GPU_HEAP_SLOT_MASK)]),
+            gpu_texture_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
+            gpu_sampler_heap[nonuniformEXT(GPU_HEAP_SLOT(smp_index))]),
         uv,
         0.0);
 }
@@ -42,8 +42,8 @@ vec4 sample_texture_2d(uint tex_index, uint smp_index, vec2 uv) {
 vec4 sample_texture_2d_implicit(uint tex_index, uint smp_index, vec2 uv) {
     return texture(
         sampler2D(
-            gpu_texture_heap[nonuniformEXT(tex_index & GPU_HEAP_SLOT_MASK)],
-            gpu_sampler_heap[nonuniformEXT(smp_index & GPU_HEAP_SLOT_MASK)]),
+            gpu_texture_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
+            gpu_sampler_heap[nonuniformEXT(GPU_HEAP_SLOT(smp_index))]),
         uv);
 }
 
@@ -52,18 +52,18 @@ vec4 sample_texture_2d_implicit(uint tex_index, uint smp_index, vec2 uv) {
 float sample_shadow_2d(uint tex_index, uint smp_index, vec3 coord) {
     return textureLod(
         sampler2DShadow(
-            gpu_texture_heap[nonuniformEXT(tex_index & GPU_HEAP_SLOT_MASK)],
-            gpu_shadow_sampler_heap[nonuniformEXT(smp_index & GPU_HEAP_SLOT_MASK)]),
+            gpu_texture_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
+            gpu_shadow_sampler_heap[nonuniformEXT(GPU_HEAP_SLOT(smp_index))]),
         coord,
         0.0);
 }
 
 vec4 load_storage_texture(uint tex_index, ivec2 coord) {
-    return imageLoad(gpu_storage_heap[nonuniformEXT(tex_index & GPU_HEAP_SLOT_MASK)], coord);
+    return imageLoad(gpu_storage_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))], coord);
 }
 
 void store_storage_texture(uint tex_index, ivec2 coord, vec4 value) {
-    imageStore(gpu_storage_heap[nonuniformEXT(tex_index & GPU_HEAP_SLOT_MASK)], coord, value);
+    imageStore(gpu_storage_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))], coord, value);
 }
 
 #endif

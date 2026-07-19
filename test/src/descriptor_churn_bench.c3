@@ -8,7 +8,7 @@ import std::time;
 import std::os::env;
 import std::core::mem::allocators;
 
-// Advisory, not gating: texture-descriptor singles vs batched (N=16) vs
+// Advisory, not gating: texture-view singles vs batched (N=16) vs
 // sampler intern-hit plus stable-publication lookups at 1/2/4 workers.
 // Reports ns/descriptor or ns/op, scaling vs one thread, and the
 // batch-vs-single ratio. DB-mode phases run only when
@@ -46,16 +46,16 @@ fn uint descriptors_per_op(BenchPhase phase) {
 }
 
 fn void run_texture_single_op(gpu::Device* device, gpu::TextureHandle texture) {
-    gpu::TextureIndex index = gpu::create_texture_descriptor(device, texture, null)!!;
-    gpu::destroy_texture_descriptor(device, index)!!;
+    gpu::TextureView view = gpu::create_texture_view(device, texture, null)!!;
+    gpu::destroy_texture_view(device, view)!!;
 }
 
 fn void run_texture_batched_op(gpu::Device* device, gpu::TextureHandle texture) {
-    gpu::TextureDescriptorDesc[BENCH_BATCH_SIZE] descs;
+    gpu::TextureViewCreateDesc[BENCH_BATCH_SIZE] descs;
     foreach (&desc : descs) *desc = { .texture = texture };
-    gpu::TextureIndex[BENCH_BATCH_SIZE] indices;
-    gpu::create_texture_descriptors(device, descs[..], indices[..])!!;
-    foreach (index : indices) gpu::destroy_texture_descriptor(device, index)!!;
+    gpu::TextureView[BENCH_BATCH_SIZE] views;
+    gpu::create_texture_views(device, descs[..], views[..])!!;
+    foreach (view : views) gpu::destroy_texture_view(device, view)!!;
 }
 
 fn void run_sampler_op(gpu::Device* device) {
@@ -83,8 +83,8 @@ fn int bench_worker(void* arg) {
     return 0;
 }
 
-<* Wall-clock work across `workers` concurrent workers. Texture phases create
-   and destroy descriptors; the sampler phase measures intern and stable
+<* Wall-clock work across `workers` concurrent workers. Texture phases publish
+   and destroy views; the sampler phase measures intern and stable
    publication lookup hits. *>
 fn double run_phase_worker_count(gpu::Device* device, BenchPhase phase, gpu::TextureHandle[] textures, uint workers) {
     BenchWorkerArgs[BENCH_MAX_WORKERS] args;

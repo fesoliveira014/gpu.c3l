@@ -205,6 +205,12 @@ Shader representation:
 uint
 ```
 
+Both types are generation-free 32-bit values. Zero is invalid; a live value is
+the zero-based heap slot plus one. CPU generation and device-owner metadata live
+only in the `TextureView` ownership token. Published sampler indices remain
+valid until device destruction. Shader helpers perform the minus-one decode;
+do not index a native descriptor array directly with the encoded value.
+
 Material example:
 
 ```text
@@ -219,8 +225,8 @@ Material
 Texture fetch example concept:
 
 ```text
-texture_heap[material.albedo_texture]
-sampler_heap[material.material_sampler]
+texture_heap[GPU_HEAP_SLOT(material.albedo_texture)]
+sampler_heap[GPU_HEAP_SLOT(material.material_sampler)]
 ```
 
 The exact shader spelling depends on descriptor buffer vs descriptor indexing implementation, but material records remain unchanged.

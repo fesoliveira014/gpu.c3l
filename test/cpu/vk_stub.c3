@@ -117,10 +117,7 @@ fn gpu::SamplerIndex? publish_stub_sampler(
         || state.samplers[sampler.index].sampler != sampler) {
         return gpu::INVALID_HANDLE~;
     }
-    return {
-        .slot       = (ushort)sampler.index,
-        .generation = 1,
-    };
+    return { .value = sampler.index + 1 };
 }
 
 fn uint stub_sampler_intern_attempt_count(gpu::Device* device) {

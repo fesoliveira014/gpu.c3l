@@ -311,6 +311,7 @@ contain an opaque device-and-kind owner identity plus a local slot and generatio
 ```text
 GpuAllocation
 TextureHandle
+TextureView
 Sampler
 PipelineHandle
 ShaderHandle
@@ -318,18 +319,20 @@ SwapchainHandle
 ```
 
 Owning tokens have zero-valued invalid constants such as
-`GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`, and `SAMPLER_INVALID`.
+`GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`, `TEXTURE_VIEW_INVALID`,
+`SAMPLER_INVALID`, and their peers.
 `token.is_valid()` checks the owner and generation; operations also validate
 the local slot generation. Public code should not inspect or construct the
 representation.
 
-Handles, `Sampler`, `Queue`, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
-command tokens, and synchronization values are runtime-only and scoped to their
-owning device. Do not persist, serialize, reconstruct, or pass them across
-device or process lifetimes. Compare `Queue` values as wholes and use
-`get_queue_info` for inspection; do not construct or mutate queue fields.
-`CommandList` embeds a copy of its owning `Device` token and does not borrow
-caller variable storage.
+Handles, `Sampler`, `TextureView`, `Queue`, `GpuSpan`, command tokens, and
+synchronization values are runtime-only owner-bearing tokens scoped to one
+device. `TextureIndex`, `SamplerIndex`, and `GpuAddress` are raw device-local
+shader values without owner or generation metadata. Do not persist, serialize,
+reconstruct, or pass either category across device or process lifetimes. Compare
+`Queue` values as wholes and use `get_queue_info` for inspection; do not
+construct or mutate queue fields. `CommandList` embeds a copy of its owning
+`Device` token and does not borrow caller variable storage.
 
 ### Allocations, spans, and GPU addresses
 
@@ -372,23 +375,23 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 
 Descriptor, configuration, barrier, viewport, scissor, and label pointers must
 be non-null unless the API explicitly documents null as a value (such as
-`TextureViewDesc* view`). Null required input faults `INVALID_ARGUMENT` before a
+`TextureViewDesc* desc`). Null required input faults `INVALID_ARGUMENT` before a
 backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors`; `intern_sampler` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `cmd_texture_barrier` | an acquired swapchain image is pending during resize, or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
-| `RESOURCE_IN_USE` | resource destruction, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, or incomplete submitted work explicitly references a resource; active pipeline creation uses a shader; a placed or dedicated texture depends on an allocation; a live descriptor owns a texture; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
+| `RESOURCE_IN_USE` | resource destruction, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, or incomplete submitted work explicitly references a resource; active pipeline creation uses a shader; a placed or dedicated texture depends on an allocation; a live texture view owns a texture; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
 | `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `intern_sampler`; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
-| `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `publish_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler publication leave existing entries untouched |
+| `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `publish_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler publication leave existing entries untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
@@ -511,7 +514,7 @@ D32_FLOAT
 D24_UNORM_S8_UINT   (current backend profile reports unsupported)
 ```
 
-### Texture descriptors
+### Textures and shader-visible views
 
 `TextureUsage` is likewise a bitstruct of bool flags.
 
@@ -591,7 +594,15 @@ TextureViewDesc
     uint base_layer
     uint layer_count
 
-TextureDescriptorDesc
+TextureIndex : uint
+    uint value : 0..31
+
+TextureView
+    ulong owner
+    TextureIndex index
+    uint generation
+
+TextureViewCreateDesc
     TextureHandle texture
     TextureViewDesc view
 ```
@@ -606,9 +617,9 @@ create_texture(Device* device, TextureDesc* desc) -> TextureHandle?
 create_placed_texture(Device* device, TextureDesc* desc, GpuAllocation allocation, usz offset) -> TextureHandle?
 create_dedicated_texture(Device* device, TextureDesc* desc, AllocationDesc* allocation_desc) -> DedicatedTexture?
 destroy_texture(Device* device, TextureHandle texture) -> void?
-create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) -> TextureIndex?
-destroy_texture_descriptor(Device* device, TextureIndex index) -> void?
-create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) -> void?
+create_texture_view(Device* device, TextureHandle texture, TextureViewDesc* desc) -> TextureView?
+destroy_texture_view(Device* device, TextureView view) -> void?
+create_texture_views(Device* device, TextureViewCreateDesc[] descs, TextureView[] out_views) -> void?
 ```
 
 `get_texture_format_support` reports library-creatable support, not every raw Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling query used by creation, but the bits are independent; use `supports_texture_desc` for a usage combination. The backend profile masks every dimension except 2D and every sample count except one. Per-format usages and linear filtering remain adapter-dependent; D24S8 reports empty support until the rendering path supports it end to end. `supports_texture_desc` returns false for an empty, unknown, or unavailable access set.
@@ -636,14 +647,26 @@ size must equal the queried requirement; its alignment and access must cover the
 texture. Destroy the texture before releasing the allocation. A premature
 release returns `RESOURCE_IN_USE` without consuming the allocation.
 
-`TextureHandle` owns the image. `TextureIndex` is a shader-visible descriptor
-heap entry. Destroyed texture indices are immediately reusable. The caller must
-first discard or complete every use and remove stale indices from GPU-visible
-data. Published sampler indices instead remain stable until device destruction.
+`TextureHandle` owns the image. `create_texture_view` returns a `TextureView`, an
+owner- and generation-checked CPU lifetime token whose `index` field is the raw
+32-bit value stored in shader data. Zero is invalid. Shader indices carry no
+generation bits; destroying a view immediately makes its index reusable. First
+discard or complete every use and remove the index from GPU-visible data.
+Passing a stale or foreign view to `destroy_texture_view` faults before heap
+mutation. Published sampler indices instead remain stable until device
+destruction.
 
-`create_texture_descriptors` batch-creates N descriptors under one lock hold, ending in one accumulated descriptor-set update in indexing mode (buffer mode writes per-item, already a mapped-memory store). `out_indices.len` must equal `descs.len` (`INVALID_ARGUMENT` otherwise); an empty `descs` is a no-op success. A zero-initialized `TextureDescriptorDesc.view` collapses to the default view, same as a null `view` to `create_texture_descriptor`.
+`create_texture_views` batch-publishes N views under one lock hold and ends in
+one accumulated descriptor-set update in indexing mode. Descriptor-buffer mode
+writes each mapped entry directly. `out_views.len` must equal `descs.len`
+(`INVALID_ARGUMENT` otherwise); an empty input is a no-op success. A
+zero-initialized `TextureViewCreateDesc.view` selects the default view, matching
+a null `desc` passed to `create_texture_view`.
 
-All-or-nothing: a fault leaves descriptor cells and generations, allocator/free-list state, texture view caches, Vulkan image-view ownership, and `out_indices` unchanged. Only a successful batch returns owned indices; release each with `destroy_texture_descriptor`.
+The batch is all-or-nothing: a fault leaves heap cells and generations,
+allocator/free-list state, cached native views, Vulkan image-view ownership, and
+`out_views` unchanged. Only a successful batch returns owner-bearing views;
+release each with `destroy_texture_view`.
 
 ## 7. Sampler API
 

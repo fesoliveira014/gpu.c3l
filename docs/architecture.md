@@ -15,6 +15,7 @@ The API centers on:
 GpuAllocation   -> owning generic GPU storage
 GpuSpan         -> non-owning identity and range
 GpuAddress      -> shader-visible data address
+TextureView     -> owner-bearing published-view lifetime
 TextureIndex    -> shader-visible texture heap index
 Sampler         -> immutable device-interned sampler identity
 SamplerIndex    -> shader-visible sampler heap index
@@ -199,15 +200,15 @@ changing the token or generation. Successful teardown increments the generation
 and invalidates the passed token. Device loss bypasses child and progress checks
 after pins retire; command tokens remain discardable after loss.
 
-Device-owned table handles and values, including `GpuAllocation` and `Sampler`,
-carry an opaque device-and-kind owner plus a local slot and generation. Backend
-tables reject foreign owners before validating liveness and generation.
-`GpuSpan` carries the same identity plus offset and size, but does not own
-storage. Command tokens derive ownership from their device. Shader-visible
-indices and GPU addresses remain caller-lifetime values rather than ownership
-tokens. Texture descriptor release accepts `TextureIndex` without device-owner
-metadata; `docs/limitations.md` describes the cross-device risk. `SamplerIndex`
-has no release operation and remains stable until its device is destroyed.
+Device-owned table handles and values, including `GpuAllocation`, `Sampler`, and
+`TextureView`, carry an opaque device-and-kind owner plus a local slot and
+generation. Backend tables reject foreign owners before validating liveness and
+generation. `GpuSpan` carries the same identity plus offset and size, but does
+not own storage. Command tokens derive ownership from their device.
+Shader-visible `TextureIndex`, `SamplerIndex`, and `GpuAddress` values contain no
+owner or generation metadata. They are direct device-local values whose lifetime
+the caller must preserve. `TextureView` owns a recyclable texture index;
+published sampler indices remain stable until device destruction.
 
 ### Queues
 
@@ -313,22 +314,27 @@ explicit allocations. Requirements are immutable device-owned values.
 Placement validates memory class, compatibility, size, alignment, access, and
 overlap before native creation. Texture destruction never releases caller-owned storage.
 
-### Texture and sampler descriptors
+### Texture and sampler heap publication
 
-`TextureHandle` owns the image. `TextureIndex` is the shader-visible descriptor
-heap index. `Sampler` is an immutable, owner-bearing identity interned from
-semantic state. `SamplerIndex` is its optional strict shader-heap publication.
+`TextureHandle` owns the image. `TextureView` is the owner- and
+generation-checked CPU token for one published image view; its `TextureIndex`
+field is the raw 32-bit shader-visible heap value. `Sampler` is an immutable,
+owner-bearing identity interned from semantic state. `SamplerIndex` is its
+stable strict shader-heap publication.
 
 This separation matters:
 
 ```text
-TextureHandle -> lifetime and commands
-TextureIndex  -> shader-visible sampled/storage reference
+TextureHandle -> image lifetime and commands
+TextureView   -> published-view lifetime and CPU validation
+TextureIndex  -> generation-free sampled/storage shader value
 Sampler       -> device-lifetime immutable identity
-SamplerIndex  -> stable strict shader-visible reference
+SamplerIndex  -> generation-free, device-lifetime shader value
 ```
 
-Destroying a texture with live descriptors returns `RESOURCE_IN_USE`.
+Destroying a texture with live views returns `RESOURCE_IN_USE`. Destroying a
+view immediately recycles its index, so every GPU reference must already be
+complete and stale shader data must be removed.
 
 ### Pipelines
 
@@ -499,11 +505,12 @@ Render pass boundaries do not imply shader-read or transfer-read readiness.
 
 ## 9. Descriptor heap model
 
-The public API exposes descriptor allocation and updates:
+The public API exposes device-wide view and sampler publication:
 
 ```text
-create_texture_descriptor(device, texture, view_desc) -> TextureIndex?
-destroy_texture_descriptor(device, index) -> void?
+create_texture_view(device, texture, view_desc) -> TextureView?
+destroy_texture_view(device, view) -> void?
+create_texture_views(device, descs, out_views) -> void?
 intern_sampler(device, desc) -> Sampler?
 publish_sampler(device, sampler) -> SamplerIndex?
 ```

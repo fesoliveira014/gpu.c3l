@@ -6,11 +6,10 @@ page doesn't explain it, that's a bug in this page — file an issue.
 
 ## 1. By design
 
-- **Texture indices still double as release tokens.** `TextureIndex` has no
-  device owner metadata, so passing one to another device can release a
-  coincident slot. `SamplerIndex` has no release operation, but it and
-  `GpuAddress` are still device-local and must not be persisted or transferred
-  between devices.
+- **Shader-visible indices are not ownership tokens.** `TextureIndex`,
+  `SamplerIndex`, and `GpuAddress` contain no device owner or generation
+  metadata. Retain the owner-bearing `TextureView` for each recyclable texture
+  index, and never persist or transfer raw shader values between devices.
 - **Debug callbacks are borrowed, synchronous, and non-reentrant.** Public and
   backend messages run before the originating call returns; Vulkan may invoke
   the callback concurrently on arbitrary threads. Payload pointers are valid
@@ -66,7 +65,7 @@ exists (else the limit is compile-time).
 
 | Limit | Value | Knob | Fault when exceeded |
 |---|---|---|---|
-| Texture descriptors in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Texture views in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Sampler descriptors | 256 default, 65 536 max (`DEFAULT_SAMPLER_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Interned sampler identities | selected-device `maxSamplerAllocationCount`, capped at 65 536 | — | `SLOT_TABLE_FULL` |
 | Sampler mip LOD bias | Absolute value up to selected-device `maxSamplerLodBias`, reported by `DeviceCaps.max_sampler_lod_bias` | — | `INVALID_ARGUMENT` |
@@ -91,10 +90,10 @@ Two sizing rules that bite:
   per-type, per-stage aggregate, or all-pools update-after-bind limit is
   exceeded.
 
-- **Shader-visible indices have caller-managed lifetime.** Texture descriptor
-  slots recycle immediately. Wait or discard every use before releasing one,
-  and do not leave stale indices in GPU-visible data. Published sampler indices
-  remain stable until device destruction.
+- **Shader-visible indices have caller-managed lifetime.** Destroying a
+  `TextureView` recycles its raw index immediately. Wait or discard every use
+  before releasing the view, and do not leave stale indices in GPU-visible
+  data. Published sampler indices remain stable until device destruction.
 - **Transient data is caller-owned.** Applications choose allocation reuse and
   concurrency policy. Flush CPU writes before submission, retain the covering
   completion point, and wait or poll before rewriting or freeing storage.

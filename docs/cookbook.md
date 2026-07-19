@@ -62,13 +62,16 @@ Running example: `textured_cube` (single texture), `pbr_materials`
 Goal: shader picks its texture by an integer you stored anywhere.
 
 ```c3
-gpu::TextureIndex idx = gpu::create_texture_descriptor(&device, tex, null)!;
-root.albedo_tex = idx;              // plain uint field in your root/table
+gpu::TextureView view = gpu::create_texture_view(&device, tex, null)!;
+root.albedo_tex = view.index;       // raw uint field in your root/table
 ```
 
 ```glsl
 vec4 c = sample_texture_2d(mat.albedo_tex, root.heap_sampler, uv);
 ```
+
+Retain `view` until every command using `view.index` has completed and no
+GPU-visible data contains it, then call `destroy_texture_view`.
 
 Running example: `bindless_texture_compute` (compute),
 `pbr_materials` (per-material indices in a table).

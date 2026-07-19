@@ -15,14 +15,14 @@ fn void descriptor_capacity_resolution() @test {
     assert(explicit_capacity == 16, "explicit capacity is honored");
 
     uint at_ceiling = resolve_descriptor_capacity(gpu::MAX_DESCRIPTOR_SLOTS, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
-    assert(at_ceiling == gpu::MAX_DESCRIPTOR_SLOTS, "the packed-slot ceiling itself is allowed");
+    assert(at_ceiling == gpu::MAX_DESCRIPTOR_SLOTS, "the descriptor heap capacity limit itself is allowed");
 
     fault ceiling_fault = @catch(resolve_descriptor_capacity(
         gpu::MAX_DESCRIPTOR_SLOTS + 1,
         gpu::DEFAULT_TEXTURE_DESCRIPTORS,
     ));
     assert(ceiling_fault == gpu::INVALID_ARGUMENT,
-        "capacity above the packed-slot ceiling faults INVALID_ARGUMENT");
+        "capacity above the descriptor heap limit faults INVALID_ARGUMENT");
 }
 
 fn void strict_indexing_heap_capacity_support_matches_creation_limits() @test {

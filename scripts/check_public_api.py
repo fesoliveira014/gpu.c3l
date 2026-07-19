@@ -17,6 +17,16 @@ FORBIDDEN_TEXT = {
     "bufferhandle": "retired BufferHandle",
     "bufferdesc": "retired BufferDesc",
     "bufferusage": "retired BufferUsage",
+    "texturedescriptordesc": "retired TextureDescriptorDesc",
+    '"name":"create_texture_descriptor"': (
+        "retired texture descriptor lifecycle"
+    ),
+    '"name":"destroy_texture_descriptor"': (
+        "retired texture descriptor lifecycle"
+    ),
+    '"name":"create_texture_descriptors"': (
+        "retired texture descriptor lifecycle"
+    ),
     "frametoken": "retired FrameToken",
     "memorykind": "retired MemoryKind",
     "begin_frame": "retired begin_frame",
@@ -104,6 +114,10 @@ RETIRED_SOURCE_SYMBOLS = (
     "BufferHandle",
     "BufferDesc",
     "BufferUsage",
+    "TextureDescriptorDesc",
+    "create_texture_descriptor(",
+    "destroy_texture_descriptor(",
+    "create_texture_descriptors(",
     "create_buffer(",
     "destroy_buffer(",
     "create_sampler(",
@@ -264,6 +278,18 @@ def validate_document(document: dict) -> list[str]:
             ("Device*", "Sampler"),
             "SamplerIndex?",
         ),
+        "create_texture_view": (
+            ("Device*", "TextureHandle", "TextureViewDesc*"),
+            "TextureView?",
+        ),
+        "destroy_texture_view": (
+            ("Device*", "TextureView"),
+            "void?",
+        ),
+        "create_texture_views": (
+            ("Device*", "TextureViewCreateDesc[]", "TextureView[]"),
+            "void?",
+        ),
         "get_texture_requirements": (
             ("Device*", "TextureDesc*"),
             "TextureRequirements?",
@@ -388,6 +414,9 @@ def validate_document(document: dict) -> list[str]:
     required_parameter_names = {
         "intern_sampler": ("device", "desc"),
         "publish_sampler": ("device", "sampler"),
+        "create_texture_view": ("device", "texture", "desc"),
+        "destroy_texture_view": ("device", "view"),
+        "create_texture_views": ("device", "descs", "out_views"),
         "get_texture_requirements": ("device", "desc"),
         "create_placed_texture": ("device", "desc", "allocation", "offset"),
         "create_dedicated_texture": (
@@ -469,6 +498,10 @@ def validate_document(document: dict) -> list[str]:
     for name, kind in (
         ("GpuAllocation", "struct"),
         ("Sampler", "struct"),
+        ("TextureView", "struct"),
+        ("TextureIndex", "bitstruct"),
+        ("SamplerIndex", "bitstruct"),
+        ("TextureViewCreateDesc", "struct"),
         ("GpuSpan", "struct"),
         ("MemoryClass", "enum"),
         ("MemoryStats", "struct"),
@@ -519,6 +552,21 @@ def validate_document(document: dict) -> list[str]:
                 ("generation", "uint"),
             ),
             "Sampler must match the exact identity schema",
+        ),
+        "TextureView": (
+            (
+                ("owner", "ulong"),
+                ("index", "TextureIndex"),
+                ("generation", "uint"),
+            ),
+            "TextureView must match the exact identity schema",
+        ),
+        "TextureViewCreateDesc": (
+            (
+                ("texture", "TextureHandle"),
+                ("view", "TextureViewDesc"),
+            ),
+            "TextureViewCreateDesc must match the exact public schema",
         ),
         "AllocationDesc": (
             (
@@ -635,6 +683,22 @@ def validate_document(document: dict) -> list[str]:
     for name, (expected_schema, failure) in public_type_schemas.items():
         if member_schema(types.get(name)) != expected_schema:
             failures.append(failure)
+
+    for name in ("TextureIndex", "SamplerIndex"):
+        definition = types.get(name, {})
+        members = definition.get("members", [])
+        raw_index_matches = (
+            definition.get("kind") == "bitstruct"
+            and definition.get("base_type", {}).get("name") == "uint"
+            and len(members) == 1
+            and members[0].get("name") == "value"
+            and members[0].get("type", {}).get("name") == "uint"
+            and members[0].get("bit_range") == [0, 31]
+        )
+        if not raw_index_matches:
+            failures.append(
+                f"{name} must be a generation-free 32-bit shader index"
+            )
 
     present = functions.get("present")
     if present is None:

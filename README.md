@@ -11,8 +11,9 @@ two ideas:
   through 64-bit addresses; each dispatch/draw pushes one root address and the
   shader follows pointers from that struct. No binding numbers, set layouts,
   or descriptor churn for generic data.
-- **One bindless heap for textures and samplers.** `TextureIndex` and
-  `SamplerIndex` are shader-visible slots for root data. Sampler state is
+- **One bindless heap for textures and samplers.** An owner-bearing
+  `TextureView` exposes the raw `TextureIndex` stored in root data;
+  `SamplerIndex` is likewise a raw shader-visible value. Sampler state is
   interned as a device-owned `Sampler` identity, then published once into the
   strict heap.
 

@@ -555,8 +555,8 @@ fn void leak_reporters_count_leaks() @test {
     gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
 
-
-    gpu::TextureIndex texture_index = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView texture_index_view = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::TextureIndex texture_index = texture_index_view.index;
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,
@@ -566,6 +566,8 @@ fn void leak_reporters_count_leaks() @test {
     };
     gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
     gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
+    assert(texture_index.is_valid() && sampler_index.is_valid(),
+        "published shader indices are valid");
 
     LeakCapture capture = {
         .metadata_valid        = true,
@@ -607,7 +609,7 @@ fn void leak_reporters_count_leaks() @test {
     vk::TextureSlot* tex_slot = &state.textures.slots[texture.index].value;
     assert(tex_slot.allocation_size > 0, "texture leak line carries the allocation size");
 
-    gpu::destroy_texture_descriptor(&device, texture_index)!!;
+    gpu::destroy_texture_view(&device, texture_index_view)!!;
     gpu::destroy_pipeline(&device, first_alias)!!;
     gpu::destroy_pipeline(&device, second_alias)!!;
     gpu::destroy_shader(&device, shader)!!;

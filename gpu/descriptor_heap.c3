@@ -2,49 +2,55 @@ module gpu;
 
 const uint DEFAULT_TEXTURE_DESCRIPTORS = 4096;
 const uint DEFAULT_SAMPLER_DESCRIPTORS = 256;
-// Ceiling set by the 16-bit slot field in TextureIndex/SamplerIndex.
 const uint MAX_DESCRIPTOR_SLOTS = 65_536;
 
-<* Register a texture in the shader-visible heap; the texture must carry
-   sampled or storage usage (INVALID_ARGUMENT otherwise). The texture stays
-   owned by its TextureHandle. Ownership: release with
-   destroy_texture_descriptor. *>
-fn TextureIndex? create_texture_descriptor(Device* device, TextureHandle texture, TextureViewDesc* view) {
+<* Publish one texture view in the strict shader-visible heap. The texture must
+   carry sampled or storage usage. The returned owner-bearing view contains the
+   raw generation-free index stored in shader data. *>
+fn TextureView? create_texture_view(
+    Device* device,
+    TextureHandle texture,
+    TextureViewDesc* desc,
+) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     validate_resource_owner(&operation, texture.owner, ResourceOwnerKind.TEXTURE)!;
-    TextureIndex index = operation.vtable.create_texture_descriptor(device, texture, view)!;
+    TextureView view = operation.vtable.create_texture_view(device, texture, desc)!;
     retain_device_children(&operation);
-    return index;
+    return view;
 }
 
-<* Release ownership and recycle the slot immediately. *>
-fn void? destroy_texture_descriptor(Device* device, TextureIndex index) {
+<* Release one texture view and recycle its shader-visible index immediately.
+   GPU references to the index must already be complete. *>
+fn void? destroy_texture_view(Device* device, TextureView view) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    operation.vtable.destroy_texture_descriptor(device, index)!;
+    validate_resource_owner(&operation, view.owner, ResourceOwnerKind.TEXTURE_VIEW)!;
+    operation.vtable.destroy_texture_view(device, view)!;
     release_device_children(&operation);
 }
 
-<* One create_texture_descriptors input; a zero-initialized view is the
-   default view (same collapse as create_texture_descriptor's null view). *>
-struct TextureDescriptorDesc {
+<* One create_texture_views input. A zero-initialized view description selects
+   the default view, matching a null description passed to create_texture_view. *>
+struct TextureViewCreateDesc {
     TextureHandle   texture;
     TextureViewDesc view;
 }
 
-<* Batch-create texture descriptors; out_indices.len must equal descs.len
-   (INVALID_ARGUMENT otherwise), empty descs is a no-op. All-or-nothing: a
-   fault leaves descriptor allocation, texture view caches, Vulkan view
-   ownership, and out_indices unchanged. Ownership on success: release each
-   index with destroy_texture_descriptor. *>
-fn void? create_texture_descriptors(Device* device, TextureDescriptorDesc[] descs, TextureIndex[] out_indices) {
+<* Batch-publish texture views. `out_views.len` must equal `descs.len`; an empty
+   batch succeeds. A fault leaves heap allocation, generations, cached native
+   views, and outputs unchanged. *>
+fn void? create_texture_views(
+    Device* device,
+    TextureViewCreateDesc[] descs,
+    TextureView[] out_views,
+) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     foreach (&desc : descs) {
         validate_resource_owner(&operation, desc.texture.owner, ResourceOwnerKind.TEXTURE)!;
     }
-    operation.vtable.create_texture_descriptors(device, descs, out_indices)!;
+    operation.vtable.create_texture_views(device, descs, out_views)!;
     retain_device_children(&operation, (ulong)descs.len);
 }
 

@@ -43,6 +43,30 @@
         "destroy_sampler.c3"
       ]
     },
+    "create_texture_descriptor": {
+      "type": "object-files",
+      "sources": [
+        "create_texture_descriptor.c3"
+      ]
+    },
+    "destroy_texture_descriptor": {
+      "type": "object-files",
+      "sources": [
+        "destroy_texture_descriptor.c3"
+      ]
+    },
+    "create_texture_descriptors": {
+      "type": "object-files",
+      "sources": [
+        "create_texture_descriptors.c3"
+      ]
+    },
+    "texture_descriptor_desc": {
+      "type": "object-files",
+      "sources": [
+        "texture_descriptor_desc.c3"
+      ]
+    },
     "buffer_handle": {
       "type": "object-files",
       "sources": [

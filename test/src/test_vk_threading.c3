@@ -63,6 +63,8 @@ fn int creation_storm_worker(void* arg) {
             .usage     = { .sampled, .transfer_dst },
         };
         gpu::TextureHandle texture = gpu::create_texture(args.device, &tex_desc)!!;
+        gpu::TextureView view =
+            gpu::create_texture_view(args.device, texture, null)!!;
 
         gpu::ShaderDesc shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
         gpu::ShaderHandle shader = gpu::create_shader(args.device, &shader_desc)!!;
@@ -77,10 +79,13 @@ fn int creation_storm_worker(void* arg) {
         gpu::Sampler sampler_identity = gpu::intern_sampler(args.device, &sampler_desc)!!;
         gpu::SamplerIndex sampler = gpu::publish_sampler(args.device, sampler_identity)!!;
 
-        if (!buffer.allocation.is_valid() || !texture.is_valid() || !shader.is_valid() || !sampler.is_valid()) {
+        if (!buffer.allocation.is_valid() || !texture.is_valid()
+            || !view.is_valid() || !view.index.is_valid()
+            || !shader.is_valid() || !sampler.is_valid()) {
             args.failed = true;
         }
         gpu::destroy_shader(args.device, shader)!!;
+        gpu::destroy_texture_view(args.device, view)!!;
         gpu::destroy_texture(args.device, texture)!!;
         free_owned_span(args.device, &buffer)!!;
     }
@@ -100,6 +105,15 @@ fn void concurrent_creation_storm() @test {
     }
     foreach (&t : threads) t.join()!!;
     foreach (&a : args) assert(!a.failed, "every storm create yielded a valid handle");
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(state.strict_heap.descriptors.texture_free_count
+        == state.strict_heap.descriptors.texture_next_new,
+        "concurrent texture-view publication and release returns every slot");
+    for (uint i = 0; i < state.strict_heap.descriptors.texture_next_new; i++) {
+        assert(!state.strict_heap.descriptors.texture_cells[i].used,
+            "no texture-view cell remains live after concurrent release");
+    }
 }
 
 struct SamplerRaceArgs {

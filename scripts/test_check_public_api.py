@@ -112,6 +112,26 @@ def valid_document() -> dict:
                         ("sampler", "Sampler"),
                     ),
                     api_function(
+                        "create_texture_view",
+                        "TextureView?",
+                        ("device", "Device*"),
+                        ("texture", "TextureHandle"),
+                        ("desc", "TextureViewDesc*"),
+                    ),
+                    api_function(
+                        "destroy_texture_view",
+                        "void?",
+                        ("device", "Device*"),
+                        ("view", "TextureView"),
+                    ),
+                    api_function(
+                        "create_texture_views",
+                        "void?",
+                        ("device", "Device*"),
+                        ("descs", "TextureViewCreateDesc[]"),
+                        ("out_views", "TextureView[]"),
+                    ),
+                    api_function(
                         "get_texture_requirements",
                         "TextureRequirements?",
                         ("device", "Device*"),
@@ -301,6 +321,52 @@ def valid_document() -> dict:
                             {"name": "owner", "type": {"name": "ulong"}},
                             {"name": "index", "type": {"name": "uint"}},
                             {"name": "generation", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "TextureIndex",
+                        "kind": "bitstruct",
+                        "base_type": {"name": "uint"},
+                        "members": [{
+                            "name": "value",
+                            "type": {"name": "uint"},
+                            "bit_range": [0, 31],
+                        }],
+                    },
+                    {
+                        "name": "SamplerIndex",
+                        "kind": "bitstruct",
+                        "base_type": {"name": "uint"},
+                        "members": [{
+                            "name": "value",
+                            "type": {"name": "uint"},
+                            "bit_range": [0, 31],
+                        }],
+                    },
+                    {
+                        "name": "TextureView",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "owner", "type": {"name": "ulong"}},
+                            {
+                                "name": "index",
+                                "type": {"name": "TextureIndex"},
+                            },
+                            {"name": "generation", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "TextureViewCreateDesc",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "texture",
+                                "type": {"name": "TextureHandle"},
+                            },
+                            {
+                                "name": "view",
+                                "type": {"name": "TextureViewDesc"},
+                            },
                         ],
                     },
                     {
@@ -996,6 +1062,37 @@ class PublicApiCheckTests(unittest.TestCase):
                     check_public_api.validate_document(document),
                 )
 
+    def test_rejects_retired_texture_descriptor_surface(self) -> None:
+        for name, failure in (
+            ("TextureDescriptorDesc", "retired TextureDescriptorDesc"),
+            (
+                "create_texture_descriptor",
+                "retired texture descriptor lifecycle",
+            ),
+            (
+                "destroy_texture_descriptor",
+                "retired texture descriptor lifecycle",
+            ),
+            (
+                "create_texture_descriptors",
+                "retired texture descriptor lifecycle",
+            ),
+        ):
+            with self.subTest(name=name):
+                document = valid_document()
+                section = (
+                    "types" if name == "TextureDescriptorDesc"
+                    else "functions"
+                )
+                document["modules"]["gpu"][section].append({
+                    "name": name,
+                    "kind": "struct",
+                })
+                self.assertIn(
+                    failure,
+                    check_public_api.validate_document(document),
+                )
+
     def test_rejects_public_buffer_lifecycle(self) -> None:
         for name in (
             "create_buffer",
@@ -1237,6 +1334,56 @@ class PublicApiCheckTests(unittest.TestCase):
         failures = check_public_api.validate_document(document)
         self.assertIn("intern_sampler has the wrong return type", failures)
         self.assertIn("publish_sampler has the wrong parameters", failures)
+
+    def test_rejects_wrong_texture_view_operation_contracts(self) -> None:
+        document = valid_document()
+        functions = document["modules"]["gpu"]["functions"]
+        create = next(entry for entry in functions
+            if entry["name"] == "create_texture_view")
+        destroy = next(entry for entry in functions
+            if entry["name"] == "destroy_texture_view")
+        batch = next(entry for entry in functions
+            if entry["name"] == "create_texture_views")
+        create["return_type"]["name"] = "TextureIndex?"
+        destroy["members"][1]["type"]["name"] = "TextureIndex"
+        batch["members"][2]["type"]["name"] = "TextureIndex[]"
+        failures = check_public_api.validate_document(document)
+        self.assertIn("create_texture_view has the wrong return type", failures)
+        self.assertIn("destroy_texture_view has the wrong parameters", failures)
+        self.assertIn("create_texture_views has the wrong parameters", failures)
+
+    def test_rejects_wrong_texture_view_identity_schema(self) -> None:
+        document = valid_document()
+        view = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "TextureView"
+        )
+        view["members"][1]["type"]["name"] = "uint"
+        self.assertIn(
+            "TextureView must match the exact identity schema",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_generation_packed_shader_indices(self) -> None:
+        document = valid_document()
+        types = document["modules"]["gpu"]["types"]
+        texture_index = next(
+            entry for entry in types if entry["name"] == "TextureIndex"
+        )
+        sampler_index = next(
+            entry for entry in types if entry["name"] == "SamplerIndex"
+        )
+        texture_index["members"][0]["bit_range"] = [0, 15]
+        sampler_index["base_type"]["name"] = "ulong"
+        failures = check_public_api.validate_document(document)
+        self.assertIn(
+            "TextureIndex must be a generation-free 32-bit shader index",
+            failures,
+        )
+        self.assertIn(
+            "SamplerIndex must be a generation-free 32-bit shader index",
+            failures,
+        )
 
 if __name__ == "__main__":
     unittest.main()
