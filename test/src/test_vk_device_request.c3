@@ -141,6 +141,58 @@ fn void strict_heap_state_selects_private_implementation() @test {
     );
 }
 
+fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
+    gpu::DeviceDesc desc = {
+        .texture_heap_capacity = 7,
+        .sampler_heap_capacity = 9,
+    };
+    gpu::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
+
+    gpu::vk::VkStrictHeapState automatic =
+        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::vk::select_strict_heap_implementation_for_creation(
+        state:              &automatic,
+        indexing_supported: true,
+        buffer_supported:   true,
+        indexing_limits:    limits,
+        probe:              null,
+    )!!;
+    assert(
+        automatic.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+        "ordinary creation keeps automatic indexing preference"
+    );
+
+    gpu::vk::DeviceCreationProbe probe = {
+        .descriptor_buffer_override = true,
+    };
+    gpu::vk::VkStrictHeapState overridden =
+        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::vk::select_strict_heap_implementation_for_creation(
+        state:              &overridden,
+        indexing_supported: true,
+        buffer_supported:   true,
+        indexing_limits:    limits,
+        probe:              &probe,
+    )!!;
+    assert(
+        overridden.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+        "the private creation probe can exercise descriptor-buffer runtime paths"
+    );
+
+    gpu::vk::VkStrictHeapState unsupported =
+        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    assert(
+        @catch(gpu::vk::select_strict_heap_implementation_for_creation(
+            state:              &unsupported,
+            indexing_supported: true,
+            buffer_supported:   false,
+            indexing_limits:    limits,
+            probe:              &probe,
+        )) == gpu::UNSUPPORTED_FEATURE,
+        "the private override never bypasses descriptor-buffer feature support"
+    );
+}
+
 fn void adapter_request_creation_reuses_runtime_discovery() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,

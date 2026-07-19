@@ -5,9 +5,8 @@ import gpu::vk @public;
 import std::os::env;
 import std::io;
 
-// Descriptor-buffer coverage runs only when automatic selection chooses it.
-// Shader-access end-to-end checks are gated by GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1:
-// Mesa 25.0.7 lavapipe miscompiles descriptor-buffer image access.
+// A private creation probe forces descriptor-buffer coverage without exposing
+// backend selection. Shader-access E2E stays gated for affected Mesa versions.
 
 const char[*] DB_WRITE_SPIRV  = $embed("shaders/heap_write.comp.spv");
 const char[*] DB_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");
@@ -21,6 +20,32 @@ fn bool db_e2e_enabled() {
     return false;
 }
 
+fn bool descriptor_buffer_creation_is_unavailable(fault err) {
+    return err == gpu::UNSUPPORTED_FEATURE;
+}
+
+fn void descriptor_buffer_creation_skip_policy_is_exact() @test {
+    assert(
+        descriptor_buffer_creation_is_unavailable(gpu::UNSUPPORTED_FEATURE),
+        "unavailable descriptor-buffer support may skip"
+    );
+    assert(
+        !descriptor_buffer_creation_is_unavailable(gpu::BACKEND_ERROR),
+        "backend failure must fail descriptor-buffer coverage"
+    );
+    assert(
+        !descriptor_buffer_creation_is_unavailable(gpu::INVALID_ARGUMENT),
+        "malformed creation must fail descriptor-buffer coverage"
+    );
+}
+
+fn gpu::Device? create_descriptor_buffer_test_device(gpu::DeviceDesc* desc) {
+    gpu::vk::DeviceCreationProbe probe = {
+        .descriptor_buffer_override = true,
+    };
+    return gpu::vk::create_vk_device_from_desc_with_probe(desc, &probe);
+}
+
 fn void descriptor_buffer_device_and_heap() @test {
     gpu::DeviceDesc desc = {
         .backend               = gpu::BackendKind.VULKAN,
@@ -30,20 +55,24 @@ fn void descriptor_buffer_device_and_heap() @test {
         .application_name      = "gpu_descriptor_buffer_test",
     };
 
-    gpu::Device device;
-    if (try dev = gpu::create_device_from_desc(&desc)) {
-        device = dev;
-    } else {
+    gpu::Device? maybe_device = create_descriptor_buffer_test_device(&desc);
+    if (catch err = maybe_device) {
+        assert(
+            descriptor_buffer_creation_is_unavailable(err),
+            "descriptor-buffer device/heap creation failed unexpectedly: %s",
+            err
+        );
         io::eprintfn("descriptor_buffer_device_and_heap: no capable adapter, skipping");
         return;
     }
+    gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
         (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
-    if (!gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
-        io::eprintfn("descriptor_buffer_device_and_heap: another private implementation was selected, skipping");
-        return;
-    }
+    assert(
+        gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
+        "the private creation probe selects descriptor buffers"
+    );
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
@@ -88,10 +117,13 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .enable_validation    = true,
         .application_name     = "gpu_descriptor_buffer_compute_to_graphics",
     };
-    gpu::Device? maybe_device = gpu::create_device_from_desc(&device_desc);
+    gpu::Device? maybe_device = create_descriptor_buffer_test_device(&device_desc);
     if (catch err = maybe_device) {
-        assert(err == gpu::UNSUPPORTED_FEATURE,
-            "strict device creation failed unexpectedly: %s", err);
+        assert(
+            descriptor_buffer_creation_is_unavailable(err),
+            "strict device creation failed unexpectedly: %s",
+            err
+        );
         io::eprintfn("descriptor_buffer_compute_to_graphics: no capable adapter, skipping");
         return;
     }
@@ -99,10 +131,10 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
         (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
-    if (!gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
-        io::eprintfn("descriptor_buffer_compute_to_graphics: another private implementation was selected, skipping");
-        return;
-    }
+    assert(
+        gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
+        "the private creation probe selects descriptor buffers"
+    );
     io::eprintfn(
         "descriptor_buffer_compute_to_graphics: graphics_family=%d compute_family=%d topology=%s",
         state.graphics_family,
@@ -405,20 +437,24 @@ fn void descriptor_buffer_write_then_sample() @test {
         .enable_validation    = true,
         .application_name     = "gpu_descriptor_buffer_e2e",
     };
-    gpu::Device device;
-    if (try dev = gpu::create_device_from_desc(&device_desc)) {
-        device = dev;
-    } else {
+    gpu::Device? maybe_device = create_descriptor_buffer_test_device(&device_desc);
+    if (catch err = maybe_device) {
+        assert(
+            descriptor_buffer_creation_is_unavailable(err),
+            "descriptor-buffer shader E2E creation failed unexpectedly: %s",
+            err
+        );
         io::eprintfn("descriptor_buffer_write_then_sample: no capable adapter, skipping");
         return;
     }
+    gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
         (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
-    if (!gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
-        io::eprintfn("descriptor_buffer_write_then_sample: another private implementation was selected, skipping");
-        return;
-    }
+    assert(
+        gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
+        "the private creation probe selects descriptor buffers"
+    );
 
     gpu::TextureDesc tex_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
