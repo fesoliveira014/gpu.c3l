@@ -1156,14 +1156,11 @@ fn void native_mapped_visibility_round_trip() @test {
         .dst = copied,
     };
     gpu::cmd_copy_buffer(&commands, &copy)!!;
-    gpu::BufferBarrier host_read = {
-        .span          = copied,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&commands, &host_read)!!;
+    gpu::cmd_barrier(&commands, &host_read)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer (void)discard_test_executable(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };
@@ -1245,36 +1242,27 @@ fn void native_allocation_spans_support_fill_upload_and_readback() @test {
         .dst = span,
     };
     gpu::cmd_copy_buffer(&commands, &upload_copy)!!;
-    gpu::BufferBarrier before_fill = {
-        .span          = fill_span,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
+    gpu::Barrier before_fill = {
+        .before = { .transfer = true },
+        .after = { .transfer = true },
     };
-    gpu::cmd_buffer_barrier(&commands, &before_fill)!!;
+    gpu::cmd_barrier(&commands, &before_fill)!!;
     gpu::cmd_fill_buffer(&commands, fill_span, 0x5A5A_5A5A)!!;
-    gpu::BufferBarrier before_readback = {
-        .span          = span,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
+    gpu::Barrier before_readback = {
+        .before = { .transfer = true },
+        .after = { .transfer = true },
     };
-    gpu::cmd_buffer_barrier(&commands, &before_readback)!!;
+    gpu::cmd_barrier(&commands, &before_readback)!!;
     gpu::BufferCopyDesc readback_copy = {
         .src = span,
         .dst = readback_span,
     };
     gpu::cmd_copy_buffer(&commands, &readback_copy)!!;
-    gpu::BufferBarrier host_read = {
-        .span          = readback_span,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&commands, &host_read)!!;
+    gpu::cmd_barrier(&commands, &host_read)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer (void)discard_test_executable(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };

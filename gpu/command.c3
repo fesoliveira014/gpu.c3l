@@ -323,22 +323,13 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
     return vtable.cmd_copy_texture_to_buffer(commands, desc);
 }
 
-<* Record an execution/memory barrier over one GPU span. *>
-fn void? cmd_buffer_barrier(CommandList* commands, BufferBarrier* barrier) {
+<* Record a global semantic execution and memory barrier. *>
+fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     if (barrier == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_buffer_barrier(commands, barrier);
-}
-
-<* Record a device-wide execution/memory barrier with no resource transition. *>
-fn void? cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    if (barrier == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_global_barrier(commands, barrier);
+    return vtable.cmd_barrier(commands, barrier);
 }
 
 <* Record a texture barrier; old_layout must match the texture's tracked layout. *>

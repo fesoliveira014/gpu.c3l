@@ -37,6 +37,26 @@ enum Hazard : int {
     DEPTH_READ_WRITE,
 }
 
+<* Execution scopes for a global barrier. `all` and `present` are exclusive. *>
+bitstruct StageMask : uint {
+    bool all             : 0;
+    bool host            : 1;
+    bool transfer        : 2;
+    bool compute         : 3;
+    bool vertex_shader   : 4;
+    bool fragment_shader : 5;
+    bool color_output    : 6;
+    bool depth_output    : 7;
+    bool present         : 8;
+}
+
+<* Explicit invalidation for special non-coherent GPU data paths. *>
+bitstruct HazardFlags : uint {
+    bool draw_arguments : 0;
+    bool descriptors    : 1;
+    bool depth_stencil  : 2;
+}
+
 <* Layout a texture must hold for a given use; transitioned via TextureBarrier. *>
 enum TextureLayout : int {
     UNDEFINED,
@@ -67,13 +87,11 @@ struct CompletionPoint {
     ulong  payload;
 }
 
-<* Orders before_* access against after_* access on one GPU span. *>
-struct BufferBarrier {
-    GpuSpan span;
-    Stage   before_stage;
-    Stage   after_stage;
-    Hazard  before_hazard;
-    Hazard  after_hazard;
+<* Global execution and memory dependency with no resource identity or range. *>
+struct Barrier {
+    StageMask   before;
+    StageMask   after;
+    HazardFlags hazards;
 }
 
 <* Orders access and transitions layout on a whole texture. `old_layout` must match
@@ -86,14 +104,6 @@ struct TextureBarrier {
     Hazard        after_hazard;
     TextureLayout old_layout;
     TextureLayout new_layout;
-}
-
-<* Resource-agnostic barrier: orders all before_* access against all after_* access. *>
-struct GlobalBarrier {
-    Stage  before_stage;
-    Stage  after_stage;
-    Hazard before_hazard;
-    Hazard after_hazard;
 }
 
 fn bool CompletionPoint.is_valid(self) => self.device.is_valid()

@@ -153,14 +153,11 @@ fn void sampled_texture_upload_and_mip_readback() @test {
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
-    gpu::BufferBarrier sample_host_read = {
-        .span          = sample_out.span,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.HOST_READ,
+    gpu::Barrier sample_host_read = {
+        .before = { .compute = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &sample_host_read)!!;
+    gpu::cmd_barrier(&cmd, &sample_host_read)!!;
 
     gpu::TextureBarrier to_src = {
         .texture       = texture,
@@ -181,12 +178,11 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     };
     gpu::cmd_copy_texture_to_buffer(&cmd, &mip1_out)!!;
 
-    gpu::BufferBarrier host_read = {
-        .span = rb_span,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
+    gpu::cmd_barrier(&cmd, &host_read)!!;
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -309,12 +305,11 @@ fn void storage_write_direct_readback() @test {
     gpu::TextureBufferCopyDesc copy = { .texture = texture, .dst = rb_span };
     gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
 
-    gpu::BufferBarrier host_read = {
-        .span = rb_span,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
+    gpu::cmd_barrier(&cmd, &host_read)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
 
@@ -528,12 +523,11 @@ fn void mip_subset_view_sampled() @test {
         root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;
-    gpu::BufferBarrier out_bar = {
-        .span = sample_out.span,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier out_bar = {
+        .before = { .compute = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
+    gpu::cmd_barrier(&cmd, &out_bar)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };

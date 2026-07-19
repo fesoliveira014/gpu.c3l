@@ -488,12 +488,11 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
         gpu::GpuSpan rb_span = readbacks[i];
         gpu::TextureBufferCopyDesc copy = { .texture = targets[i], .dst = rb_span };
         gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
-        gpu::BufferBarrier host_read = {
-            .span = rb_span,
-            .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-            .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+        gpu::Barrier host_read = {
+            .before = { .transfer = true },
+            .after = { .host = true },
         };
-        gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
+        gpu::cmd_barrier(&cmd, &host_read)!!;
     }
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;

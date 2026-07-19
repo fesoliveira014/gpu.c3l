@@ -1493,86 +1493,185 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     defer discard_test_executable(&cmd_executable)!!;
 }
 
-fn void buffer_barrier_range_beyond_buffer_faults() @test {
+fn void barrier_empty_before_faults_without_poisoning_recording() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-
-    OwnedSpan buffer = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "barrier_range_buffer",
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
-    defer free_owned_span(&device, &buffer)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::BufferBarrier barrier = {
-        .span = buffer.span.unchecked_subspan(48, 32),
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
+    defer discard_test_commands(&commands)!!;
+    gpu::Barrier barrier = {
+        .after = { .compute = true },
     };
-    fault beyond = @catch(gpu::cmd_buffer_barrier(&cmd, &barrier));
-    assert(beyond == gpu::INVALID_ARGUMENT, "buffer barrier range beyond the backing buffer faults INVALID_ARGUMENT");
 
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "an empty producer stage mask faults INVALID_ARGUMENT");
 
-    defer discard_test_executable(&cmd_executable)!!;
+    barrier.before.compute = true;
+    gpu::cmd_barrier(&commands, &barrier)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
 }
 
-fn void buffer_barrier_boundary_exact_succeeds() @test {
+fn void barrier_combined_stage_masks_succeed() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-
-    OwnedSpan buffer = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "barrier_range_buffer",
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
-    defer free_owned_span(&device, &buffer)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::BufferBarrier barrier = {
-        .span = buffer.span.checked_subspan(32, 32)!!,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
+    defer discard_test_commands(&commands)!!;
+    gpu::Barrier barrier = {
+        .before = {
+            .compute = true,
+            .color_output = true,
+        },
+        .after = {
+            .vertex_shader = true,
+            .fragment_shader = true,
+        },
     };
-    gpu::cmd_buffer_barrier(&cmd, &barrier)!!;
 
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
+    gpu::cmd_barrier(&commands, &barrier)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
 }
 
-fn void buffer_barrier_zero_size_faults() @test {
+fn void barrier_contradictory_mask_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-
-    OwnedSpan buffer = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "barrier_range_buffer",
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
-    defer free_owned_span(&device, &buffer)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::BufferBarrier barrier = {
-        .span = buffer.span.unchecked_subspan(0, 0),
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
+    defer discard_test_commands(&commands)!!;
+    gpu::Barrier barrier = {
+        .before = {
+            .all = true,
+            .compute = true,
+        },
+        .after = { .compute = true },
     };
-    fault zero_size = @catch(gpu::cmd_buffer_barrier(&cmd, &barrier));
-    assert(zero_size == gpu::INVALID_ARGUMENT, "zero-size barrier span faults INVALID_ARGUMENT");
 
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
+    fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "all combined with a specific stage faults INVALID_ARGUMENT");
 
-    defer discard_test_executable(&cmd_executable)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
 }
 
+fn void barrier_descriptor_hazard_requires_shader_consumer() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::Barrier barrier = {
+        .before = { .transfer = true },
+        .after = { .transfer = true },
+        .hazards = { .descriptors = true },
+    };
+
+    fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "descriptor hazards without a shader consumer fault INVALID_ARGUMENT");
+
+    barrier.after = { .fragment_shader = true };
+    gpu::cmd_barrier(&commands, &barrier)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+}
+
+fn void barrier_queue_stage_mismatch_faults_without_poisoning_recording() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, record.queue.id)!!;
+    vk::QueueFamilyFlags selected_flags = completion.queue_flags;
+    defer completion.queue_flags = selected_flags;
+    completion.queue_flags = {};
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after = { .transfer = true },
+    };
+
+    fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "queue-incompatible stages fault INVALID_ARGUMENT");
+
+    completion.queue_flags = selected_flags;
+    barrier.before = { .host = true };
+    gpu::cmd_barrier(&commands, &barrier)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+}
+
+fn void barrier_hazard_matrix_submits() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::Barrier[] barriers = {
+        {
+            .before = { .host = true },
+            .after = { .transfer = true },
+        },
+        {
+            .before = { .transfer = true },
+            .after = { .compute = true },
+        },
+        {
+            .before = { .compute = true },
+            .after = { .compute = true },
+            .hazards = { .draw_arguments = true },
+        },
+        {
+            .before = { .compute = true },
+            .after = { .fragment_shader = true },
+            .hazards = { .descriptors = true },
+        },
+        {
+            .before = { .compute = true },
+            .after = { .compute = true },
+            .hazards = { .depth_stencil = true },
+        },
+        {
+            .before = {
+                .color_output = true,
+                .depth_output = true,
+            },
+            .after = { .fragment_shader = true },
+        },
+        {
+            .before = { .color_output = true },
+            .after = { .present = true },
+        },
+    };
+    foreach (&barrier : barriers) {
+        gpu::cmd_barrier(&commands, barrier)!!;
+    }
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+}
 fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -1800,83 +1899,58 @@ fn void render_pass_view_cache_grows_past_initial_capacity() @test {
     defer discard_test_executable(&cmd_executable)!!;
 }
 
-fn void buffer_barrier_range_diagnostic_identifies_resource() @test {
+fn void barrier_mask_diagnostic_identifies_semantic_field() @test {
     SyncDiagnosticCapture capture = {
-        .expected_operation      = "cmd_buffer_barrier",
-        .expected_debug_name     = "barrier_diagnostic_buffer",
-        .expected_rejected_field = "BufferBarrier.span",
-        .expected_invariant      = "span range must fit its live owner",
+        .expected_operation      = "cmd_barrier",
+        .expected_rejected_field = "Barrier.before",
+        .expected_invariant      = "stage mask must be nonempty and noncontradictory",
     };
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
-
-    OwnedSpan buffer = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "barrier_diagnostic_buffer",
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
-    defer free_owned_span(&device, &buffer)!!;
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
-    gpu::BufferBarrier barrier = {
-        .span          = buffer.span.unchecked_subspan(48, 32),
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
+    gpu::Barrier barrier = {
+        .before = {
+            .all = true,
+            .compute = true,
+        },
+        .after = { .compute = true },
     };
-    fault with_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
 
-    assert(with_callback == gpu::INVALID_ARGUMENT, "barrier range keeps INVALID_ARGUMENT");
-    assert(capture.calls == 1, "barrier range emits exactly one diagnostic");
-    assert(capture.operation_matches, "operation is cmd_buffer_barrier");
+    fault with_callback = @catch(gpu::cmd_barrier(&commands, &barrier));
+
+    assert(with_callback == gpu::INVALID_ARGUMENT,
+        "contradictory barrier masks keep INVALID_ARGUMENT");
+    assert(capture.calls == 1, "barrier rejection emits exactly one diagnostic");
+    assert(capture.operation_matches, "operation is cmd_barrier");
     assert(capture.has_fault && capture.public_fault == with_callback,
         "diagnostic carries the unchanged barrier fault");
-    assert(capture.public_contract, "barrier range is a public-contract diagnostic");
-    assert(capture.resource_kind == gpu::DebugResourceKind.ALLOCATION, "resource kind is allocation");
-    assert(capture.has_public_identity, "live buffer identity is present");
-    assert(capture.index == buffer.span.index, "allocation index is preserved");
-    assert(capture.generation == buffer.span.generation, "allocation generation is preserved");
-    assert(capture.debug_name_matches, "buffer debug name is preserved");
-    assert(capture.rejected_field_matches, "barrier size field is identified");
-    assert(capture.invariant_matches, "barrier range invariant is identified");
+    assert(capture.public_contract,
+        "barrier rejection is a public-contract diagnostic");
+    assert(capture.resource_kind == gpu::DebugResourceKind.NONE,
+        "global barriers have no resource identity");
+    assert(!capture.has_public_identity,
+        "global barriers expose no public resource identity");
+    assert(capture.debug_name_matches,
+        "global barriers expose no resource debug name");
+    assert(capture.rejected_field_matches,
+        "the contradictory producer field is identified");
+    assert(capture.invariant_matches,
+        "the semantic stage-mask invariant is identified");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
     state.debug_callback = null;
-    fault without_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
-    assert(without_callback == with_callback, "callback presence does not alter the barrier fault");
-    assert(capture.calls == 1, "null callback emits no additional diagnostic");
+    fault without_callback = @catch(gpu::cmd_barrier(&commands, &barrier));
+    assert(without_callback == with_callback,
+        "callback presence does not alter the barrier fault");
+    assert(capture.calls == 1,
+        "a null callback emits no additional diagnostic");
 
-    state.debug_callback = &capture_sync_diagnostic;
-    capture.expected_rejected_field = "BufferBarrier.span";
-    capture.expected_invariant = "span range must fit its live owner";
-    barrier.span = buffer.span.unchecked_subspan(64, 0);
-    fault zero_with_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
-
-    assert(zero_with_callback == gpu::INVALID_ARGUMENT, "zero-size span keeps INVALID_ARGUMENT");
-    assert(capture.calls == 2, "zero-size span emits exactly one diagnostic");
-    assert(capture.operation_matches, "zero-size span operation is cmd_buffer_barrier");
-    assert(capture.has_fault && capture.public_fault == zero_with_callback,
-        "zero-size span diagnostic carries the unchanged fault");
-    assert(capture.resource_kind == gpu::DebugResourceKind.ALLOCATION, "zero-size span resource kind is allocation");
-    assert(capture.has_public_identity
-        && capture.index == buffer.span.index
-        && capture.generation == buffer.span.generation,
-        "zero-size span diagnostic preserves buffer identity");
-    assert(capture.debug_name_matches, "zero-size span diagnostic preserves the debug name");
-    assert(capture.rejected_field_matches, "zero-size span field is identified");
-    assert(capture.invariant_matches, "zero-size span invariant is identified");
-
-    state.debug_callback = null;
-    fault zero_without_callback = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
-    assert(zero_without_callback == zero_with_callback, "callback presence does not alter the zero-size span fault");
-    assert(capture.calls == 2, "null callback emits no duplicate zero-size span diagnostic");
-
-    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
-
-    defer discard_test_executable(&commands_executable)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
 }
 
 fn void reset_sync_diagnostic(

@@ -408,27 +408,21 @@ fn int explicit_transfer_worker(void* raw_args) {
             .dst = args.intermediate.span,
         };
         gpu::cmd_copy_buffer(&commands, &upload_copy)!!;
-        gpu::BufferBarrier before_readback = {
-            .span          = args.intermediate.span,
-            .before_stage  = gpu::Stage.TRANSFER,
-            .after_stage   = gpu::Stage.TRANSFER,
-            .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-            .after_hazard  = gpu::Hazard.TRANSFER_READ,
+        gpu::Barrier before_readback = {
+            .before = { .transfer = true },
+            .after = { .transfer = true },
         };
-        gpu::cmd_buffer_barrier(&commands, &before_readback)!!;
+        gpu::cmd_barrier(&commands, &before_readback)!!;
         gpu::BufferCopyDesc readback_copy = {
             .src = args.intermediate.span,
             .dst = args.readback.span,
         };
         gpu::cmd_copy_buffer(&commands, &readback_copy)!!;
-        gpu::BufferBarrier host_read = {
-            .span          = args.readback.span,
-            .before_stage  = gpu::Stage.TRANSFER,
-            .after_stage   = gpu::Stage.HOST,
-            .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-            .after_hazard  = gpu::Hazard.HOST_READ,
+        gpu::Barrier host_read = {
+            .before = { .transfer = true },
+            .after = { .host = true },
         };
-        gpu::cmd_buffer_barrier(&commands, &host_read)!!;
+        gpu::cmd_barrier(&commands, &host_read)!!;
         args.list = gpu::end_commands(&commands)!!;
     };
     return 0;
@@ -542,14 +536,11 @@ fn int record_worker(void* arg) {
                 1,
             },
         )!!;
-        gpu::BufferBarrier host_read = {
-            .span          = args.io_span,
-            .before_stage  = gpu::Stage.COMPUTE_SHADER,
-            .after_stage   = gpu::Stage.HOST,
-            .before_hazard = gpu::Hazard.SHADER_WRITE,
-            .after_hazard  = gpu::Hazard.HOST_READ,
+        gpu::Barrier host_read = {
+            .before = { .compute = true },
+            .after = { .host = true },
         };
-        gpu::cmd_buffer_barrier(&commands, &host_read)!!;
+        gpu::cmd_barrier(&commands, &host_read)!!;
         args.list = gpu::end_commands(&commands)!!;
     };
     return 0;

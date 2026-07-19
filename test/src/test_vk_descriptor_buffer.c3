@@ -354,14 +354,11 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         root:     test_span_address(&device, sample_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
-    gpu::BufferBarrier compute_output_to_host = {
-        .span          = compute_output_span,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.HOST_READ,
+    gpu::Barrier compute_output_to_host = {
+        .before = { .compute = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&compute_commands, &compute_output_to_host)!!;
+    gpu::cmd_barrier(&compute_commands, &compute_output_to_host)!!;
     gpu::ExecutableCommandList compute_commands_executable = gpu::end_commands(&compute_commands)!!;
     defer discard_test_executable(&compute_commands_executable)!!;
     gpu::ExecutableCommandList[1] compute_lists = { compute_commands_executable };
@@ -411,12 +408,11 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::GpuSpan readback_span = readback.span;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = readback_span };
     gpu::cmd_copy_texture_to_buffer(&graphics_commands, &copy)!!;
-    gpu::BufferBarrier host_read = {
-        .span = readback_span,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&graphics_commands, &host_read)!!;
+    gpu::cmd_barrier(&graphics_commands, &host_read)!!;
     gpu::ExecutableCommandList graphics_commands_executable = gpu::end_commands(&graphics_commands)!!;
     defer discard_test_executable(&graphics_commands_executable)!!;
     gpu::ExecutableCommandList[1] graphics_lists = { graphics_commands_executable };
@@ -603,12 +599,11 @@ fn void descriptor_buffer_write_then_sample() @test {
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
-    gpu::BufferBarrier out_bar = {
-        .span = output.span,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier out_bar = {
+        .before = { .compute = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
+    gpu::cmd_barrier(&cmd, &out_bar)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
 

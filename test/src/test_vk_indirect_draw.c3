@@ -143,12 +143,11 @@ fn void record_target_readback(
     gpu::cmd_texture_barrier(cmd, &to_src)!!;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
-    gpu::BufferBarrier host_read = {
-        .span = *rb_span,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(cmd, &host_read)!!;
+    gpu::cmd_barrier(cmd, &host_read)!!;
 }
 
 fn char* center_pixel(gpu::Device* device, gpu::GpuSpan* rb_span) {
@@ -450,37 +449,29 @@ fn void compute_generated_indexed_indirect_draw() @test {
         groups:   { 1, 1, 1 },
     )!!;
 
-    gpu::BufferBarrier args_ready = {
-        .span          = args_span,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.INDIRECT_COMMAND,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.INDIRECT_READ,
+    gpu::Barrier args_ready = {
+        .before = { .compute = true },
+        .after = { .compute = true },
+        .hazards = { .draw_arguments = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &args_ready)!!;
+    gpu::cmd_barrier(&cmd, &args_ready)!!;
 
     // Read the GPU-written arguments through ordinary caller-owned memory.
-    gpu::BufferBarrier args_to_copy = {
-        .span          = args_span,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
+    gpu::Barrier args_to_copy = {
+        .before = { .compute = true },
+        .after = { .transfer = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &args_to_copy)!!;
+    gpu::cmd_barrier(&cmd, &args_to_copy)!!;
     gpu::BufferCopyDesc args_copy = {
         .src = args_span,
         .dst = args_readback.span,
     };
     gpu::cmd_copy_buffer(&cmd, &args_copy)!!;
-    gpu::BufferBarrier args_host_read = {
-        .span          = args_readback.span,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.HOST_READ,
+    gpu::Barrier args_host_read = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &args_host_read)!!;
+    gpu::cmd_barrier(&cmd, &args_host_read)!!;
 
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -707,26 +698,23 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
         root:     test_span_address(&device, build_root_span),
         groups:   { 1, 1, 1 },
     )!!;
-    gpu::BufferBarrier args_ready = {
-        .span          = dispatch_args,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.INDIRECT_COMMAND,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.INDIRECT_READ,
+    gpu::Barrier args_ready = {
+        .before = { .compute = true },
+        .after = { .compute = true },
+        .hazards = { .draw_arguments = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &args_ready)!!;
+    gpu::cmd_barrier(&cmd, &args_ready)!!;
     bind_test_compute_pipeline(&cmd, double_pipeline);
     gpu::cmd_dispatch_indirect(
         commands: &cmd,
         root:     test_span_address(&device, double_root_span),
         args:     dispatch_args,
     )!!;
-    gpu::BufferBarrier host_read = {
-        .span = io_span,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .compute = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
+    gpu::cmd_barrier(&cmd, &host_read)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };

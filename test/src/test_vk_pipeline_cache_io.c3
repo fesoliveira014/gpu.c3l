@@ -147,12 +147,11 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
         root:     test_span_address(device, root_span),
         groups:   { (COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;
-    gpu::BufferBarrier bar = {
-        .span = output.span,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier bar = {
+        .before = { .compute = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &bar)!!;
+    gpu::cmd_barrier(&cmd, &bar)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };

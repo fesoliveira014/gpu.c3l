@@ -64,7 +64,7 @@ allocation range, alignment, access, and class validation without Vulkan
 caller-owned allocation and completion lifetime contracts
 MemoryClass policy table completeness
 Format translation table completeness through pure tables if separated
-BarrierDesc validation
+global barrier stage/hazard/queue validation and exact Vulkan scope mapping
 shader ABI scalar widths plus generated-work record sizes, offsets, and strides
 TextureView owner/generation validation and descriptor-heap free-list reuse
 null-safe, exactly-once structured debug dispatch and userdata preservation
@@ -124,6 +124,7 @@ owner-derived command finalization
 format feature queries agree with adapter-backed texture creation
 command list begin/end/submit
 completion-point signaling and waits
+global semantic barrier hazard matrix submission
 copy upload -> readback
 root-pointer compute shader
 TextureView publication and raw TextureIndex sampling in compute

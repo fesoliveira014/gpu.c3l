@@ -592,26 +592,26 @@ again; device teardown relies on command-pool destruction.
 
 Use synchronization2 for barriers.
 
-Translation helpers:
-
-```text
-stage_to_vk
-hazard_to_access
-texture_layout_to_vk
-barrier_to_vk_dependency_info
-```
+Translation helpers map semantic global stage/hazard masks and explicit texture
+transition tuples to synchronization2 scopes.
 
 Barrier commands:
 
 ```text
-cmd_buffer_barrier -> vk::BufferMemoryBarrier2
+cmd_barrier -> vk::MemoryBarrier2
 cmd_texture_barrier -> vk::ImageMemoryBarrier2
-cmd_global_barrier -> vk::MemoryBarrier2
 ```
+
+`cmd_barrier` emits one global memory barrier. Normal access scopes follow from
+its producer and consumer stages; draw-argument, descriptor-buffer, and
+depth/stencil cache paths are enabled only by their hazard flags. Invalid,
+contradictory, consumer-incompatible, or queue-unsupported scopes fault before
+recording. Cross-queue ordering remains a submission completion-wait concern.
 
 The backend must not insert hidden barriers for user-visible resource transitions except for unavoidable swapchain acquire/present transitions inside WSI helpers.
 
-`Stage.NONE` translates exactly to `VK_PIPELINE_STAGE_2_NONE`. The
+For texture transitions, `Stage.NONE` translates exactly to
+`VK_PIPELINE_STAGE_2_NONE`. The
 presentation preset uses the color-attachment-output stage with an empty
 access scope on its WSI-facing side, while explicit `Stage.PRESENT` and
 `Hazard.PRESENT_READ` retain their

@@ -82,12 +82,11 @@ fn void copy_upload_to_readback() @test {
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = { .src = up_span, .dst = rb_span };
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
-    gpu::BufferBarrier bar = {
-        .span = rb_span,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier bar = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &bar)!!;
+    gpu::cmd_barrier(&cmd, &bar)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
 
@@ -367,13 +366,11 @@ fn void bad_command_state_rejected() @test {
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
 
-    gpu::GlobalBarrier barrier = {
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
+    gpu::Barrier barrier = {
+        .before = { .host = true },
+        .after = { .transfer = true },
     };
-    fault rejected = @catch(gpu::cmd_global_barrier(
+    fault rejected = @catch(gpu::cmd_barrier(
         &stale_recording,
         &barrier,
     ));
