@@ -96,6 +96,22 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "upload_throughput_bench",
             )
 
+    def test_upload_target_rejects_generic_measurement(self):
+        runner = load_runner()
+        with self.assertRaisesRegex(ValueError, "uploads/s units"):
+            runner.require_measurement(
+                "iterations=1 units=ns/op 1 ns/op",
+                "upload_throughput_bench",
+            )
+
+    def test_generic_target_rejects_malformed_upload_measurement(self):
+        runner = load_runner()
+        with self.assertRaisesRegex(ValueError, "uploads/s units"):
+            runner.require_measurement(
+                "iterations=1 uploads_per_sec=123",
+                "generic_benchmark",
+            )
+
     def test_startup_header_alone_is_not_a_measurement(self):
         runner = load_runner()
         with self.assertRaisesRegex(ValueError, "measured value"):

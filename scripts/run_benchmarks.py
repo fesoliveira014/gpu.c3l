@@ -61,10 +61,12 @@ def require_context_fields(output):
 def require_measurement(output, target):
     if not re.search(r"\biterations?=\S+", output):
         raise ValueError(f"{target} is missing an iteration count")
-    if "uploads_per_sec=" in output and not re.search(r"\bunits=uploads/s\b", output):
-        raise ValueError(f"{target} is missing uploads/s units")
-    if "uploads_per_sec=" in output and not UPLOAD_MEASUREMENT.search(output):
-        raise ValueError(f"{target} is missing upload measurement fields")
+    is_upload = target == "upload_throughput_bench" or "uploads_per_sec=" in output
+    if is_upload:
+        if not re.search(r"\bunits=uploads/s\b", output):
+            raise ValueError(f"{target} is missing uploads/s units")
+        if not UPLOAD_MEASUREMENT.search(output):
+            raise ValueError(f"{target} is missing upload measurement fields")
     if not MEASURED_VALUE.search(output):
         raise ValueError(f"{target} is missing a measured value")
 
