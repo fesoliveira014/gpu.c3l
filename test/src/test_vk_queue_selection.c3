@@ -280,7 +280,6 @@ fn gpu::Device make_queue_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_queue_selection_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -299,8 +298,6 @@ fn void queue_alias_matches_async_compute_cap() @test {
 fn void cross_queue_timeline_chain_validates() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList compute_cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute_cmd)!!;
     gpu::ExecutableCommandList compute_cmd_executable = gpu::end_commands(&compute_cmd)!!;
@@ -328,7 +325,6 @@ fn void cross_queue_timeline_chain_validates() @test {
     )!!;
 
     gpu::wait_completion(graphics_done, 1_000_000_000)!!;
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void distinct_transfer_compute_graphics_completion_chain() @test {
@@ -611,29 +607,30 @@ fn void pool_selection_follows_queue_family() @test {
         == gfx[0], "graphics remains independent");
 }
 
-fn void tri_queue_frame_retires_cleanly() @test {
+fn void tri_queue_completions_wait_cleanly() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
 
-    for (uint frame = 0; frame < 4; frame++) {
-        gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    for (uint round = 0; round < 4; round++) {
         gpu::QueueKind[3] kinds = {
             gpu::QueueKind.GRAPHICS,
             gpu::QueueKind.COMPUTE,
             gpu::QueueKind.TRANSFER,
         };
-        for (uint i = 0; i < 3; i++) {
+        gpu::CompletionPoint[3] completions;
+        for (uint i = 0; i < kinds.len; i++) {
             gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, kinds[i])!!)!!;
             defer discard_test_commands(&cmd)!!;
             gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
             defer discard_test_executable(&cmd_executable)!!;
             gpu::ExecutableCommandList[1] one = { cmd_executable };
             gpu::SubmitDesc submit = { .command_lists = one[..] };
-            submit_test_queue(&device, kinds[i], &submit)!!;
+            completions[i] = submit_test_queue(&device, kinds[i], &submit)!!;
         }
-        gpu::end_frame(&frame_token)!!;
+        for (uint i = 0; i < completions.len; i++) {
+            gpu::wait_completion(completions[i])!!;
+        }
     }
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
 fn void native_queue_marker_clear_handles_aliased_roles() @test {

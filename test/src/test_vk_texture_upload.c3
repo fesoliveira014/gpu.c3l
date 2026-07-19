@@ -10,7 +10,6 @@ fn gpu::Device make_upload_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_texture_upload_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -100,16 +99,22 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
-    gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
+    OwnedSpan sample_root_owned = allocate_owned_span(
+        device:       &device,
+        size:         SampleRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "upload_sample_root",
+    )!!;
+    defer free_owned_span(&device, &sample_root_owned)!!;
+    gpu::GpuSpan sample_root_span = sample_root_owned.span;
     SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
     sample_root.output_gpu    = test_span_address(&device, sample_out.span);
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
     sample_root.width         = UP_SIZE;
     sample_root.height        = UP_SIZE;
+    gpu::flush_mapped_span(&device, sample_root_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -189,8 +194,12 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, sample_out.span)!!;
     gpu::GpuSpan out_span = sample_out.span;
@@ -214,8 +223,6 @@ fn void sampled_texture_upload_and_mip_readback() @test {
             assert(texel[2] == (char)7, "read-back mip 1 blue matches upload");
         }
     }
-
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void storage_write_direct_readback() @test {
@@ -252,13 +259,20 @@ fn void storage_write_direct_readback() @test {
     gpu::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pd)!!;
     defer gpu::destroy_pipeline(&device, write_pipe)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         WriteRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "storage_write_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    gpu::GpuSpan root_span = root_owned.span;
     WriteRoot* root = (WriteRoot*)test_span_mapping(&device, root_span).ptr;
     root.texture_index = tex_index;
     root.width         = UP_SIZE;
     root.height        = UP_SIZE;
+    gpu::flush_mapped_span(&device, root_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -307,8 +321,12 @@ fn void storage_write_direct_readback() @test {
 
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, readback.span)!!;
     char* bytes = (char*)test_span_mapping(&device, rb_span).ptr;
@@ -321,7 +339,6 @@ fn void storage_write_direct_readback() @test {
             assert(texel[3] == (char)255, "storage-written alpha reads back");
         }
     }
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void copy_validation_faults() @test {
@@ -348,8 +365,6 @@ fn void copy_validation_faults() @test {
     )!!;
     defer free_owned_span(&device, &staging)!!;
     gpu::GpuSpan span = staging.span;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
@@ -391,7 +406,6 @@ fn void copy_validation_faults() @test {
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
     defer discard_test_executable(&cmd_executable)!!;
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void mip_subset_view_sampled() @test {
@@ -465,15 +479,22 @@ fn void mip_subset_view_sampled() @test {
     gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         SampleRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "mip_sample_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    gpu::GpuSpan root_span = root_owned.span;
     SampleRoot* root = (SampleRoot*)test_span_mapping(&device, root_span).ptr;
     root.output_gpu    = test_span_address(&device, sample_out.span);
     root.texture_index = tex_index;
     root.sampler_index = smp_index;
     root.width         = UP_SIZE / 2;
     root.height        = UP_SIZE / 2;
+    gpu::flush_mapped_span(&device, root_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -519,15 +540,18 @@ fn void mip_subset_view_sampled() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, sample_out.span)!!;
     gpu::GpuSpan out_span = sample_out.span;
     float* sampled = (float*)test_span_mapping(&device, out_span).ptr;
     assert(quantize_unorm8(sampled[0]) == 200, "mip-subset view samples mip 1, not mip 0");
     assert(quantize_unorm8(sampled[1]) == 210, "mip-subset view green matches mip 1");
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void mapped_span_stale_owner_faults() @test {

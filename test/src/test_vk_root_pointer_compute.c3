@@ -9,7 +9,6 @@ fn void root_pointer_compute_readback() @test {
     gpu::DeviceDesc device_desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_root_pointer_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
@@ -50,12 +49,20 @@ fn void root_pointer_compute_readback() @test {
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame, ComputeRoot::size, 16)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         ComputeRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "compute_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    gpu::GpuSpan root_span = root_owned.span;
     ComputeRoot* root = (ComputeRoot*)test_span_mapping(&device, root_span).ptr;
     root.input_gpu = test_span_address(&device, input.span);
     root.output_gpu = test_span_address(&device, output.span);
     root.count = COUNT;
+    gpu::flush_mapped_span(&device, root_span)!!;
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
@@ -80,7 +87,6 @@ fn void root_pointer_compute_readback() @test {
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
-    gpu::end_frame(&frame)!!;
     gpu::wait_completion(completion)!!;
     gpu::invalidate_mapped_span(&device, output.span)!!;
 

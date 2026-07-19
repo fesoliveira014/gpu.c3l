@@ -18,7 +18,6 @@ fn gpu::Device u16v_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_u16_verify",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -198,8 +197,6 @@ fn void u16_and_u32_indexed_draws_match() @test {
     gpu::GpuSpan rb_u32 = rb_all.checked_subspan(U16V_BYTES, U16V_BYTES)!!;
     gpu::GpuSpan rb_u16_off = rb_all.checked_subspan(U16V_BYTES * 2, U16V_BYTES)!!;
     gpu::GpuSpan rb_u32_off = rb_all.checked_subspan(U16V_BYTES * 3, U16V_BYTES)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     u16v_draw(
         device:     &device,
         pipeline:   pipeline,
@@ -236,8 +233,6 @@ fn void u16_and_u32_indexed_draws_match() @test {
         index_type: gpu::IndexType.U32,
         rb_span:    &rb_u32_off,
     );
-    gpu::end_frame(&frame_token)!!;
-
     char* a = (char*)test_span_mapping(&device, rb_u16).ptr;
     char* b = (char*)test_span_mapping(&device, rb_u32).ptr;
     char* c = (char*)test_span_mapping(&device, rb_u16_off).ptr;

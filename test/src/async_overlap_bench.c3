@@ -2,6 +2,7 @@ module gpu_bench;
 
 import gpu @public;
 import gpu::vk @public;
+import gpu_test;
 import vk;
 import std::io;
 import std::time;
@@ -139,7 +140,6 @@ fn int main() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = validation_enabled(),
-        .frames_in_flight  = 2,
         .application_name  = "gpu_async_overlap_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
@@ -279,7 +279,6 @@ fn int main() {
 
     // One startup transition: re-recording UNDEFINED->COLOR_ATTACHMENT per rep
     // would fault INVALID_RESOURCE_STATE under the pending-layout model.
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList transition_cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::TextureBarrier to_attach = {
         .texture = rt, .before_stage = gpu::Stage.HOST, .after_stage = gpu::Stage.COLOR_ATTACHMENT,
@@ -291,10 +290,12 @@ fn int main() {
     defer discard_bench_executable(&transition_cmd_executable)!!;
     gpu::ExecutableCommandList[1] transition_lists = { transition_cmd_executable };
     gpu::SubmitDesc transition_submit = { .command_lists = transition_lists[..] };
-    submit_bench_queue(&device, gpu::QueueKind.GRAPHICS, &transition_submit)!!;
-    wait_bench_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
-
+    gpu::CompletionPoint transition_completion = submit_bench_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &transition_submit,
+    )!!;
+    gpu::wait_completion(transition_completion)!!;
     // Solo baselines double as calibration: two proportional rounds nudge
     // iters toward TARGET_MS per workload.
     uint comp_iters = SEED_ITERS;
@@ -304,7 +305,6 @@ fn int main() {
     for (uint round = 0; round < CALIBRATION_ROUNDS; round++) {
         comp_root.iters = comp_iters;
         gpu::flush_mapped_span(&device, comp_root_span)!!;
-        frame_token = gpu::begin_frame(&device)!!;
         gpu::ExecutableCommandList comp_cmd = record_compute(
             device:        &device,
             pipeline:      comp_pipeline,
@@ -315,8 +315,12 @@ fn int main() {
         std::time::Clock comp_start = std::time::clock::now();
         gpu::ExecutableCommandList[1] comp_lists = { comp_cmd };
         gpu::SubmitDesc comp_submit = { .command_lists = comp_lists[..] };
-        submit_bench_queue(&device, gpu::QueueKind.COMPUTE, &comp_submit)!!;
-        wait_bench_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::CompletionPoint comp_completion = submit_bench_queue(
+            &device,
+            gpu::QueueKind.COMPUTE,
+            &comp_submit,
+        )!!;
+        gpu::wait_completion(comp_completion)!!;
         double comp_wall_ns = (double)(long)comp_start.to_now();
         if (timestamps_ok) {
             double begin_ns; double end_ns;
@@ -325,18 +329,31 @@ fn int main() {
         } else {
             comp_ns = comp_wall_ns;
         }
-        gpu::end_frame(&frame_token)!!;
         double comp_scale = (TARGET_MS * 1.0e6) / comp_ns;
         double comp_next = (double)comp_iters * comp_scale;
         comp_next = comp_next < (double)MIN_ITERS ? (double)MIN_ITERS : comp_next;
         comp_next = comp_next > (double)MAX_ITERS ? (double)MAX_ITERS : comp_next;
         comp_iters = (uint)comp_next;
-
-        frame_token = gpu::begin_frame(&device)!!;
-        gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
+        OwnedSpan frag_owned = gpu_test::allocate_owned_span(
+            device:       &device,
+            size:         OverlapFragRoot::size,
+            memory_class: gpu::MemoryClass.CPU_WRITE,
+            access:       { .graphics },
+            debug_name:   "calibration_fragment_root",
+        )!!;
+        defer gpu_test::free_owned_span(&device, &frag_owned)!!;
+        gpu::GpuSpan frag_span = frag_owned.span;
         OverlapFragRoot* frag_root = (OverlapFragRoot*)gpu::get_span_mapping(&device, frag_span)!!.ptr;
         frag_root.iters = frag_iters;
-        gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+        OwnedSpan vertex_owned = gpu_test::allocate_owned_span(
+            device:       &device,
+            size:         3 * 16,
+            memory_class: gpu::MemoryClass.CPU_WRITE,
+            access:       { .graphics },
+            debug_name:   "calibration_vertices",
+        )!!;
+        defer gpu_test::free_owned_span(&device, &vertex_owned)!!;
+        gpu::GpuSpan vertex_span = vertex_owned.span;
         float* verts = (float*)gpu::get_span_mapping(&device, vertex_span)!!.ptr;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
@@ -344,6 +361,8 @@ fn int main() {
             -1.0f,  3.0f, 0.0f, 2.0f,
         };
         for (uint i = 0; i < 12; i++) verts[i] = fullscreen_triangle[i];
+        gpu::flush_mapped_span(&device, frag_span)!!;
+        gpu::flush_mapped_span(&device, vertex_span)!!;
         gpu::ExecutableCommandList frag_cmd = record_graphics(
             device:        &device,
             pipeline:      gfx_pipeline,
@@ -356,8 +375,12 @@ fn int main() {
         std::time::Clock frag_start = std::time::clock::now();
         gpu::ExecutableCommandList[1] frag_lists = { frag_cmd };
         gpu::SubmitDesc frag_submit = { .command_lists = frag_lists[..] };
-        submit_bench_queue(&device, gpu::QueueKind.GRAPHICS, &frag_submit)!!;
-        wait_bench_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::CompletionPoint frag_completion = submit_bench_queue(
+            &device,
+            gpu::QueueKind.GRAPHICS,
+            &frag_submit,
+        )!!;
+        gpu::wait_completion(frag_completion)!!;
         double frag_wall_ns = (double)(long)frag_start.to_now();
         if (timestamps_ok) {
             double begin_ns; double end_ns;
@@ -366,7 +389,6 @@ fn int main() {
         } else {
             frag_ns = frag_wall_ns;
         }
-        gpu::end_frame(&frame_token)!!;
         double frag_scale = (TARGET_MS * 1.0e6) / frag_ns;
         double frag_next = (double)frag_iters * frag_scale;
         frag_next = frag_next < (double)MIN_ITERS ? (double)MIN_ITERS : frag_next;
@@ -388,12 +410,26 @@ fn int main() {
 
 
     for (uint rep = 0; rep < REPS; rep++) {
-        frame_token = gpu::begin_frame(&device)!!;
-
-        gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, OverlapFragRoot::size, 16)!!;
+        OwnedSpan frag_owned = gpu_test::allocate_owned_span(
+            device:       &device,
+            size:         OverlapFragRoot::size,
+            memory_class: gpu::MemoryClass.CPU_WRITE,
+            access:       { .graphics },
+            debug_name:   "overlap_fragment_root",
+        )!!;
+        defer gpu_test::free_owned_span(&device, &frag_owned)!!;
+        gpu::GpuSpan frag_span = frag_owned.span;
         OverlapFragRoot* frag_root = (OverlapFragRoot*)gpu::get_span_mapping(&device, frag_span)!!.ptr;
         frag_root.iters = frag_iters;
-        gpu::GpuSpan vertex_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+        OwnedSpan vertex_owned = gpu_test::allocate_owned_span(
+            device:       &device,
+            size:         3 * 16,
+            memory_class: gpu::MemoryClass.CPU_WRITE,
+            access:       { .graphics },
+            debug_name:   "overlap_vertices",
+        )!!;
+        defer gpu_test::free_owned_span(&device, &vertex_owned)!!;
+        gpu::GpuSpan vertex_span = vertex_owned.span;
         float* verts = (float*)gpu::get_span_mapping(&device, vertex_span)!!.ptr;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
@@ -401,6 +437,8 @@ fn int main() {
             -1.0f,  3.0f, 0.0f, 2.0f,
         };
         for (uint i = 0; i < 12; i++) verts[i] = fullscreen_triangle[i];
+        gpu::flush_mapped_span(&device, frag_span)!!;
+        gpu::flush_mapped_span(&device, vertex_span)!!;
 
         // Phase A chains graphics after compute.
         std::time::Clock a_start = std::time::clock::now();
@@ -519,8 +557,6 @@ fn int main() {
             "rep %d: wall_a=%.3fms wall_b=%.3fms gpu_gfx=%.3fms gpu_comp=%.3fms intersection=%.3fms",
             rep, wall_a[rep] / 1.0e6, wall_b[rep] / 1.0e6, gfx_parts[rep] / 1.0e6, comp_parts[rep] / 1.0e6, intersection_ns / 1.0e6,
         );
-
-        gpu::end_frame(&frame_token)!!;
     }
 
     double[REPS] sum_parts;

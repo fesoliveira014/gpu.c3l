@@ -16,7 +16,6 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::DeviceDesc device_desc = {
         .backend              = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
-        .frames_in_flight     = 2,
         .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
         .application_name     = "gpu_texture_heap_test",
     };
@@ -74,22 +73,37 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::ComputePipelineDesc sample_pipe_desc = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
-    gpu::GpuSpan write_root_span = gpu::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
+    OwnedSpan write_root_owned = allocate_owned_span(
+        device:       &device,
+        size:         WriteRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "heap_write_root",
+    )!!;
+    defer free_owned_span(&device, &write_root_owned)!!;
+    gpu::GpuSpan write_root_span = write_root_owned.span;
     WriteRoot* write_root = (WriteRoot*)test_span_mapping(&device, write_root_span).ptr;
     write_root.texture_index = tex_index;
     write_root.width         = TEX_SIZE;
     write_root.height        = TEX_SIZE;
 
-    gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
+    OwnedSpan sample_root_owned = allocate_owned_span(
+        device:       &device,
+        size:         SampleRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "heap_sample_root",
+    )!!;
+    defer free_owned_span(&device, &sample_root_owned)!!;
+    gpu::GpuSpan sample_root_span = sample_root_owned.span;
     SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
     sample_root.output_gpu    = test_span_address(&device, output.span);
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
     sample_root.width         = TEX_SIZE;
     sample_root.height        = TEX_SIZE;
+    gpu::flush_mapped_span(&device, write_root_span)!!;
+    gpu::flush_mapped_span(&device, sample_root_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -135,8 +149,12 @@ fn void bindless_texture_write_then_sample() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, output.span)!!;
     gpu::GpuSpan out_span = output.span;
@@ -151,8 +169,6 @@ fn void bindless_texture_write_then_sample() @test {
             assert(quantize_unorm8(texel[3]) == 255, "alpha is 1");
         }
     }
-
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn uint quantize_unorm8(float value) {
@@ -161,8 +177,9 @@ fn uint quantize_unorm8(float value) {
 
 fn void anisotropic_sampler_caps_honest() @test {
     gpu::DeviceDesc desc = {
-        .backend = gpu::BackendKind.VULKAN, .enable_validation = true,
-        .frames_in_flight = 2, .application_name = "gpu_aniso_test",
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .application_name  = "gpu_aniso_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
@@ -192,7 +209,6 @@ fn void anisotropy_range_validated() @test {
     gpu::DeviceDesc device_desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_aniso_range_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;

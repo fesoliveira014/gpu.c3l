@@ -177,7 +177,6 @@ fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::DeviceDesc desc = {
         .backend                     = gpu::BackendKind.VULKAN,
         .enable_validation           = true,
-        .frames_in_flight            = 2,
         .descriptor_heap_mode        = gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING,
         .texture_descriptor_capacity = tex_capacity,
         .sampler_descriptor_capacity = smp_capacity,
@@ -383,7 +382,6 @@ fn void texture_descriptor_reuses_destroyed_slot_immediately() @test {
 
     gpu::TextureIndex first =
         gpu::create_texture_descriptor(&device, texture, null)!!;
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::destroy_texture_descriptor(&device, first)!!;
 
     gpu::TextureIndex recycled =
@@ -396,7 +394,6 @@ fn void texture_descriptor_reuses_destroyed_slot_immediately() @test {
         == gpu::INVALID_HANDLE, "the released index is stale");
 
     gpu::destroy_texture_descriptor(&device, recycled)!!;
-    gpu::end_frame(&frame)!!;
 }
 
 fn void texture_descriptor_stale_texture_rejected() @test {

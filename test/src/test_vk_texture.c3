@@ -198,7 +198,6 @@ fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture)
     gpu::DeviceDesc desc = {
         .backend              = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
-        .frames_in_flight     = 2,
         .application_name     = "gpu_texture_diagnostic_test",
         .debug_callback       = &capture_texture_diagnostic,
         .debug_user_data      = capture,
@@ -210,7 +209,6 @@ fn gpu::Device make_texture_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_texture_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -324,8 +322,6 @@ fn void texture_barrier_transitions_layout() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
@@ -362,7 +358,6 @@ fn void texture_barrier_transitions_layout() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void texture_multi_mip_create_destroy() @test {
@@ -403,8 +398,6 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
@@ -424,7 +417,6 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void texture_barrier_stale_handle_rejected() @test {
@@ -441,8 +433,6 @@ fn void texture_barrier_stale_handle_rejected() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     gpu::destroy_texture(&device, texture)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
@@ -457,14 +447,12 @@ fn void texture_barrier_stale_handle_rejected() @test {
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
     defer discard_test_executable(&cmd_executable)!!;
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void raised_texture_capacity_holds_more_than_default() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .texture_capacity  = 2048,
         .application_name  = "gpu_texture_capacity_test",
     };
@@ -794,8 +782,6 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     gpu::TextureBarrier barrier = {
@@ -833,7 +819,6 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
 
     defer discard_test_executable(&commands_executable)!!;
-    gpu::end_frame(&frame)!!;
 }
 
 fn void placed_texture_requirements_validate_and_release_storage() @test {

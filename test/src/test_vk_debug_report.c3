@@ -323,7 +323,6 @@ fn void allocation_span_diagnostic_preserves_fault() @test {
         .backend          = gpu::BackendKind.VULKAN,
         .debug_callback   = &capture_debug_message,
         .debug_user_data  = &capture,
-        .frames_in_flight = 2,
         .application_name = "gpu_debug_contract_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
@@ -337,8 +336,6 @@ fn void allocation_span_diagnostic_preserves_fault() @test {
         debug_name:   "debug_span",
     )!!;
     defer free_owned_span(&device, &owned)!!;
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
@@ -372,7 +369,6 @@ fn void allocation_span_diagnostic_preserves_fault() @test {
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
-    gpu::end_frame(&frame)!!;
 }
 
 fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
@@ -431,7 +427,6 @@ fn void debug_names_do_not_require_validation() @test {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = false,
         .enable_debug_names = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_debug_names_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
@@ -455,7 +450,6 @@ fn gpu::Device make_dbg_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_debug_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -658,12 +652,10 @@ fn void labels_record_validation_clean() @test {
     };
     gpu::TextureHandle target = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, target)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
-    gpu::cmd_begin_label(&cmd, "frame_setup")!!;
+    gpu::cmd_begin_label(&cmd, "resource_setup")!!;
     gpu::TextureBarrier to_attach = {
         .texture       = target,
         .before_stage  = gpu::Stage.HOST,
@@ -694,8 +686,6 @@ fn void labels_record_validation_clean() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
-
     fault ended = @catch(gpu::cmd_begin_label(&cmd, "too_late"));
     assert(ended == gpu::INVALID_HANDLE, "labels on a consumed list fault INVALID_HANDLE");
     fault end_stale = @catch(gpu::cmd_end_label(&cmd));
@@ -727,7 +717,6 @@ fn void callback_reports_leaks_without_validation() @test {
         .backend           = gpu::BackendKind.VULKAN,
         .debug_callback    = &capture_leak_message,
         .debug_user_data   = &capture,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_callback_leak_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;

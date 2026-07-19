@@ -11,7 +11,6 @@ fn gpu::Device make_layout_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_layout_commit_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -47,9 +46,6 @@ fn void dropped_list_leaves_layout_uncommitted() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle tex = make_layout_texture(&device);
     defer gpu::destroy_texture(&device, tex)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
     // Record a transition and end the list, but never submit it.
     gpu::CommandList dropped = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&dropped)!!;
@@ -79,8 +75,6 @@ fn void dropped_list_leaves_layout_uncommitted() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void two_lists_submitted_in_order_validate() @test {
@@ -88,9 +82,6 @@ fn void two_lists_submitted_in_order_validate() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle tex = make_layout_texture(&device);
     defer gpu::destroy_texture(&device, tex)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
     gpu::CommandList first = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&first)!!;
     record_layout_barrier(
@@ -122,7 +113,6 @@ fn void two_lists_submitted_in_order_validate() @test {
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &second_submit)!!;
 
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void same_list_barrier_then_copy_validates() @test {
@@ -139,8 +129,6 @@ fn void same_list_barrier_then_copy_validates() @test {
         debug_name:   "layout_copy_source",
     )!!;
     defer free_owned_span(&device, &staging)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_layout_barrier(
@@ -161,7 +149,6 @@ fn void same_list_barrier_then_copy_validates() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void more_than_sixteen_pending_layouts_submit() @test {
@@ -174,8 +161,6 @@ fn void more_than_sixteen_pending_layouts_submit() @test {
     defer {
         foreach (t : textures) (void)gpu::destroy_texture(&device, t);
     }
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     for (uint i = 0; i < TEXTURE_COUNT; i++) {
@@ -208,5 +193,4 @@ fn void more_than_sixteen_pending_layouts_submit() @test {
     gpu::SubmitDesc verify_submit = { .command_lists = verify_lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &verify_submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
 }

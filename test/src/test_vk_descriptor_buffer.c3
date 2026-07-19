@@ -25,7 +25,6 @@ fn void descriptor_buffer_device_and_heap() @test {
     gpu::DeviceDesc desc = {
         .backend                     = gpu::BackendKind.VULKAN,
         .enable_validation           = true,
-        .frames_in_flight            = 2,
         .descriptor_heap_mode        = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
         .texture_descriptor_capacity = 8,
         .sampler_descriptor_capacity = 4,
@@ -84,7 +83,6 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::DeviceDesc device_desc = {
         .backend              = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
-        .frames_in_flight     = 2,
         .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
         .application_name     = "gpu_descriptor_buffer_compute_to_graphics",
     };
@@ -251,9 +249,6 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     };
     gpu::PipelineHandle graphics_pipeline = gpu::create_graphics_pipeline(&device, &graphics_pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, graphics_pipeline)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
     gpu::CommandList compute_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute_commands)!!;
     gpu::TextureBarrier to_general = {
@@ -389,7 +384,6 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         io::eprintfn("descriptor_buffer_compute_to_graphics: PASS distinct-family graphics=%d compute=%d",
             state.graphics_family, state.compute_family);
     }
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void descriptor_buffer_write_then_sample() @test {
@@ -402,7 +396,6 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::DeviceDesc device_desc = {
         .backend              = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
-        .frames_in_flight     = 2,
         .descriptor_heap_mode = gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER,
         .application_name     = "gpu_descriptor_buffer_e2e",
     };
@@ -460,22 +453,37 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
-    gpu::GpuSpan write_root_span = gpu::alloc_frame_span(&frame_token, WriteRoot::size, 16)!!;
+    OwnedSpan write_root_owned = allocate_owned_span(
+        device:       &device,
+        size:         WriteRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "descriptor_write_root",
+    )!!;
+    defer free_owned_span(&device, &write_root_owned)!!;
+    gpu::GpuSpan write_root_span = write_root_owned.span;
     WriteRoot* write_root = (WriteRoot*)test_span_mapping(&device, write_root_span).ptr;
     write_root.texture_index = tex_index;
     write_root.width         = TEX;
     write_root.height        = TEX;
 
-    gpu::GpuSpan sample_root_span = gpu::alloc_frame_span(&frame_token, SampleRoot::size, 16)!!;
+    OwnedSpan sample_root_owned = allocate_owned_span(
+        device:       &device,
+        size:         SampleRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "descriptor_sample_root",
+    )!!;
+    defer free_owned_span(&device, &sample_root_owned)!!;
+    gpu::GpuSpan sample_root_span = sample_root_owned.span;
     SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
     sample_root.output_gpu    = test_span_address(&device, output.span);
     sample_root.texture_index = tex_index;
     sample_root.sampler_index = smp_index;
     sample_root.width         = TEX;
     sample_root.height        = TEX;
+    gpu::flush_mapped_span(&device, write_root_span)!!;
+    gpu::flush_mapped_span(&device, sample_root_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -526,8 +534,12 @@ fn void descriptor_buffer_write_then_sample() @test {
 
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, output.span)!!;
     gpu::GpuSpan out_span = output.span;
@@ -540,5 +552,4 @@ fn void descriptor_buffer_write_then_sample() @test {
             assert(quantize_unorm8(texel[2]) == (x ^ y), "blue channel matches on the buffer path");
         }
     }
-    gpu::end_frame(&frame_token)!!;
 }

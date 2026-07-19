@@ -19,7 +19,7 @@ fn void command_tokens_are_small_owner_values() @test {
 }
 
 fn void discard_consumes_recording_and_executable_lists() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
 
     gpu::CommandList recording = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -50,7 +50,6 @@ fn void copy_upload_to_readback() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_command_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
@@ -79,9 +78,6 @@ fn void copy_upload_to_readback() @test {
     char* src = up_mapping.ptr;
     for (uint i = 0; i < 256; i++) src[i] = (char)i;
     gpu::flush_mapped_span(&device, upload.span)!!;
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = { .src = up_span, .dst = rb_span };
@@ -108,16 +104,12 @@ fn void copy_upload_to_readback() @test {
     char[] rb_mapping = gpu::get_span_mapping(&device, rb_span)!!;
     char* dst = rb_mapping.ptr;
     for (uint i = 0; i < 256; i++) assert(dst[i] == (char)i, "readback byte matches uploaded byte");
-
-    gpu::end_frame(&frame)!!;
 }
 
 fn void empty_command_list_submits() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
@@ -127,11 +119,10 @@ fn void empty_command_list_submits() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame)!!;
 }
 
 fn void command_list_owns_its_device_token_value() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -149,7 +140,7 @@ fn void command_list_owns_its_device_token_value() @test {
 }
 
 fn void stale_command_owner_faults_invalid_handle() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -172,7 +163,7 @@ fn void stale_command_owner_faults_invalid_handle() @test {
 }
 
 fn void copied_alias_cannot_resubmit_after_success() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -207,7 +198,7 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
 }
 
 fn void command_generation_exhaustion_retires_slot() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -245,7 +236,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
 }
 
 fn void duplicate_token_batch_rejects_without_consuming() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -267,7 +258,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
 }
 
 fn void readiness_only_submit_validates_stale_swapchain() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -290,7 +281,7 @@ fn void readiness_only_submit_validates_stale_swapchain() @test {
 }
 
 fn void readiness_only_submit_rejects_malformed_identity() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -307,7 +298,7 @@ fn void readiness_only_submit_rejects_malformed_identity() @test {
 }
 
 fn void simultaneous_devices_submit_independently() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device first = gpu::create_device_from_desc(&desc)!!;
     gpu::Device second = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&second)!!;
@@ -365,12 +356,9 @@ fn void discarded_command_buffer_is_reclaimed_by_recording_owner() @test {
 fn void bad_command_state_rejected() @test {
     gpu::DeviceDesc desc = {
         .backend          = gpu::BackendKind.VULKAN,
-        .frames_in_flight = 2,
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
@@ -391,14 +379,11 @@ fn void bad_command_state_rejected() @test {
     ));
     assert(rejected == gpu::COMMAND_RECORDING_ERROR,
         "recording through an ended alias faults COMMAND_RECORDING_ERROR");
-    gpu::end_frame(&frame)!!;
 }
 fn void texture_barrier_faults() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier bar = {
@@ -411,7 +396,6 @@ fn void texture_barrier_faults() @test {
     assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on an invalid texture handle faults INVALID_HANDLE");
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
-    gpu::end_frame(&frame)!!;
 }
 
 fn void submitted_command_buffer_retires_at_completion() @test {
@@ -452,7 +436,7 @@ fn void submitted_command_buffer_retires_at_completion() @test {
         "the recording owner reclaims the completed command buffer before allocating again");
 }
 
-fn void command_recording_does_not_require_frame_lifecycle() @test {
+fn void command_recording_requires_no_lifecycle_boundary() @test {
     gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;

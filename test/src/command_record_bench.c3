@@ -9,7 +9,6 @@ const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 
 fn double record_global_barriers(gpu::Device* device) {
-    gpu::FrameToken frame = gpu::begin_frame(device)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::GlobalBarrier barrier = {
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
@@ -25,12 +24,10 @@ fn double record_global_barriers(gpu::Device* device) {
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
     gpu::discard_commands(&commands)!!;
-    gpu::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
 fn double record_buffer_barriers(gpu::Device* device, gpu::GpuSpan span) {
-    gpu::FrameToken frame = gpu::begin_frame(device)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::BufferBarrier barrier = {
         .span          = span,
@@ -47,7 +44,6 @@ fn double record_buffer_barriers(gpu::Device* device, gpu::GpuSpan span) {
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
     gpu::discard_commands(&commands)!!;
-    gpu::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
@@ -57,7 +53,6 @@ fn double record_indirect_dispatches(
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
-    gpu::FrameToken frame = gpu::begin_frame(device)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
@@ -72,7 +67,6 @@ fn double record_indirect_dispatches(
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
     gpu::discard_commands(&commands)!!;
-    gpu::end_frame(&frame)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
@@ -93,7 +87,6 @@ fn double command_median(double[COMMAND_RECORD_REPETITIONS] values) {
 fn int main() {
     gpu::DeviceDesc desc = {
         .backend          = gpu::BackendKind.VULKAN,
-        .frames_in_flight = 1,
         .application_name = "gpu_command_record_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;

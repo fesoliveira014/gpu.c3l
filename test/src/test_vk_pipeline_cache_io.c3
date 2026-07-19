@@ -86,7 +86,6 @@ fn gpu::Device make_cache_io_device(char[] blob = {}, CacheBackendCapture* captu
     gpu::DeviceDesc desc = {
         .backend             = gpu::BackendKind.VULKAN,
         .enable_validation   = true,
-        .frames_in_flight    = 2,
         .pipeline_cache_data = blob,
         .debug_callback      = capture == null ? null : &capture_cache_backend_diagnostic,
         .debug_user_data     = capture,
@@ -127,13 +126,20 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     float* in_data = (float*)test_span_mapping(device, input.span).ptr;
     for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
     gpu::flush_mapped_span(device, input.span)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(device)!!;
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       device,
+        size:         ComputeRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "cache_dispatch_root",
+    )!!;
+    defer free_owned_span(device, &root_owned)!!;
+    gpu::GpuSpan root_span = root_owned.span;
     ComputeRoot* root = (ComputeRoot*)test_span_mapping(device, root_span).ptr;
     root.input_gpu  = test_span_address(device, input.span);
     root.output_gpu = test_span_address(device, output.span);
     root.count      = COUNT;
+    gpu::flush_mapped_span(device, root_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -153,13 +159,16 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(device, gpu::QueueKind.COMPUTE, &submit)!!;
-    wait_test_queue(device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        device,
+        gpu::QueueKind.COMPUTE,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(device, output.span)!!;
     float* out_data = (float*)test_span_mapping(device, output.span).ptr;
     for (uint i = 0; i < COUNT; i++) assert(out_data[i] == (float)i * 2.0, "warm pipeline computes correctly");
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn char[] export_cache_blob(gpu::Device* device) {
