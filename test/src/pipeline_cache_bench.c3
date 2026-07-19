@@ -14,16 +14,20 @@ const char[*] BENCH_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 
 const uint BENCH_DISTINCT_COUNT  = 200;
 const uint BENCH_DUPLICATE_COUNT = 200_000;
+const uint BENCH_BATCH_SIZE      = 64;
+const uint BENCH_BATCH_ROUNDS    = 2_000;
 
 fn int main() {
     io::printfn(
-        "iterations=cold=%d;duplicate=%d units=ns/create",
+        "iterations=cold=%d;duplicate=%d;batch=%dx%d units=ns/create",
         BENCH_DISTINCT_COUNT,
         BENCH_DUPLICATE_COUNT,
+        BENCH_BATCH_SIZE,
+        BENCH_BATCH_ROUNDS,
     );
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .pipeline_capacity = BENCH_DISTINCT_COUNT + 1,
+        .pipeline_capacity = BENCH_DISTINCT_COUNT + BENCH_BATCH_SIZE,
         .application_name  = "gpu_pipeline_cache_bench",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
@@ -65,6 +69,25 @@ fn int main() {
     }
     double dup_ns_per_create = (double)dup_elapsed_ns / (double)BENCH_DUPLICATE_COUNT;
     io::printfn("phase 2 (duplicate, %d at full table): %.1f ns/create", BENCH_DUPLICATE_COUNT, dup_ns_per_create);
+
+    gpu::GraphicsPipelineDesc[BENCH_BATCH_SIZE] batch_descs;
+    foreach (&batch_desc : batch_descs) *batch_desc = duplicate;
+    gpu::PipelineHandle[BENCH_BATCH_SIZE] batch_pipelines;
+    long batch_elapsed_ns = 0;
+    for (uint round = 0; round < BENCH_BATCH_ROUNDS; round++) {
+        std::time::Clock mark = std::time::clock::now();
+        gpu::create_graphics_pipelines(&device, batch_descs[..], batch_pipelines[..])!!;
+        batch_elapsed_ns += (long)mark.to_now();
+        foreach (pipeline : batch_pipelines) gpu::destroy_pipeline(&device, pipeline)!!;
+    }
+    double batch_ns_per_create = (double)batch_elapsed_ns
+        / (double)(BENCH_BATCH_SIZE * BENCH_BATCH_ROUNDS);
+    io::printfn(
+        "phase 3 (cached batch, %dx%d): %.1f ns/create",
+        BENCH_BATCH_SIZE,
+        BENCH_BATCH_ROUNDS,
+        batch_ns_per_create,
+    );
 
     foreach (handle : distinct) gpu::destroy_pipeline(&device, handle)!!;
 

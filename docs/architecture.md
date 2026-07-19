@@ -348,14 +348,18 @@ construction details, never public resources.
 Pipelines are immutable shader execution objects. Creation is split by kind:
 
 ```text
-create_compute_pipeline(device, ComputePipelineDesc)   -> PipelineHandle?
-create_graphics_pipeline(device, GraphicsPipelineDesc) -> PipelineHandle?
+create_compute_pipeline(device, ComputePipelineDesc)    -> PipelineHandle?
+create_graphics_pipeline(device, GraphicsPipelineDesc)  -> PipelineHandle?
+create_compute_pipelines(device, descriptions, outputs)  -> void?
+create_graphics_pipelines(device, descriptions, outputs) -> void?
 ```
 
-Graphics pipelines include the Vulkan-required immutable state. Viewport, scissor,
-cull mode, front face, and supported depth state are dynamic. The pipeline cache
-deduplicates exact shader-code identity plus the remaining blend/depth/raster
-state and fronts a serializable driver cache: `get_pipeline_cache_size` /
+Graphics pipeline identity includes shaders, attachment compatibility, topology,
+cull/front-face, sample state, depth bias, polygon mode, and baseline blend.
+Depth state is separate; viewport and scissor are dynamic. Batch creation
+deduplicates exact shader code and pipeline identity, then publishes every
+handle transactionally. The pipeline cache fronts a serializable driver cache:
+`get_pipeline_cache_size` /
 `get_pipeline_cache_data` export the driver blob, and
 `DeviceDesc.pipeline_cache_data` warm-starts it at device creation.
 

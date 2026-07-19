@@ -22,8 +22,8 @@ enum PipelineKind : int {
 
 // Canonical packed key over the immutable pipeline state. Field order keeps
 // the struct padding-free; zero-init plus field-wise assignment keeps the
-// byte view deterministic for hashing. Dynamic-able state (viewport, scissor,
-// cull, front face, depth test/write/compare) and debug_name stay out.
+// byte view deterministic for hashing. Viewport, scissor, separate depth state,
+// and debug_name stay out.
 struct PipelineKey {
     ulong vertex_shader_digest;
     ulong fragment_shader_digest;
@@ -36,11 +36,11 @@ struct PipelineKey {
     int   blend_enable;
     int[6] blend;
     int   kind;
-    int   reserved;
+    int   cull_mode;
     float bias_constant;
     float bias_slope;
     float bias_clamp;
-    int   reserved2;
+    int   front_face;
 }
 $assert PipelineKey::size == 120;
 
@@ -234,9 +234,14 @@ fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
     key.fragment_shader_digest = desc.fragment_shader.digest;
     key.topology               = (int)desc.topology;
     key.polygon_mode           = (int)desc.raster.polygon_mode;
-    key.bias_constant          = desc.raster.depth_bias_constant;
-    key.bias_slope             = desc.raster.depth_bias_slope;
-    key.bias_clamp             = desc.raster.depth_bias_clamp;
+    key.cull_mode              = (int)desc.raster.cull_mode;
+    key.front_face             = (int)desc.raster.front_face;
+    key.bias_constant          = desc.raster.depth_bias_constant == 0.0f
+        ? 0.0f : desc.raster.depth_bias_constant;
+    key.bias_slope             = desc.raster.depth_bias_slope == 0.0f
+        ? 0.0f : desc.raster.depth_bias_slope;
+    key.bias_clamp             = desc.raster.depth_bias_clamp == 0.0f
+        ? 0.0f : desc.raster.depth_bias_clamp;
     key.depth_format           = (int)desc.depth_format;
     key.color_format_count     = (uint)desc.color_formats.len;
     foreach (i, format : desc.color_formats) key.color_formats[i] = (int)format;
@@ -354,6 +359,30 @@ fn void release_entry(VkDeviceState* state, uint entry_index) {
     entry.used = false;
     entry.next_free = state.pipeline_cache.free_head;
     state.pipeline_cache.free_head = entry_index + 1;
+}
+
+fn ulong pipeline_shader_module_create_count(VkDeviceState* state) {
+    return state.pipeline_shader_modules_created;
+}
+
+fn ulong pipeline_native_create_count(VkDeviceState* state) {
+    return state.pipelines_created;
+}
+
+<* Deterministic partial-batch rollback probe. *>
+fn void set_pipeline_creation_failure(VkDeviceState* state, usz index) {
+    state.pipeline_creation_failure_enabled = true;
+    state.pipeline_creation_failure_index = index;
+}
+
+fn void clear_pipeline_creation_failure(VkDeviceState* state) {
+    state.pipeline_creation_failure_enabled = false;
+    state.pipeline_creation_failure_index = 0;
+}
+
+fn bool pipeline_creation_should_fail(VkDeviceState* state, usz index) {
+    return state.pipeline_creation_failure_enabled
+        && state.pipeline_creation_failure_index == index;
 }
 
 <* Live entry count, exposed for dedup accounting in tests. *>

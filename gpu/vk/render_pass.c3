@@ -269,12 +269,8 @@ fn void? vk_cmd_end_render_pass(gpu::CommandList* commands) @private {
     record.state = CommandState.RECORDING;
 }
 
-<* Apply the slot's raster/depth snapshot through the core-1.3 dynamic-state
-   commands; graphics pipelines bake none of this state. *>
+<* Apply the separate depth snapshot through core 1.3 dynamic state. *>
 fn void replay_dynamic_state(vk::CommandBuffer cb, PipelineSlot* slot) @private {
-    vk::cmd_set_cull_mode(cb, (vk::CullModeFlags)cull_mode_to_vk(slot.raster.cull_mode));
-    vk::cmd_set_front_face(cb, slot.raster.front_face == gpu::FrontFace.CLOCKWISE
-        ? vk::FrontFace.CLOCKWISE : vk::FrontFace.COUNTER_CLOCKWISE);
     vk::cmd_set_depth_test_enable(cb, slot.depth.test_enable ? vk::TRUE : vk::FALSE);
     vk::cmd_set_depth_write_enable(cb, slot.depth.write_enable ? vk::TRUE : vk::FALSE);
     vk::cmd_set_depth_compare_op(cb, compare_op_to_vk(slot.depth.compare));

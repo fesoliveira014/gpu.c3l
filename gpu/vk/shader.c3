@@ -10,6 +10,12 @@ struct PipelineShaderModule {
     char[gpu::SHADER_ENTRY_POINT_CAP] entry_point;
 }
 
+struct PipelineBatchShader {
+    gpu::ShaderCode      code;
+    gpu::ShaderStage     expected_stage;
+    PipelineShaderModule native;
+}
+
 <* Fault SHADER_INVALID on any set other than 0 or a set-0 binding that breaks
    the heap convention; buffers-only shaders pass. *>
 fn void? check_heap_convention(spvreflect::ShaderModule* reflect_module) @private {
@@ -259,6 +265,7 @@ fn PipelineShaderModule? create_pipeline_shader_module(
             ),
         )!;
     };
+    state.pipeline_shader_modules_created++;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.SHADER_MODULE,
@@ -275,4 +282,45 @@ fn void destroy_pipeline_shader_module(
     if (shader == null || shader.shader_module == null) return;
     vk::destroy_shader_module(state.device, shader.shader_module, null);
     shader.shader_module = (vk::ShaderModule)null;
+}
+
+fn PipelineShaderModule*? get_pipeline_batch_shader(
+    VkDeviceState* state,
+    gpu::ShaderCode* code,
+    gpu::ShaderStage expected_stage,
+    ZString operation,
+    ZString rejected_field,
+    PipelineBatchShader[] shaders,
+    uint* shader_count,
+) {
+    foreach (&shader : shaders[:*shader_count]) {
+        if (shader.code == *code && shader.expected_stage == expected_stage) {
+            return &shader.native;
+        }
+    }
+    PipelineShaderModule native = create_pipeline_shader_module(
+        state:          state,
+        code:           code,
+        expected_stage: expected_stage,
+        operation:      operation,
+        rejected_field: rejected_field,
+    )!;
+    shaders[*shader_count] = {
+        .code           = *code,
+        .expected_stage = expected_stage,
+        .native         = native,
+    };
+    PipelineShaderModule* result = &shaders[*shader_count].native;
+    (*shader_count)++;
+    return result;
+}
+
+fn void destroy_pipeline_batch_shaders(
+    VkDeviceState* state,
+    PipelineBatchShader[] shaders,
+    uint shader_count,
+) {
+    foreach (&shader : shaders[:shader_count]) {
+        destroy_pipeline_shader_module(state, &shader.native);
+    }
 }

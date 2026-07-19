@@ -4,6 +4,7 @@ import gpu @public;
 import vk;
 import std::thread;
 import std::core::mem;
+import std::math;
 
 const uint GRAPHICS_ROOT_PUSH_SIZE = gpu::GraphicsRootPush::size;
 
@@ -70,18 +71,161 @@ fn vk::BlendOp blend_op_to_vk(gpu::BlendOp op) @private {
     }
 }
 
+fn bool primitive_topology_valid(gpu::PrimitiveTopology topology) {
+    switch (topology) {
+        case gpu::PrimitiveTopology.TRIANGLES:
+        case gpu::PrimitiveTopology.LINES:
+        case gpu::PrimitiveTopology.POINTS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn bool compare_op_valid(gpu::CompareOp op) {
+    switch (op) {
+        case gpu::CompareOp.NEVER:
+        case gpu::CompareOp.LESS:
+        case gpu::CompareOp.EQUAL:
+        case gpu::CompareOp.LESS_EQUAL:
+        case gpu::CompareOp.GREATER:
+        case gpu::CompareOp.NOT_EQUAL:
+        case gpu::CompareOp.GREATER_EQUAL:
+        case gpu::CompareOp.ALWAYS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn bool cull_mode_valid(gpu::CullMode mode) {
+    switch (mode) {
+        case gpu::CullMode.NONE:
+        case gpu::CullMode.FRONT:
+        case gpu::CullMode.BACK:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn bool front_face_valid(gpu::FrontFace face) {
+    switch (face) {
+        case gpu::FrontFace.COUNTER_CLOCKWISE:
+        case gpu::FrontFace.CLOCKWISE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn bool polygon_mode_valid(gpu::PolygonMode mode) {
+    switch (mode) {
+        case gpu::PolygonMode.FILL:
+        case gpu::PolygonMode.LINE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn bool blend_factor_valid(gpu::BlendFactor factor) {
+    switch (factor) {
+        case gpu::BlendFactor.ZERO:
+        case gpu::BlendFactor.ONE:
+        case gpu::BlendFactor.SRC_COLOR:
+        case gpu::BlendFactor.ONE_MINUS_SRC_COLOR:
+        case gpu::BlendFactor.SRC_ALPHA:
+        case gpu::BlendFactor.ONE_MINUS_SRC_ALPHA:
+        case gpu::BlendFactor.DST_ALPHA:
+        case gpu::BlendFactor.ONE_MINUS_DST_ALPHA:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn bool blend_op_valid(gpu::BlendOp op) {
+    switch (op) {
+        case gpu::BlendOp.ADD:
+        case gpu::BlendOp.SUBTRACT:
+        case gpu::BlendOp.REVERSE_SUBTRACT:
+        case gpu::BlendOp.MIN:
+        case gpu::BlendOp.MAX:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn bool blend_state_valid(gpu::BlendState* blend) {
+    if (!blend.enable) return true;
+    return blend_factor_valid(blend.src_color)
+        && blend_factor_valid(blend.dst_color)
+        && blend_op_valid(blend.color_op)
+        && blend_factor_valid(blend.src_alpha)
+        && blend_factor_valid(blend.dst_alpha)
+        && blend_op_valid(blend.alpha_op);
+}
+
 fn void? check_polygon_mode_support(gpu::PolygonMode mode, bool line_supported) {
     if (mode == gpu::PolygonMode.LINE && !line_supported) return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn void? validate_graphics_pipeline_desc(
+    VkDeviceState* state,
+    gpu::GraphicsPipelineDesc* desc,
+) {
+    if (desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS
+        || !primitive_topology_valid(desc.topology)
+        || !compare_op_valid(desc.depth.compare)
+        || !cull_mode_valid(desc.raster.cull_mode)
+        || !front_face_valid(desc.raster.front_face)
+        || !polygon_mode_valid(desc.raster.polygon_mode)
+        || !blend_state_valid(&desc.blend)
+        || !math::is_finite(desc.raster.depth_bias_constant)
+        || !math::is_finite(desc.raster.depth_bias_slope)
+        || !math::is_finite(desc.raster.depth_bias_clamp)) return gpu::INVALID_ARGUMENT~;
+    if (desc.depth_format != gpu::Format.UNDEFINED
+        && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
+    if (desc.color_formats.len == 0
+        && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+    foreach (format : desc.color_formats) {
+        if (format == gpu::Format.UNDEFINED
+            || format == gpu::Format.D32_FLOAT
+            || format == gpu::Format.D24_UNORM_S8_UINT
+            || format_to_vk(format) == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+    }
+    check_polygon_mode_support(desc.raster.polygon_mode, state.caps.line_polygon_mode)!;
+}
+
+fn bool graphics_pipeline_is_cached(
+    VkDeviceState* state,
+    gpu::GraphicsPipelineDesc* desc,
+) {
+    PipelineKey key = build_graphics_key(desc);
+    ulong hash = hash_key(&key);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    return find_entry(
+        &state.pipeline_cache,
+        hash,
+        &key,
+        &desc.vertex_shader,
+        &desc.fragment_shader,
+    ) != PIPELINE_ENTRY_NONE;
+}
+
 <* Create-info structs are assigned directly rather than through by-value
    builder setters (c3c 0.8.0 codegen crash). *>
-fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::GraphicsPipelineDesc* desc) @private {
+fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
+    gpu::Device* device,
+    gpu::GraphicsPipelineDesc* desc,
+    PipelineShaderModule* batch_vertex_shader,
+    PipelineShaderModule* batch_fragment_shader,
+) {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    if (desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS) return gpu::INVALID_ARGUMENT~;
-    if (desc.depth_format != gpu::Format.UNDEFINED && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
-    if (desc.color_formats.len == 0 && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
-    check_polygon_mode_support(desc.raster.polygon_mode, state.caps.line_polygon_mode)!;
+    validate_graphics_pipeline_desc(state, desc)!;
     PipelineKey key = build_graphics_key(desc);
     ulong hash = hash_key(&key);
     {
@@ -101,7 +245,6 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
                 .pipeline = entry.pipeline,
                 .layout   = entry.layout,
                 .entry    = hit,
-                .raster   = desc.raster,
                 .depth    = desc.depth,
             })) {
                 return handle;
@@ -111,22 +254,32 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
         }
     }
 
-    PipelineShaderModule vertex_shader = create_pipeline_shader_module(
-        state:          state,
-        code:           &desc.vertex_shader,
-        expected_stage: gpu::ShaderStage.VERTEX,
-        operation:      "create_graphics_pipeline",
-        rejected_field: "GraphicsPipelineDesc.vertex_shader",
-    )!;
-    defer destroy_pipeline_shader_module(state, &vertex_shader);
-    PipelineShaderModule fragment_shader = create_pipeline_shader_module(
-        state:          state,
-        code:           &desc.fragment_shader,
-        expected_stage: gpu::ShaderStage.FRAGMENT,
-        operation:      "create_graphics_pipeline",
-        rejected_field: "GraphicsPipelineDesc.fragment_shader",
-    )!;
-    defer destroy_pipeline_shader_module(state, &fragment_shader);
+    PipelineShaderModule owned_vertex_shader;
+    defer destroy_pipeline_shader_module(state, &owned_vertex_shader);
+    PipelineShaderModule* vertex_shader = batch_vertex_shader;
+    if (vertex_shader == null) {
+        owned_vertex_shader = create_pipeline_shader_module(
+            state:          state,
+            code:           &desc.vertex_shader,
+            expected_stage: gpu::ShaderStage.VERTEX,
+            operation:      "create_graphics_pipeline",
+            rejected_field: "GraphicsPipelineDesc.vertex_shader",
+        )!;
+        vertex_shader = &owned_vertex_shader;
+    }
+    PipelineShaderModule owned_fragment_shader;
+    defer destroy_pipeline_shader_module(state, &owned_fragment_shader);
+    PipelineShaderModule* fragment_shader = batch_fragment_shader;
+    if (fragment_shader == null) {
+        owned_fragment_shader = create_pipeline_shader_module(
+            state:          state,
+            code:           &desc.fragment_shader,
+            expected_stage: gpu::ShaderStage.FRAGMENT,
+            operation:      "create_graphics_pipeline",
+            rejected_field: "GraphicsPipelineDesc.fragment_shader",
+        )!;
+        fragment_shader = &owned_fragment_shader;
+    }
     @pool() {
         vk::Format[] color_formats = {};
         if (desc.color_formats.len > 0) {
@@ -166,6 +319,10 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
 
         vk::PipelineRasterizationStateCreateInfo raster = vk::pipeline_rasterization_state_create_info();
         raster.polygon_mode = desc.raster.polygon_mode == gpu::PolygonMode.LINE ? vk::PolygonMode.LINE : vk::PolygonMode.FILL;
+        raster.cull_mode    = cull_mode_to_vk(desc.raster.cull_mode);
+        raster.front_face   = desc.raster.front_face == gpu::FrontFace.CLOCKWISE
+            ? vk::FrontFace.CLOCKWISE
+            : vk::FrontFace.COUNTER_CLOCKWISE;
         raster.line_width   = 1.0;
         if (desc.raster.depth_bias_constant != 0 || desc.raster.depth_bias_slope != 0 || desc.raster.depth_bias_clamp != 0) {
             raster.depth_bias_enable          = vk::TRUE;
@@ -198,11 +355,9 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
             blend_state.p_attachments = blend_attachments.ptr;
         }
 
-        vk::DynamicState[7] dynamic_states = {
+        vk::DynamicState[5] dynamic_states = {
             vk::DynamicState.VIEWPORT,
             vk::DynamicState.SCISSOR,
-            vk::DynamicState.CULL_MODE,
-            vk::DynamicState.FRONT_FACE,
             vk::DynamicState.DEPTH_TEST_ENABLE,
             vk::DynamicState.DEPTH_WRITE_ENABLE,
             vk::DynamicState.DEPTH_COMPARE_OP,
@@ -240,6 +395,7 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
                 p_pipelines:       &pipeline,
             ),
         )!;
+        state.pipelines_created++;
         set_object_name(
             state:         state,
             object_type:   vk::ObjectType.PIPELINE,
@@ -285,12 +441,103 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(gpu::Device* device, gpu::Gr
             .pipeline = pipeline,
             .layout   = state.graphics_layout,
             .entry    = entry_index,
-            .raster   = desc.raster,
             .depth    = desc.depth,
         })) {
             return handle;
         }
         release_entry(state, entry_index);
         return gpu::SLOT_TABLE_FULL~;
+    };
+}
+
+fn gpu::PipelineHandle? vk_create_graphics_pipeline(
+    gpu::Device* device,
+    gpu::GraphicsPipelineDesc* desc,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    state.pipeline_creation_mutex.lock()!!;
+    defer state.pipeline_creation_mutex.unlock();
+    return create_graphics_pipeline_from_modules(
+        device:                device,
+        desc:                  desc,
+        batch_vertex_shader:   null,
+        batch_fragment_shader: null,
+    );
+}
+
+fn void? vk_create_graphics_pipelines(
+    gpu::Device* device,
+    gpu::GraphicsPipelineDesc[] descs,
+    gpu::PipelineHandle[] out_pipelines,
+) @private {
+    if (out_pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
+    if (descs.len == 0) return;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    state.pipeline_creation_mutex.lock()!!;
+    defer state.pipeline_creation_mutex.unlock();
+
+    foreach (&desc : descs) validate_graphics_pipeline_desc(state, desc)!;
+    if (!pipeline_handle_capacity_available(state, descs.len)) {
+        return gpu::SLOT_TABLE_FULL~;
+    }
+
+    @pool() {
+        PipelineBatchShader[] shaders =
+            mem::talloc_array(PipelineBatchShader, descs.len * 2);
+        PipelineShaderModule*[] vertex_shaders =
+            mem::talloc_array(PipelineShaderModule*, descs.len);
+        PipelineShaderModule*[] fragment_shaders =
+            mem::talloc_array(PipelineShaderModule*, descs.len);
+        uint shader_count = 0;
+        defer destroy_pipeline_batch_shaders(state, shaders, shader_count);
+        foreach (i, &desc : descs) {
+            vertex_shaders[i] = null;
+            fragment_shaders[i] = null;
+            if (graphics_pipeline_is_cached(state, desc)) continue;
+            vertex_shaders[i] = get_pipeline_batch_shader(
+                state:          state,
+                code:           &desc.vertex_shader,
+                expected_stage: gpu::ShaderStage.VERTEX,
+                operation:      "create_graphics_pipelines",
+                rejected_field: "GraphicsPipelineDesc.vertex_shader",
+                shaders:        shaders,
+                shader_count:   &shader_count,
+            )!;
+            fragment_shaders[i] = get_pipeline_batch_shader(
+                state:          state,
+                code:           &desc.fragment_shader,
+                expected_stage: gpu::ShaderStage.FRAGMENT,
+                operation:      "create_graphics_pipelines",
+                rejected_field: "GraphicsPipelineDesc.fragment_shader",
+                shaders:        shaders,
+                shader_count:   &shader_count,
+            )!;
+        }
+
+        gpu::PipelineHandle[] created = mem::talloc_array(gpu::PipelineHandle, descs.len);
+        usz created_count = 0;
+        foreach (i, &desc : descs) {
+            if (pipeline_creation_should_fail(state, (usz)i)) {
+                for (usz rollback = 0; rollback < created_count; rollback++) {
+                    vk_destroy_pipeline(device, created[rollback])!!;
+                }
+                return gpu::PIPELINE_CREATE_FAILED~;
+            }
+            gpu::PipelineHandle? created_optional = create_graphics_pipeline_from_modules(
+                device:                device,
+                desc:                  desc,
+                batch_vertex_shader:   vertex_shaders[i],
+                batch_fragment_shader: fragment_shaders[i],
+            );
+            if (catch create_fault = created_optional) {
+                for (usz rollback = 0; rollback < created_count; rollback++) {
+                    vk_destroy_pipeline(device, created[rollback])!!;
+                }
+                return create_fault~;
+            }
+            created[i] = created_optional;
+            created_count++;
+        }
+        foreach (i, pipeline : created) out_pipelines[i] = pipeline;
     };
 }

@@ -756,6 +756,11 @@ ComputePipelineDesc
     ZString debug_name
 
 create_compute_pipeline(Device* device, ComputePipelineDesc* desc) -> PipelineHandle?
+create_compute_pipelines(
+    Device* device,
+    ComputePipelineDesc[] descs,
+    PipelineHandle[] out_pipelines,
+) -> void?
 ```
 
 The first ABI requires at least the 8-byte `RootPush` size. The requested size
@@ -805,6 +810,11 @@ GraphicsPipelineDesc
     ZString debug_name
 
 create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) -> PipelineHandle?
+create_graphics_pipelines(
+    Device* device,
+    GraphicsPipelineDesc[] descs,
+    PipelineHandle[] out_pipelines,
+) -> void?
 destroy_pipeline(Device* device, PipelineHandle pipeline) -> void?
 ```
 `PolygonMode.LINE` is optional. Query `DeviceCaps.line_polygon_mode` before
@@ -820,9 +830,15 @@ returns a fresh handle, but descriptors identical in immutable state (exact
 shader code identity, topology, polygon mode, blend, formats, and — for compute
 — push size) alias one backend pipeline underneath. Digest collisions are
 resolved by stage, entry point, length, and exact SPIR-V bytes. Raster
-cull/front-face and depth test/write/compare state are applied per handle at
-draw time as dynamic state, so descriptors differing only there also share a
-backend pipeline.
+cull/front-face state is immutable graphics identity. Depth
+test/write/compare state remains separate and is applied per handle at draw
+time. Viewport and scissor are dynamic command state.
+
+Batch output length must equal descriptor count; an empty batch succeeds.
+Shared shader code creates one temporary native module per exact stage, entry
+point, length, and byte sequence in the batch. Duplicate pipeline identities
+compile once. A fault leaves all output handles unchanged and publishes no
+pipeline from the batch.
 
 Each successful create must be balanced by exactly one `destroy_pipeline`; the
 backend pipeline is destroyed when its last alias is released. Destroying a
