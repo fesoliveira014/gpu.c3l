@@ -889,10 +889,28 @@ fn void release_helper_command_on_fault(
     gpu::CommandList* commands,
 ) @private {
     if (commands == null || !commands.handle.is_valid()) return;
-    state.command_mutex.lock()!!;
-    defer state.command_mutex.unlock();
-    release_command(state, commands.handle);
-    *commands = {};
+    state.helper_record_mutex.lock()!!;
+    defer state.helper_record_mutex.unlock();
+    RecordingContextHandle context;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        CommandRecord* record = state.commands.get(commands.handle)!!;
+        context = record.context;
+        vk::CommandBuffer command_buffer = record.command_buffer;
+        vk::CommandPool command_pool = record.command_pool;
+        release_command(state, commands.handle);
+        enqueue_retired_command_buffer_locked(
+            state:          state,
+            context_handle: context,
+            pool:           command_pool,
+            buffer:         command_buffer,
+        );
+        *commands = {};
+    }
+    drain_retired_command_buffers(state, context);
 }
 
 fn void? finish_helper_timeline(VkDeviceState* state, ulong* helper_value, ZString operation) @private {
@@ -913,62 +931,6 @@ fn void? finish_helper_timeline(VkDeviceState* state, ulong* helper_value, ZStri
         signal_helper_timeline_cleanup(state, retry_value, operation);
     }
     return public_fault~;
-}
-
-<* Call under helper_record_mutex before this call reserves: every reserved
-   value signaled means no helper buffer is live anywhere (helpers end
-   recording before releasing the mutex and signal after queue idle). *>
-fn void? maybe_reset_helper_pool(VkDeviceState* state, ZString operation) @private {
-    RecordingContextState* context = state.recording_contexts.get(state.helper_context)!;
-    PoolDirtyMask* dirty = &context.pool_dirty[state.frame_index];
-    gpu::QueueKind queue = frame_queue_kind(state);
-    gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
-    bool pool_dirty;
-    switch (queue) {
-        case gpu::QueueKind.COMPUTE:
-            pool_dirty = dirty.compute;
-        case gpu::QueueKind.TRANSFER:
-            pool_dirty = dirty.transfer;
-        default:
-            pool_dirty = dirty.graphics;
-    }
-    if (!pool_dirty) return;
-    state.transfer_mutex.lock()!!;
-    ulong reserved = state.helper_counter;
-    state.transfer_mutex.unlock();
-    ulong current = 0;
-    check_helper_backend_result(
-        state:           state,
-        operation:       operation,
-        result:          vk::get_semaphore_counter_value(state.device, state.helper_timeline, &current),
-        fault_is_public: true,
-    )!;
-    if (current != reserved) return;
-    release_commands_for_context_frame(state, state.helper_context, state.frame_index);
-    check_helper_backend_result(
-        state:           state,
-        operation:       operation,
-        result:          vk::reset_command_pool(
-            state.device,
-            pool_for(context, helper_queue, state.frame_index),
-            (vk::CommandPoolResetFlags)0,
-        ),
-        fault_is_public: true,
-    )!;
-    switch (queue) {
-        case gpu::QueueKind.COMPUTE:
-            dirty.compute = false;
-        case gpu::QueueKind.TRANSFER:
-            dirty.transfer = false;
-        default:
-            dirty.graphics = false;
-    }
-    state.helper_pool_resets++;
-}
-
-<* Cumulative helper-pool resets, whitebox-exposed for tests. *>
-fn ulong helper_pool_reset_count(VkDeviceState* state) {
-    return state.helper_pool_resets;
 }
 
 <* Cumulative dedicated-fallback registrations (created-then-destroyed
@@ -1015,7 +977,6 @@ fn void? vk_upload_buffer_data(
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
-        maybe_reset_helper_pool(state, "upload_buffer_data")!;
         helper_value = reserve_helper_value(state);
         tag.value = helper_value;
         gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
@@ -1132,7 +1093,6 @@ fn void? vk_upload_texture_data(gpu::Device* device, gpu::TextureHandle dst, uin
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
-        maybe_reset_helper_pool(state, "upload_texture_data")!;
         helper_value = reserve_helper_value(state);
         tag.value = helper_value;
         gpu::Queue helper_queue = queue_token_for_kind(state, queue)!;
@@ -1224,7 +1184,6 @@ fn void? vk_readback_buffer_data(
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
-        maybe_reset_helper_pool(state, "readback_buffer_data")!;
         helper_value = reserve_helper_value(state);
         tag.value = helper_value;
         gpu::GpuSpan? allocated_readback = readback_alloc(
@@ -1368,7 +1327,6 @@ fn void? vk_readback_texture_data(gpu::Device* device, gpu::TextureHandle src, u
     {
         state.helper_record_mutex.lock()!!;
         defer state.helper_record_mutex.unlock();
-        maybe_reset_helper_pool(state, "readback_texture_data")!;
         helper_value = reserve_helper_value(state);
         tag.value = helper_value;
         gpu::GpuSpan? allocated_readback = readback_alloc(
@@ -1462,6 +1420,7 @@ fn void? submit_and_wait_with(
 ) @private {
     CommandRecord* record = resolve_command(commands)!;
     gpu::Queue queue = record.queue;
+    RecordingContextHandle context = record.context;
     gpu::ExecutableCommandList[1] lists = {{
         .device = commands.device,
         .handle = commands.handle,
@@ -1469,12 +1428,16 @@ fn void? submit_and_wait_with(
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint point = vk_submit_with(queue, &submit, submit_fn)!;
     *commands = {};
-    return vk_wait_completion(
-        device,
-        gpu::completion_point_queue_id(point),
-        gpu::completion_point_sequence(point),
-        ulong::max,
-    );
+    vk_wait_completion(
+        device:     device,
+        queue_id:   gpu::completion_point_queue_id(point),
+        sequence:   gpu::completion_point_sequence(point),
+        timeout_ns: ulong::max,
+    )!;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    state.helper_record_mutex.lock()!!;
+    defer state.helper_record_mutex.unlock();
+    drain_retired_command_buffers(state, context);
 }
 
 <* Submit an ended helper list and wait for completion. *>

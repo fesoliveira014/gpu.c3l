@@ -10,6 +10,7 @@ alias DestroyContextPoolFn @private = fn void (void*, vk::Device, vk::CommandPoo
 
 const uint MAX_RECORDING_CONTEXTS = 257;
 const uint MAX_THREAD_DEVICE_CONTEXTS = 64;
+const usz RETIRED_COMMAND_INITIAL_CAPACITY = 16;
 
 struct RecordingContextHandle {
     uint index;
@@ -19,6 +20,11 @@ struct RecordingContextHandle {
 struct ThreadRecordingContext {
     gpu::Device            device;
     RecordingContextHandle context;
+}
+
+struct RetiredCommandBuffer {
+    vk::CommandPool   pool;
+    vk::CommandBuffer buffer;
 }
 
 fn bool RecordingContextHandle.is_valid(self) => self.generation != 0;
@@ -32,13 +38,6 @@ fn bool RecordingContextHandle.equals(
 tlocal ThreadRecordingContext[MAX_THREAD_DEVICE_CONTEXTS]
     thread_recording_contexts;
 
-// Which of a context's pools hold unreset command buffers for a frame slot.
-bitstruct PoolDirtyMask : char {
-    bool graphics : 0;
-    bool compute  : 1;
-    bool transfer : 2;
-}
-
 struct ContextPoolOps @private {
     void*                user_data;
     CreateContextPoolFn  create;
@@ -46,14 +45,14 @@ struct ContextPoolOps @private {
 }
 
 struct RecordingContextState {
-    vk::CommandPool[] graphics_pools;
+    vk::CommandPool[]      graphics_pools;
     // Aliases graphics_pools when the compute queue shares the graphics
     // family; owned storage only when distinct (compute_pools_distinct).
-    vk::CommandPool[] compute_pools;
-    vk::CommandPool[] transfer_pools;
-    bool              compute_pools_distinct;
-    // One mask per frame slot; begin_frame's reset loop reads and clears it.
-    PoolDirtyMask[]   pool_dirty;
+    vk::CommandPool[]      compute_pools;
+    vk::CommandPool[]      transfer_pools;
+    RetiredCommandBuffer[] retired_commands;
+    uint                   retired_command_count;
+    bool                   compute_pools_distinct;
 }
 
 struct RecordingContextCell {
@@ -124,6 +123,11 @@ fn void destroy_context_pools_with_ops(
     RecordingContextState* context,
     ContextPoolOps* ops
 ) @private {
+    if (context.retired_commands.ptr != null) {
+        alloc::free(state.host_allocator, context.retired_commands.ptr);
+        context.retired_commands = {};
+    }
+    context.retired_command_count = 0;
     if (context.graphics_pools.ptr != null) {
         foreach (pool : context.graphics_pools) {
             if (pool != null) ops.destroy(ops.user_data, state.device, pool);
@@ -145,15 +149,10 @@ fn void destroy_context_pools_with_ops(
         alloc::free(state.host_allocator, context.transfer_pools.ptr);
         context.transfer_pools = {};
     }
-    if (context.pool_dirty.ptr != null) {
-        alloc::free(state.host_allocator, context.pool_dirty.ptr);
-        context.pool_dirty = {};
-    }
     context.compute_pools_distinct = false;
 }
 
-<* One command pool per queue family per frame-in-flight, owned by a
-   recording context. Construction is all-or-nothing. *>
+<* One command pool per admitted queue family, owned by a recording context. *>
 fn void? create_context_pools_with_ops(
     VkDeviceState* state,
     RecordingContextState* context,
@@ -166,7 +165,7 @@ fn void? create_context_pools_with_ops(
         context.graphics_pools = alloc::new_array(
             state.host_allocator,
             vk::CommandPool,
-            (sz)state.frames_in_flight,
+            1,
         );
     }
     context.compute_pools_distinct = state.selected_queue_roles.compute
@@ -177,7 +176,7 @@ fn void? create_context_pools_with_ops(
             ? alloc::new_array(
                 state.host_allocator,
                 vk::CommandPool,
-                (sz)state.frames_in_flight,
+                1,
             )
             : context.graphics_pools;
     }
@@ -185,25 +184,17 @@ fn void? create_context_pools_with_ops(
         context.transfer_pools = alloc::new_array(
             state.host_allocator,
             vk::CommandPool,
-            (sz)state.frames_in_flight,
+            1,
         );
     }
-    context.pool_dirty = alloc::new_array(
-        state.host_allocator,
-        PoolDirtyMask,
-        (sz)state.frames_in_flight,
-    );
-
-    for (uint i = 0; i < state.frames_in_flight; i++) {
-        if (state.selected_queue_roles.graphics) {
-            context.graphics_pools[i] = ops.create(ops.user_data, state.device, state.graphics_family)!;
-        }
-        if (context.compute_pools_distinct) {
-            context.compute_pools[i] = ops.create(ops.user_data, state.device, state.compute_family)!;
-        }
-        if (state.selected_queue_roles.transfer) {
-            context.transfer_pools[i] = ops.create(ops.user_data, state.device, state.transfer_family)!;
-        }
+    if (state.selected_queue_roles.graphics) {
+        context.graphics_pools[0] = ops.create(ops.user_data, state.device, state.graphics_family)!;
+    }
+    if (context.compute_pools_distinct) {
+        context.compute_pools[0] = ops.create(ops.user_data, state.device, state.compute_family)!;
+    }
+    if (state.selected_queue_roles.transfer) {
+        context.transfer_pools[0] = ops.create(ops.user_data, state.device, state.transfer_family)!;
     }
 }
 
@@ -270,31 +261,70 @@ fn RecordingContextHandle? thread_recording_context(
 fn vk::CommandPool pool_for(
     RecordingContextState* context,
     gpu::Queue queue,
-    uint frame_index,
 ) {
-    if (queue.roles.graphics) return context.graphics_pools[frame_index];
-    if (queue.roles.compute) return context.compute_pools[frame_index];
-    return context.transfer_pools[frame_index];
+    if (queue.roles.graphics) return context.graphics_pools[0];
+    if (queue.roles.compute) return context.compute_pools[0];
+    return context.transfer_pools[0];
 }
 
-fn void mark_pool_dirty(
-    RecordingContextState* context,
-    gpu::Queue queue,
-    uint frame_index,
-) @private {
-    if (queue.roles.graphics) {
-        context.pool_dirty[frame_index].graphics = true;
-        return;
-    }
-    if (queue.roles.compute) {
-        if (context.compute_pools_distinct) {
-            context.pool_dirty[frame_index].compute = true;
-        } else {
-            context.pool_dirty[frame_index].graphics = true;
+fn void enqueue_retired_command_buffer_locked(
+    VkDeviceState* state,
+    RecordingContextHandle context_handle,
+    vk::CommandPool pool,
+    vk::CommandBuffer buffer,
+) {
+    if (buffer == null) return;
+    RecordingContextState* context = state.recording_contexts.get(
+        context_handle,
+    )!!;
+    if (context.retired_command_count >= context.retired_commands.len) {
+        usz capacity = context.retired_commands.len == 0
+            ? RETIRED_COMMAND_INITIAL_CAPACITY
+            : context.retired_commands.len * 2;
+        RetiredCommandBuffer[] grown = alloc::new_array(
+            state.host_allocator,
+            RetiredCommandBuffer,
+            (sz)capacity,
+        );
+        for (uint i = 0; i < context.retired_command_count; i++) {
+            grown[i] = context.retired_commands[i];
         }
-        return;
+        if (context.retired_commands.ptr != null) {
+            alloc::free(state.host_allocator, context.retired_commands.ptr);
+        }
+        context.retired_commands = grown;
     }
-    context.pool_dirty[frame_index].transfer = true;
+    context.retired_commands[context.retired_command_count++] = {
+        .pool   = pool,
+        .buffer = buffer,
+    };
+}
+
+fn void drain_retired_command_buffers(
+    VkDeviceState* state,
+    RecordingContextHandle context_handle,
+) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    RecordingContextState* context = state.recording_contexts.get(
+        context_handle,
+    )!!;
+    if (context.retired_command_count == 0) return;
+
+    state.command_mutex.lock()!!;
+    defer state.command_mutex.unlock();
+    for (uint i = 0; i < context.retired_command_count; i++) {
+        RetiredCommandBuffer* retired = &context.retired_commands[i];
+        vk::free_command_buffers(
+            device:               state.device,
+            command_pool:         retired.pool,
+            command_buffer_count: 1,
+            p_command_buffers:    &retired.buffer,
+        );
+        state.command_buffers_freed++;
+        *retired = {};
+    }
+    context.retired_command_count = 0;
 }
 
 fn void? vk_begin_commands_with_context(
@@ -304,17 +334,26 @@ fn void? vk_begin_commands_with_context(
     gpu::CommandList* out_commands,
 ) @private {
     gpu::Device device = queue.device;
+    drain_retired_command_buffers(state, context_handle);
     RecordingContextState* context = state.recording_contexts.get(context_handle)!;
-    uint frame_index = state.frame_index;
-    vk::CommandPool pool = pool_for(context, queue, frame_index);
-    mark_pool_dirty(context, queue, frame_index);
-
+    vk::CommandPool pool = pool_for(context, queue);
     vk::CommandBufferAllocateInfo alloc = vk::command_buffer_allocate_info()
         .set_command_pool(pool)
         .set_level(vk::CommandBufferLevel.PRIMARY)
         .set_command_buffer_count(1);
     vk::CommandBuffer cmd;
-    check_device_result(state, vk::allocate_command_buffers(state.device, &alloc, &cmd))!;
+    {
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        check_device_result(state, vk::allocate_command_buffers(state.device, &alloc, &cmd))!;
+        state.command_buffers_allocated++;
+    }
+    defer catch {
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        vk::free_command_buffers(state.device, pool, 1, &cmd);
+        state.command_buffers_freed++;
+    }
 
     vk::CommandBufferBeginInfo begin = vk::command_buffer_begin_info()
         .set_flags(vk::CommandBufferUsageFlagBits.ONE_TIME_SUBMIT_BIT);
@@ -322,9 +361,9 @@ fn void? vk_begin_commands_with_context(
 
     CommandRecord record = {
         .command_buffer = cmd,
+        .command_pool   = pool,
         .context        = context_handle,
         .queue          = queue,
-        .frame_index    = frame_index,
         .state          = CommandState.RECORDING,
         .last_pipeline  = gpu::PIPELINE_HANDLE_INVALID,
         .last_entry     = PIPELINE_ENTRY_NONE,
@@ -340,7 +379,6 @@ fn void? vk_begin_commands_with_context(
             return;
         }
     }
-    vk::free_command_buffers(state.device, pool, 1, &cmd);
     return gpu::SLOT_TABLE_FULL~;
 }
 
@@ -378,6 +416,8 @@ fn ulong? vk_discard_commands(
     state.transfer_mutex.lock()!!;
     defer state.transfer_mutex.unlock();
     {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
         CommandRecord* record = state.commands.get(handle)!;
@@ -386,7 +426,16 @@ fn ulong? vk_discard_commands(
             : record.state == CommandState.RECORDING
                 || record.state == CommandState.RECORDING_RENDER_PASS;
         if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
+        RecordingContextHandle context = record.context;
+        vk::CommandBuffer command_buffer = record.command_buffer;
+        vk::CommandPool command_pool = record.command_pool;
         release_command(state, handle);
+        enqueue_retired_command_buffer_locked(
+            state:          state,
+            context_handle: context,
+            pool:           command_pool,
+            buffer:         command_buffer,
+        );
     }
     return cancel_command_readback_tickets_locked(
         state,

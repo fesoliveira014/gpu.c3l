@@ -578,7 +578,7 @@ fn void? free_allocation_for_state_with_ops(
         AllocationSlot* slot = state.allocations.get(allocation)!;
         if (slot.live_placements > 0) return gpu::RESOURCE_IN_USE~;
         if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
-            drain_completed_submission_references(state)!;
+            drain_completed_submitted_commands(state)!;
             if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
                 return gpu::RESOURCE_IN_USE~;
             }

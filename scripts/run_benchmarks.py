@@ -16,7 +16,6 @@ BENCHMARK_TARGETS = (
     "resource_create_bench",
     "descriptor_churn_bench",
     "upload_throughput_bench",
-    "context_reset_bench",
     "command_record_bench",
     "frame_signal_bench",
     "pipeline_cache_bench",
@@ -28,7 +27,6 @@ BENCHMARK_METHODS = {
     "resource_create_bench": ("300/worker; workers=1,2,4", "ns/op"),
     "descriptor_churn_bench": ("320/worker; workers=1,2,4", "ns/descriptor"),
     "upload_throughput_bench": ("40/worker/combination; workers=1,2,4", "uploads/s"),
-    "context_reset_bench": ("2000/phase", "ns/begin_frame"),
     "command_record_bench": ("20000/phase/repetition; repetitions=5", "ns/record"),
     "frame_signal_bench": ("2000/phase", "ns/end_frame, submits/frame"),
     "pipeline_cache_bench": ("cold=200; duplicate=200000", "ns/create"),
@@ -42,7 +40,7 @@ CONTEXT_FIELDS = ("adapter:", "driver:", "validation:", "queues:")
 # A unit token alone is not enough: the startup header already declares
 # units=..., so the gate demands a number carrying the unit.
 MEASURED_VALUE = re.compile(
-    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|begin_frame|record|end_frame|create)|ms)\b"
+    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|end_frame|create)|ms)\b"
     r"|uploads_per_sec=\d"
 )
 

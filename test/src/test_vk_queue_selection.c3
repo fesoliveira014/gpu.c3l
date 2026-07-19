@@ -585,19 +585,19 @@ fn void resource_texture_create_info_uses_exact_access_families() @test {
 }
 
 fn void pool_selection_follows_queue_family() @test {
-    vk::CommandPool[2] gfx  = { (vk::CommandPool)(uptr)0x10, (vk::CommandPool)(uptr)0x11 };
-    vk::CommandPool[2] comp = { (vk::CommandPool)(uptr)0x30, (vk::CommandPool)(uptr)0x31 };
-    vk::CommandPool[2] xfer = { (vk::CommandPool)(uptr)0x20, (vk::CommandPool)(uptr)0x21 };
+    vk::CommandPool[1] gfx  = { (vk::CommandPool)(uptr)0x10 };
+    vk::CommandPool[1] comp = { (vk::CommandPool)(uptr)0x30 };
+    vk::CommandPool[1] xfer = { (vk::CommandPool)(uptr)0x20 };
 
     vk::RecordingContextState aliased = {
         .graphics_pools = gfx[..],
         .transfer_pools = xfer[..],
     };
     aliased.compute_pools = aliased.graphics_pools;
-    assert(vk::pool_for(&aliased, { .roles = { .compute } }, 0)
+    assert(vk::pool_for(&aliased, { .roles = { .compute } })
         == gfx[0], "aliased compute uses graphics pool");
-    assert(vk::pool_for(&aliased, { .roles = { .transfer } }, 1)
-        == xfer[1], "transfer uses transfer pool");
+    assert(vk::pool_for(&aliased, { .roles = { .transfer } })
+        == xfer[0], "transfer uses transfer pool");
 
     vk::RecordingContextState distinct = {
         .graphics_pools = gfx[..],
@@ -605,9 +605,9 @@ fn void pool_selection_follows_queue_family() @test {
         .transfer_pools = xfer[..],
         .compute_pools_distinct = true,
     };
-    assert(vk::pool_for(&distinct, { .roles = { .compute } }, 0)
+    assert(vk::pool_for(&distinct, { .roles = { .compute } })
         == comp[0], "distinct compute uses compute pool");
-    assert(vk::pool_for(&distinct, { .roles = { .graphics } }, 0)
+    assert(vk::pool_for(&distinct, { .roles = { .graphics } })
         == gfx[0], "graphics remains independent");
 }
 

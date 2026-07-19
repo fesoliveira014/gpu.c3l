@@ -330,10 +330,6 @@ fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* ou
     // WAIT_TIMEOUT must leave frame_index untouched so retry is clean.
     uint next_index = (state.frame_index + 1) % state.frames_in_flight;
     FrameArenaState* slot = &state.frame_arenas[next_index];
-    if (frame_has_live_commands(state, next_index)) {
-        return gpu::INVALID_RESOURCE_STATE~;
-    }
-
     if (slot.frame_timeline_value > 0) {
         ulong wait_value = slot.frame_timeline_value;
         vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
@@ -358,65 +354,6 @@ fn void? begin_frame_with_counter_query(gpu::Device* device, gpu::FrameToken* ou
     state.frame_index = next_index;
 
     slot.cursor.store(0, AtomicOrdering.RELAXED);
-    // Only pools dirtied since this slot last reset pay
-    // the driver call; idle contexts cost nothing per frame.
-    state.pools_reset_last_frame = 0;
-    state.pools_skipped_last_frame = 0;
-    foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
-        if (!cell.used) continue;
-        PoolDirtyMask* dirty = &cell.value.pool_dirty[state.frame_index];
-        if (state.selected_queue_roles.graphics) {
-            if (dirty.graphics) {
-                check_backend_result(
-                    state:     state,
-                    operation: "begin_frame",
-                    result:    vk::reset_command_pool(
-                        state.device,
-                        cell.value.graphics_pools[state.frame_index],
-                        (vk::CommandPoolResetFlags)0,
-                    ),
-                )!;
-                dirty.graphics = false;
-                state.pools_reset_last_frame++;
-            } else {
-                state.pools_skipped_last_frame++;
-            }
-        }
-        if (cell.value.compute_pools_distinct) {
-            if (dirty.compute) {
-                check_backend_result(
-                    state:     state,
-                    operation: "begin_frame",
-                    result:    vk::reset_command_pool(
-                        state.device,
-                        cell.value.compute_pools[state.frame_index],
-                        (vk::CommandPoolResetFlags)0,
-                    ),
-                )!;
-                dirty.compute = false;
-                state.pools_reset_last_frame++;
-            } else {
-                state.pools_skipped_last_frame++;
-            }
-        }
-        if (state.selected_queue_roles.transfer) {
-            if (dirty.transfer) {
-                check_backend_result(
-                    state:     state,
-                    operation: "begin_frame",
-                    result:    vk::reset_command_pool(
-                        state.device,
-                        cell.value.transfer_pools[state.frame_index],
-                        (vk::CommandPoolResetFlags)0,
-                    ),
-                )!;
-                dirty.transfer = false;
-                state.pools_reset_last_frame++;
-            } else {
-                state.pools_skipped_last_frame++;
-            }
-        }
-    }
     state.allocator.set_current_frame_index(state.frame_index);
     ulong generation = state.frame_generation + 1;
     if (generation == 0) generation = 1;
@@ -862,7 +799,7 @@ fn void? vk_free_persistent_span(gpu::Device* device, gpu::GpuSpan span) @privat
     }
 
     if (allocation.validation_references.load(AtomicOrdering.RELAXED) > 0) {
-        drain_completed_submission_references(state)!;
+        drain_completed_submitted_commands(state)!;
         if (allocation.validation_references.load(AtomicOrdering.RELAXED) > 0) {
             return gpu::RESOURCE_IN_USE~;
         }

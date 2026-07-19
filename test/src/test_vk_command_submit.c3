@@ -333,26 +333,33 @@ fn void simultaneous_devices_submit_independently() @test {
     wait_test_queue(&second, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void live_command_blocks_pool_reset_until_discard() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 1 };
+fn void discarded_command_buffer_is_reclaimed_by_recording_owner() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandBufferStats before = vk::command_buffer_stats(state);
     gpu::CommandList abandoned = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&abandoned)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&abandoned)!!;
     defer discard_test_executable(&executable)!!;
-    gpu::end_frame(&frame)!!;
-    fault blocked = @catch(gpu::begin_frame(&device));
-    assert(blocked == gpu::INVALID_RESOURCE_STATE,
-        "a live executable command list blocks pool reset");
     gpu::discard_executable_commands(&executable)!!;
-    frame = gpu::begin_frame(&device)!!;
 
+    vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
+    assert(discarded.allocated == before.allocated + 1, "one native command buffer was allocated");
+    assert(discarded.freed == before.freed, "discard leaves reclamation to the recording owner");
+    assert(discarded.pending == before.pending, "discard does not create completion-tracked work");
     fault stale = @catch(gpu::discard_executable_commands(&executable));
     assert(stale == gpu::INVALID_HANDLE, "discard invalidates the executable token");
-    gpu::end_frame(&frame)!!;
+
+    gpu::CommandList next = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&next)!!;
+    vk::CommandBufferStats reclaimed = vk::command_buffer_stats(state);
+    assert(reclaimed.freed == before.freed + 1,
+        "the recording owner reclaims the discarded command buffer before allocating again");
 }
 
 fn void bad_command_state_rejected() @test {
@@ -407,58 +414,61 @@ fn void texture_barrier_faults() @test {
     gpu::end_frame(&frame)!!;
 }
 
-// vkWaitSemaphores with timeout 0 is a spec-guaranteed poll: it returns
-// immediately, so these are deterministic on lavapipe.
-
-fn void idle_private_context_pools_are_never_reset() @test {
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
-        .frames_in_flight = 2,
-    };
+fn void submitted_command_buffer_retires_at_completion() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
-
-    vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
-    for (uint i = 0; i < 6; i++) {
-        gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-        assert(vk::pool_reset_stats(state).reset == 0,
-            "idle private pools are not reset");
-        gpu::end_frame(&frame)!!;
-    }
-}
-fn void used_context_pool_resets_exactly_once_on_slot_wrap() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN, .frames_in_flight = 2 };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
-    defer destroy_test_device(&device)!!;
-
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!; // slot 1
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
-    gpu::ExecutableCommandList[1] lists = { cmd_executable };
+    vk::CommandBufferStats before = vk::command_buffer_stats(state);
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+
+    vk::CommandBufferStats submitted = vk::command_buffer_stats(state);
+    assert(submitted.allocated == before.allocated + 1, "submit allocated one native command buffer");
+    assert(submitted.freed == before.freed, "submit retains the native command buffer");
+    assert(submitted.pending == before.pending + 1, "submit tracks one pending native command buffer");
+
     gpu::wait_completion(completion, ulong::max)!!;
-    gpu::end_frame(&frame)!!;
+    vk::CommandBufferStats completed = vk::command_buffer_stats(state);
+    assert(completed.freed == before.freed, "wait leaves native reclamation to the recording owner");
+    assert(completed.pending == before.pending, "wait retires the completion-tracked command buffer");
 
-    frame = gpu::begin_frame(&device)!!; // slot 0: never touched
-    assert(vk::pool_reset_stats(state).reset == 0, "the other slot was never dirtied, so nothing resets");
-    gpu::end_frame(&frame)!!;
+    gpu::CommandList next = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&next)!!;
+    vk::CommandBufferStats reclaimed = vk::command_buffer_stats(state);
+    assert(reclaimed.freed == before.freed + 1,
+        "the recording owner reclaims the completed command buffer before allocating again");
+}
 
-    frame = gpu::begin_frame(&device)!!; // slot 1 wraps back: the one dirtied pool resets
-    assert(vk::pool_reset_stats(state).reset == 1, "the recorded context's pool resets exactly once on its slot's wrap");
-    gpu::end_frame(&frame)!!;
+fn void command_recording_does_not_require_frame_lifecycle() @test {
+    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    defer destroy_test_device(&device)!!;
 
-    frame = gpu::begin_frame(&device)!!; // slot 0 again: still clean
-    assert(vk::pool_reset_stats(state).reset == 0, "slot 0 stays clean");
-    gpu::end_frame(&frame)!!;
-
-    frame = gpu::begin_frame(&device)!!; // slot 1 again: the bit stays cleared, nothing new recorded
-    assert(vk::pool_reset_stats(state).reset == 0, "the dirty bit stays cleared until the context records again");
-    gpu::end_frame(&frame)!!;
+    for (uint i = 0; i < 4; i++) {
+        gpu::CommandList commands = gpu::begin_commands(
+            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        )!!;
+        gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+        gpu::ExecutableCommandList[1] lists = { executable };
+        gpu::SubmitDesc submit = { .command_lists = lists[..] };
+        gpu::CompletionPoint completion = submit_test_queue(
+            &device,
+            gpu::QueueKind.GRAPHICS,
+            &submit,
+        )!!;
+        gpu::wait_completion(completion, ulong::max)!!;
+    }
 }

@@ -1243,7 +1243,7 @@ fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @pri
     }
     vk::Image image = slot.image;
     if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
-        drain_completed_submission_references(state)!;
+        drain_completed_submitted_commands(state)!;
         if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
             return gpu::RESOURCE_IN_USE~;
         }

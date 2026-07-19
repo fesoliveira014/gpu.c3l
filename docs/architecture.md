@@ -247,9 +247,9 @@ exclusive; multiple families use private concurrent sharing.
 ### Command lists
 
 A command list is a transient, owner-bearing token for a device-owned command
-record. The public token contains only a `Device` value and generation-checked handle;
-the Vulkan command buffer, bind cache, pending layouts, context, queue, frame slot,
-and lifecycle state remain backend-owned. Copies therefore alias one record.
+record. The public token contains only a `Device` value and generation-checked
+handle; the Vulkan command buffer, pool, bind cache, pending layouts, context,
+queue, and lifecycle state remain backend-owned. Copies therefore alias one record.
 
 State transitions:
 
@@ -262,8 +262,10 @@ RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> c
 the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
 batch as `SUBMITTING`. Validation or native failure restores it without publishing
 queue progress. Success publishes one `CompletionPoint` and invalidates every
-submitted token and alias. Frame-slot reuse is rejected while abandoned records
-remain; callers must submit or discard them. Invalid transitions return faults,
+submitted token and alias. Completion observation and discard retire native
+buffers to their recording context. The context owner reclaims them before its
+next allocation; device teardown relies on command-pool destruction.
+Invalid transitions return faults,
 and render-pass command constraints remain enforced.
 
 ### Independent allocations
@@ -404,7 +406,6 @@ Each frame-in-flight has:
 
 ```text
 frame upload arena
-command pool(s)
 last submit timeline value
 ```
 
@@ -415,7 +416,6 @@ IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDL
 
 begin_frame(device) -> token      // valid only in IDLE
     wait if frame slot is still in flight
-    reset command pools
     reset frame upload arena
     set VMA current frame index
 
@@ -432,7 +432,7 @@ device-owned generation. Copies alias one active generation.
 Successful end clears the passed copy and invalidates every alias through
 device-owned state. Failed end preserves the token and all prospective
 retirement state so the caller can retry. Invalid lifecycle transitions fault
-before changing the frame slot, arena, pools, retirement state, or queue
+before changing the frame slot, arena, retirement state, or queue
 submissions.
 
 `@with_frame` is a compile-time direct-call helper, not a runtime callback. It

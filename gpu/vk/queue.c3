@@ -2173,11 +2173,11 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             );
         submit = submit.set_signal_semaphore_infos(signals);
 
-        drain_submission_references_if_needed(state)!;
-        uint reference_reservation = prepare_submitted_references(state, records);
+        drain_submitted_commands_if_needed(state)!;
+        uint command_reservation = prepare_submitted_commands(state, records);
         defer catch {
-            cancel_submitted_reference_reservation(state, reference_reservation);
-            reference_reservation = 0;
+            cancel_submitted_command_reservation(state, command_reservation);
+            command_reservation = 0;
         }
         completion.submit_mutex.lock()!!;
         {
@@ -2213,13 +2213,13 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 )!;
             }
 
-            publish_submitted_references(
+            publish_submitted_commands(
                 state,
                 records,
                 point,
-                reference_reservation,
+                command_reservation,
             );
-            reference_reservation = 0;
+            command_reservation = 0;
             state.submit_stats.queue_submits++;
             if (swapchain != null) {
                 commit_swapchain_submit(swapchain, point);

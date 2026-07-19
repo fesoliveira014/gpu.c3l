@@ -236,13 +236,9 @@ timeout rather than an unbounded stall. Frame-scoped paths
 (`cmd_upload_buffer`, `cmd_upload_texture`, `cmd_readback_buffer`,
 `cmd_readback_texture`) are unaffected: they still tag `frame_timeline` at
 `counter + 1`, retired only by `end_frame`. See docs/memory.md §13.1.
-Before recording, each blocking helper also checks under
-`helper_record_mutex` whether `helper_timeline` already reads its reserved
-value minus one — every predecessor complete — and if so resets the helper
-context's pool for the current frame slot, bounding it to one live buffer
-under sequential use even when no frame loop ever runs; the phase rule (no
-Tier S call in flight across `begin_frame`/`end_frame`) keeps this from
-racing `begin_frame`'s own per-slot reset.
+Blocking helpers use a private recording context. Each helper waits for its
+queue completion, then reclaims its native command buffer while holding the
+helper recording mutex before the call returns.
 
 ## Off-frame submissions
 
