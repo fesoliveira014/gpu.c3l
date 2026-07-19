@@ -22,6 +22,20 @@ FORBIDDEN_TEXT = {
     '"name":"sampler_descriptor_capacity"': "backend-shaped sampler capacity",
     '"name":"max_texture_descriptors"': "backend-shaped texture limit",
     '"name":"max_sampler_descriptors"': "backend-shaped sampler limit",
+    '"name":"device_generated_commands"': "device_generated_commands",
+    '"name":"supported_indirect_commands_shader_stages"': (
+        "supported_indirect_commands_shader_stages"
+    ),
+    '"name":"max_indirect_sequence_count"': "max_indirect_sequence_count",
+    '"name":"max_indirect_commands_token_count"': (
+        "max_indirect_commands_token_count"
+    ),
+    '"name":"max_indirect_commands_token_offset"': (
+        "max_indirect_commands_token_offset"
+    ),
+    '"name":"max_indirect_commands_indirect_stride"': (
+        "max_indirect_commands_indirect_stride"
+    ),
     "bufferhandle": "retired BufferHandle",
     "bufferdesc": "retired BufferDesc",
     "bufferusage": "retired BufferUsage",
