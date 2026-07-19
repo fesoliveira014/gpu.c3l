@@ -42,6 +42,10 @@ page doesn't explain it, that's a bug in this page — file an issue.
   reports whether `PolygonMode.LINE` is enabled. Unsupported adapters reject
   it with `UNSUPPORTED_FEATURE`; filled rasterization and
   `PrimitiveTopology.LINES` remain available.
+- **GPU-generated roots are optional.** `DeviceCaps.generated_work` requires
+  one backend facility that supports the draw, indexed-draw, and dispatch
+  record layouts together. Unsupported devices retain the shared-root indirect
+  path and report a zero `max_generated_work_count`.
 - **Vendored distribution.** There is no package registry; consumers vendor
   the repo (with its binding submodules) under `lib/`. See
   `docs/getting_started.md`.
@@ -75,6 +79,7 @@ exists (else the limit is compile-time).
 | Compute push-constant range | Selected-device `maxPushConstantsSize`, reported by `DeviceCaps.max_push_constant_size` | — | `INVALID_ARGUMENT` |
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
+| Generated work items | Selected-device semantic limit reported by `DeviceCaps.max_generated_work_count`; zero when unsupported | — | — |
 | Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/device.c3`) | — | `SLOT_TABLE_FULL` |
 | Worker recording-pool caches per device | 256 (`MAX_RECORDING_CONTEXTS` in `gpu/vk/command.c3`) | reuse a bounded worker pool | `SLOT_TABLE_FULL` |
 | Swapchains | 8 (`MAX_SWAPCHAINS` in `gpu/swapchain.c3`) | — | `SLOT_TABLE_FULL` |
@@ -117,9 +122,10 @@ Two sizing rules that bite:
 Anything the device can answer at runtime lives in `DeviceCaps` (filled at
 `create_device`): heap capacities, alignments, sampler limits
 (`max_sampler_lod_bias`, `max_sampler_anisotropy`), workload limits
-(`max_compute_work_group_count`, `max_draw_indirect_count`), and semantic
-feature booleans such as `draw_indirect_count`. Native heap implementation
-choices are not reported.
+(`max_compute_work_group_count`, `max_draw_indirect_count`,
+`max_generated_work_count`), and semantic feature booleans such as
+`draw_indirect_count` and `generated_work`. Native implementation choices are
+not reported.
 
 Surface support is queried separately. `supports_presentation(adapter,
 surface)` preflights device creation; `get_present_mode_support(device,

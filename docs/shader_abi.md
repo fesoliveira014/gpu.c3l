@@ -88,6 +88,32 @@ Argument structs are part of the ABI and match Vulkan byte-for-byte —
 `include/shaders/generated/shader_abi.glsl` with identical field names. Compute
 shaders write them std430-tight; no padding exists in any of the three.
 
+Capability-gated generated work uses records that keep each work item's roots
+and arguments together:
+
+```text
+GeneratedDrawRecord
+    GpuAddress vertex_root_gpu          // offset 0
+    GpuAddress fragment_root_gpu        // offset 8
+    DrawIndirectCommand arguments       // offset 16, stride 32
+
+GeneratedDrawIndexedRecord
+    GpuAddress vertex_root_gpu          // offset 0
+    GpuAddress fragment_root_gpu        // offset 8
+    DrawIndexedIndirectCommand arguments // offset 16
+    uint _pad0                          // offset 36, stride 40
+
+GeneratedDispatchRecord
+    GpuAddress root_gpu                 // offset 0
+    DispatchIndirectCommand arguments   // offset 8
+    uint _pad0                          // offset 20, stride 24
+```
+
+These structs are generated as C3 and GLSL twins. A GPU producer can compact
+or reorder the complete work record without maintaining a parallel root table.
+`DeviceCaps.generated_work` is true only when all three layouts are supported;
+the shared-root indirect convention remains portable on every strict device.
+
 ## 5. Buffer layout
 
 All root and table structs use `std430`-compatible layout.

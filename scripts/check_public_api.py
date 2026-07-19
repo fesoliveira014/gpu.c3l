@@ -254,9 +254,15 @@ def validate_document(document: dict) -> list[str]:
             failures.append(f"DeviceDesc.{field} must be a uint")
 
     device_caps_fields = dict(member_schema(types.get("DeviceCaps")))
-    for field in ("texture_heap_capacity", "sampler_heap_capacity"):
+    for field in (
+        "texture_heap_capacity",
+        "sampler_heap_capacity",
+        "max_generated_work_count",
+    ):
         if device_caps_fields.get(field) != "uint":
             failures.append(f"DeviceCaps.{field} must be a uint")
+    if device_caps_fields.get("generated_work") != "bool":
+        failures.append("DeviceCaps.generated_work must be a bool")
     if device_caps_fields.get("max_sampler_lod_bias") != "float":
         failures.append("DeviceCaps.max_sampler_lod_bias must be a float")
 
@@ -576,6 +582,9 @@ def validate_document(document: dict) -> list[str]:
         ("BufferTextureCopyDesc", "struct"),
         ("TextureBufferCopyDesc", "struct"),
         ("BufferBarrier", "struct"),
+        ("GeneratedDrawRecord", "struct"),
+        ("GeneratedDrawIndexedRecord", "struct"),
+        ("GeneratedDispatchRecord", "struct"),
     ):
         definition = types.get(name)
         if definition is None or definition.get("kind") != kind:
@@ -674,6 +683,31 @@ def validate_document(document: dict) -> list[str]:
                 ("dst", "GpuSpan"),
             ),
             "BufferCopyDesc must contain exactly source and destination spans",
+        ),
+        "GeneratedDrawRecord": (
+            (
+                ("vertex_root_gpu", "GpuAddress"),
+                ("fragment_root_gpu", "GpuAddress"),
+                ("arguments", "DrawIndirectCommand"),
+            ),
+            "GeneratedDrawRecord must match the generated ABI schema",
+        ),
+        "GeneratedDrawIndexedRecord": (
+            (
+                ("vertex_root_gpu", "GpuAddress"),
+                ("fragment_root_gpu", "GpuAddress"),
+                ("arguments", "DrawIndexedIndirectCommand"),
+                ("_pad0", "uint"),
+            ),
+            "GeneratedDrawIndexedRecord must match the generated ABI schema",
+        ),
+        "GeneratedDispatchRecord": (
+            (
+                ("root_gpu", "GpuAddress"),
+                ("arguments", "DispatchIndirectCommand"),
+                ("_pad0", "uint"),
+            ),
+            "GeneratedDispatchRecord must match the generated ABI schema",
         ),
         "BufferTextureCopyDesc": (
             (

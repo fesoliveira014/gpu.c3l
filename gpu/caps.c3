@@ -41,6 +41,9 @@ struct DeviceCaps {
     bool dynamic_rendering;
     bool shader_int64;
     bool draw_indirect_count;
+    // GPU-written root records and work arguments can execute without host
+    // readback or CPU-loop emulation.
+    bool generated_work;
     bool async_compute;
     QueueCounts queues;
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
@@ -59,6 +62,8 @@ struct DeviceCaps {
     Vec3u max_compute_work_group_count;
     // Selected-device limit for one multi-draw indirect command.
     uint max_draw_indirect_count;
+    // Selected-device limit for one generated-work execution.
+    uint max_generated_work_count;
     usz  min_uniform_alignment;
     usz  min_storage_alignment;
     usz  min_texel_buffer_alignment;

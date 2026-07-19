@@ -213,6 +213,15 @@ fillModeNonSolid -> DeviceCaps.line_polygon_mode
 `PolygonMode.LINE` faults `UNSUPPORTED_FEATURE` before shader or cache lookup
 when this cap is false. The feature is not a physical-device selection requirement.
 
+Strict devices also probe `VK_EXT_device_generated_commands` as an optional
+implementation of generated work. The backend enables it only when the feature
+is advertised and the properties support vertex, fragment, and compute stages,
+two-token layouts, token offset 16, record stride 40, and a nonzero work-count
+limit. `DeviceCaps.generated_work` and `max_generated_work_count` report the
+result semantically; unsupported devices report false and zero. The extension
+is not a physical-device selection requirement and is not enabled for a device
+without strict capability.
+
 The selected strict heap path adds either descriptor-buffer support or the
 indexing path's partially-bound and update-after-bind features. Unrequested
 strict state adds no heap feature chain, extension, dispatch, descriptors, or

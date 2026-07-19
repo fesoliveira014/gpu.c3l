@@ -32,3 +32,35 @@ $assert DispatchIndirectCommand::size == 12;
 $assert $reflect(DispatchIndirectCommand.x).offset == 0;
 $assert $reflect(DispatchIndirectCommand.y).offset == 4;
 $assert $reflect(DispatchIndirectCommand.z).offset == 8;
+
+struct GeneratedDrawRecord {
+    GpuAddress          vertex_root_gpu;
+    GpuAddress          fragment_root_gpu;
+    DrawIndirectCommand arguments;
+}
+$assert GeneratedDrawRecord::size == 32;
+$assert $reflect(GeneratedDrawRecord.vertex_root_gpu).offset == 0;
+$assert $reflect(GeneratedDrawRecord.fragment_root_gpu).offset == 8;
+$assert $reflect(GeneratedDrawRecord.arguments).offset == 16;
+
+struct GeneratedDrawIndexedRecord {
+    GpuAddress                 vertex_root_gpu;
+    GpuAddress                 fragment_root_gpu;
+    DrawIndexedIndirectCommand arguments;
+    uint                       _pad0;
+}
+$assert GeneratedDrawIndexedRecord::size == 40;
+$assert $reflect(GeneratedDrawIndexedRecord.vertex_root_gpu).offset == 0;
+$assert $reflect(GeneratedDrawIndexedRecord.fragment_root_gpu).offset == 8;
+$assert $reflect(GeneratedDrawIndexedRecord.arguments).offset == 16;
+$assert $reflect(GeneratedDrawIndexedRecord._pad0).offset == 36;
+
+struct GeneratedDispatchRecord {
+    GpuAddress              root_gpu;
+    DispatchIndirectCommand arguments;
+    uint                    _pad0;
+}
+$assert GeneratedDispatchRecord::size == 24;
+$assert $reflect(GeneratedDispatchRecord.root_gpu).offset == 0;
+$assert $reflect(GeneratedDispatchRecord.arguments).offset == 8;
+$assert $reflect(GeneratedDispatchRecord._pad0).offset == 20;

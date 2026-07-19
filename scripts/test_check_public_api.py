@@ -457,6 +457,14 @@ def valid_document() -> dict:
                                 "type": {"name": "uint"},
                             },
                             {
+                                "name": "generated_work",
+                                "type": {"name": "bool"},
+                            },
+                            {
+                                "name": "max_generated_work_count",
+                                "type": {"name": "uint"},
+                            },
+                            {
                                 "name": "max_sampler_lod_bias",
                                 "type": {"name": "float"},
                             },
@@ -676,6 +684,60 @@ def valid_document() -> dict:
                                 "name": "after_hazard",
                                 "type": {"name": "Hazard"},
                             },
+                        ],
+                    },
+                    {
+                        "name": "GeneratedDrawRecord",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "vertex_root_gpu",
+                                "type": {"name": "GpuAddress"},
+                            },
+                            {
+                                "name": "fragment_root_gpu",
+                                "type": {"name": "GpuAddress"},
+                            },
+                            {
+                                "name": "arguments",
+                                "type": {"name": "DrawIndirectCommand"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "GeneratedDrawIndexedRecord",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "vertex_root_gpu",
+                                "type": {"name": "GpuAddress"},
+                            },
+                            {
+                                "name": "fragment_root_gpu",
+                                "type": {"name": "GpuAddress"},
+                            },
+                            {
+                                "name": "arguments",
+                                "type": {
+                                    "name": "DrawIndexedIndirectCommand",
+                                },
+                            },
+                            {"name": "_pad0", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "GeneratedDispatchRecord",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "root_gpu",
+                                "type": {"name": "GpuAddress"},
+                            },
+                            {
+                                "name": "arguments",
+                                "type": {"name": "DispatchIndirectCommand"},
+                            },
+                            {"name": "_pad0", "type": {"name": "uint"}},
                         ],
                     },
                     {"name": "ExecutableCommandList", "kind": "struct"},
@@ -1458,6 +1520,51 @@ class PublicApiCheckTests(unittest.TestCase):
         failures = check_public_api.validate_document(document)
         self.assertIn("DeviceDesc.texture_heap_capacity must be a uint", failures)
         self.assertIn("DeviceCaps.sampler_heap_capacity must be a uint", failures)
+
+    def test_requires_generated_work_capability_and_limit(self) -> None:
+        document = valid_document()
+        caps = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "DeviceCaps"
+        )
+        generated = next(
+            member for member in caps["members"]
+            if member["name"] == "generated_work"
+        )
+        generated["type"]["name"] = "uint"
+        caps["members"] = [
+            member for member in caps["members"]
+            if member["name"] != "max_generated_work_count"
+        ]
+        failures = check_public_api.validate_document(document)
+        self.assertIn("DeviceCaps.generated_work must be a bool", failures)
+        self.assertIn(
+            "DeviceCaps.max_generated_work_count must be a uint",
+            failures,
+        )
+
+    def test_rejects_generated_record_abi_drift(self) -> None:
+        document = valid_document()
+        records = {
+            entry["name"]: entry
+            for entry in document["modules"]["gpu"]["types"]
+        }
+        records["GeneratedDrawRecord"]["members"][0]["name"] = "vertex_root"
+        records["GeneratedDrawIndexedRecord"]["members"].pop()
+        records["GeneratedDispatchRecord"]["members"][0]["type"]["name"] = "ulong"
+        failures = check_public_api.validate_document(document)
+        self.assertIn(
+            "GeneratedDrawRecord must match the generated ABI schema",
+            failures,
+        )
+        self.assertIn(
+            "GeneratedDrawIndexedRecord must match the generated ABI schema",
+            failures,
+        )
+        self.assertIn(
+            "GeneratedDispatchRecord must match the generated ABI schema",
+            failures,
+        )
 
     def test_rejects_backend_shaped_heap_configuration(self) -> None:
         document = valid_document()
