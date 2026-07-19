@@ -1543,6 +1543,29 @@ class PublicApiCheckTests(unittest.TestCase):
             failures,
         )
 
+    def test_rejects_vulkan_shaped_generated_work_capabilities(self) -> None:
+        document = valid_document()
+        caps = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "DeviceCaps"
+        )
+        native_fields = (
+            "device_generated_commands",
+            "supported_indirect_commands_shader_stages",
+            "max_indirect_sequence_count",
+            "max_indirect_commands_token_count",
+            "max_indirect_commands_token_offset",
+            "max_indirect_commands_indirect_stride",
+        )
+        caps["members"].extend(
+            {"name": name, "type": {"name": "uint"}}
+            for name in native_fields
+        )
+        failures = check_public_api.validate_document(document)
+        for name in native_fields:
+            with self.subTest(name=name):
+                self.assertIn(name, failures)
+
     def test_rejects_generated_record_abi_drift(self) -> None:
         document = valid_document()
         records = {
