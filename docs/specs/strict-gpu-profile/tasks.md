@@ -260,7 +260,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.6 Bind pipelines separately from execution
 
-- [ ] Add strict pipeline and depth/stencil state binding commands and remove pipeline handles from draw and dispatch argument records in `gpu/command.c3`, `gpu/pipeline.c3`, and Vulkan command code.
+- [x] Add strict pipeline and depth/stencil state binding commands and remove pipeline handles from draw and dispatch argument records in `gpu/command.c3`, `gpu/pipeline.c3`, and Vulkan command code.
   - **Depends on:** 5.5 and 3.4.
   - **Contract:** draw and dispatch contain root addresses plus execution arguments; active strict pipeline is command state; no native compilation or variant synthesis occurs during execution commands.
   - **Edges:** execute without pipeline, wrong pipeline kind, stale pipeline, missing required stage root, dynamic-state omission, and validation failure leaving command state unchanged.
