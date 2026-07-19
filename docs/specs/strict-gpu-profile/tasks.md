@@ -236,7 +236,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.3 Remove backend-shaped heap configuration
 
-- [ ] Remove `DescriptorHeapMode` and descriptor-indexing or descriptor-buffer feature choices from `gpu/caps.c3`, `gpu/descriptor_heap.c3`, `gpu/gpu.c3i`, docs, and samples; select native facilities in `gpu/vk/descriptor_heap.c3`.
+- [x] Remove `DescriptorHeapMode` and descriptor-indexing or descriptor-buffer feature choices from `gpu/caps.c3`, `gpu/descriptor_heap.c3`, `gpu/gpu.c3i`, docs, and samples; select native facilities in `gpu/vk/descriptor_heap.c3`.
   - **Depends on:** 5.2.
   - **Contract:** callers request strict semantics and query semantic limits; backend strategy is diagnostic at most.
   - **Edges:** devices supporting several implementations, devices supporting none, differing capacities, and diagnostic reporting without behavior branching.
