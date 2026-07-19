@@ -27,7 +27,7 @@ Start with:
 
 - [Strict GPU architecture requirements](specs/strict-gpu-profile/requirements.md) for scope and acceptance criteria.
 - [Strict GPU architecture design](specs/strict-gpu-profile/design.md) for module boundaries and implementation order.
-- [Strict GPU architecture tasks](specs/strict-gpu-profile/tasks.md) for implementation milestones and review gates.
+- [Strict GPU architecture tasks](specs/strict-gpu-profile/tasks.md) for implementation status and verification commands.
 
 ## Maintenance
 

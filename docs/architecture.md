@@ -486,8 +486,9 @@ cmd_fill_buffer(command_list, dst_span, value)
 
 Transfers operate on caller-owned spans. Applications allocate and map
 `CPU_WRITE` or `CPU_READ` storage, record copies and barriers, and retain that
-storage until the submission completion point retires. The core owns no staging
-ring, readback pool, or blocking transfer path.
+storage until the returned `CompletionPoint` is reached. Transfer commands own no
+storage and perform no blocking work.
+
 ### Barriers
 
 Barriers are explicit:

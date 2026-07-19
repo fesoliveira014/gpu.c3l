@@ -51,13 +51,13 @@ token's retained device pin while another call can still be in flight.
 Most public device operations take a short-lived atomic pin. `begin_commands`
 transfers its pin to the recording token. Recording calls and end/discard borrow
 that pin. Successful end transfers ownership to the executable token; successful
-submit or executable discard releases it.
+`submit` or executable discard releases it.
 Pin acquisition may return `DEVICE_BUSY`; failed destruction restores the live
 state and preserves the token and generation.
 
 `begin_commands` lazily allocates one recording context per thread/device pair.
-Each device reserves one helper context and can allocate 256 recording-thread
-contexts over its lifetime. A further distinct recording thread receives
+Each device can allocate 256 recording contexts over its lifetime. A further
+distinct recording thread receives
 `SLOT_TABLE_FULL`; contexts are released when the device is destroyed.
 
 Runtime creation and destruction must not overlap other runtime operations. After
@@ -88,7 +88,7 @@ The frame-owner thread begins and ends the token generation; workers may receive
 copies or the shared token pointer only after begin and must quiesce before end.
 With `enable_validation`, in-flight Tier S calls at the boundary fault
 `INVALID_RESOURCE_STATE`. A live unsubmitted command record prevents its frame
-slot from resetting; submit or discard it first. Without validation the phase
+slot from resetting; `submit` or discard it first. Without validation the phase
 rule is still contractual — Tier S calls pay nothing.
 
 Frame lifecycle errors are independent of validation: double begin faults
@@ -111,6 +111,7 @@ Resource creation and destruction use `resource_mutex`; command-record
 allocation, submit claims, and reclamation use `command_mutex`. Submission
 releases `command_mutex` before locking the selected queue, so command-record
 and queue locks are not nested.
+
 ## Single-recorder texture discipline
 
 Within a frame, one thread owns a given texture's barriers and render

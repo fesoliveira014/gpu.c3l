@@ -341,7 +341,6 @@ fn PersistentArenaStats? get_persistent_stats(Device* device) {
     return operation.vtable.get_persistent_stats(device);
 }
 
-
 <* Derive a sub-range without bounds or overflow checks. Use only when the
    caller has already proved the range, or deliberately needs an invalid span
    for validation testing. *>

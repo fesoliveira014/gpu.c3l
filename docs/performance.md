@@ -39,7 +39,7 @@ c3c -O1 build upload_throughput_bench --path test
 
 The output reports numeric `uploads_per_sec` values with worker and payload
 fields. Compare rates only with the same environment context emitted by
-`benchmark_info`; the historical staging-arena results do not measure this
+`benchmark_info`; allocation-owning arena benchmarks measure a different
 path.
 
 ## Windows baseline

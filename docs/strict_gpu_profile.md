@@ -1,8 +1,16 @@
 # Strict GPU Architecture
 
-This document defines the target architecture for `gpu`. It follows the pointer-first, bindless, explicit-synchronization model described in [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api).
+This document summarizes the strict architecture contract for `gpu`. It follows
+the pointer-first, bindless, explicit-synchronization model described in
+[No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api).
 
-This is a target design, not a description of the current implementation. Detailed requirements and design are in [requirements](specs/strict-gpu-profile/requirements.md) and [design](specs/strict-gpu-profile/design.md). The [task list](specs/strict-gpu-profile/tasks.md) defines the implementation milestones and review gates.
+The contract includes separately designed extensions that are not present in the
+current source; it is not a current API inventory. See [Public API](api.md) and
+[Architecture](architecture.md) for the implemented surface. Detailed requirements
+and design are in [requirements](specs/strict-gpu-profile/requirements.md) and
+[design](specs/strict-gpu-profile/design.md). The
+[task list](specs/strict-gpu-profile/tasks.md) records implementation status and
+verification commands.
 
 ## Public topology
 
@@ -39,11 +47,16 @@ Backend API and driver versions are diagnostic information. Applications select 
 - Samplers are immutable device-interned values and require no individual destruction. Strict sampler-heap publication returns a separate shader index; compatibility-only devices retain sampler identity without creating the strict heap.
 - VMA remains private.
 - Non-WSI resource destruction is immediate. No live recording command list, executable command token, or incomplete submission may reference the resource. Strict presentation integration applies the same no-hidden-wait rule to swapchain destruction and resize.
-- Readback uses a CPU-cached span, copy, completion point, mapped-span invalidation, and direct CPU access.
+- Readback uses a caller-owned `CPU_READ` allocation and span, copy, completion
+  point, mapped-span invalidation, and direct CPU access.
 
-Allocation-owning arenas and policies are outside the strict core. A future `gpu::alloc` module may provide frame, persistent, staging, readback, and deferred-release utilities over allocations, spans, and completion points.
+Explicit transfers use caller-owned `CPU_WRITE` and `CPU_READ` allocations,
+mapped visibility operations, commands, and completion points. The live frame
+and persistent arenas remain separate conveniences and do not own transfer
+storage.
 
-The root module has no frame lifecycle, public semaphore, or readback-ticket API.
+The explicit transfer path requires no frame boundary, public semaphore, or
+readback-ticket API.
 
 ## Shader data and pipelines
 
