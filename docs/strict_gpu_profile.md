@@ -52,8 +52,9 @@ Backend API and driver versions are diagnostic information. Applications select 
 
 Explicit transfers use caller-owned `CPU_WRITE` and `CPU_READ` allocations,
 mapped visibility operations, commands, and completion points. The live frame
-and persistent arenas remain separate conveniences and do not own transfer
-storage.
+arena remains a separate transient convenience and does not own transfer
+storage. Long-lived CPU-written data retains its owning allocation through
+completion; readback waits or polls before invalidation and CPU access.
 
 The explicit transfer path requires no frame boundary, public semaphore, or
 readback-ticket API.

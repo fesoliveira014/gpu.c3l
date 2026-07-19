@@ -21,7 +21,6 @@ enum DebugResourceKind : int {
     TEXTURE_DESCRIPTOR,
     SAMPLER,
     FRAME,
-    PERSISTENT_SPAN,
     ALLOCATION,
 }
 

@@ -180,6 +180,60 @@
       "sources": [
         "debug_semaphore.c3"
       ]
+    },
+    "persistent_alloc_desc": {
+      "type": "object-files",
+      "sources": [
+        "persistent_alloc_desc.c3"
+      ]
+    },
+    "persistent_arena_stats": {
+      "type": "object-files",
+      "sources": [
+        "persistent_arena_stats.c3"
+      ]
+    },
+    "max_persistent_allocations": {
+      "type": "object-files",
+      "sources": [
+        "max_persistent_allocations.c3"
+      ]
+    },
+    "default_persistent_arena_size": {
+      "type": "object-files",
+      "sources": [
+        "default_persistent_arena_size.c3"
+      ]
+    },
+    "persistent_arena_size": {
+      "type": "object-files",
+      "sources": [
+        "persistent_arena_size.c3"
+      ]
+    },
+    "alloc_persistent_span": {
+      "type": "object-files",
+      "sources": [
+        "alloc_persistent_span.c3"
+      ]
+    },
+    "free_persistent_span": {
+      "type": "object-files",
+      "sources": [
+        "free_persistent_span.c3"
+      ]
+    },
+    "get_persistent_stats": {
+      "type": "object-files",
+      "sources": [
+        "get_persistent_stats.c3"
+      ]
+    },
+    "debug_persistent_span": {
+      "type": "object-files",
+      "sources": [
+        "debug_persistent_span.c3"
+      ]
     }
   }
 }

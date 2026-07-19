@@ -36,7 +36,7 @@ gpu/vk/device.c3               physical device selection, logical device, featur
 gpu/vk/queue.c3                queue family selection, queue handles, submit
 gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
 gpu/vk/allocation.c3           generic-buffer and raw texture-memory allocations
-gpu/vk/memory.c3               memory classes, frame and persistent arenas
+gpu/vk/memory.c3               frame arenas and frame retirement
 gpu/vk/buffer.c3               VkBuffer + VMA allocation path
 gpu/vk/texture.c3              owned/placed images, views, layout tracking
 gpu/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
@@ -313,9 +313,9 @@ required nonzero device address are known. Addressable backing includes
 One unique family uses `EXCLUSIVE` sharing; multiple admitted families use
 `CONCURRENT` with the exact ordered, deduplicated list. Presentation queues
 are excluded. Frame arenas admit graphics and compute roles, or transfer on a
-transfer-only device. Persistent backing admits every selected role while each
-span retains its narrower access set. Sharing does not replace barriers,
-submission ordering, completion waits, or lifetime rules.
+transfer-only device. Independent allocations derive sharing only from their
+immutable access roles. Sharing does not replace barriers, submission ordering,
+completion waits, or lifetime rules.
 
 ## 9. Texture implementation
 
@@ -507,7 +507,7 @@ The context-free Vulkan result mapper handles success, host/device allocation
 failures, explicit device loss, and missing features, extensions, or layers.
 Operations with additional result semantics use dedicated mappers: backend
 bootstrap, surface and swapchain work, texture and shader creation, pipeline
-creation, descriptor allocation, virtual-arena allocation, and enumeration.
+creation, descriptor allocation, and enumeration.
 Unclassified native failures are logged and surface as `BACKEND_ERROR`; they
 must never be inferred as device loss.
 

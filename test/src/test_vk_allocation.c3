@@ -434,9 +434,8 @@ fn void debug_resource_kind_ordinals_match_exact_schema() @test {
     assert((int)gpu::DebugResourceKind.TEXTURE_DESCRIPTOR == 8);
     assert((int)gpu::DebugResourceKind.SAMPLER == 9);
     assert((int)gpu::DebugResourceKind.FRAME == 10);
-    assert((int)gpu::DebugResourceKind.PERSISTENT_SPAN == 11);
-    assert((int)gpu::DebugResourceKind.ALLOCATION == 12,
-        "allocation keeps the exact ordinal 12");
+    assert((int)gpu::DebugResourceKind.ALLOCATION == 11,
+        "allocation keeps the exact ordinal 11");
 }
 
 fn vk::Result allocation_probe_create_buffer(
@@ -853,13 +852,7 @@ fn void allocation_table_pins_capacity_and_owner_domain() @test {
         ALLOCATION_TEST_OWNER,
         gpu::ResourceOwnerKind.BUFFER,
     );
-    ulong persistent_owner = gpu::resource_owner_tag(
-        ALLOCATION_TEST_OWNER,
-        gpu::ResourceOwnerKind.PERSISTENT_ALLOCATION,
-    );
-    assert(allocation_owner != buffer_owner
-        && allocation_owner != persistent_owner
-        && buffer_owner != persistent_owner,
+    assert(allocation_owner != buffer_owner,
         "allocation identities occupy a distinct owner domain");
 
     vk::AllocationCell[] cells = mem::new_array(

@@ -17,9 +17,17 @@ layers, runs the fixed suite once, and writes
 `test/build/benchmark-report.md`. Individual targets perform their documented
 warmups and repetitions.
 
+## Allocation overhead
+
+`arena_allocation_bench` times 100,000 64-byte frame-span allocations in one
+frame, then 4,096 standalone 64-byte `CPU_WRITE` allocations followed by
+their frees. It reports allocation and free time separately. The published
+baseline retains its existing frame-span result; add `CPU_WRITE` figures only
+from fresh output captured with the environment context below.
+
 ## Explicit upload throughput
 
-`upload_throughput_bench` measures the strict caller-owned replacement path at
+`upload_throughput_bench` measures the explicit caller-owned upload path at
 1, 2, and 4 persistent workers across bounded payload sizes. Worker threads and
 recording contexts are created once per combination, then one complete untimed
 warmup precedes payload-specific measured counts: 2,048 at 4 KiB, 512 at
@@ -39,8 +47,8 @@ c3c -O1 build upload_throughput_bench --path test
 
 The output reports numeric `uploads_per_sec` values with worker and payload
 fields. Compare rates only with the same environment context emitted by
-`benchmark_info`; allocation-owning arena benchmarks measure a different
-path.
+`benchmark_info`. This document records the method but does not publish upload
+throughput numbers until fresh output is added to the canonical baseline.
 
 ## Windows baseline
 
@@ -56,7 +64,6 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 | Area | Case | Iterations | Result |
 |---|---|---:|---:|
 | Allocation | 64-byte frame span | 100,000 | 10.9 ns/allocation |
-| Allocation | 64-byte persistent span | 4,096 | 92.7 ns/allocation; 35.7 ns/free |
 | Descriptor churn | Texture single / batch of 16 / sampler, one worker | 320 each | 523 / 330 / 563 ns/descriptor |
 | Command reset | Idle / 15 worker pools | 2,000 each | 4,444 / 159,622 ns/begin_frame |
 | Command recording | Global / buffer barrier / indirect dispatch | 20,000 × 5 | 123 / 142 / 173 ns/record median |
@@ -66,8 +73,6 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 
 ## Usage guidance
 
-- Use frame spans for transient data; persistent allocation was about 8.5 times
-  slower in this run.
 - Reuse caller-owned upload and destination allocations only after the covering
   completion point is complete; free them only after all covering work completes.
 - Batch descriptor writes. Batches of 16 reduced one-worker texture descriptor

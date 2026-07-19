@@ -22,7 +22,7 @@ The implementation lives under `gpu/`; the Vulkan backend is under `gpu/vk/`. Be
 
 - `docs/architecture.md` — module split, handle/ABI model
 - `docs/api.md` — public API shape
-- `docs/memory.md` — VMA allocator, frame/persistent arenas
+- `docs/memory.md` — VMA allocator, independent allocations, frame arenas
 - `docs/shader_abi.md` — root-pointer ABI, std430 struct layout
 - `docs/vulkan_backend.md` — backend strategy
 - `docs/style.md` — full code style guide (source of truth)

@@ -20,7 +20,6 @@ enum DeviceCreationCheckpoint : uint {
     LOGICAL_DEVICE,
     ALLOCATOR,
     FRAME_RESOURCES,
-    PERSISTENT_ARENA,
     RECORDING_CONTEXTS,
     DESCRIPTOR_HEAP,
     PIPELINE_SHARED,
@@ -114,7 +113,6 @@ struct VkDeviceState {
     ulong                      frame_generation;
     ulong                      active_frame_generation;
     FrameArenaState[]          frame_arenas;
-    PersistentArenaState       persistent_arena;
     RecordingContextTable      recording_contexts;
     CommandTable               commands;
     ShaderTable                shaders;
@@ -198,9 +196,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .begin_frame         = &vk_begin_frame,
     .alloc_frame_span    = &vk_alloc_frame_span,
     .end_frame           = &vk_end_frame,
-    .alloc_persistent_span = &vk_alloc_persistent_span,
-    .free_persistent_span  = &vk_free_persistent_span,
-    .get_persistent_stats  = &vk_get_persistent_stats,
     .begin_commands      = &vk_begin_commands,
     .end_commands        = &vk_end_commands,
     .discard_commands    = &vk_discard_commands,
@@ -560,8 +555,6 @@ fn gpu::Device? create_vk_device_with_selection(
 
     create_frame_resources(state, desc)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.FRAME_RESOURCES)!;
-    create_persistent_arena(state, desc)!;
-    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PERSISTENT_ARENA)!;
     state.recording_contexts.slots = mem::new_array(
         RecordingContextCell,
         MAX_RECORDING_CONTEXTS,
@@ -762,7 +755,6 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         }
         destroy_queue_completions(state);
         destroy_frame_resources(state);
-        destroy_persistent_arena(state);
         if (state.allocator != null) {
             state.allocator.destroy();
             state.allocator = (vma::Allocator)null;

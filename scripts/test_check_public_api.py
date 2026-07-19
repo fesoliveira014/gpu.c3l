@@ -385,20 +385,6 @@ def valid_document() -> dict:
                         ],
                     },
                     {
-                        "name": "PersistentAllocDesc",
-                        "kind": "struct",
-                        "members": [
-                            {"name": "size", "type": {"name": "usz"}},
-                            {"name": "align", "type": {"name": "usz"}},
-                            {
-                                "name": "memory_kind",
-                                "type": {"name": "MemoryKind"},
-                            },
-                            {"name": "access", "type": {"name": "QueueRoles"}},
-                            {"name": "debug_name", "type": {"name": "ZString"}},
-                        ],
-                    },
-                    {
                         "name": "AllocationInfo",
                         "kind": "struct",
                         "members": [
@@ -1027,21 +1013,6 @@ class PublicApiCheckTests(unittest.TestCase):
         function["members"].pop()
         self.assertIn(
             "create_dedicated_texture has the wrong parameters",
-            check_public_api.validate_document(document),
-        )
-
-    def test_rejects_wrong_persistent_alloc_desc_schema(self) -> None:
-        document = valid_document()
-        desc = next(
-            entry for entry in document["modules"]["gpu"]["types"]
-            if entry["name"] == "PersistentAllocDesc"
-        )
-        desc["members"].insert(2, {
-            "name": "usage",
-            "type": {"name": "BufferUsage"},
-        })
-        self.assertIn(
-            "PersistentAllocDesc must match the exact public schema",
             check_public_api.validate_document(document),
         )
 

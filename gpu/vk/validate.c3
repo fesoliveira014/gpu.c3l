@@ -45,25 +45,6 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         offset = span.offset;
         access = slot.access;
         memory_kind = slot.memory_kind;
-    } else if (span.owner == state.persistent_arena.allocations.owner) {
-        PersistentAllocationHandle allocation_handle = {
-            .owner      = span.owner,
-            .index      = span.index,
-            .generation = span.generation,
-        };
-        PersistentAllocationState* allocation =
-            state.persistent_arena.allocations.get(allocation_handle)!;
-        if (!gpu::range_fits(allocation.size, span.offset, span.size)) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        if (span.offset > usz::max - allocation.offset) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        offset = allocation.offset + span.offset;
-        backing_buffer = state.persistent_arena.backing_buffer;
-        slot = state.buffers.get(backing_buffer)!;
-        access = allocation.access;
-        memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD;
     } else {
         return gpu::INVALID_HANDLE~;
     }
@@ -186,10 +167,6 @@ fn gpu::DebugResourceKind span_resource_kind(
 ) {
     if (span != null && span.owner == state.allocations.owner) {
         return gpu::DebugResourceKind.ALLOCATION;
-    }
-    if (span != null
-        && span.owner == state.persistent_arena.allocations.owner) {
-        return gpu::DebugResourceKind.PERSISTENT_SPAN;
     }
     return gpu::DebugResourceKind.GPU_SPAN;
 }

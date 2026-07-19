@@ -10,12 +10,16 @@ The public API uses:
 GpuAllocation
 GpuSpan
 GpuAddress
+MemoryKind
 MemoryClass
 AllocationDesc
 AllocationInfo
 TextureHandle
-MemoryKind
 ```
+
+`MemoryKind` remains exported as a backend/frame backing classification. No
+public descriptor or function accepts it; callers select `MemoryClass`, and the
+backend derives the concrete kind.
 
 The backend uses:
 
@@ -23,7 +27,6 @@ The backend uses:
 vma::Allocator
 vma::Allocation
 vma::AllocationInfo
-vma::VirtualBlock
 vk::Buffer
 vk::Image
 vk::DeviceAddress
@@ -59,7 +62,6 @@ flush/invalidate non-coherent memory
 query allocation info
 query heap budgets and stats
 name allocations
-provide virtual allocator for CPU-side suballocation
 ```
 
 `gpu.c3l` responsibilities:
@@ -69,7 +71,7 @@ define behavioral memory classes
 track owning allocations and non-owning span identities
 keep mappings, addresses, access, and native backing private
 translate resource policy to Vulkan/VMA
-own frame and persistent arenas
+own frame arenas
 validate bounds, capabilities, and lifetimes
 record explicit barriers
 ```
@@ -86,11 +88,7 @@ VkDeviceState
     vma::Allocator allocator
     AllocationTable allocations
     FrameArenaState[] frame_arenas
-    PersistentArenaState persistent_arena
 ```
-
-The persistent arena is reserved for `PERSISTENT_UPLOAD`; device-local
-persistent data uses `MemoryClass.GPU_PRIVATE` allocations.
 
 Allocator creation happens after Vulkan device creation and before resource
 creation. The allocation table is destroyed before the allocator.
@@ -114,7 +112,7 @@ generic allocation must provide a stable GPU address.
 ## 5. Independent allocations
 
 `GpuAllocation` owns device-scoped data or texture storage. `GpuSpan` borrows
-generic data from an allocation or arena and stores only
+generic data from an allocation or frame arena and stores only
 `{ owner, index, generation, offset, size }`. Mapping, GPU address, access,
 memory class, and native backing remain in device state.
 
@@ -180,12 +178,13 @@ bounds or overflow checks.
 | CPU-read generic data | `MemoryClass.CPU_READ` | wait, invalidate, then read |
 | Placed textures | `MemoryClass.TEXTURE` | query requirements, allocate, create placed textures |
 | Per-frame roots and tables | `alloc_frame_span` | mapped, host-coherent, valid for the frame generation |
-| Long-lived CPU-written tables | `alloc_persistent_span` with `PERSISTENT_UPLOAD` | mapped and host-coherent until freed |
+| Long-lived CPU-written tables | `MemoryClass.CPU_WRITE` | map, write, flush, submit, wait or poll, then free or reuse |
 
-`MemoryKind` is not an independent-allocation selector. Public code supplies it
-only through `PersistentAllocDesc`, where `PERSISTENT_UPLOAD` is mandatory.
-`FRAME_UPLOAD`, `DEVICE`, and `READBACK` are backend selections derived from the
-corresponding public API path.
+Long-lived CPU-written storage follows the independent-allocation contract:
+allocate `CPU_WRITE` memory, borrow its span, mapping, and address as needed,
+write, flush, record and submit, wait for or poll the covering completion point,
+then free the owning `GpuAllocation`. Do not infer coherence from the memory
+class.
 
 ## 7. Private buffer backing
 
@@ -309,9 +308,9 @@ FrameArenaState
     ulong frame_timeline_value
 ```
 
-Frame-upload, persistent-arena, and descriptor-buffer storage require
-host-coherent memory, so their mapped writes need no flush. Independent
-allocations use the span visibility operations.
+Frame-upload and descriptor-buffer storage require host-coherent memory, so
+their mapped writes need no flush. Independent allocations use the span
+visibility operations and must not assume coherence.
 
 Frame spans admit the selected graphics and compute roles, or transfer on a
 transfer-only device. The backing buffer uses the exact deduplicated families for
@@ -343,69 +342,21 @@ reset only after queue timeline >= frame_timeline_value
 cursor = 0
 ```
 
-## 11. Persistent arenas
+## 11. Host transfers
 
-Persistent arenas use VMA virtual allocator to suballocate ranges from large real buffers.
-
-The backing buffer uses the fixed usage superset `transfer_src`,
-`transfer_dst`, `uniform`, `storage`, `addressable`, `indirect`, and
-`index`; `vertex` is excluded. It admits every selected role. Distinct
-families use the exact ordered concurrent-sharing list; one family remains
-exclusive.
-
-`PersistentAllocDesc` specifies size, alignment, `PERSISTENT_UPLOAD`,
-semantic access, and a debug name. `access` must be a non-empty subset of
-selected roles. Each returned span carries generation-checked identity;
-device-owned metadata stores its bounds and access.
-
-Persistent backing is host-coherent, so mapped writes need no flush. Callers
-still record barriers, order submissions with completion points, wait for
-completion, and keep each span live until all referencing work retires.
-`free_persistent_span` is valid only after that retirement.
-Persistent virtual-allocation exhaustion keeps the `ARENA_FULL` fault and
-reports the originating backend result. A free whose backing identity or complete owning
-range was changed faults `INVALID_ARGUMENT`; an unknown, stale, or already-freed
-allocation faults `INVALID_HANDLE`.
-
-```text
-PersistentArenaState
-    gpu::vk::BufferHandle backing_buffer
-    vma::VirtualBlock virtual_block
-    GpuAddress gpu_base
-    void* cpu_base
-    usz size
-    PersistentAllocationTable allocations
-```
-
-Allocation flow:
-
-```text
-1. Build VirtualAllocationCreateInfo with size and alignment.
-2. Allocate from vma::VirtualBlock.
-3. Publish immutable range metadata and return its GpuSpan.
-```
-
-Free flow:
-
-```text
-1. Resolve the live allocation identity and exact owning range.
-2. After every referencing GPU access retires, free the virtual allocation.
-3. Retire the allocation generation.
-```
-
-## 12. Host transfers
-
-Transfer storage is caller-owned. Uploads use `CPU_WRITE` allocations: map,
-write, flush, record a copy, and retain the allocation until completion.
+Transfer storage is caller-owned. Uploads use `CPU_WRITE` allocations: borrow
+the span, mapping, and address as needed, write, flush, record and submit the
+copy, wait for or poll the covering completion point, then free or reuse the
+owning allocation.
 Readback uses `CPU_READ` allocations: record the copy and a destination barrier
-from `TRANSFER_WRITE` to `HOST_READ`, `submit`, wait or poll, invalidate, then
-read the mapping.
+from `TRANSFER_WRITE` to `HOST_READ`, submit, wait or poll, invalidate, then
+read the mapping before freeing or reusing the owning allocation.
 
 The core does not allocate transfer storage, choose fallback policy, or create
 additional completion state. Applications may implement pooling and reuse over
 allocations, spans, commands, and completion points.
 
-## 13. Mapped visibility
+## 12. Mapped visibility
 
 Call `flush_mapped_span` after CPU writes and before GPU use. After waiting or
 polling the relevant completion point, call `invalidate_mapped_span` before CPU
@@ -415,7 +366,7 @@ Both operations require a live, mapped independent-allocation span. Coherent
 memory returns success without native work. The backend rounds non-coherent
 ranges to atom boundaries and clamps the final atom to the native allocation.
 
-## 14. Memory budget and statistics
+## 13. Memory budget and statistics
 
 Public API:
 
@@ -447,7 +398,7 @@ live slot tables
 
 Call current-frame-index update during `begin_frame` so VMA budget tracking remains useful.
 
-## 15. Allocation names and user data
+## 14. Allocation names and user data
 
 Debug builds should set:
 
@@ -464,10 +415,9 @@ allocation:<debug_name>
 buffer:<debug_name>
 texture:<debug_name>
 arena:frame_upload:<frame_index>
-arena:persistent_upload
 ```
 
-## 16. Immediate resource lifetime
+## 15. Immediate resource lifetime
 
 `free_allocation` and non-WSI core resource destruction release native ownership
 immediately. They never wait and never enqueue deferred release work. The caller
@@ -485,12 +435,12 @@ immediately; stale shader data is therefore a caller lifetime violation.
 `destroy_device` remains non-blocking and returns `DEVICE_BUSY` while queue
 work is incomplete.
 
-## 17. Defragmentation policy
+## 16. Defragmentation policy
 
 There is no automatic defragmentation. GPU addresses may be stored in root
 structs, tables, and indirect records, so allocations do not move.
 
-## 18. Memory acceptance criteria
+## 17. Memory acceptance criteria
 
 The memory layer is acceptable when:
 
@@ -500,7 +450,7 @@ no raw vkAllocateMemory path exists in backend code
 independent allocations provide generation-checked ownership and range queries
 addressable spans return non-zero GpuAddress
 frame spans reset only after timeline retirement
-persistent spans support allocation/free/reuse
+long-lived CPU-written data remains caller-owned through GPU completion
 host transfer paths flush and invalidate non-coherent memory
 memory stats report VMA budget and live resources
 allocation names appear in debug reports

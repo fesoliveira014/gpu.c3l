@@ -91,7 +91,6 @@ test_vk_allocation.c3
 test_vk_span_resolver.c3
 test_vk_buffer.c3
 test_vk_frame_arena.c3
-test_vk_persistent_arena.c3
 test_vk_command_submit.c3
 test_vk_texture.c3 (adapter capability query/create consistency)
 test_vk_root_pointer_compute.c3
@@ -122,7 +121,6 @@ frame-token generation, stale-alias rejection, allocation, end retry, and reset 
 scoped helper with one observed end attempt after successful and faulting named workers
 owner-derived command finalization
 format feature queries agree with adapter-backed texture creation
-persistent arena suballocation/free
 command list begin/end/submit
 completion-point signaling and waits
 copy upload -> readback
@@ -137,15 +135,6 @@ plans with synthetic topology tests. Validation-enabled same-range and retired-
 slot reuse cases run only when the selected graphics and compute family indices
 differ; single-family adapters report the cases as not applicable and do not
 count them as cross-family coverage.
-
-Persistent-arena queue-family regressions deterministically pin aliased, two-
-family, and three-family creation plans, including exact ordered family metadata
-and the exclusive no-list path. Validation-enabled tests use one live `Device`
-to consume one persistent span across compute and graphics, then retire, free,
-and reallocate the same buffer, offset, and GPU address before cross-family
-reuse. Distinct-family runtime cases report PASS when exercised; same-family
-hardware reports N/A and is not counted as cross-family evidence. This case
-isolates queue-family behavior within one device.
 
 The C3 test harness captures passing-test output and has no skipped-test result,
 so the required topology audit enables output explicitly:
@@ -237,13 +226,12 @@ no public resource identity before handle resolution. Backend-result coverage
 fabricates an unmapped `wait_completion` result and verifies callback and
 stderr-fallback parity.
 
-Frame/persistent diagnostic tests inject retirement-query and end-signal
-backend failures, exercise real virtual-arena exhaustion, and cover double
-begin, boundary quiescence, alignment-before-size precedence, stale tokens,
-wrong backing buffers, and double free. They assert unchanged faults,
-exactly-once delivery, raw backend results, absent public identity, and
-mutation-free retry state. Pure range and direct reset helpers remain
-fault-only when no public operation context is supplied.
+Frame diagnostic tests inject retirement-query and end-signal backend failures
+and cover double begin, boundary quiescence, alignment-before-size precedence,
+and stale tokens. They assert unchanged faults, exactly-once delivery, raw
+backend results, absent public identity, and mutation-free retry state. Pure
+range and direct reset helpers remain fault-only when no public operation
+context is supplied.
 
 Descriptor/cache completeness coverage adds batch rollback after cached-view
 creation, stale and exhausted descriptor identities, immediate slot reuse,
@@ -289,7 +277,6 @@ Test names describe behavior, not roadmap or ticket labels.
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Frame arena | allocation, alignment, overflow, reset safety. |
-| Persistent arena | allocate/free/reuse, virtual allocator stats. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
 | Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback. |
 | Compute | root pointer shader read/write, readback. |

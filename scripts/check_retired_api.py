@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -34,7 +35,116 @@ FIXTURES = {
     "default_staging_arena_size": "DEFAULT_STAGING_ARENA_SIZE",
     "default_readback_arena_size": "DEFAULT_READBACK_ARENA_SIZE",
     "debug_semaphore": "SEMAPHORE",
+    "persistent_alloc_desc": "PersistentAllocDesc",
+    "persistent_arena_stats": "PersistentArenaStats",
+    "max_persistent_allocations": "MAX_PERSISTENT_ALLOCATIONS",
+    "default_persistent_arena_size": "DEFAULT_PERSISTENT_ARENA_SIZE",
+    "persistent_arena_size": "persistent_arena_size",
+    "alloc_persistent_span": "alloc_persistent_span",
+    "free_persistent_span": "free_persistent_span",
+    "get_persistent_stats": "get_persistent_stats",
+    "debug_persistent_span": "PERSISTENT_SPAN",
 }
+
+ERROR_DIAGNOSTIC = re.compile(
+    r"\((?P<path>[^()\r\n]+):(?P<line>\d+):(?P<column>\d+)\) "
+    r"Error: (?P<message>[^\r\n]+)$"
+)
+
+INVALID_MEMBER_TYPES = {
+    "submit_waits": "SubmitDesc",
+    "submit_signals": "SubmitDesc",
+    "staging_arena_size": "DeviceDesc",
+    "readback_arena_size": "DeviceDesc",
+    "persistent_arena_size": "DeviceDesc",
+}
+
+ENUM_VALUES = {
+    "memory_kind_staging": ("MemoryKind", "STAGING"),
+    "debug_semaphore": ("DebugResourceKind", "SEMAPHORE"),
+    "debug_persistent_span": ("DebugResourceKind", "PERSISTENT_SPAN"),
+}
+
+FIELD_OR_METHODS = {
+    "timeline_caps": "DeviceCaps.timeline_semaphore",
+}
+
+
+def diagnostic_points_to_retired_member(
+    target: str,
+    retired_symbol: str,
+    diagnostic: re.Match[str],
+) -> bool:
+    try:
+        source_lines = (PROJECT / f"{target}.c3").read_text(
+            encoding="utf-8",
+        ).splitlines()
+    except OSError:
+        return False
+
+    line_number = int(diagnostic.group("line"))
+    column = int(diagnostic.group("column"))
+    if line_number < 1 or line_number > len(source_lines) or column < 1:
+        return False
+
+    source_line = source_lines[line_number - 1]
+    occurrences = list(
+        re.finditer(
+            rf"(?<![A-Za-z0-9_]){re.escape(retired_symbol)}"
+            r"(?![A-Za-z0-9_])",
+            source_line,
+        )
+    )
+    if len(occurrences) != 1:
+        return False
+
+    occurrence = occurrences[0]
+    first_column = occurrence.start() + 1
+    if occurrence.start() > 0 and source_line[occurrence.start() - 1] == ".":
+        first_column -= 1
+    last_column = occurrence.end()
+    return first_column <= column <= last_column
+
+
+def has_expected_diagnostic(
+    target: str,
+    retired_symbol: str,
+    output: str,
+) -> bool:
+    diagnostics = [
+        match
+        for line in output.splitlines()
+        if (match := ERROR_DIAGNOSTIC.search(line)) is not None
+    ]
+    if not diagnostics:
+        return False
+
+    diagnostic = diagnostics[-1]
+    filename = diagnostic.group("path").replace("\\", "/").rsplit("/", 1)[-1]
+    if filename != f"{target}.c3":
+        return False
+
+    message = diagnostic.group("message")
+    if member_type := INVALID_MEMBER_TYPES.get(target):
+        return (
+            message == f"This is not a valid member of '{member_type}'."
+            and diagnostic_points_to_retired_member(
+                target,
+                retired_symbol,
+                diagnostic,
+            )
+        )
+    if enum_value := ENUM_VALUES.get(target):
+        enum_type, value = enum_value
+        return message == f"'{enum_type}' has no enumeration value '{value}'."
+    if field_or_method := FIELD_OR_METHODS.get(target):
+        return message == f"There is no field or method '{field_or_method}'."
+
+    return re.fullmatch(
+        rf"'gpu::{re.escape(retired_symbol)}' could not be found, "
+        r"(?:did you spell it right\?|did you perhaps want .+\?)",
+        message,
+    ) is not None
 
 
 def main() -> int:
@@ -50,9 +160,10 @@ def main() -> int:
         output = result.stdout + result.stderr
         if result.returncode == 0:
             failures.append(f"{target} unexpectedly compiled")
-        elif retired_symbol not in output:
+        elif not has_expected_diagnostic(target, retired_symbol, output):
             failures.append(
-                f"{target} failed without naming {retired_symbol}"
+                f"{target} failed without the expected diagnostic for "
+                f"{retired_symbol}"
             )
 
     if failures:

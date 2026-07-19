@@ -18,7 +18,6 @@ struct SpanResolverFixture {
     vk::VkDeviceState               state;
     vk::BufferCell[1]               buffer_cells;
     vk::AllocationCell[1]           allocation_cells;
-    vk::PersistentAllocationCell[1] persistent_cells;
     char[64]                        mapping;
 }
 
@@ -71,27 +70,6 @@ fn void init_span_resolver_fixture(SpanResolverFixture* fixture) {
         &fixture.allocation_cells[0].value.backing.debug_name[0],
         "independent",
     );
-    fixture.state.persistent_arena.backing_buffer = {
-        .owner      = fixture.state.buffers.owner,
-        .index      = 0,
-        .generation = 5,
-    };
-    fixture.state.persistent_arena.size = fixture.mapping.len;
-    fixture.state.persistent_arena.allocations.owner = gpu::resource_owner_tag(
-        SPAN_RESOLVER_DEVICE_OWNER,
-        gpu::ResourceOwnerKind.PERSISTENT_ALLOCATION,
-    );
-    fixture.state.persistent_arena.allocations.slots = fixture.persistent_cells[..];
-    fixture.state.persistent_arena.allocations.next_new = 1;
-    fixture.persistent_cells[0] = {
-        .value = {
-            .offset = 16,
-            .size   = 32,
-            .access = { .compute },
-        },
-        .generation = 9,
-        .used       = true,
-    };
 }
 
 fn gpu::GpuSpan fixture_buffer_span(
@@ -140,20 +118,6 @@ fn void buffer_span_resolves_private_metadata() @test {
         "buffer span resolves its GPU address");
 }
 
-fn gpu::GpuSpan fixture_persistent_span(
-    SpanResolverFixture* fixture,
-    usz offset,
-    usz size,
-) {
-    return {
-        .owner      = fixture.state.persistent_arena.allocations.owner,
-        .index      = 0,
-        .generation = 9,
-        .offset     = offset,
-        .size       = size,
-    };
-}
-
 fn void buffer_span_accepts_full_and_exact_end_ranges() @test {
     SpanResolverFixture fixture;
     init_span_resolver_fixture(&fixture);
@@ -166,27 +130,6 @@ fn void buffer_span_accepts_full_and_exact_end_ranges() @test {
     vk::ResolvedSpan end_resolved = vk::resolve_span(&fixture.state, &exact_end)!!;
     assert(end_resolved.offset == 48 && end_resolved.size == 16,
         "span ending at the buffer extent resolves");
-}
-
-fn void persistent_span_composes_relative_and_arena_offsets() @test {
-    SpanResolverFixture fixture;
-    init_span_resolver_fixture(&fixture);
-    gpu::GpuSpan span = fixture_persistent_span(&fixture, 4, 8);
-
-    vk::ResolvedSpan resolved = vk::resolve_span(&fixture.state, &span)!!;
-
-    assert(resolved.slot == &fixture.buffer_cells[0].value,
-        "persistent span resolves the arena backing slot");
-    assert(resolved.offset == 20 && resolved.size == 8,
-        "persistent span adds its relative offset exactly once");
-    assert(resolved.access == fixture.persistent_cells[0].value.access,
-        "persistent span derives allocation access");
-    assert(resolved.memory_kind == gpu::MemoryKind.PERSISTENT_UPLOAD,
-        "persistent span derives persistent memory kind");
-    assert(resolved.mapping == &fixture.mapping[20],
-        "persistent span resolves its mapped address");
-    assert((ulong)resolved.address == 0x1014,
-        "persistent span resolves its GPU address");
 }
 
 fn void span_resolver_rejects_wrong_owner_and_stale_generation() @test {
@@ -224,20 +167,6 @@ fn void span_resolver_rejects_empty_and_escaping_ranges() @test {
     gpu::GpuSpan overflow = fixture_buffer_span(&fixture, usz::max, 2);
     assert(@catch(vk::resolve_span(&fixture.state, &overflow)) == gpu::INVALID_ARGUMENT,
         "an overflowing span range faults INVALID_ARGUMENT");
-}
-
-fn void persistent_span_rejects_native_offset_overflow() @test {
-    SpanResolverFixture fixture;
-    init_span_resolver_fixture(&fixture);
-    fixture.persistent_cells[0].value.offset = usz::max - 1;
-    fixture.persistent_cells[0].value.size = 3;
-    fixture.buffer_cells[0].value.size = usz::max;
-    gpu::GpuSpan span = fixture_persistent_span(&fixture, 2, 1);
-
-    fault range_fault = @catch(vk::resolve_span(&fixture.state, &span));
-
-    assert(range_fault == gpu::INVALID_ARGUMENT,
-        "persistent native-offset overflow faults INVALID_ARGUMENT");
 }
 
 fn void span_resolver_rejects_gpu_address_overflow() @test {
