@@ -82,8 +82,6 @@ exists (else the limit is compile-time).
 | Swapchains | 8 (`MAX_SWAPCHAINS` in `gpu/swapchain.c3`) | — | `SLOT_TABLE_FULL` |
 | Color attachments per pass | Lesser of 8 (`MAX_COLOR_ATTACHMENTS` in `gpu/pipeline.c3`) and `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
 | Frame arena (per frame in flight) | 16 MiB (`DEFAULT_FRAME_ARENA_SIZE` in `gpu/memory.c3`) | `frame_arena_size` | `ARENA_FULL` |
-| Persistent arena | 64 MiB (`DEFAULT_PERSISTENT_ARENA_SIZE` in `gpu/memory.c3`) | `persistent_arena_size` | `ARENA_FULL` |
-| Live persistent allocations | 4096 (`MAX_PERSISTENT_ALLOCATIONS` in `gpu/memory.c3`) | — | `SLOT_TABLE_FULL` |
 
 Two sizing rules that bite:
 - **Packed descriptor ceilings are not guaranteed hardware capacities.** On the
@@ -100,7 +98,8 @@ Two sizing rules that bite:
   and do not leave stale indices in GPU-visible data.
 - **Frame-arena data is per frame in flight.** Every `alloc_frame_span`
   byte exists once per in-flight frame; large per-frame tables belong in
-  persistent spans or allocations you rewrite (see `deferred_shading`'s lights).
+  caller-owned allocations that you rewrite and retain through the covering
+  completion point (see `deferred_shading`'s lights).
 - **Pending texture transitions grow with the command record.** There is no
   16-texture recording cap; the backend starts at 16 entries and doubles the
   host allocation as distinct textures are added. Call `submit` or discard the

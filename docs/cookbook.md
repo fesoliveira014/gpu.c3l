@@ -235,11 +235,10 @@ Running example: `present_mode_explorer`.
 
 | Class or arena | For | Pattern |
 |---|---|---|
-| `MemoryClass.CPU_WRITE` | CPU-written generic data | map, write, `flush_mapped_span`, `submit` |
+| `MemoryClass.CPU_WRITE` | CPU-written generic data | map, write, flush, submit, wait or poll, free or reuse |
 | `MemoryClass.GPU_PRIVATE` | GPU-only working sets | copy from caller-owned `CPU_WRITE` storage |
 | `MemoryClass.CPU_READ` | GPU-to-CPU results | wait, `invalidate_mapped_span`, read |
 | frame arena | roots and per-frame constants | `alloc_frame_span(&frame, ...)`; coherent and valid for that frame generation |
-| persistent arena | long-lived CPU-written tables | `alloc_persistent_span`; coherent until freed |
 
 See `docs/memory.md` for lifetime and visibility rules.
 
@@ -270,10 +269,13 @@ gpu::GpuAddress address = gpu::get_span_address(&device, header)!;
 `GpuAllocation` owns storage; its spans borrow ranges. `free_allocation`
 invalidates the token only after success and requires all GPU use to be
 quiescent. `CPU_WRITE` and `CPU_READ` are mapped; `GPU_PRIVATE` is not.
-Use `AllocationInfo` for actual capabilities. Flush CPU writes before GPU use.
-For readback, record a `TRANSFER_WRITE` to `HOST_READ` barrier on the
-destination, wait or poll completion, invalidate the `CPU_READ` span, then read
-its mapping. Running example: `memory_report`.
+Use `AllocationInfo` for actual capabilities; do not assume coherence. For
+long-lived CPU-written data, borrow the allocation's span, mapping, and address
+as needed, write, flush, record and submit, wait for or poll the covering
+completion point, then free the owning allocation. For readback, record a
+`TRANSFER_WRITE` to `HOST_READ` barrier on the destination, wait or poll
+completion, invalidate the `CPU_READ` span, then read its mapping. Running
+example: `memory_report`.
 
 ## 15. Pair fallible frame work
 

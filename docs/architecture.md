@@ -172,7 +172,6 @@ resource slot tables, including independent allocations
 VMA allocator through backend state
 descriptor heaps
 frame upload arenas
-persistent arenas
 pipeline cache
 debug and stats state
 ```
@@ -233,8 +232,8 @@ identity with a shared role mask. The Vulkan backend allocates every selected
 native identity. Each identity owns a private completion timeline and monotonic
 submission sequence. Command entry points take `QueueKind`.
 
-`AllocationDesc`, `TextureDesc`, and `PersistentAllocDesc` declare a
-non-empty `QueueRoles` access set. The backend stores it as immutable resource
+`AllocationDesc` and `TextureDesc` declare a non-empty `QueueRoles` access
+set. The backend stores it as immutable resource
 metadata. Span resolution validates liveness, device ownership, bounds, and the
 recording role before backend state changes. A span cannot widen access because
 it contains no public access field. Root-addressed shader access remains a
@@ -285,7 +284,11 @@ rejected before native use.
 skip native visibility calls. Non-coherent atom alignment remains private.
 
 `free_allocation` consumes its token only after success. It requires quiescent
-GPU use and destroys storage immediately.
+GPU use and destroys storage immediately. Long-lived CPU-written data stays in
+a caller-owned `CPU_WRITE` allocation: borrow its span, mapping, and address as
+needed, write and flush, record and submit, wait for or poll completion, then
+free the allocation. Readback waits or polls before invalidating and reading a
+`CPU_READ` mapping.
 
 ### Private buffer backing
 

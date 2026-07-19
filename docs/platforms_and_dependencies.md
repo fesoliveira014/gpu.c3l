@@ -87,7 +87,6 @@ create buffers through allocator.try_create_buffer
 create images through allocator.try_create_image
 map/flush/invalidate through VMA wrappers
 query heap budgets/statistics through VMA wrappers
-use vma::VirtualBlock for CPU-side suballocation of persistent arenas
 ```
 
 Public API rule:

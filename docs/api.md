@@ -289,7 +289,7 @@ backend state. `begin_commands` transfers its pin to the returned command token;
 recording calls borrow that pin without acquiring another one.
 
 `destroy_device` never waits. Live resources, frames, command lists,
-persistent spans, swapchains, and descriptors return `RESOURCE_IN_USE`.
+swapchains and descriptors return `RESOURCE_IN_USE`.
 Active operations, incomplete queue work, or
 a closing slot return retryable `DEVICE_BUSY`. Every failed attempt preserves
 the token, generation, and backend state. Success increments the generation
@@ -350,8 +350,8 @@ GpuSpan
 ```
 
 The identity fields are opaque. Consumers may copy a complete span only for the
-lifetime documented by its producer; allocation, frame, and persistent spans
-have different expiry rules. Do not construct or mutate the identity.
+lifetime documented by its producer; allocation and frame spans have different
+expiry rules. Do not construct or mutate the identity.
 Mapping, address, access, bounds, and native backing remain device-owned and are
 recovered when a public operation resolves the span. A zero `GpuAddress` is
 invalid.
@@ -389,8 +389,8 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
 | `RESOURCE_IN_USE` | resource destruction, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, or incomplete submitted work explicitly references a resource; active pipeline creation uses a shader; a placed or dedicated texture depends on an allocation; a live descriptor owns a texture; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
-| `ARENA_FULL` | `alloc_frame_span`, persistent arena allocation | frame data or a persistent virtual block exceeded its configured capacity |
-| `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `begin_commands`; `acquire_next_image`; persistent allocation; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
+| `ARENA_FULL` | `alloc_frame_span` | frame data exceeded its configured capacity |
+| `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; `create_texture_descriptors` checks this before creating anything, so an overflowing batch leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
@@ -470,13 +470,6 @@ references and for live placed or dedicated textures. Uses reachable only by a
 raw GPU address remain the caller's precondition. Any live allocation prevents
 normal device destruction.
 
-### Arena memory selector
-
-`MemoryKind` is not an independent-allocation selector. Public code uses it
-only in `PersistentAllocDesc`, where `PERSISTENT_UPLOAD` is required.
-Independent allocations use `MemoryClass`; frame spans use private
-`FRAME_UPLOAD` backing.
-
 ### Frame spans
 
 The frame lifecycle is strict:
@@ -541,43 +534,19 @@ per-draw data
 small per-frame tables
 ```
 
-### Persistent spans
-
-Persistent spans are long-lived suballocations from a host-coherent arena.
-
-```text
-PersistentAllocDesc
-    usz size
-    usz align
-    MemoryKind memory_kind
-    QueueRoles access
-    ZString debug_name
-
-alloc_persistent_span(Device* device, PersistentAllocDesc* desc) -> GpuSpan?
-free_persistent_span(Device* device, GpuSpan span) -> void?
-```
-
-`size` must be nonzero; `align` is zero or a power of two; `memory_kind`
-must be `PERSISTENT_UPLOAD`; and `access` must be a non-empty subset of
-selected roles. The arena backing admits every selected role while each span
-retains its narrower access.
-Independent allocations and textures derive private native sharing from their
-own `access` fields: one unique family stays exclusive, while two or more use
-the exact ordered family list.
-
-Persistent-arena backing is host-coherent, so mapped writes need no explicit
-flush. Callers still provide barriers, completion-point dependencies, host
-waits, and lifetime management. Call `free_persistent_span` only after all
-referencing work retires. Spans are scoped to their owning `Device`.
-
 ### Host transfers
 
-The strict core exposes primitives, not transfer policy. For uploads, allocate
-`CPU_WRITE` memory, copy into its mapping, flush it, record a copy, and retain
-the allocation until the covered GPU work completes. For readback,
-allocate `CPU_READ` memory, record the copy and a `TRANSFER_WRITE` to
-`HOST_READ` barrier on the destination, `submit`, wait or poll, invalidate the
-span, then read its mapping.
+The strict core exposes primitives, not transfer policy. For long-lived or
+one-shot CPU-written data, allocate `CPU_WRITE` memory, borrow its span,
+mapping, and address as needed, write, flush the span, record and submit the
+work, wait for or poll its covering completion point, then free the owning
+`GpuAllocation`. Do not assume the mapping is coherent;
+`flush_mapped_span` is required before GPU use.
+
+For GPU-to-CPU data, allocate `CPU_READ` memory, borrow its span and mapping,
+record the copy and a `TRANSFER_WRITE` to `HOST_READ` barrier on the
+destination, submit, wait for or poll completion, invalidate the span, then
+read its mapping. Free or reuse the owning allocation only after completion.
 
 Applications choose whether to reuse allocations, suballocate rings, or create
 one-shot storage. `GpuSpan.checked_subspan` defines partial transfers.
@@ -1378,14 +1347,12 @@ descriptors, pipelines, queue progress, and WSI failures. Backend failures
 preserve the public fault and report the public operation name, such as
 `submit` or `wait_completion`.
 
-Frame and persistent-memory coverage reports double-begin and quiescence
-violations, stale frame tokens, invalid alignment before zero size, arena
-exhaustion, non-timeout frame-wait failures and retirement queries,
-end-frame signal failures, persistent virtual-allocation exhaustion, and
-invalid or repeated frees. Expected/retryable frame-wait `WAIT_TIMEOUT` outcomes
-remain silent; other diagnostics preserve `ARENA_FULL` and retry state.
-`GpuAllocation` diagnostics carry its public index and generation. Persistent
-arena allocation identity remains private.
+Frame-memory coverage reports double-begin and quiescence violations, stale
+frame tokens, invalid alignment before zero size, arena exhaustion,
+non-timeout frame-wait failures and retirement queries, and end-frame signal
+failures. Expected/retryable frame-wait `WAIT_TIMEOUT` outcomes remain silent;
+other diagnostics preserve `ARENA_FULL` and retry state. `GpuAllocation`
+diagnostics carry its public index and generation.
 
 ```text
 cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) -> void?
