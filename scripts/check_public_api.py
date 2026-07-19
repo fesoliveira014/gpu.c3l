@@ -83,7 +83,6 @@ DEBUG_RESOURCE_KINDS = (
     "TEXTURE_DESCRIPTOR",
     "SAMPLER",
     "FRAME",
-    "PERSISTENT_SPAN",
     "ALLOCATION",
 )
 
@@ -116,6 +115,15 @@ RETIRED_SOURCE_SYMBOLS = (
     "timeline_semaphore",
     "max_timeline_semaphore_value_difference",
     "SEMAPHORE,",
+    "PersistentAllocDesc",
+    "PersistentArenaStats",
+    "MAX_PERSISTENT_ALLOCATIONS",
+    "DEFAULT_PERSISTENT_ARENA_SIZE",
+    "persistent_arena_size",
+    "alloc_persistent_span(",
+    "free_persistent_span(",
+    "get_persistent_stats(",
+    "PERSISTENT_SPAN",
 )
 
 RETIRED_SOURCE_PATTERNS = {
@@ -430,7 +438,6 @@ def validate_document(document: dict) -> list[str]:
         ("TextureCompatibility", "distinct type"),
         ("TextureRequirements", "struct"),
         ("DedicatedTexture", "struct"),
-        ("PersistentAllocDesc", "struct"),
         ("AllocationInfo", "struct"),
         ("BufferCopyDesc", "struct"),
         ("BufferTextureCopyDesc", "struct"),
@@ -492,16 +499,6 @@ def validate_document(document: dict) -> list[str]:
                 ("allocation", "GpuAllocation"),
             ),
             "DedicatedTexture must expose exactly two ownership tokens",
-        ),
-        "PersistentAllocDesc": (
-            (
-                ("size", "usz"),
-                ("align", "usz"),
-                ("memory_kind", "MemoryKind"),
-                ("access", "QueueRoles"),
-                ("debug_name", "ZString"),
-            ),
-            "PersistentAllocDesc must match the exact public schema",
         ),
         "AllocationInfo": (
             (

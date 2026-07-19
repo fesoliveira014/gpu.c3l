@@ -193,8 +193,6 @@ fn void resource_result_mapping_is_specific() @test {
     fault descriptor = @catch(gpu::vk::check_descriptor_allocate_result(vk::Result.ERROR_OUT_OF_POOL_MEMORY));
     fault pool_fragmentation = @catch(gpu::vk::check_descriptor_pool_create_result(vk::Result.ERROR_FRAGMENTATION));
     fault fragmented_pool = @catch(gpu::vk::check_descriptor_allocate_result(vk::Result.ERROR_FRAGMENTED_POOL));
-    fault arena = @catch(gpu::vk::check_virtual_allocate_result(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY));
-    fault pure_arena = gpu::vk::virtual_allocate_result_fault(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY);
 
     assert(format == gpu::UNSUPPORTED_FEATURE, "unsupported image format is a capability result");
     assert(usage == gpu::UNSUPPORTED_FEATURE, "unsupported image usage is a capability result");
@@ -203,8 +201,6 @@ fn void resource_result_mapping_is_specific() @test {
     assert(descriptor == gpu::DESCRIPTOR_HEAP_FULL, "descriptor pool exhaustion is heap full");
     assert(pool_fragmentation == gpu::DESCRIPTOR_HEAP_FULL, "descriptor pool fragmentation is heap full");
     assert(fragmented_pool == gpu::DESCRIPTOR_HEAP_FULL, "fragmented descriptor allocation is heap full");
-    assert(arena == gpu::ARENA_FULL, "virtual block exhaustion is arena full");
-    assert(pure_arena == arena, "legacy and context-aware virtual allocation share one taxonomy");
 }
 
 fn void pipeline_and_cache_result_mapping_preserves_fatal_faults() @test {

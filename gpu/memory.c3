@@ -62,9 +62,7 @@ $assert FrameToken::size <= 16;
 fn bool FrameToken.is_valid(self) => (ulong)self.device != 0 && self.generation != 0;
 
 const usz MAX_MEMORY_HEAPS = 16;
-const usz MAX_PERSISTENT_ALLOCATIONS = 4096;
 const usz DEFAULT_FRAME_ARENA_SIZE = 16 << 20;
-const usz DEFAULT_PERSISTENT_ARENA_SIZE = 64 << 20;
 
 // Per-heap memory usage snapshot.
 struct MemoryHeapBudget {
@@ -292,53 +290,6 @@ macro void? @with_frame(FrameToken* out_frame, Device* device, #work, ...) {
     fault end_fault = @catch(end_frame(out_frame));
     if (end_fault) return end_fault~;
     if (work_fault) return work_fault~;
-}
-
-// `memory_kind` must be PERSISTENT_UPLOAD; `align` 0 means no requirement;
-// `access` must name selected roles.
-struct PersistentAllocDesc {
-    usz         size;
-    usz         align;
-    MemoryKind  memory_kind;
-    QueueRoles  access;
-    ZString     debug_name;
-}
-
-// Persistent-arena usage snapshot, returned by get_persistent_stats.
-struct PersistentArenaStats {
-    ulong capacity_bytes;
-    ulong used_bytes;
-    ulong allocation_count;
-}
-
-<* Allocate a long-lived span from the persistent arena. `size` must be
-   nonzero; `align` 0 means no requirement, otherwise a power of two
-   (INVALID_ARGUMENT). `access` must be a non-empty subset of selected roles
-   and is recorded in the arena's immutable allocation identity. The span's
-   GPU address is stable until freed. Ownership: free with free_persistent_span. *>
-fn GpuSpan? alloc_persistent_span(Device* device, PersistentAllocDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    validate_queue_access(&operation, desc.access)!;
-    GpuSpan span = operation.vtable.alloc_persistent_span(device, desc)!;
-    retain_device_children(&operation);
-    return span;
-}
-
-<* Counterpart of alloc_persistent_span. *>
-fn void? free_persistent_span(Device* device, GpuSpan span) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    operation.vtable.free_persistent_span(device, span)!;
-    release_device_children(&operation);
-}
-
-<* Snapshot of persistent-arena usage and fragmentation counters. *>
-fn PersistentArenaStats? get_persistent_stats(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.get_persistent_stats(device);
 }
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the

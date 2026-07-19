@@ -23,9 +23,6 @@ alias InvalidateSpanFn @private      = fn void? (Device*, GpuSpan);
 alias BeginFrameFn @private          = fn void? (Device*, FrameToken* out_frame);
 alias AllocFrameSpanFn @private      = fn GpuSpan? (FrameToken*, usz size, usz align);
 alias EndFrameFn @private            = fn void? (FrameToken*);
-alias AllocPersistentSpanFn @private = fn GpuSpan? (Device*, PersistentAllocDesc*);
-alias FreePersistentSpanFn @private  = fn void? (Device*, GpuSpan);
-alias GetPersistentStatsFn @private  = fn PersistentArenaStats? (Device*);
 // Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
 alias BeginCommandsFn @private   = fn void? (Queue, CommandList* out_commands);
 alias EndCommandsFn @private     = fn void? (CommandList*);
@@ -124,9 +121,6 @@ struct BackendVTable @private {
     BeginFrameFn            begin_frame;
     AllocFrameSpanFn        alloc_frame_span;
     EndFrameFn              end_frame;
-    AllocPersistentSpanFn   alloc_persistent_span;
-    FreePersistentSpanFn    free_persistent_span;
-    GetPersistentStatsFn    get_persistent_stats;
     BeginCommandsFn         begin_commands;
     EndCommandsFn           end_commands;
     DiscardCommandsFn       discard_commands;
@@ -213,7 +207,6 @@ struct DeviceOperation @private {
 
 enum ResourceOwnerKind @private {
     ALLOCATION,
-    PERSISTENT_ALLOCATION,
     BUFFER,
     TEXTURE,
     TEXTURE_VIEW,

@@ -75,18 +75,6 @@ fn void? retain_validation_reference(
         );
         return;
     }
-    if (reference.owner == state.persistent_arena.allocations.owner) {
-        PersistentAllocationHandle handle = {
-            .owner = reference.owner, .index = reference.index,
-            .generation = reference.generation,
-        };
-        state.persistent_arena.allocations.get(handle)!
-            .validation_references.add(
-                1,
-                AtomicOrdering.RELAXED,
-            );
-        return;
-    }
     if (reference.owner == state.pipelines.owner) {
         gpu::PipelineHandle pipeline = {
             .owner = reference.owner, .index = reference.index,
@@ -141,16 +129,6 @@ fn void release_validation_reference(
             1,
             AtomicOrdering.RELAXED,
         );
-    } else if (reference.owner == state.persistent_arena.allocations.owner) {
-        PersistentAllocationHandle handle = {
-            .owner = reference.owner, .index = reference.index,
-            .generation = reference.generation,
-        };
-        state.persistent_arena.allocations.get(handle)!!
-            .validation_references.sub(
-                1,
-                AtomicOrdering.RELAXED,
-            );
     }
 }
 

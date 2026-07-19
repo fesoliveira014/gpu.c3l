@@ -397,25 +397,6 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     count += report_texture_leaks(state);
     count += report_pipeline_leaks(state);
     count += report_shader_leaks(state);
-
-    if (state.persistent_arena.virtual_block != null) {
-        vma::Statistics stats;
-        state.persistent_arena.virtual_block.get_statistics(&stats);
-        if (stats.allocation_count > 0) {
-            if (!report_resource_lifetime(
-                state:               state,
-                resource_kind:       gpu::DebugResourceKind.PERSISTENT_SPAN,
-                has_public_identity: false,
-                index:               0,
-                generation:          0,
-                debug_name:          "persistent_arena",
-                backend_text:        "persistent spans remain allocated",
-            )) {
-                io::eprintfn("gpu: %d persistent spans still allocated", stats.allocation_count);
-            }
-            count += (uint)stats.allocation_count;
-        }
-    }
     return count;
 }
 
