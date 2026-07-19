@@ -69,9 +69,9 @@ fn gpu::ExecutableCommandList record_compute(gpu::Device* device, gpu::PipelineH
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);
     }
+    gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: pipeline,
         root:     root_gpu,
         groups:   { DISPATCH_GROUPS, 1, 1 },
     )!!;
@@ -97,9 +97,11 @@ fn gpu::ExecutableCommandList record_graphics(gpu::Device* device, gpu::Pipeline
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
+    gpu::DepthState depth = {};
+    gpu::cmd_set_depth_state(&cmd, &depth)!!;
     gpu::cmd_draw(
         commands:       &cmd,
-        pipeline:       pipeline,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
         vertex_count:   3,

@@ -240,6 +240,14 @@ def validate_document(document: dict) -> list[str]:
         for entry in public_surface.get("types", [])
     }
 
+    graphics_pipeline_desc = types.get("GraphicsPipelineDesc")
+    if graphics_pipeline_desc is None:
+        failures.append("missing GraphicsPipelineDesc")
+    elif "depth" in dict(member_schema(graphics_pipeline_desc)):
+        failures.append(
+            "GraphicsPipelineDesc must not contain dynamic depth state"
+        )
+
     device_desc_fields = dict(member_schema(types.get("DeviceDesc")))
     for field in ("texture_heap_capacity", "sampler_heap_capacity"):
         if device_desc_fields.get(field) != "uint":
@@ -357,6 +365,22 @@ def validate_document(document: dict) -> list[str]:
             ("Device*", "GpuSpan"),
             "void?",
         ),
+        "cmd_bind_pipeline": (
+            ("CommandList*", "PipelineHandle"),
+            "void?",
+        ),
+        "cmd_set_depth_state": (
+            ("CommandList*", "DepthState*"),
+            "void?",
+        ),
+        "cmd_dispatch": (
+            ("CommandList*", "GpuAddress", "Vec3u"),
+            "void?",
+        ),
+        "cmd_draw": (
+            ("CommandList*", "GpuAddress", "GpuAddress", "uint", "uint"),
+            "void?",
+        ),
         "cmd_copy_buffer": (
             ("CommandList*", "BufferCopyDesc*"),
             "void?",
@@ -380,7 +404,7 @@ def validate_document(document: dict) -> list[str]:
         "cmd_draw_indexed": (
             (
                 "CommandList*",
-                "PipelineHandle",
+
                 "GpuAddress",
                 "GpuAddress",
                 "GpuSpan",
@@ -393,7 +417,7 @@ def validate_document(document: dict) -> list[str]:
         "cmd_draw_indirect": (
             (
                 "CommandList*",
-                "PipelineHandle",
+
                 "GpuAddress",
                 "GpuAddress",
                 "GpuSpan",
@@ -404,7 +428,7 @@ def validate_document(document: dict) -> list[str]:
         "cmd_draw_indexed_indirect": (
             (
                 "CommandList*",
-                "PipelineHandle",
+
                 "GpuAddress",
                 "GpuAddress",
                 "GpuSpan",
@@ -417,7 +441,7 @@ def validate_document(document: dict) -> list[str]:
         "cmd_draw_indexed_indirect_count": (
             (
                 "CommandList*",
-                "PipelineHandle",
+
                 "GpuAddress",
                 "GpuAddress",
                 "GpuSpan",
@@ -431,7 +455,7 @@ def validate_document(document: dict) -> list[str]:
         "cmd_dispatch_indirect": (
             (
                 "CommandList*",
-                "PipelineHandle",
+
                 "GpuAddress",
                 "GpuSpan",
             ),
@@ -451,6 +475,16 @@ def validate_document(document: dict) -> list[str]:
             "desc",
             "allocation_desc",
         ),
+        "cmd_bind_pipeline": ("commands", "pipeline"),
+        "cmd_set_depth_state": ("commands", "depth"),
+        "cmd_dispatch": ("commands", "root", "groups"),
+        "cmd_draw": (
+            "commands",
+            "vertex_root",
+            "fragment_root",
+            "vertex_count",
+            "instance_count",
+        ),
         "cmd_copy_buffer": ("commands", "desc"),
         "cmd_fill_buffer": ("commands", "dst", "value"),
         "cmd_buffer_barrier": ("commands", "barrier"),
@@ -458,7 +492,7 @@ def validate_document(document: dict) -> list[str]:
         "cmd_copy_texture_to_buffer": ("commands", "desc"),
         "cmd_draw_indexed": (
             "commands",
-            "pipeline",
+
             "vertex_root",
             "fragment_root",
             "index_span",
@@ -468,7 +502,7 @@ def validate_document(document: dict) -> list[str]:
         ),
         "cmd_draw_indirect": (
             "commands",
-            "pipeline",
+
             "vertex_root",
             "fragment_root",
             "args",
@@ -476,7 +510,7 @@ def validate_document(document: dict) -> list[str]:
         ),
         "cmd_draw_indexed_indirect": (
             "commands",
-            "pipeline",
+
             "vertex_root",
             "fragment_root",
             "args",
@@ -486,7 +520,7 @@ def validate_document(document: dict) -> list[str]:
         ),
         "cmd_draw_indexed_indirect_count": (
             "commands",
-            "pipeline",
+
             "vertex_root",
             "fragment_root",
             "args",
@@ -497,7 +531,7 @@ def validate_document(document: dict) -> list[str]:
         ),
         "cmd_dispatch_indirect": (
             "commands",
-            "pipeline",
+
             "root",
             "args",
         ),

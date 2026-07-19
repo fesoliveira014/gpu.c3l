@@ -6,6 +6,21 @@ struct OwnedSpan {
     gpu::GpuAllocation allocation;
     gpu::GpuSpan       span;
 }
+fn void bind_test_compute_pipeline(
+    gpu::CommandList* commands,
+    gpu::PipelineHandle pipeline,
+) {
+    gpu::cmd_bind_pipeline(commands, pipeline)!!;
+}
+
+fn void bind_test_graphics_pipeline(
+    gpu::CommandList* commands,
+    gpu::PipelineHandle pipeline,
+    gpu::DepthState depth = {},
+) {
+    gpu::cmd_bind_pipeline(commands, pipeline)!!;
+    gpu::cmd_set_depth_state(commands, &depth)!!;
+}
 
 fn OwnedSpan? allocate_owned_span(
     gpu::Device* device,

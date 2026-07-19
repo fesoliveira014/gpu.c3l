@@ -426,6 +426,54 @@
       "sources": [
         "debug_persistent_span.c3"
       ]
+    },
+    "retired_cmd_dispatch_pipeline": {
+      "type": "object-files",
+      "sources": [
+        "retired_cmd_dispatch_pipeline.c3"
+      ]
+    },
+    "retired_cmd_dispatch_indirect_pipeline": {
+      "type": "object-files",
+      "sources": [
+        "retired_cmd_dispatch_indirect_pipeline.c3"
+      ]
+    },
+    "retired_cmd_draw_pipeline": {
+      "type": "object-files",
+      "sources": [
+        "retired_cmd_draw_pipeline.c3"
+      ]
+    },
+    "retired_cmd_draw_indexed_pipeline": {
+      "type": "object-files",
+      "sources": [
+        "retired_cmd_draw_indexed_pipeline.c3"
+      ]
+    },
+    "retired_cmd_draw_indirect_pipeline": {
+      "type": "object-files",
+      "sources": [
+        "retired_cmd_draw_indirect_pipeline.c3"
+      ]
+    },
+    "retired_cmd_draw_indexed_indirect_pipeline": {
+      "type": "object-files",
+      "sources": [
+        "retired_cmd_draw_indexed_indirect_pipeline.c3"
+      ]
+    },
+    "retired_cmd_draw_indexed_indirect_count_pipeline": {
+      "type": "object-files",
+      "sources": [
+        "retired_cmd_draw_indexed_indirect_count_pipeline.c3"
+      ]
+    },
+    "retired_graphics_pipeline_depth": {
+      "type": "object-files",
+      "sources": [
+        "retired_graphics_pipeline_depth.c3"
+      ]
     }
   }
 }

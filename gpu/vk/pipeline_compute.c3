@@ -14,7 +14,6 @@ struct PipelineSlot {
     vk::PipelineLayout layout;
     uint               entry;
     Atomic{uint}        validation_references;
-    gpu::DepthState    depth;
 }
 
 struct PipelineCell {

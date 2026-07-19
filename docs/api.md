@@ -373,7 +373,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; no adapter can provide the requested semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `cmd_texture_barrier` | an acquired swapchain image is pending during resize, or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
@@ -802,7 +802,7 @@ GraphicsPipelineDesc
     ShaderCode vertex_shader
     ShaderCode fragment_shader
     PrimitiveTopology topology
-    DepthState depth
+
     RasterState raster
     BlendState blend
     Format[] color_formats
@@ -830,9 +830,8 @@ returns a fresh handle, but descriptors identical in immutable state (exact
 shader code identity, topology, polygon mode, blend, formats, and — for compute
 — push size) alias one backend pipeline underneath. Digest collisions are
 resolved by stage, entry point, length, and exact SPIR-V bytes. Raster
-cull/front-face state is immutable graphics identity. Depth
-test/write/compare state remains separate and is applied per handle at draw
-time. Viewport and scissor are dynamic command state.
+cull/front-face state is immutable graphics identity. Depth test/write/compare,
+viewport, and scissor are separate dynamic command state.
 
 Batch output length must equal descriptor count; an empty batch succeeds.
 Shared shader code creates one temporary native module per exact stage, entry
@@ -968,16 +967,28 @@ Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
 `TextureBufferCopyDesc`, `ClearColor`,
 `ClearDepthStencil`) are documented in the generated reference.
 
-### Dispatch
+### Pipeline command state and dispatch
 
 ```text
+cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) -> void?
+cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
 cmd_dispatch(
     CommandList* commands,
-    PipelineHandle pipeline,
     GpuAddress root,
     Vec3u groups,
 ) -> void?
 ```
+
+Pipeline binding selects the active compute or graphics pipeline without
+compiling or synthesizing a variant. A failed bind preserves the previous active
+pipeline. Dispatch requires an active compute pipeline and a nonzero root
+address. Graphics draws require an active graphics pipeline, nonzero vertex and
+fragment roots, and explicit depth state for the current render pass.
+`cmd_set_depth_state` is valid only inside a render pass; pass begin resets
+that requirement, while viewport and scissor still receive their full-pass
+defaults. Execution with no required state returns
+`COMMAND_RECORDING_ERROR`; a wrong active pipeline kind or zero root returns
+`INVALID_ARGUMENT`.
 
 Each group count may be zero and must not exceed the corresponding component
 of `DeviceCaps.max_compute_work_group_count`. An over-limit call faults
@@ -1079,7 +1090,7 @@ far-plane clear is an explicit `{ .depth = 1.0 }`; reverse-Z setups clear to
 ```text
 cmd_draw(
     CommandList* commands,
-    PipelineHandle pipeline,
+
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     uint vertex_count,
@@ -1088,7 +1099,7 @@ cmd_draw(
 
 cmd_draw_indexed(
     CommandList* commands,
-    PipelineHandle pipeline,
+
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     GpuSpan index_span,
@@ -1109,10 +1120,10 @@ DrawIndirectCommand        { vertex_count, instance_count, first_vertex, first_i
 DrawIndexedIndirectCommand { index_count, instance_count, first_index, vertex_offset, first_instance }
 DispatchIndirectCommand    { x, y, z }
 
-cmd_draw_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count) -> void?
-cmd_draw_indexed_indirect(commands, pipeline, vertex_root, fragment_root, args, draw_count, index_span, index_type) -> void?
-cmd_draw_indexed_indirect_count(commands, pipeline, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type) -> void?
-cmd_dispatch_indirect(commands, pipeline, root, args) -> void?
+cmd_draw_indirect(commands, vertex_root, fragment_root, args, draw_count) -> void?
+cmd_draw_indexed_indirect(commands, vertex_root, fragment_root, args, draw_count, index_span, index_type) -> void?
+cmd_draw_indexed_indirect_count(commands, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type) -> void?
+cmd_dispatch_indirect(commands, root, args) -> void?
 ```
 
 Argument spans must support indirect-command reads, be 4-byte aligned, and
@@ -1504,9 +1515,9 @@ fn void? run_compute(gpu::Device* device, gpu::PipelineHandle pipeline) {
     gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
     gpu::CommandList commands = gpu::begin_commands(queue)!;
     defer (void)gpu::discard_commands(&commands);
+    gpu::cmd_bind_pipeline(&commands, pipeline)!;
     gpu::cmd_dispatch(
         commands: &commands,
-        pipeline: pipeline,
         root:     gpu::get_span_address(device, root_span)!,
         groups:   { 16, 1, 1 },
     )!;

@@ -268,10 +268,10 @@ Test names describe behavior, not roadmap or ticket labels.
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
-| Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback. |
-| Compute | root pointer shader read/write, readback. |
+| Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback, explicit pipeline/depth state, retired execution signatures, and zero execution-time pipeline creation. |
+| Compute | root pointer shader read/write, readback, active-pipeline kind and root validation. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback; dynamic viewport/scissor state, validation, clipping, pass reset, and pipeline-alias persistence. |
+| Graphics | offscreen clear/draw/readback; explicit pipeline and depth state; nonzero stage roots; dynamic viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior layout; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start. |
 | Threading | automatic per-worker recording pools, parallel record, identical submit. |

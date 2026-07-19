@@ -141,9 +141,9 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
+    bind_test_compute_pipeline(&cmd, pipeline);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: pipeline,
         root:     test_span_address(device, root_span),
         groups:   { (COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;

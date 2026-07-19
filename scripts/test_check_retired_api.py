@@ -12,6 +12,32 @@ from scripts import check_retired_api
 
 
 class RetiredApiCheckTests(unittest.TestCase):
+    def test_accepts_exact_retired_pipeline_signature_diagnostic(self) -> None:
+        source = (
+            "gpu::cmd_dispatch(commands, pipeline, root, {})!;\n"
+        )
+        pipeline_column = source.index("pipeline") + 1
+        output = (
+            f"(retired_cmd_dispatch_pipeline.c3:1:{pipeline_column}) Error: "
+            "It is not possible to cast 'PipelineHandle' to 'GpuAddress'.\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            project = Path(temp_directory)
+            (project / "retired_cmd_dispatch_pipeline.c3").write_text(
+                source,
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                check_retired_api,
+                "PROJECT",
+                project,
+            ):
+                self.assertTrue(check_retired_api.has_expected_diagnostic(
+                    "retired_cmd_dispatch_pipeline",
+                    "pipeline",
+                    output,
+                ))
+
     def test_rejects_invalid_member_diagnostic_for_unrelated_member(self) -> None:
         source = (
             "fn gpu::DeviceDesc use() => { .persistent_arena_size = 1, "

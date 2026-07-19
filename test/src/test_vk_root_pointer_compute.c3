@@ -66,9 +66,9 @@ fn void root_pointer_compute_readback() @test {
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
     defer discard_test_commands(&commands)!!;
+    bind_test_compute_pipeline(&commands, pipeline);
     gpu::cmd_dispatch(
         commands: &commands,
-        pipeline: pipeline,
         root:     test_span_address(&device, root_span),
         groups:   { (COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;

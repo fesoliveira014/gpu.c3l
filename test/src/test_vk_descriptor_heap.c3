@@ -147,31 +147,19 @@ fn void disabled_heap_preflights_pipeline_binds() @test {
     gpu::PipelineHandle cached = { .index = 7, .generation = 3 };
     gpu::PipelineHandle requested = { .index = 11, .generation = 5 };
     gpu::vk::CommandRecord record = {
-        .command_buffer = (vk::CommandBuffer)null,
-        .last_pipeline = cached,
-        .last_entry = 19,
+        .command_buffer  = (vk::CommandBuffer)null,
+        .active_pipeline = cached,
+        .active_entry    = 19,
     };
 
-    fault compute_fault = @catch(gpu::vk::bind_compute_and_push(
-        state:  &state,
-        record: &record,
-        handle: requested,
-        root:   (gpu::GpuAddress)0,
+    fault bind_fault = @catch(gpu::vk::bind_pipeline_state(
+        state:    &state,
+        record:   &record,
+        pipeline: requested,
     ));
-    assert(compute_fault == gpu::UNSUPPORTED_FEATURE, "compute binding preflights a disabled heap");
-    assert(record.last_pipeline == cached, "rejected compute binding preserves the cached pipeline");
-    assert(record.last_entry == 19, "rejected compute binding preserves the cached pipeline entry");
-
-    fault graphics_fault = @catch(gpu::vk::bind_graphics_and_push(
-        state:         &state,
-        record:        &record,
-        handle:        requested,
-        vertex_root:   (gpu::GpuAddress)0,
-        fragment_root: (gpu::GpuAddress)0,
-    ));
-    assert(graphics_fault == gpu::UNSUPPORTED_FEATURE, "graphics binding preflights a disabled heap");
-    assert(record.last_pipeline == cached, "rejected graphics binding preserves the cached pipeline");
-    assert(record.last_entry == 19, "rejected graphics binding preserves the cached pipeline entry");
+    assert(bind_fault == gpu::UNSUPPORTED_FEATURE, "pipeline binding preflights a disabled heap");
+    assert(record.active_pipeline == cached, "rejected binding preserves the active pipeline");
+    assert(record.active_entry == 19, "rejected binding preserves the active pipeline entry");
 }
 
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {

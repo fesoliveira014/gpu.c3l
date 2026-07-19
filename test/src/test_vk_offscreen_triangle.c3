@@ -272,9 +272,9 @@ fn void offscreen_textured_triangle() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    bind_test_graphics_pipeline(&cmd, pipeline);
     gpu::cmd_draw(
         commands:       &cmd,
-        pipeline:       pipeline,
         vertex_root:    test_span_address(&device, verts_span),
         fragment_root:  test_span_address(&device, frag_span),
         vertex_count:   3,
@@ -435,9 +435,9 @@ fn void dynamic_viewport_scissor_pixels() @test {
             assert(@catch(gpu::cmd_set_scissor(&cmd, &rejected)) == gpu::INVALID_ARGUMENT,
                 "a rejected scissor does not replace the valid scissor");
         }
+        bind_test_graphics_pipeline(&cmd, pipeline);
         gpu::cmd_draw(
             commands:       &cmd,
-            pipeline:       pipeline,
             vertex_root:    test_span_address(&device, vertices),
             fragment_root:  test_span_address(&device, color),
             vertex_count:   3,
@@ -727,7 +727,6 @@ fn void render_pass_state_machine() @test {
     // Draw outside a pass.
     fault draw_fault = @catch(gpu::cmd_draw(
         commands:       &cmd,
-        pipeline:       gpu::PIPELINE_HANDLE_INVALID,
         vertex_root:    (gpu::GpuAddress)0,
         fragment_root:  (gpu::GpuAddress)0,
         vertex_count:   3,

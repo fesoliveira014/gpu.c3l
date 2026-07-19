@@ -76,6 +76,14 @@ FIXTURES = {
     "free_persistent_span": "free_persistent_span",
     "get_persistent_stats": "get_persistent_stats",
     "debug_persistent_span": "PERSISTENT_SPAN",
+    "retired_cmd_dispatch_pipeline": "pipeline",
+    "retired_cmd_dispatch_indirect_pipeline": "pipeline",
+    "retired_cmd_draw_pipeline": "pipeline",
+    "retired_cmd_draw_indexed_pipeline": "pipeline",
+    "retired_cmd_draw_indirect_pipeline": "pipeline",
+    "retired_cmd_draw_indexed_indirect_pipeline": "pipeline",
+    "retired_cmd_draw_indexed_indirect_count_pipeline": "pipeline",
+    "retired_graphics_pipeline_depth": "depth",
 }
 
 ERROR_DIAGNOSTIC = re.compile(
@@ -94,6 +102,7 @@ INVALID_MEMBER_TYPES = {
     "persistent_arena_size": "DeviceDesc",
     "frame_arena_size": "DeviceDesc",
     "frames_in_flight": "DeviceDesc",
+    "retired_graphics_pipeline_depth": "GraphicsPipelineDesc",
 }
 
 ENUM_VALUES = {
@@ -112,6 +121,16 @@ FIELD_OR_METHODS = {
 
 MACRO_SYMBOLS = {
     "with_frame",
+}
+
+RETIRED_PIPELINE_SIGNATURES = {
+    "retired_cmd_dispatch_pipeline",
+    "retired_cmd_dispatch_indirect_pipeline",
+    "retired_cmd_draw_pipeline",
+    "retired_cmd_draw_indexed_pipeline",
+    "retired_cmd_draw_indirect_pipeline",
+    "retired_cmd_draw_indexed_indirect_pipeline",
+    "retired_cmd_draw_indexed_indirect_count_pipeline",
 }
 
 
@@ -174,6 +193,18 @@ def has_expected_diagnostic(
         return False
 
     message = diagnostic.group("message")
+    if target in RETIRED_PIPELINE_SIGNATURES:
+        return (
+            message == (
+                "It is not possible to cast 'PipelineHandle' to "
+                "'GpuAddress'."
+            )
+            and diagnostic_points_to_retired_member(
+                target,
+                retired_symbol,
+                diagnostic,
+            )
+        )
     if member_type := INVALID_MEMBER_TYPES.get(target):
         return (
             message == f"This is not a valid member of '{member_type}'."

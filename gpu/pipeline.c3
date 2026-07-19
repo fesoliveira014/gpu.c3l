@@ -148,7 +148,6 @@ struct GraphicsPipelineDesc {
     ShaderCode        vertex_shader;
     ShaderCode        fragment_shader;
     PrimitiveTopology topology;
-    DepthState        depth;
     RasterState       raster;
     BlendState        blend;
     Format[]          color_formats;
@@ -243,8 +242,8 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
 <* Create a graphics pipeline targeting dynamic rendering. The layout is fixed:
    the global heap set plus a 16-byte vertex/fragment root push range.
    Descriptors identical in immutable state alias one backend pipeline under
-   distinct handles; raster cull/front-face and depth state apply per handle
-   at draw time. At most MAX_COLOR_ATTACHMENTS color formats. Ownership:
+   distinct handles. Depth state is bound separately during command recording.
+   At most MAX_COLOR_ATTACHMENTS color formats. Ownership:
    release with destroy_pipeline, once per create. *>
 fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;

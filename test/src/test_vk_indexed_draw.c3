@@ -71,9 +71,9 @@ fn void u16v_draw(
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = U16V_RT, .height = U16V_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    bind_test_graphics_pipeline(&cmd, pipeline);
     gpu::cmd_draw_indexed(
         commands:       &cmd,
-        pipeline:       pipeline,
         vertex_root:    verts,
         fragment_root:  color,
         index_span:     index_span,

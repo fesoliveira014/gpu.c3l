@@ -332,9 +332,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     };
     gpu::cmd_texture_barrier(&compute_commands, &to_general)!!;
     const uint GROUPS = (TEX_SIZE + 7) / 8;
+    bind_test_compute_pipeline(&compute_commands, compute_pipeline);
     gpu::cmd_dispatch(
         commands: &compute_commands,
-        pipeline: compute_pipeline,
         root:     test_span_address(&device, compute_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
@@ -348,9 +348,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .new_layout    = gpu::TextureLayout.GENERAL,
     };
     gpu::cmd_texture_barrier(&compute_commands, &write_to_sample)!!;
+    bind_test_compute_pipeline(&compute_commands, sample_pipeline);
     gpu::cmd_dispatch(
         commands: &compute_commands,
-        pipeline: sample_pipeline,
         root:     test_span_address(&device, sample_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
@@ -389,9 +389,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = TARGET_SIZE, .height = TARGET_SIZE };
     gpu::cmd_begin_render_pass(&graphics_commands, &pass)!!;
     gpu::GpuAddress fragment_root_gpu = (gpu::GpuAddress)((ulong)test_span_address(&device, graphics_root_span) + VERTEX_BYTES);
+    bind_test_graphics_pipeline(&graphics_commands, graphics_pipeline);
     gpu::cmd_draw(
         commands:       &graphics_commands,
-        pipeline:       graphics_pipeline,
         vertex_root:    test_span_address(&device, graphics_root_span),
         fragment_root:  fragment_root_gpu,
         vertex_count:   3,
@@ -579,9 +579,9 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
     const uint GROUPS = (TEX + 7) / 8;
+    bind_test_compute_pipeline(&cmd, write_pipe);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: write_pipe,
         root:     test_span_address(&device, write_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
@@ -596,9 +596,9 @@ fn void descriptor_buffer_write_then_sample() @test {
         .new_layout    = gpu::TextureLayout.GENERAL,
     };
     gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
+    bind_test_compute_pipeline(&cmd, sample_pipe);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: sample_pipe,
         root:     test_span_address(&device, sample_root_span),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;

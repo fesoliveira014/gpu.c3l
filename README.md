@@ -38,9 +38,9 @@ root.output_gpu = gpu::get_span_address(&device, output_span)!;
 root.count      = COUNT;
 gpu::flush_mapped_span(&device, root_span)!;
 
+gpu::cmd_bind_pipeline(&cmd, pipeline)!;
 gpu::cmd_dispatch(
     commands: &cmd,
-    pipeline: pipeline,
     root:     gpu::get_span_address(&device, root_span)!,
     groups:   { (COUNT + 63) / 64, 1, 1 },
 )!;

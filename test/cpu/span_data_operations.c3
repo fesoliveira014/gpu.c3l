@@ -46,9 +46,24 @@ fn void check_span_data_operations(
 
     gpu::PipelineHandle pipeline = {};
     gpu::GpuAddress root = {};
+    gpu::DepthState depth = {};
+    (void)gpu::cmd_bind_pipeline(commands, pipeline);
+    (void)gpu::cmd_set_depth_state(commands, &depth);
+    (void)gpu::cmd_dispatch(
+        commands: commands,
+        root:     root,
+        groups:   { 1, 1, 1 },
+    );
+    (void)gpu::cmd_draw(
+        commands:       commands,
+        vertex_root:    root,
+        fragment_root:  root,
+        vertex_count:   3,
+        instance_count: 1,
+    );
     (void)gpu::cmd_draw_indexed(
         commands:       commands,
-        pipeline:       pipeline,
+
         vertex_root:    root,
         fragment_root:  root,
         index_span:     src,
@@ -58,7 +73,7 @@ fn void check_span_data_operations(
     );
     (void)gpu::cmd_draw_indirect(
         commands:      commands,
-        pipeline:      pipeline,
+
         vertex_root:   root,
         fragment_root: root,
         args:          src,
@@ -66,7 +81,7 @@ fn void check_span_data_operations(
     );
     (void)gpu::cmd_draw_indexed_indirect(
         commands:      commands,
-        pipeline:      pipeline,
+
         vertex_root:   root,
         fragment_root: root,
         args:          src,
@@ -76,7 +91,7 @@ fn void check_span_data_operations(
     );
     (void)gpu::cmd_draw_indexed_indirect_count(
         commands:       commands,
-        pipeline:       pipeline,
+
         vertex_root:    root,
         fragment_root:  root,
         args:           src,
@@ -87,7 +102,7 @@ fn void check_span_data_operations(
     );
     (void)gpu::cmd_dispatch_indirect(
         commands: commands,
-        pipeline: pipeline,
+
         root:     root,
         args:     src,
     );
