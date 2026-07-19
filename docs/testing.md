@@ -298,6 +298,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior layout; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start. |
 | Threading | automatic per-worker recording pools, parallel record, identical submit. |
+| Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
 | Depth | depth attachment creation, depth-tested draw, readback. |
 | Indirect draw | compute-written draw args, indirect draw, readback. |
@@ -358,7 +359,7 @@ The blocking headless matrix is shared by Linux and Windows:
 vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
 vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
 vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading
-vk_queue vk_debug vk_device_request
+vk_queue vk_debug upload_bench_observation vk_device_request
 ```
 
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.

@@ -6,6 +6,7 @@ import unittest
 
 
 SCRIPT = pathlib.Path(__file__).with_name("run_benchmarks.py")
+UPLOAD_BENCHMARK = SCRIPT.parents[1] / "test" / "src" / "upload_throughput_bench.c3"
 
 
 def load_runner():
@@ -24,6 +25,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "arena_allocation_bench",
                 "resource_create_bench",
                 "descriptor_churn_bench",
+                "upload_throughput_bench",
                 "command_record_bench",
                 "frame_signal_bench",
                 "pipeline_cache_bench",
@@ -31,8 +33,26 @@ class BenchmarkRunnerTests(unittest.TestCase):
             ),
         )
 
+        self.assertEqual(
+            runner.BENCHMARK_METHODS["upload_throughput_bench"],
+            ("warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4", "uploads/s"),
+        )
         self.assertIn("repetitions=5", runner.BENCHMARK_METHODS["command_record_bench"][0])
         self.assertEqual(runner.C3_BUILD_FLAGS, ("-O1",))
+
+    def test_upload_workers_are_persistent_and_warmed_before_timing(self):
+        source = UPLOAD_BENCHMARK.read_text(encoding="utf-8")
+        worker_create = source.index("threads[worker].create(&record_upload")
+        warmup = source.index("run_upload_iteration(", worker_create)
+        clock_start = source.index("Clock start", warmup)
+        self.assertLess(worker_create, warmup)
+        self.assertLess(warmup, clock_start)
+        self.assertNotIn(".create(&record_upload", source[clock_start:])
+        self.assertIn(
+            "UPLOAD_BENCH_ITERATIONS = { 2048, 512, 32 }",
+            source,
+        )
+        self.assertIn("uint measured_iterations", source)
 
     def test_context_requires_reproducibility_fields(self):
         runner = load_runner()
@@ -52,12 +72,29 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_measurements_require_iteration_count_and_units(self):
         runner = load_runner()
         runner.require_measurement("phase: iterations=100 12.5 ns/op", "target")
+        runner.require_measurement(
+            "iterations=payload-specific warmup=1 units=uploads/s\n"
+            "workers=4 payload_bytes=262144 iterations=512 uploads_per_sec=12345",
+            "target",
+        )
 
 
         with self.assertRaisesRegex(ValueError, "iteration count"):
             runner.require_measurement("phase: 12.5 ns/op", "target")
         with self.assertRaisesRegex(ValueError, "measured value"):
             runner.require_measurement("phase: iterations=100 value=12.5", "target")
+        with self.assertRaisesRegex(ValueError, "uploads/s units"):
+            runner.require_measurement(
+                "iterations=payload-specific\n"
+                "workers=4 payload_bytes=262144 iterations=512 uploads_per_sec=12345",
+                "upload_throughput_bench",
+            )
+        with self.assertRaisesRegex(ValueError, "upload measurement fields"):
+            runner.require_measurement(
+                "iterations=payload-specific units=uploads/s\n"
+                "workers=4 payload_bytes=262144 uploads_per_sec=12345",
+                "upload_throughput_bench",
+            )
 
     def test_startup_header_alone_is_not_a_measurement(self):
         runner = load_runner()

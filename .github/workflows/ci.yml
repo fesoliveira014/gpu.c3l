@@ -14,7 +14,7 @@ env:
     vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
     vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
     vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading
-    vk_queue vk_debug vk_device_request
+    vk_queue vk_debug upload_bench_observation vk_device_request
 
 jobs:
   linux:

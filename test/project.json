@@ -69,6 +69,17 @@
       "type": "executable",
       "sources": [ "src/descriptor_churn_bench.c3" ]
     },
+    // Advisory explicit caller-owned upload throughput across worker and
+    // payload combinations; executable so timing never gates CI. Needs an ICD.
+    "upload_throughput_bench": {
+      "type": "executable",
+      "sources": [ "src/upload_throughput_bench.c3", "src/upload_bench_observation.c3" ]
+    },
+    // Stable classification helpers for upload benchmark output.
+    "upload_bench_observation": {
+      "type": "test",
+      "sources": [ "src/test_upload_bench_observation.c3", "src/upload_bench_observation.c3" ]
+    },
     // Advisory async-compute/graphics overlap observation: chained vs
     // independent submission across queues, timestamp-pool-backed where
     // supported; executable so it never gates CI. Needs an ICD — pin
