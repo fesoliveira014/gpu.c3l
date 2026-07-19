@@ -51,13 +51,13 @@ Backend API and driver versions are diagnostic information. Applications select 
   point, mapped-span invalidation, and direct CPU access.
 
 Explicit transfers use caller-owned `CPU_WRITE` and `CPU_READ` allocations,
-mapped visibility operations, commands, and completion points. The live frame
-arena remains a separate transient convenience and does not own transfer
-storage. Long-lived CPU-written data retains its owning allocation through
-completion; readback waits or polls before invalidation and CPU access.
+mapped visibility operations, commands, and completion points. Short-lived and
+long-lived data use the same ownership contract: retain each allocation through
+the completion that covers its last use. Readback waits or polls before
+invalidation and CPU access.
 
-The explicit transfer path requires no frame boundary, public semaphore, or
-readback-ticket API.
+The explicit transfer path requires no root-level application work boundary,
+public semaphore, or readback-ticket API.
 
 ## Shader data and pipelines
 
@@ -110,5 +110,5 @@ The library does not translate shaders, emulate root pointers through descriptor
 - Native pipeline compilation never occurs implicitly during draw or dispatch.
 - Public synchronization does not require resource lists for generic GPU memory.
 - Non-WSI resource and device destruction never hide waits or deferred release; strict presentation extends that rule to swapchain destruction and resize.
-- Strict completion and readback require no frame lifecycle or public synchronization objects.
+- Strict completion and readback require no root-level work lifecycle or public synchronization objects.
 - Public documentation and generated API references remain backend-neutral.

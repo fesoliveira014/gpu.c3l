@@ -148,7 +148,7 @@ gpu::ExecutableCommandList executable = gpu::end_commands(&list)!;
 
 Recording storage is cached automatically per worker. Benchmark with validation
 off because validation layers may serialize recording. Quiesce every worker
-before ending the frame.
+before assembling and submitting the executable list.
 Running example: `multithreaded_recording`.
 
 ## 9. Shadow mapping with compare samplers
@@ -233,12 +233,11 @@ Running example: `present_mode_explorer`.
 
 ## 13. Choose a memory class
 
-| Class or arena | For | Pattern |
+| Class | For | Pattern |
 |---|---|---|
-| `MemoryClass.CPU_WRITE` | CPU-written generic data | map, write, flush, submit, wait or poll, free or reuse |
+| `MemoryClass.CPU_WRITE` | CPU-written generic data, including roots | map, write, flush, submit, wait or poll, free or reuse |
 | `MemoryClass.GPU_PRIVATE` | GPU-only working sets | copy from caller-owned `CPU_WRITE` storage |
 | `MemoryClass.CPU_READ` | GPU-to-CPU results | wait, `invalidate_mapped_span`, read |
-| frame arena | roots and per-frame constants | `alloc_frame_span(&frame, ...)`; coherent and valid for that frame generation |
 
 See `docs/memory.md` for lifetime and visibility rules.
 
@@ -277,38 +276,43 @@ completion point, then free the owning allocation. For readback, record a
 completion, invalidate the `CPU_READ` span, then read its mapping. Running
 example: `memory_report`.
 
-## 15. Pair fallible frame work
+## 15. Retire transient data by completion
 
-Goal: observe worker and frame-end faults without leaving the frame active on
-an early `!`.
+Goal: keep caller-owned root data valid until the GPU has finished using it.
 
 ```c3
-fn void? render_frame(gpu::FrameToken* frame, AppState* state) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
-    record_and_submit(state, root_span)!;
-}
+gpu::AllocationDesc root_desc = {
+    .size         = RootArgs::size,
+    .alignment    = RootArgs::alignment,
+    .memory_class = gpu::MemoryClass.CPU_WRITE,
+    .access       = { .graphics },
+    .debug_name   = "render_root",
+};
+gpu::GpuAllocation root_allocation =
+    gpu::allocate_memory(&device, &root_desc)!;
+defer (void)gpu::free_allocation(&device, &root_allocation);
 
-gpu::FrameToken frame;
-if (catch err = gpu::@with_frame(&frame, &device, render_frame, &state)) {
-    if (frame.is_valid()) {
-        gpu::end_frame(&frame)!;
-    }
-    return err~;
-}
+gpu::GpuSpan root_span =
+    gpu::get_allocation_span(&device, root_allocation)!;
+RootArgs* root =
+    (RootArgs*)gpu::get_span_mapping(&device, root_span)!.ptr;
+write_root(root);
+gpu::flush_mapped_span(&device, root_span)!;
+
+record_rendering(
+    commands: &commands,
+    root:     gpu::get_span_address(&device, root_span)!,
+    state:    &state,
+)!;
+gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
+gpu::ExecutableCommandList[1] lists = { executable };
+gpu::SubmitDesc submit = { .command_lists = lists[..] };
+gpu::CompletionPoint completion = gpu::submit(graphics, &submit)!;
+gpu::wait_completion(completion)!;
 ```
 
-The helper requires a named optional-returning worker and caller-owned token
-storage. It calls the worker directly, attempts end exactly once after worker
-success or fault, and performs no heap allocation or indirect dispatch. If end
-succeeds after a worker fault, the worker fault is returned. If end faults, its
-exact fault takes precedence and `frame` remains live for retry; the example
-above performs that retry before propagating the original helper fault. Log a
-worker fault inside the worker if both diagnostics must be retained.
-
-Prefer `@with_frame` for fallible work. Use explicit begin/end only for a
-deliberate recovery flow where the caller-owned token survives the whole flow,
-every work fault is caught before leaving the scope, and the end result is
-always observed.
-
-Use the existing `root_pointer_compute` and `hello_triangle_sdl` samples as the
-headless and windowed lifecycle references; no lifecycle-only sample is needed.
+The completion wait makes the deferred free safe. A non-blocking loop retains
+both `root_allocation` and `completion`, polls the point, and reuses or frees
+the allocation only after the poll succeeds. Applications can build rings or
+pools from the same rule; the root module does not choose the number of
+concurrent work sets.

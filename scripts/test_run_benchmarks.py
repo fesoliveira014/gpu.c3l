@@ -7,11 +7,10 @@ import unittest
 
 SCRIPT = pathlib.Path(__file__).with_name("run_benchmarks.py")
 UPLOAD_BENCHMARK = SCRIPT.parents[1] / "test" / "src" / "upload_throughput_bench.c3"
-ARENA_OUTPUT = "\n".join(
+ALLOCATION_OUTPUT = "\n".join(
     (
-        "frame: iterations=100000 size=64 align=16 12.5 ns/allocation",
-        "cpu_write allocate: iterations=4096 size=64 align=16 23.75 ns/allocation",
-        "cpu_write free: iterations=4096 8.25 ns/free",
+        "cpu_write allocate: iterations=4000 size=64 align=16 23.75 ns/allocation",
+        "cpu_write free: iterations=4000 size=64 align=16 8.25 ns/free",
     )
 )
 
@@ -24,11 +23,11 @@ def load_runner():
 
 
 class BenchmarkRunnerTests(unittest.TestCase):
-    def test_arena_benchmark_uses_explicit_cpu_write_allocations(self):
+    def test_allocation_benchmark_uses_explicit_cpu_write_allocations(self):
         runner = load_runner()
         self.assertEqual(
-            runner.BENCHMARK_METHODS["arena_allocation_bench"],
-            ("frame=100000; cpu_write=4096", "ns/allocation, ns/free"),
+            runner.BENCHMARK_METHODS["allocation_bench"],
+            ("4000/phase", "ns/allocation, ns/free"),
         )
 
     def test_suite_order_covers_stabilization_baselines(self):
@@ -36,12 +35,11 @@ class BenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(
             runner.BENCHMARK_TARGETS,
             (
-                "arena_allocation_bench",
+                "allocation_bench",
                 "resource_create_bench",
                 "descriptor_churn_bench",
                 "upload_throughput_bench",
                 "command_record_bench",
-                "frame_signal_bench",
                 "pipeline_cache_bench",
                 "async_overlap_bench",
             ),
@@ -110,28 +108,66 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "upload_throughput_bench",
             )
 
-    def test_arena_measurement_requires_cpu_write_allocate_phase(self):
+    def test_allocation_measurement_accepts_exact_schema(self):
         runner = load_runner()
-        output = "\n".join((ARENA_OUTPUT.splitlines()[0], ARENA_OUTPUT.splitlines()[2]))
+        runner.require_measurement(ALLOCATION_OUTPUT, "allocation_bench")
+
+    def test_allocation_measurement_rejects_extra_fields(self):
+        runner = load_runner()
+        output = ALLOCATION_OUTPUT.replace(" size=64", " status=ok size=64", 1)
+        with self.assertRaises(ValueError):
+            runner.require_measurement(output, "allocation_bench")
+
+    def test_allocation_measurement_requires_cpu_write_allocate_phase(self):
+        runner = load_runner()
+        output = ALLOCATION_OUTPUT.splitlines()[1]
         with self.assertRaisesRegex(ValueError, "cpu_write allocate"):
-            runner.require_measurement(output, "arena_allocation_bench")
+            runner.require_measurement(output, "allocation_bench")
 
-    def test_arena_measurement_requires_cpu_write_free_phase(self):
+    def test_allocation_measurement_requires_cpu_write_free_phase(self):
         runner = load_runner()
-        output = "\n".join(ARENA_OUTPUT.splitlines()[:2])
+        output = ALLOCATION_OUTPUT.splitlines()[0]
         with self.assertRaisesRegex(ValueError, "cpu_write free"):
-            runner.require_measurement(output, "arena_allocation_bench")
+            runner.require_measurement(output, "allocation_bench")
 
-    def test_arena_measurement_requires_exact_cpu_write_iteration_counts(self):
+    def test_allocation_measurement_requires_exact_cpu_write_iteration_counts(self):
         runner = load_runner()
         for phase in ("allocate", "free"):
             with self.subTest(phase=phase):
-                output = ARENA_OUTPUT.replace(
-                    f"cpu_write {phase}: iterations=4096",
-                    f"cpu_write {phase}: iterations=4095",
+                output = ALLOCATION_OUTPUT.replace(
+                    f"cpu_write {phase}: iterations=4000",
+                    f"cpu_write {phase}: iterations=3999",
                 )
                 with self.assertRaisesRegex(ValueError, f"cpu_write {phase}"):
-                    runner.require_measurement(output, "arena_allocation_bench")
+                    runner.require_measurement(output, "allocation_bench")
+
+    def test_allocation_measurement_requires_size_and_alignment(self):
+        runner = load_runner()
+        for phase in ("allocate", "free"):
+            for field in ("size=64 ", "align=16 "):
+                with self.subTest(phase=phase, field=field):
+                    line = next(
+                        line
+                        for line in ALLOCATION_OUTPUT.splitlines()
+                        if line.startswith(f"cpu_write {phase}:")
+                    )
+                    output = ALLOCATION_OUTPUT.replace(line, line.replace(field, ""))
+                    with self.assertRaisesRegex(ValueError, f"cpu_write {phase}"):
+                        runner.require_measurement(output, "allocation_bench")
+
+    def test_allocation_measurement_rejects_intervening_text(self):
+        runner = load_runner()
+        output = ALLOCATION_OUTPUT.replace("\n", "\nbenchmark error\n")
+        with self.assertRaises(ValueError):
+            runner.require_measurement(output, "allocation_bench")
+
+    def test_allocation_measurement_rejects_malformed_decimal_separators(self):
+        runner = load_runner()
+        for value in ("23,75", "23..75", "1,023.75"):
+            with self.subTest(value=value):
+                output = ALLOCATION_OUTPUT.replace("23.75", value)
+                with self.assertRaises(ValueError):
+                    runner.require_measurement(output, "allocation_bench")
 
     def test_upload_target_rejects_generic_measurement(self):
         runner = load_runner()
@@ -155,7 +191,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
             runner.require_measurement("iterations=300/worker units=ns/op", "target")
         with self.assertRaisesRegex(ValueError, "measured value"):
             runner.require_measurement(
-                "iterations=2000/phase units=ns/begin_frame\nbenchmark crashed",
+                "iterations=2000/phase units=ns/record\nbenchmark crashed",
                 "target",
             )
 

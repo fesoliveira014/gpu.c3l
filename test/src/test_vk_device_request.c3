@@ -235,6 +235,17 @@ fn void malformed_native_request_preserves_runtime_state() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
+fn void device_creation_checkpoint_ordinals_match_exact_schema() @test {
+    assert(gpu::vk::DeviceCreationCheckpoint.NONE.ordinal == 0);
+    assert(gpu::vk::DeviceCreationCheckpoint.OWNED_INSTANCE.ordinal == 1);
+    assert(gpu::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal == 2);
+    assert(gpu::vk::DeviceCreationCheckpoint.ALLOCATOR.ordinal == 3);
+    assert(gpu::vk::DeviceCreationCheckpoint.RECORDING_CONTEXTS.ordinal == 4);
+    assert(gpu::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP.ordinal == 5);
+    assert(gpu::vk::DeviceCreationCheckpoint.PIPELINE_SHARED.ordinal == 6);
+    assert(gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal == 7);
+}
+
 fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,

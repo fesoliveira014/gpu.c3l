@@ -280,7 +280,6 @@ fn gpu::Device make_queue_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_queue_selection_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -299,8 +298,6 @@ fn void queue_alias_matches_async_compute_cap() @test {
 fn void cross_queue_timeline_chain_validates() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList compute_cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute_cmd)!!;
     gpu::ExecutableCommandList compute_cmd_executable = gpu::end_commands(&compute_cmd)!!;
@@ -328,7 +325,6 @@ fn void cross_queue_timeline_chain_validates() @test {
     )!!;
 
     gpu::wait_completion(graphics_done, 1_000_000_000)!!;
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void distinct_transfer_compute_graphics_completion_chain() @test {
@@ -449,7 +445,7 @@ fn void multi_role_access_stays_exclusive_on_single_family() @test {
     gpu::destroy_texture(&device, tex)!!;
 }
 
-fn void frame_arena_families_alias_without_transfer() @test {
+fn void strict_heap_families_alias_without_transfer() @test {
     vk::VkDeviceState state = {
         .selected_queue_roles = { .graphics, .compute },
         .graphics_family = 4,
@@ -457,12 +453,12 @@ fn void frame_arena_families_alias_without_transfer() @test {
         .transfer_family = 7,
     };
     uint[2] families;
-    uint count = vk::graphics_compute_queue_families(&state, families[..]);
+    uint count = vk::strict_heap_queue_families(&state, families[..]);
     assert(count == 1, "aliased graphics and compute produce one family");
     assert(families[0] == 4, "graphics family is first");
 }
 
-fn void frame_arena_families_are_graphics_compute_only() @test {
+fn void strict_heap_families_are_graphics_compute_only() @test {
     vk::VkDeviceState state = {
         .selected_queue_roles = { .graphics, .compute },
         .graphics_family = 4,
@@ -470,39 +466,10 @@ fn void frame_arena_families_are_graphics_compute_only() @test {
         .transfer_family = 7,
     };
     uint[2] families;
-    uint count = vk::graphics_compute_queue_families(&state, families[..]);
+    uint count = vk::strict_heap_queue_families(&state, families[..]);
     assert(count == 2, "distinct graphics and compute produce two families");
     assert(families[0] == 4, "graphics family is first");
     assert(families[1] == 5, "compute family is second");
-}
-
-fn void frame_arena_create_info_is_exclusive_when_families_alias() @test {
-    vk::BufferDesc desc = {
-        .size        = 256,
-        .usage       = { .storage, .addressable, .indirect, .index },
-        .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    uint[1] families = { 4 };
-    vk::BufferCreateInfo info = vk::make_buffer_create_info(&desc, families[..])!!;
-    assert(info.sharing_mode == vk::SharingMode.EXCLUSIVE, "one family keeps exclusive sharing");
-    assert(info.queue_family_index_count == 0, "exclusive creation publishes no family count");
-    assert(info.p_queue_family_indices == null, "exclusive creation publishes no family pointer");
-}
-
-fn void frame_arena_create_info_uses_exact_distinct_families() @test {
-    vk::BufferDesc desc = {
-        .size        = 256,
-        .usage       = { .storage, .addressable, .indirect, .index },
-        .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    uint[2] families = { 4, 5 };
-    vk::BufferCreateInfo info = vk::make_buffer_create_info(&desc, families[..])!!;
-    assert(info.sharing_mode == vk::SharingMode.CONCURRENT, "two families use concurrent sharing");
-    assert(info.queue_family_index_count == 2, "concurrent creation publishes two families");
-    assert(info.p_queue_family_indices[0] == 4, "concurrent creation keeps graphics first");
-    assert(info.p_queue_family_indices[1] == 5, "concurrent creation keeps compute second");
 }
 
 fn void selected_queue_families_keep_distinct_transfer() @test {
@@ -611,57 +578,30 @@ fn void pool_selection_follows_queue_family() @test {
         == gfx[0], "graphics remains independent");
 }
 
-fn void tri_queue_frame_retires_cleanly() @test {
+fn void tri_queue_completions_wait_cleanly() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
 
-    for (uint frame = 0; frame < 4; frame++) {
-        gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
+    for (uint round = 0; round < 4; round++) {
         gpu::QueueKind[3] kinds = {
             gpu::QueueKind.GRAPHICS,
             gpu::QueueKind.COMPUTE,
             gpu::QueueKind.TRANSFER,
         };
-        for (uint i = 0; i < 3; i++) {
+        gpu::CompletionPoint[3] completions;
+        for (uint i = 0; i < kinds.len; i++) {
             gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, kinds[i])!!)!!;
             defer discard_test_commands(&cmd)!!;
             gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
             defer discard_test_executable(&cmd_executable)!!;
             gpu::ExecutableCommandList[1] one = { cmd_executable };
             gpu::SubmitDesc submit = { .command_lists = one[..] };
-            submit_test_queue(&device, kinds[i], &submit)!!;
+            completions[i] = submit_test_queue(&device, kinds[i], &submit)!!;
         }
-        gpu::end_frame(&frame_token)!!;
+        for (uint i = 0; i < completions.len; i++) {
+            gpu::wait_completion(completions[i])!!;
+        }
     }
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-}
-
-fn void native_queue_marker_clear_handles_aliased_roles() @test {
-    vk::Queue shared_queue = (vk::Queue)(uptr)0x10;
-    vk::Queue transfer_queue = (vk::Queue)(uptr)0x20;
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute, .transfer },
-        .graphics_queue = shared_queue,
-        .compute_queue  = shared_queue,
-        .transfer_queue = transfer_queue,
-    };
-    uint all_markers = vk::OFF_FRAME_GRAPHICS_BIT
-        | vk::OFF_FRAME_COMPUTE_BIT
-        | vk::OFF_FRAME_TRANSFER_BIT;
-    state.off_frame_pending_queues.store(all_markers, AtomicOrdering.RELAXED);
-
-    vk::clear_off_frame_queue_markers(&state, shared_queue);
-    assert(
-        state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE)
-            == vk::OFF_FRAME_TRANSFER_BIT,
-        "clearing an aliased native queue removes every matching semantic marker"
-    );
-
-    vk::clear_off_frame_queue_markers(&state, transfer_queue);
-    assert(
-        state.off_frame_pending_queues.load(AtomicOrdering.ACQUIRE) == 0,
-        "clearing the remaining native queue restores destruction readiness"
-    );
 }
 
 fn void swapchain_sharing_aliases_the_main_family() @test {
@@ -1036,53 +976,6 @@ fn void presentation_without_graphics_is_rejected() @test {
     );
 }
 
-fn void frame_anchor_uses_first_admitted_role() @test {
-    vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
-    vk::Queue compute_queue = (vk::Queue)(uptr)0x20;
-    vk::Queue transfer_queue = (vk::Queue)(uptr)0x30;
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute, .transfer },
-        .graphics_queue       = graphics_queue,
-        .compute_queue        = compute_queue,
-        .transfer_queue       = transfer_queue,
-    };
-
-    assert(vk::frame_queue_kind(&state) == gpu::QueueKind.GRAPHICS);
-    assert(!vk::queue_uses_frame_aux(&state, gpu::QueueKind.GRAPHICS));
-    assert(vk::queue_uses_frame_aux(&state, gpu::QueueKind.COMPUTE));
-    assert(vk::queue_uses_frame_aux(&state, gpu::QueueKind.TRANSFER));
-
-    state = {
-        .selected_queue_roles = { .compute, .transfer },
-        .compute_queue        = compute_queue,
-        .transfer_queue       = transfer_queue,
-    };
-    assert(vk::frame_queue_kind(&state) == gpu::QueueKind.COMPUTE);
-    assert(!vk::queue_uses_frame_aux(&state, gpu::QueueKind.COMPUTE));
-    assert(vk::queue_uses_frame_aux(&state, gpu::QueueKind.TRANSFER));
-
-    gpu::Queue queue = { .roles = { .compute } };
-    gpu::SubmitDesc desc;
-    vk::resolve_submit_inputs(
-        &state,
-        queue,
-        &desc,
-    )!!;
-
-    state.transfer_queue = compute_queue;
-    assert(
-        !vk::queue_uses_frame_aux(&state, gpu::QueueKind.TRANSFER),
-        "an aliased transfer role is ordered on the compute anchor"
-    );
-
-    state = {
-        .selected_queue_roles = { .transfer },
-        .transfer_queue       = transfer_queue,
-    };
-    assert(vk::frame_queue_kind(&state) == gpu::QueueKind.TRANSFER);
-    assert(!vk::queue_uses_frame_aux(&state, gpu::QueueKind.TRANSFER));
-}
-
 fn void aliased_compute_and_transfer_share_one_queue_mutex() @test {
     vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
     vk::Queue compute_queue = (vk::Queue)(uptr)0x20;
@@ -1187,32 +1080,6 @@ fn void compute_only_multi_count_keeps_exact_families() @test {
     uint shared_count = vk::used_queue_families(&state, shared_families[..]);
     assert(shared_count == 2);
     assert(shared_families[0] == 0 && shared_families[1] == 1);
-}
-
-fn void transfer_only_multi_count_reaches_every_frame_family() @test {
-    vk::QueueFamilyProperties[2] table = {
-        family(QF_T, 1),
-        family(QF_T, 1),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts = { .transfer = 2 },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(!picked.selected.graphics && !picked.selected.compute);
-    assert(picked.selected.transfer && picked.counts.transfer == 2);
-
-    vk::VkDeviceState state = {
-        .selected_queue_roles = picked.selected,
-        .transfer_family      = picked.transfer,
-        .queues               = picked,
-    };
-    uint[2] frame_families;
-    uint frame_count =
-        vk::graphics_compute_queue_families(&state, frame_families[..]);
-    assert(frame_count == 2);
-    assert(frame_families[0] == 0 && frame_families[1] == 1);
 }
 
 fn void private_presentation_preserves_graphics_multi_count() @test {

@@ -206,7 +206,7 @@ fn bool? vk_poll_completion(
         ),
     )!;
     if (current < sequence) return false;
-    observe_queue_completion(state, completion, current);
+    observe_queue_completion(completion, current);
     release_completed_submitted_commands(
         state,
         queue_id,
@@ -241,7 +241,7 @@ fn void? vk_wait_completion(
             timeout_ns,
         ),
     )!;
-    observe_queue_completion(state, completion, sequence);
+    observe_queue_completion(completion, sequence);
     release_completed_submitted_commands(
         state,
         queue_id,

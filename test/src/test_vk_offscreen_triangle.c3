@@ -18,7 +18,6 @@ fn gpu::Device make_offscreen_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_offscreen_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -56,8 +55,6 @@ fn void offscreen_clear_works() @test {
         debug_name:   "offscreen_readback",
     )!!;
     defer free_owned_span(&device, &readback)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
@@ -109,8 +106,12 @@ fn void offscreen_clear_works() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
     gpu::invalidate_mapped_span(&device, readback.span)!!;
 
     char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
@@ -120,7 +121,6 @@ fn void offscreen_clear_works() @test {
         assert(pixels[i * 4 + 2] == (char)192, "cleared blue");
         assert(pixels[i * 4 + 3] == (char)255, "cleared alpha");
     }
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void offscreen_textured_triangle() @test {
@@ -196,11 +196,16 @@ fn void offscreen_textured_triangle() @test {
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
     // Vertex data: xy = NDC position, zw = uv.
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+    OwnedSpan verts_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "offscreen_vertices",
+    )!!;
+    defer free_owned_span(&device, &verts_owned)!!;
+    gpu::GpuSpan verts_span = verts_owned.span;
     float* verts = (float*)test_span_mapping(&device, verts_span).ptr;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
@@ -209,10 +214,20 @@ fn void offscreen_textured_triangle() @test {
     };
     for (uint i = 0; i < 12; i++) verts[i] = vertex_data[i];
 
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
+    OwnedSpan frag_owned = allocate_owned_span(
+        device:       &device,
+        size:         FragRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "offscreen_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &frag_owned)!!;
+    gpu::GpuSpan frag_span = frag_owned.span;
     FragRoot* frag_root = (FragRoot*)test_span_mapping(&device, frag_span).ptr;
     frag_root.texture_index = tex_index;
     frag_root.sampler_index = smp_index;
+    gpu::flush_mapped_span(&device, verts_span)!!;
+    gpu::flush_mapped_span(&device, frag_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -295,8 +310,12 @@ fn void offscreen_textured_triangle() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
     gpu::invalidate_mapped_span(&device, readback.span)!!;
 
     char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
@@ -310,8 +329,6 @@ fn void offscreen_textured_triangle() @test {
     assert(corner[0] == (char)8 && corner[1] == (char)16 && corner[2] == (char)32, "corner is the clear color");
     char* far_corner = &pixels[(RT_SIZE * RT_SIZE - 1) * 4];
     assert(far_corner[0] == (char)8, "opposite corner is the clear color");
-
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void dynamic_viewport_scissor_pixels() @test {
@@ -351,9 +368,15 @@ fn void dynamic_viewport_scissor_pixels() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
     gpu::GpuSpan readback_all = readback.span;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan vertices = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+    OwnedSpan vertices_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "dynamic_vertices",
+    )!!;
+    defer free_owned_span(&device, &vertices_owned)!!;
+    gpu::GpuSpan vertices = vertices_owned.span;
     float[12] vertex_data = {
         -1.0f, -1.0f, 0.0f, 0.0f,
          3.0f, -1.0f, 0.0f, 0.0f,
@@ -361,9 +384,19 @@ fn void dynamic_viewport_scissor_pixels() @test {
     };
     for (uint i = 0; i < vertex_data.len; i++) ((float*)test_span_mapping(&device, vertices).ptr)[i] = vertex_data[i];
 
-    gpu::GpuSpan color = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
+    OwnedSpan color_owned = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "dynamic_color_root",
+    )!!;
+    defer free_owned_span(&device, &color_owned)!!;
+    gpu::GpuSpan color = color_owned.span;
     float[4] green = { 0.0f, 1.0f, 0.0f, 1.0f };
     for (uint i = 0; i < green.len; i++) ((float*)test_span_mapping(&device, color).ptr)[i] = green[i];
+    gpu::flush_mapped_span(&device, vertices)!!;
+    gpu::flush_mapped_span(&device, color)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -443,8 +476,12 @@ fn void dynamic_viewport_scissor_pixels() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
     gpu::invalidate_mapped_span(&device, readback.span)!!;
 
     for (uint i = 0; i < 2; i++) {
@@ -457,8 +494,6 @@ fn void dynamic_viewport_scissor_pixels() @test {
     char* reset_pixels = (char*)test_span_mapping(&device, readback_all).ptr + RT_BYTES * 2;
     usz reset_right_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE * 3 / 4) * 4 + 1;
     assert(reset_pixels[reset_right_green] != 0, "the next pass restores full viewport and scissor defaults");
-
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void offscreen_render_to_mip() @test {
@@ -476,8 +511,6 @@ fn void offscreen_render_to_mip() @test {
         debug_name:   "mip_readback",
     )!!;
     defer free_owned_span(&device, &readback)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
@@ -529,8 +562,12 @@ fn void offscreen_render_to_mip() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
     gpu::invalidate_mapped_span(&device, readback.span)!!;
 
     char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
@@ -538,7 +575,6 @@ fn void offscreen_render_to_mip() @test {
         assert(pixels[i * 4] == (char)40 && pixels[i * 4 + 1] == (char)80 && pixels[i * 4 + 2] == (char)120,
             "mip 1 holds the rendered clear color");
     }
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void graphics_pipeline_depth_format_validation() @test {
@@ -584,8 +620,6 @@ fn void dynamic_viewport_scissor_validation() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
@@ -677,7 +711,6 @@ fn void dynamic_viewport_scissor_validation() @test {
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
     defer discard_test_executable(&cmd_executable)!!;
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void render_pass_state_machine() @test {
@@ -694,8 +727,6 @@ fn void render_pass_state_machine() @test {
         debug_name:   "render_pass_data",
     )!!;
     defer free_owned_span(&device, &data)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
@@ -745,5 +776,4 @@ fn void render_pass_state_machine() @test {
     gpu::cmd_end_render_pass(&cmd)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
-    gpu::end_frame(&frame_token)!!;
 }

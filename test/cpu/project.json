@@ -81,7 +81,7 @@
         "../src/test_allocation_contract.c3",
         "../src/test_texture_transition.c3",
         "../src/test_texture_support.c3",
-        "../src/test_frame_lifecycle_helper.c3",
+        "../src/test_device_fixture.c3",
         "../src/test_device_registry.c3",
         "../src/test_diagnostics.c3",
         "../src/test_workload_limits.c3"

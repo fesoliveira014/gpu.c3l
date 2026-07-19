@@ -9,7 +9,7 @@ struct ResolvedSpan {
     usz               offset;
     usz               size;
     gpu::QueueRoles   access;
-    gpu::MemoryKind   memory_kind;
+    gpu::MemoryClass   memory_class;
     void*             mapping;
     gpu::GpuAddress   address;
 }
@@ -21,7 +21,7 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     BufferHandle backing_buffer;
     usz offset;
     gpu::QueueRoles access;
-    gpu::MemoryKind memory_kind;
+    gpu::MemoryClass memory_class;
     if (span.owner == state.buffers.owner) {
         backing_buffer = {
             .owner      = span.owner,
@@ -31,7 +31,7 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         slot = state.buffers.get(backing_buffer)!;
         offset = span.offset;
         access = slot.access;
-        memory_kind = slot.memory_kind;
+        memory_class = slot.memory_class;
     } else if (span.owner == state.allocations.owner) {
         gpu::GpuAllocation allocation = {
             .owner      = span.owner,
@@ -44,7 +44,7 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         slot = &allocation_slot.backing;
         offset = span.offset;
         access = slot.access;
-        memory_kind = slot.memory_kind;
+        memory_class = slot.memory_class;
     } else {
         return gpu::INVALID_HANDLE~;
     }
@@ -73,7 +73,7 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         .offset         = offset,
         .size           = span.size,
         .access         = access,
-        .memory_kind    = memory_kind,
+        .memory_class    = memory_class,
         .mapping        = mapping,
         .address        = address,
     };

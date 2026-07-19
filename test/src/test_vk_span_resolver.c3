@@ -37,7 +37,7 @@ fn void init_span_resolver_fixture(SpanResolverFixture* fixture) {
             .size        = fixture.mapping.len,
             .usage       = { .storage, .addressable },
             .access      = { .compute, .transfer },
-            .memory_kind = gpu::MemoryKind.FRAME_UPLOAD,
+            .memory_class = gpu::MemoryClass.CPU_WRITE,
         },
         .generation = 5,
         .used       = true,
@@ -57,7 +57,7 @@ fn void init_span_resolver_fixture(SpanResolverFixture* fixture) {
                 .size        = fixture.mapping.len,
                 .usage       = { .storage, .addressable },
                 .access      = { .compute },
-                .memory_kind = gpu::MemoryKind.PERSISTENT_UPLOAD,
+                .memory_class = gpu::MemoryClass.CPU_WRITE,
             },
             .alignment    = 64,
             .memory_class = gpu::MemoryClass.CPU_WRITE,
@@ -110,8 +110,8 @@ fn void buffer_span_resolves_private_metadata() @test {
         "buffer span preserves its checked native range");
     assert(resolved.access == fixture.buffer_cells[0].value.access,
         "buffer span derives immutable access from the slot");
-    assert(resolved.memory_kind == gpu::MemoryKind.FRAME_UPLOAD,
-        "buffer span derives its memory kind from the slot");
+    assert(resolved.memory_class == gpu::MemoryClass.CPU_WRITE,
+        "buffer span derives its memory class from the slot");
     assert(resolved.mapping == &fixture.mapping[8],
         "buffer span resolves its mapped address");
     assert((ulong)resolved.address == 0x1008,
@@ -250,7 +250,7 @@ fn void independent_allocation_span_resolves() @test {
     assert(resolved.offset == 8 && resolved.size == 16,
         "independent spans preserve their checked range");
     assert(resolved.access == fixture.allocation_cells[0].value.backing.access
-        && resolved.memory_kind == gpu::MemoryKind.PERSISTENT_UPLOAD,
+        && resolved.memory_class == gpu::MemoryClass.CPU_WRITE,
         "independent spans derive immutable backing policy");
     assert(resolved.mapping == &fixture.mapping[8]
         && (ulong)resolved.address == 0x2008,

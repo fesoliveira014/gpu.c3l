@@ -24,8 +24,8 @@ Sample modules may use sample-specific namespaces. Do not put samples in `module
 
 | Kind | Case | Examples |
 |---|---|---|
-| Variables, fields, parameters | `snake_case` | `frame_index`, `debug_name`, `memory_kind` |
-| Functions | `snake_case` | `allocate_memory`, `cmd_dispatch`, `alloc_frame_span` |
+| Variables, fields, parameters | `snake_case` | `queue_index`, `debug_name`, `memory_class` |
+| Functions | `snake_case` | `allocate_memory`, `cmd_dispatch`, `wait_completion` |
 | Structs, enums, typedefs, aliases | `PascalCase` | `DeviceDesc`, `GpuSpan`, `TextureUsage` |
 | Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_DESCRIPTOR_SLOTS`, `TRANSFER_DST`, `DEVICE_LOST` |
 | Modules | lowercase, dotted | `gpu`, `gpu::vk` |
@@ -96,7 +96,7 @@ Faults should be specific:
 ```text
 INVALID_HANDLE
 UNSUPPORTED_FEATURE
-ARENA_FULL
+RESOURCE_IN_USE
 DESCRIPTOR_HEAP_FULL
 PIPELINE_CREATE_FAILED
 ```
@@ -174,7 +174,7 @@ Shipped code and documentation describe current behavior. Omit schedules,
 roadmap labels, ticket identifiers, and implementation history.
 
 Use behavior names such as `test_root_pointer_compute` and
-`create_frame_upload_arena`.
+`create_upload_pool`.
 
 ## 12. Public API dependency hygiene
 
@@ -208,7 +208,6 @@ Backend implementation should mirror public areas:
 
 ```text
 gpu/vk/device.c3
-gpu/vk/memory.c3
 gpu/vk/buffer.c3
 gpu/vk/texture.c3
 gpu/vk/pipeline_compute.c3
@@ -241,7 +240,7 @@ Debug name conventions:
 ```text
 input_buffer
 output_buffer
-frame_upload_0
+transient_upload_0
 persistent_materials
 albedo_texture
 swapchain_color_0
@@ -266,7 +265,7 @@ Test names describe behavior:
 
 ```text
 test_invalid_buffer_handle_rejected
-test_frame_arena_overflow_faults
+test_allocation_extent_overflow_faults
 test_root_pointer_compute_writes_output
 ```
 

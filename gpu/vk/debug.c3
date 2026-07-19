@@ -261,11 +261,6 @@ fn ZString slot_name(char* name) @private {
     return name[0] != 0 ? (ZString)name : (ZString)"(unnamed)";
 }
 
-<* Library-owned arena allocations are exempt. *>
-fn void mark_buffer_internal(VkDeviceState* state, BufferHandle handle) {
-    if (try slot = state.buffers.get(handle)) slot.internal = true;
-}
-
 fn uint report_buffer_leaks(VkDeviceState* state) {
     uint count = 0;
     if (state.buffers.slots.ptr == null) return 0;

@@ -29,7 +29,6 @@ fn gpu::Device make_ind_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_indirect_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -183,58 +182,86 @@ fn gpu::PipelineHandle make_cross_family_compute_pipeline(
     return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
 }
 
-fn gpu::GpuSpan alloc_cross_family_indirect_args(gpu::Device* device, gpu::FrameToken* frame) {
-    gpu::GpuSpan span = gpu::alloc_frame_span(frame, gpu::DispatchIndirectCommand::size, 16)!!;
-    uint* words = (uint*)test_span_mapping(device, span).ptr;
+fn OwnedSpan alloc_cross_family_indirect_args(
+    gpu::Device* device,
+    gpu::QueueRoles access,
+) {
+    OwnedSpan owned = allocate_owned_span(
+        device:       device,
+        size:         gpu::DispatchIndirectCommand::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       access,
+        debug_name:   "cross_family_indirect_args",
+    )!!;
+    uint* words = (uint*)test_span_mapping(device, owned.span).ptr;
     words[0] = 1;
     words[1] = 1;
     words[2] = 1;
-    return span;
+    gpu::flush_mapped_span(device, owned.span)!!;
+    return owned;
 }
 
-fn gpu::GpuSpan alloc_empty_compute_root(gpu::Device* device, gpu::FrameToken* frame) {
-    gpu::GpuSpan span = gpu::alloc_frame_span(frame, ComputeRoot::size, 16)!!;
-    ComputeRoot* root = (ComputeRoot*)test_span_mapping(device, span).ptr;
+fn OwnedSpan alloc_empty_compute_root(
+    gpu::Device* device,
+    gpu::QueueRoles access,
+) {
+    OwnedSpan owned = allocate_owned_span(
+        device:       device,
+        size:         ComputeRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       access,
+        debug_name:   "cross_family_compute_root",
+    )!!;
+    ComputeRoot* root = (ComputeRoot*)test_span_mapping(device, owned.span).ptr;
     *root = { .count = 0 };
-    return span;
+    gpu::flush_mapped_span(device, owned.span)!!;
+    return owned;
 }
 
-fn void frame_span_same_range_crosses_compute_and_graphics_families_when_available() @test {
+fn void caller_owned_span_crosses_compute_and_graphics_families_when_available() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
-    if (!distinct_graphics_compute_families(&device, "same-range frame span")) return;
+    if (!distinct_graphics_compute_families(&device, "same-range caller-owned span")) return;
 
     gpu::ShaderHandle shader;
     gpu::PipelineHandle pipeline = make_cross_family_compute_pipeline(&device, &shader);
     defer gpu::destroy_shader(&device, shader)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan args = alloc_cross_family_indirect_args(&device, &frame_token);
-    gpu::GpuSpan compute_root = alloc_empty_compute_root(&device, &frame_token);
-    gpu::GpuSpan graphics_root = alloc_empty_compute_root(&device, &frame_token);
+    OwnedSpan args_owned = alloc_cross_family_indirect_args(
+        &device,
+        { .graphics, .compute },
+    );
+    defer free_owned_span(&device, &args_owned)!!;
+    OwnedSpan compute_root_owned = alloc_empty_compute_root(&device, { .compute });
+    defer free_owned_span(&device, &compute_root_owned)!!;
+    OwnedSpan graphics_root_owned = alloc_empty_compute_root(&device, { .graphics });
+    defer free_owned_span(&device, &graphics_root_owned)!!;
 
     gpu::CommandList compute = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
         pipeline: pipeline,
-        root:     test_span_address(&device, compute_root),
-        args:     args,
+        root:     test_span_address(&device, compute_root_owned.span),
+        args:     args_owned.span,
     )!!;
     gpu::ExecutableCommandList compute_executable = gpu::end_commands(&compute)!!;
     defer discard_test_executable(&compute_executable)!!;
     gpu::ExecutableCommandList[1] compute_lists = { compute_executable };
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
-    gpu::CompletionPoint compute_completion = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &compute_submit)!!;
+    gpu::CompletionPoint compute_completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &compute_submit,
+    )!!;
 
     gpu::CommandList graphics = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&graphics)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
         pipeline: pipeline,
-        root:     test_span_address(&device, graphics_root),
-        args:     args,
+        root:     test_span_address(&device, graphics_root_owned.span),
+        args:     args_owned.span,
     )!!;
     gpu::ExecutableCommandList graphics_executable = gpu::end_commands(&graphics)!!;
     defer discard_test_executable(&graphics_executable)!!;
@@ -244,71 +271,76 @@ fn void frame_span_same_range_crosses_compute_and_graphics_families_when_availab
         .command_lists    = graphics_lists[..],
         .completion_waits = waits[..],
     };
-    gpu::CompletionPoint graphics_completion = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &graphics_submit)!!;
-    gpu::end_frame(&frame_token)!!;
+    gpu::CompletionPoint graphics_completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &graphics_submit,
+    )!!;
     gpu::wait_completion(graphics_completion, ulong::max)!!;
 }
 
-fn void frame_span_reused_offset_switches_queue_family_when_available() @test {
+fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 1,
-        .application_name  = "frame_arena_reuse_cross_family",
+        .application_name  = "caller_owned_reuse_cross_family",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
     defer destroy_test_device(&device)!!;
-    if (!distinct_graphics_compute_families(&device, "reused-offset frame span")) return;
+    if (!distinct_graphics_compute_families(&device, "reused caller-owned span")) return;
 
     gpu::ShaderHandle shader;
     gpu::PipelineHandle pipeline = make_cross_family_compute_pipeline(&device, &shader);
     defer gpu::destroy_shader(&device, shader)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
+    OwnedSpan args_owned = alloc_cross_family_indirect_args(
+        &device,
+        { .graphics, .compute },
+    );
+    defer free_owned_span(&device, &args_owned)!!;
+    OwnedSpan compute_root_owned = alloc_empty_compute_root(&device, { .compute });
+    defer free_owned_span(&device, &compute_root_owned)!!;
+    OwnedSpan graphics_root_owned = alloc_empty_compute_root(&device, { .graphics });
+    defer free_owned_span(&device, &graphics_root_owned)!!;
 
-    gpu::FrameToken first_frame = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan compute_args = alloc_cross_family_indirect_args(&device, &first_frame);
-    assert(compute_args.offset == 0, "first slot use starts at offset zero");
-    gpu::GpuSpan compute_root = alloc_empty_compute_root(&device, &first_frame);
     gpu::CommandList compute = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute)!!;
     gpu::cmd_dispatch_indirect(
         commands: &compute,
         pipeline: pipeline,
-        root:     test_span_address(&device, compute_root),
-        args:     compute_args,
+        root:     test_span_address(&device, compute_root_owned.span),
+        args:     args_owned.span,
     )!!;
     gpu::ExecutableCommandList compute_executable = gpu::end_commands(&compute)!!;
     defer discard_test_executable(&compute_executable)!!;
     gpu::ExecutableCommandList[1] compute_lists = { compute_executable };
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &compute_submit)!!;
-    gpu::end_frame(&first_frame)!!;
+    gpu::CompletionPoint compute_completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &compute_submit,
+    )!!;
+    gpu::wait_completion(compute_completion)!!;
 
-    gpu::FrameToken second_frame = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan graphics_args = alloc_cross_family_indirect_args(&device, &second_frame);
-    assert(graphics_args.owner == compute_args.owner
-        && graphics_args.index == compute_args.index
-        && graphics_args.generation == compute_args.generation,
-        "retired slot reuses its backing buffer");
-    assert(graphics_args.offset == 0, "retired slot reuses offset zero");
-    gpu::GpuSpan graphics_root = alloc_empty_compute_root(&device, &second_frame);
     gpu::CommandList graphics = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&graphics)!!;
     gpu::cmd_dispatch_indirect(
         commands: &graphics,
         pipeline: pipeline,
-        root:     test_span_address(&device, graphics_root),
-        args:     graphics_args,
+        root:     test_span_address(&device, graphics_root_owned.span),
+        args:     args_owned.span,
     )!!;
     gpu::ExecutableCommandList graphics_executable = gpu::end_commands(&graphics)!!;
     defer discard_test_executable(&graphics_executable)!!;
     gpu::ExecutableCommandList[1] graphics_lists = { graphics_executable };
     gpu::SubmitDesc graphics_submit = { .command_lists = graphics_lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &graphics_submit)!!;
-    gpu::end_frame(&second_frame)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint graphics_completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &graphics_submit,
+    )!!;
+    gpu::wait_completion(graphics_completion)!!;
 }
-
 fn void compute_generated_indexed_indirect_draw() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
@@ -352,21 +384,61 @@ fn void compute_generated_indexed_indirect_draw() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
     gpu::GpuSpan rb_span = readback.span;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
-    gpu::GpuSpan scratch = gpu::alloc_frame_span(&frame_token, 64, 16)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+    OwnedSpan scratch_owned = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "indexed_scratch",
+    )!!;
+    defer free_owned_span(&device, &scratch_owned)!!;
+    gpu::GpuSpan scratch = scratch_owned.span;
+    OwnedSpan verts_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "indexed_vertices",
+    )!!;
+    defer free_owned_span(&device, &verts_owned)!!;
+    gpu::GpuSpan verts_span = verts_owned.span;
     write_triangle_verts(&device, &verts_span);
-    gpu::GpuSpan index_span = gpu::alloc_frame_span(&frame_token, 3 * 4, 4)!!;
+    gpu::flush_mapped_span(&device, verts_span)!!;
+    OwnedSpan index_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 4,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "indexed_indices",
+    )!!;
+    defer free_owned_span(&device, &index_owned)!!;
+    gpu::GpuSpan index_span = index_owned.span;
     uint* indices = (uint*)test_span_mapping(&device, index_span).ptr;
     indices[0] = 0; indices[1] = 1; indices[2] = 2;
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
+    gpu::flush_mapped_span(&device, index_span)!!;
+    OwnedSpan frag_owned = allocate_owned_span(
+        device:       &device,
+        size:         FragRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "indexed_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &frag_owned)!!;
+    gpu::GpuSpan frag_span = frag_owned.span;
     FragRoot* frag_root = (FragRoot*)test_span_mapping(&device, frag_span).ptr;
     frag_root.texture_index = ctx.tex_index;
     frag_root.sampler_index = ctx.smp_index;
+    gpu::flush_mapped_span(&device, frag_span)!!;
 
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame_token, BuildRoot::size, 16)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         BuildRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "indexed_build_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    gpu::GpuSpan root_span = root_owned.span;
     BuildRoot* root = (BuildRoot*)test_span_mapping(&device, root_span).ptr;
     root.indexed_args_gpu = test_span_address(&device, args_span);
     root.plain_args_gpu   = test_span_address(&device, scratch);
@@ -376,6 +448,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     root.vertex_count     = 3;
     root.dispatch_x       = 1;
     root.count_value      = 1;
+    gpu::flush_mapped_span(&device, root_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -448,8 +521,6 @@ fn void compute_generated_indexed_indirect_draw() @test {
         &submit,
     )!!;
     gpu::wait_completion(completion)!!;
-    gpu::end_frame(&frame_token)!!;
-
     gpu::invalidate_mapped_span(&device, readback.span)!!;
     char* center = center_pixel(&device, &rb_span);
     assert(center[0] == (char)255 && center[1] == (char)255 && center[2] == (char)255,
@@ -470,7 +541,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     }
 }
 
-fn void plain_indirect_draw_from_frame_span() @test {
+fn void plain_indirect_draw_from_caller_owned_span() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
@@ -487,19 +558,44 @@ fn void plain_indirect_draw_from_frame_span() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
     gpu::GpuSpan rb_span = readback.span;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+    OwnedSpan verts_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "plain_indirect_vertices",
+    )!!;
+    defer free_owned_span(&device, &verts_owned)!!;
+    gpu::GpuSpan verts_span = verts_owned.span;
     write_triangle_verts(&device, &verts_span);
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
+    gpu::flush_mapped_span(&device, verts_span)!!;
+    OwnedSpan frag_owned = allocate_owned_span(
+        device:       &device,
+        size:         FragRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "plain_indirect_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &frag_owned)!!;
+    gpu::GpuSpan frag_span = frag_owned.span;
     FragRoot* frag_root = (FragRoot*)test_span_mapping(&device, frag_span).ptr;
     frag_root.texture_index = ctx.tex_index;
     frag_root.sampler_index = ctx.smp_index;
+    gpu::flush_mapped_span(&device, frag_span)!!;
 
-    // Host-written args in a frame span: the arena carries indirect usage.
-    gpu::GpuSpan args_span = gpu::alloc_frame_span(&frame_token, gpu::DrawIndirectCommand::size, 16)!!;
+    // Caller-owned allocations include indirect usage.
+    OwnedSpan args_owned = allocate_owned_span(
+        device:       &device,
+        size:         gpu::DrawIndirectCommand::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "plain_indirect_args",
+    )!!;
+    defer free_owned_span(&device, &args_owned)!!;
+    gpu::GpuSpan args_span = args_owned.span;
     gpu::DrawIndirectCommand* args = (gpu::DrawIndirectCommand*)test_span_mapping(&device, args_span).ptr;
     *args = { .vertex_count = 3, .instance_count = 1 };
+    gpu::flush_mapped_span(&device, args_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -524,13 +620,16 @@ fn void plain_indirect_draw_from_frame_span() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, readback.span)!!;
     char* center = center_pixel(&device, &rb_span);
     assert(center[0] == (char)255, "non-indexed indirect draw renders");
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void indirect_dispatch_executes_gpu_counts() @test {
@@ -552,16 +651,38 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     defer gpu::destroy_pipeline(&device, double_pipeline)!!;
 
     const uint COUNT = 100;
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
-    gpu::GpuSpan io_span = gpu::alloc_frame_span(&frame_token, COUNT * 4 * 2, 16)!!;
+    OwnedSpan io_owned = allocate_owned_span(
+        device:       &device,
+        size:         COUNT * 4 * 2,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "dispatch_io",
+    )!!;
+    defer free_owned_span(&device, &io_owned)!!;
+    gpu::GpuSpan io_span = io_owned.span;
     float* values = (float*)test_span_mapping(&device, io_span).ptr;
     for (uint i = 0; i < COUNT; i++) values[i] = (float)i;
 
-    gpu::GpuSpan scratch = gpu::alloc_frame_span(&frame_token, 64, 16)!!;
+    OwnedSpan scratch_owned = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "dispatch_scratch",
+    )!!;
+    defer free_owned_span(&device, &scratch_owned)!!;
+    gpu::GpuSpan scratch = scratch_owned.span;
     gpu::GpuSpan dispatch_args = scratch.checked_subspan(16, gpu::DispatchIndirectCommand::size)!!;
 
-    gpu::GpuSpan build_root_span = gpu::alloc_frame_span(&frame_token, BuildRoot::size, 16)!!;
+    OwnedSpan build_root_owned = allocate_owned_span(
+        device:       &device,
+        size:         BuildRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "dispatch_build_root",
+    )!!;
+    defer free_owned_span(&device, &build_root_owned)!!;
+    gpu::GpuSpan build_root_span = build_root_owned.span;
     BuildRoot* build_root = (BuildRoot*)test_span_mapping(&device, build_root_span).ptr;
     build_root.indexed_args_gpu = test_span_address(&device, scratch);
     build_root.plain_args_gpu   = test_span_address(&device, scratch);
@@ -571,12 +692,23 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     build_root.vertex_count     = 3;
     build_root.dispatch_x       = (COUNT + 63) / 64;
     build_root.count_value      = 1;
+    gpu::flush_mapped_span(&device, build_root_span)!!;
 
-    gpu::GpuSpan double_root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
+    OwnedSpan double_root_owned = allocate_owned_span(
+        device:       &device,
+        size:         ComputeRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "dispatch_double_root",
+    )!!;
+    defer free_owned_span(&device, &double_root_owned)!!;
+    gpu::GpuSpan double_root_span = double_root_owned.span;
     ComputeRoot* double_root = (ComputeRoot*)test_span_mapping(&device, double_root_span).ptr;
     double_root.input_gpu  = test_span_address(&device, io_span);
     double_root.output_gpu = (gpu::GpuAddress)((ulong)test_span_address(&device, io_span) + COUNT * 4);
     double_root.count      = COUNT;
+    gpu::flush_mapped_span(&device, io_span)!!;
+    gpu::flush_mapped_span(&device, double_root_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -610,14 +742,18 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+    gpu::invalidate_mapped_span(&device, io_span)!!;
 
     float* doubled = &values[COUNT];
     for (uint i = 0; i < COUNT; i++) {
         assert(doubled[i] == (float)i * 2.0f, "indirect dispatch ran with GPU-written group counts");
     }
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void count_buffer_limits_draws() @test {
@@ -650,26 +786,69 @@ fn void count_buffer_limits_draws() @test {
     )!!;
     defer free_owned_span(&device, &rb_one)!!;
     gpu::GpuSpan rb_one_span = rb_one.span;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+    OwnedSpan verts_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "count_vertices",
+    )!!;
+    defer free_owned_span(&device, &verts_owned)!!;
+    gpu::GpuSpan verts_span = verts_owned.span;
     write_triangle_verts(&device, &verts_span);
-    gpu::GpuSpan index_span = gpu::alloc_frame_span(&frame_token, 3 * 4, 4)!!;
+    gpu::flush_mapped_span(&device, verts_span)!!;
+    OwnedSpan index_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 4,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "count_indices",
+    )!!;
+    defer free_owned_span(&device, &index_owned)!!;
+    gpu::GpuSpan index_span = index_owned.span;
     uint* indices = (uint*)test_span_mapping(&device, index_span).ptr;
     indices[0] = 0; indices[1] = 1; indices[2] = 2;
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
+    gpu::flush_mapped_span(&device, index_span)!!;
+    OwnedSpan frag_owned = allocate_owned_span(
+        device:       &device,
+        size:         FragRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "count_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &frag_owned)!!;
+    gpu::GpuSpan frag_span = frag_owned.span;
     FragRoot* frag_root = (FragRoot*)test_span_mapping(&device, frag_span).ptr;
     frag_root.texture_index = ctx.tex_index;
     frag_root.sampler_index = ctx.smp_index;
+    gpu::flush_mapped_span(&device, frag_span)!!;
 
-    gpu::GpuSpan args_span = gpu::alloc_frame_span(&frame_token, gpu::DrawIndexedIndirectCommand::size, 16)!!;
+    OwnedSpan args_owned = allocate_owned_span(
+        device:       &device,
+        size:         gpu::DrawIndexedIndirectCommand::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "count_indirect_args",
+    )!!;
+    defer free_owned_span(&device, &args_owned)!!;
+    gpu::GpuSpan args_span = args_owned.span;
     gpu::DrawIndexedIndirectCommand* args = (gpu::DrawIndexedIndirectCommand*)test_span_mapping(&device, args_span).ptr;
     *args = { .index_count = 3, .instance_count = 1 };
+    gpu::flush_mapped_span(&device, args_span)!!;
 
-    gpu::GpuSpan counts = gpu::alloc_frame_span(&frame_token, 8, 4)!!;
+    OwnedSpan counts_owned = allocate_owned_span(
+        device:       &device,
+        size:         8,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "draw_counts",
+    )!!;
+    defer free_owned_span(&device, &counts_owned)!!;
+    gpu::GpuSpan counts = counts_owned.span;
     uint* count_values = (uint*)test_span_mapping(&device, counts).ptr;
     count_values[0] = 0;
     count_values[1] = 1;
+    gpu::flush_mapped_span(&device, counts)!!;
     gpu::GpuSpan count_zero = counts.checked_subspan(0, 4)!!;
     gpu::GpuSpan count_one = counts.checked_subspan(4, 4)!!;
 
@@ -703,8 +882,12 @@ fn void count_buffer_limits_draws() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, rb_zero.span)!!;
     char* zero_center = center_pixel(&device, &rb_zero_span);
@@ -713,7 +896,6 @@ fn void count_buffer_limits_draws() @test {
     gpu::invalidate_mapped_span(&device, rb_one.span)!!;
     char* one_center = center_pixel(&device, &rb_one_span);
     assert(one_center[0] == (char)255, "GPU count of one draws the triangle");
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void discard_consumes_active_render_pass_recording() @test {
@@ -752,18 +934,41 @@ fn void indirect_argument_validation() @test {
     vk::BufferDesc plain_desc = {
         .size        = 64,
         .usage       = { .storage, .addressable },
-        .memory_kind = gpu::MemoryKind.DEVICE,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
         .access      = { .graphics, .compute, .transfer },
     };
     vk::BufferHandle plain = vk::vk_create_buffer(&device, &plain_desc)!!;
     defer vk::vk_destroy_buffer(&device, plain)!!;
     gpu::GpuSpan plain_span = vk::vk_get_buffer_span(&device, plain)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+    OwnedSpan verts_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "validation_vertices",
+    )!!;
+    defer free_owned_span(&device, &verts_owned)!!;
+    gpu::GpuSpan verts_span = verts_owned.span;
     write_triangle_verts(&device, &verts_span);
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
-    gpu::GpuSpan args_span = gpu::alloc_frame_span(&frame_token, 64, 16)!!;
+    gpu::flush_mapped_span(&device, verts_span)!!;
+    OwnedSpan frag_owned = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "validation_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &frag_owned)!!;
+    gpu::GpuSpan frag_span = frag_owned.span;
+    OwnedSpan args_owned = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "validation_indirect_args",
+    )!!;
+    defer free_owned_span(&device, &args_owned)!!;
+    gpu::GpuSpan args_span = args_owned.span;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -808,5 +1013,4 @@ fn void indirect_argument_validation() @test {
     gpu::cmd_end_render_pass(&cmd)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
-    gpu::end_frame(&frame_token)!!;
 }

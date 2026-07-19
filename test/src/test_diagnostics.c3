@@ -24,14 +24,9 @@ fn void null_device_descriptor_faults_without_dereference() @test {
         "null device descriptor faults INVALID_ARGUMENT");
 }
 
-fn void null_owner_tokens_fault_as_invalid_handles() @test {
-    fault frame_result = @catch(end_frame((FrameToken*)null));
+fn void null_command_owner_faults_as_invalid_handle() @test {
     fault command_result = @catch(end_commands((CommandList*)null));
 
-    assert(
-        frame_result == INVALID_HANDLE,
-        "null frame token faults INVALID_HANDLE"
-    );
     assert(
         command_result == INVALID_HANDLE,
         "null command token faults INVALID_HANDLE"

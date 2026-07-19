@@ -8,7 +8,7 @@ import std::atomic;
 import std::core::mem::allocators;
 
 // Headless (lavapipe): the tiered threading model. Storm tests maximize
-// detection surface (handle uniqueness, disjoint spans, cache convergence);
+// detection surface (handle uniqueness, allocation release, cache convergence);
 // parallel recording runs one context per thread into disjoint targets.
 
 const char[*] THR_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
@@ -31,7 +31,6 @@ fn gpu::Device make_thr_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_threading_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -190,60 +189,6 @@ fn void shader_destroy_rejects_concurrent_pipeline_build_pin() @test {
 
     gpu::destroy_shader(&device, shader)!!;
     shader = {};
-}
-
-struct SpanArgs {
-    gpu::FrameToken* frame;
-    uint         seed;
-    usz[THR_ITERS] offsets;
-    usz[THR_ITERS] sizes;
-}
-
-fn int span_storm_worker(void* arg) {
-    SpanArgs* args = (SpanArgs*)arg;
-    for (uint i = 0; i < THR_ITERS; i++) {
-        usz size = (usz)(16 + (args.seed * 32 + i * 8) % 128);
-        usz align = (usz)1 << (4 + (args.seed + i) % 3);
-        gpu::GpuSpan span = gpu::alloc_frame_span(args.frame, size, align)!!;
-        if (span.offset % align != 0) return 1;
-        args.offsets[i] = span.offset;
-        args.sizes[i] = size;
-    }
-    return 0;
-}
-
-fn void frame_span_storm_disjoint() @test {
-    gpu::Device device = make_thr_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    SpanArgs[THR_THREADS] args;
-    Thread[THR_THREADS] threads;
-    for (uint i = 0; i < THR_THREADS; i++) {
-        args[i].frame = &frame_token;
-        args[i].seed = i;
-        threads[i].create(&span_storm_worker, &args[i])!!;
-    }
-    foreach (&t : threads) {
-        int code = t.join()!!;
-        assert(code == 0, "every span honored its alignment");
-    }
-
-    for (uint a = 0; a < THR_THREADS; a++) {
-        for (uint i = 0; i < THR_ITERS; i++) {
-            for (uint b = 0; b < THR_THREADS; b++) {
-                for (uint j = 0; j < THR_ITERS; j++) {
-                    if (a == b && i == j) continue;
-                    usz a_start = args[a].offsets[i];
-                    usz a_end = a_start + args[a].sizes[i];
-                    usz b_start = args[b].offsets[j];
-                    usz b_end = b_start + args[b].sizes[j];
-                    assert(a_end <= b_start || b_end <= a_start, "concurrent spans never overlap");
-                }
-            }
-        }
-    }
-    gpu::end_frame(&frame_token)!!;
 }
 
 struct ReuseWorkerArgs {
@@ -431,6 +376,7 @@ fn int record_worker(void* arg) {
             (ulong)test_span_address(args.device, args.io_span) + THR_ELEMENTS * 4
         );
         root.count = THR_ELEMENTS;
+        gpu::flush_mapped_span(args.device, args.root_span)!!;
 
         gpu::CommandList commands = gpu::begin_commands(
             gpu::get_queue(args.device, gpu::QueueKind.GRAPHICS)!!,
@@ -470,16 +416,35 @@ fn void parallel_recording_across_workers() @test {
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
 
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     RecordArgs[THR_THREADS] args;
+    OwnedSpan[THR_THREADS] io_owned;
+    OwnedSpan[THR_THREADS] root_owned;
+    defer for (uint i = 0; i < THR_THREADS; i++) {
+        free_owned_span(&device, &root_owned[i])!!;
+        free_owned_span(&device, &io_owned[i])!!;
+    }
     for (uint i = 0; i < THR_THREADS; i++) {
         args[i].device = &device;
-
         args[i].pipeline = pipeline;
-        args[i].io_span = gpu::alloc_frame_span(&frame_token, THR_ELEMENTS * 4 * 2, 16)!!;
-        args[i].root_span = gpu::alloc_frame_span(&frame_token, ComputeRoot::size, 16)!!;
+        io_owned[i] = allocate_owned_span(
+            device:       &device,
+            size:         THR_ELEMENTS * 4 * 2,
+            memory_class: gpu::MemoryClass.CPU_WRITE,
+            access:       { .graphics },
+            debug_name:   "thread_io",
+        )!!;
+        root_owned[i] = allocate_owned_span(
+            device:       &device,
+            size:         ComputeRoot::size,
+            memory_class: gpu::MemoryClass.CPU_WRITE,
+            access:       { .graphics },
+            debug_name:   "thread_root",
+        )!!;
+        args[i].io_span = io_owned[i].span;
+        args[i].root_span = root_owned[i].span;
         float* values = (float*)test_span_mapping(&device, args[i].io_span).ptr;
         for (uint e = 0; e < THR_ELEMENTS; e++) values[e] = (float)(i * 1000 + e);
+        gpu::flush_mapped_span(&device, args[i].io_span)!!;
     }
 
     Thread[THR_THREADS] threads;
@@ -491,11 +456,15 @@ fn void parallel_recording_across_workers() @test {
     gpu::ExecutableCommandList[THR_THREADS] lists;
     for (uint i = 0; i < THR_THREADS; i++) lists[i] = args[i].list;
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     for (uint i = 0; i < THR_THREADS; i++) {
-
+        gpu::invalidate_mapped_span(&device, args[i].io_span)!!;
         float* values = (float*)test_span_mapping(&device, args[i].io_span).ptr;
         float* doubled = &values[THR_ELEMENTS];
         for (uint e = 0; e < THR_ELEMENTS; e++) {
@@ -503,7 +472,6 @@ fn void parallel_recording_across_workers() @test {
                 "each thread's recorded dispatch produced its own results");
         }
     }
-    gpu::end_frame(&frame_token)!!;
 }
 
 struct LayoutRecordArgs {
@@ -554,7 +522,6 @@ fn void parallel_recording_disjoint_texture_layouts() @test {
         foreach (t : textures) (void)gpu::destroy_texture(&device, t);
     }
 
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     LayoutRecordArgs[THR_THREADS] args;
     for (uint i = 0; i < THR_THREADS; i++) {
         args[i] = { .device = &device, .texture = textures[i] };
@@ -567,9 +534,12 @@ fn void parallel_recording_disjoint_texture_layouts() @test {
     gpu::ExecutableCommandList[THR_THREADS] lists;
     for (uint i = 0; i < THR_THREADS; i++) lists[i] = args[i].list;
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 }
 
 const uint RELEASE_THREADS = 4;
@@ -590,7 +560,7 @@ fn int release_worker(void* arg) {
     return 0;
 }
 
-<* Release independent allocations concurrently while a frame is active. *>
+<* Release independent allocations concurrently. *>
 fn void concurrent_allocation_release_from_worker_threads() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
@@ -609,7 +579,6 @@ fn void concurrent_allocation_release_from_worker_threads() @test {
         }
     }
 
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
     Thread[RELEASE_THREADS] threads;
     for (uint i = 0; i < RELEASE_THREADS; i++) {
         threads[i].create(&release_worker, &args[i])!!;
@@ -622,66 +591,7 @@ fn void concurrent_allocation_release_from_worker_threads() @test {
                 "worker release clears every owned allocation and span");
         }
     }
-    gpu::end_frame(&frame_token)!!;
-
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 0,
         "concurrent allocation release leaves no live resource slots");
-}
-
-struct BoundaryArgs {
-    gpu::Device* device;
-    Atomic{int}  entered;
-    Atomic{int}  release;
-}
-
-fn int boundary_worker(void* arg) {
-    BoundaryArgs* args = (BoundaryArgs*)arg;
-    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-    // One allocation under the lock is too fast to hold reliably, so churn
-    // allocations until told to stop.
-    while (args.release.load(AtomicOrdering.RELAXED) == 0) {
-        OwnedSpan buffer = allocate_owned_span(
-            device:       args.device,
-            size:         4096,
-            memory_class: gpu::MemoryClass.GPU_PRIVATE,
-            access:       { .graphics, .compute, .transfer },
-            debug_name:   "boundary_buffer",
-        )!!;
-        args.entered.store(1, AtomicOrdering.RELAXED);
-        free_owned_span(args.device, &buffer)!!;
-    }
-    };
-    return 0;
-}
-
-fn void boundary_violation_detected() @test {
-    gpu::Device device = make_thr_device();
-    defer destroy_test_device(&device)!!;
-
-    BoundaryArgs args;
-    args.device = &device;
-    Thread worker;
-    worker.create(&boundary_worker, &args)!!;
-
-    while (args.entered.load(AtomicOrdering.RELAXED) == 0) { }
-    // The worker churns Tier S calls; begin_frame must eventually observe one
-    // in flight and fault rather than proceed.
-    bool tripped = false;
-    for (uint attempt = 0; attempt < 10_000 && !tripped; attempt++) {
-        gpu::FrameToken? frame_result = gpu::begin_frame(&device);
-        if (catch err = frame_result) {
-            assert(err == gpu::INVALID_RESOURCE_STATE, "boundary violation faults INVALID_RESOURCE_STATE");
-            tripped = true;
-        } else {
-            gpu::FrameToken frame_token = frame_result;
-            if (catch end_err = gpu::end_frame(&frame_token)) {
-                assert(end_err == gpu::INVALID_RESOURCE_STATE, "boundary violation faults INVALID_RESOURCE_STATE");
-                tripped = true;
-            }
-        }
-    }
-    args.release.store(1, AtomicOrdering.RELAXED);
-    worker.join()!!;
-    assert(tripped, "a Tier S call in flight at begin_frame was detected");
 }

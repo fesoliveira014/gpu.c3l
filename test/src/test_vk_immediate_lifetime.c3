@@ -23,7 +23,6 @@ fn gpu::Device make_lifetime_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_immediate_lifetime_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -58,12 +57,10 @@ fn gpu::CommandList record_lifetime_copy(
     return commands;
 }
 
-fn void unreferenced_mid_frame_destroy_is_immediate() @test {
+fn void unreferenced_destroy_is_immediate() @test {
     gpu::Device device = make_lifetime_test_device();
     defer destroy_test_device(&device)!!;
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
-    OwnedSpan owned = make_lifetime_span(&device, "immediate_mid_frame");
+    OwnedSpan owned = make_lifetime_span(&device, "immediate_unreferenced");
     gpu::GpuAllocation stale = owned.allocation;
 
     gpu::free_allocation(&device, &owned.allocation)!!;
@@ -71,8 +68,7 @@ fn void unreferenced_mid_frame_destroy_is_immediate() @test {
 
     assert(!owned.allocation.is_valid(), "successful release consumes the allocation token");
     assert(@catch(gpu::get_allocation_info(&device, stale)) == gpu::INVALID_HANDLE,
-        "immediate release invalidates copied tokens before the frame ends");
-    gpu::end_frame(&frame)!!;
+        "immediate release invalidates copied tokens without a lifecycle boundary");
 }
 
 fn void recording_references_reject_allocation_release() @test {

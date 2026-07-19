@@ -262,14 +262,14 @@ fn void invalid_retained_runtime_metadata_is_rejected_before_publication() @test
     Adapter adapter = device_creation_adapter(&runtime);
     Adapter forged_adapter = adapter;
     forged_adapter.runtime_generation++;
-    FrameFixture fixture;
+    DeviceFixture fixture;
     Device owner;
 
     gpu::runtime_retain_device(&runtime)!!;
     Device? result = gpu::register_device(
         backend:          BackendKind.VULKAN,
         caps:             {},
-        vtable:           &frame_fixture_vtable,
+        vtable:           &device_fixture_vtable,
         backend_state:    &fixture,
         retained_runtime: &runtime,
         adapter:          &forged_adapter,

@@ -4,17 +4,6 @@ module gpu;
 // be confused with sizes, offsets, or handles.
 typedef GpuAddress = ulong;
 
-// Where a resource's memory lives and how the host may access it.
-enum MemoryKind : int {
-    // Per-frame upload arena; contents live for one frame.
-    FRAME_UPLOAD,
-    // Host-visible with persistent lifetime; stable until freed.
-    PERSISTENT_UPLOAD,
-    // GPU-only; not host-mappable.
-    DEVICE,
-    // GPU-to-CPU readback; invalidate before reading.
-    READBACK,
-}
 enum MemoryClass : int {
     CPU_WRITE,
     GPU_PRIVATE,
@@ -52,17 +41,7 @@ struct AllocationInfo {
     bool        addressable;
 }
 
-struct FrameToken {
-    Device device;
-    ulong  generation;
-}
-$assert FrameToken::size <= 16;
-
-<* True while the token contains a frame generation. *>
-fn bool FrameToken.is_valid(self) => (ulong)self.device != 0 && self.generation != 0;
-
 const usz MAX_MEMORY_HEAPS = 16;
-const usz DEFAULT_FRAME_ARENA_SIZE = 16 << 20;
 
 // Per-heap memory usage snapshot.
 struct MemoryHeapBudget {
@@ -241,55 +220,6 @@ fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
         ResourceOwnerKind.ALLOCATION,
     )!;
     return operation.vtable.invalidate_mapped_span(device, span);
-}
-
-fn DeviceOperation? frame_operation(FrameToken* frame) @private {
-    if (frame == null || frame.generation == 0) return INVALID_HANDLE~;
-    return begin_device_operation(&frame.device);
-}
-
-<* Enter an idle frame. Double begin faults `INVALID_RESOURCE_STATE`; a retire
-   wait may fault `WAIT_TIMEOUT`. Those rejections leave lifecycle and arena
-   state unchanged. *>
-fn FrameToken? begin_frame(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    FrameToken frame;
-    operation.vtable.begin_frame(device, &frame)!;
-    retain_device_children(&operation);
-    return frame;
-}
-
-<* `size` and power-of-two `align` must be nonzero (`INVALID_ARGUMENT`);
-   capacity faults `ARENA_FULL`, invalid or stale tokens `INVALID_HANDLE`.
-   Faults do not advance the arena; spans remain valid until its reset. *>
-fn GpuSpan? alloc_frame_span(FrameToken* frame, usz size, usz align) {
-    DeviceOperation operation = frame_operation(frame)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.alloc_frame_span(frame, size, align);
-}
-
-<* End the identified frame. Invalid, stale, or consumed tokens fault
-   `INVALID_HANDLE` without mutation; a failed end retains the token and
-   lifecycle state for retry. *>
-fn void? end_frame(FrameToken* frame) {
-    DeviceOperation operation = frame_operation(frame)!;
-    defer end_device_operation(&operation);
-    operation.vtable.end_frame(frame)!;
-    release_device_children(&operation);
-    *frame = {};
-}
-
-<* Run `work` inside one frame. End faults take precedence and retain
-   `out_frame`; successful end clears it. *>
-macro void? @with_frame(FrameToken* out_frame, Device* device, #work, ...) {
-    if (out_frame == null) return INVALID_HANDLE~;
-    *out_frame = {};
-    *out_frame = begin_frame(device)!;
-    fault work_fault = @catch(#work(out_frame, ...$vaarg));
-    fault end_fault = @catch(end_frame(out_frame));
-    if (end_fault) return end_fault~;
-    if (work_fault) return work_fault~;
 }
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the

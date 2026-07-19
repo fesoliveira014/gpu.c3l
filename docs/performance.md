@@ -19,11 +19,15 @@ warmups and repetitions.
 
 ## Allocation overhead
 
-`arena_allocation_bench` times 100,000 64-byte frame-span allocations in one
-frame, then 4,096 standalone 64-byte `CPU_WRITE` allocations followed by
-their frees. It reports allocation and free time separately. The published
-baseline retains its existing frame-span result; add `CPU_WRITE` figures only
-from fresh output captured with the environment context below.
+`allocation_bench` measures two explicit `CPU_WRITE` phases: allocate 4,000
+independent 64-byte allocations at 16-byte alignment, then free the same 4,000
+allocations. Its exact output schema is one `cpu_write allocate` result in
+`ns/allocation` and one `cpu_write free` result in `ns/free`.
+
+The runner rejects missing phases, different counts, or extra output. This
+document does not publish allocation numbers until fresh results are captured
+with the environment context below; measurements from the retired storage path
+are not comparable.
 
 ## Explicit upload throughput
 
@@ -63,11 +67,8 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 
 | Area | Case | Iterations | Result |
 |---|---|---:|---:|
-| Allocation | 64-byte frame span | 100,000 | 10.9 ns/allocation |
 | Descriptor churn | Texture single / batch of 16 / sampler, one worker | 320 each | 523 / 330 / 563 ns/descriptor |
-| Command reset | Idle / 15 worker pools | 2,000 each | 4,444 / 159,622 ns/begin_frame |
 | Command recording | Global / buffer barrier / indirect dispatch | 20,000 × 5 | 123 / 142 / 173 ns/record median |
-| Submission | Graphics / graphics+compute / all queues | 2,000 each | 45,514 / 131,617 / 149,877 ns/end_frame |
 | Pipeline creation | Cold / cached duplicate | 200 / 200,000 | 14,808 / 137 ns/create |
 | Async overlap | Serialized / independent queues | 5 | 8.872 / 9.464 ms wall median; overlap observed |
 
@@ -78,9 +79,8 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 - Batch descriptor writes. Batches of 16 reduced one-worker texture descriptor
   cost by about 37%.
 - Reuse worker threads. Recording pools are cached per worker and only dirty pools reset.
-- Avoid activating queues without useful work. End-of-frame cost increased with
-  each queue participating in the frame.
+- Submit only useful work and retain the completion points that govern reuse.
 - Cache pipelines. A cached duplicate was about 108 times cheaper than a cold
   pipeline creation.
-- Queue overlap does not guarantee lower frame time. This run observed GPU
-  overlap, but the independent phase was slower in wall time.
+- Queue overlap does not guarantee lower completion latency. This run observed
+  GPU overlap, but the independent phase was slower in wall time.

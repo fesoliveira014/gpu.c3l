@@ -5,7 +5,6 @@ import gpu;
 fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
     gpu::DeviceDesc device_desc = {
         .backend          = gpu::BackendKind.VULKAN,
-        .frames_in_flight = 2,
         .application_name = "gpu_null_contract_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
@@ -73,13 +72,10 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
 fn void null_command_arguments_fault_without_recording_side_effects() @test {
     gpu::DeviceDesc device_desc = {
         .backend          = gpu::BackendKind.VULKAN,
-        .frames_in_flight = 2,
         .application_name = "gpu_null_command_contract_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-
-    gpu::FrameToken frame = gpu::begin_frame(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
@@ -145,6 +141,5 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
     gpu::ExecutableCommandList[1] lists = { commands_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    gpu::end_frame(&frame)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }

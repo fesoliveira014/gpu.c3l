@@ -19,7 +19,6 @@ fn gpu::Device make_cache_test_device() {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_pipeline_cache_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
@@ -29,7 +28,6 @@ fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .pipeline_capacity = pipeline_capacity,
         .application_name  = "gpu_pipeline_cache_capacity_test",
     };
@@ -291,10 +289,15 @@ fn void cull_replay_renders_per_alias() @test {
         debug_name:   "cache_reset_readback",
     )!!;
     defer free_owned_span(&device, &rb_reset)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
+    OwnedSpan verts_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "cache_vertices",
+    )!!;
+    defer free_owned_span(&device, &verts_owned)!!;
+    gpu::GpuSpan verts_span = verts_owned.span;
     float* verts = (float*)test_span_mapping(&device, verts_span).ptr;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
@@ -303,10 +306,20 @@ fn void cull_replay_renders_per_alias() @test {
     };
     for (uint i = 0; i < 12; i++) verts[i] = vertex_data[i];
 
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, FragRoot::size, 16)!!;
+    OwnedSpan frag_owned = allocate_owned_span(
+        device:       &device,
+        size:         FragRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "cache_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &frag_owned)!!;
+    gpu::GpuSpan frag_span = frag_owned.span;
     FragRoot* frag_root = (FragRoot*)test_span_mapping(&device, frag_span).ptr;
     frag_root.texture_index = tex_index;
     frag_root.sampler_index = smp_index;
+    gpu::flush_mapped_span(&device, verts_span)!!;
+    gpu::flush_mapped_span(&device, frag_span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -381,8 +394,12 @@ fn void cull_replay_renders_per_alias() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, rb_culled.span)!!;
     gpu::GpuSpan culled_span = rb_culled.span;
@@ -407,8 +424,6 @@ fn void cull_replay_renders_per_alias() @test {
     char* reset_center = &reset_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
     assert(reset_center[0] == (char)255 && reset_center[1] == (char)255 && reset_center[2] == (char)255,
         "the next pass restores full viewport and scissor defaults");
-
-    gpu::end_frame(&frame_token)!!;
 }
 
 fn void alias_survives_peer_destroy() @test {
@@ -434,10 +449,24 @@ fn void alias_survives_peer_destroy() @test {
     };
     gpu::TextureHandle target = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, target)!!;
-
-    gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;
-    gpu::GpuSpan verts_span = gpu::alloc_frame_span(&frame_token, 3 * 16, 16)!!;
-    gpu::GpuSpan frag_span = gpu::alloc_frame_span(&frame_token, 16, 16)!!;
+    OwnedSpan verts_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "cache_alias_vertices",
+    )!!;
+    defer free_owned_span(&device, &verts_owned)!!;
+    gpu::GpuSpan verts_span = verts_owned.span;
+    OwnedSpan frag_owned = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "cache_alias_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &frag_owned)!!;
+    gpu::GpuSpan frag_span = frag_owned.span;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -469,10 +498,12 @@ fn void alias_survives_peer_destroy() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::end_frame(&frame_token)!!;
-
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
     gpu::destroy_pipeline(&device, survivor)!!;
     assert(cache_entry_count(&device) == 0, "entry released after the surviving alias is destroyed");
 }

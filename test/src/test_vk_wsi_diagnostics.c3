@@ -20,7 +20,6 @@ fn void wsi_presentation_gate_diagnostic() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_wsi_diagnostic_gate_test",
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
@@ -84,7 +83,6 @@ fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_wsi_stale_handle_test",
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,

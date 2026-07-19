@@ -408,7 +408,7 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
     );
 
     uint[MAX_QUEUE_FAMILIES] family_storage;
-    uint family_count = graphics_compute_queue_families(state, family_storage[..]);
+    uint family_count = strict_heap_queue_families(state, family_storage[..]);
     vk::BufferCreateInfo buffer_info = make_descriptor_buffer_create_info(layout_size, family_storage[:family_count]);
     // Descriptor bytes are written mapped (vkGetDescriptorEXT) with no
     // flush hook — require coherent memory.
@@ -734,8 +734,6 @@ fn vk::ImageView? resolve_descriptor_texture_view(
 
 fn gpu::TextureIndex? vk_create_texture_descriptor(gpu::Device* device, gpu::TextureHandle texture, gpu::TextureViewDesc* view) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
@@ -879,9 +877,6 @@ fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescript
         )~;
     }
     if (descs.len == 0) return;
-
-    enter_tracked(state);
-    defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
@@ -960,8 +955,6 @@ fn void? vk_create_texture_descriptors(gpu::Device* device, gpu::TextureDescript
 
 fn void? vk_destroy_texture_descriptor(gpu::Device* device, gpu::TextureIndex index) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     if (catch f = texture_cell_get(&state.strict_heap.descriptors, index)) {
@@ -1136,8 +1129,6 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
             backend_text:        null,
         )~;
     }
-    enter_tracked(state);
-    defer exit_tracked(state);
 
     vk::SamplerCreateInfo sampler_info = vk::sampler_create_info()
         .set_mag_filter(filter_to_vk(desc.mag_filter))
@@ -1185,8 +1176,6 @@ fn gpu::SamplerIndex? vk_create_sampler(gpu::Device* device, gpu::SamplerDesc* d
 
 fn void? vk_destroy_sampler(gpu::Device* device, gpu::SamplerIndex index) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    enter_tracked(state);
-    defer exit_tracked(state);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     if (catch f = sampler_cell_get(&state.strict_heap.descriptors, index)) {

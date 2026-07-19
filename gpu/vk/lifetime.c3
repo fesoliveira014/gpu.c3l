@@ -271,7 +271,7 @@ fn void release_completed_submitted_commands(
 
 fn void? drain_completed_submitted_commands_with_query(
     VkDeviceState* state,
-    FrameCounterQueryFn query_fn,
+    SemaphoreCounterQueryFn query_fn,
 ) {
     bool[gpu::MAX_SELECTED_QUEUE_IDENTITIES] queried;
     ulong[gpu::MAX_SELECTED_QUEUE_IDENTITIES] completed;
@@ -303,7 +303,7 @@ fn void? drain_completed_submitted_commands_with_query(
 fn void? drain_completed_submitted_commands(VkDeviceState* state) {
     return drain_completed_submitted_commands_with_query(
         state,
-        &real_frame_counter_query,
+        &real_semaphore_counter_query,
     );
 }
 
@@ -312,7 +312,7 @@ fn void? drain_submitted_commands_if_needed(VkDeviceState* state) {
     defer state.resource_mutex.unlock();
     if (state.submitted_command_count
         < SUBMITTED_COMMAND_DRAIN_THRESHOLD) return;
-    drain_completed_submitted_commands_with_query(state, &real_frame_counter_query)!;
+    drain_completed_submitted_commands_with_query(state, &real_semaphore_counter_query)!;
 }
 
 fn void destroy_submitted_commands(VkDeviceState* state) {

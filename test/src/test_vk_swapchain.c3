@@ -156,7 +156,6 @@ fn void swapchain_requires_a_presentation_request() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_swapchain_gate_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
@@ -296,7 +295,6 @@ fn void present_path_guards_precede_native_mutation() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_present_guard_test",
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
@@ -468,14 +466,15 @@ fn bool? poll_no_retirement(
 
 fn void acquire_semaphores_retire_before_reuse() @test {
     gpu::Device device = { .generation = 1 };
-    gpu::CompletionPoint[3] retirements = {
+    assert(gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT == 2,
+        "the production acquire ring remains fixed at two slots");
+    gpu::CompletionPoint[gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT] retirements = {
         { .device = device, .payload = 1ull << gpu::COMPLETION_QUEUE_BITS },
         { .device = device, .payload = 2ull << gpu::COMPLETION_QUEUE_BITS },
-        { .device = device, .payload = 3ull << gpu::COMPLETION_QUEUE_BITS },
     };
     gpu::vk::SwapchainSlot slot = {
         .acquire_retirements   = retirements[..],
-        .next_acquire_semaphore = 2,
+        .next_acquire_semaphore = 0,
     };
 
     uint selected = gpu::vk::select_acquire_semaphore_with(
@@ -486,20 +485,20 @@ fn void acquire_semaphores_retire_before_reuse() @test {
     assert(selected == 1,
         "selection skips pending waits and finds a retired semaphore");
 
-    retirements[2] = {};
+    retirements[0] = {};
     selected = gpu::vk::select_acquire_semaphore_with(
         &device,
         &slot,
         &poll_no_retirement,
     )!!;
-    assert(selected == 2, "a never-used semaphore is immediately available");
+    assert(selected == 0, "a never-used semaphore is immediately available");
 
-    slot.pending_acquire_semaphore_index = 2;
+    slot.pending_acquire_semaphore_index = 0;
     gpu::CompletionPoint submitted = { .device = device, .payload = 3ull << gpu::COMPLETION_QUEUE_BITS };
     gpu::vk::commit_swapchain_submit(&slot, submitted);
     assert(slot.readiness_consumed && slot.render_completion == submitted,
         "successful submission commits readiness and render completion");
-    assert(retirements[2] == submitted,
+    assert(retirements[0] == submitted,
         "successful submission retires the exact acquire semaphore");
 
     fault busy = @catch(gpu::vk::select_acquire_semaphore_with(
@@ -546,7 +545,6 @@ fn void unsubmitted_acquire_is_consumed_before_teardown() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_acquire_teardown_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;
@@ -732,7 +730,6 @@ fn void swapchain_info_query_rejects_invalid_handle() @test {
     gpu::DeviceDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
-        .frames_in_flight  = 2,
         .application_name  = "gpu_swapchain_info_invalid_handle_test",
     };
     gpu::Device device = gpu::create_device_from_desc(&desc)!!;

@@ -158,8 +158,8 @@ glslangValidator --target-env vulkan1.3 -o shaders/doubler.comp.spv shaders/doub
 
 ## 4. The program
 
-The C3 side declares the same 24-byte root struct, allocates it from the
-per-frame arena, and hands its GPU address to `cmd_dispatch`. Errors are
+The C3 side declares the same 24-byte root struct, stores it in a caller-owned
+`CPU_WRITE` allocation, and hands its GPU address to `cmd_dispatch`. Errors are
 C3 optionals throughout — `!` propagates, no error codes to check:
 
 ```c3 file=hello_gpu/src/main.c3
@@ -175,13 +175,6 @@ struct DoublerRoot {
     gpu::GpuAddress input_gpu;
     gpu::GpuAddress output_gpu;
     uint            count;
-}
-
-struct FrameWork {
-    gpu::Device*        device;
-    gpu::GpuSpan        input_span;
-    gpu::GpuSpan        output_span;
-    gpu::PipelineHandle pipeline;
 }
 
 fn int main() {
@@ -247,17 +240,26 @@ fn void? run() {
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!;
     defer (void)gpu::destroy_pipeline(&device, pipeline);
 
-    FrameWork frame_work = {
-        .device      = &device,
-        .input_span  = in_span,
-        .output_span = out_span,
-        .pipeline    = pipeline,
+    gpu::AllocationDesc root_desc = {
+        .size         = DoublerRoot::size,
+        .alignment    = DoublerRoot::alignment,
+        .memory_class = gpu::MemoryClass.CPU_WRITE,
+        .access       = { .compute },
+        .debug_name   = "doubler_root",
     };
-    gpu::FrameToken frame;
-    if (catch frame_err = gpu::@with_frame(&frame, &device, run_frame, &frame_work)) {
-        if (frame.is_valid()) gpu::end_frame(&frame)!;
-        return frame_err~;
-    }
+    gpu::GpuAllocation root_allocation =
+        gpu::allocate_memory(&device, &root_desc)!;
+    defer (void)gpu::free_allocation(&device, &root_allocation);
+    gpu::GpuSpan root_span =
+        gpu::get_allocation_span(&device, root_allocation)!;
+
+    run_compute(
+        device:      &device,
+        pipeline:    pipeline,
+        input_span:  in_span,
+        output_span: out_span,
+        root_span:   root_span,
+    )!;
     gpu::invalidate_mapped_span(&device, out_span)!;
     float* out_data = (float*)gpu::get_span_mapping(&device, out_span)!.ptr;
     for (uint i = 0; i < COUNT; i++) {
@@ -265,25 +267,33 @@ fn void? run() {
     }
 }
 
-fn void? run_frame(gpu::FrameToken* frame, FrameWork* work) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, DoublerRoot::size, 16)!;
-    DoublerRoot* root = (DoublerRoot*)gpu::get_span_mapping(work.device, root_span)!.ptr;
-    gpu::GpuAddress root_address = gpu::get_span_address(work.device, root_span)!;
-    root.input_gpu  = gpu::get_span_address(work.device, work.input_span)!;
-    root.output_gpu = gpu::get_span_address(work.device, work.output_span)!;
+fn void? run_compute(
+    gpu::Device* device,
+    gpu::PipelineHandle pipeline,
+    gpu::GpuSpan input_span,
+    gpu::GpuSpan output_span,
+    gpu::GpuSpan root_span,
+) {
+    DoublerRoot* root =
+        (DoublerRoot*)gpu::get_span_mapping(device, root_span)!.ptr;
+    gpu::GpuAddress root_address =
+        gpu::get_span_address(device, root_span)!;
+    root.input_gpu  = gpu::get_span_address(device, input_span)!;
+    root.output_gpu = gpu::get_span_address(device, output_span)!;
     root.count      = COUNT;
+    gpu::flush_mapped_span(device, root_span)!;
 
-    gpu::Queue queue = gpu::get_queue(work.device, gpu::QueueKind.COMPUTE)!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
     gpu::CommandList cmd = gpu::begin_commands(queue)!;
     defer (void)gpu::discard_commands(&cmd);
     gpu::cmd_dispatch(
         commands: &cmd,
-        pipeline: work.pipeline,
+        pipeline: pipeline,
         root:     root_address,
         groups:   { (COUNT + 63) / 64, 1, 1 },
     )!;
     gpu::BufferBarrier to_host = {
-        .span          = work.output_span,
+        .span          = output_span,
         .before_stage  = gpu::Stage.COMPUTE_SHADER,
         .after_stage   = gpu::Stage.HOST,
         .before_hazard = gpu::Hazard.SHADER_WRITE,

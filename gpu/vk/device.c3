@@ -11,6 +11,11 @@ import std::thread;
 // Disambiguates from vma::Allocator: std::core::mem's host-memory interface.
 alias HostAllocator = std::core::mem::alloc::Allocator;
 alias DeviceExtensionQuery = fn bool(vk::PhysicalDevice physical_device, ZString extension);
+alias SemaphoreCounterQueryFn @private = fn vk::Result (
+    vk::Device,
+    vk::Semaphore,
+    ulong*,
+);
 
 const ZString SWAPCHAIN_EXTENSION = "VK_KHR_swapchain";
 
@@ -19,7 +24,6 @@ enum DeviceCreationCheckpoint : uint {
     OWNED_INSTANCE,
     LOGICAL_DEVICE,
     ALLOCATOR,
-    FRAME_RESOURCES,
     RECORDING_CONTEXTS,
     DESCRIPTOR_HEAP,
     PIPELINE_SHARED,
@@ -88,31 +92,9 @@ struct VkDeviceState {
     float                      max_sampler_anisotropy;
     BufferTable                buffers;
     AllocationTable            allocations;
-    vk::Semaphore              frame_timeline;
-    // Per-queue aux timelines piggybacked onto user submits; each signals
-    // from one queue only, so values are monotonic. counter/last_signaled
-    // mutate under that queue's mutex, last_signaled only after success.
-    vk::Semaphore              aux_compute_timeline;
-    vk::Semaphore              aux_transfer_timeline;
-    ulong                      aux_compute_counter;
-    ulong                      aux_compute_last_signaled;
-    ulong                      aux_transfer_counter;
-    ulong                      aux_transfer_last_signaled;
-    Atomic{ulong}              timeline_counter;
-    // Set unconditionally by vk_submit so end_frame also waits off-frame use.
-    bool                       compute_used_since_frame;
-    bool                       transfer_used_since_frame;
-    // Off-frame queues not yet covered by end_frame or observed completion.
-    Atomic{uint}               off_frame_pending_queues;
     Mutex                      resource_mutex;
     Mutex                      command_mutex;
     bool                       compute_queue_distinct;
-    Atomic{int}                inflight_calls;
-    uint                       frames_in_flight;
-    uint                       frame_index;
-    ulong                      frame_generation;
-    ulong                      active_frame_generation;
-    FrameArenaState[]          frame_arenas;
     RecordingContextTable      recording_contexts;
     CommandTable               commands;
     ShaderTable                shaders;
@@ -132,7 +114,6 @@ struct VkDeviceState {
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
-    bool                       frame_active;
 }
 
 struct PhysicalDeviceSelection {
@@ -157,6 +138,14 @@ struct CapsInputs {
     uint sampler_capacity;
 }
 
+fn vk::Result real_semaphore_counter_query(
+    vk::Device device,
+    vk::Semaphore semaphore,
+    ulong* value,
+) @private {
+    return vk::get_semaphore_counter_value(device, semaphore, value);
+}
+
 fn void? reach_device_creation_checkpoint(
     DeviceCreationProbe* probe,
     DeviceCreationCheckpoint checkpoint,
@@ -164,19 +153,6 @@ fn void? reach_device_creation_checkpoint(
     if (probe == null) return;
     probe.reached = checkpoint;
     if (probe.fail_at == checkpoint) return gpu::BACKEND_ERROR~;
-}
-
-<* Frame-boundary quiescence accounting, active only under validation. *>
-fn void enter_tracked(VkDeviceState* state) {
-    if (state.validation) state.inflight_calls.add(1, AtomicOrdering.RELAXED);
-}
-
-fn void exit_tracked(VkDeviceState* state) {
-    if (state.validation) state.inflight_calls.sub(1, AtomicOrdering.RELAXED);
-}
-
-fn bool boundary_blocked(VkDeviceState* state) {
-    return state.validation && state.inflight_calls.load(AtomicOrdering.RELAXED) != 0;
 }
 
 // One static vtable shared by every Vulkan device.
@@ -193,9 +169,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .get_span_address       = &vk_get_span_address,
     .flush_mapped_span      = &vk_flush_mapped_span,
     .invalidate_mapped_span = &vk_invalidate_mapped_span,
-    .begin_frame         = &vk_begin_frame,
-    .alloc_frame_span    = &vk_alloc_frame_span,
-    .end_frame           = &vk_end_frame,
     .begin_commands      = &vk_begin_commands,
     .end_commands        = &vk_end_commands,
     .discard_commands    = &vk_discard_commands,
@@ -553,8 +526,6 @@ fn gpu::Device? create_vk_device_with_selection(
         ALLOCATION_CAPACITY,
     );
 
-    create_frame_resources(state, desc)!;
-    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.FRAME_RESOURCES)!;
     state.recording_contexts.slots = mem::new_array(
         RecordingContextCell,
         MAX_RECORDING_CONTEXTS,
@@ -635,7 +606,7 @@ fn gpu::Device? create_vk_device_with_selection(
 
 fn bool? device_destroy_ready_with_query(
     VkDeviceState* state,
-    FrameCounterQueryFn query_fn,
+    SemaphoreCounterQueryFn query_fn,
 ) @private {
     foreach (&completion : state.queue_completions) {
         ulong expected = completion.published_sequence.load(
@@ -657,22 +628,12 @@ fn bool? device_destroy_ready_with_query(
         if (current < expected) return false;
     }
 
-    ulong expected = state.timeline_counter.load(AtomicOrdering.ACQUIRE);
-    if (expected == 0) return true;
-
-    ulong current;
-    vk::Result result = query_fn(state.device, state.frame_timeline, &current);
-    if (result == vk::Result.ERROR_DEVICE_LOST) {
-        observe_device_result(state, result);
-        return true;
-    }
-    check_device_result(state, result)!;
-    return current >= expected;
+    return true;
 }
 
 fn void? vk_check_device_destroy(void* backend_state) @private {
     VkDeviceState* state = (VkDeviceState*)backend_state;
-    if (!device_destroy_ready_with_query(state, &real_frame_counter_query)!) {
+    if (!device_destroy_ready_with_query(state, &real_semaphore_counter_query)!) {
         return gpu::DEVICE_BUSY~;
     }
 }
@@ -754,7 +715,6 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
             state.recording_contexts.slots = {};
         }
         destroy_queue_completions(state);
-        destroy_frame_resources(state);
         if (state.allocator != null) {
             state.allocator.destroy();
             state.allocator = (vma::Allocator)null;

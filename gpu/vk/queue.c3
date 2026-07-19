@@ -7,6 +7,13 @@ import std::core::mem;
 import std::atomic;
 import std::atomic::types;
 
+alias QueueSubmit2Fn @private = fn vk::Result (
+    vk::Queue,
+    uint,
+    vk::SubmitInfo2*,
+    vk::Fence,
+);
+
 const uint MAX_QUEUE_FAMILIES = gpu::MAX_SELECTED_QUEUE_IDENTITIES + 4;
 const uint MAX_SELECTED_QUEUE_INDICES = 3;
 
@@ -56,7 +63,6 @@ struct QueueCandidatePool {
 <* Submit accounting, whitebox-exposed via submit_stats. *>
 struct SubmitStats {
     ulong queue_submits;
-    ulong empty_signal_submits;
 }
 
 struct QueueCompletionState {
@@ -71,14 +77,19 @@ struct QueueCompletionState {
     bool            bound;
 }
 
-const uint OFF_FRAME_GRAPHICS_BIT @private = 1 << 0;
-const uint OFF_FRAME_COMPUTE_BIT @private = 1 << 1;
-const uint OFF_FRAME_TRANSFER_BIT @private = 1 << 2;
-
 struct SubmitInputs {
     CommandRecord*[]        records;
     QueueCompletionState*[] completion_waits;
     SwapchainSlot*   swapchain;
+}
+
+fn vk::Result real_queue_submit2(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) @private {
+    return vk::queue_submit2(queue, submit_count, submits, fence);
 }
 
 fn bool queue_family_supports_graphics(
@@ -1484,8 +1495,8 @@ fn uint used_queue_families(VkDeviceState* state, uint[] out_families) {
     return count;
 }
 
-<* Selected shader families, or transfer when it is the only admitted role. *>
-fn uint graphics_compute_queue_families(VkDeviceState* state, uint[] out_families) @private {
+<* Selected strict-heap families, or transfer when it is the only admitted role. *>
+fn uint strict_heap_queue_families(VkDeviceState* state, uint[] out_families) @private {
     uint count;
     if (state.selected_queue_roles.graphics) {
         count = append_queue_family(out_families, count, state.graphics_family);
@@ -1704,7 +1715,7 @@ fn gpu::Queue? queue_token_for_kind(
 fn void? require_queue_completion_headroom_with_query(
     VkDeviceState* state,
     QueueCompletionState* completion,
-    FrameCounterQueryFn query_fn,
+    SemaphoreCounterQueryFn query_fn,
 ) @private {
     if (completion.next_sequence == gpu::MAX_COMPLETION_SEQUENCE) {
         return gpu::SLOT_TABLE_FULL~;
@@ -1855,51 +1866,10 @@ fn uint swapchain_idle_queues(
     return count;
 }
 
-fn gpu::QueueKind frame_queue_kind(VkDeviceState* state) @private {
-    if (state.selected_queue_roles.graphics) return gpu::QueueKind.GRAPHICS;
-    if (state.selected_queue_roles.compute) return gpu::QueueKind.COMPUTE;
-    return gpu::QueueKind.TRANSFER;
-}
-
-fn gpu::QueueKind queue_kind_for_roles(gpu::QueueRoles roles) @private {
-    if (roles.graphics) return gpu::QueueKind.GRAPHICS;
-    if (roles.compute) return gpu::QueueKind.COMPUTE;
-    return gpu::QueueKind.TRANSFER;
-}
-
-fn uint off_frame_queue_bit(gpu::QueueKind queue) @private {
-    switch (queue) {
-        case gpu::QueueKind.GRAPHICS: return OFF_FRAME_GRAPHICS_BIT;
-        case gpu::QueueKind.COMPUTE:  return OFF_FRAME_COMPUTE_BIT;
-        case gpu::QueueKind.TRANSFER: return OFF_FRAME_TRANSFER_BIT;
-    }
-}
-
-fn vk::Queue queue_for(VkDeviceState* state, gpu::QueueKind queue) {
-    switch (queue) {
-        case gpu::QueueKind.TRANSFER: return state.transfer_queue;
-        case gpu::QueueKind.COMPUTE:  return state.compute_queue;
-        default:                      return state.graphics_queue;
-    }
-}
-
-fn vk::Queue frame_queue_for(VkDeviceState* state) @private {
-    return queue_for(state, frame_queue_kind(state));
-}
-
-fn bool queue_uses_frame_aux(VkDeviceState* state, gpu::QueueKind kind) @private {
-    return kind != frame_queue_kind(state)
-        && queue_for(state, kind) != frame_queue_for(state);
-}
-
 <* Aliased semantic roles share the selected queue identity's submit mutex. *>
 fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
     QueueCompletionState* completion = queue_completion_for_kind(state, kind)!!;
     return &completion.submit_mutex;
-}
-
-fn Mutex* frame_queue_mutex_for(VkDeviceState* state) @private {
-    return queue_mutex_for(state, frame_queue_kind(state));
 }
 
 fn Mutex* native_queue_mutex_for(VkDeviceState* state, vk::Queue queue) @private {
@@ -1915,25 +1885,7 @@ fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
     return native_queue_mutex_for(state, state.presentation.queue);
 }
 
-fn void clear_off_frame_queue_markers(
-    VkDeviceState* state,
-    vk::Queue waited,
-) @private {
-    uint clear_mask;
-    if (state.selected_queue_roles.graphics && state.graphics_queue == waited) {
-        clear_mask |= OFF_FRAME_GRAPHICS_BIT;
-    }
-    if (state.selected_queue_roles.compute && state.compute_queue == waited) {
-        clear_mask |= OFF_FRAME_COMPUTE_BIT;
-    }
-    if (state.selected_queue_roles.transfer && state.transfer_queue == waited) {
-        clear_mask |= OFF_FRAME_TRANSFER_BIT;
-    }
-    state.off_frame_pending_queues.and(~clear_mask, AtomicOrdering.RELEASE);
-}
-
 fn void observe_queue_completion(
-    VkDeviceState* state,
     QueueCompletionState* completion,
     ulong completed_sequence,
 ) @private {
@@ -1942,12 +1894,6 @@ fn void observe_queue_completion(
 
     if (completed_sequence > completion.observed_completed_sequence) {
         completion.observed_completed_sequence = completed_sequence;
-    }
-    ulong published_sequence = completion.published_sequence.load(
-        AtomicOrdering.ACQUIRE,
-    );
-    if (completion.observed_completed_sequence >= published_sequence) {
-        clear_off_frame_queue_markers(state, completion.queue);
     }
 }
 
@@ -2045,7 +1991,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     gpu::Queue queue,
     gpu::SubmitDesc* desc,
     QueueSubmit2Fn submit_fn,
-    FrameCounterQueryFn counter_query_fn,
+    SemaphoreCounterQueryFn counter_query_fn,
 ) @private {
     gpu::Device device = queue.device;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&device);
@@ -2054,7 +2000,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     @pool() {
         SubmitInputs inputs = resolve_submit_inputs(state, queue, desc)!;
         vk::SubmitInfo2 submit = vk::submit_info2();
-        gpu::QueueKind kind = queue_kind_for_roles(queue.roles);
         CommandRecord*[] records = inputs.records;
         bool claimed = false;
 
@@ -2096,11 +2041,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             }
         }
 
-        bool piggyback_compute = kind == gpu::QueueKind.COMPUTE
-            && queue_uses_frame_aux(state, kind);
-        bool piggyback_transfer = kind == gpu::QueueKind.TRANSFER
-            && queue_uses_frame_aux(state, kind);
-        bool piggyback = piggyback_compute || piggyback_transfer;
         QueueCompletionState* completion = queue_completion_state(
             state,
             queue.id,
@@ -2134,9 +2074,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             }
         }
 
-        usz signal_count = (usz)(swapchain != null ? 1 : 0)
-            + (usz)(piggyback ? 1 : 0)
-            + 1;
+        usz signal_count = (usz)(swapchain != null ? 1 : 0) + 1;
         vk::SemaphoreSubmitInfo[] signals = mem::talloc_array(
             vk::SemaphoreSubmitInfo,
             (sz)signal_count,
@@ -2150,19 +2088,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 .set_stage_mask(
                     vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
                 );
-        }
-
-        vk::SemaphoreSubmitInfo* aux_signal = null;
-        if (piggyback) {
-            vk::Semaphore aux_semaphore = piggyback_compute
-                ? state.aux_compute_timeline
-                : state.aux_transfer_timeline;
-            signals[next_signal] = vk::semaphore_submit_info()
-                .set_semaphore(aux_semaphore)
-                .set_stage_mask(
-                    vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
-                );
-            aux_signal = &signals[next_signal++];
         }
 
         vk::SemaphoreSubmitInfo* completion_signal = &signals[next_signal++];
@@ -2192,11 +2117,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 queue,
             )!;
             completion_signal.value = gpu::completion_point_sequence(point);
-            if (aux_signal != null) {
-                aux_signal.value = (piggyback_compute
-                    ? state.aux_compute_counter
-                    : state.aux_transfer_counter) + 1;
-            }
 
             vk::Result result = submit_fn(
                 completion.queue,
@@ -2223,22 +2143,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             state.submit_stats.queue_submits++;
             if (swapchain != null) {
                 commit_swapchain_submit(swapchain, point);
-            }
-            if (piggyback_compute) {
-                state.aux_compute_counter++;
-                state.aux_compute_last_signaled = state.aux_compute_counter;
-                state.compute_used_since_frame = true;
-            }
-            if (piggyback_transfer) {
-                state.aux_transfer_counter++;
-                state.aux_transfer_last_signaled = state.aux_transfer_counter;
-                state.transfer_used_since_frame = true;
-            }
-            if (!state.frame_active) {
-                state.off_frame_pending_queues.or(
-                    off_frame_queue_bit(kind),
-                    AtomicOrdering.RELAXED,
-                );
             }
             foreach (record : records) {
                 commit_pending_layouts(state, record);
@@ -2270,7 +2174,7 @@ fn gpu::CompletionPoint? vk_submit_with(
         queue:            queue,
         desc:             desc,
         submit_fn:        submit_fn,
-        counter_query_fn: &real_frame_counter_query,
+        counter_query_fn: &real_semaphore_counter_query,
     );
 }
 

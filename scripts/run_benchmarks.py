@@ -12,18 +12,17 @@ import sys
 
 
 BENCHMARK_TARGETS = (
-    "arena_allocation_bench",
+    "allocation_bench",
     "resource_create_bench",
     "descriptor_churn_bench",
     "upload_throughput_bench",
     "command_record_bench",
-    "frame_signal_bench",
     "pipeline_cache_bench",
     "async_overlap_bench",
 )
 
 BENCHMARK_METHODS = {
-    "arena_allocation_bench": ("frame=100000; cpu_write=4096", "ns/allocation, ns/free"),
+    "allocation_bench": ("4000/phase", "ns/allocation, ns/free"),
     "resource_create_bench": ("300/worker; workers=1,2,4", "ns/op"),
     "descriptor_churn_bench": ("320/worker; workers=1,2,4", "ns/descriptor"),
     "upload_throughput_bench": (
@@ -31,7 +30,6 @@ BENCHMARK_METHODS = {
         "uploads/s",
     ),
     "command_record_bench": ("20000/phase/repetition; repetitions=5", "ns/record"),
-    "frame_signal_bench": ("2000/phase", "ns/end_frame, submits/frame"),
     "pipeline_cache_bench": ("cold=200; duplicate=200000", "ns/create"),
     "async_overlap_bench": ("calibration=2; measured=5", "ms"),
 }
@@ -43,38 +41,37 @@ CONTEXT_FIELDS = ("adapter:", "driver:", "validation:", "queues:")
 # A unit token alone is not enough: the startup header already declares
 # units=..., so the gate demands a number carrying the unit.
 MEASURED_VALUE = re.compile(
-    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|end_frame|create)|ms)\b"
+    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|create)|ms)\b"
     r"|uploads_per_sec=\d[\d,.]*\b"
 )
 UPLOAD_MEASUREMENT = re.compile(
     r"\bworkers=\d+\s+payload_bytes=\d+\s+iterations=\d+\s+"
     r"uploads_per_sec=\d[\d,.]*\b"
 )
-ARENA_MEASUREMENTS = (
-    (
-        "frame",
-        re.compile(
-            r"^frame:\s+iterations=100000(?=\s|$)[^\r\n]*"
-            r"\d[\d,.]*\s?ns/allocation\s*$",
-            re.MULTILINE,
-        ),
-    ),
+ALLOCATION_NUMBER = r"[0-9]+(?:\.[0-9]+)?"
+ALLOCATION_PHASES = (
     (
         "cpu_write allocate",
         re.compile(
-            r"^cpu_write allocate:\s+iterations=4096(?=\s|$)[^\r\n]*"
-            r"\d[\d,.]*\s?ns/allocation\s*$",
+            rf"^cpu_write allocate: iterations=4000 size=64 align=16 "
+            rf"{ALLOCATION_NUMBER} ns/allocation$",
             re.MULTILINE,
         ),
     ),
     (
         "cpu_write free",
         re.compile(
-            r"^cpu_write free:\s+iterations=4096(?=\s|$)[^\r\n]*"
-            r"\d[\d,.]*\s?ns/free\s*$",
+            rf"^cpu_write free: iterations=4000 size=64 align=16 "
+            rf"{ALLOCATION_NUMBER} ns/free$",
             re.MULTILINE,
         ),
     ),
+)
+ALLOCATION_SCHEMA = re.compile(
+    rf"\Acpu_write allocate: iterations=4000 size=64 align=16 "
+    rf"{ALLOCATION_NUMBER} ns/allocation\r?\n"
+    rf"cpu_write free: iterations=4000 size=64 align=16 "
+    rf"{ALLOCATION_NUMBER} ns/free\Z"
 )
 
 
@@ -85,10 +82,12 @@ def require_context_fields(output):
 
 
 def require_measurement(output, target):
-    if target == "arena_allocation_bench":
-        for phase, pattern in ARENA_MEASUREMENTS:
+    if target == "allocation_bench":
+        for phase, pattern in ALLOCATION_PHASES:
             if not pattern.search(output):
                 raise ValueError(f"{target} is missing {phase} measurement")
+        if not ALLOCATION_SCHEMA.fullmatch(output):
+            raise ValueError(f"{target} output does not match the exact schema")
     if not re.search(r"\biterations?=\S+", output):
         raise ValueError(f"{target} is missing an iteration count")
     is_upload = target == "upload_throughput_bench" or "uploads_per_sec=" in output

@@ -32,9 +32,9 @@
       "type": "executable",
       "sources": [ "src/benchmark_info.c3" ]
     },
-    "arena_allocation_bench": {
+    "allocation_bench": {
       "type": "executable",
-      "sources": [ "src/arena_allocation_bench.c3" ]
+      "sources": [ "src/allocation_bench.c3" ]
     },
     // Advisory pipeline-cache lookup timing; executable so it never gates CI.
     // Needs an ICD — pin lavapipe via VK_DRIVER_FILES when running this target.
@@ -42,13 +42,7 @@
       "type": "executable",
       "sources": [ "src/pipeline_cache_bench.c3" ]
     },
-    // Advisory end_frame timing across four queue-topology phases; executable
-    // so it never gates CI. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
-    "frame_signal_bench": {
-      "type": "executable",
-      "sources": [ "src/frame_signal_bench.c3" ]
-    },
-    // Advisory begin_frame reset-loop timing; executable so it never gates
+    // Advisory command recording timing; executable so it never gates
     // CI. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
     "command_record_bench": {
       "type": "executable",
@@ -97,7 +91,7 @@
     // needs one — pin lavapipe via VK_DRIVER_FILES when running this target.
     "vk_bootstrap": {
       "type": "test",
-      "sources": [ "src/test_vk_features.c3", "src/test_vk_runtime.c3", "src/test_vk_bootstrap.c3", "src/test_vk_public_contract.c3", "src/test_vk_result_mapping.c3", "src/test_vk_context_pools.c3", "src/root_pointer_abi.c3", "src/test_vk_vma_allocator.c3", "src/test_vk_buffer.c3", "src/test_vk_buffer_table.c3", "src/test_vk_frame_arena.c3", "src/test_vk_span_resolver.c3" ]
+      "sources": [ "src/test_vk_features.c3", "src/test_vk_runtime.c3", "src/test_vk_bootstrap.c3", "src/test_vk_public_contract.c3", "src/test_vk_result_mapping.c3", "src/test_vk_context_pools.c3", "src/root_pointer_abi.c3", "src/test_vk_vma_allocator.c3", "src/test_vk_buffer.c3", "src/test_vk_buffer_table.c3", "src/test_vk_span_resolver.c3" ]
     },
     "vk_allocation": {
       "type": "test",

@@ -598,6 +598,113 @@ class PublicApiCheckTests(unittest.TestCase):
         self.assertIn("retired wait_queue_idle", failures)
         self.assertIn("retired timeline capability", failures)
 
+    def test_rejects_each_retired_frame_policy_symbol(self) -> None:
+        cases = (
+            (
+                "FrameToken",
+                "types",
+                {"name": "FrameToken"},
+                "retired FrameToken",
+            ),
+            (
+                "MemoryKind",
+                "types",
+                {"name": "MemoryKind"},
+                "retired MemoryKind",
+            ),
+            (
+                "begin_frame",
+                "functions",
+                {"name": "begin_frame"},
+                "retired begin_frame",
+            ),
+            (
+                "alloc_frame_span",
+                "functions",
+                {"name": "alloc_frame_span"},
+                "retired alloc_frame_span",
+            ),
+            (
+                "end_frame",
+                "functions",
+                {"name": "end_frame"},
+                "retired end_frame",
+            ),
+            (
+                "with_frame",
+                "functions",
+                {"name": "with_frame"},
+                "retired with_frame",
+            ),
+            (
+                "DeviceDesc.frame_arena_size",
+                "types",
+                {
+                    "name": "FramePolicyProbe",
+                    "members": [{"name": "frame_arena_size"}],
+                },
+                "retired DeviceDesc.frame_arena_size",
+            ),
+            (
+                "DeviceDesc.frames_in_flight",
+                "types",
+                {
+                    "name": "FramePolicyProbe",
+                    "members": [{"name": "frames_in_flight"}],
+                },
+                "retired DeviceDesc.frames_in_flight",
+            ),
+            (
+                "DEFAULT_FRAME_ARENA_SIZE",
+                "types",
+                {"name": "DEFAULT_FRAME_ARENA_SIZE"},
+                "retired DEFAULT_FRAME_ARENA_SIZE",
+            ),
+            (
+                "ARENA_FULL",
+                "types",
+                {"name": "ARENA_FULL"},
+                "retired ARENA_FULL",
+            ),
+        )
+        for symbol, section, entry, expected_failure in cases:
+            with self.subTest(symbol=symbol):
+                document = valid_document()
+                document["modules"]["gpu"][section].append(entry)
+                self.assertEqual(
+                    check_public_api.validate_document(document),
+                    [expected_failure],
+                    f"{symbol} must produce exactly its retirement failure",
+                )
+
+    def test_rejects_debug_resource_kind_frame(self) -> None:
+        document = valid_document()
+        resource_kind = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "DebugResourceKind"
+        )
+        resource_kind["members"] = [
+            {"name": name, "type": {"name": "DebugResourceKind"}}
+            for name in (
+                "NONE",
+                "DEVICE",
+                "GPU_SPAN",
+                "TEXTURE",
+                "PIPELINE",
+                "SWAPCHAIN",
+                "SHADER",
+                "COMMAND_LIST",
+                "TEXTURE_DESCRIPTOR",
+                "SAMPLER",
+                "ALLOCATION",
+                "FRAME",
+            )
+        ]
+        self.assertEqual(
+            check_public_api.validate_document(document),
+            ["DebugResourceKind must match its exact schema"],
+            "DebugResourceKind.FRAME must produce exactly its schema failure",
+        )
 
     def test_rejects_public_recording_contexts(self) -> None:
         document = valid_document()
