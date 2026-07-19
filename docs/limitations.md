@@ -69,6 +69,7 @@ exists (else the limit is compile-time).
 | Texture descriptors in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Sampler descriptors | 256 default, 65 536 max (`DEFAULT_SAMPLER_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Interned sampler identities | selected-device `maxSamplerAllocationCount`, capped at 65 536 | — | `SLOT_TABLE_FULL` |
+| Sampler mip LOD bias | Absolute value up to selected-device `maxSamplerLodBias`, reported by `DeviceCaps.max_sampler_lod_bias` | — | `INVALID_ARGUMENT` |
 | Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY` in `gpu/texture.c3`; `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
 | Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
 | Live pipelines / shaders | 256 each by default (`MAX_PIPELINES`, `MAX_SHADERS` in `gpu/pipeline.c3`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
@@ -118,8 +119,9 @@ Two sizing rules that bite:
 ## 4. Capability queries
 
 Anything the device can answer at runtime lives in `DeviceCaps` (filled at
-`create_device`): heap capacities, alignments, `max_sampler_anisotropy`,
-workload limits (`max_compute_work_group_count`,
+`create_device`): heap capacities, alignments, sampler limits
+(`max_sampler_lod_bias`, `max_sampler_anisotropy`), workload limits
+(`max_compute_work_group_count`,
 `max_draw_indirect_count`), and feature booleans such as
 `draw_indirect_count` and `descriptor_buffer`.
 

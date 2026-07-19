@@ -92,6 +92,16 @@ fn void sampler_interning_pins_public_contract() @test {
     assert(gpu::vk::stub_sampler_intern_attempt_count(&device) == 0,
         "null descriptions stop before backend mutation");
 
+    DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    assert(caps.max_sampler_lod_bias == 16.0f,
+        "caps expose the backend-neutral sampler LOD bias limit");
+    SamplerDesc invalid_bias = sampler_test_desc();
+    invalid_bias.mip_lod_bias = caps.max_sampler_lod_bias + 1.0f;
+    assert(@catch(gpu::intern_sampler(&device, &invalid_bias))
+        == gpu::INVALID_ARGUMENT);
+    assert(gpu::vk::stub_sampler_intern_attempt_count(&device) == 0,
+        "over-limit LOD bias stops before sampler table mutation");
+
     SamplerDesc first_desc = sampler_test_desc();
     first_desc.debug_name = "first_debug_name";
     Sampler first = gpu::intern_sampler(&device, &first_desc)!!;

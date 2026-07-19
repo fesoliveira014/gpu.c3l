@@ -5,7 +5,8 @@ import std::atomic;
 import std::core::mem;
 import std::thread;
 
-const uint STUB_SAMPLER_CAPACITY @private = 16;
+const uint  STUB_SAMPLER_CAPACITY       @private = 16;
+const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
 
 struct StubRuntimeState {
     gpu::Runtime runtime;
@@ -71,6 +72,11 @@ fn gpu::Sampler? intern_stub_sampler(
 ) {
     StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
     if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    if (sampler_desc_invalid_enum_field(desc) != null) return gpu::INVALID_ARGUMENT~;
+    if (desc.mip_lod_bias < -STUB_SAMPLER_LOD_BIAS_LIMIT
+        || desc.mip_lod_bias > STUB_SAMPLER_LOD_BIAS_LIMIT) {
+        return gpu::INVALID_ARGUMENT~;
+    }
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     state.sampler_intern_attempts++;
@@ -544,7 +550,7 @@ fn gpu::Device? stub_create_strict_disabled_device() {
     state.resource_owner = gpu::allocate_device_resource_owner()!;
     return gpu::register_device(
         backend:        gpu::BackendKind.VULKAN,
-        caps:           {},
+        caps:           { .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT },
         vtable:         &STUB_DEVICE_VTABLE,
         backend_state:  state,
         resource_owner: state.resource_owner,
@@ -583,6 +589,7 @@ fn gpu::Device? create_vk_device(
     gpu::DeviceCaps caps = {
         .strict_enabled       = true,
         .presentation_enabled = presentation_surface.is_valid(),
+        .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
     };
     return gpu::register_device(
         backend:              gpu::BackendKind.VULKAN,

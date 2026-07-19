@@ -207,6 +207,10 @@ def validate_document(document: dict) -> list[str]:
         for entry in public_surface.get("types", [])
     }
 
+    device_caps_fields = dict(member_schema(types.get("DeviceCaps")))
+    if device_caps_fields.get("max_sampler_lod_bias") != "float":
+        failures.append("DeviceCaps.max_sampler_lod_bias must be a float")
+
     begin_commands = functions.get("begin_commands")
     if begin_commands is None:
         failures.append("missing begin_commands")
