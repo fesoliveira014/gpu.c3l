@@ -192,24 +192,3 @@ fn void successful_context_pool_ownership_is_idempotent() @test {
     run_context_pool_success(false, 2);
     run_context_pool_success(true, 3);
 }
-
-fn void built_in_context_insertion_failure_cleans_full_context() @test {
-    gpu::vk::VkDeviceState state = {
-        .host_allocator = &allocators::LIBC_ALLOCATOR,
-        .selected_queue_roles = { .graphics, .compute, .transfer },
-        .graphics_family = FIXTURE_GRAPHICS_FAMILY,
-        .compute_family = FIXTURE_GRAPHICS_FAMILY,
-        .transfer_family = FIXTURE_TRANSFER_FAMILY,
-    };
-    ContextPoolFixture fixture = { .fail_at = uint::max };
-    gpu::vk::ContextPoolOps ops = context_pool_ops(&fixture);
-
-    fault insert_fault = @catch(gpu::vk::create_builtin_recording_context_with_ops(&state, &ops));
-    assert(insert_fault == gpu::SLOT_TABLE_FULL, "built-in insertion fault propagates");
-    assert(fixture.create_calls == 2, "full shared pool set was constructed");
-    assert(fixture.destroy_calls == 2, "full local pool set is destroyed on insertion failure");
-    for (uint i = 0; i < 2; i++) {
-        assert(fixture.destroyed[i] == 1, "each unpublished pool is destroyed exactly once");
-    }
-    assert(state.recording_contexts.next_new == 0, "no recording-context handle is published");
-}

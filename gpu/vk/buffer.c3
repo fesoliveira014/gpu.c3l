@@ -156,8 +156,6 @@ fn vma::AllocationCreateInfo memory_kind_to_vma(gpu::MemoryKind kind) @private {
             return { .usage = vma::MemoryUsage.AUTO_PREFER_DEVICE };
         case gpu::MemoryKind.READBACK:
             return { .usage = vma::MemoryUsage.AUTO_PREFER_HOST, .flags = { .host_access_random, .mapped } };
-        case gpu::MemoryKind.STAGING:
-            return { .usage = vma::MemoryUsage.AUTO, .flags = { .host_access_sequential_write, .mapped } };
         default:
             return { .usage = vma::MemoryUsage.AUTO };
     }

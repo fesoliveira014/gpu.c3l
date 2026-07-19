@@ -14,8 +14,6 @@ enum MemoryKind : int {
     DEVICE,
     // GPU-to-CPU readback; invalidate before reading.
     READBACK,
-    // Transfer sources for staged uploads.
-    STAGING,
 }
 enum MemoryClass : int {
     CPU_WRITE,

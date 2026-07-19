@@ -208,25 +208,6 @@ fn void destroy_context_pools(VkDeviceState* state, RecordingContextState* conte
     destroy_context_pools_with_ops(state, context, &ops);
 }
 
-fn RecordingContextHandle? create_builtin_recording_context_with_ops(
-    VkDeviceState* state,
-    ContextPoolOps* ops
-) @private {
-    RecordingContextState context;
-    create_context_pools_with_ops(state, &context, ops)!;
-    RecordingContextHandle? handle = state.recording_contexts.alloc(context);
-    if (catch err = handle) {
-        destroy_context_pools_with_ops(state, &context, ops);
-        return err~;
-    }
-    return handle;
-}
-
-fn RecordingContextHandle? create_builtin_recording_context(VkDeviceState* state) @private {
-    ContextPoolOps ops = context_pool_ops_real(state);
-    return create_builtin_recording_context_with_ops(state, &ops);
-}
-
 fn RecordingContextHandle? thread_recording_context(
     VkDeviceState* state,
     gpu::Device device,
