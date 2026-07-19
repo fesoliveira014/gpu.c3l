@@ -142,7 +142,7 @@ fn void device_capacity_over_ceiling_rejected() @test {
     };
 
     fault capacity_fault = @catch(gpu::create_device_from_desc(&desc));
-    assert(capacity_fault == gpu::INVALID_ARGUMENT, "capacity above the packed-slot ceiling fails with INVALID_ARGUMENT");
+    assert(capacity_fault == gpu::INVALID_ARGUMENT, "capacity above the descriptor heap limit fails with INVALID_ARGUMENT");
 }
 
 // Note: the UNSUPPORTED_BACKEND default arm is unreachable while BackendKind has

@@ -32,8 +32,9 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::TextureIndex tex_index = tex_index_view.index;
+    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,
@@ -238,8 +239,9 @@ fn void storage_write_direct_readback() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::TextureIndex tex_index = tex_index_view.index;
+    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
 
     OwnedSpan readback = allocate_owned_span(
         device:       &device,
@@ -425,11 +427,12 @@ fn void mip_subset_view_sampled() @test {
 
     // Register a mip-1-only view: sampling it at lod 0 must return mip 1.
     gpu::TextureViewDesc mip1_view = { .base_mip = 1, .mip_count = 1 };
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, texture, &mip1_view)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, &mip1_view)!!;
+    gpu::TextureIndex tex_index = tex_index_view.index;
+    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
 
     gpu::TextureViewDesc out_of_range = { .base_mip = 2, .mip_count = 1 };
-    fault range_fault = @catch(gpu::create_texture_descriptor(&device, texture, &out_of_range));
+    fault range_fault = @catch(gpu::create_texture_view(&device, texture, &out_of_range));
     assert(range_fault == gpu::INVALID_ARGUMENT, "view past the mip chain faults INVALID_ARGUMENT");
 
     gpu::SamplerDesc sampler_desc = {

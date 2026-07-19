@@ -49,10 +49,10 @@ alias CreateDedicatedTextureFn @private = fn DedicatedTexture? (
     TextureDesc* desc,
     AllocationDesc* allocation_desc,
 );
-alias CreateTextureDescriptorFn @private  = fn TextureIndex? (Device*, TextureHandle, TextureViewDesc*);
+alias CreateTextureViewFn @private       = fn TextureView? (Device*, TextureHandle, TextureViewDesc*);
 alias DestroyTextureFn @private          = fn void? (Device*, TextureHandle);
-alias DestroyTextureDescriptorFn @private = fn void? (Device*, TextureIndex);
-alias CreateTextureDescriptorsFn @private = fn void? (Device*, TextureDescriptorDesc[], TextureIndex[]);
+alias DestroyTextureViewFn @private      = fn void? (Device*, TextureView);
+alias CreateTextureViewsFn @private      = fn void? (Device*, TextureViewCreateDesc[], TextureView[]);
 alias InternSamplerFn @private            = fn Sampler? (Device*, SamplerDesc*);
 alias PublishSamplerFn @private           = fn SamplerIndex? (Device*, Sampler);
 alias CreateShaderFn @private          = fn ShaderHandle? (Device*, ShaderDesc*);
@@ -135,9 +135,9 @@ struct BackendVTable @private {
     CreatePlacedTextureFn     create_placed_texture;
     CreateDedicatedTextureFn  create_dedicated_texture;
     DestroyTextureFn          destroy_texture;
-    CreateTextureDescriptorFn  create_texture_descriptor;
-    DestroyTextureDescriptorFn destroy_texture_descriptor;
-    CreateTextureDescriptorsFn create_texture_descriptors;
+    CreateTextureViewFn       create_texture_view;
+    DestroyTextureViewFn      destroy_texture_view;
+    CreateTextureViewsFn      create_texture_views;
     InternSamplerFn            intern_sampler;
     PublishSamplerFn           publish_sampler;
     CreateShaderFn          create_shader;

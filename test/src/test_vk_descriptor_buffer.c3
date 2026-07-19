@@ -54,15 +54,16 @@ fn void descriptor_buffer_device_and_heap() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureDescriptorDesc[2] batch = {
+    gpu::TextureViewCreateDesc[2] batch = {
         { .texture = texture },
         { .texture = texture },
     };
-    gpu::TextureIndex[2] indices;
-    gpu::create_texture_descriptors(&device, batch[..], indices[..])!!;
-    foreach (index : indices) {
-        assert(index.is_valid(), "batch descriptor written into the descriptor buffer");
-        gpu::destroy_texture_descriptor(&device, index)!!;
+    gpu::TextureView[2] views;
+    gpu::create_texture_views(&device, batch[..], views[..])!!;
+    foreach (view : views) {
+        assert(view.index.is_valid(),
+            "batch view index is written into the descriptor buffer");
+        gpu::destroy_texture_view(&device, view)!!;
     }
 
     gpu::SamplerDesc sampler_desc = {};
@@ -113,8 +114,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     };
     gpu::TextureHandle shared_texture = gpu::create_texture(&device, &shared_desc)!!;
     defer gpu::destroy_texture(&device, shared_texture)!!;
-    gpu::TextureIndex texture_index = gpu::create_texture_descriptor(&device, shared_texture, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, texture_index)!!;
+    gpu::TextureView texture_index_view = gpu::create_texture_view(&device, shared_texture, null)!!;
+    gpu::TextureIndex texture_index = texture_index_view.index;
+    defer gpu::destroy_texture_view(&device, texture_index_view)!!;
 
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
@@ -417,8 +419,9 @@ fn void descriptor_buffer_write_then_sample() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::TextureIndex tex_index = tex_index_view.index;
+    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
 
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,

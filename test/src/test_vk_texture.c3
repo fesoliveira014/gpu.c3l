@@ -272,8 +272,9 @@ fn void texture_unsupported_desc_rejected() @test {
         .usage     = { .transfer_dst },
     };
     gpu::TextureHandle staging_target = gpu::create_texture(&device, &transfer_only)!!;
-    fault descriptor_fault = @catch(gpu::create_texture_descriptor(&device, staging_target, null));
-    assert(descriptor_fault == gpu::INVALID_ARGUMENT, "descriptor on a non-shader-visible texture faults INVALID_ARGUMENT");
+    fault view_fault = @catch(gpu::create_texture_view(&device, staging_target, null));
+    assert(view_fault == gpu::INVALID_ARGUMENT,
+        "a view on a non-shader-visible texture faults INVALID_ARGUMENT");
     gpu::destroy_texture(&device, staging_target)!!;
 
     gpu::TextureDesc not_2d = {

@@ -59,14 +59,14 @@ full/nested span mapping and address queries, unavailable mapping, and stale/cro
 device registry concurrency, generation exhaustion, closing-state rejection,
 and active-operation destruction retry
 immediate-parent exact-fit, nested, zero-size, out-of-parent, and offset-overflow slicing
-texture descriptor normalization and backend-profile validation
+texture-view normalization and backend-profile validation
 allocation range, alignment, access, and class validation without Vulkan
 caller-owned allocation and completion lifetime contracts
 MemoryClass policy table completeness
 Format translation table completeness through pure tables if separated
 BarrierDesc validation
 shader ABI sizeof/offset checks
-DescriptorHeap free-list reuse
+TextureView owner/generation validation and descriptor-heap free-list reuse
 null-safe, exactly-once structured debug dispatch and userdata preservation
 invalid-backend callback delivery with callback-enabled/disabled fault parity
 borrowed field and explicit absent-fault representation
@@ -125,9 +125,11 @@ command list begin/end/submit
 completion-point signaling and waits
 copy upload -> readback
 root-pointer compute shader
-TextureIndex sampling in compute
+TextureView publication and raw TextureIndex sampling in compute
 offscreen render target clear/draw/readback
 dynamic viewport/scissor validation, clipping pixels, pass reset, and pipeline-alias persistence
+texture-view capacity, batch rollback, immediate index reuse, stale and
+cross-device release rejection, and concurrent publication/release
 sampler interning, stable strict publication, publication exhaustion, concurrent
 intern-and-publish convergence, and device-owned teardown
 ```
@@ -268,7 +270,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
 | Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback. |
 | Compute | root pointer shader read/write, readback. |
-| Texture heap | descriptor allocation, sampling by TextureIndex. |
+| Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback; dynamic viewport/scissor state, validation, clipping, pass reset, and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior layout; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start. |
@@ -305,6 +307,7 @@ c3c build import_surface_wayland --path test/cpu
 c3c build import_surface_x11 --path test/cpu
 c3c build span_data_operations --path test/cpu
 c3c build sampler_operations --path test/cpu
+c3c build texture_view_operations --path test/cpu
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
 python -m unittest scripts.test_check_public_api scripts.test_check_backend_dispatch

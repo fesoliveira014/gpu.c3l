@@ -28,21 +28,35 @@ fn void gpu_allocation_identity_is_generation_checked() @test {
     assert(!gpu::GPU_ALLOCATION_INVALID.is_valid(), "the zero allocation is invalid");
 }
 
-fn void index_pack_unpack() @test {
-    TextureIndex t = { .slot = 42, .generation = 7 };
-    assert(t.slot == 42, "slot round-trips");
-    assert(t.generation == 7, "generation round-trips");
-    assert((uint)t == (7u << 16) | 42u, "raw uint matches slot(0..15)|generation(16..31)");
-    assert(((uint)t & 0xFFFFu) == 42, "shader-side slot mask recovers the slot");
-    assert(t.is_valid(), "non-zero index is valid");
+fn void heap_indices_are_raw_32_bit_shader_values() @test {
+    TextureIndex texture = { .value = 42 };
+    SamplerIndex sampler = { .value = 7 };
+    assert(TextureIndex::size == uint::size, "texture indices are ABI-pinned uints");
+    assert(SamplerIndex::size == uint::size, "sampler indices are ABI-pinned uints");
+    assert((uint)texture == 42, "texture index contains no CPU generation metadata");
+    assert((uint)sampler == 7, "sampler index contains no CPU generation metadata");
+    assert(texture.is_valid() && sampler.is_valid(), "non-zero raw indices are valid");
     assert(!gpu::TEXTURE_INDEX_INVALID.is_valid(), "INVALID index is not valid");
     assert(!gpu::SAMPLER_INDEX_INVALID.is_valid(), "INVALID sampler index is not valid");
 }
 
-fn void index_smallest_valid_never_zero() @test {
-    SamplerIndex s = { .slot = 0, .generation = 1 };
-    assert((uint)s != 0, "live index is never all-zero");
-    assert(s.is_valid(), "slot 0 with generation 1 is valid");
+fn void texture_view_owns_raw_shader_index() @test {
+    TextureView first = {
+        .owner      = 7,
+        .index      = { .value = 3 },
+        .generation = 11,
+    };
+    TextureView same = first;
+    TextureView stale = first;
+    stale.generation++;
+
+    assert(TextureView::size <= ulong::size * 2,
+        "texture views fit in two machine words");
+    assert(first.is_valid(), "owner, index, and generation make a view valid");
+    assert(first == same, "copied texture-view identity compares equal");
+    assert(first != stale, "CPU generation participates in view identity");
+    assert((uint)first.index == 3, "the embedded shader index stays generation-free");
+    assert(!gpu::TEXTURE_VIEW_INVALID.is_valid(), "the zero texture view is invalid");
 }
 
 // Concrete generation-checked slot table used to exercise handle invariants.

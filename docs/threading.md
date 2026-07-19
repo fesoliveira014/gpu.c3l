@@ -36,7 +36,7 @@ token's retained device pin while another call can still be in flight.
 | `get_allocation_info` / `get_allocation_span` / `get_span_mapping` / `get_span_address` | S | lock-free slot resolution |
 | `flush_mapped_span` / `invalidate_mapped_span` | S | lock-free validation; coherent no-op; native calls are internally synchronized |
 | `create_texture` / `destroy_texture` | S | |
-| `create_texture_descriptor` / `destroy_texture_descriptor` | S | |
+| `create_texture_view` / `create_texture_views` / `destroy_texture_view` | S | owner and generation are validated before heap mutation |
 | `intern_sampler` / `publish_sampler` | S | equal interning and repeated publication converge under the device resource lock |
 | `create_shader` / `destroy_shader` | S | |
 | `create_compute_pipeline` / `create_graphics_pipeline` / `destroy_pipeline` | S | driver compiles run in parallel; a same-key race compiles twice, converges to one entry |

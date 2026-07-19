@@ -216,8 +216,9 @@ fn void cull_replay_renders_per_alias() @test {
     };
     gpu::TextureHandle pattern = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, pattern)!!;
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, pattern, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::TextureView tex_index_view = gpu::create_texture_view(&device, pattern, null)!!;
+    gpu::TextureIndex tex_index = tex_index_view.index;
+    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,

@@ -117,11 +117,11 @@ forms from one schema.
 
 Textures are the one thing GPUs still want tables for (samplers and image
 descriptors are opaque hardware state, not addresses) — for those the library
-manages a single global **bindless heap**. Texture descriptors yield
-`TextureIndex` values. Sampler descriptions are first interned as device-owned
-`Sampler` identities; `publish_sampler` yields stable `SamplerIndex` values.
-Put those indices in root structs like any other field. This program needs no
-textures.
+manages a single global **bindless heap**. Creating a texture view returns an
+owner-bearing `TextureView`; its raw 32-bit `index` field is the value stored in
+shader data. Sampler descriptions are first interned as device-owned `Sampler`
+identities; `publish_sampler` yields stable `SamplerIndex` values. Put those raw
+indices in root structs like any other field. This program needs no textures.
 
 The root struct below is this program's whole binding model:
 
@@ -344,9 +344,9 @@ real workflow generates both sides from one schema:
 - **Shader ABI generator** — write a `.abi` schema, get the C3 struct
   (with size/offset asserts) and the GLSL include from one source of truth,
   plus a `--check` drift gate for CI. Read `docs/shader_abi.md`.
-- **Textures, samplers, and the bindless heap** — `TextureIndex` and published
-  `SamplerIndex` values in root structs, with one global descriptor set you
-  never manage. Read `docs/api.md`.
+- **Textures, samplers, and the bindless heap** — `TextureView.index` and
+  published `SamplerIndex` values in root structs, with one global descriptor set
+  you never manage. Read `docs/api.md`.
 - **The samples repository** —
   [gpu.c3l-samples](https://github.com/fesoliveira014/gpu.c3l-samples):
   eighteen runnable programs from a windowed triangle through GPU-driven

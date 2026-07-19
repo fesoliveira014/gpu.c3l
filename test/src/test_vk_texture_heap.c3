@@ -34,8 +34,9 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::TextureIndex tex_index = tex_index_view.index;
+    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
 
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,

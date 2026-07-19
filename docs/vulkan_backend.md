@@ -410,24 +410,27 @@ same index, while a capacity fault leaves the identity unpublished and valid.
 ```text
 DescriptorSlot
     uint index
-    ushort generation
+    uint generation
     DescriptorKind kind
     bool used
     TextureHandle owner_texture
 ```
 
-Texture descriptor use is validated in debug builds, and device destruction
-reports texture descriptor leaks. Sampler entries are device-owned and are not
-reported as individually releasable leaks.
+CPU cells retain generation and texture ownership. The public `TextureView`
+token also carries the device-owner identity and current generation, while its
+`TextureIndex` field is only the shader value: zero is invalid and a live value
+encodes the zero-based physical slot plus one. Destruction validates owner and
+generation before recycling the slot. Device teardown reports leaked texture
+views. Sampler entries are device-owned and are not individually releasable.
 
 Batch creation uses a prepare/commit transaction under the resource lock.
-Preparation validates every item and resolves its view without consuming
-descriptor slots, changing generations, or writing
-outputs. It records only cache misses created by the transaction. If a later
-item faults, those Vulkan image views are destroyed exactly once and their full
-prior cache cells are restored; default, pre-existing, and duplicate views are
-untouched. After complete preparation, commit allocates every descriptor,
-publishes outputs, and performs the existing heap writes.
+Preparation validates every item and resolves its native view without consuming
+heap slots, changing generations, or writing outputs. It records only cache
+misses created by the transaction. If a later item faults, those Vulkan image
+views are destroyed exactly once and their full prior cache cells are restored;
+default, pre-existing, and duplicate views are untouched. After complete
+preparation, commit allocates every slot, publishes owner-bearing views, and
+performs the selected heap writes.
 
 ## 11. Shader and pipeline implementation
 
@@ -776,7 +779,7 @@ all native buffer/image allocations are VMA-backed
 independent allocation creation publishes only complete native state
 addressable spans produce valid GPU addresses
 root-pointer compute works
-texture heap works through TextureIndex
+texture heap decodes generation-free TextureIndex values
 barriers use synchronization2
 offscreen dynamic rendering works
 SDL3 swapchain sample presents and resizes

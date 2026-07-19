@@ -319,9 +319,6 @@ fn gpu::SamplerIndex? vk_publish_sampler(
     }
     uint slot = heap.sampler_next_new++;
     write_sampler_descriptor(state, slot, cell.native);
-    cell.published = {
-        .slot       = (ushort)slot,
-        .generation = 1,
-    };
+    cell.published = { .value = slot + 1 };
     return cell.published;
 }

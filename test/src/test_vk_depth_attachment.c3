@@ -512,8 +512,9 @@ fn void sampled_depth_matches_readback() @test {
     gpu::TextureHandle depth = make_depth_texture(&device, sampled: true);
     defer gpu::destroy_texture(&device, depth)!!;
 
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, depth, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::TextureView tex_index_view = gpu::create_texture_view(&device, depth, null)!!;
+    gpu::TextureIndex tex_index = tex_index_view.index;
+    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,
@@ -667,8 +668,9 @@ fn void compare_sampler_exact_results() @test {
     gpu::TextureHandle depth = make_depth_texture(&device, sampled: true);
     defer gpu::destroy_texture(&device, depth)!!;
 
-    gpu::TextureIndex tex_index = gpu::create_texture_descriptor(&device, depth, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, tex_index)!!;
+    gpu::TextureView tex_index_view = gpu::create_texture_view(&device, depth, null)!!;
+    gpu::TextureIndex tex_index = tex_index_view.index;
+    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
     gpu::SamplerDesc shadow_desc = {
         .min_filter     = gpu::Filter.NEAREST,
         .mag_filter     = gpu::Filter.NEAREST,

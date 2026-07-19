@@ -70,6 +70,12 @@
         "sampler_operations.c3"
       ]
     },
+    "texture_view_operations": {
+      "type": "object-files",
+      "sources": [
+        "texture_view_operations.c3"
+      ]
+    },
     "unit": {
       "type": "test",
       "sources": [

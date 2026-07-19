@@ -21,6 +21,7 @@ struct IndDrawCtx {
     gpu::ShaderHandle   frag;
     gpu::PipelineHandle pipeline;
     gpu::TextureHandle  pattern;
+    gpu::TextureView    tex_view;
     gpu::TextureIndex   tex_index;
     gpu::SamplerIndex   smp_index;
 }
@@ -61,7 +62,8 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
         .usage     = { .sampled, .transfer_dst },
     };
     ctx.pattern = gpu::create_texture(device, &tex_desc)!!;
-    ctx.tex_index = gpu::create_texture_descriptor(device, ctx.pattern, null)!!;
+    ctx.tex_view = gpu::create_texture_view(device, ctx.pattern, null)!!;
+    ctx.tex_index = ctx.tex_view.index;
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,
@@ -86,7 +88,7 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
 }
 
 fn void destroy_ind_draw_ctx(gpu::Device* device, IndDrawCtx* ctx) {
-    gpu::destroy_texture_descriptor(device, ctx.tex_index)!!;
+    gpu::destroy_texture_view(device, ctx.tex_view)!!;
     gpu::destroy_texture(device, ctx.pattern)!!;
     gpu::destroy_pipeline(device, ctx.pipeline)!!;
     gpu::destroy_shader(device, ctx.frag)!!;

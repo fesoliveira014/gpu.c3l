@@ -12,6 +12,10 @@ PROJECT = ROOT / "test" / "retired_api"
 FIXTURES = {
     "create_sampler": "create_sampler",
     "destroy_sampler": "destroy_sampler",
+    "create_texture_descriptor": "create_texture_descriptor",
+    "destroy_texture_descriptor": "destroy_texture_descriptor",
+    "create_texture_descriptors": "create_texture_descriptors",
+    "texture_descriptor_desc": "TextureDescriptorDesc",
     "buffer_handle": "BufferHandle",
     "public_semaphore": "SemaphoreHandle",
     "queue_idle": "wait_queue_idle",

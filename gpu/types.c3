@@ -21,6 +21,17 @@ bitstruct Device : ulong {
     uint reserved   : 56..63;
 }
 
+// Fixed-width shader-visible heap values. Value zero is the invalid sentinel;
+// live values encode the zero-based backend slot plus one and carry no CPU
+// ownership or generation metadata.
+bitstruct TextureIndex : uint {
+    uint value : 0..31;
+}
+
+bitstruct SamplerIndex : uint {
+    uint value : 0..31;
+}
+
 <* Owning token for device-scoped generic GPU data. *>
 struct GpuAllocation {
     ulong owner;
@@ -35,6 +46,15 @@ struct TextureHandle {
     uint  generation;
 }
 $assert TextureHandle::size <= ulong::size * 2;
+
+<* Owning CPU token for one published texture view. `index` is the raw value
+   stored in shader data; ownership and generation stay CPU-only. *>
+struct TextureView {
+    ulong        owner;
+    TextureIndex index;
+    uint         generation;
+}
+$assert TextureView::size <= ulong::size * 2;
 
 <* Immutable device-interned sampler identity. *>
 struct Sampler {
@@ -72,24 +92,10 @@ struct CommandListHandle {
 }
 $assert CommandListHandle::size <= ulong::size * 2;
 
-// Shader-visible heap indices, packed slot(0..15) | generation(16..31).
-// Embedded in GPU records as 32-bit scalars; shaders mask with `& 0xFFFFu`.
-// A live index has generation >= 1, so raw 0 is INVALID.
-
-bitstruct TextureIndex : uint {
-    ushort slot       : 0..15;
-    ushort generation : 16..31;
-}
-
-// Same packing as TextureIndex.
-bitstruct SamplerIndex : uint {
-    ushort slot       : 0..15;
-    ushort generation : 16..31;
-}
-
 const Device            DEVICE_INVALID              = {};
 const GpuAllocation     GPU_ALLOCATION_INVALID      = {};
 const TextureHandle     TEXTURE_HANDLE_INVALID      = {};
+const TextureView       TEXTURE_VIEW_INVALID        = {};
 const Sampler           SAMPLER_INVALID             = {};
 const PipelineHandle    PIPELINE_HANDLE_INVALID     = {};
 const SwapchainHandle   SWAPCHAIN_HANDLE_INVALID    = {};
@@ -110,6 +116,14 @@ fn bool GpuAllocation.equals(self, GpuAllocation other) @operator(==) {
 }
 fn bool TextureHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool TextureView.is_valid(self) {
+    return self.owner != 0 && self.index.is_valid() && self.generation != 0;
+}
+fn bool TextureView.equals(self, TextureView other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;

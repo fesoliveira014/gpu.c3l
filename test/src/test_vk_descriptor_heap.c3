@@ -224,7 +224,7 @@ fn void descriptor_sampler_failures_report_context() @test {
     state.debug_callback = &capture_descriptor_diagnostic;
     state.debug_user_data = &capture;
 
-    gpu::TextureIndex descriptor = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView descriptor = gpu::create_texture_view(&device, texture, null)!!;
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::DESCRIPTOR_HEAP_FULL,
@@ -232,15 +232,15 @@ fn void descriptor_sampler_failures_report_context() @test {
         expected_identity:   false,
         expected_index:      0,
         expected_generation: 0,
-        expected_operation:  "create_texture_descriptor",
+        expected_operation:  "create_texture_view",
         expected_field:      "DeviceDesc.texture_descriptor_capacity",
         expected_invariant:  "must exceed live texture descriptors",
     );
-    fault full = @catch(gpu::create_texture_descriptor(&device, texture, null));
+    fault full = @catch(gpu::create_texture_view(&device, texture, null));
     assert(full == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 1 && capture.matched,
         "descriptor capacity fault and diagnostic are exact");
 
-    gpu::destroy_texture_descriptor(&device, descriptor)!!;
+    gpu::destroy_texture_view(&device, descriptor)!!;
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::INVALID_HANDLE,
@@ -248,11 +248,11 @@ fn void descriptor_sampler_failures_report_context() @test {
         expected_identity:   false,
         expected_index:      0,
         expected_generation: 0,
-        expected_operation:  "destroy_texture_descriptor",
-        expected_field:      "index",
-        expected_invariant:  "descriptor index must identify a live generation",
+        expected_operation:  "destroy_texture_view",
+        expected_field:      "view",
+        expected_invariant:  "view must identify a live generation",
     );
-    fault stale = @catch(gpu::destroy_texture_descriptor(&device, descriptor));
+    fault stale = @catch(gpu::destroy_texture_view(&device, descriptor));
     assert(stale == gpu::INVALID_HANDLE && capture.calls == 2 && capture.matched,
         "stale descriptor fault has kind without unvalidated identity");
 
@@ -263,11 +263,11 @@ fn void descriptor_sampler_failures_report_context() @test {
         expected_identity:   true,
         expected_index:      transfer.index,
         expected_generation: transfer.generation,
-        expected_operation:  "create_texture_descriptor",
+        expected_operation:  "create_texture_view",
         expected_field:      "TextureDesc.usage",
         expected_invariant:  "texture must have sampled or storage usage",
     );
-    fault usage = @catch(gpu::create_texture_descriptor(&device, transfer, null));
+    fault usage = @catch(gpu::create_texture_view(&device, transfer, null));
     assert(usage == gpu::INVALID_ARGUMENT && capture.calls == 3 && capture.matched,
         "descriptor usage fault and texture identity are exact");
 
@@ -306,43 +306,84 @@ fn uint cached_texture_view_count(vk::VkDeviceState* state, gpu::TextureHandle t
     return count;
 }
 
-fn void texture_descriptor_round_trip() @test {
+fn void texture_view_round_trip() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    assert(index.is_valid(), "created index is valid");
-    gpu::destroy_texture_descriptor(&device, index)!!;
+    gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
+    assert(view.is_valid() && view.index.is_valid(),
+        "created view and its raw shader index are valid");
+    gpu::destroy_texture_view(&device, view)!!;
 
-    fault stale_fault = @catch(gpu::destroy_texture_descriptor(&device, index));
-    assert(stale_fault == gpu::INVALID_HANDLE, "destroying a stale index faults INVALID_HANDLE");
+    fault stale_fault = @catch(gpu::destroy_texture_view(&device, view));
+    assert(stale_fault == gpu::INVALID_HANDLE,
+        "destroying a stale view faults INVALID_HANDLE");
 }
 
-fn void texture_descriptor_exhaustion() @test {
+fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
+    gpu::Device first_device = make_heap_test_device(2, 1);
+    gpu::Device second_device = make_heap_test_device(2, 1);
+    gpu::TextureHandle first_texture = make_heap_texture(&first_device);
+    gpu::TextureHandle second_texture = make_heap_texture(&second_device);
+    gpu::TextureView first_view =
+        gpu::create_texture_view(&first_device, first_texture, null)!!;
+    gpu::TextureView second_view =
+        gpu::create_texture_view(&second_device, second_texture, null)!!;
+
+    assert(first_view.owner != second_view.owner,
+        "texture-view ownership differs across devices");
+    assert(first_view.index == second_view.index,
+        "coincident devices may publish the same raw shader index");
+    vk::VkDeviceState* first_state =
+        (vk::VkDeviceState*)gpu::device_backend_state(first_device);
+    vk::VkDeviceState* second_state =
+        (vk::VkDeviceState*)gpu::device_backend_state(second_device);
+    uint first_free_before = first_state.strict_heap.descriptors.texture_free_count;
+    uint second_free_before = second_state.strict_heap.descriptors.texture_free_count;
+
+    fault foreign = @catch(gpu::destroy_texture_view(&second_device, first_view));
+    assert(foreign == gpu::INVALID_HANDLE,
+        "a foreign texture view faults INVALID_HANDLE");
+    assert(first_state.strict_heap.descriptors.texture_free_count == first_free_before
+        && second_state.strict_heap.descriptors.texture_free_count == second_free_before,
+        "foreign release stops before either heap mutates");
+    assert(first_state.strict_heap.descriptors.texture_cells[first_view.index.value - 1].used
+        && second_state.strict_heap.descriptors.texture_cells[second_view.index.value - 1].used,
+        "both coincident live cells survive the rejected release");
+
+    gpu::destroy_texture_view(&first_device, first_view)!!;
+    gpu::destroy_texture_view(&second_device, second_view)!!;
+    gpu::destroy_texture(&first_device, first_texture)!!;
+    gpu::destroy_texture(&second_device, second_texture)!!;
+    destroy_test_device(&first_device)!!;
+    destroy_test_device(&second_device)!!;
+}
+
+fn void texture_view_exhaustion() @test {
     gpu::Device device = make_heap_test_device(2, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex a = gpu::create_texture_descriptor(&device, texture, null)!!;
-    gpu::TextureIndex b = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView a = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::TextureView b = gpu::create_texture_view(&device, texture, null)!!;
 
-    fault full_fault = @catch(gpu::create_texture_descriptor(&device, texture, null));
+    fault full_fault = @catch(gpu::create_texture_view(&device, texture, null));
     assert(full_fault == gpu::DESCRIPTOR_HEAP_FULL, "allocating past capacity faults DESCRIPTOR_HEAP_FULL");
     assert(a.is_valid() && b.is_valid(), "existing indices stay valid after exhaustion");
 
-    gpu::destroy_texture_descriptor(&device, a)!!;
-    gpu::destroy_texture_descriptor(&device, b)!!;
+    gpu::destroy_texture_view(&device, a)!!;
+    gpu::destroy_texture_view(&device, b)!!;
 }
 
-fn void texture_descriptor_exhaustion_does_not_cache_failed_views() @test {
+fn void texture_view_exhaustion_does_not_cache_failed_views() @test {
     gpu::Device device = make_heap_test_device(1, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::TextureIndex occupied = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView occupied = gpu::create_texture_view(&device, texture, null)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(cached_texture_view_count(state, texture) == 0, "the fixture starts with an empty view cache");
@@ -354,70 +395,94 @@ fn void texture_descriptor_exhaustion_does_not_cache_failed_views() @test {
             .base_layer  = i / 4,
             .layer_count = 1,
         };
-        fault full = @catch(gpu::create_texture_descriptor(&device, texture, &view));
+        fault full = @catch(gpu::create_texture_view(&device, texture, &view));
         assert(full == gpu::DESCRIPTOR_HEAP_FULL, "an exhausted heap rejects the descriptor");
         assert(cached_texture_view_count(state, texture) == 0,
             "a rejected descriptor leaves the texture view cache unchanged");
     }
 
-    gpu::destroy_texture_descriptor(&device, occupied)!!;
+    gpu::destroy_texture_view(&device, occupied)!!;
 }
 
-fn void texture_descriptor_reuses_destroyed_slot_immediately() @test {
+fn void texture_view_reuses_destroyed_slot_immediately() @test {
     gpu::Device device = make_heap_test_device(1, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex first =
-        gpu::create_texture_descriptor(&device, texture, null)!!;
-    gpu::destroy_texture_descriptor(&device, first)!!;
+    gpu::TextureView first =
+        gpu::create_texture_view(&device, texture, null)!!;
+    gpu::destroy_texture_view(&device, first)!!;
 
-    gpu::TextureIndex recycled =
-        gpu::create_texture_descriptor(&device, texture, null)!!;
-    assert(recycled.slot == first.slot,
+    gpu::TextureView recycled =
+        gpu::create_texture_view(&device, texture, null)!!;
+    assert(recycled.index.value == first.index.value,
         "destroyed descriptor slots are immediately reusable");
     assert(recycled.generation != first.generation,
         "immediate reuse advances the generation");
-    assert(@catch(gpu::destroy_texture_descriptor(&device, first))
+    assert(@catch(gpu::destroy_texture_view(&device, first))
         == gpu::INVALID_HANDLE, "the released index is stale");
 
-    gpu::destroy_texture_descriptor(&device, recycled)!!;
+    gpu::destroy_texture_view(&device, recycled)!!;
 }
 
-fn void texture_descriptor_stale_texture_rejected() @test {
+fn void texture_view_generation_exhaustion_retires_slot() @test {
+    gpu::Device device = make_heap_test_device(1, 1);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::TextureDescriptorCell* cell =
+        &state.strict_heap.descriptors.texture_cells[view.index.value - 1];
+    cell.generation = vk::HANDLE_GENERATION_MAX - 1;
+    view.generation = cell.generation;
+
+    gpu::destroy_texture_view(&device, view)!!;
+
+    assert(cell.generation == vk::HANDLE_GENERATION_MAX,
+        "an exhausted texture-view generation retires at the sentinel");
+    assert(state.strict_heap.descriptors.texture_free_count == 0,
+        "an exhausted texture-view slot never returns to the free list");
+    assert(@catch(gpu::create_texture_view(&device, texture, null))
+        == gpu::DESCRIPTOR_HEAP_FULL,
+        "a retired only slot cannot recycle to a stale generation");
+}
+
+fn void texture_view_stale_texture_rejected() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, texture)!!;
 
-    fault texture_fault = @catch(gpu::create_texture_descriptor(&device, texture, null));
+    fault texture_fault = @catch(gpu::create_texture_view(&device, texture, null));
     assert(texture_fault == gpu::INVALID_HANDLE, "registering a destroyed texture faults INVALID_HANDLE");
 }
 
-fn void texture_descriptor_bad_view_rejected() @test {
+fn void texture_view_bad_view_rejected() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
     gpu::TextureViewDesc reinterpret = { .format = gpu::Format.R32_UINT };
-    fault view_fault = @catch(gpu::create_texture_descriptor(&device, texture, &reinterpret));
+    fault view_fault = @catch(gpu::create_texture_view(&device, texture, &reinterpret));
     assert(view_fault == gpu::INVALID_ARGUMENT, "format-reinterpreting views fault INVALID_ARGUMENT");
 }
 
-fn void texture_descriptor_overflowing_view_range_rejected() @test {
+fn void texture_view_overflowing_view_range_rejected() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
     gpu::TextureViewDesc mip_overflow = { .base_mip = 1, .mip_count = uint::max };
-    fault mip_fault = @catch(gpu::create_texture_descriptor(&device, texture, &mip_overflow));
+    fault mip_fault = @catch(gpu::create_texture_view(&device, texture, &mip_overflow));
     assert(mip_fault == gpu::INVALID_ARGUMENT, "overflowing mip range faults INVALID_ARGUMENT");
 
     gpu::TextureViewDesc layer_overflow = { .base_layer = 1, .layer_count = uint::max };
-    fault layer_fault = @catch(gpu::create_texture_descriptor(&device, texture, &layer_overflow));
+    fault layer_fault = @catch(gpu::create_texture_view(&device, texture, &layer_overflow));
     assert(layer_fault == gpu::INVALID_ARGUMENT, "overflowing layer range faults INVALID_ARGUMENT");
 }
 
@@ -426,16 +491,16 @@ fn void destroy_texture_with_live_descriptor_faults_and_recovers() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
 
-    gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView index = gpu::create_texture_view(&device, texture, null)!!;
 
     fault in_use_fault = @catch(gpu::destroy_texture(&device, texture));
     assert(in_use_fault == gpu::RESOURCE_IN_USE, "destroying a texture with a live descriptor faults RESOURCE_IN_USE");
 
-    gpu::TextureIndex second = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView second = gpu::create_texture_view(&device, texture, null)!!;
     assert(second.is_valid(), "handle stays valid and usable after the faulted destroy");
-    gpu::destroy_texture_descriptor(&device, second)!!;
+    gpu::destroy_texture_view(&device, second)!!;
 
-    gpu::destroy_texture_descriptor(&device, index)!!;
+    gpu::destroy_texture_view(&device, index)!!;
     gpu::destroy_texture(&device, texture)!!;
 }
 
@@ -444,8 +509,8 @@ fn void destroy_texture_after_descriptor_release_succeeds() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
 
-    gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
-    gpu::destroy_texture_descriptor(&device, index)!!;
+    gpu::TextureView index = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::destroy_texture_view(&device, index)!!;
 
     gpu::destroy_texture(&device, texture)!!;
 }
@@ -455,14 +520,14 @@ fn void destroy_texture_blocks_while_any_descriptor_live() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
 
-    gpu::TextureIndex a = gpu::create_texture_descriptor(&device, texture, null)!!;
-    gpu::TextureIndex b = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView a = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::TextureView b = gpu::create_texture_view(&device, texture, null)!!;
 
-    gpu::destroy_texture_descriptor(&device, a)!!;
+    gpu::destroy_texture_view(&device, a)!!;
     fault still_in_use = @catch(gpu::destroy_texture(&device, texture));
     assert(still_in_use == gpu::RESOURCE_IN_USE, "one remaining live descriptor still blocks destroy_texture");
 
-    gpu::destroy_texture_descriptor(&device, b)!!;
+    gpu::destroy_texture_view(&device, b)!!;
     gpu::destroy_texture(&device, texture)!!;
 }
 
@@ -473,113 +538,113 @@ fn void destroy_texture_unaffected_by_unrelated_descriptor() @test {
     defer gpu::destroy_texture(&device, texture_a)!!;
     gpu::TextureHandle texture_b = make_heap_texture(&device);
 
-    gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture_a, null)!!;
-    defer gpu::destroy_texture_descriptor(&device, index)!!;
+    gpu::TextureView index = gpu::create_texture_view(&device, texture_a, null)!!;
+    defer gpu::destroy_texture_view(&device, index)!!;
 
     gpu::destroy_texture(&device, texture_b)!!;
 }
 
-fn void texture_descriptors_batch_happy_path() @test {
+fn void texture_views_batch_happy_path() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureDescriptorDesc[3] descs;
+    gpu::TextureViewCreateDesc[3] descs;
     foreach (&desc : descs) *desc = { .texture = texture };
-    gpu::TextureIndex[3] indices;
-    gpu::create_texture_descriptors(&device, descs[..], indices[..])!!;
+    gpu::TextureView[3] indices;
+    gpu::create_texture_views(&device, descs[..], indices[..])!!;
 
     foreach (index : indices) assert(index.is_valid(), "every batch-created index is valid");
-    assert(indices[0].slot != indices[1].slot && indices[1].slot != indices[2].slot && indices[0].slot != indices[2].slot,
+    assert(indices[0].index.value != indices[1].index.value && indices[1].index.value != indices[2].index.value && indices[0].index.value != indices[2].index.value,
         "batch-created indices occupy distinct slots");
 
-    foreach (index : indices) gpu::destroy_texture_descriptor(&device, index)!!;
+    foreach (index : indices) gpu::destroy_texture_view(&device, index)!!;
 }
 
-fn void texture_descriptors_batch_fills_capacity_exactly() @test {
+fn void texture_views_batch_fills_capacity_exactly() @test {
     gpu::Device device = make_heap_test_device(3, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureDescriptorDesc[3] descs;
+    gpu::TextureViewCreateDesc[3] descs;
     foreach (&desc : descs) *desc = { .texture = texture };
-    gpu::TextureIndex[3] indices;
-    gpu::create_texture_descriptors(&device, descs[..], indices[..])!!;
+    gpu::TextureView[3] indices;
+    gpu::create_texture_views(&device, descs[..], indices[..])!!;
 
-    fault full_fault = @catch(gpu::create_texture_descriptor(&device, texture, null));
+    fault full_fault = @catch(gpu::create_texture_view(&device, texture, null));
     assert(full_fault == gpu::DESCRIPTOR_HEAP_FULL, "a batch that exactly fills capacity leaves none spare — the heap count rose by exactly N");
 
-    foreach (index : indices) gpu::destroy_texture_descriptor(&device, index)!!;
+    foreach (index : indices) gpu::destroy_texture_view(&device, index)!!;
 }
 
-fn void texture_descriptors_batch_zeroed_view_is_default() @test {
+fn void texture_views_batch_zeroed_view_is_default() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureDescriptorDesc[1] descs = { { .texture = texture } };
-    gpu::TextureIndex[1] indices;
-    gpu::create_texture_descriptors(&device, descs[..], indices[..])!!;
+    gpu::TextureViewCreateDesc[1] descs = { { .texture = texture } };
+    gpu::TextureView[1] indices;
+    gpu::create_texture_views(&device, descs[..], indices[..])!!;
     assert(indices[0].is_valid(), "a zero-initialized view collapses to the default view and creates successfully");
 
-    gpu::destroy_texture_descriptor(&device, indices[0])!!;
+    gpu::destroy_texture_view(&device, indices[0])!!;
 }
 
-fn void texture_descriptors_mismatched_out_len_faults() @test {
+fn void texture_views_mismatched_out_len_faults() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureDescriptorDesc[2] descs;
+    gpu::TextureViewCreateDesc[2] descs;
     foreach (&desc : descs) *desc = { .texture = texture };
-    gpu::TextureIndex[1] indices;
-    fault mismatch_fault = @catch(gpu::create_texture_descriptors(&device, descs[..], indices[..]));
+    gpu::TextureView[1] indices;
+    fault mismatch_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
     assert(mismatch_fault == gpu::INVALID_ARGUMENT, "a mismatched out-indices length faults INVALID_ARGUMENT");
 }
 
-fn void texture_descriptors_empty_batch_is_no_op() @test {
+fn void texture_views_empty_batch_is_no_op() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
 
-    gpu::TextureDescriptorDesc[] descs;
-    gpu::TextureIndex[] indices;
-    gpu::create_texture_descriptors(&device, descs, indices)!!;
+    gpu::TextureViewCreateDesc[] descs;
+    gpu::TextureView[] indices;
+    gpu::create_texture_views(&device, descs, indices)!!;
 }
 
-fn void texture_descriptors_batch_preflight_faults_untouched() @test {
+fn void texture_views_batch_preflight_faults_untouched() @test {
     gpu::Device device = make_heap_test_device(4, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex existing = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView existing = gpu::create_texture_view(&device, texture, null)!!;
 
     // Capacity 4, one slot already used: 3 remain; the batch asks for 4.
-    gpu::TextureDescriptorDesc[4] descs;
+    gpu::TextureViewCreateDesc[4] descs;
     foreach (&desc : descs) *desc = { .texture = texture };
-    gpu::TextureIndex[4] indices;
-    fault full_fault = @catch(gpu::create_texture_descriptors(&device, descs[..], indices[..]));
+    gpu::TextureView[4] indices;
+    fault full_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
     assert(full_fault == gpu::DESCRIPTOR_HEAP_FULL, "a batch exceeding remaining capacity faults DESCRIPTOR_HEAP_FULL");
     assert(existing.is_valid(), "the pre-existing index survives the failed pre-flight");
 
     // Untouched: the failed pre-flight consumed nothing, so the remaining
     // headroom (3 slots) is still there to fill exactly.
-    gpu::TextureIndex a = gpu::create_texture_descriptor(&device, texture, null)!!;
-    gpu::TextureIndex b = gpu::create_texture_descriptor(&device, texture, null)!!;
-    gpu::TextureIndex c = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView a = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::TextureView b = gpu::create_texture_view(&device, texture, null)!!;
+    gpu::TextureView c = gpu::create_texture_view(&device, texture, null)!!;
     assert(a.is_valid() && b.is_valid() && c.is_valid(), "the failed batch left the full remaining headroom available");
 
-    gpu::destroy_texture_descriptor(&device, existing)!!;
-    gpu::destroy_texture_descriptor(&device, a)!!;
-    gpu::destroy_texture_descriptor(&device, b)!!;
-    gpu::destroy_texture_descriptor(&device, c)!!;
+    gpu::destroy_texture_view(&device, existing)!!;
+    gpu::destroy_texture_view(&device, a)!!;
+    gpu::destroy_texture_view(&device, b)!!;
+    gpu::destroy_texture_view(&device, c)!!;
 }
 
-fn void texture_descriptors_failed_batch_restores_full_view_capacity() @test {
+fn void texture_views_failed_batch_restores_full_view_capacity() @test {
     gpu::Device device = make_heap_test_device(32, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
@@ -595,18 +660,18 @@ fn void texture_descriptors_failed_batch_restores_full_view_capacity() @test {
             .base_layer  = i / 4,
             .layer_count = 1,
         };
-        gpu::TextureDescriptorDesc[2] descs = {
+        gpu::TextureViewCreateDesc[2] descs = {
             { .texture = texture, .view = failed_view },
             { .texture = stale_texture },
         };
-        gpu::TextureIndex[2] indices;
-        fault batch_fault = @catch(gpu::create_texture_descriptors(&device, descs[..], indices[..]));
+        gpu::TextureView[2] indices;
+        fault batch_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
         assert(batch_fault == gpu::INVALID_HANDLE, "a later stale texture faults the batch");
         assert(cached_texture_view_count(state, texture) == 0,
             "a failed batch restores the empty view cache");
     }
 
-    gpu::TextureIndex[vk::MAX_CACHED_VIEWS] live;
+    gpu::TextureView[vk::MAX_CACHED_VIEWS] live;
     for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
         gpu::TextureViewDesc valid_view = {
             .base_mip    = i % 4,
@@ -614,15 +679,15 @@ fn void texture_descriptors_failed_batch_restores_full_view_capacity() @test {
             .base_layer  = 2 + i / 4,
             .layer_count = 1,
         };
-        live[i] = gpu::create_texture_descriptor(&device, texture, &valid_view)!!;
+        live[i] = gpu::create_texture_view(&device, texture, &valid_view)!!;
     }
     assert(cached_texture_view_count(state, texture) == vk::MAX_CACHED_VIEWS,
         "all cache entries remain available after repeated failed batches");
 
-    foreach (index : live) gpu::destroy_texture_descriptor(&device, index)!!;
+    foreach (index : live) gpu::destroy_texture_view(&device, index)!!;
 }
 
-fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test {
+fn void texture_views_failed_batch_restores_multiple_created_views() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
@@ -647,12 +712,12 @@ fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test
         .base_layer  = 1,
         .layer_count = 1,
     };
-    gpu::TextureDescriptorDesc[3] descs = {
+    gpu::TextureViewCreateDesc[3] descs = {
         { .texture = texture, .view = first_view },
         { .texture = texture, .view = second_view },
         { .texture = stale_texture },
     };
-    gpu::TextureIndex[3] indices;
+    gpu::TextureView[3] indices;
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::INVALID_HANDLE,
@@ -660,11 +725,11 @@ fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test
         expected_identity:   false,
         expected_index:      0,
         expected_generation: 0,
-        expected_operation:  "create_texture_descriptors",
+        expected_operation:  "create_texture_views",
         expected_field:      "descs[].texture",
         expected_invariant:  "texture must identify a live generation",
     );
-    fault batch_fault = @catch(gpu::create_texture_descriptors(&device, descs[..], indices[..]));
+    fault batch_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
     assert(batch_fault == gpu::INVALID_HANDLE && capture.calls == 1 && capture.matched,
         "a later stale texture emits once after two new views");
     assert(cached_texture_view_count(state, texture) == 0,
@@ -674,7 +739,7 @@ fn void texture_descriptors_failed_batch_restores_multiple_created_views() @test
     state.debug_callback = null;
 }
 
-fn void texture_descriptors_failed_batch_preserves_existing_and_duplicate_views() @test {
+fn void texture_views_failed_batch_preserves_existing_and_duplicate_views() @test {
     gpu::Device device = make_heap_test_device(16, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
@@ -690,7 +755,7 @@ fn void texture_descriptors_failed_batch_preserves_existing_and_duplicate_views(
         .base_layer  = 0,
         .layer_count = 1,
     };
-    gpu::TextureIndex existing_index = gpu::create_texture_descriptor(&device, texture, &existing_view)!!;
+    gpu::TextureView existing_index = gpu::create_texture_view(&device, texture, &existing_view)!!;
     vk::CachedView existing_cache = slot.views[0];
 
     gpu::TextureViewDesc new_view = {
@@ -699,14 +764,14 @@ fn void texture_descriptors_failed_batch_preserves_existing_and_duplicate_views(
         .base_layer  = 1,
         .layer_count = 1,
     };
-    gpu::TextureDescriptorDesc[4] descs = {
+    gpu::TextureViewCreateDesc[4] descs = {
         { .texture = texture, .view = existing_view },
         { .texture = texture, .view = new_view },
         { .texture = texture, .view = new_view },
         { .texture = stale_texture },
     };
-    gpu::TextureIndex[4] indices;
-    fault batch_fault = @catch(gpu::create_texture_descriptors(&device, descs[..], indices[..]));
+    gpu::TextureView[4] indices;
+    fault batch_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
     assert(batch_fault == gpu::INVALID_HANDLE, "a fault after a duplicate new view rejects the batch");
     assert(cached_texture_view_count(state, texture) == 1,
         "rollback removes the one transaction-created view and preserves the existing view");
@@ -718,21 +783,21 @@ fn void texture_descriptors_failed_batch_preserves_existing_and_duplicate_views(
         && slot.views[0].layer_count == existing_cache.layer_count,
         "the pre-existing cache entry remains unchanged");
 
-    gpu::destroy_texture_descriptor(&device, existing_index)!!;
+    gpu::destroy_texture_view(&device, existing_index)!!;
 }
 
-fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
+fn void texture_views_mid_batch_fault_preserves_descriptor_state() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex[7] occupied;
+    gpu::TextureView[7] occupied;
     for (uint i = 0; i < 7; i++) {
-        occupied[i] = gpu::create_texture_descriptor(&device, texture, null)!!;
+        occupied[i] = gpu::create_texture_view(&device, texture, null)!!;
     }
-    gpu::TextureIndex released = occupied[0];
-    gpu::destroy_texture_descriptor(&device, released)!!;
+    gpu::TextureView released = occupied[0];
+    gpu::destroy_texture_view(&device, released)!!;
 
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
@@ -754,16 +819,16 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
         .base_layer  = 1,
         .layer_count = 1,
     };
-    gpu::TextureDescriptorDesc[2] descs = {
+    gpu::TextureViewCreateDesc[2] descs = {
         { .texture = texture, .view = view },
         { .texture = stale_texture },
     };
-    gpu::TextureIndex[2] indices = {
-        { .slot = 6, .generation = 111 },
-        { .slot = 7, .generation = 222 },
+    gpu::TextureView[2] indices = {
+        { .owner = 101, .index.value = 6, .generation = 111 },
+        { .owner = 202, .index.value = 7, .generation = 222 },
     };
-    gpu::TextureIndex[2] outputs_before = indices;
-    fault batch_fault = @catch(gpu::create_texture_descriptors(&device, descs[..], indices[..]));
+    gpu::TextureView[2] outputs_before = indices;
+    fault batch_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
     assert(batch_fault == gpu::INVALID_HANDLE, "a mid-batch destroyed-texture reference faults INVALID_HANDLE");
 
     assert(heap.texture_free_count == free_count_before, "failure preserves free-list count");
@@ -778,40 +843,42 @@ fn void texture_descriptors_mid_batch_fault_preserves_descriptor_state() @test {
             "failure preserves every descriptor cell and generation");
         assert(heap.texture_free[i] == free_before[i], "failure preserves free-list ordering and contents");
     }
-    assert(indices[0].slot == outputs_before[0].slot
+    assert(indices[0].owner == outputs_before[0].owner
+        && indices[0].index == outputs_before[0].index
         && indices[0].generation == outputs_before[0].generation
-        && indices[1].slot == outputs_before[1].slot
+        && indices[1].owner == outputs_before[1].owner
+        && indices[1].index == outputs_before[1].index
         && indices[1].generation == outputs_before[1].generation,
-        "failure leaves output indices untouched");
+        "failure leaves every output-view field untouched");
 
-    gpu::TextureDescriptorDesc[2] valid = {
+    gpu::TextureViewCreateDesc[2] valid = {
         { .texture = texture },
         { .texture = texture },
     };
-    gpu::TextureIndex[2] committed;
-    gpu::create_texture_descriptors(&device, valid[..], committed[..])!!;
+    gpu::TextureView[2] committed;
+    gpu::create_texture_views(&device, valid[..], committed[..])!!;
     assert(committed[0].is_valid() && committed[1].is_valid(),
         "a two-item batch commits using one free and one never-used slot");
-    foreach (index : committed) gpu::destroy_texture_descriptor(&device, index)!!;
+    foreach (index : committed) gpu::destroy_texture_view(&device, index)!!;
     for (uint i = 1; i < 7; i++) {
-        gpu::destroy_texture_descriptor(&device, occupied[i])!!;
+        gpu::destroy_texture_view(&device, occupied[i])!!;
     }
 }
 
-fn void texture_descriptors_batch_created_descriptor_blocks_texture_destroy() @test {
+fn void texture_views_batch_created_descriptor_blocks_texture_destroy() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
 
-    gpu::TextureDescriptorDesc[2] descs;
+    gpu::TextureViewCreateDesc[2] descs;
     foreach (&desc : descs) *desc = { .texture = texture };
-    gpu::TextureIndex[2] indices;
-    gpu::create_texture_descriptors(&device, descs[..], indices[..])!!;
+    gpu::TextureView[2] indices;
+    gpu::create_texture_views(&device, descs[..], indices[..])!!;
 
     fault in_use_fault = @catch(gpu::destroy_texture(&device, texture));
     assert(in_use_fault == gpu::RESOURCE_IN_USE, "a batch-created descriptor blocks destroy_texture the same as a single-created one");
 
-    foreach (index : indices) gpu::destroy_texture_descriptor(&device, index)!!;
+    foreach (index : indices) gpu::destroy_texture_view(&device, index)!!;
     gpu::destroy_texture(&device, texture)!!;
 }
 
@@ -942,7 +1009,7 @@ fn void sampler_invalid_enum_values_are_rejected() @test {
 fn void live_descriptors_block_device_destruction() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     gpu::TextureHandle texture = make_heap_texture(&device);
-    gpu::TextureIndex descriptor = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView descriptor = gpu::create_texture_view(&device, texture, null)!!;
 
     gpu::SamplerDesc desc = {};
     gpu::Sampler sampler = gpu::intern_sampler(&device, &desc)!!;
@@ -950,7 +1017,7 @@ fn void live_descriptors_block_device_destruction() @test {
 
     assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
         "live descriptors block device destruction");
-    gpu::destroy_texture_descriptor(&device, descriptor)!!;
+    gpu::destroy_texture_view(&device, descriptor)!!;
     gpu::destroy_texture(&device, texture)!!;
     gpu::destroy_device(&device)!!;
 }
@@ -1240,9 +1307,9 @@ fn void descriptor_heap_raised_capacity_creates() @test {
     assert(gpu::get_device_caps(&device)!!.max_sampler_descriptors == 512, "caps report the created sampler capacity");
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::TextureIndex index = gpu::create_texture_descriptor(&device, texture, null)!!;
+    gpu::TextureView index = gpu::create_texture_view(&device, texture, null)!!;
     assert(index.is_valid(), "raised-capacity heap creates and serves a descriptor");
-    gpu::destroy_texture_descriptor(&device, index)!!;
+    gpu::destroy_texture_view(&device, index)!!;
 }
 
 fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
@@ -1255,8 +1322,8 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
     state.debug_callback = &capture_descriptor_diagnostic;
     state.debug_user_data = &capture;
 
-    gpu::TextureDescriptorDesc[1] one = { { .texture = texture } };
-    gpu::TextureIndex[2] too_many_outputs;
+    gpu::TextureViewCreateDesc[1] one = { { .texture = texture } };
+    gpu::TextureView[2] too_many_outputs;
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::INVALID_ARGUMENT,
@@ -1264,18 +1331,18 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_identity:   false,
         expected_index:      0,
         expected_generation: 0,
-        expected_operation:  "create_texture_descriptors",
-        expected_field:      "out_indices",
+        expected_operation:  "create_texture_views",
+        expected_field:      "out_views",
         expected_invariant:  "output count must match descriptor count",
     );
-    fault lengths = @catch(gpu::create_texture_descriptors(&device, one[..], too_many_outputs[..]));
+    fault lengths = @catch(gpu::create_texture_views(&device, one[..], too_many_outputs[..]));
     assert(lengths == gpu::INVALID_ARGUMENT && capture.calls == 1 && capture.matched,
         "batch length rejection reports exact context");
 
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
-    gpu::TextureDescriptorDesc[1] stale_descs = { { .texture = stale_texture } };
-    gpu::TextureIndex[1] stale_outputs = { { .slot = 19, .generation = 7 } };
+    gpu::TextureViewCreateDesc[1] stale_descs = { { .texture = stale_texture } };
+    gpu::TextureView[1] stale_outputs = { { .owner = 17, .index.value = 19, .generation = 7 } };
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::INVALID_HANDLE,
@@ -1283,19 +1350,20 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_identity:   false,
         expected_index:      0,
         expected_generation: 0,
-        expected_operation:  "create_texture_descriptors",
+        expected_operation:  "create_texture_views",
         expected_field:      "descs[].texture",
         expected_invariant:  "texture must identify a live generation",
     );
-    fault stale = @catch(gpu::create_texture_descriptors(&device, stale_descs[..], stale_outputs[..]));
+    fault stale = @catch(gpu::create_texture_views(&device, stale_descs[..], stale_outputs[..]));
     assert(stale == gpu::INVALID_HANDLE && capture.calls == 2 && capture.matched,
         "batch stale texture rejection omits unvalidated identity");
-    assert(stale_outputs[0].slot == 19 && stale_outputs[0].generation == 7,
+    assert(stale_outputs[0].owner == 17 && stale_outputs[0].index.value == 19
+        && stale_outputs[0].generation == 7,
         "batch stale texture rejection preserves outputs");
 
     gpu::TextureViewDesc bad_view = { .format = gpu::Format.R32_UINT };
-    gpu::TextureDescriptorDesc[1] bad_view_descs = { { .texture = texture, .view = bad_view } };
-    gpu::TextureIndex[1] bad_view_outputs = { { .slot = 23, .generation = 9 } };
+    gpu::TextureViewCreateDesc[1] bad_view_descs = { { .texture = texture, .view = bad_view } };
+    gpu::TextureView[1] bad_view_outputs = { { .owner = 29, .index.value = 23, .generation = 9 } };
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::INVALID_ARGUMENT,
@@ -1303,19 +1371,20 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_identity:   true,
         expected_index:      texture.index,
         expected_generation: texture.generation,
-        expected_operation:  "create_texture_descriptors",
+        expected_operation:  "create_texture_views",
         expected_field:      "descs[].view",
         expected_invariant:  "view must select a valid texture subresource range and format",
     );
-    fault view = @catch(gpu::create_texture_descriptors(&device, bad_view_descs[..], bad_view_outputs[..]));
+    fault view = @catch(gpu::create_texture_views(&device, bad_view_descs[..], bad_view_outputs[..]));
     assert(view == gpu::INVALID_ARGUMENT && capture.calls == 3 && capture.matched,
         "batch view rejection reports resolved texture identity");
-    assert(bad_view_outputs[0].slot == 23 && bad_view_outputs[0].generation == 9,
+    assert(bad_view_outputs[0].owner == 29 && bad_view_outputs[0].index.value == 23
+        && bad_view_outputs[0].generation == 9,
         "batch view rejection preserves outputs");
 
-    gpu::TextureDescriptorDesc[2] over_capacity;
+    gpu::TextureViewCreateDesc[2] over_capacity;
     foreach (&desc : over_capacity) *desc = { .texture = texture };
-    gpu::TextureIndex[2] capacity_outputs;
+    gpu::TextureView[2] capacity_outputs;
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::DESCRIPTOR_HEAP_FULL,
@@ -1323,11 +1392,11 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_identity:   false,
         expected_index:      0,
         expected_generation: 0,
-        expected_operation:  "create_texture_descriptors",
+        expected_operation:  "create_texture_views",
         expected_field:      "DeviceDesc.texture_descriptor_capacity",
         expected_invariant:  "must fit the complete descriptor batch",
     );
-    fault capacity = @catch(gpu::create_texture_descriptors(&device, over_capacity[..], capacity_outputs[..]));
+    fault capacity = @catch(gpu::create_texture_views(&device, over_capacity[..], capacity_outputs[..]));
     assert(capacity == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 4 && capture.matched,
         "batch capacity rejection reports exact context");
 
@@ -1404,12 +1473,12 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
     state.debug_callback = null;
 }
 
-fn void texture_descriptor_view_cache_exhaustion_reports_distinct_context() @test {
+fn void texture_view_cache_exhaustion_reports_distinct_context() @test {
     gpu::Device device = make_heap_test_device(16, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::TextureIndex[vk::MAX_CACHED_VIEWS] live;
+    gpu::TextureView[vk::MAX_CACHED_VIEWS] live;
     for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
         gpu::TextureViewDesc view = {
             .base_mip    = i % 4,
@@ -1417,7 +1486,7 @@ fn void texture_descriptor_view_cache_exhaustion_reports_distinct_context() @tes
             .base_layer  = i / 4,
             .layer_count = 1,
         };
-        live[i] = gpu::create_texture_descriptor(&device, texture, &view)!!;
+        live[i] = gpu::create_texture_view(&device, texture, &view)!!;
     }
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -1437,16 +1506,16 @@ fn void texture_descriptor_view_cache_exhaustion_reports_distinct_context() @tes
         expected_identity:   true,
         expected_index:      texture.index,
         expected_generation: texture.generation,
-        expected_operation:  "create_texture_descriptor",
+        expected_operation:  "create_texture_view",
         expected_field:      "texture view cache",
         expected_invariant:  "texture must have free cached-view capacity",
     );
-    fault full = @catch(gpu::create_texture_descriptor(&device, texture, &overflow));
+    fault full = @catch(gpu::create_texture_view(&device, texture, &overflow));
     assert(full == gpu::SLOT_TABLE_FULL && capture.calls == 1 && capture.matched,
         "view-cache exhaustion has distinct structured context");
 
     state.debug_callback = null;
-    foreach (index : live) gpu::destroy_texture_descriptor(&device, index)!!;
+    foreach (index : live) gpu::destroy_texture_view(&device, index)!!;
 }
 
 fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @test {
@@ -1510,13 +1579,13 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
         .expected_identity   = true,
         .expected_index      = texture.index,
         .expected_generation = texture.generation,
-        .expected_operation  = "create_texture_descriptor",
+        .expected_operation  = "create_texture_view",
         .expected_text       = "Vulkan device memory exhausted",
         .expected_result     = (int)vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
     };
     fault view_backend = @catch(gpu::vk::check_texture_view_backend_result(
         state:     &state,
-        operation: "create_texture_descriptor",
+        operation: "create_texture_view",
         texture:   texture,
         slot:      &texture_slot,
         result:    vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
