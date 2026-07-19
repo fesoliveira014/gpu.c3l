@@ -23,7 +23,6 @@ fn double record_global_barriers(gpu::Device* device) {
     long elapsed_ns = (long)start.to_now();
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
-    gpu::discard_commands(&commands)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
@@ -43,7 +42,6 @@ fn double record_buffer_barriers(gpu::Device* device, gpu::GpuSpan span) {
     long elapsed_ns = (long)start.to_now();
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
-    gpu::discard_commands(&commands)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
@@ -66,7 +64,6 @@ fn double record_indirect_dispatches(
     long elapsed_ns = (long)start.to_now();
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
-    gpu::discard_commands(&commands)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
