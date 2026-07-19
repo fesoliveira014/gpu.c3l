@@ -83,10 +83,9 @@ fn int bench_worker(void* arg) {
     return 0;
 }
 
-<* Wall-clock ns/descriptor across `workers` concurrent workers, each running
-   BENCH_ITERS_PER_WORKER descriptor create+destroy round trips of `phase`
-   (batched phase: BENCH_ITERS_PER_WORKER/BENCH_BATCH_SIZE calls of
-   BENCH_BATCH_SIZE each) against its own pool texture. *>
+<* Wall-clock work across `workers` concurrent workers. Texture phases create
+   and destroy descriptors; the sampler phase measures intern and stable
+   publication lookup hits. *>
 fn double run_phase_worker_count(gpu::Device* device, BenchPhase phase, gpu::TextureHandle[] textures, uint workers) {
     BenchWorkerArgs[BENCH_MAX_WORKERS] args;
     Thread[BENCH_MAX_WORKERS] threads;

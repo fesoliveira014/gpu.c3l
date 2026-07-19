@@ -22,6 +22,22 @@ fn SamplerKey? sampler_key_from_desc(
     VkDeviceState* state,
     gpu::SamplerDesc* desc,
 ) @private {
+    ZString invalid_enum_field = sampler_desc_invalid_enum_field(desc);
+    if (invalid_enum_field != null) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "intern_sampler",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      invalid_enum_field,
+            invariant:           "must name a defined enum value",
+            backend_text:        null,
+        )~;
+    }
     if (!math::is_finite(desc.mip_lod_bias)) {
         return report_contract_failure(
             state:               state,
@@ -34,6 +50,22 @@ fn SamplerKey? sampler_key_from_desc(
             debug_name:          null,
             rejected_field:      "SamplerDesc.mip_lod_bias",
             invariant:           "must be finite",
+            backend_text:        null,
+        )~;
+    }
+    if (desc.mip_lod_bias < -state.caps.max_sampler_lod_bias
+        || desc.mip_lod_bias > state.caps.max_sampler_lod_bias) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "intern_sampler",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "SamplerDesc.mip_lod_bias",
+            invariant:           "absolute value must not exceed DeviceCaps.max_sampler_lod_bias",
             backend_text:        null,
         )~;
     }
@@ -228,7 +260,12 @@ fn gpu::Sampler? vk_intern_sampler(
     check_backend_result(
         state:     state,
         operation: "intern_sampler",
-        result:    vk::create_sampler(state.device, &sampler_info, null, &native),
+        result:    vk::create_sampler(
+            device:        state.device,
+            p_create_info: &sampler_info,
+            p_allocator:   null,
+            p_sampler:     &native,
+        ),
     )!;
     set_object_name(
         state:         state,

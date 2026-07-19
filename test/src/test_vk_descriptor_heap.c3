@@ -867,6 +867,31 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
     gpu::Device device = make_heap_test_device(8, 8);
     defer destroy_test_device(&device)!!;
 
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::PhysicalDeviceProperties properties;
+    vk::get_physical_device_properties(state.physical_device, &properties);
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    assert(caps.max_sampler_lod_bias == properties.limits.max_sampler_lod_bias,
+        "caps expose the selected device mip bias limit");
+    float bias_limit = caps.max_sampler_lod_bias;
+    gpu::SamplerDesc positive_limit = { .mip_lod_bias = bias_limit };
+    gpu::SamplerDesc negative_limit = { .mip_lod_bias = -bias_limit };
+    assert(gpu::intern_sampler(&device, &positive_limit)!!.is_valid(),
+        "the positive device mip bias limit is accepted");
+    assert(gpu::intern_sampler(&device, &negative_limit)!!.is_valid(),
+        "the negative device mip bias limit is accepted");
+
+    gpu::SamplerDesc above_limit = { .mip_lod_bias = bias_limit + 1.0f };
+    fault above_limit_fault = @catch(gpu::intern_sampler(&device, &above_limit));
+    assert(above_limit_fault == gpu::INVALID_ARGUMENT,
+        "mip bias above the device limit faults INVALID_ARGUMENT");
+
+    gpu::SamplerDesc below_limit = { .mip_lod_bias = -bias_limit - 1.0f };
+    fault below_limit_fault = @catch(gpu::intern_sampler(&device, &below_limit));
+    assert(below_limit_fault == gpu::INVALID_ARGUMENT,
+        "mip bias below the device limit faults INVALID_ARGUMENT");
+
     gpu::SamplerDesc nan_bias = { .mip_lod_bias = float::nan };
     fault bias_fault = @catch(gpu::intern_sampler(&device, &nan_bias));
     assert(bias_fault == gpu::INVALID_ARGUMENT, "non-finite mip bias faults INVALID_ARGUMENT");
@@ -886,6 +911,32 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
     gpu::SamplerDesc nan_anisotropy = { .anisotropy_enable = true, .max_anisotropy = float::nan };
     fault anisotropy_fault = @catch(gpu::intern_sampler(&device, &nan_anisotropy));
     assert(anisotropy_fault == gpu::INVALID_ARGUMENT, "non-finite anisotropy faults INVALID_ARGUMENT");
+}
+
+fn void sampler_invalid_enum_values_are_rejected() @test {
+    gpu::Device device = make_heap_test_device(8, 8);
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    uint count_before = state.samplers.count;
+
+    gpu::SamplerDesc invalid_filter = {};
+    *((int*)&invalid_filter.min_filter) = 99;
+    assert(@catch(gpu::intern_sampler(&device, &invalid_filter))
+        == gpu::INVALID_ARGUMENT, "invalid filter ordinal is rejected");
+
+    gpu::SamplerDesc invalid_address = {};
+    *((int*)&invalid_address.address_w) = -1;
+    assert(@catch(gpu::intern_sampler(&device, &invalid_address))
+        == gpu::INVALID_ARGUMENT, "invalid address-mode ordinal is rejected");
+
+    gpu::SamplerDesc invalid_compare = { .compare_enable = true };
+    *((int*)&invalid_compare.compare) = 99;
+    assert(@catch(gpu::intern_sampler(&device, &invalid_compare))
+        == gpu::INVALID_ARGUMENT, "invalid enabled compare ordinal is rejected");
+
+    assert(state.samplers.count == count_before,
+        "invalid enum values do not mutate the sampler table");
 }
 
 fn void live_descriptors_block_device_destruction() @test {
@@ -1280,6 +1331,41 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
     assert(capacity == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 4 && capture.matched,
         "batch capacity rejection reports exact context");
 
+    gpu::SamplerDesc invalid_bias = {
+        .mip_lod_bias = state.caps.max_sampler_lod_bias + 1.0f,
+    };
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        expected_kind:       gpu::DebugResourceKind.SAMPLER,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "intern_sampler",
+        expected_field:      "SamplerDesc.mip_lod_bias",
+        expected_invariant:  "absolute value must not exceed DeviceCaps.max_sampler_lod_bias",
+    );
+    fault bias = @catch(gpu::intern_sampler(&device, &invalid_bias));
+    assert(bias == gpu::INVALID_ARGUMENT && capture.calls == 5 && capture.matched,
+        "over-limit sampler LOD bias reports exact context");
+
+    gpu::SamplerDesc invalid_filter = {};
+    *((int*)&invalid_filter.min_filter) = 99;
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        expected_kind:       gpu::DebugResourceKind.SAMPLER,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "intern_sampler",
+        expected_field:      "SamplerDesc.min_filter",
+        expected_invariant:  "must name a defined enum value",
+    );
+    fault filter = @catch(gpu::intern_sampler(&device, &invalid_filter));
+    assert(filter == gpu::INVALID_ARGUMENT && capture.calls == 6 && capture.matched,
+        "invalid sampler enum reports exact context");
+
     gpu::SamplerDesc invalid_anisotropy = { .anisotropy_enable = true, .max_anisotropy = 0.5f };
     float supported_anisotropy = state.max_sampler_anisotropy;
     if (supported_anisotropy <= 0) state.max_sampler_anisotropy = 16.0f;
@@ -1295,7 +1381,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_invariant:  "must be at least 1.0 when anisotropy is enabled",
     );
     fault anisotropy = @catch(gpu::intern_sampler(&device, &invalid_anisotropy));
-    assert(anisotropy == gpu::INVALID_ARGUMENT && capture.calls == 5 && capture.matched,
+    assert(anisotropy == gpu::INVALID_ARGUMENT && capture.calls == 7 && capture.matched,
         "invalid sampler anisotropy reports exact context");
 
     state.max_sampler_anisotropy = 0;
@@ -1312,7 +1398,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_invariant:  "device must support sampler anisotropy",
     );
     fault unsupported = @catch(gpu::intern_sampler(&device, &unsupported_anisotropy));
-    assert(unsupported == gpu::UNSUPPORTED_FEATURE && capture.calls == 6 && capture.matched,
+    assert(unsupported == gpu::UNSUPPORTED_FEATURE && capture.calls == 8 && capture.matched,
         "unsupported sampler anisotropy reports exact context");
     state.max_sampler_anisotropy = supported_anisotropy;
     state.debug_callback = null;

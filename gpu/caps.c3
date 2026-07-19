@@ -72,6 +72,8 @@ struct DeviceCaps {
     usz  min_uniform_alignment;
     usz  min_storage_alignment;
     usz  min_texel_buffer_alignment;
+    // Maximum absolute SamplerDesc.mip_lod_bias.
+    float max_sampler_lod_bias;
     // 0 means anisotropic filtering is unsupported.
     float max_sampler_anisotropy;
 }

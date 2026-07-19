@@ -304,6 +304,16 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "DeviceCaps",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "max_sampler_lod_bias",
+                                "type": {"name": "float"},
+                            },
+                        ],
+                    },
+                    {
                         "name": "MemoryClass",
                         "kind": "enum",
                         "members": [
@@ -1200,6 +1210,18 @@ class PublicApiCheckTests(unittest.TestCase):
         sampler["members"][2]["name"] = "revision"
         self.assertIn(
             "Sampler must match the exact identity schema",
+            check_public_api.validate_document(document),
+        )
+
+    def test_requires_sampler_lod_bias_capability(self) -> None:
+        document = valid_document()
+        caps = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "DeviceCaps"
+        )
+        caps["members"].clear()
+        self.assertIn(
+            "DeviceCaps.max_sampler_lod_bias must be a float",
             check_public_api.validate_document(document),
         )
 
