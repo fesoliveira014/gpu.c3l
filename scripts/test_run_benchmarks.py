@@ -51,6 +51,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         self.assertIn("repetitions=5", runner.BENCHMARK_METHODS["command_record_bench"][0])
         self.assertEqual(
+            runner.BENCHMARK_METHODS["pipeline_cache_bench"],
+            ("cold=200; duplicate=200000; batch=64x2000", "ns/create"),
+        )
+        self.assertEqual(
             runner.BENCHMARK_METHODS["descriptor_churn_bench"],
             ("320/worker; workers=1,2,4", "ns/descriptor, ns/op"),
         )

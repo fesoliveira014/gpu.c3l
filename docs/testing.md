@@ -353,8 +353,10 @@ The advisory benchmark runner builds these seven executable targets with
 `command_record_bench`, `pipeline_cache_bench`, and
 `async_overlap_bench`. Descriptor churn reports texture single/batch work in
 `ns/descriptor` and sampler intern-hit plus stable-publication lookup work in
-`ns/op`. Resource operations report texture create/destroy, shader-code
-preparation, allocation allocate/free, and mixed work at 1/2/4 workers in
+`ns/op`. Pipeline-cache work reports cold creation, cached single creation, and
+cached transactional batch creation in `ns/create`. Resource operations report
+texture create/destroy, shader-code preparation, allocation allocate/free, and
+mixed work at 1/2/4 workers in
 `ns/op`. The allocation target must emit exactly two phases for
 4,000 64-byte, 16-byte-aligned `CPU_WRITE` allocations:
 `cpu_write allocate` in `ns/allocation`, then `cpu_write free` in

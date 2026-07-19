@@ -4,6 +4,7 @@ import gpu @public;
 import vk;
 import std::thread;
 import std::atomic::types;
+import std::core::mem;
 
 // Concrete slot table avoids a c3c 0.8.0 generic-instantiation codegen failure.
 const uint PIPELINE_FREE_NONE = 0;
@@ -12,7 +13,6 @@ struct PipelineSlot {
     vk::Pipeline       pipeline;
     vk::PipelineLayout layout;
     uint               entry;
-    gpu::RasterState   raster;
     Atomic{uint}        validation_references;
     gpu::DepthState    depth;
 }
@@ -80,16 +80,58 @@ fn void? PipelineTable.free(&self, gpu::PipelineHandle h) {
     self.free_head = idx + 1;
 }
 
-<* Dedup through the descriptor cache keyed on shader + push size. Layout is
-   the shared per-push-size compute layout. The ComputePipelineCreateInfo
-   stage/layout are assigned directly rather than through the builder setters:
-   set_stage takes the embedded struct by value, and that by-value flow
-   crashes c3c 0.8.0 codegen. *>
-fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::ComputePipelineDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+fn uint PipelineTable.available_count(&self) {
+    uint count = (uint)self.slots.len - self.next_new;
+    for (uint next = self.free_head; next != PIPELINE_FREE_NONE; next = self.slots[next - 1].next_free) {
+        if (can_allocate_handle_generation(self.slots[next - 1].generation)) count++;
+    }
+    return count;
+}
+
+fn bool pipeline_handle_capacity_available(VkDeviceState* state, usz required) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    return (usz)state.pipelines.available_count() >= required;
+}
+
+fn void? validate_compute_pipeline_desc(
+    VkDeviceState* state,
+    gpu::ComputePipelineDesc* desc,
+) {
     if (desc.push_constant_size < gpu::RootPush::size
         || desc.push_constant_size % 4 != 0
-        || desc.push_constant_size > state.caps.max_push_constant_size) return gpu::INVALID_ARGUMENT~;
+        || desc.push_constant_size > state.caps.max_push_constant_size) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+}
+
+fn bool compute_pipeline_is_cached(
+    VkDeviceState* state,
+    gpu::ComputePipelineDesc* desc,
+) {
+    PipelineKey key = build_compute_key(desc);
+    ulong hash = hash_key(&key);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    return find_entry(
+        &state.pipeline_cache,
+        hash,
+        &key,
+        &desc.shader,
+        null,
+    ) != PIPELINE_ENTRY_NONE;
+}
+
+<* Dedup through the descriptor cache keyed on shader + push size. A batch may
+   provide one temporary shader module shared by all descriptions using the
+   same exact ShaderCode value. *>
+fn gpu::PipelineHandle? create_compute_pipeline_from_module(
+    gpu::Device* device,
+    gpu::ComputePipelineDesc* desc,
+    PipelineShaderModule* batch_shader,
+) {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    validate_compute_pipeline_desc(state, desc)!;
     PipelineKey key = build_compute_key(desc);
     ulong hash = hash_key(&key);
     {
@@ -118,14 +160,19 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     }
 
     vk::PipelineLayout layout = get_compute_layout(state, desc.push_constant_size)!;
-    PipelineShaderModule shader = create_pipeline_shader_module(
-        state:          state,
-        code:           &desc.shader,
-        expected_stage: gpu::ShaderStage.COMPUTE,
-        operation:      "create_compute_pipeline",
-        rejected_field: "ComputePipelineDesc.shader",
-    )!;
-    defer destroy_pipeline_shader_module(state, &shader);
+    PipelineShaderModule owned_shader;
+    defer destroy_pipeline_shader_module(state, &owned_shader);
+    PipelineShaderModule* shader = batch_shader;
+    if (shader == null) {
+        owned_shader = create_pipeline_shader_module(
+            state:          state,
+            code:           &desc.shader,
+            expected_stage: gpu::ShaderStage.COMPUTE,
+            operation:      "create_compute_pipeline",
+            rejected_field: "ComputePipelineDesc.shader",
+        )!;
+        shader = &owned_shader;
+    }
 
     vk::ComputePipelineCreateInfo pipe_info = vk::compute_pipeline_create_info();
     pipe_info.stage = vk::pipeline_shader_stage_create_info()
@@ -149,6 +196,7 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
             p_pipelines:       &pipeline,
         ),
     )!;
+    state.pipelines_created++;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.PIPELINE,
@@ -199,6 +247,78 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(gpu::Device* device, gpu::Com
     return gpu::SLOT_TABLE_FULL~;
 }
 
+fn gpu::PipelineHandle? vk_create_compute_pipeline(
+    gpu::Device* device,
+    gpu::ComputePipelineDesc* desc,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    state.pipeline_creation_mutex.lock()!!;
+    defer state.pipeline_creation_mutex.unlock();
+    return create_compute_pipeline_from_module(device, desc, null);
+}
+
+fn void? vk_create_compute_pipelines(
+    gpu::Device* device,
+    gpu::ComputePipelineDesc[] descs,
+    gpu::PipelineHandle[] out_pipelines,
+) @private {
+    if (out_pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
+    if (descs.len == 0) return;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    state.pipeline_creation_mutex.lock()!!;
+    defer state.pipeline_creation_mutex.unlock();
+
+    foreach (&desc : descs) validate_compute_pipeline_desc(state, desc)!;
+    if (!pipeline_handle_capacity_available(state, descs.len)) {
+        return gpu::SLOT_TABLE_FULL~;
+    }
+
+    @pool() {
+        PipelineBatchShader[] shaders = mem::talloc_array(PipelineBatchShader, descs.len);
+        PipelineShaderModule*[] native_shaders =
+            mem::talloc_array(PipelineShaderModule*, descs.len);
+        uint shader_count = 0;
+        defer destroy_pipeline_batch_shaders(state, shaders, shader_count);
+        foreach (i, &desc : descs) {
+            native_shaders[i] = null;
+            if (compute_pipeline_is_cached(state, desc)) continue;
+            native_shaders[i] = get_pipeline_batch_shader(
+                state:          state,
+                code:           &desc.shader,
+                expected_stage: gpu::ShaderStage.COMPUTE,
+                operation:      "create_compute_pipelines",
+                rejected_field: "ComputePipelineDesc.shader",
+                shaders:        shaders,
+                shader_count:   &shader_count,
+            )!;
+        }
+
+        gpu::PipelineHandle[] created = mem::talloc_array(gpu::PipelineHandle, descs.len);
+        usz created_count = 0;
+        foreach (i, &desc : descs) {
+            if (pipeline_creation_should_fail(state, (usz)i)) {
+                for (usz rollback = 0; rollback < created_count; rollback++) {
+                    vk_destroy_pipeline(device, created[rollback])!!;
+                }
+                return gpu::PIPELINE_CREATE_FAILED~;
+            }
+            gpu::PipelineHandle? created_optional = create_compute_pipeline_from_module(
+                device,
+                desc,
+                native_shaders[i],
+            );
+            if (catch create_fault = created_optional) {
+                for (usz rollback = 0; rollback < created_count; rollback++) {
+                    vk_destroy_pipeline(device, created[rollback])!!;
+                }
+                return create_fault~;
+            }
+            created[i] = created_optional;
+            created_count++;
+        }
+        foreach (i, pipeline : created) out_pipelines[i] = pipeline;
+    };
+}
 fn void? vk_destroy_pipeline(gpu::Device* device, gpu::PipelineHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     state.resource_mutex.lock()!!;

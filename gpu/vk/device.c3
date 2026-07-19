@@ -110,6 +110,7 @@ struct VkDeviceState {
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;
+    Mutex                      pipeline_creation_mutex;
     Mutex                      texture_view_cache_mutex;
     Mutex                      command_mutex;
     bool                       compute_queue_distinct;
@@ -129,6 +130,10 @@ struct VkDeviceState {
     uint                       submitted_command_reserved;
     ulong                      command_buffers_allocated;
     ulong                      command_buffers_freed;
+    ulong                      pipeline_shader_modules_created;
+    ulong                      pipelines_created;
+    bool                       pipeline_creation_failure_enabled;
+    usz                        pipeline_creation_failure_index;
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
@@ -211,11 +216,13 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .create_texture_views       = &vk_create_texture_views,
     .intern_sampler             = &vk_intern_sampler,
     .publish_sampler            = &vk_publish_sampler,
-    .create_compute_pipeline = &vk_create_compute_pipeline,
-    .create_graphics_pipeline = &vk_create_graphics_pipeline,
-    .destroy_pipeline        = &vk_destroy_pipeline,
-    .get_pipeline_cache_size = &vk_get_pipeline_cache_size,
-    .get_pipeline_cache_data = &vk_get_pipeline_cache_data,
+    .create_compute_pipeline   = &vk_create_compute_pipeline,
+    .create_graphics_pipeline  = &vk_create_graphics_pipeline,
+    .create_compute_pipelines  = &vk_create_compute_pipelines,
+    .create_graphics_pipelines = &vk_create_graphics_pipelines,
+    .destroy_pipeline          = &vk_destroy_pipeline,
+    .get_pipeline_cache_size   = &vk_get_pipeline_cache_size,
+    .get_pipeline_cache_data   = &vk_get_pipeline_cache_data,
     .cmd_dispatch            = &vk_cmd_dispatch,
     .cmd_begin_render_pass   = &vk_cmd_begin_render_pass,
     .cmd_set_viewport        = &vk_cmd_set_viewport,
@@ -341,6 +348,7 @@ fn gpu::Device? create_vk_device_with_selection(
     state.debug_user_data = desc.debug_user_data;
     state.debug_names = desc.enable_debug_names;
     state.resource_mutex.init()!;
+    state.pipeline_creation_mutex.init()!;
     state.texture_view_cache_mutex.init()!;
     state.command_mutex.init()!;
 
@@ -768,6 +776,7 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
     }
     state.instance = (vk::Instance)null;
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
+    if (state.pipeline_creation_mutex.is_initialized()) (void)state.pipeline_creation_mutex.destroy();
     if (state.texture_view_cache_mutex.is_initialized()) (void)state.texture_view_cache_mutex.destroy();
     if (state.command_mutex.is_initialized())        (void)state.command_mutex.destroy();
     if (state.presentation.queue_mutex.is_initialized()) (void)state.presentation.queue_mutex.destroy();

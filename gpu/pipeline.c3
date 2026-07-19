@@ -109,7 +109,7 @@ struct DepthState {
     CompareOp compare;
 }
 
-<* Rasterizer state; cull_mode and front_face apply per handle at draw time. *>
+<* Immutable rasterizer state in graphics pipeline identity. *>
 struct RasterState {
     CullMode    cull_mode;
     FrontFace   front_face;
@@ -255,7 +255,38 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     return pipeline;
 }
 
-<* Counterpart of the pipeline creates, once per returned handle; descriptors aliasing one backend pipeline are refcounted. *>
+<* Create compute pipelines transactionally. Output count must match descriptor
+   count; an empty batch succeeds. A fault leaves every output unchanged. *>
+fn void? create_compute_pipelines(
+    Device* device,
+    ComputePipelineDesc[] descs,
+    PipelineHandle[] out_pipelines,
+) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
+    if (descs.len == 0) return;
+    operation.vtable.create_compute_pipelines(device, descs, out_pipelines)!;
+    for (usz i = 0; i < descs.len; i++) retain_device_children(&operation);
+}
+
+<* Create graphics pipelines transactionally. Output count must match descriptor
+   count; an empty batch succeeds. A fault leaves every output unchanged. *>
+fn void? create_graphics_pipelines(
+    Device* device,
+    GraphicsPipelineDesc[] descs,
+    PipelineHandle[] out_pipelines,
+) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
+    if (descs.len == 0) return;
+    operation.vtable.create_graphics_pipelines(device, descs, out_pipelines)!;
+    for (usz i = 0; i < descs.len; i++) retain_device_children(&operation);
+}
+
+<* Release one returned handle. Descriptions sharing one backend pipeline are
+   refcounted. *>
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);

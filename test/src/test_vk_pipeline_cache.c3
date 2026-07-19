@@ -5,9 +5,8 @@ import gpu::vk @public;
 import vk;
 import std::core::mem;
 
-// Headless (lavapipe): pipeline dedup cache. Entry accounting across aliases,
-// refcounted destroy, shared layouts, dynamic-state replay proven by drawing
-// through two aliases of one cache entry with different cull state.
+// Headless (lavapipe): deterministic pipeline identity, transactional batches,
+// refcounted cache entries, shared layouts, and dynamic viewport/scissor state.
 
 const char[*] CACHE_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
 const char[*] CACHE_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
@@ -101,12 +100,25 @@ fn void dynamic_state_and_blend_normalization_share_entries() @test {
     gpu::PipelineHandle base = gpu::create_graphics_pipeline(&device, &desc)!!;
     defer gpu::destroy_pipeline(&device, base)!!;
 
+    gpu::GraphicsPipelineDesc depth_variant = desc;
+    depth_variant.depth = {
+        .test_enable  = true,
+        .write_enable = true,
+        .compare      = gpu::CompareOp.LESS,
+    };
+    gpu::PipelineHandle separate_depth =
+        gpu::create_graphics_pipeline(&device, &depth_variant)!!;
+    defer gpu::destroy_pipeline(&device, separate_depth)!!;
+    assert(cache_entry_count(&device) == 1,
+        "separate depth state does not alter graphics pipeline identity");
+
     gpu::GraphicsPipelineDesc culled = desc;
     culled.raster.cull_mode = gpu::CullMode.BACK;
-    culled.depth = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
-    gpu::PipelineHandle variant = gpu::create_graphics_pipeline(&device, &culled)!!;
-    defer gpu::destroy_pipeline(&device, variant)!!;
-    assert(cache_entry_count(&device) == 1, "raster/depth-only variants share one entry");
+    gpu::PipelineHandle cull_variant =
+        gpu::create_graphics_pipeline(&device, &culled)!!;
+    defer gpu::destroy_pipeline(&device, cull_variant)!!;
+    assert(cache_entry_count(&device) == 2,
+        "culling is immutable graphics pipeline identity");
 
     gpu::GraphicsPipelineDesc garbage_blend = desc;
     garbage_blend.blend = {
@@ -117,7 +129,7 @@ fn void dynamic_state_and_blend_normalization_share_entries() @test {
     };
     gpu::PipelineHandle normalized = gpu::create_graphics_pipeline(&device, &garbage_blend)!!;
     defer gpu::destroy_pipeline(&device, normalized)!!;
-    assert(cache_entry_count(&device) == 1, "disabled blend ignores factor fields in the key");
+    assert(cache_entry_count(&device) == 2, "disabled blend ignores factor fields in the key");
 
     gpu::GraphicsPipelineDesc blended = desc;
     blended.blend = {
@@ -131,7 +143,7 @@ fn void dynamic_state_and_blend_normalization_share_entries() @test {
     };
     gpu::PipelineHandle distinct = gpu::create_graphics_pipeline(&device, &blended)!!;
     defer gpu::destroy_pipeline(&device, distinct)!!;
-    assert(cache_entry_count(&device) == 2, "enabled blend is immutable state and splits the key");
+    assert(cache_entry_count(&device) == 3, "enabled blend is immutable state and splits the key");
 }
 
 fn void formats_split_entries_and_limits_enforced() @test {
@@ -305,7 +317,7 @@ fn void prepared_shader_code_is_reusable_across_devices() @test {
         "the second device owns an independent entry for shared shader code");
 }
 
-fn void cull_replay_renders_per_alias() @test {
+fn void immutable_cull_state_renders_per_pipeline() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
@@ -369,7 +381,7 @@ fn void cull_replay_renders_per_alias() @test {
     cull_desc.raster.cull_mode = gpu::CullMode.BACK;
     gpu::PipelineHandle culled = gpu::create_graphics_pipeline(&device, &cull_desc)!!;
     defer gpu::destroy_pipeline(&device, culled)!!;
-    assert(cache_entry_count(&device) == 1, "both draw pipelines alias one cache entry");
+    assert(cache_entry_count(&device) == 2, "distinct cull state has distinct graphics identity");
 
     OwnedSpan rb_culled = allocate_owned_span(
         device:       &device,
@@ -756,4 +768,232 @@ fn void compute_layout_cache_grows_beyond_pipeline_capacity_hint() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(state.compute_layout_cache.count == sizes.len, "each distinct size has one cached layout");
     assert(state.compute_layout_cache.entries.len >= sizes.len, "layout cache grows beyond the one-pipeline hint");
+}
+
+fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    char[] equivalent_storage = mem::new_array(char, CACHE_COMP_SPIRV.len);
+    defer mem::free(equivalent_storage.ptr);
+    mem::copy(
+        equivalent_storage.ptr,
+        CACHE_COMP_SPIRV[..].ptr,
+        CACHE_COMP_SPIRV.len,
+    );
+    gpu::ShaderDesc equivalent_desc = shader_desc;
+    equivalent_desc.spirv = equivalent_storage;
+    gpu::ShaderCode equivalent_shader = gpu::prepare_shader_code(&equivalent_desc)!!;
+    gpu::ComputePipelineDesc[3] descs = {
+        { .shader = shader, .push_constant_size = gpu::RootPush::size },
+        { .shader = equivalent_shader, .push_constant_size = gpu::RootPush::size },
+        { .shader = equivalent_shader, .push_constant_size = 16 },
+    };
+    gpu::PipelineHandle[3] pipelines;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
+    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
+
+    gpu::create_compute_pipelines(&device, descs[..], pipelines[..])!!;
+
+    assert(pipelines[0].is_valid() && pipelines[1].is_valid() && pipelines[2].is_valid(),
+        "a successful batch publishes every pipeline handle");
+    assert(pipelines[0] != pipelines[1], "duplicate descriptions publish distinct owning handles");
+    assert(cache_entry_count(&device) == 2, "duplicate descriptions share deterministic pipeline identity");
+    assert(vk::pipeline_shader_module_create_count(state) - shader_modules_before == 1,
+        "shared shader IR creates one temporary native module per batch");
+    assert(vk::pipeline_native_create_count(state) - native_pipelines_before == 2,
+        "only distinct compute pipeline identities reach native creation");
+
+    foreach (pipeline : pipelines) gpu::destroy_pipeline(&device, pipeline)!!;
+}
+
+fn void graphics_pipeline_batch_reuses_shared_shader_modules() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::GraphicsPipelineDesc[2] descs;
+    descs[0] = base_graphics_desc(&shaders, formats[..]);
+    descs[1] = descs[0];
+    descs[1].blend = {
+        .enable    = true,
+        .src_color = gpu::BlendFactor.SRC_ALPHA,
+        .dst_color = gpu::BlendFactor.ONE_MINUS_SRC_ALPHA,
+        .color_op  = gpu::BlendOp.ADD,
+        .src_alpha = gpu::BlendFactor.ONE,
+        .dst_alpha = gpu::BlendFactor.ZERO,
+        .alpha_op  = gpu::BlendOp.ADD,
+    };
+    gpu::PipelineHandle[2] pipelines;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
+    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
+
+    gpu::create_graphics_pipelines(&device, descs[..], pipelines[..])!!;
+
+    assert(cache_entry_count(&device) == 2, "distinct blend identities publish distinct graphics pipelines");
+    assert(vk::pipeline_shader_module_create_count(state) - shader_modules_before == 2,
+        "shared vertex and fragment IR each create one temporary native module per batch");
+    assert(vk::pipeline_native_create_count(state) - native_pipelines_before == 2,
+        "each distinct graphics identity reaches native creation once");
+
+    foreach (pipeline : pipelines) gpu::destroy_pipeline(&device, pipeline)!!;
+}
+
+fn void pipeline_batch_shape_failure_preserves_outputs() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ComputePipelineDesc[2] descs;
+    foreach (&desc : descs) {
+        *desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
+    }
+    gpu::PipelineHandle sentinel = gpu::create_compute_pipeline(&device, &descs[0])!!;
+    defer gpu::destroy_pipeline(&device, sentinel)!!;
+    gpu::PipelineHandle[1] outputs = { sentinel };
+    uint entries_before = cache_entry_count(&device);
+
+    fault shape_fault = @catch(gpu::create_compute_pipelines(&device, descs[..], outputs[..]));
+
+    assert(shape_fault == gpu::INVALID_ARGUMENT, "mismatched batch slices fault INVALID_ARGUMENT");
+    assert(outputs[0] == sentinel, "shape validation leaves caller outputs unchanged");
+    assert(cache_entry_count(&device) == entries_before, "shape validation leaves the cache unchanged");
+}
+
+fn void pipeline_batch_capacity_failure_is_transactional() @test {
+    gpu::Device device = make_cache_test_device_with_capacity(1);
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ComputePipelineDesc[2] descs = {
+        { .shader = shader, .push_constant_size = gpu::RootPush::size },
+        { .shader = shader, .push_constant_size = 16 },
+    };
+    gpu::PipelineHandle[2] outputs = {
+        { .owner = 7, .index = 8, .generation = 9 },
+        { .owner = 10, .index = 11, .generation = 12 },
+    };
+    gpu::PipelineHandle[2] before = outputs;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
+    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
+
+    fault capacity_fault = @catch(gpu::create_compute_pipelines(&device, descs[..], outputs[..]));
+
+    assert(capacity_fault == gpu::SLOT_TABLE_FULL, "an oversized batch faults before partial publication");
+    assert(outputs[0] == before[0] && outputs[1] == before[1],
+        "capacity failure leaves every caller output unchanged");
+    assert(cache_entry_count(&device) == 0, "capacity failure publishes no cache entry");
+    assert(vk::pipeline_shader_module_create_count(state) == shader_modules_before,
+        "capacity failure creates no temporary shader module");
+    assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
+        "capacity failure performs no native pipeline creation");
+}
+
+fn void pipeline_batch_invalid_state_prevalidates_transactionally() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::GraphicsPipelineDesc[2] descs;
+    descs[0] = base_graphics_desc(&shaders, formats[..]);
+    descs[1] = descs[0];
+    int invalid_topology = 99;
+    mem::copy(&descs[1].topology, &invalid_topology, int::size);
+    gpu::PipelineHandle[2] outputs = {
+        { .owner = 1, .index = 2, .generation = 3 },
+        { .owner = 4, .index = 5, .generation = 6 },
+    };
+    gpu::PipelineHandle[2] before = outputs;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
+    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
+
+    fault invalid_fault = @catch(gpu::create_graphics_pipelines(
+        &device,
+        descs[..],
+        outputs[..],
+    ));
+
+    assert(invalid_fault == gpu::INVALID_ARGUMENT, "unsupported immutable state faults INVALID_ARGUMENT");
+    assert(outputs[0] == before[0] && outputs[1] == before[1],
+        "state validation leaves caller outputs unchanged");
+    assert(cache_entry_count(&device) == 0, "state validation publishes no cache entry");
+    assert(vk::pipeline_shader_module_create_count(state) == shader_modules_before,
+        "state validation creates no temporary shader module");
+    assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
+        "state validation performs no native pipeline creation");
+}
+
+fn void pipeline_batch_partial_failure_rolls_back_publication() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ComputePipelineDesc[2] descs = {
+        { .shader = shader, .push_constant_size = gpu::RootPush::size },
+        { .shader = shader, .push_constant_size = 16 },
+    };
+    gpu::PipelineHandle[2] outputs = {
+        { .owner = 13, .index = 14, .generation = 15 },
+        { .owner = 16, .index = 17, .generation = 18 },
+    };
+    gpu::PipelineHandle[2] before = outputs;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
+    vk::set_pipeline_creation_failure(state, 1);
+    defer vk::clear_pipeline_creation_failure(state);
+
+    fault creation_fault = @catch(gpu::create_compute_pipelines(
+        &device,
+        descs[..],
+        outputs[..],
+    ));
+
+    assert(creation_fault == gpu::PIPELINE_CREATE_FAILED,
+        "a native failure after one success preserves its exact public fault");
+    assert(outputs[0] == before[0] && outputs[1] == before[1],
+        "partial failure leaves caller outputs unchanged");
+    assert(cache_entry_count(&device) == 0,
+        "partial failure removes every cache entry created by the batch");
+    assert(vk::pipeline_native_create_count(state) - native_pipelines_before == 1,
+        "the rollback probe fails after exactly one native creation");
+}
+
+fn void empty_pipeline_batches_succeed_without_native_work() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::ComputePipelineDesc[] compute_descs = {};
+    gpu::GraphicsPipelineDesc[] graphics_descs = {};
+    gpu::PipelineHandle[] outputs = {};
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
+    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
+
+    gpu::create_compute_pipelines(&device, compute_descs, outputs)!!;
+    gpu::create_graphics_pipelines(&device, graphics_descs, outputs)!!;
+
+    assert(vk::pipeline_shader_module_create_count(state) == shader_modules_before,
+        "empty batches create no shader modules");
+    assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
+        "empty batches create no native pipelines");
 }

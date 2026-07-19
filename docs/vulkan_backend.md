@@ -442,8 +442,10 @@ performs the selected heap writes.
 backend object. Pipeline creation checks the in-memory cache before compiling.
 On a miss, the backend creates a temporary `vk::ShaderModule`, validates
 reflection against the requested pipeline ABI, compiles the pipeline, and
-destroys the module before returning. No shader-module handle or table crosses
-the public boundary.
+destroys the module before returning. Batch creation reuses one temporary
+module for each exact shader value and rolls back every created handle and cache
+entry before returning a fault. No shader-module handle or table crosses the
+public boundary.
 
 Reflection validation checks:
 
@@ -479,7 +481,8 @@ vertex shader
 fragment shader
 pipeline layout with vertex/fragment root push constants
 color/depth formats for dynamic rendering
-raster/depth/blend state
+immutable raster and blend state
+separate dynamic depth state
 viewport/scissor dynamic state
 pipeline cache lookup
 vk::Pipeline
