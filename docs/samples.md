@@ -11,7 +11,7 @@ The samples repository contains 18 samples and `shared_selftest`. Its root
 README is the authoritative target index, capability matrix, and smoke-command
 reference. CI checks generated ABI files, builds shaders, runs all nine
 headless/helper targets, and runs all ten windowed targets under xvfb/lavapipe
-with bounded frame counts.
+with bounded application-render iterations.
 
 ## Conventions
 

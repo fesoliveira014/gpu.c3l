@@ -10,16 +10,11 @@ The public API uses:
 GpuAllocation
 GpuSpan
 GpuAddress
-MemoryKind
 MemoryClass
 AllocationDesc
 AllocationInfo
 TextureHandle
 ```
-
-`MemoryKind` remains exported as a backend/frame backing classification. No
-public descriptor or function accepts it; callers select `MemoryClass`, and the
-backend derives the concrete kind.
 
 The backend uses:
 
@@ -43,7 +38,6 @@ Backend files that may import `vma`:
 ```text
 gpu/vk/allocator.c3
 gpu/vk/allocation.c3
-gpu/vk/memory.c3
 gpu/vk/buffer.c3
 gpu/vk/texture.c3
 gpu/vk/debug.c3
@@ -71,7 +65,7 @@ define behavioral memory classes
 track owning allocations and non-owning span identities
 keep mappings, addresses, access, and native backing private
 translate resource policy to Vulkan/VMA
-own frame arenas
+leave allocation reuse and pooling policy to callers
 validate bounds, capabilities, and lifetimes
 record explicit barriers
 ```
@@ -87,7 +81,6 @@ VkDeviceState
     vk::Device device
     vma::Allocator allocator
     AllocationTable allocations
-    FrameArenaState[] frame_arenas
 ```
 
 Allocator creation happens after Vulkan device creation and before resource
@@ -112,7 +105,7 @@ generic allocation must provide a stable GPU address.
 ## 5. Independent allocations
 
 `GpuAllocation` owns device-scoped data or texture storage. `GpuSpan` borrows
-generic data from an allocation or frame arena and stores only
+generic data from an allocation and stores only
 `{ owner, index, generation, offset, size }`. Mapping, GPU address, access,
 memory class, and native backing remain in device state.
 
@@ -177,7 +170,6 @@ bounds or overflow checks.
 | GPU-private generic data | `MemoryClass.GPU_PRIVATE` | upload or write from GPU commands |
 | CPU-read generic data | `MemoryClass.CPU_READ` | wait, invalidate, then read |
 | Placed textures | `MemoryClass.TEXTURE` | query requirements, allocate, create placed textures |
-| Per-frame roots and tables | `alloc_frame_span` | mapped, host-coherent, valid for the frame generation |
 | Long-lived CPU-written tables | `MemoryClass.CPU_WRITE` | map, write, flush, submit, wait or poll, then free or reuse |
 
 Long-lived CPU-written storage follows the independent-allocation contract:
@@ -188,15 +180,15 @@ class.
 
 ## 7. Private buffer backing
 
-Generic allocations and arena ranges use private addressable Vulkan buffers;
+Generic allocations use private addressable Vulkan buffers;
 texture allocations contain only compatible image memory. Generic allocations
 use a fixed native-usage superset. Queue-family sharing derives from the
 immutable `QueueRoles` access set. Creation publishes an allocation or span
 identity only after its native buffer, VMA allocation, mapping state, and
 nonzero device address are complete.
 
-Private `gpu::vk::BufferHandle`, `BufferDesc`, and `BufferUsage` declarations
-support this implementation. They are not public resource types.
+Private buffer records support this implementation. They are not public
+resource types.
 
 ## 8. Texture allocation
 
@@ -263,84 +255,34 @@ Destroying a placed texture releases the image but not its `GpuAllocation`.
 Dedicated creation returns separate texture and allocation tokens; destroy the
 texture before releasing its allocation.
 
-## 10. Frame upload arena
+## 10. Caller-owned transient data
 
-Each frame-in-flight owns one or more VMA-backed buffers.
+Roots, constants, transfer payloads, and other short-lived GPU data use ordinary
+allocations. The library does not define an application work boundary, choose
+how many copies exist, or reset caller storage.
 
-Frame upload allocation is governed by a strict lifecycle:
-
-```text
-IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDLE
-```
-
-`begin_frame` returns a `FrameToken`; `alloc_frame_span` and `end_frame` require
-that token rather than a bare device pointer. A copied token may allocate while
-its generation remains active. The token embeds the owning `Device` value and
-does not borrow the caller's device variable. Successful end clears the passed
-copy and makes every alias stale. Failed end leaves the token, generation, frame
-slot, retirement values, queue-use flags, and prospective signal value unchanged for
-retry.
-
-A malformed, consumed, or stale token faults `INVALID_HANDLE`. `begin_frame`
-while active faults `INVALID_RESOURCE_STATE` before changing frame state. This
-is particularly important with one frame in flight, where the next slot is the
-active slot itself. `frame.is_valid()` reports whether the token contains a
-generation; it does not validate a stale alias. Tokens are stack-only, at most
-16 bytes, and add no heap allocation or new atomic operation to the allocation
-path.
-Retirement waits and counter queries complete before frame state is committed.
-A timeout or backend query failure therefore leaves the frame index, arena
-cursor, retirement counters, pool accounting, and output token unchanged.
-Expected retire-wait timeouts return `WAIT_TIMEOUT` silently for retry,
-matching other expected semaphore/fence timeout paths. Non-timeout backend
-failures emit a structured diagnostic identifying the public operation but do
-not represent a `FrameToken` as slot identity. Alignment validation
-precedes zero-size validation when both inputs are invalid.
+For CPU-authored data:
 
 ```text
-FrameArenaState
-    gpu::vk::BufferHandle backing_buffer
-    GpuAddress gpu_base
-    void* cpu_base
-    usz size
-    QueueRoles access
-    Atomic{usz} cursor
-    ulong frame_timeline_value
+allocate CPU_WRITE storage
+borrow its GpuSpan and mapping
+write the mapped bytes
+flush_mapped_span before GPU consumption
+record and submit work
+retain the returned CompletionPoint
+wait or poll before reusing or freeing the allocation
 ```
 
-Frame-upload and descriptor-buffer storage require host-coherent memory, so
-their mapped writes need no flush. Independent allocations use the span
-visibility operations and must not assume coherence.
+For GPU-private data, copy from caller-owned `CPU_WRITE` storage and retain both
+allocations until the copy's completion covers their last use. For readback,
+copy into `CPU_READ` storage, wait for completion, invalidate the mapped span,
+and only then read it.
 
-Frame spans admit the selected graphics and compute roles, or transfer on a
-transfer-only device. The backing buffer uses the exact deduplicated families for
-those roles: one family stays exclusive and two or more use concurrent sharing.
-Barriers, completion-point ordering, and lifetime remain explicit.
-
-Allocation during `ACTIVE` is lock-free — the cursor is an atomic bumped with
-a CAS loop, so worker threads allocate concurrently (see docs/threading.md):
-
-```text
-alloc_frame_span(token, size, align)
-    if token is not the active generation: return INVALID_HANDLE
-    retry:
-    if cursor > arena.size: return ARENA_FULL
-    remainder = cursor & (align - 1)
-    padding = remainder == 0 ? 0 : align - remainder
-    if padding > arena.size - cursor: return ARENA_FULL
-    aligned = cursor + padding
-    if size > arena.size - aligned: return ARENA_FULL
-    next_cursor = aligned + size
-    if !compare_exchange(cursor, next_cursor): goto retry
-    span = backing_span.unchecked_subspan(aligned, size)
-```
-
-Reset:
-
-```text
-reset only after queue timeline >= frame_timeline_value
-cursor = 0
-```
+Applications may build rings, pools, or workload-local allocators from
+`GpuAllocation`, `GpuSpan`, and `CompletionPoint`. That policy remains
+outside the root module. Each allocation declares the queue roles that may use
+it; sharing mode follows those roles but does not replace barriers or
+submission ordering.
 
 ## 11. Host transfers
 
@@ -396,8 +338,6 @@ vma::Allocator.stats_string
 live slot tables
 ```
 
-Call current-frame-index update during `begin_frame` so VMA budget tracking remains useful.
-
 ## 14. Allocation names and user data
 
 Debug builds should set:
@@ -414,7 +354,6 @@ Recommended allocation name format:
 allocation:<debug_name>
 buffer:<debug_name>
 texture:<debug_name>
-arena:frame_upload:<frame_index>
 ```
 
 ## 15. Immediate resource lifetime
@@ -449,7 +388,7 @@ all Vulkan buffers/images are VMA-backed
 no raw vkAllocateMemory path exists in backend code
 independent allocations provide generation-checked ownership and range queries
 addressable spans return non-zero GpuAddress
-frame spans reset only after timeline retirement
+caller-owned transient allocations remain live until their completion points finish
 long-lived CPU-written data remains caller-owned through GPU completion
 host transfer paths flush and invalidate non-coherent memory
 memory stats report VMA budget and live resources

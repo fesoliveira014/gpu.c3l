@@ -34,12 +34,12 @@ test_runtime.c3
 test_handles.c3
 test_ranges.c3
 test_texture_support.c3
-test_memory_policy.c3
+test_resource_access.c3
 test_allocation_contract.c3
 test_shader_abi_layout.c3
-test_descriptor_heap_slots.c3
+test_texture_transition.c3
 test_diagnostics.c3
-test_barrier_desc_validation.c3
+test_workload_limits.c3
 ```
 
 Coverage:
@@ -60,10 +60,9 @@ device registry concurrency, generation exhaustion, closing-state rejection,
 and active-operation destruction retry
 immediate-parent exact-fit, nested, zero-size, out-of-parent, and offset-overflow slicing
 texture descriptor normalization and backend-profile validation
-arena bump allocation logic without Vulkan
-FrameToken size, copy/consumption, scoped-worker fault propagation, end-fault
-precedence, retry-token retention, and begin-fault short circuit
-MemoryKind policy table completeness
+allocation range, alignment, access, and class validation without Vulkan
+caller-owned allocation and completion lifetime contracts
+MemoryClass policy table completeness
 Format translation table completeness through pure tables if separated
 BarrierDesc validation
 shader ABI sizeof/offset checks
@@ -71,7 +70,7 @@ DescriptorHeap free-list reuse
 null-safe, exactly-once structured debug dispatch and userdata preservation
 invalid-backend callback delivery with callback-enabled/disabled fault parity
 borrowed field and explicit absent-fault representation
-synthetic frame-arena graphics/compute sharing plans and exact buffer create-info mode/indices
+synthetic allocation sharing plans and exact buffer create-info mode/indices
 ```
 
 Pure CPU tests should be exhaustive where practical.
@@ -90,7 +89,6 @@ test_vk_vma_allocator.c3
 test_vk_allocation.c3
 test_vk_span_resolver.c3
 test_vk_buffer.c3
-test_vk_frame_arena.c3
 test_vk_command_submit.c3
 test_vk_texture.c3 (adapter capability query/create consistency)
 test_vk_root_pointer_compute.c3
@@ -117,8 +115,8 @@ mapped-span owner, liveness, mapping, coherence, atom-range, and backend-fault c
 native allocation info, mapping/address queries, mapped visibility round trip, and immediate free
 allocation-span stale/foreign/range rejection, stats, leak identity, and device-loss teardown
 dedicated texture validation, transaction-step rollback, publication, and independent ownership
-frame-token generation, stale-alias rejection, allocation, end retry, and reset safety
-scoped helper with one observed end attempt after successful and faulting named workers
+caller-owned CPU_WRITE roots retained through covering completion
+explicit wait-before-reuse and wait-before-free behavior
 owner-derived command finalization
 format feature queries agree with adapter-backed texture creation
 command list begin/end/submit
@@ -130,22 +128,10 @@ offscreen render target clear/draw/readback
 dynamic viewport/scissor validation, clipping pixels, pass reset, and pipeline-alias persistence
 ```
 
-Frame-arena queue-family regressions always pin aliased and distinct creation
-plans with synthetic topology tests. Validation-enabled same-range and retired-
-slot reuse cases run only when the selected graphics and compute family indices
-differ; single-family adapters report the cases as not applicable and do not
-count them as cross-family coverage.
-
-The C3 test harness captures passing-test output and has no skipped-test result,
-so the required topology audit enables output explicitly:
-
-```text
-c3c test vk_indirect --path test --test-filter frame_span_ --test-show-output
-```
-
-A `[PASS]` for a `when_available` test on a same-family adapter proves only that
-the topology guard completed. The accompanying `not applicable` message must be
-recorded separately; only a run without that message is cross-family evidence.
+Allocation queue-family regressions pin aliased and distinct creation plans
+with synthetic topology tests. Live Vulkan coverage verifies that an
+allocation's immutable access roles select the exact native sharing families;
+barriers and completion waits remain explicit.
 
 ## 4. SDL3 windowed tests and samples
 
@@ -171,7 +157,7 @@ resize and out-of-date recovery
 coherent info refresh and dormant sentinel after zero/failed resize
 UNDEFINED/PRESENT acquired-image prior layout without a seen table
 present mode selection
-frame pacing sanity
+application render-loop pacing sanity
 ```
 
 The local `vk_swapchain` target covers result mapping, readiness identity and
@@ -226,12 +212,11 @@ no public resource identity before handle resolution. Backend-result coverage
 fabricates an unmapped `wait_completion` result and verifies callback and
 stderr-fallback parity.
 
-Frame diagnostic tests inject retirement-query and end-signal backend failures
-and cover double begin, boundary quiescence, alignment-before-size precedence,
-and stale tokens. They assert unchanged faults, exactly-once delivery, raw
-backend results, absent public identity, and mutation-free retry state. Pure
-range and direct reset helpers remain fault-only when no public operation
-context is supplied.
+Allocation diagnostic tests cover invalid alignment and size, unavailable
+mapping/address capabilities, stale spans, visibility failures, and detected
+resource references. They assert unchanged faults, exactly-once delivery, raw
+backend results, and stable public allocation identity where available. Pure
+range helpers remain fault-only when no public operation context is supplied.
 
 Descriptor/cache completeness coverage adds batch rollback after cached-view
 creation, stale and exhausted descriptor identities, immediate slot reuse,
@@ -258,7 +243,7 @@ Test functions:
 ```text
 test_handle_pack_round_trip
 test_generation_mismatch_rejected
-test_frame_arena_alignment
+test_allocation_alignment
 test_vk_create_device
 test_vk_create_addressable_allocation
 test_vk_root_pointer_compute
@@ -271,12 +256,11 @@ Test names describe behavior, not roadmap or ticket labels.
 | Area | Required tests |
 |---|---|
 | Handles | pack/unpack, invalid handle, generation mismatch. |
-| Memory policy | memory kind/class translation, alignment, range validation. |
+| Memory policy | memory-class translation, alignment, range validation. |
 | Independent allocations | descriptor normalization; identity/capacity/reuse; all memory classes; info, mapping, address, checked subspans; rollback; immediate free; placement/lifetime rejection; leaks/stats. |
 | Vulkan bootstrap | create/destroy device, required feature checks. |
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
-| Frame arena | allocation, alignment, overflow, reset safety. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
 | Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback. |
 | Compute | root pointer shader read/write, readback. |
@@ -350,6 +334,17 @@ vk_queue vk_debug upload_bench_observation vk_device_request
 ```
 
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.
+
+The advisory benchmark runner builds these seven executable targets with
+`-O1`: `allocation_bench`, `resource_create_bench`,
+`descriptor_churn_bench`, `upload_throughput_bench`,
+`command_record_bench`, `pipeline_cache_bench`, and
+`async_overlap_bench`. The allocation target must emit exactly two phases for
+4,000 64-byte, 16-byte-aligned `CPU_WRITE` allocations:
+`cpu_write allocate` in `ns/allocation`, then `cpu_write free` in
+`ns/free`. Run the suite with `python scripts/run_benchmarks.py`; benchmark
+timings are advisory and never gate CI.
+
 Distinct-adapter ownership is gated deterministically by the CPU stub suite.
 `vk_device_request` also uses two physical adapters when both support the strict
 profile and reports `distinct-adapter=N/A` otherwise.
@@ -392,7 +387,7 @@ C3 0.8.0 constraints:
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
   a `project.json` key); dependencies are declared per-target and resolved by
   the consumer's search path.
-- `manifest.json` `sources` must list files explicitly — all 19 public source
+- `manifest.json` `sources` must list files explicitly — all 20 public source
   files under `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the default does not
   recurse into `gpu/vk/`.
 
@@ -495,7 +490,7 @@ slot index
 generation
 debug name
 allocation size
-creation frame if tracked
+creation context if tracked
 ```
 
 The callback form carries the applicable subset as a borrowed
@@ -507,9 +502,9 @@ Tests should cover specific faults:
 
 ```text
 invalid handle -> INVALID_HANDLE
-arena exact-end fit -> success
-arena one-byte, alignment, or extent overflow -> ARENA_FULL
+allocation exact-range fit -> success
 zero allocation size, malformed alignment, or unavailable span capability -> INVALID_ARGUMENT
+allocation extent or offset overflow -> INVALID_ARGUMENT
 stale or foreign allocation/span identity -> INVALID_HANDLE
 live placement on free_allocation -> RESOURCE_IN_USE and unchanged token
 allocation table capacity -> SLOT_TABLE_FULL with no published token

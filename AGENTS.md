@@ -22,7 +22,7 @@ The implementation lives under `gpu/`; the Vulkan backend is under `gpu/vk/`. Be
 
 - `docs/architecture.md` — module split, handle/ABI model
 - `docs/api.md` — public API shape
-- `docs/memory.md` — VMA allocator, independent allocations, frame arenas
+- `docs/memory.md` — VMA allocator, caller-owned allocations, and mapped visibility
 - `docs/shader_abi.md` — root-pointer ABI, std430 struct layout
 - `docs/vulkan_backend.md` — backend strategy
 - `docs/style.md` — full code style guide (source of truth)
@@ -31,7 +31,7 @@ The implementation lives under `gpu/`; the Vulkan backend is under `gpu/vk/`. Be
 ## Code style (see `docs/style.md` for the rest)
 
 - **Naming**: `snake_case` for vars, fields, params, **and functions**; `PascalCase` for structs/enums/typedefs; `SCREAMING_SNAKE_CASE` for constants and enum values; files `snake_case.c3`.
-- **Errors**: C3 optionals/faults (`create_buffer(...) -> BufferHandle?`), never exceptions or null. Use named faults (`INVALID_HANDLE`, `ARENA_FULL`, …).
+- **Errors**: C3 optionals/faults (`allocate_memory(...) -> GpuAllocation?`), never exceptions or null. Use named faults (`INVALID_HANDLE`, `RESOURCE_IN_USE`, …).
 - **Lifecycle**: free functions `create_x()` / `destroy_x()` for project-owned resources, not `X.create` / `X.destroy`.
 - **Definition order in a file**: typedefs → aliases → constants → enums/bitstructs → structs → struct methods → free functions.
 - **Formatting**: K&R braces; calls with 4+ args use named arguments, one per line, trailing comma. No auto-formatter — hand-format to the style guide.

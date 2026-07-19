@@ -171,7 +171,7 @@ queue ownership
 resource slot tables, including independent allocations
 VMA allocator through backend state
 descriptor heaps
-frame upload arenas
+caller-owned allocation and completion lifetimes
 pipeline cache
 debug and stats state
 ```
@@ -201,8 +201,8 @@ after pins retire; command tokens remain discardable after loss.
 Device-owned table handles, including `GpuAllocation`, carry an opaque
 device-and-kind owner plus a local slot and generation. Backend tables reject
 foreign owners before validating liveness and generation. `GpuSpan` carries
-the same identity plus offset and size, but does not own storage. Frame and
-command tokens derive ownership from their device. Shader-visible indices and
+the same identity plus offset and size, but does not own storage. Command tokens
+derive ownership from their device. Shader-visible indices and
 GPU addresses remain caller-lifetime values rather than ownership tokens.
 Descriptor release accepts `TextureIndex` and `SamplerIndex` values without
 device-owner metadata; `docs/limitations.md` describes the cross-device risk.
@@ -402,47 +402,31 @@ named span, texture, or pipeline is referenced by a recording token, executable
 token, or incomplete submission. GPU addresses and shader indices are opaque to
 the command stream, so their lifetime remains a caller precondition.
 
-## 7. Frame model
+## 7. Work and storage lifetime model
 
-Each frame-in-flight has:
+The root module does not define application work boundaries or storage rotation.
+Every submission returns a `CompletionPoint`, and the caller uses that point to
+decide when commands and resources may be retired, reused, or destroyed.
 
-```text
-frame upload arena
-last submit timeline value
-```
-
-Frame lifecycle and flow:
+A typical CPU-authored root-data flow is:
 
 ```text
-IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDLE
-
-begin_frame(device) -> token      // valid only in IDLE
-    wait if frame slot is still in flight
-    reset frame upload arena
-    set VMA current frame index
-
-alloc_frame_span(token, ...)     // current active generation only
-record work
-submit work
-
-end_frame(token)                 // consumes only after success
-    record frame timeline value
+allocate CPU_WRITE storage
+write through the mapped GpuSpan
+flush_mapped_span
+record commands that use its GpuAddress
+submit and retain the returned CompletionPoint
+wait or poll before rewriting or freeing the allocation
 ```
 
-The public `FrameToken` embeds its owning `Device` value plus a nonzero
-device-owned generation. Copies alias one active generation.
-Successful end clears the passed copy and invalidates every alias through
-device-owned state. Failed end preserves the token and all prospective
-retirement state so the caller can retry. Invalid lifecycle transitions fault
-before changing the frame slot, arena, retirement state, or queue
-submissions.
+Readback reverses visibility: GPU work writes a `CPU_READ` span, the caller
+waits for the covering completion, calls `invalidate_mapped_span`, and then
+reads the mapping. The visibility calls do not wait.
 
-`@with_frame` is a compile-time direct-call helper, not a runtime callback. It
-calls a named optional-returning worker and attempts end exactly once after the
-worker completes or faults. End faults take precedence and retain the caller's
-token for retry. This adds no heap allocation or per-frame indirect dispatch.
-
-Headless tests may skip swapchain-specific acquire/present steps.
+Applications choose their own allocation granularity, pooling, and number of
+concurrent work sets. A ring or pool is application policy built from
+`GpuAllocation`, `GpuSpan`, and `CompletionPoint`; it is not device
+configuration. Headless and windowed programs use the same ownership model.
 
 ## 8. Command model
 
@@ -563,7 +547,7 @@ allocation names
 allocation user data
 slot generation errors
 resource state errors
-outstanding frame allocations
+outstanding allocation and command references
 leaked descriptors
 leaked backend objects
 ```

@@ -18,11 +18,23 @@ two ideas:
 ```c3
 gpu::GpuSpan input_span = gpu::get_allocation_span(&device, input)!;
 gpu::GpuSpan output_span = gpu::get_allocation_span(&device, output)!;
-gpu::GpuSpan root_span = gpu::alloc_frame_span(&frame, DoublerRoot::size, 16)!;
-DoublerRoot* root = (DoublerRoot*)gpu::get_span_mapping(&device, root_span)!.ptr;
+gpu::AllocationDesc root_desc = {
+    .size         = DoublerRoot::size,
+    .alignment    = DoublerRoot::alignment,
+    .memory_class = gpu::MemoryClass.CPU_WRITE,
+    .access       = { .compute },
+    .debug_name   = "doubler_root",
+};
+gpu::GpuAllocation root_allocation =
+    gpu::allocate_memory(&device, &root_desc)!;
+gpu::GpuSpan root_span =
+    gpu::get_allocation_span(&device, root_allocation)!;
+DoublerRoot* root =
+    (DoublerRoot*)gpu::get_span_mapping(&device, root_span)!.ptr;
 root.input_gpu  = gpu::get_span_address(&device, input_span)!;
 root.output_gpu = gpu::get_span_address(&device, output_span)!;
 root.count      = COUNT;
+gpu::flush_mapped_span(&device, root_span)!;
 
 gpu::cmd_dispatch(
     commands: &cmd,
@@ -32,6 +44,9 @@ gpu::cmd_dispatch(
 )!;
 ```
 
+Keep `root_allocation` live until the submission's `CompletionPoint` finishes,
+then free or reuse it.
+
 ## Features
 
 - Vulkan 1.3 backend (dynamic rendering, timeline semaphores, sync2, BDA);
@@ -39,12 +54,12 @@ gpu::cmd_dispatch(
 - Shader ABI generator: one `.abi` schema emits the C3 struct (with
   compile-time size/offset asserts) and the GLSL include, plus a CI drift gate
 - VMA-backed memory: independent `GpuAllocation` storage with checked spans,
-  mapping/address queries, arenas, dedicated transfers, and leak reporting
+  mapping/address queries, explicit transfers, and leak reporting
 - Explicit barrier model with tracked texture layouts; validation-clean is a
   test gate across the whole suite
 - GPU-driven path: multi-draw indirect (+ count), draw tables via `gl_DrawID`
-- Tiered threading: automatic per-worker command pools, lock-free frame-arena
-  allocation, completion-driven command-buffer reclamation
+- Tiered threading: automatic per-worker command pools, thread-safe allocation,
+  completion-driven command-buffer reclamation
 - Pipeline dedup cache + driver-cache save/load; swapchain with present-mode
   query; compare samplers, depth bias, MRT
 - Runs entirely on lavapipe (CPU Vulkan) — CI needs no GPU, and neither does

@@ -11,8 +11,8 @@ token's retained device pin while another call can still be in flight.
 - **E — externally synchronized.** The caller serializes calls within the
   scope named in the table. Device calls normally share one device-wide scope;
   runtime and surface calls may use a process-wide scope.
-- **S — thread-safe.** Any thread, any time within a frame; internally
-  synchronized (see the lock map).
+- **S — thread-safe.** Any thread while the owning runtime or device is live;
+  internally synchronized (see the lock map).
 - **C — confined.** A recording or executable command token and its aliases
   are used by one thread at a time. Different tokens may be recorded in
   parallel.
@@ -28,7 +28,6 @@ token's retained device pin while another call can still be in flight.
 | `supports_presentation` / `request_presentation` / `supports_device_request` | E | process-wide surface registry access; a presentation request does not retain its surface |
 | `create_device` | E | per runtime; device-registry mutation is synchronized; presentation also uses the surface scope |
 | `destroy_device` | S | per target device; success invalidates the caller's token; live children return `RESOURCE_IN_USE`, while active operations, incomplete queue work, or closing state return retryable `DEVICE_BUSY` |
-| `begin_frame` / `end_frame` / `@with_frame` | E | token-paired `IDLE -> ACTIVE -> IDLE`; quiescence required; helper worker is a direct call |
 | `submit` / `present` | E | externally synchronize each acquired image; submit consumes readiness, present consumes the image |
 | `poll_completion` / `wait_completion` | S | reusable value queries; host waits do not consume the point |
 | `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction invalidates a pending acquire and waits its render work |
@@ -41,7 +40,6 @@ token's retained device pin while another call can still be in flight.
 | `create_sampler` / `destroy_sampler` | S | |
 | `create_shader` / `destroy_shader` | S | |
 | `create_compute_pipeline` / `create_graphics_pipeline` / `destroy_pipeline` | S | driver compiles run in parallel; a same-key race compiles twice, converges to one entry |
-| `alloc_frame_span` | S | lock-free CAS bump through a current `FrameToken`; token copies may be shared during the active generation |
 | `get_memory_stats` / `build_memory_report` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
 | `begin_commands` / `end_commands` / command discard | C | recording storage is automatic per worker |
 | every `cmd_*` recording call | C | confined to the list's thread |
@@ -80,29 +78,20 @@ accepts only that exact surface. `create_swapchain` retains the surface until
 native instance, display, and window objects valid until the surface is
 destroyed.
 
-## Phase rule
+## Operation concurrency
 
-No Tier S or Tier C call may be in flight across `begin_frame` / `end_frame`.
-The frame-owner thread begins and ends the token generation; workers may receive
-copies or the shared token pointer only after begin and must quiesce before end.
-With `enable_validation`, in-flight Tier S calls at the boundary fault
-`INVALID_RESOURCE_STATE`. A live unsubmitted command record prevents its frame
-slot from resetting; `submit` or discard it first. Without validation the phase
-rule is still contractual — Tier S calls pay nothing.
+There is no global application work phase in the root module. Calls may overlap
+only according to their entry-point tiers and token ownership rules. A Tier C
+command token and all its aliases stay confined to one thread at a time;
+different command tokens may be recorded in parallel. Tier S allocation and
+span operations may overlap, but callers synchronize writes to mapped storage
+and keep every allocation live through its last submitted use.
 
-Frame lifecycle errors are independent of validation: double begin faults
-`INVALID_RESOURCE_STATE`; malformed, consumed, and stale frame tokens fault
-`INVALID_HANDLE`. Every rejection is mutation-free. A successful end consumes
-the frame generation and all token aliases; a failed end retains the caller's
-token and boundary state for retry.
-
-`@with_frame(&frame, &device, named_worker, ...args)` is Tier E around the
-entire worker. It invokes the symbol directly, with no runtime callback or
-virtual dispatch, then attempts end exactly once even when the worker returns a
-fault through `!`. An end fault wins and leaves `frame` live for retry.
-Off-frame `submit` and `present` remain allowed. Before device destruction,
-wait the latest `CompletionPoint` for each affected queue and destroy every
-swapchain.
+Submission consumes executable command tokens only after native acceptance and
+returns a reusable `CompletionPoint`. The caller retains that point whenever it
+guards resource reuse, command-dependent destruction, or cross-queue ordering.
+Before device destruction, wait for the latest point on every used queue and
+destroy every swapchain and child resource.
 
 ## Lock order
 
@@ -113,8 +102,8 @@ and queue locks are not nested.
 
 ## Single-recorder texture discipline
 
-Within a frame, one thread owns a given texture's barriers and render
-passes. Under this discipline tracked-layout validation is exact and
+Across overlapping command recording, one thread owns a given texture's
+barriers and render passes. Under this discipline tracked-layout validation is exact and
 cross-texture parallel recording is data-race-free. Violating it degrades
 layout validation to best-effort (stale verdicts) — never memory unsafety.
 
@@ -164,40 +153,26 @@ through the matching destroy return; no callback occurs afterward.
 - A command token is confined, not locked.
 - Executable tokens recorded for the same queue may share one `SubmitDesc`.
 
-## Frame retirement across queues
+## Completion across queues
 
-Each distinct compute/transfer queue has its own auxiliary timeline
-(`aux_compute_timeline`, `aux_transfer_timeline`), signaled from that queue
-alone — monotonic by construction, since a single queue's submissions
-execute in submission order. `submit` piggybacks one internal aux signal
-(`ALL_COMMANDS`, per-queue counter) onto every user submit on a distinct
-compute or transfer queue; the counter and its last-signaled value update
-only after the submit succeeds, under the queue mutex already held, so a
-rejected submit never leaves anything waiting on a value that will never
-signal. `end_frame` issues a single empty submit: the graphics-side frame
-signal, which waits each used queue's latest recorded aux value before
-signaling the frame value. A host-side wait on the frame value therefore
-covers every queue's work, including arenas and command pools, under any queue
-topology, off-frame submissions included. `submit` sets the per-queue used
-flags unconditionally, not just
-while a frame is active, so an off-frame submission on a distinct compute or
-transfer queue is still waited by the next `end_frame`'s chain (off-frame
-graphics-queue submits need no flag: the frame signal already runs on that
-queue, and Vulkan's per-queue submission order covers them for free). See
-"Off-frame submissions" below for the destruction-side half of this
-contract.
+Each selected queue identity owns one private timeline. A successful `submit`
+signals its next value and returns a `CompletionPoint` for that queue. Same-queue
+submissions are ordered by the queue. Cross-queue dependencies are explicit in
+`SubmitDesc.completion_waits`; no application work boundary adds waits or
+signals.
 
-`end_frame` builds its prospective frame value and wait chain without mutation,
-then commits retirement bookkeeping only after the graphics signal submit is
-accepted. A rejected signal leaves the active boundary exactly retryable.
+Polling or waiting a point advances cached progress for its queue. Command
+buffers from accepted submissions become reusable only after their covering
+point completes. Resource storage, raw addresses, shader indices, and mapped
+data remain the caller's responsibility: retain every owning token until all
+points covering its use have completed.
 
-## Off-frame submissions
+## Submission lifetime
 
-Tier E's `submit`/`present` may run outside a `begin_frame`/`end_frame`
-bracket — sanctioned for frame-loop-free apps and one-shot setup work.
-Resource destruction is immediate and never waits. Discard recording or
-executable command tokens and wait for every returned `CompletionPoint` that
-may reference the resource before destroying it. Validation returns
-`RESOURCE_IN_USE` for detected explicit references. `destroy_device` queries
-every published queue sequence without blocking and returns `DEVICE_BUSY`
-while any is incomplete.
+`submit` and `present` are Tier E. Externally synchronize each queue and
+acquired image. Resource destruction is immediate and never waits. Discard
+recording or executable command tokens and wait for every returned
+`CompletionPoint` that may reference a resource before destroying it.
+Validation returns `RESOURCE_IN_USE` for detected explicit references.
+`destroy_device` queries every published queue sequence without blocking and
+returns `DEVICE_BUSY` while any is incomplete.

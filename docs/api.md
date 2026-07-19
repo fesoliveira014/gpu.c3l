@@ -217,7 +217,6 @@ DeviceDesc
     uint texture_descriptor_capacity      (0 = default; docs/limitations.md)
     uint sampler_descriptor_capacity
     uint texture_capacity
-    uint frames_in_flight
     char[] pipeline_cache_data            (warm-start blob; §8)
     ZString application_name
     DebugMessageCallback debug_callback       (null = no structured delivery)
@@ -288,7 +287,7 @@ token. Most public operations take a short-lived atomic pin before reading
 backend state. `begin_commands` transfers its pin to the returned command token;
 recording calls borrow that pin without acquiring another one.
 
-`destroy_device` never waits. Live resources, frames, command lists,
+`destroy_device` never waits. Live resources, command lists,
 swapchains and descriptors return `RESOURCE_IN_USE`.
 Active operations, incomplete queue work, or
 a closing slot return retryable `DEVICE_BUSY`. Every failed attempt preserves
@@ -297,7 +296,7 @@ and invalidates the passed token. A lost device bypasses child and progress
 checks after operation pins retire. Lost command tokens remain discardable so
 their lifetime pins cannot strand the device.
 
-Frame tokens, queue tokens, command tokens, resource handles, descriptor
+Queue tokens, command tokens, resource handles, descriptor
 indices, GPU addresses/spans, and completion points are scoped to their
 owning device. Backend table resolution rejects foreign handle owners before
 resource mutation. Shader-visible indices and GPU addresses remain
@@ -329,8 +328,8 @@ command tokens, and synchronization values are runtime-only and scoped to their
 owning device. Do not persist, serialize, reconstruct, or pass them across
 device or process lifetimes. Compare `Queue` values as wholes and use
 `get_queue_info` for inspection; do not construct or mutate queue fields.
-`FrameToken` and `CommandList` embed a copy of their owning `Device` token; they
-do not borrow caller variable storage.
+`CommandList` embeds a copy of its owning `Device` token and does not borrow
+caller variable storage.
 
 ### Allocations, spans, and GPU addresses
 
@@ -349,9 +348,8 @@ GpuSpan
     usz size
 ```
 
-The identity fields are opaque. Consumers may copy a complete span only for the
-lifetime documented by its producer; allocation and frame spans have different
-expiry rules. Do not construct or mutate the identity.
+The identity fields are opaque. Consumers may copy a complete span only while
+its owning allocation remains live. Do not construct or mutate the identity.
 Mapping, address, access, bounds, and native backing remain device-owned and are
 recovered when a public operation resolves the span. A zero `GpuAddress` is
 invalid.
@@ -382,14 +380,13 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
-| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command/frame lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource token; consumed or stale command-list, frame |
-| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `begin_frame`, `end_frame`, `cmd_texture_barrier` | an acquired swapchain image is pending during resize; double begin or a frame boundary blocked by in-flight work; or `old_layout` disagrees with the list's effective layout |
+| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
+| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `cmd_texture_barrier` | an acquired swapchain image is pending during resize, or `old_layout` disagrees with the list's effective layout |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
 | `RESOURCE_IN_USE` | resource destruction, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, or incomplete submitted work explicitly references a resource; active pipeline creation uses a shader; a placed or dedicated texture depends on an allocation; a live descriptor owns a texture; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
-| `ARENA_FULL` | `alloc_frame_span` | frame data exceeded its configured capacity |
 | `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; `create_texture_descriptors` checks this before creating anything, so an overflowing batch leaves the heap untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
@@ -397,7 +394,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, duplicate command token in one submit batch, or token that is already being submitted |
-| `WAIT_TIMEOUT` | `wait_completion`, `begin_frame`, `acquire_next_image` | bounded wait or transient image unavailability; retry with the unchanged completion point or resource |
+| `WAIT_TIMEOUT` | `wait_completion`, `acquire_next_image` | bounded wait or transient image unavailability; retry with the unchanged completion point or resource |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
 Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled. `DEVICE_LOST` is reserved for an explicit native device-loss result; an unmapped native result becomes `BACKEND_ERROR`.
@@ -469,70 +466,6 @@ preserve it. Validation returns `RESOURCE_IN_USE` for detected explicit command
 references and for live placed or dedicated textures. Uses reachable only by a
 raw GPU address remain the caller's precondition. Any live allocation prevents
 normal device destruction.
-
-### Frame spans
-
-The frame lifecycle is strict:
-
-```text
-IDLE --begin_frame(device)--> ACTIVE(token generation) --end_frame(token)--> IDLE
-
-begin_frame(Device* device) -> FrameToken?
-alloc_frame_span(FrameToken* frame, usz size, usz align) -> GpuSpan?
-end_frame(FrameToken* frame) -> void?
-```
-
-`FrameToken` is a stack-only owner-bearing token no larger than 16 bytes. A
-copy may allocate while its device-owned generation remains active. Its embedded
-`Device` value does not borrow the variable passed to `begin_frame`. Successful
-end clears the passed token and invalidates every alias; a consumed, malformed,
-or stale token faults `INVALID_HANDLE`. `frame.is_valid()` checks whether the
-token contains a generation so cleanup code can retry a failed end; operations
-still validate liveness. Double begin faults
-`INVALID_RESOURCE_STATE`. Rejections change no frame or arena state.
-
-When end submission faults, `end_frame` returns the exact fault and preserves
-the token, active generation, frame slot, retirement state, queue-use flags,
-and prospective signal value. Retry with the same token; only a successful end
-consumes it. Frame spans are transient and invalid after their frame arena
-resets.
-
-For fallible frame work, use the compile-time direct-call helper:
-
-```c3
-fn void? render_frame(gpu::FrameToken* frame, RenderState* state) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(frame, RootArgs::size, RootArgs::alignment)!;
-    record_rendering(&frame.device, state, root_span)!;
-}
-
-gpu::FrameToken frame;
-gpu::@with_frame(&frame, &device, render_frame, &state)!;
-```
-
-The worker must be a named optional-returning function whose first parameter is
-`FrameToken*`; additional state is passed as ordinary arguments. The worker
-must not end the frame itself; the helper owns the single end attempt. The
-helper clears caller-owned token storage, begins the frame, calls the worker
-directly, and attempts end exactly once after worker success or fault. Begin
-failure calls neither worker nor end. If only the worker faults, its fault is
-returned after end succeeds. If end faults, that exact fault takes precedence
-even when the worker also faulted, and caller-owned `frame` remains live for
-`end_frame(&frame)` retry. Callers needing both diagnostics should log the
-worker fault before returning it. The helper performs no heap allocation,
-runtime callback, virtual dispatch, or per-frame indirect call.
-
-Frame spans admit the selected graphics and compute roles, or transfer on a
-transfer-only device. The backend uses concurrent sharing only when those roles
-map to distinct families. Barriers and submission ordering remain explicit.
-
-Use cases:
-
-```text
-root structs
-per-dispatch data
-per-draw data
-small per-frame tables
-```
 
 ### Host transfers
 
@@ -1177,7 +1110,7 @@ get_span_mapping
 ```
 
 The caller owns the allocation, barriers, completion point, and mapped data.
-No frame boundary or readback-specific token is required.
+No application work boundary or readback-specific token is required.
 
 ### Barriers
 
@@ -1347,12 +1280,10 @@ descriptors, pipelines, queue progress, and WSI failures. Backend failures
 preserve the public fault and report the public operation name, such as
 `submit` or `wait_completion`.
 
-Frame-memory coverage reports double-begin and quiescence violations, stale
-frame tokens, invalid alignment before zero size, arena exhaustion,
-non-timeout frame-wait failures and retirement queries, and end-frame signal
-failures. Expected/retryable frame-wait `WAIT_TIMEOUT` outcomes remain silent;
-other diagnostics preserve `ARENA_FULL` and retry state. `GpuAllocation`
-diagnostics carry its public index and generation.
+Allocation diagnostics cover invalid classes, sizes, alignments, mapping and
+address capability mismatches, visibility failures, stale spans, and detected
+resource references. `GpuAllocation` diagnostics carry the public index and
+generation.
 
 ```text
 cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) -> void?
@@ -1436,10 +1367,12 @@ native host/device allocation failure leave it retryable. `present` requires the
 texture's tracked layout to be `PRESENT`. Resize rejects a pending acquisition;
 destruction waits submitted render work and invalidates it.
 
-`WAIT_TIMEOUT` from acquire leaves the swapchain unchanged. Out-of-date requires
-resize; surface loss requires a new surface and swapchain. A suboptimal image is
-valid and may be presented before resizing. Unsupported requested present modes
-fall back to FIFO; query `get_present_mode_support` to choose explicitly.
+`WAIT_TIMEOUT` from acquire leaves the swapchain unchanged. It can mean the
+native acquire timed out or reported not ready, or that both private acquire
+semaphore slots remain retired behind incomplete render completions. Out-of-date
+requires resize; surface loss requires a new surface and swapchain. A
+suboptimal image is valid and may be presented before resizing. Unsupported
+requested present modes fall back to FIFO; query `get_present_mode_support` to choose explicitly.
 
 `get_swapchain_info` returns the selected format, extent, image count, present
 mode, and dormant state. Re-query after resize and rebuild format-dependent
@@ -1467,13 +1400,6 @@ struct RootArgs {
     uint            _pad2;
 }
 
-struct ComputeWork {
-    gpu::Device*        device;
-    gpu::GpuSpan        input;
-    gpu::GpuSpan        output;
-    gpu::PipelineHandle pipeline;
-}
-
 fn void? run_compute(gpu::Device* device, gpu::PipelineHandle pipeline) {
     gpu::AllocationDesc storage_desc = {
         .size         = 8192,
@@ -1482,50 +1408,59 @@ fn void? run_compute(gpu::Device* device, gpu::PipelineHandle pipeline) {
         .access       = { .compute },
         .debug_name   = "compute_storage",
     };
-    gpu::GpuAllocation storage = gpu::allocate_memory(device, &storage_desc)!;
+    gpu::GpuAllocation storage =
+        gpu::allocate_memory(device, &storage_desc)!;
     defer (void)gpu::free_allocation(device, &storage);
+    gpu::GpuSpan storage_span =
+        gpu::get_allocation_span(device, storage)!;
 
-    gpu::GpuSpan storage_span = gpu::get_allocation_span(device, storage)!;
-    ComputeWork work = {
-        .device   = device,
-        .input    = storage_span.checked_subspan(0, 4096)!,
-        .output   = storage_span.checked_subspan(4096, 4096)!,
-        .pipeline = pipeline,
+    gpu::AllocationDesc root_desc = {
+        .size         = RootArgs::size,
+        .alignment    = RootArgs::alignment,
+        .memory_class = gpu::MemoryClass.CPU_WRITE,
+        .access       = { .compute },
+        .debug_name   = "compute_root",
     };
-    gpu::FrameToken frame;
-    gpu::@with_frame(&frame, device, record_compute, &work)!;
-}
-
-fn void? record_compute(gpu::FrameToken* frame, ComputeWork* work) {
-    gpu::GpuSpan root_span = gpu::alloc_frame_span(
-        frame,
-        RootArgs::size,
-        RootArgs::alignment,
-    )!;
+    gpu::GpuAllocation root_allocation =
+        gpu::allocate_memory(device, &root_desc)!;
+    defer (void)gpu::free_allocation(device, &root_allocation);
+    gpu::GpuSpan root_span =
+        gpu::get_allocation_span(device, root_allocation)!;
     RootArgs* root =
-        (RootArgs*)gpu::get_span_mapping(work.device, root_span)!.ptr;
-    root.input = gpu::get_span_address(work.device, work.input)!;
-    root.output = gpu::get_span_address(work.device, work.output)!;
+        (RootArgs*)gpu::get_span_mapping(device, root_span)!.ptr;
+    root.input = gpu::get_span_address(
+        device,
+        storage_span.checked_subspan(0, 4096)!,
+    )!;
+    root.output = gpu::get_span_address(
+        device,
+        storage_span.checked_subspan(4096, 4096)!,
+    )!;
     root.count = 1024;
+    gpu::flush_mapped_span(device, root_span)!;
 
-    gpu::Queue queue = gpu::get_queue(work.device, gpu::QueueKind.COMPUTE)!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
     gpu::CommandList commands = gpu::begin_commands(queue)!;
     defer (void)gpu::discard_commands(&commands);
     gpu::cmd_dispatch(
         commands: &commands,
-        pipeline: work.pipeline,
-        root:     gpu::get_span_address(work.device, root_span)!,
+        pipeline: pipeline,
+        root:     gpu::get_span_address(device, root_span)!,
         groups:   { 16, 1, 1 },
     )!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
+    gpu::ExecutableCommandList executable =
+        gpu::end_commands(&commands)!;
     defer (void)gpu::discard_executable_commands(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
     gpu::wait_completion(completion)!;
 }
-
 ```
+
+The wait covers the last use of both allocations, so their deferred frees are
+safe. A non-blocking caller retains the allocations and completion point until
+`poll_completion` succeeds.
 
 ## 12. API acceptance criteria
 
@@ -1534,7 +1469,7 @@ The public API is acceptable when:
 ```text
 no public signature exposes vk::, vma::, or sdl:: types
 all fallible operations return optionals/faults
-all resources have explicit destruction or frame ownership
+all resources have explicit destruction and caller-managed completion lifetimes
 generic GPU data uses allocations, spans, and addresses without a public buffer object
 root-pointer compute can be written without descriptor-set concepts
 texture sampling can be written with TextureIndex and SamplerIndex

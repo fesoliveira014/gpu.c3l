@@ -36,7 +36,6 @@ gpu/vk/device.c3               physical device selection, logical device, featur
 gpu/vk/queue.c3                queue family selection, queue handles, submit
 gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
 gpu/vk/allocation.c3           generic-buffer and raw texture-memory allocations
-gpu/vk/memory.c3               frame arenas and frame retirement
 gpu/vk/buffer.c3               VkBuffer + VMA allocation path
 gpu/vk/texture.c3              owned/placed images, views, layout tracking
 gpu/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
@@ -302,7 +301,7 @@ table entries before destroying the allocator.
 ## 8. Private buffer implementation
 
 `gpu::vk::BufferHandle`, `BufferDesc`, and `BufferUsage` implement
-allocation and arena backing. They never cross backend dispatch.
+generic allocation backing. They never cross backend dispatch.
 
 Creation validates size and semantic access, derives the exact native queue
 families, translates private usage and memory policy, creates the VMA-backed
@@ -312,9 +311,8 @@ required nonzero device address are known. Addressable backing includes
 
 One unique family uses `EXCLUSIVE` sharing; multiple admitted families use
 `CONCURRENT` with the exact ordered, deduplicated list. Presentation queues
-are excluded. Frame arenas admit graphics and compute roles, or transfer on a
-transfer-only device. Independent allocations derive sharing only from their
-immutable access roles. Sharing does not replace barriers, submission ordering,
+are excluded. Independent allocations derive sharing only from their immutable
+access roles. Sharing does not replace barriers, submission ordering,
 completion waits, or lifetime rules.
 
 ## 9. Texture implementation
@@ -385,7 +383,7 @@ sampled images
 storage images
 samplers
 ```
-The internal descriptor buffer uses the frame-arena family list: every selected
+The internal descriptor buffer admits every selected
 graphics and compute identity, or every transfer identity on a transfer-only
 device. One family remains `EXCLUSIVE`; two or more use `CONCURRENT` with the
 exact ordered list. Transfer is otherwise excluded because transfer commands
@@ -606,9 +604,7 @@ Use timeline semaphores for:
 
 ```text
 queue-owned completion points
-frame retirement
 queue submission order
-arena reset safety
 completion-based caller lifetime decisions
 ```
 
@@ -635,10 +631,9 @@ SubmitDesc
 ```
 
 Host poll and wait reject unpublished sequences and query the owning timeline
-directly. Successful observation advances cached progress and clears off-frame
-queue markers only when it covers the latest published sequence. Device
-destruction performs the same non-blocking query and returns `DEVICE_BUSY`
-while work is incomplete.
+directly. Successful observation advances cached progress when it covers the
+latest published sequence. Device destruction performs the same non-blocking
+query and returns `DEVICE_BUSY` while work is incomplete.
 
 ## 15. Render pass implementation
 
@@ -667,13 +662,18 @@ Do not transition attachments to shader-read automatically.
 
 A swapchain borrows its runtime-owned `vk::SurfaceKHR` and retains the public
 surface until destruction. Each live slot owns its `vk::SwapchainKHR`, wrapped
-images, acquire semaphores, per-image present semaphores, runtime snapshot, and
-one pending acquisition state.
+images, a fixed two-slot acquire-semaphore ring with per-slot retirement points,
+per-image present semaphores, runtime snapshot, and one pending acquisition
+state.
 
-Acquire first checks identity headroom, then calls `vkAcquireNextImageKHR`.
-Success publishes a `SwapchainReadiness` packed from device, swapchain slot and
-generation, and a non-repeating acquisition sequence. The native semaphore
-never enters the public value.
+Acquire first checks identity headroom, then scans the private ring from its next
+slot and polls each slot's retirement `CompletionPoint`. If neither slot is
+retired, it returns `WAIT_TIMEOUT` without calling `vkAcquireNextImageKHR`.
+Otherwise it passes the selected semaphore to the native acquire.
+Success advances the ring and publishes a `SwapchainReadiness` packed from
+device, swapchain slot and generation, and a non-repeating acquisition sequence.
+Successful submission associates the selected slot with the returned render
+completion. The native semaphore never enters the public value.
 
 A readiness-consuming graphics submit:
 
@@ -744,7 +744,6 @@ Helpers:
 format_to_vk
 buffer_usage_to_vk
 texture_usage_to_vk
-memory_kind_to_vma
 stage_to_vk
 hazard_to_vk_access
 layout_to_vk
