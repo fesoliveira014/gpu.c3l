@@ -298,7 +298,7 @@ Copy, fill, index, indirect, upload, and readback workflows resolve spans to
 private native buffers.
 
 The Vulkan backend may use private `BufferHandle`, `BufferDesc`, and
-`BufferUsage` declarations for allocation and arena backing. They remain in
+`BufferUsage` declarations for generic allocation backing. They remain in
 `gpu::vk` and never cross backend dispatch.
 
 ### Textures
