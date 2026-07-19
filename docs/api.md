@@ -891,7 +891,6 @@ handle twice faults `INVALID_HANDLE` and never affects other aliases. Handles
 must not be compared to decide whether two pipelines are "the same object" —
 distinct handles may or may not share backend state.
 
-
 ### Pipeline cache
 
 Identical immutable-state descriptors alias one backend pipeline (in-memory
@@ -1210,6 +1209,7 @@ Use a caller-owned `CPU_READ` allocation as the copy destination:
 allocate_memory(CPU_READ)
 get_allocation_span
 cmd_copy_buffer or cmd_copy_texture_to_buffer
+cmd_buffer_barrier(TRANSFER_WRITE -> HOST_READ) on the destination
 submit
 poll_completion or wait_completion
 invalidate_mapped_span

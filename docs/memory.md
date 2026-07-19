@@ -415,8 +415,9 @@ Blocking flow (the `readback_buffer_data` / `readback_texture_data` helpers):
 6. Read the range returned by `get_span_mapping`.
 ```
 
-For non-blocking readback, allocate `CPU_READ` memory, record the copy into its
-span, submit, and poll the returned completion point. After completion,
+For non-blocking readback, allocate `CPU_READ` memory, record the copy and a
+`TRANSFER_WRITE` to `HOST_READ` barrier on its destination span, submit, and
+poll the returned completion point. After completion,
 invalidate the span and read its mapping. The caller controls allocation reuse
 and release.
 

@@ -574,7 +574,6 @@ fn void stale_transfer_command_owners_report_without_identity() @test {
         resource_name:       null,
     );
 
-
 }
 
 fn void helper_backend_result_diagnostics_preserve_public_fault_metadata() @test {
@@ -1264,7 +1263,6 @@ fn void upload_helper_validation_faults() @test {
     );
     assert(state.helper_counter == helper_before, "empty upload reserves no helper value");
 
-
     before = capture.calls;
     helper_before = state.helper_counter;
     fault bounds_fault = @catch(gpu::upload_buffer_data(
@@ -1333,7 +1331,6 @@ fn void upload_helper_validation_faults() @test {
         gpu::vk::texture_layout(no_transfer_slot) == gpu::TextureLayout.UNDEFINED,
         "invalid texture usage preserves the tracked layout"
     );
-
 
     // cmd-level upload into a texture that is not TRANSFER_DST still faults.
     gpu::FrameToken frame_token = gpu::begin_frame(&device)!!;

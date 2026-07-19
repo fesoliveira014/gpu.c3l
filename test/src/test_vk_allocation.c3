@@ -832,7 +832,6 @@ fn void texture_memory_uses_raw_non_addressable_allocation() @test {
         == gpu::INVALID_ARGUMENT,
         "forged texture spans stop before private-buffer resolution");
 
-
     vk::free_allocation_for_state_with_ops(
         &fixture.state,
         allocation,

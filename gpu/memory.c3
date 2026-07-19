@@ -24,7 +24,6 @@ enum MemoryClass : int {
     TEXTURE,
 }
 
-
 <* Non-owning identity and range into generic GPU data. *>
 struct GpuSpan {
     ulong owner;
@@ -433,7 +432,6 @@ fn void? readback_texture_data(Device* device, TextureHandle src, uint mip, char
     defer end_device_operation(&operation);
     return operation.vtable.readback_texture_data(device, src, mip, out_data, from_stage, from_hazard, from_layout);
 }
-
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the
    caller has already proved the range, or deliberately needs an invalid span
