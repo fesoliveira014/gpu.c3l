@@ -67,3 +67,31 @@ fn void texture_desc_profile_rejects_unsupported_formats() @test {
     desc.usage = { .transfer_dst };
     assert(!gpu::texture_desc_valid(&desc), "D24S8 transfer usage remains invalid");
 }
+
+fn void texture_view_publication_requires_strict_capability() @test {
+    gpu::Device device = gpu::vk::stub_create_strict_disabled_device()!!;
+    gpu::TextureDesc texture_desc = valid_texture_desc();
+    gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
+
+    assert(@catch(gpu::create_texture_view(&device, texture, null))
+        == gpu::UNSUPPORTED_FEATURE,
+        "single texture-view publication requires strict capability");
+
+    gpu::TextureViewCreateDesc[1] descs = { { .texture = texture } };
+    gpu::TextureView[1] views;
+    gpu::TextureView[] no_views;
+    assert(@catch(gpu::create_texture_views(&device, descs[..], no_views))
+        == gpu::INVALID_ARGUMENT,
+        "batch length mismatch precedes strict capability validation");
+    assert(@catch(gpu::create_texture_views(&device, descs[..], views[..]))
+        == gpu::UNSUPPORTED_FEATURE,
+        "batch texture-view publication requires strict capability");
+    assert(!views[0].is_valid(),
+        "strict-disabled batch rejection leaves outputs unchanged");
+    gpu::TextureViewCreateDesc[] empty_descs;
+    gpu::TextureView[] empty_views;
+    gpu::create_texture_views(&device, empty_descs, empty_views)!!;
+
+    gpu::destroy_texture(&device, texture)!!;
+    gpu::destroy_device(&device)!!;
+}

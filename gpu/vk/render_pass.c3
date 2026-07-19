@@ -122,6 +122,8 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
             if (effective_layout(record, depth_slot, desc.depth.texture) != gpu::TextureLayout.DEPTH_STENCIL) return gpu::INVALID_RESOURCE_STATE~;
         }
 
+        state.texture_view_cache_mutex.lock()!!;
+        defer state.texture_view_cache_mutex.unlock();
         defer catch rollback_texture_view_creations(state, creations[:creation_count]);
 
         foreach (i, &target : desc.colors) {
@@ -140,7 +142,7 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
                 operation: "cmd_begin_render_pass",
                 creation:  &creation,
             )!;
-            if (creation.cell != null) creations[creation_count++] = creation;
+            if (creation.cache != null) creations[creation_count++] = creation;
 
             attachments[i] = vk::rendering_attachment_info();
             attachments[i].image_view = view;
@@ -167,7 +169,7 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
                 operation: "cmd_begin_render_pass",
                 creation:  &depth_creation,
             )!;
-            if (depth_creation.cell != null) creations[creation_count++] = depth_creation;
+            if (depth_creation.cache != null) creations[creation_count++] = depth_creation;
             depth_attach = vk::rendering_attachment_info();
             depth_attach.image_view = depth_view;
             depth_attach.image_layout = vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -180,6 +182,7 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
             rendering.p_depth_attachment = &depth_attach;
         }
         vk::cmd_begin_rendering(cb, &rendering);
+        commit_texture_view_creations(state, creations[:creation_count]);
     };
 
     vk::Viewport viewport = {

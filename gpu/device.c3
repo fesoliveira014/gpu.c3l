@@ -10,6 +10,14 @@ import std::core::mem;
 // CommandList; all other entries take the validated device token.
 alias CheckDeviceDestroyFn @private  = fn void? (void*);
 alias DestroyDeviceFn @private       = fn void (void*);
+alias ReportContractFailureFn @private = fn fault (
+    void* backend_state,
+    ZString operation,
+    fault public_fault,
+    DebugResourceKind resource_kind,
+    ZString rejected_field,
+    ZString invariant,
+);
 alias GetMemoryStatsFn @private      = fn MemoryStats? (Device*);
 alias BuildMemoryReportFn @private   = fn String? (Device*, bool detailed);
 alias AllocateMemoryFn @private      = fn GpuAllocation? (Device*, AllocationDesc*);
@@ -105,6 +113,7 @@ bitstruct DeviceSlotControl : ulong @private {
 struct BackendVTable @private {
     CheckDeviceDestroyFn    check_device_destroy;
     DestroyDeviceFn         destroy_device;
+    ReportContractFailureFn report_contract_failure;
     GetMemoryStatsFn        get_memory_stats;
     BuildMemoryReportFn     build_memory_report;
     AllocateMemoryFn        allocate_memory;
@@ -456,6 +465,28 @@ fn void release_device_children(DeviceOperation* operation, ulong count = 1) @pr
 
 fn ulong resource_owner_tag(ulong device_owner, ResourceOwnerKind kind) @private {
     return (device_owner - 1) * RESOURCE_OWNER_KIND_COUNT + (ulong)kind + 1;
+}
+
+fn fault report_device_contract_failure(
+    DeviceOperation* operation,
+    ZString operation_name,
+    fault public_fault,
+    DebugResourceKind resource_kind,
+    ZString rejected_field,
+    ZString invariant,
+) @private {
+    if (operation != null && operation.active
+        && operation.vtable.report_contract_failure != null) {
+        return operation.vtable.report_contract_failure(
+            backend_state:  operation.data.backend_state,
+            operation:      operation_name,
+            public_fault:   public_fault,
+            resource_kind:  resource_kind,
+            rejected_field: rejected_field,
+            invariant:      invariant,
+        );
+    }
+    return public_fault;
 }
 
 fn void? validate_resource_owner(

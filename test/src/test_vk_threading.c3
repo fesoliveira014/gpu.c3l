@@ -5,6 +5,7 @@ import gpu::vk @public;
 import vk;
 import std::thread;
 import std::atomic;
+import std::core::mem;
 import std::core::mem::allocators;
 
 // Headless (lavapipe): the tiered threading model. Storm tests maximize
@@ -114,6 +115,131 @@ fn void concurrent_creation_storm() @test {
         assert(!state.strict_heap.descriptors.texture_cells[i].used,
             "no texture-view cell remains live after concurrent release");
     }
+}
+
+struct TextureViewAllocatorArgs {
+    gpu::Device*       device;
+    gpu::TextureHandle texture;
+    gpu::TextureView   published;
+}
+
+fn int texture_view_allocator_worker(void* raw_args) {
+    TextureViewAllocatorArgs* args = (TextureViewAllocatorArgs*)raw_args;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        mem::@scoped(&allocators::NULL_ALLOCATOR) {
+            gpu::TextureViewDesc view = {
+                .mip_count   = 1,
+                .base_layer  = 1,
+                .layer_count = 1,
+            };
+            args.published = gpu::create_texture_view(
+                args.device,
+                args.texture,
+                &view,
+            )!!;
+        };
+    };
+    return 0;
+}
+
+fn void texture_view_cache_uses_device_allocator_across_threads() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension    = gpu::TextureDimension.TEX_2D,
+        .access       = { .graphics },
+        .width        = 8,
+        .height       = 8,
+        .mip_levels   = 2,
+        .array_layers = 2,
+        .format       = gpu::Format.RGBA8_UNORM,
+        .usage        = { .sampled },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    TextureViewAllocatorArgs args = {
+        .device  = &device,
+        .texture = texture,
+    };
+    Thread worker;
+    worker.create(&texture_view_allocator_worker, &args)!!;
+    assert(worker.join()!! == 0,
+        "worker publishes through a thread-local allocator that rejects allocations");
+    assert(args.published.is_valid(),
+        "texture-view cache storage comes from the device allocator");
+    gpu::destroy_texture_view(&device, args.published)!!;
+}
+
+struct RenderViewGateArgs {
+    gpu::CommandList           commands;
+    gpu::TextureHandle         texture;
+    gpu::ExecutableCommandList executable;
+    Atomic{bool}               entered;
+    Atomic{bool}               completed;
+}
+
+fn int render_view_gate_worker(void* raw_args) {
+    RenderViewGateArgs* args = (RenderViewGateArgs*)raw_args;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        gpu::ColorTargetDesc[1] colors = { {
+            .texture   = args.texture,
+            .mip_level = 1,
+            .load_op   = gpu::LoadOp.DONT_CARE,
+            .store_op  = gpu::StoreOp.DONT_CARE,
+        } };
+        gpu::RenderPassDesc pass = {
+            .colors = colors[..],
+            .width  = 4,
+            .height = 4,
+        };
+        args.entered.store(true, AtomicOrdering.RELEASE);
+        gpu::cmd_begin_render_pass(&args.commands, &pass)!!;
+        gpu::cmd_end_render_pass(&args.commands)!!;
+        args.executable = gpu::end_commands(&args.commands)!!;
+        args.completed.store(true, AtomicOrdering.RELEASE);
+    };
+    return 0;
+}
+
+fn void render_view_resolution_uses_shared_cache_lock() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics },
+        .width      = 8,
+        .height     = 8,
+        .mip_levels = 2,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .color_attach },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
+    slot.current_layout.store(
+        (int)gpu::TextureLayout.COLOR_ATTACHMENT,
+        AtomicOrdering.RELEASE,
+    );
+    RenderViewGateArgs args = {
+        .commands = gpu::begin_commands(
+            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        )!!,
+        .texture = texture,
+    };
+    state.texture_view_cache_mutex.lock()!!;
+    Thread worker;
+    worker.create(&render_view_gate_worker, &args)!!;
+    while (!args.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    thread::sleep_ms(25)!!;
+    assert(!args.completed.load(AtomicOrdering.ACQUIRE),
+        "render view resolution waits for the shared cache lock");
+    state.texture_view_cache_mutex.unlock();
+    assert(worker.join()!! == 0,
+        "render recording resumes after cache publication releases the lock");
+    assert(args.completed.load(AtomicOrdering.ACQUIRE),
+        "render recording completes after synchronized cache resolution");
+    discard_test_executable(&args.executable)!!;
 }
 
 struct SamplerRaceArgs {

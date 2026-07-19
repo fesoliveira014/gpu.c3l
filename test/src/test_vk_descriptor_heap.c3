@@ -3,6 +3,7 @@ module gpu_test;
 import gpu @public;
 import gpu::vk @public;
 import vk;
+import std::core::mem::allocators;
 
 // Headless (lavapipe): descriptor heap slot bookkeeping through the public API.
 
@@ -387,7 +388,7 @@ fn void texture_view_exhaustion_does_not_cache_failed_views() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(cached_texture_view_count(state, texture) == 0, "the fixture starts with an empty view cache");
 
-    for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
+    for (uint i = 0; i < vk::INITIAL_CACHED_VIEW_CAPACITY; i++) {
         gpu::TextureViewDesc view = {
             .base_mip    = i % 4,
             .mip_count   = 1,
@@ -652,7 +653,7 @@ fn void texture_views_failed_batch_restores_full_view_capacity() @test {
     gpu::destroy_texture(&device, stale_texture)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
-    for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
+    for (uint i = 0; i < vk::INITIAL_CACHED_VIEW_CAPACITY; i++) {
         gpu::TextureViewDesc failed_view = {
             .base_mip    = i % 4,
             .mip_count   = 1,
@@ -670,8 +671,8 @@ fn void texture_views_failed_batch_restores_full_view_capacity() @test {
             "a failed batch restores the empty view cache");
     }
 
-    gpu::TextureView[vk::MAX_CACHED_VIEWS] live;
-    for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
+    gpu::TextureView[vk::INITIAL_CACHED_VIEW_CAPACITY] live;
+    for (uint i = 0; i < vk::INITIAL_CACHED_VIEW_CAPACITY; i++) {
         gpu::TextureViewDesc valid_view = {
             .base_mip    = i % 4,
             .mip_count   = 1,
@@ -680,7 +681,7 @@ fn void texture_views_failed_batch_restores_full_view_capacity() @test {
         };
         live[i] = gpu::create_texture_view(&device, texture, &valid_view)!!;
     }
-    assert(cached_texture_view_count(state, texture) == vk::MAX_CACHED_VIEWS,
+    assert(cached_texture_view_count(state, texture) == vk::INITIAL_CACHED_VIEW_CAPACITY,
         "all cache entries remain available after repeated failed batches");
 
     foreach (index : live) gpu::destroy_texture_view(&device, index)!!;
@@ -733,8 +734,8 @@ fn void texture_views_failed_batch_restores_multiple_created_views() @test {
         "a later stale texture emits once after two new views");
     assert(cached_texture_view_count(state, texture) == 0,
         "rollback removes every view created by the failed transaction");
-    assert(!slot.views[0].used && !slot.views[1].used,
-        "rollback restores both cache cells to their prior unused state");
+    assert(slot.views.len == 0,
+        "rollback restores the empty pre-transaction cache");
     state.debug_callback = null;
 }
 
@@ -1472,13 +1473,40 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
     state.debug_callback = null;
 }
 
-fn void texture_view_cache_exhaustion_reports_distinct_context() @test {
+fn void texture_view_cache_growth_reports_host_oom_transactionally() @test {
     gpu::Device device = make_heap_test_device(16, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::TextureView[vk::MAX_CACHED_VIEWS] live;
-    for (uint i = 0; i < vk::MAX_CACHED_VIEWS; i++) {
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    state.host_allocator = &allocators::NULL_ALLOCATOR;
+    gpu::TextureViewDesc view = {
+        .mip_count   = 1,
+        .base_layer  = 1,
+        .layer_count = 1,
+    };
+
+    fault allocation_fault = @catch(gpu::create_texture_view(&device, texture, &view));
+    state.host_allocator = &allocators::LIBC_ALLOCATOR;
+    assert(allocation_fault == gpu::OUT_OF_HOST_MEMORY,
+        "host cache allocation failure remains recoverable");
+    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
+    assert(slot.views.len == 0,
+        "failed host cache growth preserves the prior cache");
+
+    gpu::TextureView published = gpu::create_texture_view(&device, texture, &view)!!;
+    gpu::destroy_texture_view(&device, published)!!;
+    assert(slot.views.len == vk::INITIAL_CACHED_VIEW_CAPACITY,
+        "publication succeeds after the allocator recovers");
+}
+
+fn void texture_view_cache_grows_past_initial_capacity() @test {
+    gpu::Device device = make_heap_test_device(16, 4);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureView[vk::INITIAL_CACHED_VIEW_CAPACITY + 1] live;
+    for (uint i = 0; i < vk::INITIAL_CACHED_VIEW_CAPACITY; i++) {
         gpu::TextureViewDesc view = {
             .base_mip    = i % 4,
             .mip_count   = 1,
@@ -1488,33 +1516,58 @@ fn void texture_view_cache_exhaustion_reports_distinct_context() @test {
         live[i] = gpu::create_texture_view(&device, texture, &view)!!;
     }
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    DescriptorDiagnosticCapture capture;
-    state.debug_callback = &capture_descriptor_diagnostic;
-    state.debug_user_data = &capture;
-    gpu::TextureViewDesc overflow = {
+    gpu::TextureViewDesc beyond_initial_capacity = {
         .base_mip    = 4,
         .mip_count   = 1,
         .base_layer  = 3,
         .layer_count = 1,
     };
-    expect_descriptor_diagnostic(
-        capture:             &capture,
-        expected_fault:      gpu::SLOT_TABLE_FULL,
-        expected_kind:       gpu::DebugResourceKind.TEXTURE,
-        expected_identity:   true,
-        expected_index:      texture.index,
-        expected_generation: texture.generation,
-        expected_operation:  "create_texture_view",
-        expected_field:      "texture view cache",
-        expected_invariant:  "texture must have free cached-view capacity",
-    );
-    fault full = @catch(gpu::create_texture_view(&device, texture, &overflow));
-    assert(full == gpu::SLOT_TABLE_FULL && capture.calls == 1 && capture.matched,
-        "view-cache exhaustion has distinct structured context");
+    live[vk::INITIAL_CACHED_VIEW_CAPACITY] = gpu::create_texture_view(
+        &device,
+        texture,
+        &beyond_initial_capacity,
+    )!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(cached_texture_view_count(state, texture) == vk::INITIAL_CACHED_VIEW_CAPACITY + 1,
+        "distinct texture views grow past the initial native-view cache capacity");
 
-    state.debug_callback = null;
     foreach (index : live) gpu::destroy_texture_view(&device, index)!!;
+}
+
+fn void texture_view_batch_rollback_survives_cache_growth() @test {
+    gpu::Device device = make_heap_test_device(16, 4);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureHandle stale_texture = make_heap_texture(&device);
+    gpu::destroy_texture(&device, stale_texture)!!;
+
+    gpu::TextureViewCreateDesc[vk::INITIAL_CACHED_VIEW_CAPACITY + 2] descs;
+    for (uint i = 0; i <= vk::INITIAL_CACHED_VIEW_CAPACITY; i++) {
+        descs[i] = {
+            .texture = texture,
+            .view = {
+                .base_mip    = i % 5,
+                .mip_count   = 1,
+                .base_layer  = i / 5,
+                .layer_count = 1,
+            },
+        };
+    }
+    descs[vk::INITIAL_CACHED_VIEW_CAPACITY + 1] = { .texture = stale_texture };
+    gpu::TextureView[vk::INITIAL_CACHED_VIEW_CAPACITY + 2] views;
+
+    assert(@catch(gpu::create_texture_views(&device, descs[..], views[..]))
+        == gpu::INVALID_HANDLE,
+        "a stale final item rejects a batch after native-view cache growth");
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(cached_texture_view_count(state, texture) == 0,
+        "batch rollback removes creations made before and after cache growth");
+    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
+    assert(slot.views.len == 0,
+        "batch rollback restores the pre-growth native-view cache capacity");
+    foreach (view : views) assert(!view.is_valid(),
+        "cache-growth rollback leaves batch outputs unchanged");
 }
 
 fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @test {

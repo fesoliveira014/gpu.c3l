@@ -55,7 +55,7 @@ struct DedicatedTextureNativeOps {
 // Concrete (non-generic) slot table for textures. Monomorphized twin of
 // gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
 const uint TEXTURE_FREE_NONE = 0;
-const uint MAX_CACHED_VIEWS = 8;
+const sz INITIAL_CACHED_VIEW_CAPACITY = 8;
 
 struct CachedView {
     vk::ImageView     view;
@@ -68,8 +68,11 @@ struct CachedView {
 }
 
 struct CachedViewCreation {
-    CachedView* cell;
-    CachedView  previous;
+    CachedView[]* cache;
+    CachedView[]  previous_cache;
+    sz            index;
+    CachedView    previous;
+    bool          replaced_cache;
 }
 
 struct TextureSlot {
@@ -91,7 +94,7 @@ struct TextureSlot {
     usz                placement_offset;
     usz                allocation_size;
     char[DEBUG_NAME_CAP] debug_name;
-    CachedView[MAX_CACHED_VIEWS] views;
+    CachedView[]        views;
 }
 
 struct TextureCell {
@@ -393,8 +396,8 @@ fn void? check_texture_view_backend_result(
 
 <* Resolve a view desc to an image view: null/zero desc (or the explicit full
    range) is the default view; anything else is normalized, validated, and
-   get-or-created in the slot's view cache. Cached views die with the texture.
-   Format reinterpretation is out of scope. *>
+   get-or-created in the slot's growable view cache. Cached views die with the
+   texture. Format reinterpretation is out of scope. *>
 fn vk::ImageView? resolve_texture_view_tracked(
     VkDeviceState* state,
     TextureSlot* slot,
@@ -427,54 +430,66 @@ fn vk::ImageView? resolve_texture_view_tracked(
         }
     }
 
-    foreach (&cached : slot.views) {
-        if (cached.used) continue;
-        vk::ImageViewCreateInfo view_info = vk::image_view_create_info()
-            .set_image(slot.image)
-            .set_view_type(view_type)
-            .set_format(format_to_vk(slot.format))
-            .set_subresource_range({
-                .aspect_mask      = format_aspect(slot.format),
-                .base_mip_level   = view.base_mip,
-                .level_count      = mip_count,
-                .base_array_layer = view.base_layer,
-                .layer_count      = layer_count,
-            });
-        vk::ImageView image_view;
-        check_texture_view_backend_result(
-            state:     state,
-            operation: operation,
-            texture:   texture,
-            slot:      slot,
-            result:    vk::create_image_view(state.device, &view_info, null, &image_view),
-        )!;
-        creation.cell = cached;
-        creation.previous = *cached;
-        *cached = {
-            .view        = image_view,
-            .base_mip    = view.base_mip,
-            .mip_count   = mip_count,
-            .base_layer  = view.base_layer,
-            .layer_count = layer_count,
-            .view_type   = view_type,
-            .used        = true,
-        };
-        return image_view;
+    sz cache_index = slot.views.len;
+    foreach (i, &cached : slot.views) {
+        if (!cached.used) {
+            cache_index = i;
+            break;
+        }
     }
-    if (operation == null) return gpu::SLOT_TABLE_FULL~;
-    return report_contract_failure(
-        state:               state,
-        operation:           operation,
-        public_fault:        gpu::SLOT_TABLE_FULL,
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
-        has_public_identity: true,
-        index:               texture.index,
-        generation:          texture.generation,
-        debug_name:          slot_name(&slot.debug_name[0]),
-        rejected_field:      "texture view cache",
-        invariant:           "texture must have free cached-view capacity",
-        backend_text:        null,
-    )~;
+
+    vk::ImageViewCreateInfo view_info = vk::image_view_create_info()
+        .set_image(slot.image)
+        .set_view_type(view_type)
+        .set_format(format_to_vk(slot.format))
+        .set_subresource_range({
+            .aspect_mask      = format_aspect(slot.format),
+            .base_mip_level   = view.base_mip,
+            .level_count      = mip_count,
+            .base_array_layer = view.base_layer,
+            .layer_count      = layer_count,
+        });
+    vk::ImageView image_view;
+    check_texture_view_backend_result(
+        state:     state,
+        operation: operation,
+        texture:   texture,
+        slot:      slot,
+        result:    vk::create_image_view(state.device, &view_info, null, &image_view),
+    )!;
+    if (cache_index == slot.views.len) {
+        sz new_capacity = slot.views.len == 0
+            ? INITIAL_CACHED_VIEW_CAPACITY
+            : slot.views.len * 2;
+        CachedView[]? grown_result = alloc::new_array_try(
+            state.host_allocator,
+            CachedView,
+            new_capacity,
+        );
+        if (catch allocation_fault = grown_result) {
+            vk::destroy_image_view(state.device, image_view, null);
+            return gpu::OUT_OF_HOST_MEMORY~;
+        }
+        CachedView[] grown = grown_result;
+        foreach (i, &cached : slot.views) grown[i] = *cached;
+        creation.previous_cache = slot.views;
+        creation.replaced_cache = true;
+        slot.views = grown;
+    }
+    CachedView* cached = &slot.views[cache_index];
+    creation.cache = &slot.views;
+    creation.index = cache_index;
+    creation.previous = *cached;
+    *cached = {
+        .view        = image_view,
+        .base_mip    = view.base_mip,
+        .mip_count   = mip_count,
+        .base_layer  = view.base_layer,
+        .layer_count = layer_count,
+        .view_type   = view_type,
+        .used        = true,
+    };
+    return image_view;
 }
 
 fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view) {
@@ -489,10 +504,24 @@ fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, 
     );
 }
 
-fn void rollback_texture_view_creations(VkDeviceState* state, CachedViewCreation[] creations) @private {
+fn void commit_texture_view_creations(VkDeviceState* state, CachedViewCreation[] creations) @private {
     foreach (&creation : creations) {
-        vk::destroy_image_view(state.device, creation.cell.view, null);
-        *creation.cell = creation.previous;
+        if (creation.replaced_cache && creation.previous_cache.ptr != null) {
+            alloc::free(state.host_allocator, creation.previous_cache.ptr);
+        }
+    }
+}
+
+fn void rollback_texture_view_creations(VkDeviceState* state, CachedViewCreation[] creations) @private {
+    sz remaining = creations.len;
+    while (remaining > 0) {
+        CachedViewCreation* creation = &creations[--remaining];
+        CachedView* cached = &(*creation.cache)[creation.index];
+        vk::destroy_image_view(state.device, cached.view, null);
+        *cached = creation.previous;
+        if (!creation.replaced_cache) continue;
+        alloc::free(state.host_allocator, (*creation.cache).ptr);
+        *creation.cache = creation.previous_cache;
     }
 }
 
@@ -502,6 +531,10 @@ fn void destroy_cached_views(VkDeviceState* state, TextureSlot* slot) {
             vk::destroy_image_view(state.device, cached.view, null);
             cached.used = false;
         }
+    }
+    if (slot.views.ptr != null) {
+        alloc::free(state.host_allocator, slot.views.ptr);
+        slot.views = {};
     }
 }
 
