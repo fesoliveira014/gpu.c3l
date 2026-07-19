@@ -173,6 +173,6 @@ fn uint? resolve_descriptor_capacity(
     uint default_capacity,
 ) {
     uint capacity = requested == 0 ? default_capacity : requested;
-    if (capacity > gpu::MAX_DESCRIPTOR_SLOTS) return gpu::INVALID_ARGUMENT~;
+    if (capacity > gpu::MAX_SHADER_HEAP_CAPACITY) return gpu::INVALID_ARGUMENT~;
     return capacity;
 }

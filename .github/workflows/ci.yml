@@ -9,7 +9,6 @@ env:
   C3C_VERSION: "0.8.0"
   VULKAN_SDK_VERSION: "1.3.290.0"
   MESA_DIST_WIN_VERSION: "25.1.5"
-  MESA_DIST_WIN_BROKEN_DESCRIPTOR_BUFFER_E2E_VERSION: "25.1.5"
   HEADLESS_TEST_TARGETS: >-
     vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
     vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
@@ -344,24 +343,3 @@ jobs:
             echo "::endgroup::"
           done
           exit $FAIL
-
-      - name: Descriptor-buffer coverage status
-        run: |
-          if [ "$MESA_DIST_WIN_VERSION" != "$MESA_DIST_WIN_BROKEN_DESCRIPTOR_BUFFER_E2E_VERSION" ]; then
-            echo "::error::mesa-dist-win changed; re-evaluate descriptor-buffer shader E2E"
-            exit 1
-          fi
-          c3c test vk_texture_heap --path test \
-            --test-filter descriptor_buffer_device_and_heap --test-show-output 2>&1 \
-            | tee /tmp/descriptor-buffer.txt
-          if grep -Fq "no capable adapter" /tmp/descriptor-buffer.txt; then
-            echo "::notice::descriptor-buffer device/heap path not exercised on this adapter"
-            echo "Descriptor-buffer device/heap: NOT EXERCISED (adapter support unavailable)." >> "$GITHUB_STEP_SUMMARY"
-          elif ! grep -Fq "Testing gpu_test::descriptor_buffer_device_and_heap" /tmp/descriptor-buffer.txt; then
-            echo "::error::descriptor-buffer test filter matched no test"
-            exit 1
-          else
-            echo "Descriptor-buffer device/heap: EXERCISED on mesa-dist-win ${MESA_DIST_WIN_VERSION}." >> "$GITHUB_STEP_SUMMARY"
-          fi
-          echo "::notice::descriptor-buffer shader E2E remains disabled for the pinned known-broken driver; fixed-driver or real-hardware evidence is pending"
-          echo "Descriptor-buffer shader E2E: NOT EXERCISED (disabled for the pinned known-broken driver; re-evaluate on Mesa pin changes)." >> "$GITHUB_STEP_SUMMARY"

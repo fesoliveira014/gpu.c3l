@@ -7,8 +7,9 @@ faultdef
     // No backend for the requested BackendKind, no Vulkan 1.3 driver, or
     // instance/device creation failed outright.
     UNSUPPORTED_BACKEND,
-    // A requested optional capability is absent: validation layers not
-    // installed, presentation not enabled/supported, missing device feature.
+    // A valid requested capability is unavailable: validation layers not
+    // installed, presentation unsupported, missing feature, or no adapter
+    // can provide an exact semantic capacity.
     UNSUPPORTED_FEATURE,
     // A descriptor or parameter is malformed: zero sizes, out-of-range
     // values, undersized output buffers, mismatched spans.

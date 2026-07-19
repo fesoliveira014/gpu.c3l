@@ -57,8 +57,8 @@
     },
     // Advisory texture-descriptor churn and sampler lookup timing across
     // worker counts 1/2/4; executable so it never gates CI.
-    // Needs an ICD — pin lavapipe via VK_DRIVER_FILES. DB-mode phases run
-    // only with GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1.
+    // Needs an ICD — pin lavapipe via VK_DRIVER_FILES. The backend selects
+    // the native heap implementation automatically.
     "descriptor_churn_bench": {
       "type": "executable",
       "sources": [ "src/descriptor_churn_bench.c3" ]

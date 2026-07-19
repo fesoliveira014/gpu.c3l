@@ -14,6 +14,14 @@ PRIVATE_BACKEND_DECLARATION = "module gpu::vk @private;"
 FORBIDDEN_TEXT = {
     "backend_state": "backend state pointer",
     "backendvtable": "backend dispatch table",
+    "descriptorheapmode": "backend heap strategy type",
+    '"name":"descriptor_heap_mode"': "backend heap strategy field",
+    '"name":"descriptor_buffer"': "backend descriptor-buffer capability",
+    '"name":"descriptor_indexing"': "backend descriptor-indexing capability",
+    '"name":"texture_descriptor_capacity"': "backend-shaped texture capacity",
+    '"name":"sampler_descriptor_capacity"': "backend-shaped sampler capacity",
+    '"name":"max_texture_descriptors"': "backend-shaped texture limit",
+    '"name":"max_sampler_descriptors"': "backend-shaped sampler limit",
     "bufferhandle": "retired BufferHandle",
     "bufferdesc": "retired BufferDesc",
     "bufferusage": "retired BufferUsage",
@@ -115,6 +123,17 @@ RETIRED_SOURCE_SYMBOLS = (
     "BufferDesc",
     "BufferUsage",
     "TextureDescriptorDesc",
+    "DescriptorHeapMode",
+    "descriptor_heap_mode",
+    "texture_descriptor_capacity",
+    "sampler_descriptor_capacity",
+    "max_texture_descriptors",
+    "max_sampler_descriptors",
+    "descriptor_buffer",
+    "descriptor_indexing",
+    "DEFAULT_TEXTURE_DESCRIPTORS",
+    "DEFAULT_SAMPLER_DESCRIPTORS",
+    "MAX_DESCRIPTOR_SLOTS",
     "create_texture_descriptor(",
     "destroy_texture_descriptor(",
     "create_texture_descriptors(",
@@ -221,7 +240,15 @@ def validate_document(document: dict) -> list[str]:
         for entry in public_surface.get("types", [])
     }
 
+    device_desc_fields = dict(member_schema(types.get("DeviceDesc")))
+    for field in ("texture_heap_capacity", "sampler_heap_capacity"):
+        if device_desc_fields.get(field) != "uint":
+            failures.append(f"DeviceDesc.{field} must be a uint")
+
     device_caps_fields = dict(member_schema(types.get("DeviceCaps")))
+    for field in ("texture_heap_capacity", "sampler_heap_capacity"):
+        if device_caps_fields.get(field) != "uint":
+            failures.append(f"DeviceCaps.{field} must be a uint")
     if device_caps_fields.get("max_sampler_lod_bias") != "float":
         failures.append("DeviceCaps.max_sampler_lod_bias must be a float")
 

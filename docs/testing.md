@@ -280,13 +280,13 @@ Test names describe behavior, not roadmap or ticket labels.
 | Depth | depth attachment creation, depth-tested draw, readback. |
 | Indirect draw | compute-written draw args, indirect draw, readback. |
 
-Descriptor-buffer topology has deterministic create-info coverage for the
-same-family exclusive path and the distinct graphics/compute concurrent path,
-including ordered family values and transfer exclusion. The gated
-`GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1` regression uses one live `Device`, a
-texture admitting graphics and compute, and one descriptor across compute
-storage writes and fragment sampling with a timeline dependency. It reports the selected family
-indices; the gate remains necessary on drivers with unreliable descriptor-buffer image access.
+Private heap selection has deterministic mocked coverage for both available
+implementations, no available implementation, and indexing limits below the
+requested capacities. Descriptor-buffer topology has deterministic create-info
+coverage for exclusive and concurrent paths. The gated
+`GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1` workloads run only when automatic
+selection chooses descriptor buffers; the gate remains necessary on drivers
+with unreliable descriptor-buffer image access.
 
 ## 9. Build commands
 
@@ -410,8 +410,8 @@ linux (blocking): generator tests, ABI drift gate, shader build, full
     lavapipe test sweep, then a c3c docgen API reference uploaded as the
     api-reference artifact
 windows (blocking): same suite via mesa-dist-win lavapipe, registered in the
-    HKLM Vulkan driver registry; descriptor-buffer device/heap coverage reports
-    its status, while shader E2E awaits a fixed driver or real hardware
+    HKLM Vulkan driver registry; private heap selection is covered by the
+    shared mocked and native targets
 docs-walkthrough (blocking): executes docs/getting_started.md verbatim on a
     bare runner
 ```

@@ -183,8 +183,8 @@ fn void? create_sampler_table(VkDeviceState* state) @private {
     vk::PhysicalDeviceProperties properties;
     vk::get_physical_device_properties(state.physical_device, &properties);
     uint capacity = properties.limits.max_sampler_allocation_count;
-    if (capacity > gpu::MAX_DESCRIPTOR_SLOTS) {
-        capacity = gpu::MAX_DESCRIPTOR_SLOTS;
+    if (capacity > gpu::MAX_SHADER_HEAP_CAPACITY) {
+        capacity = gpu::MAX_SHADER_HEAP_CAPACITY;
     }
     if (capacity == 0) return gpu::UNSUPPORTED_FEATURE~;
     state.samplers.owner = gpu::resource_owner_tag(
@@ -312,7 +312,7 @@ fn gpu::SamplerIndex? vk_publish_sampler(
             index:               sampler.index,
             generation:          sampler.generation,
             debug_name:          null,
-            rejected_field:      "DeviceDesc.sampler_descriptor_capacity",
+            rejected_field:      "DeviceDesc.sampler_heap_capacity",
             invariant:           "must exceed published samplers",
             backend_text:        null,
         )~;

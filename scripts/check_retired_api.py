@@ -16,6 +16,17 @@ FIXTURES = {
     "destroy_texture_descriptor": "destroy_texture_descriptor",
     "create_texture_descriptors": "create_texture_descriptors",
     "texture_descriptor_desc": "TextureDescriptorDesc",
+    "descriptor_heap_mode": "DescriptorHeapMode",
+    "descriptor_heap_mode_field": "descriptor_heap_mode",
+    "texture_descriptor_capacity": "texture_descriptor_capacity",
+    "sampler_descriptor_capacity": "sampler_descriptor_capacity",
+    "descriptor_buffer_caps": "descriptor_buffer",
+    "descriptor_indexing_caps": "descriptor_indexing",
+    "max_texture_descriptors_caps": "max_texture_descriptors",
+    "max_sampler_descriptors_caps": "max_sampler_descriptors",
+    "default_texture_descriptors": "DEFAULT_TEXTURE_DESCRIPTORS",
+    "default_sampler_descriptors": "DEFAULT_SAMPLER_DESCRIPTORS",
+    "max_descriptor_slots": "MAX_DESCRIPTOR_SLOTS",
     "buffer_handle": "BufferHandle",
     "public_semaphore": "SemaphoreHandle",
     "queue_idle": "wait_queue_idle",
@@ -70,6 +81,9 @@ ERROR_DIAGNOSTIC = re.compile(
 INVALID_MEMBER_TYPES = {
     "submit_waits": "SubmitDesc",
     "submit_signals": "SubmitDesc",
+    "descriptor_heap_mode_field": "DeviceDesc",
+    "texture_descriptor_capacity": "DeviceDesc",
+    "sampler_descriptor_capacity": "DeviceDesc",
     "staging_arena_size": "DeviceDesc",
     "readback_arena_size": "DeviceDesc",
     "persistent_arena_size": "DeviceDesc",
@@ -85,6 +99,10 @@ ENUM_VALUES = {
 
 FIELD_OR_METHODS = {
     "timeline_caps": "DeviceCaps.timeline_semaphore",
+    "descriptor_buffer_caps": "DeviceCaps.descriptor_buffer",
+    "descriptor_indexing_caps": "DeviceCaps.descriptor_indexing",
+    "max_texture_descriptors_caps": "DeviceCaps.max_texture_descriptors",
+    "max_sampler_descriptors_caps": "DeviceCaps.max_sampler_descriptors",
 }
 
 MACRO_SYMBOLS = {

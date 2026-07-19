@@ -370,9 +370,31 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "DeviceDesc",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "texture_heap_capacity",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "sampler_heap_capacity",
+                                "type": {"name": "uint"},
+                            },
+                        ],
+                    },
+                    {
                         "name": "DeviceCaps",
                         "kind": "struct",
                         "members": [
+                            {
+                                "name": "texture_heap_capacity",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "sampler_heap_capacity",
+                                "type": {"name": "uint"},
+                            },
                             {
                                 "name": "max_sampler_lod_bias",
                                 "type": {"name": "float"},
@@ -1321,6 +1343,62 @@ class PublicApiCheckTests(unittest.TestCase):
             "DeviceCaps.max_sampler_lod_bias must be a float",
             check_public_api.validate_document(document),
         )
+
+    def test_requires_semantic_heap_capacities(self) -> None:
+        document = valid_document()
+        types = document["modules"]["gpu"]["types"]
+        desc = next(entry for entry in types if entry["name"] == "DeviceDesc")
+        caps = next(entry for entry in types if entry["name"] == "DeviceCaps")
+        desc["members"][0]["type"]["name"] = "usz"
+        caps["members"] = [
+            member for member in caps["members"]
+            if member["name"] != "sampler_heap_capacity"
+        ]
+        failures = check_public_api.validate_document(document)
+        self.assertIn("DeviceDesc.texture_heap_capacity must be a uint", failures)
+        self.assertIn("DeviceCaps.sampler_heap_capacity must be a uint", failures)
+
+    def test_rejects_backend_shaped_heap_configuration(self) -> None:
+        document = valid_document()
+        types = document["modules"]["gpu"]["types"]
+        desc = next(entry for entry in types if entry["name"] == "DeviceDesc")
+        caps = next(entry for entry in types if entry["name"] == "DeviceCaps")
+        types.append({"name": "DescriptorHeapMode", "kind": "enum"})
+        desc["members"].extend([
+            {
+                "name": "descriptor_heap_mode",
+                "type": {"name": "DescriptorHeapMode"},
+            },
+            {
+                "name": "texture_descriptor_capacity",
+                "type": {"name": "uint"},
+            },
+            {
+                "name": "sampler_descriptor_capacity",
+                "type": {"name": "uint"},
+            },
+        ])
+        caps["members"].extend([
+            {"name": "descriptor_buffer", "type": {"name": "bool"}},
+            {"name": "descriptor_indexing", "type": {"name": "bool"}},
+            {
+                "name": "max_texture_descriptors",
+                "type": {"name": "uint"},
+            },
+            {
+                "name": "max_sampler_descriptors",
+                "type": {"name": "uint"},
+            },
+        ])
+        failures = check_public_api.validate_document(document)
+        self.assertIn("backend heap strategy type", failures)
+        self.assertIn("backend heap strategy field", failures)
+        self.assertIn("backend descriptor-buffer capability", failures)
+        self.assertIn("backend descriptor-indexing capability", failures)
+        self.assertIn("backend-shaped texture capacity", failures)
+        self.assertIn("backend-shaped sampler capacity", failures)
+        self.assertIn("backend-shaped texture limit", failures)
+        self.assertIn("backend-shaped sampler limit", failures)
 
     def test_rejects_wrong_sampler_operation_contracts(self) -> None:
         document = valid_document()

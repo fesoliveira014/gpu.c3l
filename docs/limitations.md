@@ -65,11 +65,11 @@ exists (else the limit is compile-time).
 
 | Limit | Value | Knob | Fault when exceeded |
 |---|---|---|---|
-| Texture views in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
-| Sampler descriptors | 256 default, 65 536 max (`DEFAULT_SAMPLER_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Texture views in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_HEAP_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `texture_heap_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Sampler descriptors | 256 default, 65 536 max (`DEFAULT_SAMPLER_HEAP_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `sampler_heap_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Interned sampler identities | selected-device `maxSamplerAllocationCount`, capped at 65 536 | — | `SLOT_TABLE_FULL` |
 | Sampler mip LOD bias | Absolute value up to selected-device `maxSamplerLodBias`, reported by `DeviceCaps.max_sampler_lod_bias` | — | `INVALID_ARGUMENT` |
-| Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY` in `gpu/texture.c3`; `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
+| Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY` in `gpu/texture.c3`; `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
 | Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
 | Live pipelines / shaders | 256 each by default (`MAX_PIPELINES`, `MAX_SHADERS` in `gpu/pipeline.c3`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
 | Compute push-constant range | Selected-device `maxPushConstantsSize`, reported by `DeviceCaps.max_push_constant_size` | — | `INVALID_ARGUMENT` |
@@ -81,14 +81,11 @@ exists (else the limit is compile-time).
 | Color attachments per pass | Lesser of 8 (`MAX_COLOR_ATTACHMENTS` in `gpu/pipeline.c3`) and `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
 
 Two sizing rules that bite:
-- **Packed descriptor ceilings are not guaranteed hardware capacities.** On the
-  descriptor-indexing path, texture slots count once as sampled images and once
-  as storage images. Per-stage resource usage is `2 *
-  texture_descriptor_capacity`; plain samplers are excluded. All-pools usage is
-  `2 * texture_descriptor_capacity + sampler_descriptor_capacity`.
-  `create_device_from_desc` returns `INVALID_ARGUMENT` rather than clamping when any
-  per-type, per-stage aggregate, or all-pools update-after-bind limit is
-  exceeded.
+- **Heap capacities are exact requests.** Adapter selection checks each
+  candidate against the requested texture and sampler capacities, including
+  the driver's exact descriptor-buffer layout size when that path is needed.
+  It tries another viable candidate rather than clamping; if none can satisfy
+  the request, `create_device_from_desc` returns `UNSUPPORTED_FEATURE`.
 
 - **Shader-visible indices have caller-managed lifetime.** Destroying a
   `TextureView` recycles its raw index immediately. Wait or discard every use
@@ -106,7 +103,7 @@ Two sizing rules that bite:
 
 | Symptom | Cause | Workaround | Notes |
 |---|---|---|---|
-| Segfault on any image/sampler access, lavapipe + descriptor-buffer heap | Mesa 25.0.7 lavapipe descriptor-buffer bug | `DescriptorHeapMode.AUTO` already prefers descriptor-indexing on lavapipe; don't force `DESCRIPTOR_BUFFER` there | retest on Mesa upgrade |
+| Segfault on any image/sampler access, lavapipe + descriptor-buffer heap | Mesa 25.0.7 lavapipe descriptor-buffer bug | no caller action; automatic selection uses descriptor indexing when it satisfies the request | retest on Mesa upgrade |
 | `UNSUPPORTED_FEATURE` at device create with validation on | `vulkan-validationlayers` not installed | install it, or `enable_validation = false` | — |
 | Windows: driver not found in elevated shells despite `VK_DRIVER_FILES` | elevated processes ignore loader env vars | register the ICD under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` (CI does this for mesa-dist-win) | elevated shells only |
 | Pipeline-cache blob is 32 bytes, warm start ≈ cold | lavapipe returns a header-only blob (no compiled-shader payload) | expected; real drivers populate it — `pipeline_cache_timing` prints blob size as the signal | — |
@@ -120,9 +117,9 @@ Two sizing rules that bite:
 Anything the device can answer at runtime lives in `DeviceCaps` (filled at
 `create_device`): heap capacities, alignments, sampler limits
 (`max_sampler_lod_bias`, `max_sampler_anisotropy`), workload limits
-(`max_compute_work_group_count`,
-`max_draw_indirect_count`), and feature booleans such as
-`draw_indirect_count` and `descriptor_buffer`.
+(`max_compute_work_group_count`, `max_draw_indirect_count`), and semantic
+feature booleans such as `draw_indirect_count`. Native heap implementation
+choices are not reported.
 
 Surface support is queried separately. `supports_presentation(adapter,
 surface)` preflights device creation; `get_present_mode_support(device,

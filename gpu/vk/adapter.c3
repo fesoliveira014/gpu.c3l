@@ -89,8 +89,10 @@ fn bool strict_adapter_supported(vk::PhysicalDevice physical_device) {
     gpu::DeviceDesc desc = {
         .backend = gpu::BackendKind.VULKAN,
     };
-    if (!candidate_satisfies(physical_device, &desc)) return false;
-    return !@catch(select_queue_families(physical_device));
+    if (try families = select_queue_families(physical_device)) {
+        return candidate_satisfies(physical_device, &desc, &families);
+    }
+    return false;
 }
 
 fn void initialize_adapter(

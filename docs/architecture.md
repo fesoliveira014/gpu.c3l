@@ -515,19 +515,20 @@ intern_sampler(device, desc) -> Sampler?
 publish_sampler(device, sampler) -> SamplerIndex?
 ```
 
-The strict request initializes one inline, device-owned heap group. Heap mode,
-capacities, descriptor objects, native features, dispatch, pipeline state, and
-published capabilities derive from that group. An unrequested group owns none
-of that state; current public request validation requires strict semantics.
+The strict request initializes one inline, device-owned heap group. Callers
+request texture and sampler capacities; descriptor objects, native features,
+dispatch, and pipeline state remain private. An unrequested group owns none of
+that state; current public request validation requires strict semantics.
 
 Sampler interning is independent of that optional heap group. The backend keeps
 one append-only sampler table per device, deduplicates equal effective state,
 and destroys every native sampler during device teardown. Strict publication
 adds at most one heap entry per identity and never transfers native ownership.
 
-`AUTO` prefers descriptor indexing and falls back to descriptor buffers when
-indexing is unavailable. Callers may force either path. Neither changes shader
-material records.
+The backend prefers descriptor indexing when it satisfies the requested
+capacities and falls back to descriptor buffers when available. Callers cannot
+select or branch on the native implementation; shader material records are
+identical on either path.
 
 ## 10. Swapchain model
 

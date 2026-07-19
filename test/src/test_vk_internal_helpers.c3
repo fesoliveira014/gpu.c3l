@@ -8,18 +8,18 @@ fn void pow2_helper() @test {
 }
 
 fn void descriptor_capacity_resolution() @test {
-    uint defaulted = resolve_descriptor_capacity(0, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
-    assert(defaulted == gpu::DEFAULT_TEXTURE_DESCRIPTORS, "zero requests the default capacity");
+    uint defaulted = resolve_descriptor_capacity(0, gpu::DEFAULT_TEXTURE_HEAP_CAPACITY)!!;
+    assert(defaulted == gpu::DEFAULT_TEXTURE_HEAP_CAPACITY, "zero requests the default capacity");
 
-    uint explicit_capacity = resolve_descriptor_capacity(16, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
+    uint explicit_capacity = resolve_descriptor_capacity(16, gpu::DEFAULT_TEXTURE_HEAP_CAPACITY)!!;
     assert(explicit_capacity == 16, "explicit capacity is honored");
 
-    uint at_ceiling = resolve_descriptor_capacity(gpu::MAX_DESCRIPTOR_SLOTS, gpu::DEFAULT_TEXTURE_DESCRIPTORS)!!;
-    assert(at_ceiling == gpu::MAX_DESCRIPTOR_SLOTS, "the descriptor heap capacity limit itself is allowed");
+    uint at_ceiling = resolve_descriptor_capacity(gpu::MAX_SHADER_HEAP_CAPACITY, gpu::DEFAULT_TEXTURE_HEAP_CAPACITY)!!;
+    assert(at_ceiling == gpu::MAX_SHADER_HEAP_CAPACITY, "the descriptor heap capacity limit itself is allowed");
 
     fault ceiling_fault = @catch(resolve_descriptor_capacity(
-        gpu::MAX_DESCRIPTOR_SLOTS + 1,
-        gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        gpu::MAX_SHADER_HEAP_CAPACITY + 1,
+        gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
     ));
     assert(ceiling_fault == gpu::INVALID_ARGUMENT,
         "capacity above the descriptor heap limit faults INVALID_ARGUMENT");
@@ -27,26 +27,26 @@ fn void descriptor_capacity_resolution() @test {
 
 fn void strict_indexing_heap_capacity_support_matches_creation_limits() @test {
     gpu::vk::IndexingHeapLimits limits = {
-        .max_sampled_images           = gpu::DEFAULT_TEXTURE_DESCRIPTORS,
-        .max_storage_images           = gpu::DEFAULT_TEXTURE_DESCRIPTORS,
-        .max_samplers                 = gpu::DEFAULT_SAMPLER_DESCRIPTORS,
-        .max_per_stage_sampled_images = gpu::DEFAULT_TEXTURE_DESCRIPTORS,
-        .max_per_stage_storage_images = gpu::DEFAULT_TEXTURE_DESCRIPTORS,
-        .max_per_stage_samplers       = gpu::DEFAULT_SAMPLER_DESCRIPTORS,
-        .max_per_stage_resources      = gpu::DEFAULT_TEXTURE_DESCRIPTORS * 2,
-        .max_all_pools_descriptors    = gpu::DEFAULT_TEXTURE_DESCRIPTORS * 2
-            + gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+        .max_sampled_images           = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+        .max_storage_images           = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+        .max_samplers                 = gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
+        .max_per_stage_sampled_images = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+        .max_per_stage_storage_images = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+        .max_per_stage_samplers       = gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
+        .max_per_stage_resources      = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY * 2,
+        .max_all_pools_descriptors    = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY * 2
+            + gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     };
     assert(gpu::vk::indexing_heap_fits_limits(
-        tex_capacity: gpu::DEFAULT_TEXTURE_DESCRIPTORS,
-        smp_capacity: gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+        tex_capacity: gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+        smp_capacity: gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
         limits:       limits,
     ));
 
     limits.max_sampled_images--;
     assert(!gpu::vk::indexing_heap_fits_limits(
-        tex_capacity: gpu::DEFAULT_TEXTURE_DESCRIPTORS,
-        smp_capacity: gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+        tex_capacity: gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+        smp_capacity: gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
         limits:       limits,
     ));
 }

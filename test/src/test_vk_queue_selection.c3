@@ -139,6 +139,54 @@ fn vk::PhysicalDeviceCandidate candidate(uptr device, int score, bool suitable, 
     };
 }
 
+fn void descriptor_buffer_capacity_failure_falls_back_to_lower_candidate() @test {
+    vk::IndexingHeapLimits limits = {
+        .max_sampled_images           = uint::max,
+        .max_storage_images           = uint::max,
+        .max_samplers                 = uint::max,
+        .max_per_stage_sampled_images = uint::max,
+        .max_per_stage_storage_images = uint::max,
+        .max_per_stage_samplers       = uint::max,
+        .max_per_stage_resources      = uint::max,
+        .max_all_pools_descriptors    = uint::max,
+    };
+    fault preferred_fault = @catch(vk::resolve_candidate_heap_implementation(
+        indexing_supported:                 false,
+        descriptor_buffer_supported:        true,
+        descriptor_buffer_capacity_usable: false,
+        texture_capacity:                   4096,
+        sampler_capacity:                   256,
+        indexing_limits:                    limits,
+    ));
+    assert(
+        preferred_fault == gpu::UNSUPPORTED_FEATURE,
+        "descriptor-buffer feature support alone does not satisfy semantic capacity"
+    );
+
+    vk::VkHeapImplementation fallback = vk::resolve_candidate_heap_implementation(
+        indexing_supported:                 true,
+        descriptor_buffer_supported:        false,
+        descriptor_buffer_capacity_usable: false,
+        texture_capacity:                   4096,
+        sampler_capacity:                   256,
+        indexing_limits:                    limits,
+    )!!;
+    assert(
+        fallback == vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+        "a lower-scored indexing candidate can satisfy the same semantic capacity"
+    );
+
+    vk::PhysicalDeviceCandidate[2] candidates = {
+        candidate(device: 0xA0, score: 100, suitable: preferred_fault != gpu::UNSUPPORTED_FEATURE),
+        candidate(device: 0xB0, score: 50, suitable: fallback != vk::VkHeapImplementation.NONE),
+    };
+    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
+    assert(
+        selected.physical_device == fake_physical_device(0xB0),
+        "capacity rejection falls back to the lower-scored viable adapter"
+    );
+}
+
 fn void later_unsuitable_high_score_does_not_replace_selection() @test {
     vk::PhysicalDeviceCandidate[2] candidates = {
         candidate(device: 0x92, score: 50, suitable: true),

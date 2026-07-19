@@ -48,7 +48,7 @@ struct VkPresentationState {
 
 struct VkStrictHeapState {
     bool                    enabled;
-    gpu::DescriptorHeapMode mode;
+    VkHeapImplementation    implementation;
     uint                    texture_capacity;
     uint                    sampler_capacity;
     DescriptorHeapState     descriptors;
@@ -130,8 +130,6 @@ struct PhysicalDeviceCandidate {
 
 struct CapsInputs {
     bool strict_enabled;
-    bool indexing_enabled;
-    bool buffer_enabled;
     bool presentation_enabled;
     bool async_compute;
     bool line_polygon_mode;
@@ -422,11 +420,11 @@ fn gpu::Device? create_vk_device_with_selection(
         bool indexing_supported = heap_indexing_supported(&features2.features, &features12);
         bool buffer_supported = heap_shared_features_supported(&features2.features, &features12)
             && query_descriptor_buffer_support(state.physical_device);
-        select_strict_heap_mode(
+        select_strict_heap_implementation(
             state:              &state.strict_heap,
-            requested:          desc.descriptor_heap_mode,
             indexing_supported: indexing_supported,
             buffer_supported:   buffer_supported,
+            indexing_limits:    query_indexing_heap_limits(state.physical_device),
         )!;
     }
 
@@ -560,8 +558,6 @@ fn gpu::Device? create_vk_device_with_selection(
     }
     CapsInputs caps_inputs = {
         .strict_enabled       = state.strict_heap.enabled,
-        .indexing_enabled     = strict_heap_uses_descriptor_indexing(&state.strict_heap),
-        .buffer_enabled       = strict_heap_uses_descriptor_buffer(&state.strict_heap),
         .presentation_enabled = state.presentation.enabled,
         .async_compute        = state.compute_queue_distinct,
         .line_polygon_mode    = line_polygon_mode,
@@ -776,63 +772,32 @@ fn bool heap_indexing_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDe
         && v12.descriptor_binding_update_unused_while_pending != 0;
 }
 
-<* AUTO prefers indexing and falls back to descriptor buffer. Pure. *>
-fn gpu::DescriptorHeapMode? resolve_heap_mode(gpu::DescriptorHeapMode requested, bool indexing_supported, bool buffer_supported) {
-    switch (requested) {
-        case gpu::DescriptorHeapMode.AUTO:
-            if (indexing_supported) return gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING;
-            if (buffer_supported)   return gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER;
-            return gpu::UNSUPPORTED_FEATURE~;
-        case gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER:
-            if (!buffer_supported) return gpu::UNSUPPORTED_FEATURE~;
-            return requested;
-        case gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING:
-            if (!indexing_supported) return gpu::UNSUPPORTED_FEATURE~;
-            return requested;
-    }
-}
-
 fn VkStrictHeapState? resolve_strict_heap_state(bool requested, gpu::DeviceDesc* desc) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
     VkStrictHeapState state;
     if (!requested) return state;
     state.enabled = true;
     state.texture_capacity = resolve_descriptor_capacity(
-        desc.texture_descriptor_capacity,
-        gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+        desc.texture_heap_capacity,
+        gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
     )!;
     state.sampler_capacity = resolve_descriptor_capacity(
-        desc.sampler_descriptor_capacity,
-        gpu::DEFAULT_SAMPLER_DESCRIPTORS,
+        desc.sampler_heap_capacity,
+        gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     )!;
     return state;
-}
-
-fn void? select_strict_heap_mode(
-    VkStrictHeapState* state,
-    gpu::DescriptorHeapMode requested,
-    bool indexing_supported,
-    bool buffer_supported,
-) {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
-    if (!state.enabled) return;
-    state.mode = resolve_heap_mode(
-        requested,
-        indexing_supported,
-        buffer_supported,
-    )!;
 }
 
 fn bool strict_heap_uses_descriptor_indexing(VkStrictHeapState* state) {
     return state != null
         && state.enabled
-        && state.mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING;
+        && state.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING;
 }
 
 fn bool strict_heap_uses_descriptor_buffer(VkStrictHeapState* state) {
     return state != null
         && state.enabled
-        && state.mode == gpu::DescriptorHeapMode.DESCRIPTOR_BUFFER;
+        && state.implementation == VkHeapImplementation.DESCRIPTOR_BUFFER;
 }
 
 <* The feature struct is only chained once the extension is confirmed. *>
@@ -860,7 +825,11 @@ fn IndexingHeapLimits query_indexing_heap_limits(vk::PhysicalDevice physical_dev
     };
 }
 
-fn bool candidate_satisfies(vk::PhysicalDevice candidate, gpu::DeviceDesc* desc) @private {
+fn bool candidate_satisfies(
+    vk::PhysicalDevice candidate,
+    gpu::DeviceDesc* desc,
+    QueueFamilies* families,
+) @private {
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(candidate, &props);
     if (props.api_version < API_VERSION_1_3) return false;
@@ -877,30 +846,46 @@ fn bool candidate_satisfies(vk::PhysicalDevice candidate, gpu::DeviceDesc* desc)
         v13:  &features13,
     )) return false;
 
-    bool indexing = heap_indexing_supported(&features2.features, &features12);
-    bool buffer   = heap_shared_features_supported(&features2.features, &features12) && query_descriptor_buffer_support(candidate);
-    gpu::DescriptorHeapMode? resolved_mode =
-        resolve_heap_mode(desc.descriptor_heap_mode, indexing, buffer);
-    if (catch mode_fault = resolved_mode) return false;
-    gpu::DescriptorHeapMode mode = resolved_mode;
-    if (mode == gpu::DescriptorHeapMode.DESCRIPTOR_INDEXING) {
-        uint? resolved_tex = resolve_descriptor_capacity(
-            desc.texture_descriptor_capacity,
-            gpu::DEFAULT_TEXTURE_DESCRIPTORS,
+    uint? resolved_tex = resolve_descriptor_capacity(
+        desc.texture_heap_capacity,
+        gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+    );
+    if (catch capacity_fault = resolved_tex) return false;
+    uint? resolved_smp = resolve_descriptor_capacity(
+        desc.sampler_heap_capacity,
+        gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
+    );
+    if (catch capacity_fault = resolved_smp) return false;
+
+    bool indexing_supported =
+        heap_indexing_supported(&features2.features, &features12);
+    bool descriptor_buffer_supported =
+        heap_shared_features_supported(&features2.features, &features12)
+            && query_descriptor_buffer_support(candidate);
+    IndexingHeapLimits indexing_limits = query_indexing_heap_limits(candidate);
+    bool indexing_usable = indexing_supported && indexing_heap_fits_limits(
+        resolved_tex,
+        resolved_smp,
+        indexing_limits,
+    );
+    bool descriptor_buffer_capacity_usable = false;
+    if (!indexing_usable && descriptor_buffer_supported) {
+        descriptor_buffer_capacity_usable = descriptor_buffer_candidate_fits(
+            physical_device:    candidate,
+            families:           families,
+            draw_indirect_count: features12.draw_indirect_count != 0,
+            texture_capacity:   resolved_tex,
+            sampler_capacity:   resolved_smp,
         );
-        if (catch capacity_fault = resolved_tex) return false;
-        uint? resolved_smp = resolve_descriptor_capacity(
-            desc.sampler_descriptor_capacity,
-            gpu::DEFAULT_SAMPLER_DESCRIPTORS,
-        );
-        if (catch capacity_fault = resolved_smp) return false;
-        IndexingHeapLimits limits = query_indexing_heap_limits(candidate);
-        if (!indexing_heap_fits_limits(
-            resolved_tex,
-            resolved_smp,
-            limits,
-        )) return false;
     }
+    if (catch implementation_fault = resolve_candidate_heap_implementation(
+        indexing_supported:                 indexing_supported,
+        descriptor_buffer_supported:        descriptor_buffer_supported,
+        descriptor_buffer_capacity_usable: descriptor_buffer_capacity_usable,
+        texture_capacity:                   resolved_tex,
+        sampler_capacity:                   resolved_smp,
+        indexing_limits:                    indexing_limits,
+    )) return false;
     return true;
 }
 
@@ -921,7 +906,7 @@ fn PhysicalDeviceSelection? choose_physical_device(PhysicalDeviceCandidate[] can
 }
 
 <* Enumerate physical devices, drop candidates that cannot satisfy the desc
-   (API version, required features, heap mode, conditional presentation
+   (API version, required features, semantic heap support, conditional presentation
    capability, queue topology), and return the highest-scored device with its
    already-resolved queue families. *>
 fn PhysicalDeviceSelection? pick_physical_device(vk::Instance instance, gpu::DeviceDesc* desc) {
@@ -938,8 +923,8 @@ fn PhysicalDeviceSelection? pick_physical_device(vk::Instance instance, gpu::Dev
             PhysicalDeviceCandidate candidate = {
                 .selection = { .physical_device = physical_device },
             };
-            if (candidate_satisfies(physical_device, desc)) {
-                if (try families = select_queue_families(physical_device)) {
+            if (try families = select_queue_families(physical_device)) {
+                if (candidate_satisfies(physical_device, desc, &families)) {
                     vk::PhysicalDeviceProperties props;
                     vk::get_physical_device_properties(physical_device, &props);
                     candidate.selection.families = families;
@@ -1137,12 +1122,10 @@ fn gpu::DeviceCaps build_caps(
         .dynamic_rendering          = v13.dynamic_rendering != 0,
         .shader_int64               = base.shader_int64 != 0,
         .draw_indirect_count        = v12.draw_indirect_count != 0,
-        .descriptor_buffer          = inputs.buffer_enabled,
-        .descriptor_indexing        = inputs.indexing_enabled,
         .async_compute              = inputs.async_compute,
         .line_polygon_mode          = inputs.line_polygon_mode,
-        .max_texture_descriptors    = inputs.texture_capacity,
-        .max_sampler_descriptors    = inputs.sampler_capacity,
+        .texture_heap_capacity      = inputs.texture_capacity,
+        .sampler_heap_capacity      = inputs.sampler_capacity,
         .max_color_attachments      = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS
             ? props.limits.max_color_attachments : gpu::MAX_COLOR_ATTACHMENTS,
         .max_push_constant_size     = props.limits.max_push_constants_size,

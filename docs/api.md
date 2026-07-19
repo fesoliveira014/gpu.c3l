@@ -204,19 +204,14 @@ backend instance. Destroy the device before destroying that runtime.
 its own discovery and owns that discovery state.
 
 ```text
-DescriptorHeapMode
-    AUTO                    (indexing preferred; buffer where proven)
-    DESCRIPTOR_BUFFER
-    DESCRIPTOR_INDEXING
-
 DeviceDesc
     BackendKind backend
     bool enable_validation
     bool enable_debug_names
-    DescriptorHeapMode descriptor_heap_mode
-    uint texture_descriptor_capacity      (0 = default; docs/limitations.md)
-    uint sampler_descriptor_capacity
+    uint texture_heap_capacity      (0 = default; docs/limitations.md)
+    uint sampler_heap_capacity
     uint texture_capacity
+    uint pipeline_capacity
     char[] pipeline_cache_data            (warm-start blob; §8)
     ZString application_name
     DebugMessageCallback debug_callback       (null = no structured delivery)
@@ -230,13 +225,11 @@ DeviceCaps
     bool dynamic_rendering
     bool shader_int64
     bool draw_indirect_count
-    bool descriptor_buffer
-    bool descriptor_indexing
     bool async_compute
     QueueCounts queues
     bool line_polygon_mode
-    uint max_texture_descriptors
-    uint max_sampler_descriptors
+    uint texture_heap_capacity
+    uint sampler_heap_capacity
     uint max_color_attachments
     uint max_push_constant_size
     Vec3u max_compute_work_group_count
@@ -252,18 +245,15 @@ get_device_backend(Device*)      -> BackendKind?
 get_device_caps(Device*)         -> DeviceCaps?
 ```
 
-`strict_enabled` and the descriptor-path flags report enabled device state,
-not adapter support. Query request support before creation.
+`strict_enabled` reports whether strict semantics were requested and enabled.
+Query request support before creation. Heap implementation details are private
+and are not exposed as behavior-selection capabilities.
 
-Descriptor capacities are exact creation requests, not clampable upper bounds.
-For descriptor indexing, texture capacity contributes once to the sampled-image
-binding and once to the storage-image binding. Per-stage resource usage is
-`2 * texture_descriptor_capacity`; plain sampler descriptors do not count toward
-that limit. All-pools usage is `2 * texture_descriptor_capacity +
-sampler_descriptor_capacity`. `create_device_from_desc` returns `INVALID_ARGUMENT` when a
-requested capacity exceeds a per-type or aggregate device limit. On success,
-`DeviceCaps.max_texture_descriptors` and
-`DeviceCaps.max_sampler_descriptors` report the capacities of the created heap.
+Heap capacities are exact semantic creation requests, not clampable upper
+bounds. Device creation fails rather than clamping when a selected adapter cannot
+satisfy a requested capacity. On success,
+`DeviceCaps.texture_heap_capacity` and `DeviceCaps.sampler_heap_capacity`
+report the exact capacities of the created shader-visible heaps.
 
 Creation:
 
@@ -381,7 +371,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
-| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; no adapter can provide the requested semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `cmd_texture_barrier` | an acquired swapchain image is pending during resize, or `old_layout` disagrees with the list's effective layout |
