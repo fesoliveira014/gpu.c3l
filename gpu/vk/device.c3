@@ -144,7 +144,8 @@ struct VkDeviceState {
     uint                       submitted_command_count;
     uint                       submitted_command_reserved;
     ulong                      command_buffers_allocated;
-    ulong                      command_buffers_freed;    DedicatedRetireState       dedicated_staging;
+    ulong                      command_buffers_freed;
+    DedicatedRetireState       dedicated_staging;
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;

@@ -14,7 +14,6 @@ fn void public_state_tokens_are_compact() @test {
     assert(Device::size == ulong::size, "Device is one opaque 64-bit token");
     assert(GpuAllocation::size <= ulong::size * 2,
         "GpuAllocation fits in two machine words");
-
 }
 
 fn void gpu_allocation_identity_is_generation_checked() @test {
