@@ -355,12 +355,12 @@ jobs:
             --test-filter descriptor_buffer_device_and_heap --test-show-output 2>&1 \
             | tee /tmp/descriptor-buffer.txt
           if grep -Fq "no capable adapter" /tmp/descriptor-buffer.txt; then
-            echo "::notice::descriptor-buffer layout/bind/write path not exercised on this adapter"
-            echo "Descriptor-buffer layout/bind/write: NOT EXERCISED (adapter support unavailable)." >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::descriptor-buffer layout/write path not exercised on this adapter"
+            echo "Descriptor-buffer layout/write: NOT EXERCISED (adapter support unavailable)." >> "$GITHUB_STEP_SUMMARY"
           elif ! grep -Fq "Testing gpu_test::descriptor_buffer_device_and_heap" /tmp/descriptor-buffer.txt; then
             echo "::error::descriptor-buffer test filter matched no test"
             exit 1
           else
-            echo "Descriptor-buffer layout/bind/write: EXERCISED on mesa-dist-win ${MESA_DIST_WIN_VERSION}." >> "$GITHUB_STEP_SUMMARY"
+            echo "Descriptor-buffer layout/write: EXERCISED on mesa-dist-win ${MESA_DIST_WIN_VERSION}." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "Descriptor-buffer shader E2E: NOT EXERCISED (retest required when the Mesa pin changes)." >> "$GITHUB_STEP_SUMMARY"
