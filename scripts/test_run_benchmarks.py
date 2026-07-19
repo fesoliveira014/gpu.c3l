@@ -50,6 +50,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
             ("warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4", "uploads/s"),
         )
         self.assertIn("repetitions=5", runner.BENCHMARK_METHODS["command_record_bench"][0])
+        self.assertEqual(
+            runner.BENCHMARK_METHODS["descriptor_churn_bench"],
+            ("320/worker; workers=1,2,4", "ns/descriptor, ns/op"),
+        )
         self.assertEqual(runner.C3_BUILD_FLAGS, ("-O1",))
 
     def test_upload_workers_are_persistent_and_warmed_before_timing(self):

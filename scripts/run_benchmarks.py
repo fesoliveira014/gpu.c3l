@@ -24,7 +24,7 @@ BENCHMARK_TARGETS = (
 BENCHMARK_METHODS = {
     "allocation_bench": ("4000/phase", "ns/allocation, ns/free"),
     "resource_create_bench": ("300/worker; workers=1,2,4", "ns/op"),
-    "descriptor_churn_bench": ("320/worker; workers=1,2,4", "ns/descriptor"),
+    "descriptor_churn_bench": ("320/worker; workers=1,2,4", "ns/descriptor, ns/op"),
     "upload_throughput_bench": (
         "warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4",
         "uploads/s",

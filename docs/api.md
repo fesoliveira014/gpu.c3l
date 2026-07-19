@@ -310,20 +310,19 @@ contain an opaque device-and-kind owner identity plus a local slot and generatio
 ```text
 GpuAllocation
 TextureHandle
+Sampler
 PipelineHandle
 ShaderHandle
 SwapchainHandle
 ```
 
-(Samplers have no handle — they are `SamplerIndex` heap indices.)
-
 Owning tokens have zero-valued invalid constants such as
-`GPU_ALLOCATION_INVALID` and `TEXTURE_HANDLE_INVALID`.
+`GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`, and `SAMPLER_INVALID`.
 `token.is_valid()` checks the owner and generation; operations also validate
 the local slot generation. Public code should not inspect or construct the
 representation.
 
-Handles, `Queue`, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
+Handles, `Sampler`, `Queue`, `TextureIndex`, `SamplerIndex`, `GpuAddress`, `GpuSpan`,
 command tokens, and synchronization values are runtime-only and scoped to their
 owning device. Do not persist, serialize, reconstruct, or pass them across
 device or process lifetimes. Compare `Queue` values as wholes and use
@@ -378,7 +377,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
-| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_swapchain`, `create_graphics_pipeline`, sampler/aniso paths | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_viewport`/`cmd_set_scissor`; pipeline/shader creates; `texture_transition`; `create_texture_descriptors` | null or malformed input, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_indices.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle, `cmd_texture_barrier` | an acquired swapchain image is pending during resize, or `old_layout` disagrees with the list's effective layout |
@@ -387,8 +386,8 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
 | `RESOURCE_IN_USE` | resource destruction, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, or incomplete submitted work explicitly references a resource; active pipeline creation uses a shader; a placed or dedicated texture depends on an allocation; a live descriptor owns a texture; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
-| `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
-| `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `create_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; `create_texture_descriptors` checks this before creating anything, so an overflowing batch leaves the heap untouched |
+| `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `intern_sampler`; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
+| `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_descriptor`, `create_texture_descriptors`, `publish_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler publication leave existing entries untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `create_shader` | SPIR-V rejected by the driver |
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
@@ -637,9 +636,9 @@ texture. Destroy the texture before releasing the allocation. A premature
 release returns `RESOURCE_IN_USE` without consuming the allocation.
 
 `TextureHandle` owns the image. `TextureIndex` is a shader-visible descriptor
-heap entry. Destroyed texture and sampler indices are immediately reusable.
-The caller must first discard or complete every use and remove stale indices
-from GPU-visible data.
+heap entry. Destroyed texture indices are immediately reusable. The caller must
+first discard or complete every use and remove stale indices from GPU-visible
+data. Published sampler indices instead remain stable until device destruction.
 
 `create_texture_descriptors` batch-creates N descriptors under one lock hold, ending in one accumulated descriptor-set update in indexing mode (buffer mode writes per-item, already a mapped-memory store). `out_indices.len` must equal `descs.len` (`INVALID_ARGUMENT` otherwise); an empty `descs` is a no-op success. A zero-initialized `TextureDescriptorDesc.view` collapses to the default view, same as a null `view` to `create_texture_descriptor`.
 
@@ -674,12 +673,23 @@ SamplerDesc
     CompareOp compare
     ZString debug_name
 
-create_sampler(Device* device, SamplerDesc* desc) -> SamplerIndex?
-destroy_sampler(Device* device, SamplerIndex index) -> void?
+Sampler                       (opaque owner | slot | generation)
+intern_sampler(Device* device, SamplerDesc* desc) -> Sampler?
+publish_sampler(Device* device, Sampler sampler) -> SamplerIndex?
 ```
 
-Samplers are shader-visible indices. LOD values must be finite and `min_lod`
-must not exceed `max_lod`. Anisotropy requires the reported device capability.
+`intern_sampler` returns an immutable device-owned identity. Descriptions with
+the same effective filtering, addressing, LOD, anisotropy, and comparison state
+return the same `Sampler`; `debug_name` is not part of identity. LOD values must
+be finite and `min_lod` must not exceed `max_lod`. Anisotropy requires the
+reported device capability. Sampler identities and their native objects live
+until device destruction and have no individual destroy operation.
+
+`publish_sampler` is separate and requires strict capability. It returns one
+stable shader-visible `SamplerIndex` for the identity. Repeated publication is
+idempotent. `DESCRIPTOR_HEAP_FULL` leaves the identity valid and consumes no
+entry; a device without strict capability returns `UNSUPPORTED_FEATURE` before
+backend publication.
 
 ## 8. Shader and pipeline API
 
@@ -1469,7 +1479,7 @@ The public API is acceptable when:
 ```text
 no public signature exposes vk::, vma::, or sdl:: types
 all fallible operations return optionals/faults
-all resources have explicit destruction and caller-managed completion lifetimes
+individually owned resources have explicit destruction and caller-managed completion lifetimes
 generic GPU data uses allocations, spans, and addresses without a public buffer object
 root-pointer compute can be written without descriptor-set concepts
 texture sampling can be written with TextureIndex and SamplerIndex

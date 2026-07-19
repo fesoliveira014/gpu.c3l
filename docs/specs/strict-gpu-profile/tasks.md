@@ -224,6 +224,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
   - **Contract:** sampler identity works on compatibility-only devices; strict publication returns a backend-neutral shader index only when strict capability is enabled; samplers live until device destruction.
   - **Edges:** duplicate descriptors, exhaustion, unsupported strict publication, cross-device sampler, and concurrent interning.
   - **Verify:** CPU interning/concurrency tests and strict-only, compatibility-only, and combined-device publication tests.
+  - **Verification deferral:** the public compatibility-only and combined-device matrix remains gated on task 8.2; the 5.1 implementation slice covers strict-only publication and a private strict-disabled backend seam.
 
 ### 5.2 Device-wide strict texture and sampler heaps
 

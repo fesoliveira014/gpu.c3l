@@ -272,43 +272,32 @@ fn void descriptor_sampler_failures_report_context() @test {
         "descriptor usage fault and texture identity are exact");
 
     gpu::SamplerDesc sampler_desc = {};
-    gpu::SamplerIndex sampler = gpu::create_sampler(&device, &sampler_desc)!!;
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerDesc other_desc = { .mag_filter = gpu::Filter.LINEAR };
+    gpu::Sampler other = gpu::intern_sampler(&device, &other_desc)!!;
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::DESCRIPTOR_HEAP_FULL,
         expected_kind:       gpu::DebugResourceKind.SAMPLER,
-        expected_identity:   false,
-        expected_index:      0,
-        expected_generation: 0,
-        expected_operation:  "create_sampler",
+        expected_identity:   true,
+        expected_index:      other.index,
+        expected_generation: other.generation,
+        expected_operation:  "publish_sampler",
         expected_field:      "DeviceDesc.sampler_descriptor_capacity",
-        expected_invariant:  "must exceed live samplers",
+        expected_invariant:  "must exceed published samplers",
     );
-    fault sampler_full = @catch(gpu::create_sampler(&device, &sampler_desc));
-    assert(sampler_full == gpu::DESCRIPTOR_HEAP_FULL && capture.calls == 4 && capture.matched,
-        "sampler capacity fault and diagnostic are exact");
+    fault sampler_full = @catch(gpu::publish_sampler(&device, other));
+    assert(sampler_full == gpu::DESCRIPTOR_HEAP_FULL
+            && capture.calls == 4 && capture.matched,
+        "sampler publication capacity fault and diagnostic are exact");
 
-    gpu::destroy_sampler(&device, sampler)!!;
-    expect_descriptor_diagnostic(
-        capture:             &capture,
-        expected_fault:      gpu::INVALID_HANDLE,
-        expected_kind:       gpu::DebugResourceKind.SAMPLER,
-        expected_identity:   false,
-        expected_index:      0,
-        expected_generation: 0,
-        expected_operation:  "destroy_sampler",
-        expected_field:      "index",
-        expected_invariant:  "sampler index must identify a live generation",
-    );
-    fault sampler_stale = @catch(gpu::destroy_sampler(&device, sampler));
-    assert(sampler_stale == gpu::INVALID_HANDLE && capture.calls == 5 && capture.matched,
-        "stale sampler fault has kind without unvalidated identity");
-
+    assert(gpu::publish_sampler(&device, sampler)!! == sampler_index,
+        "an existing sampler publication remains available when the heap is full");
     state.debug_callback = null;
-    fault fallback = @catch(gpu::destroy_sampler(&device, sampler));
-    assert(fallback == sampler_stale && capture.calls == 5,
-        "null callback preserves fault parity without a structured duplicate");
-}
+    fault fallback = @catch(gpu::publish_sampler(&device, other));
+    assert(fallback == sampler_full && capture.calls == 4,
+        "null callback preserves fault parity without a structured duplicate");}
 
 fn uint cached_texture_view_count(vk::VkDeviceState* state, gpu::TextureHandle texture) {
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
@@ -826,7 +815,7 @@ fn void texture_descriptors_batch_created_descriptor_blocks_texture_destroy() @t
     gpu::destroy_texture(&device, texture)!!;
 }
 
-fn void sampler_round_trip_and_exhaustion() @test {
+fn void sampler_interning_and_publication_are_stable() @test {
     gpu::Device device = make_heap_test_device(8, 2);
     defer destroy_test_device(&device)!!;
 
@@ -837,22 +826,41 @@ fn void sampler_round_trip_and_exhaustion() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex a = gpu::create_sampler(&device, &desc)!!;
-    gpu::SamplerIndex b = gpu::create_sampler(&device, &desc)!!;
-    assert(a.is_valid() && b.is_valid(), "sampler indices valid");
+    gpu::Sampler first = gpu::intern_sampler(&device, &desc)!!;
+    gpu::Sampler duplicate = gpu::intern_sampler(&device, &desc)!!;
+    assert(first == duplicate, "identical sampler descriptions share identity");
 
-    fault full_fault = @catch(gpu::create_sampler(&device, &desc));
-    assert(full_fault == gpu::DESCRIPTOR_HEAP_FULL, "allocating past sampler capacity faults DESCRIPTOR_HEAP_FULL");
+    gpu::SamplerIndex first_index = gpu::publish_sampler(&device, first)!!;
+    gpu::SamplerIndex duplicate_index = gpu::publish_sampler(&device, duplicate)!!;
+    assert(first_index == duplicate_index,
+        "repeated publication returns the stable sampler index");
 
-    gpu::destroy_sampler(&device, a)!!;
-    fault stale_fault = @catch(gpu::destroy_sampler(&device, a));
-    gpu::SamplerIndex recycled = gpu::create_sampler(&device, &desc)!!;
-    assert(recycled.slot == a.slot && recycled.generation != a.generation,
-        "destroyed sampler slots are immediately reusable");
-    gpu::destroy_sampler(&device, recycled)!!;
-    assert(stale_fault == gpu::INVALID_HANDLE, "destroying a stale sampler index faults INVALID_HANDLE");
+    gpu::SamplerDesc second_desc = desc;
+    second_desc.mag_filter = gpu::Filter.LINEAR;
+    gpu::Sampler second = gpu::intern_sampler(&device, &second_desc)!!;
+    gpu::SamplerIndex second_index = gpu::publish_sampler(&device, second)!!;
+    assert(second_index.is_valid() && second_index != first_index,
+        "a distinct sampler consumes the next publication slot");
 
-    gpu::destroy_sampler(&device, b)!!;
+    gpu::SamplerDesc third_desc = desc;
+    third_desc.address_u = gpu::AddressMode.REPEAT;
+    gpu::Sampler third = gpu::intern_sampler(&device, &third_desc)!!;
+    fault full_fault = @catch(gpu::publish_sampler(&device, third));
+    assert(full_fault == gpu::DESCRIPTOR_HEAP_FULL,
+        "publishing past sampler capacity faults DESCRIPTOR_HEAP_FULL");
+    assert(third.is_valid(), "publication exhaustion preserves sampler identity");
+    assert(gpu::publish_sampler(&device, first)!! == first_index,
+        "an existing publication succeeds after heap exhaustion");
+    gpu::Sampler forged = first;
+    forged.generation++;
+    fault forged_fault = @catch(gpu::publish_sampler(&device, forged));
+    assert(forged_fault == gpu::INVALID_HANDLE,
+        "a manufactured sampler generation is rejected");
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(state.samplers.count == 3
+            && state.strict_heap.descriptors.sampler_next_new == 2,
+        "failed publication preserves identity and heap state");
 }
 
 fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
@@ -860,23 +868,23 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::SamplerDesc nan_bias = { .mip_lod_bias = float::nan };
-    fault bias_fault = @catch(gpu::create_sampler(&device, &nan_bias));
+    fault bias_fault = @catch(gpu::intern_sampler(&device, &nan_bias));
     assert(bias_fault == gpu::INVALID_ARGUMENT, "non-finite mip bias faults INVALID_ARGUMENT");
 
     gpu::SamplerDesc nan_lod = { .min_lod = float::nan };
-    fault lod_fault = @catch(gpu::create_sampler(&device, &nan_lod));
+    fault lod_fault = @catch(gpu::intern_sampler(&device, &nan_lod));
     assert(lod_fault == gpu::INVALID_ARGUMENT, "non-finite LOD range faults INVALID_ARGUMENT");
 
     gpu::SamplerDesc nan_max_lod = { .max_lod = float::nan };
-    fault max_lod_fault = @catch(gpu::create_sampler(&device, &nan_max_lod));
+    fault max_lod_fault = @catch(gpu::intern_sampler(&device, &nan_max_lod));
     assert(max_lod_fault == gpu::INVALID_ARGUMENT, "non-finite maximum LOD faults INVALID_ARGUMENT");
 
     gpu::SamplerDesc reversed_lod = { .min_lod = 2.0f, .max_lod = 1.0f };
-    fault reversed_fault = @catch(gpu::create_sampler(&device, &reversed_lod));
+    fault reversed_fault = @catch(gpu::intern_sampler(&device, &reversed_lod));
     assert(reversed_fault == gpu::INVALID_ARGUMENT, "reversed LOD range faults INVALID_ARGUMENT");
 
     gpu::SamplerDesc nan_anisotropy = { .anisotropy_enable = true, .max_anisotropy = float::nan };
-    fault anisotropy_fault = @catch(gpu::create_sampler(&device, &nan_anisotropy));
+    fault anisotropy_fault = @catch(gpu::intern_sampler(&device, &nan_anisotropy));
     assert(anisotropy_fault == gpu::INVALID_ARGUMENT, "non-finite anisotropy faults INVALID_ARGUMENT");
 }
 
@@ -886,12 +894,12 @@ fn void live_descriptors_block_device_destruction() @test {
     gpu::TextureIndex descriptor = gpu::create_texture_descriptor(&device, texture, null)!!;
 
     gpu::SamplerDesc desc = {};
-    gpu::SamplerIndex sampler = gpu::create_sampler(&device, &desc)!!;
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &desc)!!;
+    gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
 
     assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
         "live descriptors block device destruction");
     gpu::destroy_texture_descriptor(&device, descriptor)!!;
-    gpu::destroy_sampler(&device, sampler)!!;
     gpu::destroy_texture(&device, texture)!!;
     gpu::destroy_device(&device)!!;
 }
@@ -1282,11 +1290,11 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_identity:   false,
         expected_index:      0,
         expected_generation: 0,
-        expected_operation:  "create_sampler",
+        expected_operation:  "intern_sampler",
         expected_field:      "SamplerDesc.max_anisotropy",
         expected_invariant:  "must be at least 1.0 when anisotropy is enabled",
     );
-    fault anisotropy = @catch(gpu::create_sampler(&device, &invalid_anisotropy));
+    fault anisotropy = @catch(gpu::intern_sampler(&device, &invalid_anisotropy));
     assert(anisotropy == gpu::INVALID_ARGUMENT && capture.calls == 5 && capture.matched,
         "invalid sampler anisotropy reports exact context");
 
@@ -1299,11 +1307,11 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_identity:   false,
         expected_index:      0,
         expected_generation: 0,
-        expected_operation:  "create_sampler",
+        expected_operation:  "intern_sampler",
         expected_field:      "SamplerDesc.anisotropy_enable",
         expected_invariant:  "device must support sampler anisotropy",
     );
-    fault unsupported = @catch(gpu::create_sampler(&device, &unsupported_anisotropy));
+    fault unsupported = @catch(gpu::intern_sampler(&device, &unsupported_anisotropy));
     assert(unsupported == gpu::UNSUPPORTED_FEATURE && capture.calls == 6 && capture.matched,
         "unsupported sampler anisotropy reports exact context");
     state.max_sampler_anisotropy = supported_anisotropy;

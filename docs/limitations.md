@@ -6,10 +6,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
 
 ## 1. By design
 
-- **Descriptor indices still double as release tokens.** `TextureIndex` and
-  `SamplerIndex` have no device owner metadata, so passing one to another device
-  can release a coincident slot. `GpuAddress` is also device-local and must not
-  be persisted or transferred between devices.
+- **Texture indices still double as release tokens.** `TextureIndex` has no
+  device owner metadata, so passing one to another device can release a
+  coincident slot. `SamplerIndex` has no release operation, but it and
+  `GpuAddress` are still device-local and must not be persisted or transferred
+  between devices.
 - **Debug callbacks are borrowed, synchronous, and non-reentrant.** Public and
   backend messages run before the originating call returns; Vulkan may invoke
   the callback concurrently on arbitrary threads. Payload pointers are valid
@@ -67,6 +68,7 @@ exists (else the limit is compile-time).
 |---|---|---|---|
 | Texture descriptors in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Sampler descriptors | 256 default, 65 536 max (`DEFAULT_SAMPLER_DESCRIPTORS`, `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `sampler_descriptor_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Interned sampler identities | selected-device `maxSamplerAllocationCount`, capped at 65 536 | — | `SLOT_TABLE_FULL` |
 | Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY` in `gpu/texture.c3`; `MAX_DESCRIPTOR_SLOTS` in `gpu/descriptor_heap.c3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
 | Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
 | Live pipelines / shaders | 256 each by default (`MAX_PIPELINES`, `MAX_SHADERS` in `gpu/pipeline.c3`) | `pipeline_capacity` for pipelines | `SLOT_TABLE_FULL` |
@@ -88,9 +90,10 @@ Two sizing rules that bite:
   per-type, per-stage aggregate, or all-pools update-after-bind limit is
   exceeded.
 
-- **Shader-visible indices have caller-managed lifetime.** Descriptor and
-  sampler slots recycle immediately. Wait or discard every use before destroy,
-  and do not leave stale indices in GPU-visible data.
+- **Shader-visible indices have caller-managed lifetime.** Texture descriptor
+  slots recycle immediately. Wait or discard every use before releasing one,
+  and do not leave stale indices in GPU-visible data. Published sampler indices
+  remain stable until device destruction.
 - **Transient data is caller-owned.** Applications choose allocation reuse and
   concurrency policy. Flush CPU writes before submission, retain the covering
   completion point, and wait or poll before rewriting or freeing storage.

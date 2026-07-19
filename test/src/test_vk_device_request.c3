@@ -137,8 +137,12 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             "strict state owns texture descriptor cells"
         );
         assert(
-            device_state.strict_heap.descriptors.sampler_cells.ptr != null,
-            "strict state owns sampler descriptor cells"
+            device_state.samplers.slots.ptr != null,
+            "the device owns an independent sampler identity table"
+        );
+        assert(
+            device_state.strict_heap.descriptors.sampler_next_new == 0,
+            "the strict sampler heap begins unpublished"
         );
         assert(
             device_state.strict_heap.descriptors.set_layout != null,

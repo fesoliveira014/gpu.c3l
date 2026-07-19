@@ -106,6 +106,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "BufferUsage",
     "create_buffer(",
     "destroy_buffer(",
+    "create_sampler(",
+    "destroy_sampler(",
     "get_buffer_address(",
     "get_buffer_span(",
     "flush_buffer(",
@@ -250,6 +252,14 @@ def validate_document(document: dict) -> list[str]:
             ("Device*", "AllocationDesc*"),
             "GpuAllocation?",
         ),
+        "intern_sampler": (
+            ("Device*", "SamplerDesc*"),
+            "Sampler?",
+        ),
+        "publish_sampler": (
+            ("Device*", "Sampler"),
+            "SamplerIndex?",
+        ),
         "get_texture_requirements": (
             ("Device*", "TextureDesc*"),
             "TextureRequirements?",
@@ -372,6 +382,8 @@ def validate_document(document: dict) -> list[str]:
         ),
     }
     required_parameter_names = {
+        "intern_sampler": ("device", "desc"),
+        "publish_sampler": ("device", "sampler"),
         "get_texture_requirements": ("device", "desc"),
         "create_placed_texture": ("device", "desc", "allocation", "offset"),
         "create_dedicated_texture": (
@@ -452,6 +464,7 @@ def validate_document(document: dict) -> list[str]:
 
     for name, kind in (
         ("GpuAllocation", "struct"),
+        ("Sampler", "struct"),
         ("GpuSpan", "struct"),
         ("MemoryClass", "enum"),
         ("MemoryStats", "struct"),
@@ -494,6 +507,14 @@ def validate_document(document: dict) -> list[str]:
                 ("generation", "uint"),
             ),
             "GpuAllocation must match the exact identity schema",
+        ),
+        "Sampler": (
+            (
+                ("owner", "ulong"),
+                ("index", "uint"),
+                ("generation", "uint"),
+            ),
+            "Sampler must match the exact identity schema",
         ),
         "AllocationDesc": (
             (

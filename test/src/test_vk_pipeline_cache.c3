@@ -225,9 +225,8 @@ fn void cull_replay_renders_per_alias() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, smp_index)!!;
-
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
     upload_test_texture_data(
         device:      &device,

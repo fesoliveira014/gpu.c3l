@@ -41,9 +41,8 @@ fn void sampled_texture_upload_and_mip_readback() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, smp_index)!!;
-
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
     OwnedSpan staging = allocate_owned_span(
         device:       &device,
         size:         MIP0_BYTES + MIP1_BYTES,
@@ -440,9 +439,8 @@ fn void mip_subset_view_sampled() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::SamplerIndex smp_index = gpu::create_sampler(&device, &sampler_desc)!!;
-    defer gpu::destroy_sampler(&device, smp_index)!!;
-
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
     OwnedSpan staging = allocate_owned_span(
         device:       &device,
         size:         MIP0_BYTES + MIP1_BYTES,

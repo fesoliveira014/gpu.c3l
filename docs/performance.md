@@ -56,7 +56,8 @@ throughput numbers until fresh output is added to the canonical baseline.
 
 ## Windows baseline
 
-Recorded 2026-07-13 with C3 0.8.0_2 on Windows 11:
+Environment recorded 2026-07-13 with C3 0.8.0_2 on Windows 11. The
+descriptor rows were refreshed on 2026-07-19:
 
 ```text
 adapter: name="NVIDIA GeForce RTX 4090" type=discrete api_version=4210991
@@ -67,7 +68,8 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 
 | Area | Case | Iterations | Result |
 |---|---|---:|---:|
-| Descriptor churn | Texture single / batch of 16 / sampler, one worker | 320 each | 523 / 330 / 563 ns/descriptor |
+| Descriptor churn | Texture single / batch of 16, one worker | 320 each | 512 / 313 ns/descriptor |
+| Sampler lookup | Intern + stable publication hits, one worker | 320 | 239 ns/op |
 | Command recording | Global / buffer barrier / indirect dispatch | 20,000 × 5 | 123 / 142 / 173 ns/record median |
 | Pipeline creation | Cold / cached duplicate | 200 / 200,000 | 14,808 / 137 ns/create |
 | Async overlap | Serialized / independent queues | 5 | 8.872 / 9.464 ms wall median; overlap observed |

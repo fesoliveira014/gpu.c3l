@@ -37,7 +37,7 @@ token's retained device pin while another call can still be in flight.
 | `flush_mapped_span` / `invalidate_mapped_span` | S | lock-free validation; coherent no-op; native calls are internally synchronized |
 | `create_texture` / `destroy_texture` | S | |
 | `create_texture_descriptor` / `destroy_texture_descriptor` | S | |
-| `create_sampler` / `destroy_sampler` | S | |
+| `intern_sampler` / `publish_sampler` | S | equal interning and repeated publication converge under the device resource lock |
 | `create_shader` / `destroy_shader` | S | |
 | `create_compute_pipeline` / `create_graphics_pipeline` / `destroy_pipeline` | S | driver compiles run in parallel; a same-key race compiles twice, converges to one entry |
 | `get_memory_stats` / `build_memory_report` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |

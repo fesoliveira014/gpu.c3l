@@ -53,8 +53,8 @@ alias CreateTextureDescriptorFn @private  = fn TextureIndex? (Device*, TextureHa
 alias DestroyTextureFn @private          = fn void? (Device*, TextureHandle);
 alias DestroyTextureDescriptorFn @private = fn void? (Device*, TextureIndex);
 alias CreateTextureDescriptorsFn @private = fn void? (Device*, TextureDescriptorDesc[], TextureIndex[]);
-alias CreateSamplerFn @private            = fn SamplerIndex? (Device*, SamplerDesc*);
-alias DestroySamplerFn @private           = fn void? (Device*, SamplerIndex);
+alias InternSamplerFn @private            = fn Sampler? (Device*, SamplerDesc*);
+alias PublishSamplerFn @private           = fn SamplerIndex? (Device*, Sampler);
 alias CreateShaderFn @private          = fn ShaderHandle? (Device*, ShaderDesc*);
 alias DestroyShaderFn @private         = fn void? (Device*, ShaderHandle);
 alias CreateComputePipelineFn @private = fn PipelineHandle? (Device*, ComputePipelineDesc*);
@@ -138,8 +138,8 @@ struct BackendVTable @private {
     CreateTextureDescriptorFn  create_texture_descriptor;
     DestroyTextureDescriptorFn destroy_texture_descriptor;
     CreateTextureDescriptorsFn create_texture_descriptors;
-    CreateSamplerFn            create_sampler;
-    DestroySamplerFn           destroy_sampler;
+    InternSamplerFn            intern_sampler;
+    PublishSamplerFn           publish_sampler;
     CreateShaderFn          create_shader;
     DestroyShaderFn         destroy_shader;
     CreateComputePipelineFn create_compute_pipeline;

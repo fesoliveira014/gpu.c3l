@@ -156,8 +156,14 @@ Running example: `multithreaded_recording`.
 Goal: depth-only pass, then hardware PCF.
 
 ```c3
-gpu::SamplerDesc shadow_sampler = { ..., .compare_enable = true,
-    .compare = gpu::CompareOp.LESS_EQUAL };
+gpu::SamplerDesc shadow_sampler_desc = {
+    ...,
+    .compare_enable = true,
+    .compare = gpu::CompareOp.LESS_EQUAL,
+};
+gpu::Sampler shadow_sampler = gpu::intern_sampler(&device, &shadow_sampler_desc)!;
+gpu::SamplerIndex shadow_sampler_index =
+    gpu::publish_sampler(&device, shadow_sampler)!;
 // shadow pipeline: no color formats, depth D32, front-face culling +
 // .raster = { .depth_bias_slope = 1.0f } against acne
 ```

@@ -31,6 +31,18 @@
   ],
   "output": "build",
   "targets": {
+    "create_sampler": {
+      "type": "object-files",
+      "sources": [
+        "create_sampler.c3"
+      ]
+    },
+    "destroy_sampler": {
+      "type": "object-files",
+      "sources": [
+        "destroy_sampler.c3"
+      ]
+    },
     "buffer_handle": {
       "type": "object-files",
       "sources": [

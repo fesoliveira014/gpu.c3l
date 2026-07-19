@@ -100,6 +100,18 @@ def valid_document() -> dict:
                         ],
                     },
                     api_function(
+                        "intern_sampler",
+                        "Sampler?",
+                        ("device", "Device*"),
+                        ("desc", "SamplerDesc*"),
+                    ),
+                    api_function(
+                        "publish_sampler",
+                        "SamplerIndex?",
+                        ("device", "Device*"),
+                        ("sampler", "Sampler"),
+                    ),
+                    api_function(
                         "get_texture_requirements",
                         "TextureRequirements?",
                         ("device", "Device*"),
@@ -275,6 +287,15 @@ def valid_document() -> dict:
                 "types": [
                     {
                         "name": "GpuAllocation",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "owner", "type": {"name": "ulong"}},
+                            {"name": "index", "type": {"name": "uint"}},
+                            {"name": "generation", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "Sampler",
                         "kind": "struct",
                         "members": [
                             {"name": "owner", "type": {"name": "ulong"}},
@@ -1170,6 +1191,30 @@ class PublicApiCheckTests(unittest.TestCase):
             failures,
         )
 
+    def test_rejects_wrong_sampler_identity_schema(self) -> None:
+        document = valid_document()
+        sampler = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "Sampler"
+        )
+        sampler["members"][2]["name"] = "revision"
+        self.assertIn(
+            "Sampler must match the exact identity schema",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_wrong_sampler_operation_contracts(self) -> None:
+        document = valid_document()
+        functions = document["modules"]["gpu"]["functions"]
+        intern = next(entry for entry in functions
+            if entry["name"] == "intern_sampler")
+        publish = next(entry for entry in functions
+            if entry["name"] == "publish_sampler")
+        intern["return_type"]["name"] = "SamplerIndex?"
+        publish["members"][1]["type"]["name"] = "SamplerIndex"
+        failures = check_public_api.validate_document(document)
+        self.assertIn("intern_sampler has the wrong return type", failures)
+        self.assertIn("publish_sampler has the wrong parameters", failures)
 
 if __name__ == "__main__":
     unittest.main()

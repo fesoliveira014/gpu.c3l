@@ -69,7 +69,8 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    ctx.smp_index = gpu::create_sampler(device, &sampler_desc)!!;
+    gpu::Sampler sampler = gpu::intern_sampler(device, &sampler_desc)!!;
+    ctx.smp_index = gpu::publish_sampler(device, sampler)!!;
 
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
     upload_test_texture_data(
@@ -85,7 +86,6 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
 }
 
 fn void destroy_ind_draw_ctx(gpu::Device* device, IndDrawCtx* ctx) {
-    gpu::destroy_sampler(device, ctx.smp_index)!!;
     gpu::destroy_texture_descriptor(device, ctx.tex_index)!!;
     gpu::destroy_texture(device, ctx.pattern)!!;
     gpu::destroy_pipeline(device, ctx.pipeline)!!;
