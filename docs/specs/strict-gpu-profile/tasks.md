@@ -310,7 +310,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.5 Strict presentation integration
 
-- [ ] Integrate swapchain textures with shared texture views, transitions, render-pass commands, semantic queue roles, readiness, and completion in `gpu/swapchain.c3` and Vulkan WSI code.
+- [x] Integrate swapchain textures with shared texture views, transitions, render-pass commands, semantic queue roles, readiness, and completion in `gpu/swapchain.c3` and Vulkan WSI code.
   - **Depends on:** 3.5, 6.2, and 6.3.
   - **Contract:** swapchain images use the ordinary resource and synchronization model; public presentation exposes no native semaphore or layout; destruction and resize never hide queue-idle waits; resize and loss faults retain distinct retry contracts.
   - **Edges:** acquire without render, present without completion, completion that does not cover rendering, destruction or resize during use, dormant surface, and device or surface loss.
