@@ -286,7 +286,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.2 Semantic texture transitions
 
-- [ ] Replace public `TextureLayout` and backend-shaped transition fields with texture or view plus semantic previous and next uses in `gpu/texture.c3`, `gpu/sync.c3`, `gpu/vk/sync.c3`, and render/transfer call sites.
+- [x] Replace public `TextureLayout` and backend-shaped transition fields with texture or view plus semantic previous and next uses in `gpu/texture.c3`, `gpu/sync.c3`, `gpu/vk/sync.c3`, and render/transfer call sites.
   - **Depends on:** 6.1 and 4.4.
   - **Contract:** native layouts remain private; transitions are always explicit; debug tracking may validate expected use but cannot change release behavior.
   - **Edges:** first use, presentation, depth/stencil aspects, subresources/views, mismatched expected use, and queues outside the access domain.
