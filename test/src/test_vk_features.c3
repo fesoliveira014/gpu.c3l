@@ -367,6 +367,67 @@ fn void sampled_depth_uses_choose_depth_stencil_read_only_layout() @test {
         "sampled depth-stencil textures use the joint read-only layout");
 }
 
+fn void sampled_descriptor_layout_matches_semantic_layout() @test {
+    gpu::vk::TextureSlot color = {
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled },
+    };
+    assert(gpu::vk::texture_descriptor_layout(
+            &color,
+            gpu::vk::TextureDescriptorKind.SAMPLED,
+        ) == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+        "sampled color descriptors use the shader read-only layout");
+
+    gpu::vk::TextureSlot depth = {
+        .format = gpu::Format.D32_FLOAT,
+        .usage  = { .sampled },
+    };
+    assert(gpu::vk::texture_descriptor_layout(
+            &depth,
+            gpu::vk::TextureDescriptorKind.SAMPLED,
+        ) == vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        "sampled depth descriptors use the depth-stencil read-only layout");
+
+    gpu::vk::TextureSlot combined = {
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled, .storage },
+    };
+    assert(gpu::vk::texture_descriptor_layout(
+            &combined,
+            gpu::vk::TextureDescriptorKind.SAMPLED,
+        ) == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+        "sampled bindings retain read-only layout on storage-capable textures");
+    assert(gpu::vk::texture_descriptor_layout(
+            &combined,
+            gpu::vk::TextureDescriptorKind.STORAGE,
+        ) == vk::ImageLayout.GENERAL,
+        "storage bindings use the general layout");
+}
+
+fn void combined_texture_batch_keeps_binding_layouts_distinct() @test {
+    gpu::vk::DescriptorHeapState heap;
+    gpu::vk::TextureSlot texture = {
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled, .storage },
+    };
+    vk::DescriptorImageInfo[2] image_infos;
+    vk::WriteDescriptorSet[2] writes;
+    uint write_count = gpu::vk::accumulate_texture_descriptor_write(
+        heap:         &heap,
+        slot:         3,
+        texture_slot: &texture,
+        view:         {},
+        image_infos:  image_infos[..],
+        writes:       writes[..],
+        write_count:  0,
+    );
+    assert(write_count == 2, "combined textures publish both descriptor bindings");
+    assert(image_infos[0].image_layout == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+        "batched sampled descriptors retain the read-only layout");
+    assert(image_infos[1].image_layout == vk::ImageLayout.GENERAL,
+        "batched storage descriptors use the general layout");
+}
+
 fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {
     gpu::vk::TextureSlot color_slot = {
         .format       = gpu::Format.RGBA8_UNORM,

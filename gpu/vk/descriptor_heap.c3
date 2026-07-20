@@ -20,6 +20,11 @@ enum VkHeapImplementation : int {
     DESCRIPTOR_BUFFER,
 }
 
+enum TextureDescriptorKind : char {
+    SAMPLED,
+    STORAGE,
+}
+
 // Generations bump at destroy (stale indices reject immediately) and at
 // alloc (a live index is never generation 0).
 struct TextureDescriptorCell {
@@ -588,6 +593,16 @@ fn gpu::TextureIndex texture_index_from_slot(uint slot) @private {
     return { .value = slot + 1 };
 }
 
+fn vk::ImageLayout texture_descriptor_layout(
+    TextureSlot* texture,
+    TextureDescriptorKind kind,
+) {
+    if (kind == TextureDescriptorKind.STORAGE) return vk::ImageLayout.GENERAL;
+    return texture_format_is_depth_stencil(texture.format)
+        ? vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL
+        : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL;
+}
+
 fn TextureDescriptorCell*? texture_cell_get(
     DescriptorHeapState* heap,
     gpu::TextureView view,
@@ -604,34 +619,46 @@ fn TextureDescriptorCell*? texture_cell_get(
 }
 
 <* Sampled and/or storage descriptor per the texture's usage, same slot in
-   both bindings, so one TextureIndex serves both access kinds. Descriptor
-   layout follows usage: sampled-only textures are accessed in SHADER_READ,
-   storage-capable ones in GENERAL. *>
+   both bindings, so one TextureIndex serves both access kinds. Sampled bindings
+   use the format's read-only layout; storage bindings use GENERAL. *>
 fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* texture, vk::ImageView view) @private {
     DescriptorHeapState* heap = &state.strict_heap.descriptors;
-    vk::DescriptorImageInfo image_info = {
-        .image_view   = view,
-        .image_layout = texture.usage.storage ? vk::ImageLayout.GENERAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
-    };
 
     if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
         vk::WriteDescriptorSet[2] writes;
+        vk::DescriptorImageInfo[2] image_infos;
         uint write_count = 0;
         if (texture.usage.sampled) {
-            writes[write_count++] = vk::write_descriptor_set()
+            image_infos[write_count] = {
+                .image_view   = view,
+                .image_layout = texture_descriptor_layout(
+                    texture,
+                    TextureDescriptorKind.SAMPLED,
+                ),
+            };
+            writes[write_count] = vk::write_descriptor_set()
                 .set_dst_set(heap.descriptor_set)
                 .set_dst_binding(HEAP_BINDING_SAMPLED)
                 .set_dst_array_element(slot)
                 .set_descriptor_type(vk::DescriptorType.SAMPLED_IMAGE)
-                .set_image_info((&image_info)[:1]);
+                .set_image_info((&image_infos[write_count])[:1]);
+            write_count++;
         }
         if (texture.usage.storage) {
-            writes[write_count++] = vk::write_descriptor_set()
+            image_infos[write_count] = {
+                .image_view   = view,
+                .image_layout = texture_descriptor_layout(
+                    texture,
+                    TextureDescriptorKind.STORAGE,
+                ),
+            };
+            writes[write_count] = vk::write_descriptor_set()
                 .set_dst_set(heap.descriptor_set)
                 .set_dst_binding(HEAP_BINDING_STORAGE)
                 .set_dst_array_element(slot)
                 .set_descriptor_type(vk::DescriptorType.STORAGE_IMAGE)
-                .set_image_info((&image_info)[:1]);
+                .set_image_info((&image_infos[write_count])[:1]);
+            write_count++;
         }
         if (write_count > 0) {
             vk::update_descriptor_sets(state.device, write_count, &writes[0], 0, null);
@@ -640,6 +667,13 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
     }
 
     if (texture.usage.sampled) {
+        vk::DescriptorImageInfo image_info = {
+            .image_view   = view,
+            .image_layout = texture_descriptor_layout(
+                texture,
+                TextureDescriptorKind.SAMPLED,
+            ),
+        };
         vk::DescriptorGetInfoEXT info = vk::descriptor_get_info_ext();
         info.type = vk::DescriptorType.SAMPLED_IMAGE;
         info.data.p_sampled_image = &image_info;
@@ -652,6 +686,13 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
         );
     }
     if (texture.usage.storage) {
+        vk::DescriptorImageInfo image_info = {
+            .image_view   = view,
+            .image_layout = texture_descriptor_layout(
+                texture,
+                TextureDescriptorKind.STORAGE,
+            ),
+        };
         vk::DescriptorGetInfoEXT info = vk::descriptor_get_info_ext();
         info.type = vk::DescriptorType.STORAGE_IMAGE;
         info.data.p_storage_image = &image_info;
@@ -924,13 +965,15 @@ fn void commit_texture_descriptor_item(
     };
 }
 
-fn uint accumulate_texture_descriptor_write(DescriptorHeapState* heap, uint slot, TextureSlot* texture_slot, vk::ImageView view, vk::DescriptorImageInfo[] image_infos, vk::WriteDescriptorSet[] writes, uint write_count) @private {
-    vk::DescriptorImageInfo image_info = {
-        .image_view   = view,
-        .image_layout = texture_slot.usage.storage ? vk::ImageLayout.GENERAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
-    };
+fn uint accumulate_texture_descriptor_write(DescriptorHeapState* heap, uint slot, TextureSlot* texture_slot, vk::ImageView view, vk::DescriptorImageInfo[] image_infos, vk::WriteDescriptorSet[] writes, uint write_count) {
     if (texture_slot.usage.sampled) {
-        image_infos[write_count] = image_info;
+        image_infos[write_count] = {
+            .image_view   = view,
+            .image_layout = texture_descriptor_layout(
+                texture_slot,
+                TextureDescriptorKind.SAMPLED,
+            ),
+        };
         writes[write_count] = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
             .set_dst_binding(HEAP_BINDING_SAMPLED)
@@ -940,7 +983,13 @@ fn uint accumulate_texture_descriptor_write(DescriptorHeapState* heap, uint slot
         write_count++;
     }
     if (texture_slot.usage.storage) {
-        image_infos[write_count] = image_info;
+        image_infos[write_count] = {
+            .image_view   = view,
+            .image_layout = texture_descriptor_layout(
+                texture_slot,
+                TextureDescriptorKind.STORAGE,
+            ),
+        };
         writes[write_count] = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
             .set_dst_binding(HEAP_BINDING_STORAGE)
