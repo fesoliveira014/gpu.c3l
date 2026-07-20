@@ -877,6 +877,39 @@ fn void? validate_root_address(
     )~;
 }
 
+fn void? validate_pipeline_render_compatibility(
+    VkDeviceState* state,
+    PipelineSlot* slot,
+    RenderCompatibility* render,
+) @private {
+    if (slot.entry >= state.pipeline_cache.entries.len
+        || !state.pipeline_cache.entries[slot.entry].used) {
+        return gpu::INVALID_HANDLE~;
+    }
+    PipelineKey* key = &state.pipeline_cache.entries[slot.entry].key;
+    if ((PipelineKind)key.kind != PipelineKind.GRAPHICS) return;
+    if (key.color_format_count != render.color_count
+        || key.depth_format != (int)render.depth_format
+        || key.sample_count != (int)render.sample_count) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    for (uint i = 0; i < render.color_count; i++) {
+        if (key.color_formats[i] != (int)render.color_formats[i]) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+    }
+}
+
+fn void? validate_active_pipeline_render_compatibility(
+    VkDeviceState* state,
+    CommandRecord* record,
+    RenderCompatibility* render,
+) @private {
+    if (!record.active_pipeline.is_valid()) return;
+    PipelineSlot* slot = state.pipelines.get(record.active_pipeline)!;
+    return validate_pipeline_render_compatibility(state, slot, render);
+}
+
 fn void? bind_pipeline_state(
     VkDeviceState* state,
     CommandRecord* record,
@@ -884,6 +917,13 @@ fn void? bind_pipeline_state(
 ) @private {
     validate_descriptor_heap_binding(state)!;
     PipelineSlot* slot = state.pipelines.get(pipeline)!;
+    if (record.state == CommandState.RECORDING_RENDER_PASS) {
+        validate_pipeline_render_compatibility(
+            state,
+            slot,
+            &record.active_render,
+        )!;
+    }
     uint reference_checkpoint = record.reference_count;
     defer catch rollback_command_references(state, record, reference_checkpoint);
     track_command_reference(

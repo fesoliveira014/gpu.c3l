@@ -18,7 +18,7 @@
     "../gpu/device_support.c3",
     "../gpu/surface.c3", "../gpu/surface/**",
     "../gpu/memory.c3", "../gpu/texture.c3", "../gpu/descriptor_heap.c3",
-    "../gpu/pipeline.c3", "../gpu/command.c3", "../gpu/sync.c3", "../gpu/queue.c3",
+    "../gpu/pipeline.c3", "../gpu/command.c3", "../gpu/render_pass.c3", "../gpu/sync.c3", "../gpu/queue.c3",
     "../gpu/swapchain.c3", "../gpu/debug.c3", "../gpu/shader_abi.c3", "../gpu/vk/**",
     "src/test_lifetime_helpers.c3", "src/bench_lifetime.c3"
   ],
@@ -99,7 +99,7 @@
     },
     "vk_command": {
       "type": "test",
-      "sources": [ "src/test_vk_command_submit.c3", "src/test_vk_command_validation.c3", "src/test_vk_texture_transition.c3", "src/offscreen_abi.c3" ]
+      "sources": [ "src/test_vk_command_submit.c3", "src/test_vk_command_validation.c3", "src/test_vk_render_pass_validation.c3", "src/test_vk_texture_transition.c3", "src/offscreen_abi.c3" ]
     },
     "vk_texture": {
       "type": "test",
@@ -144,7 +144,7 @@
     },
     "vk_depth": {
       "type": "test",
-      "sources": [ "src/test_vk_depth_attachment.c3", "src/depth_abi.c3" ]
+      "sources": [ "src/test_vk_depth_attachment.c3", "src/test_vk_multisample_render.c3", "src/depth_abi.c3" ]
     },
     "vk_threading": {
       "type": "test",

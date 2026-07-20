@@ -31,6 +31,7 @@ struct PipelineKey {
     uint  push_constant_size;
     int[gpu::MAX_COLOR_ATTACHMENTS] color_formats;
     int   depth_format;
+    int   sample_count;
     int   topology;
     int   polygon_mode;
     int   blend_enable;
@@ -42,7 +43,7 @@ struct PipelineKey {
     float bias_clamp;
     int   front_face;
 }
-$assert PipelineKey::size == 120;
+$assert PipelineKey::size == 128;
 
 struct PipelineCacheEntry {
     ulong              hash;
@@ -243,6 +244,7 @@ fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
     key.bias_clamp             = desc.raster.depth_bias_clamp == 0.0f
         ? 0.0f : desc.raster.depth_bias_clamp;
     key.depth_format           = (int)desc.depth_format;
+    key.sample_count           = (int)desc.sample_count;
     key.color_format_count     = (uint)desc.color_formats.len;
     foreach (i, format : desc.color_formats) key.color_formats[i] = (int)format;
     if (desc.blend.enable) {

@@ -82,6 +82,7 @@ struct TextureSlot {
     gpu::Format        format;
     gpu::TextureUsage  usage;
     gpu::QueueRoles    access;
+    gpu::SampleCount   sample_count;
     uint               width;
     uint               height;
     uint               mip_levels;
@@ -195,6 +196,21 @@ fn vk::Format format_to_vk(gpu::Format format) {
     }
 }
 
+fn vk::SampleCountFlagBits sample_count_to_vk(
+    gpu::SampleCount sample_count,
+) @private {
+    switch (sample_count) {
+        case gpu::SampleCount.ONE:        return vk::SampleCountFlagBits.COUNT_1_BIT;
+        case gpu::SampleCount.TWO:        return vk::SampleCountFlagBits.COUNT_2_BIT;
+        case gpu::SampleCount.FOUR:       return vk::SampleCountFlagBits.COUNT_4_BIT;
+        case gpu::SampleCount.EIGHT:      return vk::SampleCountFlagBits.COUNT_8_BIT;
+        case gpu::SampleCount.SIXTEEN:    return vk::SampleCountFlagBits.COUNT_16_BIT;
+        case gpu::SampleCount.THIRTY_TWO: return vk::SampleCountFlagBits.COUNT_32_BIT;
+        case gpu::SampleCount.SIXTY_FOUR: return vk::SampleCountFlagBits.COUNT_64_BIT;
+        default:                          return vk::SampleCountFlagBits.COUNT_1_BIT;
+    }
+}
+
 fn vk::ImageUsageFlags texture_usage_to_vk(gpu::TextureUsage usage) @private {
     uint flags = 0;
     if (usage.sampled)      flags |= (uint)vk::ImageUsageFlagBits.SAMPLED_BIT;
@@ -204,6 +220,24 @@ fn vk::ImageUsageFlags texture_usage_to_vk(gpu::TextureUsage usage) @private {
     if (usage.transfer_src) flags |= (uint)vk::ImageUsageFlagBits.TRANSFER_SRC_BIT;
     if (usage.transfer_dst) flags |= (uint)vk::ImageUsageFlagBits.TRANSFER_DST_BIT;
     return (vk::ImageUsageFlags)flags;
+}
+
+fn bool? format_supports_sample_count(
+    VkDeviceState* state,
+    gpu::Format format,
+    gpu::TextureUsage usage,
+    gpu::SampleCount sample_count,
+) @private {
+    gpu::TextureDesc desc = {
+        .dimension    = gpu::TextureDimension.TEX_2D,
+        .width        = 1,
+        .height       = 1,
+        .format       = format,
+        .usage        = usage,
+        .access       = state.selected_queue_roles,
+        .sample_count = sample_count,
+    };
+    return texture_desc_supported(state, &desc);
 }
 
 fn gpu::TextureFormatSupport? vk_get_texture_format_support(
@@ -239,6 +273,56 @@ fn gpu::TextureFormatSupport? vk_get_texture_format_support(
         || support.features.transfer_src || support.features.transfer_dst;
     support.dimensions.tex_2d = creatable;
     support.sample_counts.one = creatable;
+
+    gpu::TextureUsage attachment_usage;
+    bool attachment_supported;
+    if (format == gpu::Format.D32_FLOAT) {
+        attachment_usage = { .depth_attach };
+        attachment_supported = support.features.depth_attach;
+    } else {
+        attachment_usage = { .color_attach };
+        attachment_supported = support.features.color_attach;
+    }
+    if (attachment_supported) {
+        support.sample_counts.two = format_supports_sample_count(
+            state,
+            format,
+            attachment_usage,
+            gpu::SampleCount.TWO,
+        )!;
+        support.sample_counts.four = format_supports_sample_count(
+            state,
+            format,
+            attachment_usage,
+            gpu::SampleCount.FOUR,
+        )!;
+        support.sample_counts.eight = format_supports_sample_count(
+            state,
+            format,
+            attachment_usage,
+            gpu::SampleCount.EIGHT,
+        )!;
+        support.sample_counts.sixteen = format_supports_sample_count(
+            state,
+            format,
+            attachment_usage,
+            gpu::SampleCount.SIXTEEN,
+        )!;
+        support.sample_counts.thirty_two =
+            format_supports_sample_count(
+                state,
+                format,
+                attachment_usage,
+                gpu::SampleCount.THIRTY_TWO,
+            )!;
+        support.sample_counts.sixty_four =
+            format_supports_sample_count(
+                state,
+                format,
+                attachment_usage,
+                gpu::SampleCount.SIXTY_FOUR,
+            )!;
+    }
     return support;
 }
 
@@ -266,14 +350,14 @@ fn bool? texture_desc_supported(VkDeviceState* state, gpu::TextureDesc* desc) @p
     uint mip_levels = desc.mip_levels == 0 ? 1 : desc.mip_levels;
     uint array_layers = desc.array_layers == 0 ? 1 : desc.array_layers;
     uint depth = desc.depth == 0 ? 1 : desc.depth;
-    bool supports_sample_one = ((uint)properties.sample_counts
-        & (uint)vk::SampleCountFlagBits.COUNT_1_BIT) != 0;
+    bool supports_sample_count = ((uint)properties.sample_counts
+        & (uint)sample_count_to_vk(desc.sample_count)) != 0;
     return desc.width <= properties.max_extent.width
         && desc.height <= properties.max_extent.height
         && depth <= properties.max_extent.depth
         && mip_levels <= properties.max_mip_levels
         && array_layers <= properties.max_array_layers
-        && supports_sample_one;
+        && supports_sample_count;
 }
 
 fn bool? format_supports_usage(
@@ -550,7 +634,7 @@ fn vk::ImageCreateInfo make_texture_create_info(
         .set_extent({ .width = desc.width, .height = desc.height, .depth = 1 })
         .set_mip_levels(gpu::texture_mip_levels(desc))
         .set_array_layers(gpu::texture_array_layers(desc))
-        .set_samples(vk::SampleCountFlagBits.COUNT_1_BIT)
+        .set_samples(sample_count_to_vk(desc.sample_count))
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
         .set_initial_layout(vk::ImageLayout.UNDEFINED);
@@ -689,6 +773,7 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
         .format         = desc.format,
         .usage          = desc.usage,
         .access         = desc.access,
+        .sample_count   = desc.sample_count,
         .width          = desc.width,
         .height         = desc.height,
         .mip_levels     = mip_levels,
@@ -939,6 +1024,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
         .format           = desc.format,
         .usage            = desc.usage,
         .access           = desc.access,
+        .sample_count     = desc.sample_count,
         .width            = desc.width,
         .height           = desc.height,
         .mip_levels       = mip_levels,
@@ -1071,6 +1157,7 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         .format           = desc.format,
         .usage            = desc.usage,
         .access           = desc.access,
+        .sample_count     = desc.sample_count,
         .width            = desc.width,
         .height           = desc.height,
         .mip_levels       = mip_levels,

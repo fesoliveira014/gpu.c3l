@@ -15,6 +15,13 @@ enum CommandState : int {
     SUBMITTED,
 }
 
+struct RenderCompatibility {
+    uint                                      color_count;
+    gpu::Format[gpu::MAX_COLOR_ATTACHMENTS]   color_formats;
+    gpu::Format                               depth_format;
+    gpu::SampleCount                          sample_count;
+}
+
 struct CommandRecord {
     vk::CommandBuffer           command_buffer;
     vk::CommandPool             command_pool;
@@ -23,6 +30,7 @@ struct CommandRecord {
     CommandState                state;
     uint                        active_render_width;
     uint                        active_render_height;
+    RenderCompatibility         active_render;
     gpu::PipelineHandle         active_pipeline;
     uint                        active_entry;
     bool                        depth_state_set;

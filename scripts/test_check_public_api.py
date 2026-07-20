@@ -270,6 +270,17 @@ def valid_document() -> dict:
                         ("desc", "TextureBufferCopyDesc*"),
                     ),
                     api_function(
+                        "cmd_begin_render_pass",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("desc", "RenderPassDesc*"),
+                    ),
+                    api_function(
+                        "cmd_end_render_pass",
+                        "void?",
+                        ("commands", "CommandList*"),
+                    ),
+                    api_function(
                         "cmd_bind_pipeline",
                         "void?",
                         ("commands", "CommandList*"),
@@ -382,9 +393,113 @@ def valid_document() -> dict:
                                 "type": {"name": "Format"},
                             },
                             {
+                                "name": "sample_count",
+                                "type": {"name": "SampleCount"},
+                            },
+                            {
                                 "name": "debug_name",
                                 "type": {"name": "ZString"},
                             },
+                        ],
+                    },
+                    {
+                        "name": "SampleCount",
+                        "kind": "enum",
+                        "members": [
+                            {"name": name, "type": {"name": "SampleCount"}}
+                            for name in (
+                                "ONE",
+                                "TWO",
+                                "FOUR",
+                                "EIGHT",
+                                "SIXTEEN",
+                                "THIRTY_TWO",
+                                "SIXTY_FOUR",
+                            )
+                        ],
+                    },
+                    {
+                        "name": "TextureDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "dimension", "type": {"name": "TextureDimension"}},
+                            {"name": "width", "type": {"name": "uint"}},
+                            {"name": "height", "type": {"name": "uint"}},
+                            {"name": "depth", "type": {"name": "uint"}},
+                            {"name": "mip_levels", "type": {"name": "uint"}},
+                            {"name": "array_layers", "type": {"name": "uint"}},
+                            {"name": "format", "type": {"name": "Format"}},
+                            {"name": "usage", "type": {"name": "TextureUsage"}},
+                            {"name": "access", "type": {"name": "QueueRoles"}},
+                            {"name": "sample_count", "type": {"name": "SampleCount"}},
+                            {"name": "debug_name", "type": {"name": "ZString"}},
+                        ],
+                    },
+                    {
+                        "name": "LoadOp",
+                        "kind": "enum",
+                        "members": [
+                            {"name": name, "type": {"name": "LoadOp"}}
+                            for name in ("LOAD", "CLEAR", "DONT_CARE")
+                        ],
+                    },
+                    {
+                        "name": "StoreOp",
+                        "kind": "enum",
+                        "members": [
+                            {"name": name, "type": {"name": "StoreOp"}}
+                            for name in ("STORE", "DONT_CARE")
+                        ],
+                    },
+                    {
+                        "name": "ClearColor",
+                        "kind": "union",
+                        "members": [
+                            {"name": "rgba", "type": {"name": "float[4]"}},
+                            {"name": "uint_rgba", "type": {"name": "uint[4]"}},
+                        ],
+                    },
+                    {
+                        "name": "ClearDepthStencil",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "depth", "type": {"name": "float"}},
+                            {"name": "stencil", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "ColorTargetDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "texture", "type": {"name": "TextureHandle"}},
+                            {"name": "mip_level", "type": {"name": "uint"}},
+                            {"name": "array_layer", "type": {"name": "uint"}},
+                            {"name": "resolve_texture", "type": {"name": "TextureHandle"}},
+                            {"name": "resolve_mip_level", "type": {"name": "uint"}},
+                            {"name": "resolve_array_layer", "type": {"name": "uint"}},
+                            {"name": "load_op", "type": {"name": "LoadOp"}},
+                            {"name": "store_op", "type": {"name": "StoreOp"}},
+                            {"name": "clear", "type": {"name": "ClearColor"}},
+                        ],
+                    },
+                    {
+                        "name": "DepthTargetDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "texture", "type": {"name": "TextureHandle"}},
+                            {"name": "load_op", "type": {"name": "LoadOp"}},
+                            {"name": "store_op", "type": {"name": "StoreOp"}},
+                            {"name": "clear", "type": {"name": "ClearDepthStencil"}},
+                        ],
+                    },
+                    {
+                        "name": "RenderPassDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "colors", "type": {"name": "ColorTargetDesc[]"}},
+                            {"name": "depth", "type": {"name": "DepthTargetDesc*"}},
+                            {"name": "width", "type": {"name": "uint"}},
+                            {"name": "height", "type": {"name": "uint"}},
                         ],
                     },
                     {
@@ -1205,6 +1320,144 @@ class PublicApiCheckTests(unittest.TestCase):
                     failure,
                     check_public_api.validate_document(document),
                 )
+
+    def test_requires_sample_count_enum(self) -> None:
+        document = valid_document()
+        sample_count = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "SampleCount"
+        )
+        sample_count["members"].pop()
+        self.assertIn(
+            "SampleCount must define the strict sample counts",
+            check_public_api.validate_document(document),
+        )
+
+    def test_requires_render_sample_fields(self) -> None:
+        for type_name, field_name, failure in (
+            (
+                "TextureDesc",
+                "sample_count",
+                "TextureDesc.sample_count must be SampleCount",
+            ),
+            (
+                "GraphicsPipelineDesc",
+                "sample_count",
+                "GraphicsPipelineDesc.sample_count must be SampleCount",
+            ),
+        ):
+            with self.subTest(type_name=type_name):
+                document = valid_document()
+                desc = next(
+                    entry for entry in document["modules"]["gpu"]["types"]
+                    if entry["name"] == type_name
+                )
+                field = next(
+                    member for member in desc["members"]
+                    if member["name"] == field_name
+                )
+                field["type"]["name"] = "uint"
+                self.assertIn(
+                    failure,
+                    check_public_api.validate_document(document),
+                )
+
+    def test_requires_full_render_pass_schema(self) -> None:
+        mutations = (
+            (
+                "LoadOp",
+                lambda entry: entry["members"].pop(),
+                "LoadOp must define the strict load operations",
+            ),
+            (
+                "StoreOp",
+                lambda entry: entry["members"].pop(),
+                "StoreOp must define the strict store operations",
+            ),
+            (
+                "ClearColor",
+                lambda entry: entry["members"].pop(),
+                "ClearColor must expose typed color values",
+            ),
+            (
+                "ClearDepthStencil",
+                lambda entry: entry["members"].pop(),
+                "ClearDepthStencil must match the strict schema",
+            ),
+            (
+                "ColorTargetDesc",
+                lambda entry: entry["members"].pop(),
+                "ColorTargetDesc must match the strict schema",
+            ),
+            (
+                "DepthTargetDesc",
+                lambda entry: entry["members"].pop(),
+                "DepthTargetDesc must match the strict schema",
+            ),
+            (
+                "RenderPassDesc",
+                lambda entry: entry["members"].pop(),
+                "RenderPassDesc must match the strict schema",
+            ),
+        )
+        for type_name, mutate, failure in mutations:
+            with self.subTest(type_name=type_name):
+                document = valid_document()
+                entry = next(
+                    item for item in document["modules"]["gpu"]["types"]
+                    if item["name"] == type_name
+                )
+                mutate(entry)
+                self.assertIn(
+                    failure,
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_public_render_pass_objects(self) -> None:
+        document = valid_document()
+        document["modules"]["gpu"]["types"].extend((
+            {"name": "RenderPassHandle", "kind": "struct", "members": []},
+            {"name": "FramebufferHandle", "kind": "struct", "members": []},
+        ))
+        document["modules"]["gpu"]["functions"].extend((
+            api_function("create_render_pass", "RenderPassHandle?"),
+            api_function("create_framebuffer", "FramebufferHandle?"),
+        ))
+        failures = check_public_api.validate_document(document)
+        for symbol in (
+            "RenderPassHandle",
+            "FramebufferHandle",
+            "create_render_pass",
+            "create_framebuffer",
+        ):
+            self.assertIn(symbol, failures)
+
+    def test_requires_resolve_attachment_fields(self) -> None:
+        document = valid_document()
+        desc = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "ColorTargetDesc"
+        )
+        desc["members"] = [
+            member for member in desc["members"]
+            if member["name"] != "resolve_texture"
+        ]
+        self.assertIn(
+            "ColorTargetDesc must match the strict schema",
+            check_public_api.validate_document(document),
+        )
+
+    def test_requires_render_pass_command_signatures(self) -> None:
+        document = valid_document()
+        begin = next(
+            entry for entry in document["modules"]["gpu"]["functions"]
+            if entry["name"] == "cmd_begin_render_pass"
+        )
+        begin["members"][1]["type"]["name"] = "RenderPassHandle"
+        self.assertIn(
+            "cmd_begin_render_pass has the wrong parameters",
+            check_public_api.validate_document(document),
+        )
 
     def test_rejects_dynamic_depth_in_graphics_pipeline_desc(self) -> None:
         document = valid_document()

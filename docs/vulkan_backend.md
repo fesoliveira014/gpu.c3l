@@ -677,11 +677,16 @@ Render pass begin:
 
 ```text
 reject color counts above the library or selected-device limit
-validate every color handle, usage, mip/layer range, and selected-mip extent
+validate every color source handle, usage, mip/layer range, and selected-mip extent
+require one sample count across color and depth sources
+validate each resolve as distinct, single-sample, same-format color attachment
 validate the depth handle, usage, and mip-zero extent
+preflight any bound pipeline against color formats, depth format, and samples
 transition only if caller explicitly requested via barrier before begin
-resolve views and build attachment infos only after all targets validate
+create views and build attachment infos only after all targets validate
+use AVERAGE for normalized/float resolves and SAMPLE_ZERO for integer resolves
 vkCmdBeginRendering
+publish active compatibility and retained references
 ```
 
 Render pass end:

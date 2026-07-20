@@ -205,6 +205,7 @@ TextureDesc
     Format format
     TextureUsage usage
     QueueRoles access
+    SampleCount sample_count
     ZString debug_name
 ```
 
@@ -217,7 +218,12 @@ TextureUsage.COLOR_ATTACH -> VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
 TextureUsage.DEPTH_ATTACH -> VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
 TextureUsage.TRANSFER_SRC -> VK_IMAGE_USAGE_TRANSFER_SRC_BIT
 TextureUsage.TRANSFER_DST -> VK_IMAGE_USAGE_TRANSFER_DST_BIT
+SampleCount               -> VkSampleCountFlagBits
 ```
+
+Multisample textures are attachment-only, have one mip, and require an
+adapter-supported sample count. Resolve destinations are separate
+single-sample color-attachment textures.
 
 Owned creation:
 

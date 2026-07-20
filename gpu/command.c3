@@ -1,18 +1,5 @@
 module gpu;
 
-<* What happens to an attachment's contents when a render pass begins. *>
-enum LoadOp : int {
-    LOAD,
-    CLEAR,
-    DONT_CARE,
-}
-
-<* Whether an attachment's contents persist after the render pass ends. *>
-enum StoreOp : int {
-    STORE,
-    DONT_CARE,
-}
-
 <* Unsigned 3-vector; dispatches take their workgroup counts as one. *>
 struct Vec3u {
     uint x;
@@ -67,46 +54,6 @@ struct DispatchIndirectCommand {
     uint z;
 }
 $assert DispatchIndirectCommand::size == 12;
-
-<* Color clear value; rgba is interpreted in the target's format. *>
-struct ClearColor {
-    float[4] rgba;
-}
-
-<* Depth/stencil clear value; depth in [0, 1]. *>
-struct ClearDepthStencil {
-    float depth;
-    uint  stencil;
-}
-
-<* One color attachment of a render pass: a single mip/layer of the texture.
-   `clear` applies only with LoadOp.CLEAR. *>
-struct ColorTargetDesc {
-    TextureHandle texture;
-    uint          mip_level;
-    uint          array_layer;
-    LoadOp        load_op;
-    StoreOp       store_op;
-    ClearColor    clear;
-}
-
-<* Depth attachment of a render pass; `clear` applies only with LoadOp.CLEAR. *>
-struct DepthTargetDesc {
-    TextureHandle     texture;
-    LoadOp            load_op;
-    StoreOp           store_op;
-    ClearDepthStencil clear;
-}
-
-<* A dynamic-rendering pass. width/height set the render area and every
-   attachment must cover it. *>
-struct RenderPassDesc {
-    ColorTargetDesc[] colors;
-    // Null means no depth attachment.
-    DepthTargetDesc*  depth;
-    uint              width;
-    uint              height;
-}
 
 <* A recording command token. Successful end consumes it. *>
 struct CommandList {
@@ -361,18 +308,6 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
     return vtable.cmd_dispatch(commands, root, groups);
 }
 
-<* Begin dynamic rendering into the desc's targets. Every selected attachment
-   must cover the pass dimensions, and the color count must not exceed
-   DeviceCaps.max_color_attachments. Viewport and scissor cover the full
-   pass dimensions. *>
-fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_begin_render_pass(commands, desc);
-}
-
 <* Set separate dynamic depth state for subsequent draws in the active render
    pass. A failed update leaves the previous depth state unchanged. *>
 fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
@@ -401,14 +336,6 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
     BackendVTable* vtable = operation.vtable;
     if (scissor == null) return INVALID_ARGUMENT~;
     return vtable.cmd_set_scissor(commands, scissor);
-}
-
-<* Counterpart of cmd_begin_render_pass. *>
-fn void? cmd_end_render_pass(CommandList* commands) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_end_render_pass(commands);
 }
 
 <* Draw inside a render pass, pushing the vertex and fragment root addresses.

@@ -201,6 +201,7 @@ gpu/memory.c3
 gpu/texture.c3
 gpu/pipeline.c3
 gpu/command.c3
+gpu/render_pass.c3
 gpu/sync.c3
 gpu/swapchain.c3
 ```
