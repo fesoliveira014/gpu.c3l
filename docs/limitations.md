@@ -65,7 +65,7 @@ page doesn't explain it, that's a bug in this page — file an issue.
 ## 2. Limits
 
 Fixed limits fault loudly rather than degrade. Values cite their defining
-constant; "knob" is the `DeviceDesc` field that raises the limit where one
+constant; "knob" is the `RuntimeDesc` field that raises the limit where one
 exists (else the limit is compile-time).
 
 | Limit | Value | Knob | Fault when exceeded |
@@ -87,11 +87,11 @@ exists (else the limit is compile-time).
 | Color attachments per pass | Lesser of 8 (`MAX_COLOR_ATTACHMENTS` in `gpu/pipeline.c3`) and `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
 
 Two sizing rules that bite:
-- **Heap capacities are exact requests.** Adapter selection checks each
-  candidate against the requested texture and sampler capacities, including
-  the driver's exact descriptor-buffer layout size when that path is needed.
-  It tries another viable candidate rather than clamping; if none can satisfy
-  the request, `create_device_from_desc` returns `UNSUPPORTED_FEATURE`.
+- **Heap capacities are exact device defaults.** `create_device` checks the
+  selected adapter against the runtime's texture and sampler capacities,
+  including the driver's exact descriptor-buffer layout size when that path
+  is needed. It returns `UNSUPPORTED_FEATURE` rather than clamping; the caller
+  may then try another adapter from the runtime.
 
 - **Shader-visible indices have caller-managed lifetime.** Destroying a
   `TextureView` recycles its raw index immediately. Wait or discard every use

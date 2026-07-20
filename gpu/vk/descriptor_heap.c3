@@ -354,7 +354,7 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
                 index:               0,
                 generation:          0,
                 debug_name:          null,
-                rejected_field:      "DeviceDesc.texture_heap_capacity/sampler_heap_capacity",
+                rejected_field:      "RuntimeDesc.texture_heap_capacity/sampler_heap_capacity",
                 invariant:           "descriptor capacities must fit device update-after-bind limits",
                 backend_text:        null,
             )~;
@@ -484,7 +484,7 @@ fn void? create_descriptor_buffer(VkDeviceState* state) @private {
             index:               0,
             generation:          0,
             debug_name:          null,
-            rejected_field:      "DeviceDesc.texture_heap_capacity/sampler_heap_capacity",
+            rejected_field:      "RuntimeDesc.texture_heap_capacity/sampler_heap_capacity",
             invariant:           "descriptor buffer layout must fit device limits",
             backend_text:        null,
         )~;
@@ -879,7 +879,7 @@ fn gpu::TextureView? vk_create_texture_view(gpu::Device* device, gpu::TextureHan
             index:               0,
             generation:          0,
             debug_name:          null,
-            rejected_field:      "DeviceDesc.texture_heap_capacity",
+            rejected_field:      "RuntimeDesc.texture_heap_capacity",
             invariant:           "must exceed live texture descriptors",
             backend_text:        null,
         )~;
@@ -1039,7 +1039,7 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
             index:               0,
             generation:          0,
             debug_name:          null,
-            rejected_field:      "DeviceDesc.texture_heap_capacity",
+            rejected_field:      "RuntimeDesc.texture_heap_capacity",
             invariant:           "must fit the complete descriptor batch",
             backend_text:        null,
         )~;

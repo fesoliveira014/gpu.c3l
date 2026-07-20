@@ -244,12 +244,12 @@ fn int main() {
         UPLOAD_BENCH_ITERATIONS[2],
     );
 
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = false,
         .application_name  = "gpu_upload_throughput_bench",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
     print_upload_adapter(&device);
 

@@ -163,14 +163,14 @@ fn void disabled_heap_preflights_pipeline_binds() @test {
 }
 
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
-    gpu::DeviceDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation     = true,
         .texture_heap_capacity = tex_capacity,
         .sampler_heap_capacity = smp_capacity,
         .application_name      = "gpu_descriptor_heap_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn gpu::TextureHandle make_heap_texture(gpu::Device* device) {
@@ -221,7 +221,7 @@ fn void descriptor_sampler_failures_report_context() @test {
         expected_index:      0,
         expected_generation: 0,
         expected_operation:  "create_texture_view",
-        expected_field:      "DeviceDesc.texture_heap_capacity",
+        expected_field:      "RuntimeDesc.texture_heap_capacity",
         expected_invariant:  "must exceed live texture descriptors",
     );
     fault full = @catch(gpu::create_texture_view(&device, texture, null));
@@ -272,7 +272,7 @@ fn void descriptor_sampler_failures_report_context() @test {
         expected_index:      other.index,
         expected_generation: other.generation,
         expected_operation:  "publish_sampler",
-        expected_field:      "DeviceDesc.sampler_heap_capacity",
+        expected_field:      "RuntimeDesc.sampler_heap_capacity",
         expected_invariant:  "must exceed published samplers",
     );
     fault sampler_full = @catch(gpu::publish_sampler(&device, other));
@@ -1007,7 +1007,7 @@ fn void live_descriptors_block_device_destruction() @test {
         "live descriptors block device destruction");
     gpu::destroy_texture_view(&device, descriptor)!!;
     gpu::destroy_texture(&device, texture)!!;
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 }
 
 // Pure: heap_fits_limits takes no device, so these synthesize HeapLimits
@@ -1381,7 +1381,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_index:      0,
         expected_generation: 0,
         expected_operation:  "create_texture_views",
-        expected_field:      "DeviceDesc.texture_heap_capacity",
+        expected_field:      "RuntimeDesc.texture_heap_capacity",
         expected_invariant:  "must fit the complete descriptor batch",
     );
     fault capacity = @catch(gpu::create_texture_views(&device, over_capacity[..], capacity_outputs[..]));

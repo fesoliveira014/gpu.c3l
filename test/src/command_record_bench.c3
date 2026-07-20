@@ -108,11 +108,11 @@ fn double command_median(double[COMMAND_RECORD_REPETITIONS] values) {
 }
 
 fn int main() {
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .application_name = "gpu_command_record_bench",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
 
     gpu::AllocationDesc data_desc = {

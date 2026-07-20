@@ -44,6 +44,19 @@ enum DeviceCreationCheckpoint : uint {
     BEFORE_PUBLICATION,
 }
 
+struct StandaloneDeviceConfig {
+    bool                      enable_validation;
+    bool                      enable_debug_names;
+    uint                      texture_heap_capacity;
+    uint                      sampler_heap_capacity;
+    uint                      texture_capacity;
+    uint                      pipeline_capacity;
+    char[]                    pipeline_cache_data;
+    ZString                   application_name;
+    gpu::DebugMessageCallback debug_callback;
+    void*                     debug_user_data;
+}
+
 struct DeviceCreationProbe {
     DeviceCreationCheckpoint fail_at;
     DeviceCreationCheckpoint reached;
@@ -343,14 +356,8 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .get_present_mode_support = &vk_get_present_mode_support,
 };
 
-<* Build a Vulkan device end to end. On failure the partial state is torn down
-   and freed before the fault propagates, so nothing leaks. *>
-fn gpu::Device? create_vk_device_from_desc(gpu::DeviceDesc* desc) {
-    return create_vk_device_from_desc_with_probe(desc, null);
-}
-
-fn gpu::Device? create_vk_device_from_desc_with_probe(
-    gpu::DeviceDesc* desc,
+fn gpu::Device? create_standalone_device_with_probe(
+    StandaloneDeviceConfig* desc,
     DeviceCreationProbe* probe,
 ) {
     return create_vk_device_with_selection(
@@ -388,11 +395,16 @@ fn gpu::Device? create_vk_device_with_probe(
     VkRuntimeState* runtime_state = (VkRuntimeState*)runtime_data.backend_state;
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
 
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = runtime_state.validation,
-        .debug_callback    = runtime_state.debug_callback,
-        .debug_user_data   = runtime_state.debug_user_data,
+    StandaloneDeviceConfig desc = {
+        .enable_validation     = runtime_state.validation,
+        .enable_debug_names    = runtime_state.debug_names,
+        .texture_heap_capacity = runtime_state.texture_heap_capacity,
+        .sampler_heap_capacity = runtime_state.sampler_heap_capacity,
+        .texture_capacity      = runtime_state.texture_capacity,
+        .pipeline_capacity     = runtime_state.pipeline_capacity,
+        .pipeline_cache_data   = runtime_state.pipeline_cache_data,
+        .debug_callback        = runtime_state.debug_callback,
+        .debug_user_data       = runtime_state.debug_user_data,
     };
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = gpu::requested_surface(*request);
@@ -424,7 +436,7 @@ fn gpu::Device? create_vk_device_with_probe(
 }
 
 fn gpu::Device? create_vk_device_with_selection(
-    gpu::DeviceDesc* desc,
+    StandaloneDeviceConfig* desc,
     vk::Instance instance,
     vk::PhysicalDevice physical_device,
     bool owns_instance,
@@ -978,7 +990,7 @@ fn bool heap_indexing_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDe
         && v12.descriptor_binding_update_unused_while_pending != 0;
 }
 
-fn VkStrictHeapState? resolve_strict_heap_state(bool requested, gpu::DeviceDesc* desc) {
+fn VkStrictHeapState? resolve_strict_heap_state(bool requested, StandaloneDeviceConfig* desc) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
     VkStrictHeapState state;
     if (!requested) return state;
@@ -1174,7 +1186,7 @@ fn VkHeapImplementation? resolve_candidate_heap_implementation_with_probe(
 
 fn bool candidate_satisfies(
     vk::PhysicalDevice candidate,
-    gpu::DeviceDesc* desc,
+    StandaloneDeviceConfig* desc,
     QueueFamilies* families,
 ) @private {
     vk::PhysicalDeviceProperties props;
@@ -1249,7 +1261,7 @@ fn PhysicalDeviceSelection? choose_physical_device(PhysicalDeviceCandidate[] can
    (API version, required features, semantic heap support, conditional presentation
    capability, queue topology), and return the highest-scored device with its
    already-resolved queue families. *>
-fn PhysicalDeviceSelection? pick_physical_device(vk::Instance instance, gpu::DeviceDesc* desc) {
+fn PhysicalDeviceSelection? pick_physical_device(vk::Instance instance, StandaloneDeviceConfig* desc) {
     uint count = 0;
     check_physical_device_enumeration_result(vk::enumerate_physical_devices(instance, &count, null))!;
     if (count == 0) return gpu::UNSUPPORTED_FEATURE~;

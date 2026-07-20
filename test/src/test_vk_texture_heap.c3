@@ -13,12 +13,12 @@ const char[*] HEAP_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");
 const uint TEX_SIZE = 16;
 
 fn void bindless_texture_write_then_sample() @test {
-    gpu::DeviceDesc device_desc = {
-        .backend              = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
         .application_name     = "gpu_texture_heap_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
@@ -245,12 +245,12 @@ fn uint quantize_unorm8(float value) {
 }
 
 fn void anisotropic_sampler_caps_honest() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_aniso_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::SamplerDesc aniso = {
@@ -275,12 +275,12 @@ fn void anisotropic_sampler_caps_honest() @test {
 }
 
 fn void anisotropy_range_validated() @test {
-    gpu::DeviceDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
         .enable_validation = true,
+        .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "gpu_aniso_range_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     if (gpu::get_device_caps(&device)!!.max_sampler_anisotropy <= 0) return;
 

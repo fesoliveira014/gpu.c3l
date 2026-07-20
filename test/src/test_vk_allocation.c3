@@ -996,12 +996,12 @@ fn void allocation_table_teardown_destroys_each_live_pair_once() @test {
 }
 
 fn gpu::Device create_allocation_test_device(ZString name) {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = name,
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn gpu::AllocationDesc native_allocation_desc(
@@ -1353,7 +1353,7 @@ fn void live_allocation_blocks_normal_device_destruction() @test {
         "live-child rejection preserves the device token");
 
     gpu::free_allocation(&device, &allocation)!!;
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 }
 
 fn void lost_device_releases_live_allocation_backing() @test {
@@ -1368,7 +1368,7 @@ fn void lost_device_releases_live_allocation_backing() @test {
     assert(allocation.is_valid());
 
     gpu::mark_device_lost(&device);
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 
     assert(!device.is_valid(),
         "lost-device teardown consumes the device with live allocation backing");

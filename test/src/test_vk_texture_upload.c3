@@ -7,12 +7,12 @@ const usz MIP0_BYTES = UP_SIZE * UP_SIZE * 4;
 const usz MIP1_BYTES = (UP_SIZE / 2) * (UP_SIZE / 2) * 4;
 
 fn gpu::Device make_upload_test_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_texture_upload_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn void sampled_texture_upload_and_mip_readback() @test {

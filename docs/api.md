@@ -65,6 +65,12 @@ BackendKind
 RuntimeDesc
     BackendKind backend
     bool enable_validation
+    bool enable_debug_names
+    uint texture_heap_capacity      (0 = default; docs/limitations.md)
+    uint sampler_heap_capacity
+    uint texture_capacity
+    uint pipeline_capacity
+    char[] pipeline_cache_data      (copied warm-start blob; section 8)
     ZString application_name
     DebugMessageCallback debug_callback
     void* debug_user_data
@@ -199,24 +205,10 @@ Invalid or duplicate queue groups return `INVALID_ARGUMENT`. Support queries
 report unavailable counts or topology without enabling device state.
 
 A live adapter-created device retains its runtime and reuses the runtime-owned
-backend instance. Destroy the device before destroying that runtime.
-`create_device_from_desc` is the direct headless convenience path; it performs
-its own discovery and owns that discovery state.
+backend instance. Device defaults are copied by `create_runtime` and inherited
+by every device created from that runtime. Destroy each device before its runtime.
 
 ```text
-DeviceDesc
-    BackendKind backend
-    bool enable_validation
-    bool enable_debug_names
-    uint texture_heap_capacity      (0 = default; docs/limitations.md)
-    uint sampler_heap_capacity
-    uint texture_capacity
-    uint pipeline_capacity
-    char[] pipeline_cache_data            (warm-start blob; §8)
-    ZString application_name
-    DebugMessageCallback debug_callback       (null = no structured delivery)
-    void* debug_user_data
-
 DeviceCaps
     bool strict_enabled
     bool presentation_enabled
@@ -254,13 +246,13 @@ and compute. A supported device reports a nonzero `max_generated_work_count`;
 an unsupported device reports false and zero. Heap and generated-work
 implementation mechanisms remain private.
 
-Heap capacities are exact semantic creation requests, not clampable upper
-bounds. Device creation fails rather than clamping when a selected adapter cannot
-satisfy a requested capacity. On success,
+Runtime heap capacities are exact semantic device defaults, not clampable upper
+bounds. Device creation fails rather than clamping when the selected adapter
+cannot satisfy them. On success,
 `DeviceCaps.texture_heap_capacity` and `DeviceCaps.sampler_heap_capacity`
-report the exact capacities of the created shader-visible heaps. A capacity
+report the exact capacities of the created shader-visible heaps. A runtime capacity
 above the library hard ceiling is malformed and faults `INVALID_ARGUMENT`; a
-valid capacity unavailable on every adapter faults `UNSUPPORTED_FEATURE`.
+valid capacity unavailable on the selected adapter faults `UNSUPPORTED_FEATURE`.
 
 Creation:
 
@@ -270,7 +262,6 @@ supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
 request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
 request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
 create_device(Adapter*, DeviceRequest*) -> Device?
-create_device_from_desc(DeviceDesc*) -> Device?
 destroy_device(Device*) -> void?
 ```
 
@@ -376,8 +367,8 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 
 | Fault | Fired by | Typical cause |
 |---|---|---|
-| `UNSUPPORTED_BACKEND` | `create_runtime`, `create_device_from_desc` | no Vulkan 1.3 driver / loader found no ICD |
-| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; no adapter can provide the requested semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_BACKEND` | `create_runtime` | the selected backend is unavailable |
+| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle | an acquired swapchain image is pending during resize or destruction, or a readiness/acquisition state transition is invalid |
@@ -880,7 +871,7 @@ dedup, per device). The driver cache is additionally serializable:
 ```text
 get_pipeline_cache_size(Device* device) -> usz?
 get_pipeline_cache_data(Device* device, char[] out) -> usz?   (bytes written)
-DeviceDesc.pipeline_cache_data                                 (warm-start blob)
+RuntimeDesc.pipeline_cache_data                                 (warm-start blob)
 ```
 
 Export must not race pipeline creation; blob usefulness is driver-dependent
@@ -1360,7 +1351,7 @@ No command helper should silently insert barriers for a later use.
 
 ### Structured debug messages, labels, and leak reporting
 
-`DeviceDesc.debug_callback` optionally receives `DebugMessage` values for
+`RuntimeDesc.debug_callback` optionally receives `DebugMessage` values for
 public-contract failures, backend failures, Vulkan validation/performance
 messages, and resource-lifetime warnings during device teardown. A null
 callback disables structured delivery and never changes the value, fault,

@@ -47,11 +47,11 @@ fn void run_cpu_write_allocations(gpu::Device* device) {
 }
 
 fn int main() {
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .application_name = "gpu_allocation_bench",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
 
     run_cpu_write_allocations(&device);

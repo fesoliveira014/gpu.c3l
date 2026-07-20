@@ -14,6 +14,12 @@ struct VkRuntimeState {
     void*                      debug_user_data;
     VkAdapterState[]           adapters;
     bool                       validation;
+    bool                       debug_names;
+    uint                       texture_heap_capacity;
+    uint                       sampler_heap_capacity;
+    uint                       texture_capacity;
+    uint                       pipeline_capacity;
+    char[]                     pipeline_cache_data;
 }
 
 fn uint route_runtime_debug_message(
@@ -118,6 +124,10 @@ fn void destroy_vk_runtime_state(VkRuntimeState* state) {
         mem::free(state.adapters.ptr);
         state.adapters = {};
     }
+    if (state.pipeline_cache_data.ptr != null) {
+        mem::free(state.pipeline_cache_data.ptr);
+        state.pipeline_cache_data = {};
+    }
     mem::free(state);
 }
 
@@ -146,11 +156,29 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
     state.validation = desc.enable_validation;
+    state.debug_names = desc.enable_debug_names;
+    state.texture_heap_capacity = desc.texture_heap_capacity;
+    state.sampler_heap_capacity = desc.sampler_heap_capacity;
+    state.texture_capacity = desc.texture_capacity;
+    state.pipeline_capacity = desc.pipeline_capacity;
+    if (desc.pipeline_cache_data.len > 0) {
+        if (desc.pipeline_cache_data.ptr == null) return gpu::INVALID_ARGUMENT~;
+        state.pipeline_cache_data = mem::new_array(
+            char,
+            desc.pipeline_cache_data.len,
+        );
+        mem::copy(
+            state.pipeline_cache_data.ptr,
+            desc.pipeline_cache_data.ptr,
+            desc.pipeline_cache_data.len,
+        );
+    }
     vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
         runtime_debug_messenger_create_info(state);
     VkInstanceDesc instance_desc = {
         .enable_validation         = desc.enable_validation,
         .enable_debug_utils        = desc.enable_validation
+            || desc.enable_debug_names
             || desc.debug_callback != null,
         .enable_available_surfaces = true,
         .application_name          = desc.application_name,

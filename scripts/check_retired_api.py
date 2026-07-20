@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "test" / "retired_api"
 
 FIXTURES = {
+    "device_desc": "DeviceDesc",
+    "create_device_from_desc": "create_device_from_desc",
     "create_sampler": "create_sampler",
     "destroy_sampler": "destroy_sampler",
     "create_texture_descriptor": "create_texture_descriptor",
@@ -17,9 +19,6 @@ FIXTURES = {
     "create_texture_descriptors": "create_texture_descriptors",
     "texture_descriptor_desc": "TextureDescriptorDesc",
     "descriptor_heap_mode": "DescriptorHeapMode",
-    "descriptor_heap_mode_field": "descriptor_heap_mode",
-    "texture_descriptor_capacity": "texture_descriptor_capacity",
-    "sampler_descriptor_capacity": "sampler_descriptor_capacity",
     "descriptor_buffer_caps": "descriptor_buffer",
     "descriptor_indexing_caps": "descriptor_indexing",
     "max_texture_descriptors_caps": "max_texture_descriptors",
@@ -65,12 +64,8 @@ FIXTURES = {
     "end_frame": "end_frame",
     "with_frame": "with_frame",
     "default_frame_arena_size": "DEFAULT_FRAME_ARENA_SIZE",
-    "frame_arena_size": "frame_arena_size",
-    "frames_in_flight": "frames_in_flight",
     "debug_frame": "FRAME",
     "arena_full": "ARENA_FULL",
-    "staging_arena_size": "staging_arena_size",
-    "readback_arena_size": "readback_arena_size",
     "default_staging_arena_size": "DEFAULT_STAGING_ARENA_SIZE",
     "default_readback_arena_size": "DEFAULT_READBACK_ARENA_SIZE",
     "debug_semaphore": "SEMAPHORE",
@@ -78,7 +73,6 @@ FIXTURES = {
     "persistent_arena_stats": "PersistentArenaStats",
     "max_persistent_allocations": "MAX_PERSISTENT_ALLOCATIONS",
     "default_persistent_arena_size": "DEFAULT_PERSISTENT_ARENA_SIZE",
-    "persistent_arena_size": "persistent_arena_size",
     "alloc_persistent_span": "alloc_persistent_span",
     "free_persistent_span": "free_persistent_span",
     "get_persistent_stats": "get_persistent_stats",
@@ -101,14 +95,6 @@ ERROR_DIAGNOSTIC = re.compile(
 INVALID_MEMBER_TYPES = {
     "submit_waits": "SubmitDesc",
     "submit_signals": "SubmitDesc",
-    "descriptor_heap_mode_field": "DeviceDesc",
-    "texture_descriptor_capacity": "DeviceDesc",
-    "sampler_descriptor_capacity": "DeviceDesc",
-    "staging_arena_size": "DeviceDesc",
-    "readback_arena_size": "DeviceDesc",
-    "persistent_arena_size": "DeviceDesc",
-    "frame_arena_size": "DeviceDesc",
-    "frames_in_flight": "DeviceDesc",
     "retired_graphics_pipeline_depth": "GraphicsPipelineDesc",
 }
 

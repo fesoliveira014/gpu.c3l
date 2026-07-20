@@ -55,14 +55,14 @@ fn void device_destroy_readiness_never_waits() @test {
 }
 
 fn void device_create_destroy() @test {
-    gpu::DeviceDesc desc = {
-        .backend              = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
         .enable_debug_names   = true,
         .application_name     = "gpu_vk_bootstrap_test",
     };
 
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
 
     assert(gpu::get_device_backend(&device)!! == gpu::BackendKind.VULKAN, "backend recorded");
     assert(gpu::device_backend_state(device) != null, "backend state allocated");
@@ -111,7 +111,7 @@ fn void device_create_destroy() @test {
         "reported indirect draw-count limit matches the selected physical device"
     );
     assert(gpu::get_device_caps(&device)!!.max_push_constant_size >= gpu::RootPush::size, "push-constant limit contains RootPush");
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
     assert(gpu::device_backend_state(device) == null, "backend state cleared on destroy");
     assert((ulong)device == 0, "destroy consumes the device token");
 
@@ -120,29 +120,29 @@ fn void device_create_destroy() @test {
 }
 
 fn void device_heap_capacities() @test {
-    gpu::DeviceDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation     = true,
         .texture_heap_capacity = 64,
         .sampler_heap_capacity = 8,
         .application_name      = "gpu_vk_heap_capacity_test",
     };
 
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
     assert(caps.texture_heap_capacity == 64, "texture capacity reflects the desc");
     assert(caps.sampler_heap_capacity == 8, "sampler capacity reflects the desc");
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 }
 
 fn void device_capacity_over_ceiling_rejected() @test {
-    gpu::DeviceDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
         .texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1,
+        .backend               = gpu::BackendKind.VULKAN,
         .application_name      = "gpu_vk_capacity_test",
     };
 
-    fault capacity_fault = @catch(gpu::create_device_from_desc(&desc));
+    fault capacity_fault = @catch(create_test_device(&desc));
     assert(capacity_fault == gpu::INVALID_ARGUMENT, "capacity above the descriptor heap limit fails with INVALID_ARGUMENT");
 }
 

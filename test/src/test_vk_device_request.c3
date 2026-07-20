@@ -70,7 +70,7 @@ fn gpu::vk::IndexingHeapLimits permissive_indexing_heap_limits() @private {
 }
 
 fn void strict_heap_state_selects_private_implementation() @test {
-    gpu::DeviceDesc desc = {
+    gpu::vk::StandaloneDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
@@ -161,7 +161,7 @@ fn void strict_heap_state_selects_private_implementation() @test {
 }
 
 fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
-    gpu::DeviceDesc desc = {
+    gpu::vk::StandaloneDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
@@ -225,7 +225,7 @@ fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
 }
 
 fn void descriptor_buffer_query_is_needed_only_for_fallback_or_override() @test {
-    gpu::DeviceDesc desc = {
+    gpu::vk::StandaloneDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
@@ -334,6 +334,59 @@ fn void descriptor_buffer_capability_query_distinguishes_absence_and_failure() @
         )) == gpu::UNSUPPORTED_FEATURE,
         "a missing extension layer maps through the public unsupported-feature taxonomy"
     );
+}
+
+fn void runtime_copies_device_creation_defaults() @test {
+    char[4] cache_data = { 1, 2, 3, 4 };
+    gpu::RuntimeDesc desc = {
+        .backend                   = gpu::BackendKind.VULKAN,
+        .enable_debug_names        = true,
+        .texture_heap_capacity     = 17,
+        .sampler_heap_capacity     = 19,
+        .texture_capacity          = 23,
+        .pipeline_capacity         = 29,
+        .pipeline_cache_data       = cache_data[..],
+        .application_name          = "gpu_vk_runtime_defaults_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    gpu::vk::VkRuntimeState* state =
+        (gpu::vk::VkRuntimeState*)gpu::runtime_backend_state(&runtime);
+
+    assert(state != null, "the runtime publishes its Vulkan state");
+    assert(state.debug_names, "the runtime retains the debug-name default");
+    assert(
+        state.texture_heap_capacity == 17,
+        "the runtime retains the texture heap capacity"
+    );
+    assert(
+        state.sampler_heap_capacity == 19,
+        "the runtime retains the sampler heap capacity"
+    );
+    assert(
+        state.texture_capacity == 23,
+        "the runtime retains the texture identity capacity"
+    );
+    assert(
+        state.pipeline_capacity == 29,
+        "the runtime retains the pipeline capacity"
+    );
+    assert(
+        state.pipeline_cache_data.ptr != &cache_data[0],
+        "the runtime owns an independent cache copy"
+    );
+    assert(
+        state.pipeline_cache_data.len == cache_data.len,
+        "the runtime retains the full cache blob"
+    );
+    assert(state.pipeline_cache_data[0] == 1, "the runtime copies cache bytes");
+
+    cache_data[0] = 9;
+    assert(
+        state.pipeline_cache_data[0] == 1,
+        "caller mutation cannot change the runtime cache copy"
+    );
+
+    gpu::destroy_runtime(&runtime)!!;
 }
 
 fn void adapter_request_creation_reuses_runtime_discovery() @test {
@@ -585,8 +638,7 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
 }
 
 fn void owned_instance_creation_rolls_back_after_bootstrap() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::vk::StandaloneDeviceConfig desc = {
         .application_name  = "gpu_vk_owned_instance_rollback_test",
         .enable_validation = true,
     };
@@ -596,7 +648,7 @@ fn void owned_instance_creation_rolls_back_after_bootstrap() @test {
     uint live_slots_before = live_device_slot_count();
 
     assert(
-        @catch(gpu::vk::create_vk_device_from_desc_with_probe(&desc, &probe))
+        @catch(gpu::vk::create_standalone_device_with_probe(&desc, &probe))
             == gpu::BACKEND_ERROR,
         "an owned-instance checkpoint failure returns the backend fault"
     );

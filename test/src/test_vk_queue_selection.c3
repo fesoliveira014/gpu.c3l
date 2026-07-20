@@ -436,12 +436,12 @@ fn void no_suitable_physical_device_faults() @test {
 }
 
 fn gpu::Device make_queue_test_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_queue_selection_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn void queue_alias_matches_async_compute_cap() @test {
@@ -515,7 +515,7 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
         }
 
         gpu::Device device = gpu::create_device(&adapter, &request)!!;
-        defer destroy_test_device(&device)!!;
+        defer gpu::destroy_device(&device)!!;
         gpu::Queue graphics = gpu::get_queue(
             &device,
             gpu::QueueKind.GRAPHICS,

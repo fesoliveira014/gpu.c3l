@@ -12,6 +12,8 @@ CPU_PROJECT = ROOT / "test" / "cpu"
 PRIVATE_BACKEND_DECLARATION = "module gpu::vk @private;"
 
 FORBIDDEN_TEXT = {
+    "devicedesc": "retired transitional DeviceDesc",
+    '"name":"create_device_from_desc"': "retired direct device creation",
     "backend_state": "backend state pointer",
     "backendvtable": "backend dispatch table",
     "descriptorheapmode": "backend heap strategy type",
@@ -145,6 +147,8 @@ DEBUG_RESOURCE_KINDS = (
 )
 
 RETIRED_SOURCE_SYMBOLS = (
+    "DeviceDesc",
+    "create_device_from_desc(",
     "PlatformKind",
     "PresentDesc",
     "SurfaceDesc",
@@ -409,10 +413,21 @@ def validate_document(document: dict) -> list[str]:
         ):
             failures.append(failure)
 
-    device_desc_fields = dict(member_schema(types.get("DeviceDesc")))
-    for field in ("texture_heap_capacity", "sampler_heap_capacity"):
-        if device_desc_fields.get(field) != "uint":
-            failures.append(f"DeviceDesc.{field} must be a uint")
+    runtime_desc_schema = (
+        ("backend", "BackendKind"),
+        ("enable_validation", "bool"),
+        ("enable_debug_names", "bool"),
+        ("texture_heap_capacity", "uint"),
+        ("sampler_heap_capacity", "uint"),
+        ("texture_capacity", "uint"),
+        ("pipeline_capacity", "uint"),
+        ("pipeline_cache_data", "char[]"),
+        ("application_name", "ZString"),
+        ("debug_callback", "DebugMessageCallback"),
+        ("debug_user_data", "void*"),
+    )
+    if member_schema(types.get("RuntimeDesc")) != runtime_desc_schema:
+        failures.append("RuntimeDesc must match the strict schema")
 
     device_caps_fields = dict(member_schema(types.get("DeviceCaps")))
     for field in (

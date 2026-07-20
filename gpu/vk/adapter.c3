@@ -86,9 +86,7 @@ fn gpu::AdapterQueueInfo query_adapter_queues(vk::PhysicalDevice physical_device
 }
 
 fn bool strict_adapter_supported(vk::PhysicalDevice physical_device) {
-    gpu::DeviceDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
-    };
+    StandaloneDeviceConfig desc;
     if (try families = select_queue_families(physical_device)) {
         return candidate_satisfies(physical_device, &desc, &families);
     }

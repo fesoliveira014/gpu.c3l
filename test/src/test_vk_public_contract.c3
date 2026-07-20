@@ -3,11 +3,11 @@ module gpu_test;
 import gpu;
 
 fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
-    gpu::DeviceDesc device_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .application_name = "gpu_null_contract_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
 
     assert(
@@ -70,11 +70,11 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
 }
 
 fn void null_command_arguments_fault_without_recording_side_effects() @test {
-    gpu::DeviceDesc device_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .application_name = "gpu_null_command_contract_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,

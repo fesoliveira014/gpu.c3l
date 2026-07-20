@@ -567,9 +567,21 @@ def valid_document() -> dict:
                         ],
                     },
                     {
-                        "name": "DeviceDesc",
+                        "name": "RuntimeDesc",
                         "kind": "struct",
                         "members": [
+                            {
+                                "name": "backend",
+                                "type": {"name": "BackendKind"},
+                            },
+                            {
+                                "name": "enable_validation",
+                                "type": {"name": "bool"},
+                            },
+                            {
+                                "name": "enable_debug_names",
+                                "type": {"name": "bool"},
+                            },
                             {
                                 "name": "texture_heap_capacity",
                                 "type": {"name": "uint"},
@@ -577,6 +589,30 @@ def valid_document() -> dict:
                             {
                                 "name": "sampler_heap_capacity",
                                 "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "texture_capacity",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "pipeline_capacity",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "pipeline_cache_data",
+                                "type": {"name": "char[]"},
+                            },
+                            {
+                                "name": "application_name",
+                                "type": {"name": "ZString"},
+                            },
+                            {
+                                "name": "debug_callback",
+                                "type": {"name": "DebugMessageCallback"},
+                            },
+                            {
+                                "name": "debug_user_data",
+                                "type": {"name": "void*"},
                             },
                         ],
                     },
@@ -1910,18 +1946,18 @@ class PublicApiCheckTests(unittest.TestCase):
             check_public_api.validate_document(document),
         )
 
-    def test_requires_semantic_heap_capacities(self) -> None:
+    def test_requires_runtime_device_defaults_and_capacities(self) -> None:
         document = valid_document()
         types = document["modules"]["gpu"]["types"]
-        desc = next(entry for entry in types if entry["name"] == "DeviceDesc")
+        desc = next(entry for entry in types if entry["name"] == "RuntimeDesc")
         caps = next(entry for entry in types if entry["name"] == "DeviceCaps")
-        desc["members"][0]["type"]["name"] = "usz"
+        desc["members"][3]["type"]["name"] = "usz"
         caps["members"] = [
             member for member in caps["members"]
             if member["name"] != "sampler_heap_capacity"
         ]
         failures = check_public_api.validate_document(document)
-        self.assertIn("DeviceDesc.texture_heap_capacity must be a uint", failures)
+        self.assertIn("RuntimeDesc must match the strict schema", failures)
         self.assertIn("DeviceCaps.sampler_heap_capacity must be a uint", failures)
 
     def test_requires_generated_work_capability_and_limit(self) -> None:
@@ -1995,7 +2031,7 @@ class PublicApiCheckTests(unittest.TestCase):
     def test_rejects_backend_shaped_heap_configuration(self) -> None:
         document = valid_document()
         types = document["modules"]["gpu"]["types"]
-        desc = next(entry for entry in types if entry["name"] == "DeviceDesc")
+        desc = next(entry for entry in types if entry["name"] == "RuntimeDesc")
         caps = next(entry for entry in types if entry["name"] == "DeviceCaps")
         types.append({"name": "DescriptorHeapMode", "kind": "enum"})
         desc["members"].extend([

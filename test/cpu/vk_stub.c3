@@ -554,10 +554,6 @@ fn gpu::Device? stub_create_strict_disabled_device() {
     );
 }
 
-fn gpu::Device? create_vk_device_from_desc(gpu::DeviceDesc* desc) {
-    return gpu::UNSUPPORTED_BACKEND~;
-}
-
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
     gpu::DeviceRequest* request,

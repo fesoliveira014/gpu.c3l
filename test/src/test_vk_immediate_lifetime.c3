@@ -20,12 +20,12 @@ fn vk::Result lifetime_counter_query(
 }
 
 fn gpu::Device make_lifetime_test_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_immediate_lifetime_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn OwnedSpan make_lifetime_span(

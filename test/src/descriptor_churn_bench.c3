@@ -130,8 +130,8 @@ fn gpu::TextureHandle[BENCH_MAX_WORKERS] make_texture_pool(gpu::Device* device) 
     return textures;
 }
 
-fn void run_bench_suite(gpu::DeviceDesc* desc, ZString label) {
-    gpu::Device device = gpu::create_device_from_desc(desc)!!;
+fn void run_bench_suite(gpu::RuntimeDesc* desc, ZString label) {
+    gpu::Device device = create_bench_device(desc)!!;
     defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
@@ -149,8 +149,8 @@ fn void run_bench_suite(gpu::DeviceDesc* desc, ZString label) {
 
 fn int main() {
     io::printfn("iterations=%d/worker units=ns/descriptor,ns/op", BENCH_ITERS_PER_WORKER);
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .application_name = "gpu_descriptor_churn_bench",
     };
     run_bench_suite(&desc, "automatic heap");
