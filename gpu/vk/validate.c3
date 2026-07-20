@@ -317,7 +317,13 @@ fn ResolvedSpan? resolve_span_slot(
 }
 
 <* Bytes per index element for `index_type`. *>
-fn usz index_element_size(gpu::IndexType index_type) => index_type == gpu::IndexType.U16 ? 2 : 4;
+fn usz? index_element_size(gpu::IndexType index_type) {
+    switch (index_type) {
+        case gpu::IndexType.U16: return 2;
+        case gpu::IndexType.U32: return 4;
+        default: return gpu::INVALID_ARGUMENT~;
+    }
+}
 
 <* Resolve an index span and validate bounds, usage, alignment, and queue access.
    `required` is zero when GPU-written arguments provide the index count. *>
@@ -338,7 +344,7 @@ fn ResolvedSpan? resolve_index_span(
         operation: operation,
     )!;
     if (!resolved.slot.usage.index) return gpu::INVALID_ARGUMENT~;
-    usz index_size = index_element_size(index_type);
+    usz index_size = index_element_size(index_type)!;
     if (resolved.offset % index_size != 0) return gpu::INVALID_ARGUMENT~;
     return resolved;
 }

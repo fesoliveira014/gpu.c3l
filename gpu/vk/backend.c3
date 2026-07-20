@@ -18,6 +18,7 @@ struct VkDeviceDispatchPlan {
     bool debug;
     bool presentation;
     bool descriptor_buffer;
+    bool generated_work;
 }
 
 struct VkInstanceDebugDispatch {
@@ -63,10 +64,18 @@ struct VkDescriptorBufferDispatch {
     vk::PFN_vkCmdSetDescriptorBufferOffsetsEXT       cmd_set_descriptor_buffer_offsets;
 }
 
+struct VkGeneratedWorkDispatch {
+    vk::PFN_vkCmdExecuteGeneratedCommandsEXT         cmd_execute_generated_commands;
+    vk::PFN_vkGetGeneratedCommandsMemoryRequirementsEXT get_memory_requirements;
+    vk::PFN_vkCreateIndirectCommandsLayoutEXT        create_layout;
+    vk::PFN_vkDestroyIndirectCommandsLayoutEXT       destroy_layout;
+}
+
 struct VkDeviceDispatch {
     VkDeviceDebugDispatch        debug;
     VkDevicePresentationDispatch presentation;
     VkDescriptorBufferDispatch   descriptor_buffer;
+    VkGeneratedWorkDispatch      generated_work;
 }
 
 fn VkInstanceDispatch load_vk_instance_dispatch(
@@ -200,6 +209,26 @@ fn VkDeviceDispatch load_vk_device_dispatch(
             ),
         };
     }
+    if (plan.generated_work) {
+        dispatch.generated_work = {
+            .cmd_execute_generated_commands = (vk::PFN_vkCmdExecuteGeneratedCommandsEXT)loader(
+                device,
+                "vkCmdExecuteGeneratedCommandsEXT",
+            ),
+            .get_memory_requirements = (vk::PFN_vkGetGeneratedCommandsMemoryRequirementsEXT)loader(
+                device,
+                "vkGetGeneratedCommandsMemoryRequirementsEXT",
+            ),
+            .create_layout = (vk::PFN_vkCreateIndirectCommandsLayoutEXT)loader(
+                device,
+                "vkCreateIndirectCommandsLayoutEXT",
+            ),
+            .destroy_layout = (vk::PFN_vkDestroyIndirectCommandsLayoutEXT)loader(
+                device,
+                "vkDestroyIndirectCommandsLayoutEXT",
+            ),
+        };
+    }
     return dispatch;
 }
 
@@ -234,6 +263,12 @@ fn bool device_dispatch_supports_descriptor_buffer(VkDeviceDispatch* dispatch) {
         && dispatch.descriptor_buffer.get_descriptor != null
         && dispatch.descriptor_buffer.cmd_bind_descriptor_buffers != null
         && dispatch.descriptor_buffer.cmd_set_descriptor_buffer_offsets != null;
+}
+fn bool device_dispatch_supports_generated_work(VkDeviceDispatch* dispatch) {
+    return dispatch.generated_work.cmd_execute_generated_commands != null
+        && dispatch.generated_work.get_memory_requirements != null
+        && dispatch.generated_work.create_layout != null
+        && dispatch.generated_work.destroy_layout != null;
 }
 
 <* Loader instance version, or 0 if unavailable. A real `vk` call, so it pulls

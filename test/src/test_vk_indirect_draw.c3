@@ -12,6 +12,7 @@ const char[*] IND_VERT_SPIRV  = $embed("shaders/offscreen.vert.spv");
 const char[*] IND_FRAG_SPIRV  = $embed("shaders/offscreen.frag.spv");
 const char[*] IND_BUILD_SPIRV = $embed("shaders/build_indirect.comp.spv");
 const char[*] IND_DOUBLE_SPIRV = $embed("shaders/root_pointer.comp.spv");
+const char[*] IND_GENERATED_WORK_SPIRV = $embed("shaders/generated_work.comp.spv");
 
 const uint IND_RT = 16;
 const usz IND_RT_BYTES = IND_RT * IND_RT * 4;
@@ -29,6 +30,14 @@ fn gpu::Device make_ind_device() {
         .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_indirect_test",
+    };
+    return gpu::create_device_from_desc(&desc)!!;
+}
+
+fn gpu::Device make_generated_work_device() {
+    gpu::DeviceDesc desc = {
+        .backend          = gpu::BackendKind.VULKAN,
+        .application_name = "gpu_generated_work_test",
     };
     return gpu::create_device_from_desc(&desc)!!;
 }
@@ -511,6 +520,293 @@ fn void compute_generated_indexed_indirect_draw() @test {
             && got[i].first_instance == 0,
             "GPU-written arg tail fields read back intact");
     }
+}
+
+fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
+    gpu::Device device = make_generated_work_device();
+    defer destroy_test_device(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    if (!caps.generated_work) {
+        io::eprintfn("generated work not supported; native workload not applicable");
+        return;
+    }
+
+    IndDrawCtx draw = make_ind_draw_ctx(&device);
+    defer destroy_ind_draw_ctx(&device, &draw);
+    gpu::TextureHandle plain_target = make_ind_target(&device);
+    defer gpu::destroy_texture(&device, plain_target)!!;
+    gpu::TextureHandle indexed_target = make_ind_target(&device);
+    defer gpu::destroy_texture(&device, indexed_target)!!;
+
+    gpu::ShaderDesc build_shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = IND_GENERATED_WORK_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_shader_desc)!!;
+    gpu::ComputePipelineDesc build_pipeline_desc = {
+        .shader             = build_shader,
+        .push_constant_size = gpu::RootPush::size,
+    };
+    gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(
+        &device,
+        &build_pipeline_desc,
+    )!!;
+    defer gpu::destroy_pipeline(&device, build_pipeline)!!;
+    gpu::PipelineHandle dispatch_pipeline = make_cross_family_compute_pipeline(&device);
+    defer gpu::destroy_pipeline(&device, dispatch_pipeline)!!;
+
+    OwnedSpan draw_records = allocate_owned_span(
+        device:       &device,
+        size:         gpu::GeneratedDrawRecord::size,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "generated_draw_records",
+    )!!;
+    defer free_owned_span(&device, &draw_records)!!;
+    OwnedSpan indexed_records = allocate_owned_span(
+        device:       &device,
+        size:         gpu::GeneratedDrawIndexedRecord::size,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "generated_indexed_records",
+    )!!;
+    defer free_owned_span(&device, &indexed_records)!!;
+    OwnedSpan dispatch_records = allocate_owned_span(
+        device:       &device,
+        size:         gpu::GeneratedDispatchRecord::size,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "generated_dispatch_records",
+    )!!;
+    defer free_owned_span(&device, &dispatch_records)!!;
+    OwnedSpan count = allocate_owned_span(
+        device:       &device,
+        size:         4,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "generated_work_count",
+    )!!;
+    defer free_owned_span(&device, &count)!!;
+
+    OwnedSpan vertices = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "generated_vertices",
+    )!!;
+    defer free_owned_span(&device, &vertices)!!;
+    write_triangle_verts(&device, &vertices.span);
+    gpu::flush_mapped_span(&device, vertices.span)!!;
+    OwnedSpan indices = allocate_owned_span(
+        device:       &device,
+        size:         3 * uint::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "generated_indices",
+    )!!;
+    defer free_owned_span(&device, &indices)!!;
+    uint* index_values = (uint*)test_span_mapping(&device, indices.span).ptr;
+    index_values[0] = 0;
+    index_values[1] = 1;
+    index_values[2] = 2;
+    gpu::flush_mapped_span(&device, indices.span)!!;
+    OwnedSpan fragment_root = allocate_owned_span(
+        device:       &device,
+        size:         FragRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "generated_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &fragment_root)!!;
+    FragRoot* fragment = (FragRoot*)test_span_mapping(&device, fragment_root.span).ptr;
+    fragment.texture_index = draw.tex_index;
+    fragment.sampler_index = draw.smp_index;
+    gpu::flush_mapped_span(&device, fragment_root.span)!!;
+
+    const uint VALUE_COUNT = 64;
+    OwnedSpan io_values = allocate_owned_span(
+        device:       &device,
+        size:         VALUE_COUNT * float::size * 2,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "generated_dispatch_values",
+    )!!;
+    defer free_owned_span(&device, &io_values)!!;
+    float* values = (float*)test_span_mapping(&device, io_values.span).ptr;
+    for (uint i = 0; i < VALUE_COUNT; i++) values[i] = (float)i;
+    gpu::flush_mapped_span(&device, io_values.span)!!;
+    OwnedSpan dispatch_root = allocate_owned_span(
+        device:       &device,
+        size:         ComputeRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "generated_dispatch_root",
+    )!!;
+    defer free_owned_span(&device, &dispatch_root)!!;
+    ComputeRoot* compute_root = (ComputeRoot*)test_span_mapping(
+        &device,
+        dispatch_root.span,
+    ).ptr;
+    compute_root.input_gpu = test_span_address(&device, io_values.span);
+    compute_root.output_gpu = (gpu::GpuAddress)(
+        (ulong)test_span_address(&device, io_values.span)
+        + VALUE_COUNT * float::size
+    );
+    compute_root.count = VALUE_COUNT;
+    gpu::flush_mapped_span(&device, dispatch_root.span)!!;
+
+    OwnedSpan build_root = allocate_owned_span(
+        device:       &device,
+        size:         GeneratedWorkBuildRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "generated_work_build_root",
+    )!!;
+    defer free_owned_span(&device, &build_root)!!;
+    GeneratedWorkBuildRoot* root = (GeneratedWorkBuildRoot*)test_span_mapping(
+        &device,
+        build_root.span,
+    ).ptr;
+    root.draw_records_gpu = test_span_address(&device, draw_records.span);
+    root.indexed_records_gpu = test_span_address(&device, indexed_records.span);
+    root.dispatch_records_gpu = test_span_address(&device, dispatch_records.span);
+    root.count_gpu = test_span_address(&device, count.span);
+    root.vertex_root_gpu = test_span_address(&device, vertices.span);
+    root.fragment_root_gpu = test_span_address(&device, fragment_root.span);
+    root.dispatch_root_gpu = test_span_address(&device, dispatch_root.span);
+    root.vertex_count = 3;
+    root.index_count = 3;
+    root.dispatch_x = 1;
+    root.count_value = 1;
+    gpu::flush_mapped_span(&device, build_root.span)!!;
+
+    OwnedSpan plain_readback = allocate_owned_span(
+        device:       &device,
+        size:         IND_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics },
+        debug_name:   "generated_plain_readback",
+    )!!;
+    defer free_owned_span(&device, &plain_readback)!!;
+    OwnedSpan indexed_readback = allocate_owned_span(
+        device:       &device,
+        size:         IND_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics },
+        debug_name:   "generated_indexed_readback",
+    )!!;
+    defer free_owned_span(&device, &indexed_readback)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    bind_test_compute_pipeline(&commands, build_pipeline);
+    gpu::cmd_dispatch(
+        commands: &commands,
+        root:     test_span_address(&device, build_root.span),
+        groups:   { 1, 1, 1 },
+    )!!;
+    gpu::Barrier generated_ready = {
+        .before  = { .compute = true },
+        .after   = {
+            .compute = true,
+            .vertex_shader = true,
+            .fragment_shader = true,
+        },
+        .hazards = { .draw_arguments = true },
+    };
+    gpu::cmd_barrier(&commands, &generated_ready)!!;
+
+    bind_test_compute_pipeline(&commands, dispatch_pipeline);
+    gpu::cmd_dispatch_generated(
+        commands:           &commands,
+        records:            dispatch_records.span,
+        count_span:         count.span,
+        max_dispatch_count: 1,
+    )!!;
+
+    record_target_to_attach(&commands, plain_target);
+    gpu::ColorTargetDesc[1] plain_colors = {{
+        .texture  = plain_target,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc plain_pass = {
+        .colors = plain_colors[..],
+        .width  = IND_RT,
+        .height = IND_RT,
+    };
+    gpu::cmd_begin_render_pass(&commands, &plain_pass)!!;
+    bind_test_graphics_pipeline(&commands, draw.pipeline);
+    gpu::cmd_draw_generated(
+        commands:      &commands,
+        records:       draw_records.span,
+        count_span:    count.span,
+        max_draw_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+    record_target_readback(&commands, plain_target, &plain_readback.span);
+
+    record_target_to_attach(&commands, indexed_target);
+    gpu::ColorTargetDesc[1] indexed_colors = {{
+        .texture  = indexed_target,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc indexed_pass = {
+        .colors = indexed_colors[..],
+        .width  = IND_RT,
+        .height = IND_RT,
+    };
+    gpu::cmd_begin_render_pass(&commands, &indexed_pass)!!;
+    bind_test_graphics_pipeline(&commands, draw.pipeline);
+    gpu::cmd_draw_indexed_generated(
+        commands:      &commands,
+        records:       indexed_records.span,
+        count_span:    count.span,
+        max_draw_count: 1,
+        index_span:    indices.span,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+    record_target_readback(&commands, indexed_target, &indexed_readback.span);
+
+    gpu::Barrier dispatch_host_read = {
+        .before = { .compute = true },
+        .after  = { .host = true },
+    };
+    gpu::cmd_barrier(&commands, &dispatch_host_read)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+
+    gpu::invalidate_mapped_span(&device, io_values.span)!!;
+    float* doubled = &values[VALUE_COUNT];
+    for (uint i = 0; i < VALUE_COUNT; i++) {
+        assert(doubled[i] == (float)i * 2.0f,
+            "generated dispatch uses its GPU-provided root and arguments");
+    }
+    gpu::invalidate_mapped_span(&device, plain_readback.span)!!;
+    char* plain_center = center_pixel(&device, &plain_readback.span);
+    assert(plain_center[0] == (char)255
+            && plain_center[1] == (char)255
+            && plain_center[2] == (char)255,
+        "GPU-written generated draw renders the triangle");
+    gpu::invalidate_mapped_span(&device, indexed_readback.span)!!;
+    char* indexed_center = center_pixel(&device, &indexed_readback.span);
+    assert(indexed_center[0] == (char)255
+            && indexed_center[1] == (char)255
+            && indexed_center[2] == (char)255,
+        "GPU-written generated indexed draw renders the triangle");
 }
 
 fn void plain_indirect_draw_from_caller_owned_span() @test {

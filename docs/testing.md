@@ -350,7 +350,12 @@ vk_queue vk_debug upload_bench_observation vk_device_request
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.
 `vk_depth` covers validation-clean offscreen color/depth rendering, including a
 supported multisample source, average color resolve, explicit attachment
-transitions, depth testing, and pixel readback.
+transitions, depth testing, and pixel readback. `vk_indirect` conditionally runs
+a native generated-work workload when the adapter exposes the semantic
+capability: a compute producer writes draw, indexed-draw, dispatch, and count
+records; all three generated commands then verify observable output. Command
+validation separately covers unsupported capability, count bounds, alignment,
+short spans, zero work, index formats, and generated-preprocess barrier masks.
 
 The advisory benchmark runner builds these seven executable targets with
 `-O1`: `allocation_bench`, `resource_create_bench`,
@@ -362,8 +367,11 @@ The advisory benchmark runner builds these seven executable targets with
 cached transactional batch creation in `ns/create`. Resource operations report
 texture create/destroy, shader-code preparation, allocation allocate/free, and
 mixed work at 1/2/4 workers in
-`ns/op`. The allocation target must emit exactly two phases for
-4,000 64-byte, 16-byte-aligned `CPU_WRITE` allocations:
+`ns/op`. Command recording compares ordinary barriers, semantic-hazard
+barriers, indirect dispatch, and capability-gated generated dispatch. The
+generated phase uses 1,000 calls per repetition to bound the distinct private
+preprocess regions required by Vulkan. The allocation target must emit exactly
+two phases for 4,000 64-byte, 16-byte-aligned `CPU_WRITE` allocations:
 `cpu_write allocate` in `ns/allocation`, then `cpu_write free` in
 `ns/free`. Run the suite with `python scripts/run_benchmarks.py`; benchmark
 timings are advisory and never gate CI.

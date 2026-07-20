@@ -82,6 +82,9 @@ alias CmdDrawIndirectFn @private             = fn void? (CommandList*, GpuAddres
 alias CmdDrawIndexedIndirectFn @private      = fn void? (CommandList*, GpuAddress, GpuAddress, GpuSpan, uint, GpuSpan, IndexType);
 alias CmdDrawIndexedIndirectCountFn @private = fn void? (CommandList*, GpuAddress, GpuAddress, GpuSpan, GpuSpan, uint, GpuSpan, IndexType);
 alias CmdDispatchIndirectFn @private         = fn void? (CommandList*, GpuAddress, GpuSpan);
+alias CmdDrawGeneratedFn @private            = fn void? (CommandList*, GpuSpan, GpuSpan, uint);
+alias CmdDrawIndexedGeneratedFn @private     = fn void? (CommandList*, GpuSpan, GpuSpan, uint, GpuSpan, IndexType);
+alias CmdDispatchGeneratedFn @private        = fn void? (CommandList*, GpuSpan, GpuSpan, uint);
 alias CmdBeginLabelFn @private               = fn void? (CommandList*, ZString, float[4]);
 alias CmdEndLabelFn @private                 = fn void? (CommandList*);
 alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
@@ -169,6 +172,9 @@ struct BackendVTable @private {
     CmdDrawIndexedIndirectFn      cmd_draw_indexed_indirect;
     CmdDrawIndexedIndirectCountFn cmd_draw_indexed_indirect_count;
     CmdDispatchIndirectFn         cmd_dispatch_indirect;
+    CmdDrawGeneratedFn            cmd_draw_generated;
+    CmdDrawIndexedGeneratedFn     cmd_draw_indexed_generated;
+    CmdDispatchGeneratedFn        cmd_dispatch_generated;
     CmdBeginLabelFn               cmd_begin_label;
     CmdEndLabelFn                 cmd_end_label;
     CreateSwapchainFn       create_swapchain;

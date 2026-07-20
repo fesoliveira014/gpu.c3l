@@ -67,8 +67,9 @@ struct PipelineCacheTable {
 }
 
 struct ComputeLayoutEntry {
-    uint               push_size;
-    vk::PipelineLayout layout;
+    uint                          push_size;
+    vk::PipelineLayout            layout;
+    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
 }
 
 struct ComputeLayoutCache {
@@ -454,18 +455,44 @@ fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) 
         .set_set_layouts((&state.strict_heap.descriptors.set_layout)[:1])
         .set_push_constant_ranges((&range)[:1]);
     vk::PipelineLayout layout;
+    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
+    defer catch {
+        if (generated_dispatch_layout != null) {
+            state.device_dispatch.generated_work.destroy_layout(
+                state.device,
+                generated_dispatch_layout,
+                null,
+            );
+        }
+        if (layout != null) vk::destroy_pipeline_layout(state.device, layout, null);
+    }
     check_backend_result(
         state:     state,
         operation: "create_compute_pipeline",
         result:    vk::create_pipeline_layout(state.device, &layout_info, null, &layout),
     )!;
+    if (state.generated_work.enabled) {
+        generated_dispatch_layout = create_generated_work_layout(
+            state:           state,
+            pipeline_layout: layout,
+            shader_stages:   vk::ShaderStageFlagBits.COMPUTE_BIT,
+            root_size:       gpu::RootPush::size,
+            action_type:     vk::IndirectCommandsTokenTypeEXT.DISPATCH_EXT,
+            action_offset:   8,
+            stride:          gpu::GeneratedDispatchRecord::size,
+        )!;
+    }
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.PIPELINE_LAYOUT,
         object_handle: (ulong)layout,
         name:          "gpu_compute_layout",
     );
-    cache.entries[cache.count++] = { .push_size = push_size, .layout = layout };
+    cache.entries[cache.count++] = {
+        .push_size                 = push_size,
+        .layout                    = layout,
+        .generated_dispatch_layout = generated_dispatch_layout,
+    };
     return layout;
 }
 
@@ -506,6 +533,26 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         object_handle: (ulong)state.graphics_layout,
         name:          "gpu_graphics_layout",
     );
+    if (state.generated_work.enabled) {
+        state.generated_draw_layout = create_generated_work_layout(
+            state:           state,
+            pipeline_layout: state.graphics_layout,
+            shader_stages:   (vk::ShaderStageFlags)push_stages,
+            root_size:       gpu::GraphicsRootPush::size,
+            action_type:     vk::IndirectCommandsTokenTypeEXT.DRAW_EXT,
+            action_offset:   16,
+            stride:          gpu::GeneratedDrawRecord::size,
+        )!;
+        state.generated_indexed_draw_layout = create_generated_work_layout(
+            state:           state,
+            pipeline_layout: state.graphics_layout,
+            shader_stages:   (vk::ShaderStageFlags)push_stages,
+            root_size:       gpu::GraphicsRootPush::size,
+            action_type:     vk::IndirectCommandsTokenTypeEXT.DRAW_INDEXED_EXT,
+            action_offset:   16,
+            stride:          gpu::GeneratedDrawIndexedRecord::size,
+        )!;
+    }
 
     char[] cache_data = initial_cache_data;
     if (!cache_blob_compatible(state, cache_data)) cache_data = {};
@@ -578,10 +625,33 @@ fn void destroy_pipeline_shared(VkDeviceState* state) {
     }
     ComputeLayoutCache* layout_cache = &state.compute_layout_cache;
     foreach (&entry : layout_cache.entries[:layout_cache.count]) {
+        if (entry.generated_dispatch_layout != null) {
+            state.device_dispatch.generated_work.destroy_layout(
+                state.device,
+                entry.generated_dispatch_layout,
+                null,
+            );
+        }
         vk::destroy_pipeline_layout(state.device, entry.layout, null);
     }
     if (layout_cache.entries.ptr != null) alloc::free(state.host_allocator, layout_cache.entries.ptr);
     *layout_cache = {};
+    if (state.generated_indexed_draw_layout != null) {
+        state.device_dispatch.generated_work.destroy_layout(
+            state.device,
+            state.generated_indexed_draw_layout,
+            null,
+        );
+        state.generated_indexed_draw_layout = (vk::IndirectCommandsLayoutEXT)null;
+    }
+    if (state.generated_draw_layout != null) {
+        state.device_dispatch.generated_work.destroy_layout(
+            state.device,
+            state.generated_draw_layout,
+            null,
+        );
+        state.generated_draw_layout = (vk::IndirectCommandsLayoutEXT)null;
+    }
     if (state.graphics_layout != null) {
         vk::destroy_pipeline_layout(state.device, state.graphics_layout, null);
         state.graphics_layout = (vk::PipelineLayout)null;

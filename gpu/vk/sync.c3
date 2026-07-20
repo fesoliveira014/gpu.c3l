@@ -373,7 +373,11 @@ fn void? vk_cmd_barrier(
 
     bool descriptor_buffer = state.strict_heap.implementation
         == VkHeapImplementation.DESCRIPTOR_BUFFER;
-    vk::MemoryBarrier2 native_barrier = barrier_to_vk(barrier, descriptor_buffer);
+    vk::MemoryBarrier2 native_barrier = barrier_to_vk(
+        barrier,
+        descriptor_buffer,
+        state.generated_work.enabled,
+    );
     vk::DependencyInfo dependency =
         vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
     vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);

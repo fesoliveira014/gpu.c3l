@@ -109,4 +109,24 @@ fn void check_span_data_operations(
         root:     root,
         args:     src,
     );
+    (void)gpu::cmd_draw_generated(
+        commands:       commands,
+        records:        src,
+        count_span:     dst,
+        max_draw_count: 1,
+    );
+    (void)gpu::cmd_draw_indexed_generated(
+        commands:       commands,
+        records:        src,
+        count_span:     dst,
+        max_draw_count: 1,
+        index_span:     dst,
+        index_type:     gpu::IndexType.U32,
+    );
+    (void)gpu::cmd_dispatch_generated(
+        commands:           commands,
+        records:            src,
+        count_span:         dst,
+        max_dispatch_count: 1,
+    );
 }

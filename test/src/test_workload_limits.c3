@@ -52,3 +52,35 @@ fn void indirect_argument_bytes_reject_count_and_arithmetic_overflow() @test {
     assert(count_fault == gpu::INVALID_ARGUMENT, "indirect count above the selected-device limit faults");
     assert(overflow_fault == gpu::INVALID_ARGUMENT, "indirect argument byte overflow faults");
 }
+
+fn void generated_work_bytes_accept_zero_and_exact_limit() @test {
+    usz empty = gpu::generated_work_bytes(
+        record_size: gpu::GeneratedDrawRecord::size,
+        count:       0,
+        max_count:   4,
+    )!!;
+    usz exact = gpu::generated_work_bytes(
+        record_size: gpu::GeneratedDrawIndexedRecord::size,
+        count:       4,
+        max_count:   4,
+    )!!;
+
+    assert(empty == 0, "zero generated-work count needs no record bytes");
+    assert(exact == 160, "exact-limit generated-work count returns its required bytes");
+}
+
+fn void generated_work_bytes_reject_count_and_arithmetic_overflow() @test {
+    fault count_fault = @catch(gpu::generated_work_bytes(
+        record_size: gpu::GeneratedDispatchRecord::size,
+        count:       5,
+        max_count:   4,
+    ));
+    fault overflow_fault = @catch(gpu::generated_work_bytes(
+        record_size: usz::max,
+        count:       2,
+        max_count:   2,
+    ));
+
+    assert(count_fault == gpu::INVALID_ARGUMENT, "generated-work count above the selected-device limit faults");
+    assert(overflow_fault == gpu::INVALID_ARGUMENT, "generated-work record byte overflow faults");
+}

@@ -26,7 +26,8 @@ alias SemaphoreCounterQueryFn @private = fn vk::Result (
 );
 
 const ZString SWAPCHAIN_EXTENSION      = "VK_KHR_swapchain";
-const ZString GENERATED_WORK_EXTENSION = "VK_EXT_device_generated_commands";
+const ZString GENERATED_WORK_EXTENSION       = "VK_EXT_device_generated_commands";
+const ZString GENERATED_WORK_USAGE_EXTENSION = "VK_KHR_maintenance5";
 const uint GENERATED_WORK_TOKEN_COUNT  = 2;
 const uint GENERATED_WORK_TOKEN_OFFSET = 16;
 const uint GENERATED_WORK_RECORD_SIZE  = 40;
@@ -124,6 +125,8 @@ struct VkDeviceState {
     PipelineTable              pipelines;
     PipelineCacheTable         pipeline_cache;
     vk::PipelineLayout         graphics_layout;
+    vk::IndirectCommandsLayoutEXT generated_draw_layout;
+    vk::IndirectCommandsLayoutEXT generated_indexed_draw_layout;
     ComputeLayoutCache         compute_layout_cache;
     vk::PipelineCache          driver_cache;
     TextureTable               textures;
@@ -172,10 +175,12 @@ struct CapsInputs {
 
 fn GeneratedWorkSupport resolve_generated_work_support(
     bool extension_supported,
+    bool maintenance5_supported,
     vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT* features,
     vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT* properties,
 ) {
     if (!extension_supported
+        || !maintenance5_supported
         || features == null
         || properties == null
         || features.device_generated_commands == 0) return {};
@@ -203,18 +208,20 @@ fn GeneratedWorkSupport resolve_generated_work_support(
 fn GeneratedWorkSupport query_generated_work_support(
     vk::PhysicalDevice physical_device,
     bool extension_supported,
+    bool maintenance5_supported,
     vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT* features,
 ) @private {
-    if (!extension_supported) return {};
+    if (!extension_supported || !maintenance5_supported) return {};
     vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT properties =
         vk::physical_device_device_generated_commands_properties_ext();
     vk::PhysicalDeviceProperties2 properties2 =
         vk::physical_device_properties2().set_next(&properties);
     vk::get_physical_device_properties2(physical_device, &properties2);
     return resolve_generated_work_support(
-        extension_supported: extension_supported,
-        features:            features,
-        properties:          &properties,
+        extension_supported:    extension_supported,
+        maintenance5_supported: maintenance5_supported,
+        features:               features,
+        properties:             &properties,
     );
 }
 
@@ -294,6 +301,9 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .cmd_draw_indexed_indirect       = &vk_cmd_draw_indexed_indirect,
     .cmd_draw_indexed_indirect_count = &vk_cmd_draw_indexed_indirect_count,
     .cmd_dispatch_indirect           = &vk_cmd_dispatch_indirect,
+    .cmd_draw_generated              = &vk_cmd_draw_generated,
+    .cmd_draw_indexed_generated      = &vk_cmd_draw_indexed_generated,
+    .cmd_dispatch_generated          = &vk_cmd_dispatch_generated,
     .cmd_begin_label                 = &vk_cmd_begin_label,
     .cmd_end_label                   = &vk_cmd_end_label,
 
@@ -487,12 +497,20 @@ fn gpu::Device? create_vk_device_with_selection(
             state.physical_device,
             GENERATED_WORK_EXTENSION,
         );
+    bool generated_work_usage_extension = generated_work_extension
+        && device_supports_extension(
+            state.physical_device,
+            GENERATED_WORK_USAGE_EXTENSION,
+        );
     vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT generated_work_features =
         vk::physical_device_device_generated_commands_features_ext();
+    vk::PhysicalDeviceMaintenance5FeaturesKHR maintenance5_features =
+        vk::physical_device_maintenance5features_khr();
     vk::PhysicalDeviceVulkan13Features features13 =
         vk::physical_device_vulkan13features();
-    if (generated_work_extension) {
-        features13 = features13.set_next(&generated_work_features);
+    if (generated_work_usage_extension) {
+        maintenance5_features = maintenance5_features.set_next(&generated_work_features);
+        features13 = features13.set_next(&maintenance5_features);
     }
     vk::PhysicalDeviceVulkan12Features features12 =
         vk::physical_device_vulkan12features().set_next(&features13);
@@ -509,9 +527,11 @@ fn gpu::Device? create_vk_device_with_selection(
     )!;
     state.draw_indirect_count = features12.draw_indirect_count != 0;
     state.generated_work = query_generated_work_support(
-        physical_device:     state.physical_device,
-        extension_supported: generated_work_extension,
-        features:            &generated_work_features,
+        physical_device:        state.physical_device,
+        extension_supported:    generated_work_extension,
+        maintenance5_supported: generated_work_usage_extension
+            && maintenance5_features.maintenance5 != 0,
+        features:               &generated_work_features,
     );
     bool line_polygon_mode = line_polygon_mode_supported(&features2.features);
 
@@ -566,6 +586,7 @@ fn gpu::Device? create_vk_device_with_selection(
         .debug             = debug_utils_enabled,
         .presentation      = state.presentation.enabled,
         .descriptor_buffer = strict_heap_uses_descriptor_buffer(&state.strict_heap),
+        .generated_work    = state.generated_work.enabled,
     };
     state.device_dispatch = load_vk_device_dispatch(
         state.device,
@@ -579,6 +600,10 @@ fn gpu::Device? create_vk_device_with_selection(
     }
     if (strict_heap_uses_descriptor_buffer(&state.strict_heap)
         && !device_dispatch_supports_descriptor_buffer(&state.device_dispatch)) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (state.generated_work.enabled
+        && !device_dispatch_supports_generated_work(&state.device_dispatch)) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     if (families.selected.graphics) {
@@ -1277,6 +1302,10 @@ fn void? create_logical_device_with_queue_infos(
     vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT generated_work_features =
         vk::physical_device_device_generated_commands_features_ext()
             .set_device_generated_commands(vk::TRUE);
+    vk::PhysicalDeviceMaintenance5FeaturesKHR maintenance5_features =
+        vk::physical_device_maintenance5features_khr()
+            .set_maintenance5(vk::TRUE)
+            .set_next(&generated_work_features);
     vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features =
         vk::physical_device_descriptor_buffer_features_ext()
             .set_descriptor_buffer(vk::TRUE);
@@ -1287,11 +1316,11 @@ fn void? create_logical_device_with_queue_infos(
             .set_maintenance4(vk::TRUE);
     if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
         if (state.generated_work.enabled) {
-            db_features = db_features.set_next(&generated_work_features);
+            db_features = db_features.set_next(&maintenance5_features);
         }
         features13 = features13.set_next(&db_features);
     } else if (state.generated_work.enabled) {
-        features13 = features13.set_next(&generated_work_features);
+        features13 = features13.set_next(&maintenance5_features);
     }
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features()
         .set_buffer_device_address(vk::TRUE)
@@ -1327,11 +1356,12 @@ fn void? create_logical_device_with_queue_infos(
     }
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[4] extensions;
+    ZString[5] extensions;
     uint extension_count = 0;
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
     if (state.generated_work.enabled) {
         extensions[extension_count++] = GENERATED_WORK_EXTENSION;
+        extensions[extension_count++] = GENERATED_WORK_USAGE_EXTENSION;
     }
     if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
         extensions[extension_count++] = "VK_EXT_descriptor_buffer";

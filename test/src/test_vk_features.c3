@@ -161,27 +161,39 @@ fn void generated_work_support_requires_the_complete_semantic_profile() @test {
 
     gpu::vk::GeneratedWorkSupport supported =
         gpu::vk::resolve_generated_work_support(
-            extension_supported: true,
-            features:            &features,
-            properties:          &properties,
+            extension_supported:    true,
+            maintenance5_supported: true,
+            features:               &features,
+            properties:             &properties,
         );
     assert(supported.enabled);
     assert(supported.max_count == 4096);
 
     gpu::vk::GeneratedWorkSupport missing_extension =
         gpu::vk::resolve_generated_work_support(
-            extension_supported: false,
-            features:            &features,
-            properties:          &properties,
+            extension_supported:    false,
+            maintenance5_supported: true,
+            features:               &features,
+            properties:             &properties,
         );
     assert(!missing_extension.enabled && missing_extension.max_count == 0);
+
+    gpu::vk::GeneratedWorkSupport missing_maintenance5 =
+        gpu::vk::resolve_generated_work_support(
+            extension_supported:    true,
+            maintenance5_supported: false,
+            features:               &features,
+            properties:             &properties,
+        );
+    assert(!missing_maintenance5.enabled && missing_maintenance5.max_count == 0);
 
     features.device_generated_commands = vk::FALSE;
     gpu::vk::GeneratedWorkSupport missing_feature =
         gpu::vk::resolve_generated_work_support(
-            extension_supported: true,
-            features:            &features,
-            properties:          &properties,
+            extension_supported:    true,
+            maintenance5_supported: true,
+            features:               &features,
+            properties:             &properties,
         );
     assert(!missing_feature.enabled && missing_feature.max_count == 0);
 }
@@ -197,42 +209,47 @@ fn void generated_work_support_rejects_incomplete_layout_limits() @test {
         vk::ShaderStageFlagBits.VERTEX_BIT
         | vk::ShaderStageFlagBits.FRAGMENT_BIT;
     assert(!gpu::vk::resolve_generated_work_support(
-        extension_supported: true,
-        features:            &features,
-        properties:          &properties,
+        extension_supported:    true,
+        maintenance5_supported: true,
+        features:               &features,
+        properties:             &properties,
     ).enabled);
 
     properties = generated_work_properties();
     properties.max_indirect_commands_token_count = 1;
     assert(!gpu::vk::resolve_generated_work_support(
-        extension_supported: true,
-        features:            &features,
-        properties:          &properties,
+        extension_supported:    true,
+        maintenance5_supported: true,
+        features:               &features,
+        properties:             &properties,
     ).enabled);
 
     properties = generated_work_properties();
     properties.max_indirect_commands_token_offset = 15;
     assert(!gpu::vk::resolve_generated_work_support(
-        extension_supported: true,
-        features:            &features,
-        properties:          &properties,
+        extension_supported:    true,
+        maintenance5_supported: true,
+        features:               &features,
+        properties:             &properties,
     ).enabled);
 
     properties = generated_work_properties();
     properties.max_indirect_commands_indirect_stride = 39;
     assert(!gpu::vk::resolve_generated_work_support(
-        extension_supported: true,
-        features:            &features,
-        properties:          &properties,
+        extension_supported:    true,
+        maintenance5_supported: true,
+        features:               &features,
+        properties:             &properties,
     ).enabled);
 
     properties = generated_work_properties();
     properties.max_indirect_sequence_count = 0;
     gpu::vk::GeneratedWorkSupport zero_count =
         gpu::vk::resolve_generated_work_support(
-            extension_supported: true,
-            features:            &features,
-            properties:          &properties,
+            extension_supported:    true,
+            maintenance5_supported: true,
+            features:               &features,
+            properties:             &properties,
         );
     assert(!zero_count.enabled && zero_count.max_count == 0);
 }
@@ -535,6 +552,12 @@ fn void semantic_barrier_stage_masks_map_exactly() @test {
     assert((ulong)gpu::vk::barrier_after_stages_to_vk(stages, hazards) == expected,
         "special consumer hazards extend the destination stage scope");
 
+    ulong generated_expected = expected
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
+    assert((ulong)gpu::vk::barrier_after_stages_to_vk(stages, hazards, true)
+            == generated_expected,
+        "generated work adds the command-preprocess destination stage");
+
     gpu::StageMask all = { .all = true };
     assert(gpu::vk::barrier_before_stages_to_vk(all)
             == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
@@ -584,6 +607,12 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
             == indexing_expected,
         "descriptor-buffer access is omitted for the indexing implementation");
 
+    ulong generated_expected = after_expected
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV;
+    assert((ulong)gpu::vk::barrier_after_access_to_vk(stages, hazards, true, true)
+            == generated_expected,
+        "generated work adds command-preprocess reads without dropping indirect reads");
+
     gpu::StageMask present = { .present = true };
     assert(gpu::vk::barrier_after_access_to_vk(present, {}, false)
             == vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT,
@@ -619,6 +648,16 @@ fn void semantic_barrier_native_wiring_preserves_direction() @test {
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT;
     assert((ulong)native.dst_access_mask == expected_dst_access,
         "the destination access comes from Barrier.after and hazards");
+
+    vk::MemoryBarrier2 generated = gpu::vk::barrier_to_vk(&barrier, true, true);
+    assert((ulong)generated.dst_stage_mask
+            == expected_dst_stages
+                | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV,
+        "generated work extends the wired destination stage scope");
+    assert((ulong)generated.dst_access_mask
+            == expected_dst_access
+                | (ulong)vk::AccessFlagBits2.ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV,
+        "generated work extends the wired destination access scope");
 }
 
 fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
@@ -745,4 +784,13 @@ fn void semantic_barrier_queue_flags_reject_unsupported_stages() @test {
             graphics_only,
         ),
         "graphics-capable families accept depth/stencil hazards");
+}
+
+fn void index_type_validation_rejects_unknown_values() @test {
+    assert(gpu::vk::index_element_size(gpu::IndexType.U16)!! == 2);
+    assert(gpu::vk::index_element_size(gpu::IndexType.U32)!! == 4);
+    gpu::IndexType unknown_type;
+    *(int*)&unknown_type = 99;
+    fault unknown = @catch(gpu::vk::index_element_size(unknown_type));
+    assert(unknown == gpu::INVALID_ARGUMENT, "unknown index format faults");
 }

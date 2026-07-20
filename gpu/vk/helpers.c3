@@ -316,10 +316,14 @@ fn vk::PipelineStageFlags2 barrier_before_stages_to_vk(gpu::StageMask stages) {
 fn vk::PipelineStageFlags2 barrier_after_stages_to_vk(
     gpu::StageMask stages,
     gpu::HazardFlags hazards,
+    bool generated_work = false,
 ) {
     ulong mask = (ulong)barrier_before_stages_to_vk(stages);
     if (hazards.draw_arguments) {
         mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+        if (generated_work) {
+            mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
+        }
     }
     if (hazards.depth_stencil) {
         mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
@@ -354,6 +358,7 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
     gpu::StageMask stages,
     gpu::HazardFlags hazards,
     bool descriptor_buffer,
+    bool generated_work = false,
 ) {
     ulong mask;
     if (stages.all) {
@@ -382,6 +387,9 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
     }
     if (hazards.draw_arguments) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+        if (generated_work) {
+            mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV;
+        }
     }
     if (hazards.descriptors && descriptor_buffer) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT;
@@ -396,6 +404,7 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
 fn vk::MemoryBarrier2 barrier_to_vk(
     gpu::Barrier* barrier,
     bool descriptor_buffer,
+    bool generated_work = false,
 ) {
     return vk::memory_barrier2()
         .set_src_stage_mask(barrier_before_stages_to_vk(barrier.before))
@@ -403,11 +412,13 @@ fn vk::MemoryBarrier2 barrier_to_vk(
         .set_dst_stage_mask(barrier_after_stages_to_vk(
             barrier.after,
             barrier.hazards,
+            generated_work,
         ))
         .set_dst_access_mask(barrier_after_access_to_vk(
             barrier.after,
             barrier.hazards,
             descriptor_buffer,
+            generated_work,
         ));
 }
 

@@ -571,7 +571,7 @@ fn void? vk_cmd_draw_indexed(gpu::CommandList* commands, gpu::GpuAddress vertex_
         fragment_root: fragment_root,
         operation:     "cmd_draw_indexed",
     )!;
-    usz index_size = index_element_size(index_type);
+    usz index_size = index_element_size(index_type)!;
     ResolvedSpan buffer = resolve_index_span(
         state:      state,
         record:     record,
@@ -741,4 +741,151 @@ fn void? vk_cmd_draw_indexed_indirect_count(gpu::CommandList* commands, gpu::Gpu
         max_draw_count,
         gpu::DrawIndexedIndirectCommand::size,
     );
+}
+
+fn PipelineSlot*? validate_generated_graphics_execution_state(
+    VkDeviceState* state,
+    CommandRecord* record,
+    ZString operation,
+) @private {
+    PipelineSlot* pipeline = active_pipeline_slot(
+        state:         state,
+        record:        record,
+        expected_kind: PipelineKind.GRAPHICS,
+        operation:     operation,
+    )!;
+    if (!record.depth_state_set) return gpu::COMMAND_RECORDING_ERROR~;
+    return pipeline;
+}
+
+fn void? vk_cmd_draw_generated(
+    gpu::CommandList* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+) @private {
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    PipelineSlot* pipeline = validate_generated_graphics_execution_state(
+        state,
+        record,
+        "cmd_draw_generated",
+    )!;
+    if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
+    validate_generated_work_count(
+        state,
+        max_draw_count,
+        "cmd_draw_generated",
+        "max_draw_count",
+    )!;
+    if (max_draw_count == 0) return;
+
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
+    ResolvedSpan resolved_records = resolve_generated_work_records(
+        state:       state,
+        record:      record,
+        records:     &records,
+        record_size: gpu::GeneratedDrawRecord::size,
+        max_count:   max_draw_count,
+        operation:   "cmd_draw_generated",
+    )!;
+    ResolvedSpan resolved_count = resolve_indirect_span(
+        state:          state,
+        record:         record,
+        span:           &count_span,
+        arg_size:       4,
+        count:          1,
+        operation:      "cmd_draw_generated",
+        rejected_field: "count_span",
+    )!;
+    uint stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT
+        | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
+    execute_generated_work(
+        state:         state,
+        record:        record,
+        pipeline:      pipeline,
+        layout:        state.generated_draw_layout,
+        shader_stages: (vk::ShaderStageFlags)stages,
+        records:       &resolved_records,
+        count:         &resolved_count,
+        max_count:     max_draw_count,
+    )!;
+}
+
+fn void? vk_cmd_draw_indexed_generated(
+    gpu::CommandList* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) @private {
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    PipelineSlot* pipeline = validate_generated_graphics_execution_state(
+        state,
+        record,
+        "cmd_draw_indexed_generated",
+    )!;
+    if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
+    validate_generated_work_count(
+        state,
+        max_draw_count,
+        "cmd_draw_indexed_generated",
+        "max_draw_count",
+    )!;
+    (void)index_element_size(index_type)!;
+    if (max_draw_count == 0) return;
+
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
+    ResolvedSpan resolved_records = resolve_generated_work_records(
+        state:       state,
+        record:      record,
+        records:     &records,
+        record_size: gpu::GeneratedDrawIndexedRecord::size,
+        max_count:   max_draw_count,
+        operation:   "cmd_draw_indexed_generated",
+    )!;
+    ResolvedSpan resolved_count = resolve_indirect_span(
+        state:          state,
+        record:         record,
+        span:           &count_span,
+        arg_size:       4,
+        count:          1,
+        operation:      "cmd_draw_indexed_generated",
+        rejected_field: "count_span",
+    )!;
+    ResolvedSpan resolved_index = resolve_index_span(
+        state:      state,
+        record:     record,
+        span:       &index_span,
+        index_type: index_type,
+        required:   0,
+        operation:  "cmd_draw_indexed_generated",
+    )!;
+    bind_index_buffer(
+        cb:         record.command_buffer,
+        index_span: &resolved_index,
+        index_type: index_type,
+    );
+    uint stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT
+        | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
+    execute_generated_work(
+        state:         state,
+        record:        record,
+        pipeline:      pipeline,
+        layout:        state.generated_indexed_draw_layout,
+        shader_stages: (vk::ShaderStageFlags)stages,
+        records:       &resolved_records,
+        count:         &resolved_count,
+        max_count:     max_draw_count,
+    )!;
 }

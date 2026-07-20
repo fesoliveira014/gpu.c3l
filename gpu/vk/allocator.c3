@@ -18,6 +18,7 @@ fn void? create_vk_allocator(VkDeviceState* state) {
         .flags = {
             .buffer_device_address = true,
             .ext_memory_budget     = state.memory_budget_enabled,
+            .khr_maintenance5       = state.generated_work.enabled,
         },
     };
     check_backend_create_result(vma::create_allocator(&info, &state.allocator))!;
