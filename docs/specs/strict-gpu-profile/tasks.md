@@ -278,7 +278,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.1 Global execution and memory barriers
 
-- [ ] Replace resource/range-shaped generic barriers with global semantic stage and hazard barriers in `gpu/sync.c3`, `gpu/command.c3`, `gpu/vk/sync.c3`, and tests.
+- [x] Replace resource/range-shaped generic barriers with global semantic stage and hazard barriers in `gpu/sync.c3`, `gpu/command.c3`, `gpu/vk/sync.c3`, and tests.
   - **Depends on:** 3.4 and 4.3.
   - **Contract:** generic barriers contain no handles, addresses, ranges, layouts, or queue families; no barrier is inferred; cross-queue order still requires completion-point waits.
   - **Edges:** transfer, shader, indirect, descriptor, color, depth, host, and presentation hazards; empty and contradictory masks.
