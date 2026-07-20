@@ -45,7 +45,18 @@ POINT_ALLOCATION_FORBIDDEN = (
     "mem::new",
     ".alloc(",
 )
+OWNERSHIP_TRANSFER_CALLEES = (
+    "release_submitted_command_batch",
+    "release_completed_submitted_commands_locked",
+    "drain_completed_submitted_commands_with_query",
+    "release_completed_submitted_commands",
+    "publish_submitted_commands",
+    "release_command",
+    "vk_submit_with_queries",
+    "vk_submit_with",
+)
 BACKEND_OWNERSHIP_DIGESTS = {
+    "vk_discard_commands": "c3ac801188a15ec816ae46f2d269fdd81a3a083f6e118a3cd6aacc61f282bc7a",
     "vk_begin_commands_with_context": "3292d8a58303e0fc2992ffe89976ecc542e0712da03aecc0efdee0fc4deb37de",
     "generated_preprocess_compatible": "df5842124c9c4e5427be4440e3a6ce3df20282e3d3b7d9d7557ac6bec007b5a0",
     "ensure_generated_preprocess_pool_capacity_locked": "8f07b4af72b8e015ec80aee966099e0a362323110017cff1c37172133ab00569",
@@ -66,11 +77,24 @@ LIFETIME_OWNERSHIP_DIGESTS = {
     "release_submitted_command_batch": "f9b2c92ba67ebdf818a8d6417074d55012b6756dad85106e05593c68748f775f",
     "release_completed_submitted_commands_locked": "bd81cb2ab4514a5428d70fa75883594913b7e77d0c15f123593b008f7e0e50d4",
     "destroy_submitted_commands": "1858d0b6e5a0d7659b1ed6ca6a08abf7e13f5577cdcea9cdc48dfdcde0d95d60",
+    "release_completed_submitted_commands": "55704517d5dbeb414da3f31d973f083bcd7f0cf6203d058bd70f84b466fa19bd",
+    "drain_completed_submitted_commands_with_query": "1dbd22577aa1f69899421ecfd011a78cd5c0db7b8bf61e20f57dc9a35a38aec9",
+    "drain_completed_submitted_commands": "182036fc91b30152a2f76fd8a300f6b25efc1ff4d2260c4eafaa60fc00ba4314",
+    "drain_submitted_commands_if_needed": "98335236132105a4225003e82c431d6c0bfe68d998260320edce4d00302e5ff8",
 }
 DEVICE_OWNERSHIP_DIGESTS = {
     "destroy_state": "aa9b3c53333b2eb21b29bc54b629f7a184ff66602ed9dfaefb328baf8d93b0b2",
 }
 
+SYNC_OWNERSHIP_DIGESTS = {
+    "vk_poll_completion": "2514773c830d417af21f1c9a87a917a83b4630fbfc87bfbeb80d058b290208b8",
+    "vk_wait_completion": "1152d19168b8fbf057ecea0b8cfc540adb169c1b7e3239aa56f8d95141ab0543",
+}
+QUEUE_OWNERSHIP_DIGESTS = {
+    "vk_submit_with_queries": "7218775026af7c397b77c4f4f5b66f1f67cf9a709a8750dd2cd578b47b2768bf",
+    "vk_submit_with": "773cfe5518f228b74c72265329eeb46a1db722334cabe1f57b0f0f4a5e3dc9e1",
+    "vk_submit": "383f58739300051514fa01012860a73d7b96601c6d8040ffcbf1f864d111196a",
+}
 
 
 def function_body(source: str, name: str) -> str:
@@ -142,6 +166,8 @@ def check(root: Path = ROOT) -> list[str]:
         ),
         ("gpu/vk/lifetime.c3", lifetime_source, LIFETIME_OWNERSHIP_DIGESTS),
         ("gpu/vk/device.c3", backend_device_source, DEVICE_OWNERSHIP_DIGESTS),
+        ("gpu/vk/sync.c3", sync_source, SYNC_OWNERSHIP_DIGESTS),
+        ("gpu/vk/queue.c3", queue_source, QUEUE_OWNERSHIP_DIGESTS),
     )
     for relative, source, digests in ownership_sources:
         for name, expected in digests.items():
@@ -166,6 +192,10 @@ def check(root: Path = ROOT) -> list[str]:
             touches_ownership = (
                 "generated_preprocess" in name
                 or "generated_preprocess" in body
+                or any(
+                    re.search(rf"\b{re.escape(callee)}\s*\(", body)
+                    for callee in OWNERSHIP_TRANSFER_CALLEES
+                )
             )
             if touches_ownership and name not in digests:
                 errors.append(
