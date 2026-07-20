@@ -117,6 +117,51 @@ fn bool texture_use_known(gpu::TextureUse use) @private {
     }
 }
 
+fn bool texture_use_stage_supported_by_queue(
+    gpu::TextureUse use,
+    vk::QueueFlags flags,
+) @private {
+    bool graphics = queue_flags_include(flags, vk::QueueFlagBits.GRAPHICS_BIT);
+    bool compute = queue_flags_include(flags, vk::QueueFlagBits.COMPUTE_BIT);
+    bool transfer = queue_flags_include(flags, vk::QueueFlagBits.TRANSFER_BIT);
+    bool admitted = graphics || compute || transfer;
+    switch (use) {
+        case gpu::TextureUse.UNDEFINED:
+        case gpu::TextureUse.TRANSFER_SOURCE:
+        case gpu::TextureUse.TRANSFER_DESTINATION:
+            return admitted;
+        case gpu::TextureUse.SAMPLED_COMPUTE:
+        case gpu::TextureUse.STORAGE_COMPUTE:
+            return compute;
+        case gpu::TextureUse.SAMPLED_FRAGMENT:
+        case gpu::TextureUse.COLOR_ATTACHMENT:
+        case gpu::TextureUse.DEPTH_ATTACHMENT:
+        case gpu::TextureUse.PRESENT:
+            return graphics;
+        default:
+            return false;
+    }
+}
+
+fn TextureBarrierRejection texture_barrier_queue_rejection(
+    gpu::TextureBarrier* barrier,
+    vk::QueueFlags flags,
+) @private {
+    if (!texture_use_stage_supported_by_queue(barrier.before, flags)) {
+        return {
+            .field     = "TextureBarrier.before",
+            .invariant = "before use stage must be supported by the recording queue",
+        };
+    }
+    if (!texture_use_stage_supported_by_queue(barrier.after, flags)) {
+        return {
+            .field     = "TextureBarrier.after",
+            .invariant = "after use stage must be supported by the recording queue",
+        };
+    }
+    return {};
+}
+
 fn bool texture_use_matches_format(
     gpu::TextureUse use,
     gpu::Format format,
@@ -379,6 +424,16 @@ fn void? vk_cmd_texture_barrier(
         operation: "cmd_texture_barrier",
     )!;
     rejection = texture_barrier_rejection(barrier, slot);
+    if (rejection.field == null) {
+        QueueCompletionState* completion = queue_completion_state(
+            state,
+            record.queue.id,
+        )!;
+        rejection = texture_barrier_queue_rejection(
+            barrier,
+            completion.queue_flags,
+        );
+    }
     if (rejection.field != null) {
         return report_contract_failure(
             state:               state,

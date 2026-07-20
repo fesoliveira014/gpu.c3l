@@ -615,9 +615,10 @@ The backend must not insert hidden barriers for user-visible resource
 transitions except for unavoidable swapchain acquire/present transitions
 inside WSI helpers.
 
-For texture transitions, `TextureUse.UNDEFINED` maps to empty execution and
-access scopes. `TextureUse.PRESENT` uses the color-attachment-output stage
-with an empty access scope on its WSI-facing side.
+For texture transitions, each semantic use must map to a stage supported by
+the recording queue. `TextureUse.UNDEFINED` maps to empty execution and access
+scopes. `TextureUse.PRESENT` uses the color-attachment-output stage with an
+empty access scope on its WSI-facing side.
 
 Presentation transitions use these exact synchronization2 scopes:
 

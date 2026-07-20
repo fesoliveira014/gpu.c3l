@@ -1278,10 +1278,10 @@ remaining range from their respective base. Format reinterpretation and
 out-of-range subresources fault `INVALID_ARGUMENT`.
 
 The constructors are pure and insert no synchronization. Recording validates
-the texture handle, queue access, semantic values, texture usage and format,
-presentation ownership, and the subresource range. It does not infer, track, or
-repair prior use; a wrong `before` declaration is a caller synchronization
-error and does not change
+the texture handle, queue access, semantic values, stage support on the
+recording queue, texture usage and format, presentation ownership, and the
+subresource range. It does not infer, track, or repair prior use; a wrong
+`before` declaration is a caller synchronization error and does not change
 release behavior.
 
 At the presentation boundary, `AcquiredImage.prior_use` supplies the first

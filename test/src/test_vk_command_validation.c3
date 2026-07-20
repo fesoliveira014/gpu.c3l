@@ -13,6 +13,7 @@ const char[*] VAL_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 const char[*] VAL_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
 const uint VAL_RT = 16;
+const vk::QueueFamilyFlags TRANSFER_ONLY_QUEUE_FLAGS = (vk::QueueFamilyFlags)0x00000004;
 
 struct SyncDiagnosticCapture {
     uint                   calls;
@@ -1598,6 +1599,59 @@ fn void barrier_queue_stage_mismatch_faults_without_poisoning_recording() @test 
     completion.queue_flags = selected_flags;
     barrier.before = { .host = true };
     gpu::cmd_barrier(&commands, &barrier)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+}
+
+fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .transfer },
+        .width     = 1,
+        .height    = 1,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .color_attach, .transfer_dst },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, record.queue.id)!!;
+    vk::QueueFamilyFlags selected_flags = completion.queue_flags;
+    defer completion.queue_flags = selected_flags;
+    completion.queue_flags = TRANSFER_ONLY_QUEUE_FLAGS;
+    gpu::TextureBarrier barrier = gpu::texture_transition(
+        texture: texture,
+        before:  gpu::TextureUse.COLOR_ATTACHMENT,
+        after:   gpu::TextureUse.TRANSFER_DESTINATION,
+    )!!;
+    uint references_before = record.reference_count;
+
+    assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
+        == gpu::INVALID_ARGUMENT,
+        "queue-incompatible before use faults INVALID_ARGUMENT");
+    assert(record.reference_count == references_before,
+        "before-use rejection retains no texture reference");
+
+    barrier.before = gpu::TextureUse.UNDEFINED;
+    barrier.after = gpu::TextureUse.COLOR_ATTACHMENT;
+    assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
+        == gpu::INVALID_ARGUMENT,
+        "queue-incompatible after use faults INVALID_ARGUMENT");
+    assert(record.reference_count == references_before,
+        "after-use rejection retains no texture reference");
+
+    completion.queue_flags = selected_flags;
+    barrier.after = gpu::TextureUse.TRANSFER_DESTINATION;
+    gpu::cmd_texture_barrier(&commands, &barrier)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
 }
