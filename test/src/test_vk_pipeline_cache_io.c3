@@ -83,7 +83,7 @@ fn void capture_cache_diagnostic(gpu::DebugMessage* message, void* user_data) {
 
 fn gpu::Device make_cache_io_device(char[] blob = {}, CacheBackendCapture* capture = null) {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend             = gpu::BackendKind.VULKAN,
         .enable_validation   = true,
         .pipeline_cache_data = blob,
         .debug_callback      = capture == null ? null : &capture_cache_backend_diagnostic,

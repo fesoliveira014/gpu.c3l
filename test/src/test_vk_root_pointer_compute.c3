@@ -7,7 +7,7 @@ const char[*] ROOT_POINTER_SPIRV = $embed("shaders/root_pointer.comp.spv");
 fn void root_pointer_compute_readback() @test {
     const uint COUNT = 256;
     gpu::RuntimeDesc device_desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_root_pointer_test",
     };

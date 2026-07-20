@@ -69,14 +69,39 @@ fn void descriptor_buffer_creation_skip_policy_is_exact() @test {
 }
 
 fn gpu::Device? create_descriptor_buffer_test_device(
-    gpu::vk::StandaloneDeviceConfig* desc,
+    gpu::RuntimeDesc* desc,
     gpu::vk::DeviceCreationProbe* probe,
 ) {
-    return gpu::vk::create_standalone_device_with_probe(desc, probe);
+    if (desc == null) return gpu::INVALID_ARGUMENT~;
+    gpu::Runtime runtime = gpu::create_runtime(desc)!;
+    defer catch (void)gpu::destroy_runtime(&runtime);
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!;
+        if (!gpu::supports_device_request(&adapter, &request)!.supported) continue;
+
+        gpu::Runtime retained_runtime = runtime;
+        gpu::runtime_retain_device(&retained_runtime)!;
+        gpu::Device? device = gpu::vk::create_vk_device_with_probe(
+            adapter:          &adapter,
+            request:          &request,
+            retained_runtime: &retained_runtime,
+            probe:            probe,
+        );
+        if (catch err = device) {
+            gpu::runtime_release_device(&retained_runtime)!;
+            if (err == gpu::UNSUPPORTED_FEATURE) continue;
+            return err~;
+        }
+        return device;
+    }
+    return gpu::UNSUPPORTED_FEATURE~;
 }
 
 fn void descriptor_buffer_device_and_heap() @test {
-    gpu::vk::StandaloneDeviceConfig desc = {
+    gpu::RuntimeDesc desc = {
+        .backend               = gpu::BackendKind.VULKAN,
         .enable_validation     = true,
         .texture_heap_capacity = 8,
         .sampler_heap_capacity = 4,
@@ -143,9 +168,10 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     const uint TARGET_SIZE = 32;
     const usz TARGET_BYTES = TARGET_SIZE * TARGET_SIZE * 4;
     const usz VERTEX_BYTES = 3 * 16;
-    gpu::vk::StandaloneDeviceConfig device_desc = {
-        .enable_validation    = true,
-        .application_name     = "gpu_descriptor_buffer_compute_to_graphics",
+    gpu::RuntimeDesc device_desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .application_name  = "gpu_descriptor_buffer_compute_to_graphics",
     };
     gpu::vk::DeviceCreationProbe probe = {
         .descriptor_buffer_override = true,
@@ -441,9 +467,10 @@ fn void descriptor_buffer_write_then_sample() @test {
     }
 
     const uint TEX = 16;
-    gpu::vk::StandaloneDeviceConfig device_desc = {
-        .enable_validation    = true,
-        .application_name     = "gpu_descriptor_buffer_e2e",
+    gpu::RuntimeDesc device_desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .application_name  = "gpu_descriptor_buffer_e2e",
     };
     gpu::vk::DeviceCreationProbe probe = {
         .descriptor_buffer_override = true,

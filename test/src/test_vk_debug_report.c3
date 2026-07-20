@@ -17,7 +17,6 @@ struct DebugCapture {
     bool              validation_strings_match;
     bool              barrier_strings_match;
     bool              device_name_matches;
-    bool              messenger_failure_strings_match;
 }
 
 struct SamplerNameCapture {
@@ -66,10 +65,6 @@ fn void capture_debug_message(gpu::DebugMessage* message, void* user_data) {
     }
     if (message.resource.kind == gpu::DebugResourceKind.DEVICE && message.resource.debug_name != null) {
         capture.device_name_matches = message.resource.debug_name.str_view() == "named_device";
-    }
-    if (message.backend_text != null && message.backend_text.str_view() == "fabricated messenger failure") {
-        capture.messenger_failure_strings_match = message.operation != null
-            && message.operation.str_view() == "create_device";
     }
 }
 
@@ -345,7 +340,7 @@ fn void vulkan_debug_message_handles_null_callback_data() @test {
 fn void barrier_mask_diagnostic_preserves_fault() @test {
     DebugCapture capture;
     gpu::RuntimeDesc device_desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend          = gpu::BackendKind.VULKAN,
         .debug_callback   = &capture_debug_message,
         .debug_user_data  = &capture,
         .application_name = "gpu_debug_contract_test",
@@ -423,29 +418,13 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
         "helper exposes borrowed contract strings only during callback delivery");
 }
 
-fn void debug_messenger_failure_routes_backend_warning() @test {
-    DebugCapture capture;
-    vk::VkDeviceState state = {
-        .debug_callback  = &capture_debug_message,
-        .debug_user_data = &capture,
-    };
-
-    vk::report_debug_messenger_failure(&state, "fabricated messenger failure");
-
-    assert(capture.calls == 1, "messenger setup failure routes exactly once");
-    assert(capture.last.severity == gpu::DebugMessageSeverity.WARNING, "messenger setup failure is a warning");
-    assert(capture.last.category.backend, "messenger setup failure is a backend diagnostic");
-    assert(!capture.last.has_fault, "best-effort messenger setup failure carries no public fault");
-    assert(capture.messenger_failure_strings_match,
-        "callback observes borrowed create-device operation and failure text while valid");
-}
 
 fn void debug_names_do_not_require_validation() @test {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
-        .enable_validation = false,
+        .backend            = gpu::BackendKind.VULKAN,
+        .enable_validation  = false,
         .enable_debug_names = true,
-        .application_name  = "gpu_debug_names_test",
+        .application_name   = "gpu_debug_names_test",
     };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
@@ -466,8 +445,8 @@ fn void debug_names_do_not_require_validation() @test {
 
 fn void interned_sampler_keeps_first_debug_name() @test {
     gpu::RuntimeDesc device_desc = {
-        .enable_debug_names = true,
         .backend            = gpu::BackendKind.VULKAN,
+        .enable_debug_names = true,
         .application_name   = "gpu_sampler_name_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;
@@ -499,8 +478,8 @@ fn void interned_sampler_keeps_first_debug_name() @test {
 
 fn gpu::Device make_dbg_device() {
     gpu::RuntimeDesc desc = {
-        .enable_validation = true,
         .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
         .application_name  = "gpu_debug_test",
     };
     return create_test_device(&desc)!!;
@@ -760,10 +739,10 @@ fn void callback_reports_leaks_without_validation() @test {
         .named_resources_valid = true,
     };
     gpu::RuntimeDesc device_desc = {
-        .debug_callback    = &capture_leak_message,
-        .backend             = gpu::BackendKind.VULKAN,
-        .debug_user_data   = &capture,
-        .application_name  = "gpu_callback_leak_test",
+        .backend          = gpu::BackendKind.VULKAN,
+        .debug_callback   = &capture_leak_message,
+        .debug_user_data  = &capture,
+        .application_name = "gpu_callback_leak_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     vk::BufferDesc buffer_desc = {

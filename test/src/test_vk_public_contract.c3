@@ -4,7 +4,7 @@ import gpu;
 
 fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
     gpu::RuntimeDesc device_desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_null_contract_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;
@@ -71,7 +71,7 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
 
 fn void null_command_arguments_fault_without_recording_side_effects() @test {
     gpu::RuntimeDesc device_desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_null_command_contract_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;

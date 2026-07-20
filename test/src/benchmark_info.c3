@@ -17,7 +17,7 @@ fn ZString device_type_name(vk::PhysicalDeviceType device_type) {
 
 fn int main() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = false,
         .application_name  = "gpu_benchmark_info",
     };

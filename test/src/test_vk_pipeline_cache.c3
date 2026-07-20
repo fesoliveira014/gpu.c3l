@@ -18,7 +18,7 @@ const usz CACHE_RT_BYTES = CACHE_RT_SIZE * CACHE_RT_SIZE * 4;
 
 fn gpu::Device make_cache_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_pipeline_cache_test",
     };
@@ -27,7 +27,7 @@ fn gpu::Device make_cache_test_device() {
 
 fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .pipeline_capacity = pipeline_capacity,
         .application_name  = "gpu_pipeline_cache_capacity_test",

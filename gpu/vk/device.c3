@@ -35,7 +35,6 @@ const uint GENERATED_WORK_RECORD_SIZE  = 40;
 
 enum DeviceCreationCheckpoint : uint {
     NONE,
-    OWNED_INSTANCE,
     LOGICAL_DEVICE,
     ALLOCATOR,
     RECORDING_CONTEXTS,
@@ -44,7 +43,7 @@ enum DeviceCreationCheckpoint : uint {
     BEFORE_PUBLICATION,
 }
 
-struct StandaloneDeviceConfig {
+struct VkDeviceConfig {
     bool                      enable_validation;
     bool                      enable_debug_names;
     uint                      texture_heap_capacity;
@@ -52,7 +51,6 @@ struct StandaloneDeviceConfig {
     uint                      texture_capacity;
     uint                      pipeline_capacity;
     char[]                    pipeline_cache_data;
-    ZString                   application_name;
     gpu::DebugMessageCallback debug_callback;
     void*                     debug_user_data;
 }
@@ -61,7 +59,6 @@ struct DeviceCreationProbe {
     DeviceCreationCheckpoint fail_at;
     DeviceCreationCheckpoint reached;
     uint                     rollback_count;
-    uint                     owned_instance_teardown_count;
     bool                     descriptor_buffer_override;
     bool                     descriptor_buffer_capability_checked;
     bool                     descriptor_buffer_capability_available;
@@ -95,8 +92,6 @@ struct VkDeviceState {
     ulong                       resource_owner;
     vk::Instance               instance;
     VkInstanceDispatch         instance_dispatch;
-    vk::DebugUtilsMessengerEXT messenger;
-    bool                       owns_instance;
     vk::PhysicalDevice         physical_device;
     vk::Device                 device;
     VkDeviceDispatch           device_dispatch;
@@ -159,17 +154,6 @@ struct VkDeviceState {
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
-}
-
-struct PhysicalDeviceSelection {
-    vk::PhysicalDevice physical_device;
-    QueueFamilies      families;
-}
-
-struct PhysicalDeviceCandidate {
-    PhysicalDeviceSelection selection;
-    int                     score;
-    bool                    suitable;
 }
 
 struct GeneratedWorkSupport {
@@ -356,18 +340,18 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .get_present_mode_support = &vk_get_present_mode_support,
 };
 
-fn gpu::Device? create_standalone_device_with_probe(
-    StandaloneDeviceConfig* desc,
-    DeviceCreationProbe* probe,
-) {
-    return create_vk_device_with_selection(
-        desc:             desc,
-        instance:         (vk::Instance)null,
-        physical_device:  (vk::PhysicalDevice)null,
-        owns_instance:    true,
-        strict_requested: true,
-        probe:            probe,
-    );
+fn VkDeviceConfig runtime_device_config(VkRuntimeState* state) {
+    return {
+        .enable_validation     = state.validation,
+        .enable_debug_names    = state.debug_names,
+        .texture_heap_capacity = state.texture_heap_capacity,
+        .sampler_heap_capacity = state.sampler_heap_capacity,
+        .texture_capacity      = state.texture_capacity,
+        .pipeline_capacity     = state.pipeline_capacity,
+        .pipeline_cache_data   = state.pipeline_cache_data,
+        .debug_callback        = state.debug_callback,
+        .debug_user_data       = state.debug_user_data,
+    };
 }
 
 fn gpu::Device? create_vk_device(
@@ -395,17 +379,7 @@ fn gpu::Device? create_vk_device_with_probe(
     VkRuntimeState* runtime_state = (VkRuntimeState*)runtime_data.backend_state;
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
 
-    StandaloneDeviceConfig desc = {
-        .enable_validation     = runtime_state.validation,
-        .enable_debug_names    = runtime_state.debug_names,
-        .texture_heap_capacity = runtime_state.texture_heap_capacity,
-        .sampler_heap_capacity = runtime_state.sampler_heap_capacity,
-        .texture_capacity      = runtime_state.texture_capacity,
-        .pipeline_capacity     = runtime_state.pipeline_capacity,
-        .pipeline_cache_data   = runtime_state.pipeline_cache_data,
-        .debug_callback        = runtime_state.debug_callback,
-        .debug_user_data       = runtime_state.debug_user_data,
-    };
+    VkDeviceConfig desc = runtime_device_config(runtime_state);
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = gpu::requested_surface(*request);
     if (requested_surface.is_valid()
@@ -417,11 +391,10 @@ fn gpu::Device? create_vk_device_with_probe(
     vk::SurfaceKHR presentation_surface = requested_surface.is_valid()
         ? (vk::SurfaceKHR)gpu::surface_backend_handle(&requested_surface)!
         : (vk::SurfaceKHR)null;
-    return create_vk_device_with_selection(
+    return create_vk_device_from_runtime(
         desc:                       &desc,
         instance:                   runtime_state.instance,
         physical_device:            adapter_state.physical_device,
-        owns_instance:              false,
         strict_requested:           gpu::requests_strict(*request),
         retained_runtime:           retained_runtime,
         adapter:                    adapter,
@@ -435,11 +408,10 @@ fn gpu::Device? create_vk_device_with_probe(
     );
 }
 
-fn gpu::Device? create_vk_device_with_selection(
-    StandaloneDeviceConfig* desc,
+fn gpu::Device? create_vk_device_from_runtime(
+    VkDeviceConfig* desc,
     vk::Instance instance,
     vk::PhysicalDevice physical_device,
-    bool owns_instance,
     bool strict_requested,
     gpu::Runtime* retained_runtime = null,
     gpu::Adapter* adapter = null,
@@ -455,7 +427,6 @@ fn gpu::Device? create_vk_device_with_selection(
         destroy_state(state, probe);
         if (probe != null) probe.rollback_count++;
     }
-    state.owns_instance = owns_instance;
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
@@ -472,68 +443,26 @@ fn gpu::Device? create_vk_device_with_selection(
     if (state.presentation.enabled) state.presentation.queue_mutex.init()!;
     bool debug_utils_enabled;
     QueueFamilies families;
-    if (owns_instance) {
-        vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
-            debug_messenger_create_info(state);
-        VkInstanceDesc instance_desc = {
-            .enable_validation      = desc.enable_validation,
-            .enable_debug_utils     = desc.enable_validation
-                || desc.enable_debug_names
-                || desc.debug_callback != null,
-            .application_name       = desc.application_name,
-            .debug_messenger_info   = desc.enable_validation
-                ? &messenger_info
-                : null,
-        };
-        VkInstanceCreateResult instance_result =
-            create_vk_instance(&instance_desc)!;
-        state.instance = instance_result.instance;
-        debug_utils_enabled = instance_result.capabilities.debug_utils;
-        VkInstanceDispatchPlan dispatch_plan = {
-            .debug = debug_utils_enabled,
-        };
-        state.instance_dispatch = load_vk_instance_dispatch(
-            state.instance,
-            &vk::get_instance_proc_addr,
-            dispatch_plan,
-        );
-        if (should_create_debug_messenger(
-            instance_result.capabilities,
-            state.validation || state.debug_callback != null,
-        )) {
-            setup_debug_messenger(state);
-        } else if (should_report_debug_messenger_unavailable(
-            instance_result.capabilities,
-            state.validation || state.debug_callback != null,
-        )) {
-            report_debug_messenger_failure(state, "debug-utils messenger unavailable");
-        }
-
-        PhysicalDeviceSelection selection = pick_physical_device(state.instance, desc)!;
-        state.physical_device = selection.physical_device;
-        families = selection.families;
-        reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.OWNED_INSTANCE)!;
-    } else {
-        if (instance == null || physical_device == null || runtime_state == null) return gpu::INVALID_ARGUMENT~;
-        state.instance = instance;
-        debug_utils_enabled =
-            runtime_state.instance_capabilities.debug_utils;
-        if (state.presentation.enabled) {
-            state.instance_dispatch.surface = runtime_state.dispatch.surface;
-        }
-        state.physical_device = physical_device;
-        families = presentation_surface == null
-            ? select_queue_families(
-                physical_device: state.physical_device,
-                requirements:    queue_requirements,
-            )!
-            : select_queue_families_for_surface(
-                runtime:         runtime_state,
-                physical_device: state.physical_device,
-                surface:         presentation_surface,
-                requirements:    queue_requirements,
-            )!;
+    if (instance == null || physical_device == null || runtime_state == null) {
+        return gpu::INVALID_ARGUMENT~;
     }
+    state.instance = instance;
+    debug_utils_enabled = runtime_state.instance_capabilities.debug_utils;
+    if (state.presentation.enabled) {
+        state.instance_dispatch.surface = runtime_state.dispatch.surface;
+    }
+    state.physical_device = physical_device;
+    families = presentation_surface == null
+        ? select_queue_families(
+            physical_device: state.physical_device,
+            requirements:    queue_requirements,
+        )!
+        : select_queue_families_for_surface(
+            runtime:         runtime_state,
+            physical_device: state.physical_device,
+            surface:         presentation_surface,
+            requirements:    queue_requirements,
+        )!;
 
     bool swapchain_maintenance_extension = state.presentation.enabled
         && device_supports_extension(
@@ -937,11 +866,6 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         vk::destroy_device(state.device, null);
         state.device = (vk::Device)null;
     }
-    destroy_debug_messenger(state);
-    if (state.owns_instance && state.instance != null) {
-        vk::destroy_instance(state.instance, null);
-        if (probe != null) probe.owned_instance_teardown_count++;
-    }
     state.instance = (vk::Instance)null;
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
     if (state.pipeline_creation_mutex.is_initialized()) (void)state.pipeline_creation_mutex.destroy();
@@ -990,7 +914,7 @@ fn bool heap_indexing_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDe
         && v12.descriptor_binding_update_unused_while_pending != 0;
 }
 
-fn VkStrictHeapState? resolve_strict_heap_state(bool requested, StandaloneDeviceConfig* desc) {
+fn VkStrictHeapState? resolve_strict_heap_state(bool requested, VkDeviceConfig* desc) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
     VkStrictHeapState state;
     if (!requested) return state;
@@ -1186,7 +1110,7 @@ fn VkHeapImplementation? resolve_candidate_heap_implementation_with_probe(
 
 fn bool candidate_satisfies(
     vk::PhysicalDevice candidate,
-    StandaloneDeviceConfig* desc,
+    VkDeviceConfig* desc,
     QueueFamilies* families,
 ) @private {
     vk::PhysicalDeviceProperties props;
@@ -1215,6 +1139,14 @@ fn bool candidate_satisfies(
         gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     );
     if (catch capacity_fault = resolved_smp) return false;
+    if (catch capacity_fault = resolve_descriptor_capacity(
+        desc.texture_capacity,
+        gpu::DEFAULT_TEXTURE_CAPACITY,
+    )) return false;
+    if (catch capacity_fault = resolve_descriptor_capacity(
+        desc.pipeline_capacity,
+        gpu::MAX_PIPELINES,
+    )) return false;
 
     bool indexing_supported =
         heap_indexing_supported(&features2.features, &features12);
@@ -1239,66 +1171,6 @@ fn bool candidate_satisfies(
         capacity_probe:              &capacity_probe,
     )) return false;
     return true;
-}
-
-<* Select the highest-scored suitable candidate, preserving enumeration order
-   for equal scores. Pure. *>
-fn PhysicalDeviceSelection? choose_physical_device(PhysicalDeviceCandidate[] candidates) {
-    PhysicalDeviceSelection best;
-    int best_score = -1;
-    bool found = false;
-    foreach (&candidate : candidates) {
-        if (!candidate.suitable || (found && candidate.score <= best_score)) continue;
-        best = candidate.selection;
-        best_score = candidate.score;
-        found = true;
-    }
-    if (!found) return gpu::UNSUPPORTED_FEATURE~;
-    return best;
-}
-
-<* Enumerate physical devices, drop candidates that cannot satisfy the desc
-   (API version, required features, semantic heap support, conditional presentation
-   capability, queue topology), and return the highest-scored device with its
-   already-resolved queue families. *>
-fn PhysicalDeviceSelection? pick_physical_device(vk::Instance instance, StandaloneDeviceConfig* desc) {
-    uint count = 0;
-    check_physical_device_enumeration_result(vk::enumerate_physical_devices(instance, &count, null))!;
-    if (count == 0) return gpu::UNSUPPORTED_FEATURE~;
-
-    @pool() {
-        vk::PhysicalDevice[] devices = mem::talloc_array(vk::PhysicalDevice, (sz)count);
-        check_physical_device_enumeration_result(vk::enumerate_physical_devices(instance, &count, devices.ptr))!;
-        PhysicalDeviceCandidate[] candidates = mem::talloc_array(PhysicalDeviceCandidate, (sz)count);
-
-        foreach (i, physical_device : devices[:count]) {
-            PhysicalDeviceCandidate candidate = {
-                .selection = { .physical_device = physical_device },
-            };
-            if (try families = select_queue_families(physical_device)) {
-                if (candidate_satisfies(physical_device, desc, &families)) {
-                    vk::PhysicalDeviceProperties props;
-                    vk::get_physical_device_properties(physical_device, &props);
-                    candidate.selection.families = families;
-                    candidate.score = score_device((int)props.device_type);
-                    candidate.suitable = true;
-                }
-            }
-            candidates[i] = candidate;
-        }
-        return choose_physical_device(candidates[:count]);
-    };
-}
-
-// VkPhysicalDeviceType: 0 other, 1 integrated, 2 discrete, 3 virtual, 4 cpu.
-fn int score_device(int device_type) @private {
-    switch (device_type) {
-        case 2:  return 100;
-        case 1:  return 50;
-        case 3:  return 20;
-        case 4:  return 10;
-        default: return 1;
-    }
 }
 
 <* Enable requested feature groups and deduplicate queue families. *>

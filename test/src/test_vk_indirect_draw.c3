@@ -27,7 +27,7 @@ struct IndDrawCtx {
 
 fn gpu::Device make_ind_device() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_indirect_test",
     };
@@ -36,7 +36,7 @@ fn gpu::Device make_ind_device() {
 
 fn gpu::Device make_generated_work_device() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_generated_work_test",
     };
     return create_test_device(&desc)!!;
@@ -272,8 +272,8 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
 
 fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     gpu::RuntimeDesc desc = {
-        .enable_validation = true,
         .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
         .application_name  = "caller_owned_reuse_cross_family",
     };
     gpu::Device device = create_test_device(&desc)!!;

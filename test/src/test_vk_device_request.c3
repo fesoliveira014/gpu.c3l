@@ -70,7 +70,7 @@ fn gpu::vk::IndexingHeapLimits permissive_indexing_heap_limits() @private {
 }
 
 fn void strict_heap_state_selects_private_implementation() @test {
-    gpu::vk::StandaloneDeviceConfig desc = {
+    gpu::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
@@ -161,7 +161,7 @@ fn void strict_heap_state_selects_private_implementation() @test {
 }
 
 fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
-    gpu::vk::StandaloneDeviceConfig desc = {
+    gpu::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
@@ -225,7 +225,7 @@ fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
 }
 
 fn void descriptor_buffer_query_is_needed_only_for_fallback_or_override() @test {
-    gpu::vk::StandaloneDeviceConfig desc = {
+    gpu::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
@@ -339,14 +339,14 @@ fn void descriptor_buffer_capability_query_distinguishes_absence_and_failure() @
 fn void runtime_copies_device_creation_defaults() @test {
     char[4] cache_data = { 1, 2, 3, 4 };
     gpu::RuntimeDesc desc = {
-        .backend                   = gpu::BackendKind.VULKAN,
-        .enable_debug_names        = true,
-        .texture_heap_capacity     = 17,
-        .sampler_heap_capacity     = 19,
-        .texture_capacity          = 23,
-        .pipeline_capacity         = 29,
-        .pipeline_cache_data       = cache_data[..],
-        .application_name          = "gpu_vk_runtime_defaults_test",
+        .backend               = gpu::BackendKind.VULKAN,
+        .enable_debug_names    = true,
+        .texture_heap_capacity = 17,
+        .sampler_heap_capacity = 19,
+        .texture_capacity      = 23,
+        .pipeline_capacity     = 29,
+        .pipeline_cache_data   = cache_data[..],
+        .application_name      = "gpu_vk_runtime_defaults_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::vk::VkRuntimeState* state =
@@ -389,6 +389,67 @@ fn void runtime_copies_device_creation_defaults() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
+fn void adapter_support_inherits_runtime_device_config() @test {
+    gpu::RuntimeDesc desc = {
+        .backend               = gpu::BackendKind.VULKAN,
+        .texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY,
+        .sampler_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY,
+        .application_name      = "gpu_vk_adapter_support_config_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    assert(adapters.count > 0, "the controlled target exposes an adapter");
+    gpu::DeviceRequest request = gpu::strict_device_request();
+    gpu::RuntimeData* runtime_data = gpu::resolve_runtime(&runtime);
+    gpu::vk::VkRuntimeState* runtime_state =
+        (gpu::vk::VkRuntimeState*)runtime_data.backend_state;
+    gpu::vk::VkDeviceConfig config = gpu::vk::runtime_device_config(runtime_state);
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::AdapterInfo info = gpu::get_adapter_info(&adapter)!!;
+        gpu::DeviceRequestSupport support =
+            gpu::supports_device_request(&adapter, &request)!!;
+        gpu::vk::VkAdapterState* adapter_state = &runtime_state.adapters[i];
+        bool expected = gpu::vk::strict_adapter_supported(
+            adapter_state.physical_device,
+            &config,
+        );
+        assert(info.strict_supported == expected, "adapter info uses the runtime configuration");
+        assert(support.supported == expected, "support and adapter info agree");
+
+        gpu::vk::VkDeviceConfig invalid_config = config;
+        invalid_config.texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1;
+        gpu::vk::VkAdapterState invalid_adapter;
+        gpu::vk::initialize_adapter(
+            &invalid_adapter,
+            adapter_state.physical_device,
+            &invalid_config,
+        );
+        assert(!invalid_adapter.info.strict_supported, "each adapter consumes the supplied configuration");
+
+        if (!expected) {
+            assert(
+                @catch(gpu::create_device(&adapter, &request)) == gpu::UNSUPPORTED_FEATURE,
+                "creation rejects a configuration reported as unsupported"
+            );
+            continue;
+        }
+        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        assert(
+            caps.texture_heap_capacity == gpu::MAX_SHADER_HEAP_CAPACITY,
+            "creation preserves the supported runtime texture capacity"
+        );
+        assert(
+            caps.sampler_heap_capacity == gpu::MAX_SHADER_HEAP_CAPACITY,
+            "creation preserves the supported runtime sampler capacity"
+        );
+        gpu::destroy_device(&device)!!;
+    }
+}
+
 fn void adapter_request_creation_reuses_runtime_discovery() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -422,7 +483,7 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
                 == runtime_state.adapters[adapter.adapter_index].physical_device,
             "the device uses the exact requested physical adapter"
         );
-        assert(!device_state.owns_instance, "the adapter device does not own the runtime instance");
+        assert(device_state.validation, "the device inherits runtime validation state");
         gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
         assert(device_state.strict_heap.enabled, "the strict request owns heap state");
         assert(caps.strict_enabled, "strict state is enabled");
@@ -571,13 +632,12 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
 
 fn void device_creation_checkpoint_ordinals_match_exact_schema() @test {
     assert(gpu::vk::DeviceCreationCheckpoint.NONE.ordinal == 0);
-    assert(gpu::vk::DeviceCreationCheckpoint.OWNED_INSTANCE.ordinal == 1);
-    assert(gpu::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal == 2);
-    assert(gpu::vk::DeviceCreationCheckpoint.ALLOCATOR.ordinal == 3);
-    assert(gpu::vk::DeviceCreationCheckpoint.RECORDING_CONTEXTS.ordinal == 4);
-    assert(gpu::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP.ordinal == 5);
-    assert(gpu::vk::DeviceCreationCheckpoint.PIPELINE_SHARED.ordinal == 6);
-    assert(gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal == 7);
+    assert(gpu::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal == 1);
+    assert(gpu::vk::DeviceCreationCheckpoint.ALLOCATOR.ordinal == 2);
+    assert(gpu::vk::DeviceCreationCheckpoint.RECORDING_CONTEXTS.ordinal == 3);
+    assert(gpu::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP.ordinal == 4);
+    assert(gpu::vk::DeviceCreationCheckpoint.PIPELINE_SHARED.ordinal == 5);
+    assert(gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal == 6);
 }
 
 fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
@@ -635,36 +695,6 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     }
 
     gpu::destroy_runtime(&runtime)!!;
-}
-
-fn void owned_instance_creation_rolls_back_after_bootstrap() @test {
-    gpu::vk::StandaloneDeviceConfig desc = {
-        .application_name  = "gpu_vk_owned_instance_rollback_test",
-        .enable_validation = true,
-    };
-    gpu::vk::DeviceCreationProbe probe = {
-        .fail_at = gpu::vk::DeviceCreationCheckpoint.OWNED_INSTANCE,
-    };
-    uint live_slots_before = live_device_slot_count();
-
-    assert(
-        @catch(gpu::vk::create_standalone_device_with_probe(&desc, &probe))
-            == gpu::BACKEND_ERROR,
-        "an owned-instance checkpoint failure returns the backend fault"
-    );
-    assert(
-        probe.reached == gpu::vk::DeviceCreationCheckpoint.OWNED_INSTANCE,
-        "owned-instance creation reaches its checkpoint"
-    );
-    assert(probe.rollback_count == 1, "owned-instance creation rolls back once");
-    assert(
-        probe.owned_instance_teardown_count == 1,
-        "owned-instance rollback destroys the instance once"
-    );
-    assert(
-        live_device_slot_count() == live_slots_before,
-        "owned-instance failure publishes no device"
-    );
 }
 
 fn void publication_failure_rolls_back_native_state() @test {

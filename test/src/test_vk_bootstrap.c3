@@ -56,10 +56,10 @@ fn void device_destroy_readiness_never_waits() @test {
 
 fn void device_create_destroy() @test {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
-        .enable_validation    = true,
-        .enable_debug_names   = true,
-        .application_name     = "gpu_vk_bootstrap_test",
+        .backend            = gpu::BackendKind.VULKAN,
+        .enable_validation  = true,
+        .enable_debug_names = true,
+        .application_name   = "gpu_vk_bootstrap_test",
     };
 
     gpu::Device device = create_test_device(&desc)!!;
@@ -121,7 +121,7 @@ fn void device_create_destroy() @test {
 
 fn void device_heap_capacities() @test {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend               = gpu::BackendKind.VULKAN,
         .enable_validation     = true,
         .texture_heap_capacity = 64,
         .sampler_heap_capacity = 8,
@@ -137,8 +137,8 @@ fn void device_heap_capacities() @test {
 
 fn void device_capacity_over_ceiling_rejected() @test {
     gpu::RuntimeDesc desc = {
-        .texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1,
         .backend               = gpu::BackendKind.VULKAN,
+        .texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1,
         .application_name      = "gpu_vk_capacity_test",
     };
 

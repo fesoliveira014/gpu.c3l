@@ -150,7 +150,7 @@ fn void run_bench_suite(gpu::RuntimeDesc* desc, ZString label) {
 fn int main() {
     io::printfn("iterations=%d/worker units=ns/descriptor,ns/op", BENCH_ITERS_PER_WORKER);
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_descriptor_churn_bench",
     };
     run_bench_suite(&desc, "automatic heap");

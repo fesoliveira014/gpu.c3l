@@ -15,7 +15,7 @@ vk::Result completion_counter_result;
 
 fn gpu::Device make_submit_stats_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_submit_stats_test",
     };

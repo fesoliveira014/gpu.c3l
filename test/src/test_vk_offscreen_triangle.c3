@@ -16,7 +16,7 @@ const usz RT_BYTES = RT_SIZE * RT_SIZE * 4;
 
 fn gpu::Device make_offscreen_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_offscreen_test",
     };

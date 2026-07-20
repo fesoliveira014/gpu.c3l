@@ -104,41 +104,6 @@ fn uint route_debug_message(
     return vk::FALSE;
 }
 
-fn uint debug_callback(
-    vk::DebugUtilsMessageSeverityFlagsEXT severity,
-    vk::DebugUtilsMessageTypeFlagsEXT     message_type,
-    vk::DebugUtilsMessengerCallbackDataEXT* data,
-    void*                                 user_data
-) @private {
-    return route_debug_message((VkDeviceState*)user_data, severity, message_type, data);
-}
-
-fn vk::DebugUtilsMessengerCreateInfoEXT debug_messenger_create_info(VkDeviceState* state) {
-    uint severity_flags = (uint)vk::DebugUtilsMessageSeverityFlagBitsEXT.WARNING_BIT_EXT
-                        | (uint)vk::DebugUtilsMessageSeverityFlagBitsEXT.ERROR_BIT_EXT;
-    uint type_flags = (uint)vk::DebugUtilsMessageTypeFlagBitsEXT.GENERAL_BIT_EXT
-                    | (uint)vk::DebugUtilsMessageTypeFlagBitsEXT.VALIDATION_BIT_EXT
-                    | (uint)vk::DebugUtilsMessageTypeFlagBitsEXT.PERFORMANCE_BIT_EXT;
-    return vk::debug_utils_messenger_create_info_ext()
-        .set_message_severity((vk::DebugUtilsMessageSeverityFlagsEXT)severity_flags)
-        .set_message_type((vk::DebugUtilsMessageTypeFlagsEXT)type_flags)
-        .set_pfn_user_callback((vk::PFN_vkDebugUtilsMessengerCallbackEXT)&debug_callback)
-        .set_user_data(state);
-}
-
-fn void report_debug_messenger_failure(VkDeviceState* state, ZString text) {
-    if (state.debug_callback == null) {
-        io::eprintfn("vk: %s; relying on layer stderr", text);
-        return;
-    }
-    gpu::DebugMessage message = {
-        .severity     = gpu::DebugMessageSeverity.WARNING,
-        .category     = { .backend },
-        .operation    = "create_device",
-        .backend_text = text,
-    };
-    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
-}
 
 <* Emit exactly one public-contract ERROR when configured, return public_fault
    unchanged, and permit delivery while internal locks are held. *>
@@ -204,34 +169,6 @@ fn bool report_resource_lifetime(
     return true;
 }
 
-fn bool create_debug_messenger(
-    VkDeviceState* state,
-    vk::DebugUtilsMessengerCreateInfoEXT* create_info,
-    vk::DebugUtilsMessengerEXT* out_messenger,
-) {
-    if (state == null || state.instance == null
-        || create_info == null || out_messenger == null) return false;
-    if (!instance_dispatch_supports_debug_messenger(&state.instance_dispatch)) return false;
-    vk::Result result = state.instance_dispatch.debug.create_debug_messenger(
-        state.instance,
-        create_info,
-        null,
-        out_messenger,
-    );
-    if (result == vk::Result.SUCCESS) return true;
-    *out_messenger = (vk::DebugUtilsMessengerEXT)null;
-    return false;
-}
-
-<* Install the device debug messenger when debug-utils is available. *>
-fn void setup_debug_messenger(VkDeviceState* state) @private {
-    vk::DebugUtilsMessengerCreateInfoEXT create_info =
-        debug_messenger_create_info(state);
-    if (!create_debug_messenger(state, &create_info, &state.messenger)) {
-        report_debug_messenger_failure(state, "debug-utils messenger unavailable");
-    }
-}
-
 <* Best-effort object naming: silently a no-op when the debug-utils entry
    point is unavailable or no name was given. *>
 fn void set_object_name(VkDeviceState* state, vk::ObjectType object_type, ulong object_handle, ZString name) {
@@ -243,18 +180,6 @@ fn void set_object_name(VkDeviceState* state, vk::ObjectType object_type, ulong 
     info.object_handle = object_handle;
     info.p_object_name = (char*)name;
     if (state.device_dispatch.debug.set_object_name(state.device, &info) != vk::Result.SUCCESS) return;
-}
-
-fn void destroy_debug_messenger(VkDeviceState* state) @private {
-    if (state.messenger == null) return;
-    if (state.instance_dispatch.debug.destroy_debug_messenger != null) {
-        state.instance_dispatch.debug.destroy_debug_messenger(
-            state.instance,
-            state.messenger,
-            null,
-        );
-    }
-    state.messenger = (vk::DebugUtilsMessengerEXT)null;
 }
 
 fn ZString slot_name(char* name) @private {

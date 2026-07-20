@@ -164,7 +164,7 @@ fn void disabled_heap_preflights_pipeline_binds() @test {
 
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend               = gpu::BackendKind.VULKAN,
         .enable_validation     = true,
         .texture_heap_capacity = tex_capacity,
         .sampler_heap_capacity = smp_capacity,

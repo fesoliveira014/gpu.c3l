@@ -155,7 +155,7 @@ fn void extent_clamp_rules() @test {
 
 fn void swapchain_requires_a_presentation_request() @test {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_swapchain_gate_test",
     };
@@ -294,7 +294,7 @@ fn void swapchain_present_guard_lifecycle() @test {
 fn void present_path_guards_precede_native_mutation() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_present_guard_test",
         .debug_callback    = &capture_wsi_diagnostic,
@@ -789,8 +789,8 @@ fn void acquired_image_reports_prior_semantic_use() @test {
 
 fn void swapchain_info_query_rejects_invalid_handle() @test {
     gpu::RuntimeDesc desc = {
-        .enable_validation = true,
         .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
         .application_name  = "gpu_swapchain_info_invalid_handle_test",
     };
     gpu::Device device = create_test_device(&desc)!!;
