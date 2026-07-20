@@ -144,6 +144,26 @@ def check(root: Path = ROOT) -> list[str]:
             "gpu/vk/command.c3 reuses a generated preprocess address "
             "within one command record"
         )
+    allowed_record_lines = (
+        "ensure_generated_preprocess_capacity(state, record);",
+        "uint index = record.generated_preprocess_count++;",
+        "record.generated_preprocess[index] = pooled;",
+        "return &record.generated_preprocess[index];",
+        "ensure_generated_preprocess_capacity(state, record);",
+        "uint index = record.generated_preprocess_count++;",
+        "record.generated_preprocess[index] = buffer;",
+        "return &record.generated_preprocess[index];",
+    )
+    record_lines = tuple(
+        line.strip()
+        for line in acquire.splitlines()
+        if re.search(r"\brecord\b", line)
+    )
+    if record_lines != allowed_record_lines:
+        errors.append(
+            "gpu/vk/command.c3 generated preprocess acquisition must only "
+            "append newly acquired buffers"
+        )
     acquire_steps = (
         "take_generated_preprocess_buffer(",
         "create_buffer_with_alignment(",
