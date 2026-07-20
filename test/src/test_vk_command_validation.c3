@@ -2,6 +2,7 @@ module gpu_test;
 
 import gpu @public;
 import gpu::vk @public;
+import vk;
 import std::core::mem;
 import std::io;
 
@@ -13,7 +14,8 @@ const char[*] VAL_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 const char[*] VAL_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
 const uint VAL_RT = 16;
-const vk::QueueFamilyFlags TRANSFER_ONLY_QUEUE_FLAGS = (vk::QueueFamilyFlags)0x00000004;
+const vk::QueueFamilyFlags TRANSFER_ONLY_QUEUE_FLAGS =
+    (vk::QueueFamilyFlags)(uint)vk::QueueFlagBits.TRANSFER_BIT;
 
 struct SyncDiagnosticCapture {
     uint                   calls;
