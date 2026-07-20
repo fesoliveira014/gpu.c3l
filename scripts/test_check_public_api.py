@@ -1017,6 +1017,42 @@ class PublicApiCheckTests(unittest.TestCase):
     def test_accepts_distinct_platform_handle_modules(self) -> None:
         self.assertEqual(check_public_api.validate_document(valid_document()), [])
 
+    def test_rejects_generated_public_backend_declaration(self) -> None:
+        document = valid_document()
+        document["modules"]["gpu::vk"] = {
+            "functions": [{
+                "name": "create_native_device",
+                "uid": "gpu::vk::create_native_device",
+                "visibility": "public",
+            }],
+            "types": [{
+                "name": "PrivateState",
+                "uid": "gpu::vk::PrivateState",
+                "visibility": "private",
+            }],
+        }
+        self.assertIn(
+            "generated gpu::vk::create_native_device must remain private",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_generated_public_nested_backend_declaration(self) -> None:
+        document = valid_document()
+        document["modules"]["gpu::vk::testing"] = {
+            "functions": [{
+                "name": "open_backend_escape",
+                "uid": "gpu::vk::testing::open_backend_escape",
+                "visibility": "public",
+            }],
+        }
+        self.assertIn(
+            (
+                "generated gpu::vk::testing::open_backend_escape "
+                "must remain private"
+            ),
+            check_public_api.validate_document(document),
+        )
+
     def test_rejects_backend_sharing_flags(self) -> None:
         document = valid_document()
         document["modules"]["gpu"]["types"].append(
