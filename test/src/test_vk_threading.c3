@@ -215,11 +215,6 @@ fn void render_view_resolution_uses_shared_cache_lock() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
-    slot.current_layout.store(
-        (int)gpu::TextureLayout.COLOR_ATTACHMENT,
-        AtomicOrdering.RELEASE,
-    );
     RenderViewGateArgs args = {
         .commands = gpu::begin_commands(
             gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
@@ -614,26 +609,22 @@ fn void parallel_recording_across_workers() @test {
     }
 }
 
-struct LayoutRecordArgs {
+struct TransitionRecordArgs {
     gpu::Device*               device;
     gpu::TextureHandle         texture;
     gpu::ExecutableCommandList list;
 }
 
-fn int layout_record_worker(void* arg) {
-    LayoutRecordArgs* args = (LayoutRecordArgs*)arg;
+fn int transition_record_worker(void* arg) {
+    TransitionRecordArgs* args = (TransitionRecordArgs*)arg;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
         gpu::CommandList commands = gpu::begin_commands(
             gpu::get_queue(args.device, gpu::QueueKind.GRAPHICS)!!,
         )!!;
         gpu::TextureBarrier to_dst = {
-            .texture       = args.texture,
-            .before_stage  = gpu::Stage.HOST,
-            .after_stage   = gpu::Stage.TRANSFER,
-            .before_hazard = gpu::Hazard.HOST_WRITE,
-            .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
-            .old_layout    = gpu::TextureLayout.UNDEFINED,
-            .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+            .texture = args.texture,
+            .before  = gpu::TextureUse.UNDEFINED,
+            .after   = gpu::TextureUse.TRANSFER_DESTINATION,
         };
         gpu::cmd_texture_barrier(&commands, &to_dst)!!;
         args.list = gpu::end_commands(&commands)!!;
@@ -641,8 +632,7 @@ fn int layout_record_worker(void* arg) {
     return 0;
 }
 
-<* Concurrent layout records keep their pending state isolated. *>
-fn void parallel_recording_disjoint_texture_layouts() @test {
+fn void parallel_recording_disjoint_texture_transitions() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
 
@@ -662,13 +652,13 @@ fn void parallel_recording_disjoint_texture_layouts() @test {
         foreach (t : textures) (void)gpu::destroy_texture(&device, t);
     }
 
-    LayoutRecordArgs[THR_THREADS] args;
+    TransitionRecordArgs[THR_THREADS] args;
     for (uint i = 0; i < THR_THREADS; i++) {
         args[i] = { .device = &device, .texture = textures[i] };
     }
 
     Thread[THR_THREADS] threads;
-    for (uint i = 0; i < THR_THREADS; i++) threads[i].create(&layout_record_worker, &args[i])!!;
+    for (uint i = 0; i < THR_THREADS; i++) threads[i].create(&transition_record_worker, &args[i])!!;
     foreach (&t : threads) t.join()!!;
 
     gpu::ExecutableCommandList[THR_THREADS] lists;

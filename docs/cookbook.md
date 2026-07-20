@@ -225,7 +225,7 @@ Running example: `pipeline_cache_timing`.
 ## 12. Query swapchain runtime state
 
 Goal: build against the selected format and transition acquired images from
-their actual prior layout.
+their reported prior semantic use.
 
 ```c3
 gpu::PresentModeSupport support = gpu::get_present_mode_support(&device, swapchain)!;
@@ -237,20 +237,18 @@ if (info.dormant) { /* wait for a non-zero resize */ }
 gpu::Format[1] color_formats = { info.format };
 
 gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
-gpu::TextureUse before = acquired.prior_layout == gpu::TextureLayout.PRESENT
-    ? gpu::TextureUse.PRESENT : gpu::TextureUse.UNDEFINED;
 gpu::TextureBarrier to_color = gpu::texture_transition(
     acquired.texture,
-    before,
+    acquired.prior_use,
     gpu::TextureUse.COLOR_ATTACHMENT,
 )!;
 ```
 
 Re-query `SwapchainInfo` after resize, rebuild pipelines if `format` changed,
-and size any per-image data from `image_count`. `prior_layout` removes the
-fixed-size seen table normally used to distinguish first acquire from a
-previously presented image. FIFO is always available; other modes remain a
-support query away. The graphics submission consumes `acquired.readiness`; presentation accepts
+and size any per-image data from `image_count`. `prior_use` distinguishes a
+newly wrapped image from one returned by a previous presentation cycle. FIFO
+is always available; other modes remain a support query away. The graphics
+submission consumes `acquired.readiness`; presentation accepts
 its returned completion point. `TextureUse.PRESENT` uses color-attachment
 output without presentation-facing access.
 Running example: `present_mode_explorer`.

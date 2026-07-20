@@ -249,8 +249,8 @@ exclusive; multiple families use private concurrent sharing.
 
 A command list is a transient, owner-bearing token for a device-owned command
 record. The public token contains only a `Device` value and generation-checked
-handle; the Vulkan command buffer, pool, bind cache, pending layouts, context,
-queue, and lifecycle state remain backend-owned. Copies therefore alias one record.
+handle; the Vulkan command buffer, pool, bind cache, context, queue, and
+lifecycle state remain backend-owned. Copies therefore alias one record.
 
 State transitions:
 
@@ -522,8 +522,8 @@ cmd_texture_barrier(command_list, TextureBarrier)
 `Barrier` declares a global semantic dependency between nonempty stage masks.
 It carries no resource identity, address, range, layout, or queue family;
 special draw-argument, descriptor, and depth/stencil hazards are explicit.
-Texture layout transitions remain resource-specific. Cross-queue dependencies
-use completion waits.
+`TextureBarrier` declares a texture, subresource range, and semantic previous
+and next uses. Cross-queue dependencies use completion waits.
 
 Render pass boundaries do not imply shader-read or transfer-read readiness.
 
@@ -574,8 +574,9 @@ binary synchronization stays in the backend; public ordering uses readiness
 and completion values only.
 
 `SwapchainInfo` reports the selected format, extent, image count, present mode,
-and dormant state. `AcquiredImage.prior_layout` comes from committed texture
-state. Resize stales borrowed textures and never reuses acquisition identities.
+and dormant state. `AcquiredImage.prior_use` is `UNDEFINED` before first use
+and `PRESENT` after presentation. Resize stales borrowed textures and never
+reuses acquisition identities.
 
 Surface creation remains platform-specific. SDL helpers live outside `gpu`.
 

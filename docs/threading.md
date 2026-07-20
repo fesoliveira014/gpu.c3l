@@ -102,20 +102,13 @@ When both resource and view-cache locks are needed, resource comes first.
 Submission releases `command_mutex` before locking the selected queue, so
 command-record and queue locks are not nested.
 
-## Single-recorder texture discipline
+## Texture-transition discipline
 
-Across overlapping command recording, one thread owns a given texture's
-barriers and render passes. Under this discipline tracked-layout validation is exact and
-cross-texture parallel recording is data-race-free. Violating it degrades
-layout validation to best-effort (stale verdicts) — never memory unsafety.
-
-Texture-layout transitions are staged per list at record time (`old_layout`
-validates against the recording list's own pending transitions first, else
-the tracked layout) and only commit onto tracked state when the list
-submits, under the queue mutex, in submission order. A list that is recorded
-and never submitted has no effect on tracked state. Commit order is submit
-order, not cross-queue execution order — per-queue ownership of a texture
-stays the caller's responsibility.
+Texture transitions contain the caller-declared previous and next semantic
+uses. Recording does not consult or mutate shared layout state. Concurrent
+recording is therefore independent, but the caller must keep each declaration
+consistent with execution order and use completion-point waits for cross-queue
+ownership transfers.
 
 ## Visibility rules
 

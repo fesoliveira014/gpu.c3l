@@ -337,13 +337,11 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
     gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
     upload_test_texture_data(
-        device:      &device,
-        dst:         pattern,
-        mip:         0,
-        data:        white[..],
-        next_stage:  gpu::Stage.FRAGMENT_SHADER,
-        next_hazard: gpu::Hazard.SHADER_READ,
-        next_layout: gpu::TextureLayout.SHADER_READ,
+        device:   &device,
+        dst:      pattern,
+        mip:      0,
+        data:     white[..],
+        next_use: gpu::TextureUse.SAMPLED_FRAGMENT,
     )!!;
 
     gpu::TextureDesc rt_desc = {
@@ -436,13 +434,9 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
     gpu::GpuSpan[3] readbacks = { rb_culled.span, rb_drawn.span, rb_reset.span };
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
-            .texture       = targets[i],
-            .before_stage  = gpu::Stage.HOST,
-            .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
-            .before_hazard = gpu::Hazard.HOST_WRITE,
-            .after_hazard  = gpu::Hazard.COLOR_WRITE,
-            .old_layout    = gpu::TextureLayout.UNDEFINED,
-            .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .texture = targets[i],
+            .before  = gpu::TextureUse.UNDEFINED,
+            .after   = gpu::TextureUse.COLOR_ATTACHMENT,
         };
         gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
@@ -475,13 +469,9 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
         gpu::cmd_end_render_pass(&cmd)!!;
 
         gpu::TextureBarrier to_src = {
-            .texture       = targets[i],
-            .before_stage  = gpu::Stage.COLOR_ATTACHMENT,
-            .after_stage   = gpu::Stage.TRANSFER,
-            .before_hazard = gpu::Hazard.COLOR_WRITE,
-            .after_hazard  = gpu::Hazard.TRANSFER_READ,
-            .old_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
-            .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+            .texture = targets[i],
+            .before  = gpu::TextureUse.COLOR_ATTACHMENT,
+            .after   = gpu::TextureUse.TRANSFER_SOURCE,
         };
         gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -575,13 +565,9 @@ fn void alias_survives_peer_destroy() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_attach = {
-        .texture       = target,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.COLOR_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .texture = target,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
     gpu::ColorTargetDesc[1] colors = {{

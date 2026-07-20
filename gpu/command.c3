@@ -332,7 +332,7 @@ fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
     return vtable.cmd_barrier(commands, barrier);
 }
 
-<* Record a texture barrier; old_layout must match the texture's tracked layout. *>
+<* Record an explicit semantic texture transition. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);

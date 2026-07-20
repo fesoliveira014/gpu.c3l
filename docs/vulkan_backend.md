@@ -37,7 +37,7 @@ gpu/vk/queue.c3                queue family selection, queue handles, submit
 gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
 gpu/vk/allocation.c3           generic-buffer and raw texture-memory allocations
 gpu/vk/buffer.c3               VkBuffer + VMA allocation path
-gpu/vk/texture.c3              owned/placed images, views, layout tracking
+gpu/vk/texture.c3              owned/placed images, views, presentation-use state
 gpu/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
 gpu/vk/shader.c3               temporary SPIR-V modules and reflection validation
 gpu/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
@@ -331,7 +331,7 @@ public TextureDesc
     -> translate usage to vk::ImageUsageFlags
     -> derive the admitted native queue families
     -> allocator.try_create_image
-    -> create default image view and set initial layout
+    -> create default image view
     -> store TextureSlot, including access roles
     -> return TextureHandle
 ```
@@ -352,7 +352,10 @@ Any fault before publication destroys the temporary view, image, and allocation.
 Textures use the same one-family `EXCLUSIVE` or multi-family `CONCURRENT`
 rule as buffers, based only on `TextureDesc.access`.
 
-The backend tracks image layout per texture. For complex subresource layout tracking, begin with whole-image layout tracking and add subresource tracking only when required.
+Texture transitions map the caller-declared semantic uses and subresource
+range directly to one native image barrier. The backend does not infer or track
+general texture layouts. Swapchain slots retain only whether an image completed
+a presentation cycle so acquisition can report `prior_use`.
 
 ## 10. Descriptor heap implementation
 
@@ -402,7 +405,7 @@ never bind or consume the descriptor heap.
 
 This internal policy does not widen public resource access. Explicit command
 resources are checked against `CommandRecord.queue` before Vulkan commands,
-layout tracking, pipeline binding, or transfer allocation. Span metadata must
+command recording, pipeline binding, or transfer allocation. Span metadata must
 remain a non-empty subset of its backing buffer. Descriptor tokens and the
 internal heap remain scoped to their owning `Device`.
 
@@ -608,15 +611,13 @@ depth/stencil cache paths are enabled only by their hazard flags. Invalid,
 contradictory, consumer-incompatible, or queue-unsupported scopes fault before
 recording. Cross-queue ordering remains a submission completion-wait concern.
 
-The backend must not insert hidden barriers for user-visible resource transitions except for unavoidable swapchain acquire/present transitions inside WSI helpers.
+The backend must not insert hidden barriers for user-visible resource
+transitions except for unavoidable swapchain acquire/present transitions
+inside WSI helpers.
 
-For texture transitions, `Stage.NONE` translates exactly to
-`VK_PIPELINE_STAGE_2_NONE`. The
-presentation preset uses the color-attachment-output stage with an empty
-access scope on its WSI-facing side, while explicit `Stage.PRESENT` and
-`Hazard.PRESENT_READ` retain their
-compatibility mappings to `VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT` and
-`VK_ACCESS_2_MEMORY_READ_BIT`.
+For texture transitions, `TextureUse.UNDEFINED` maps to empty execution and
+access scopes. `TextureUse.PRESENT` uses the color-attachment-output stage
+with an empty access scope on its WSI-facing side.
 
 Presentation transitions use these exact synchronization2 scopes:
 
@@ -653,8 +654,8 @@ The queue mutex covers sequence reservation and `vkQueueSubmit2`, satisfying
 Vulkan external synchronization. Near the timeline-value-difference limit, the
 backend queries completed progress and returns `DEVICE_BUSY` before reservation
 if headroom remains unavailable. Native failure cancels the reservation before
-unlocking. Command records, layout commits, counters, swapchain state, and point
-publication commit only after native success.
+unlocking. Command records, counters, swapchain state, and point publication
+commit only after native success.
 
 ```text
 SubmitDesc
@@ -675,8 +676,8 @@ Render pass begin:
 
 ```text
 reject color counts above the library or selected-device limit
-validate every color handle, usage, mip/layer range, selected-mip extent, and layout
-validate the depth handle, usage, mip-zero extent, and layout
+validate every color handle, usage, mip/layer range, and selected-mip extent
+validate the depth handle, usage, and mip-zero extent
 transition only if caller explicitly requested via barrier before begin
 resolve views and build attachment infos only after all targets validate
 vkCmdBeginRendering
@@ -715,9 +716,10 @@ A readiness-consuming graphics submit:
 4. commits readiness consumption and the returned completion point only after
    `vkQueueSubmit2` succeeds.
 
-Present requires that exact completion point and image identity, verifies the
-tracked `PRESENT` layout, then waits the private present semaphore in
-`vkQueuePresentKHR`. Successful and enqueued WSI outcomes retire the acquisition.
+Present requires that exact completion point and image identity, then waits the
+private present semaphore in `vkQueuePresentKHR`. The caller records the
+explicit transition to `TextureUse.PRESENT` in the submitted command list.
+Successful and enqueued WSI outcomes retire the acquisition.
 Host or device allocation failure preserves it for retry.
 
 | Vulkan result | Public outcome | Recovery |
@@ -768,26 +770,14 @@ Releasing an allocation with a live placement returns `RESOURCE_IN_USE`.
 
 ## 19. Translation helpers
 
-All enum/flag conversion should live in `gpu/vk/helpers.c3`.
+Centralize enum and flag conversion in `gpu/vk/helpers.c3` or the backend file
+that owns the complete semantic operation. Texture-use conversion stays in
+`gpu/vk/sync.c3` beside barrier construction because layouts are private to
+that operation.
 
-Helpers:
-
-```text
-format_to_vk
-buffer_usage_to_vk
-texture_usage_to_vk
-stage_to_vk
-hazard_to_vk_access
-layout_to_vk
-filter_to_vk
-address_mode_to_vk
-compare_op_to_vk
-blend_factor_to_vk
-blend_op_to_vk
-topology_to_vk
-```
-
-Do not duplicate translation switches in command or resource files.
+Shared helpers include format, usage, sampler, blend, topology, and global
+barrier conversion. Do not duplicate translation switches in command or
+resource files.
 
 ## 20. Backend acceptance criteria
 

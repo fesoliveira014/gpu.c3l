@@ -6,7 +6,6 @@ import std::core::mem;
 
 const uint MAX_COMMAND_LISTS = gpu::MAX_DEVICE_COMMANDS;
 const uint COMMAND_FREE_NONE = 0;
-const usz PENDING_LAYOUT_INITIAL_CAPACITY = 16;
 
 enum CommandState : int {
     RECORDING,
@@ -14,12 +13,6 @@ enum CommandState : int {
     EXECUTABLE,
     SUBMITTING,
     SUBMITTED,
-}
-
-struct PendingLayout {
-    gpu::TextureHandle texture;
-    gpu::TextureLayout first_old;
-    gpu::TextureLayout latest;
 }
 
 struct CommandRecord {
@@ -33,8 +26,6 @@ struct CommandRecord {
     gpu::PipelineHandle         active_pipeline;
     uint                        active_entry;
     bool                        depth_state_set;
-    PendingLayout[]             pending_layouts;
-    uint                        pending_layout_count;
     CommandResourceReference[]  references;
     uint                        reference_count;
 }
@@ -185,17 +176,8 @@ fn void rollback_command_references(
     }
 }
 
-fn void free_pending_layouts(VkDeviceState* state, CommandRecord* record) {
-    if (record.pending_layouts.ptr != null) {
-        alloc::free(state.host_allocator, record.pending_layouts.ptr);
-        record.pending_layouts = {};
-    }
-    record.pending_layout_count = 0;
-}
-
 fn void release_command(VkDeviceState* state, gpu::CommandListHandle handle) {
     if (try record = state.commands.get(handle)) {
-        free_pending_layouts(state, record);
         free_command_references(state, record);
         (void)state.commands.free(handle);
     }
@@ -205,29 +187,9 @@ fn void destroy_command_table(VkDeviceState* state) {
     if (state.commands.slots.ptr == null) return;
     foreach (&cell : state.commands.slots[:state.commands.next_new]) {
         if (cell.used) {
-            free_pending_layouts(state, &cell.value);
             free_command_references(state, &cell.value);
         }
     }
     mem::free(state.commands.slots.ptr);
     state.commands = {};
-}
-
-fn void ensure_pending_layout_capacity(VkDeviceState* state, CommandRecord* record) {
-    if (record.pending_layout_count < record.pending_layouts.len) return;
-    usz new_capacity = record.pending_layouts.len == 0
-        ? PENDING_LAYOUT_INITIAL_CAPACITY
-        : record.pending_layouts.len * 2;
-    PendingLayout[] grown = alloc::new_array(
-        state.host_allocator,
-        PendingLayout,
-        (sz)new_capacity,
-    );
-    for (uint i = 0; i < record.pending_layout_count; i++) {
-        grown[i] = record.pending_layouts[i];
-    }
-    if (record.pending_layouts.ptr != null) {
-        alloc::free(state.host_allocator, record.pending_layouts.ptr);
-    }
-    record.pending_layouts = grown;
 }

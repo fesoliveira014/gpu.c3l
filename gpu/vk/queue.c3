@@ -2176,7 +2176,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 commit_swapchain_submit(swapchain, point);
             }
             foreach (record : records) {
-                commit_pending_layouts(state, record);
                 record.state = CommandState.SUBMITTED;
             }
             publish_queue_completion_locked(state, point)!!;

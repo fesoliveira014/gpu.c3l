@@ -686,8 +686,6 @@ fn void? vk_cmd_copy_buffer_to_texture(
         operation: "cmd_copy_buffer_to_texture",
     )!;
     if (!texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
-    gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
-    if (layout != gpu::TextureLayout.TRANSFER_DST) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
         resolved:          &buffer,
@@ -705,7 +703,7 @@ fn void? vk_cmd_copy_buffer_to_texture(
         command_buffer:  record.command_buffer,
         src_buffer:      buffer.slot.buffer,
         dst_image:       texture.image,
-        dst_image_layout: layout_to_vk(layout),
+        dst_image_layout: vk::ImageLayout.TRANSFER_DST_OPTIMAL,
         region_count:    1,
         p_regions:       &region,
     );
@@ -750,8 +748,6 @@ fn void? vk_cmd_copy_texture_to_buffer(
         operation: "cmd_copy_texture_to_buffer",
     )!;
     if (!texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
-    gpu::TextureLayout layout = effective_layout(record, texture, desc.texture);
-    if (layout != gpu::TextureLayout.TRANSFER_SRC) return gpu::INVALID_RESOURCE_STATE~;
 
     vk::BufferImageCopy region = resolve_texture_copy_region(
         resolved:          &buffer,
@@ -768,7 +764,7 @@ fn void? vk_cmd_copy_texture_to_buffer(
     vk::cmd_copy_image_to_buffer(
         command_buffer:  record.command_buffer,
         src_image:       texture.image,
-        src_image_layout: layout_to_vk(layout),
+        src_image_layout: vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
         dst_buffer:      buffer.slot.buffer,
         region_count:    1,
         p_regions:       &region,

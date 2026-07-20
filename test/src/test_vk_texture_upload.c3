@@ -160,13 +160,9 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::cmd_barrier(&cmd, &sample_host_read)!!;
 
     gpu::TextureBarrier to_src = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.SHADER_READ,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = gpu::TextureLayout.SHADER_READ,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        .texture = texture,
+        .before  = gpu::TextureUse.SAMPLED_COMPUTE,
+        .after   = gpu::TextureUse.TRANSFER_SOURCE,
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -272,13 +268,9 @@ fn void storage_write_direct_readback() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.STORAGE_COMPUTE,
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
@@ -291,13 +283,9 @@ fn void storage_write_direct_readback() @test {
     )!!;
 
     gpu::TextureBarrier to_src = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = gpu::TextureLayout.GENERAL,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        .texture = texture,
+        .before  = gpu::TextureUse.STORAGE_COMPUTE,
+        .after   = gpu::TextureUse.TRANSFER_SOURCE,
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -362,18 +350,10 @@ fn void copy_validation_faults() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
-    gpu::BufferTextureCopyDesc wrong_layout = { .src = span, .texture = texture };
-    fault layout_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &wrong_layout));
-    assert(layout_fault == gpu::INVALID_RESOURCE_STATE, "copy into a non-TRANSFER_DST layout faults INVALID_RESOURCE_STATE");
-
     gpu::TextureBarrier to_dst = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.TRANSFER_DESTINATION,
     };
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
 
@@ -492,13 +472,9 @@ fn void mip_subset_view_sampled() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_dst = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.TRANSFER_DESTINATION,
     };
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
     gpu::GpuSpan mip0_span = staging_span.checked_subspan(0, MIP0_BYTES)!!;
@@ -508,13 +484,9 @@ fn void mip_subset_view_sampled() @test {
     gpu::BufferTextureCopyDesc mip1_copy = { .src = mip1_span, .texture = texture, .mip = 1 };
     gpu::cmd_copy_buffer_to_texture(&cmd, &mip1_copy)!!;
     gpu::TextureBarrier to_read = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
-        .old_layout    = gpu::TextureLayout.TRANSFER_DST,
-        .new_layout    = gpu::TextureLayout.SHADER_READ,
+        .texture = texture,
+        .before  = gpu::TextureUse.TRANSFER_DESTINATION,
+        .after   = gpu::TextureUse.SAMPLED_COMPUTE,
     };
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
     bind_test_compute_pipeline(&cmd, sample_pipe);

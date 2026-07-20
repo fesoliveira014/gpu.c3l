@@ -6,6 +6,13 @@ import vk;
 
 // Pure-CPU: feeds the feature gate synthetic structs, no ICD required.
 
+struct TextureUseMapping {
+    gpu::TextureUse        use;
+    vk::PipelineStageFlags2 stages;
+    vk::AccessFlags2        access;
+    vk::ImageLayout         layout;
+}
+
 fn vk::PhysicalDeviceFeatures base_with_required() {
     vk::PhysicalDeviceFeatures base;
     base.shader_int64 = vk::TRUE;
@@ -270,6 +277,183 @@ fn void polygon_mode_optional_gate() @test {
         "LINE without optional support faults UNSUPPORTED_FEATURE");
 }
 
+fn void semantic_texture_uses_map_exactly() @test {
+    ulong shader_storage_access =
+        (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_STORAGE_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    ulong color_access =
+        (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    ulong depth_stages =
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    ulong depth_access =
+        (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    TextureUseMapping[9] cases = {
+        {
+            gpu::TextureUse.UNDEFINED,
+            vk::PipelineStageFlagBits2.STAGE_2_NONE,
+            vk::AccessFlagBits2.ACCESS_2_NONE,
+            vk::ImageLayout.UNDEFINED,
+        },
+        {
+            gpu::TextureUse.TRANSFER_SOURCE,
+            vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+            vk::AccessFlagBits2.ACCESS_2_TRANSFER_READ_BIT,
+            vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
+        },
+        {
+            gpu::TextureUse.TRANSFER_DESTINATION,
+            vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+            vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT,
+            vk::ImageLayout.TRANSFER_DST_OPTIMAL,
+        },
+        {
+            gpu::TextureUse.SAMPLED_COMPUTE,
+            vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+            vk::AccessFlagBits2.ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+        },
+        {
+            gpu::TextureUse.SAMPLED_FRAGMENT,
+            vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT,
+            vk::AccessFlagBits2.ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+        },
+        {
+            gpu::TextureUse.STORAGE_COMPUTE,
+            vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+            (vk::AccessFlags2)shader_storage_access,
+            vk::ImageLayout.GENERAL,
+        },
+        {
+            gpu::TextureUse.COLOR_ATTACHMENT,
+            vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            (vk::AccessFlags2)color_access,
+            vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+        },
+        {
+            gpu::TextureUse.DEPTH_ATTACHMENT,
+            (vk::PipelineStageFlags2)depth_stages,
+            (vk::AccessFlags2)depth_access,
+            vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        },
+        {
+            gpu::TextureUse.PRESENT,
+            vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            vk::AccessFlagBits2.ACCESS_2_NONE,
+            vk::ImageLayout.PRESENT_SRC_KHR,
+        },
+    };
+
+    foreach (&expected : cases) {
+        gpu::vk::TextureUseScope actual = gpu::vk::texture_use_to_vk(
+            expected.use,
+            gpu::Format.RGBA8_UNORM,
+        )!!;
+        assert(actual.stages == expected.stages, "texture use stage scope maps exactly");
+        assert(actual.access == expected.access, "texture use access scope maps exactly");
+        assert(actual.layout == expected.layout, "texture use layout maps exactly");
+    }
+}
+
+fn void sampled_depth_uses_choose_depth_stencil_read_only_layout() @test {
+    gpu::vk::TextureUseScope sampled = gpu::vk::texture_use_to_vk(
+        gpu::TextureUse.SAMPLED_FRAGMENT,
+        gpu::Format.D24_UNORM_S8_UINT,
+    )!!;
+    assert(sampled.layout == vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        "sampled depth-stencil textures use the joint read-only layout");
+}
+
+fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {
+    gpu::vk::TextureSlot color_slot = {
+        .format       = gpu::Format.RGBA8_UNORM,
+        .mip_levels   = 6,
+        .array_layers = 8,
+    };
+    gpu::TextureBarrier color_barrier = {
+        .view = {
+            .base_mip    = 2,
+            .mip_count   = 0,
+            .base_layer  = 3,
+            .layer_count = 2,
+        },
+        .before = gpu::TextureUse.TRANSFER_DESTINATION,
+        .after  = gpu::TextureUse.SAMPLED_FRAGMENT,
+    };
+    vk::ImageMemoryBarrier2 color = gpu::vk::texture_barrier_to_vk(
+        &color_barrier,
+        &color_slot,
+    )!!;
+    assert(color.old_layout == vk::ImageLayout.TRANSFER_DST_OPTIMAL);
+    assert(color.new_layout == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL);
+    assert(color.subresource_range.aspect_mask == vk::ImageAspectFlagBits.COLOR_BIT);
+    assert(color.subresource_range.base_mip_level == 2);
+    assert(color.subresource_range.level_count == 4);
+    assert(color.subresource_range.base_array_layer == 3);
+    assert(color.subresource_range.layer_count == 2);
+
+    gpu::vk::TextureSlot depth_slot = {
+        .format       = gpu::Format.D24_UNORM_S8_UINT,
+        .mip_levels   = 1,
+        .array_layers = 1,
+    };
+    gpu::TextureBarrier depth_barrier = {
+        .before = gpu::TextureUse.DEPTH_ATTACHMENT,
+        .after  = gpu::TextureUse.SAMPLED_COMPUTE,
+    };
+    vk::ImageMemoryBarrier2 depth = gpu::vk::texture_barrier_to_vk(
+        &depth_barrier,
+        &depth_slot,
+    )!!;
+    ulong expected_aspects =
+        (ulong)vk::ImageAspectFlagBits.DEPTH_BIT
+        | (ulong)vk::ImageAspectFlagBits.STENCIL_BIT;
+    assert((ulong)depth.subresource_range.aspect_mask == expected_aspects);
+    assert(depth.old_layout == vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+    assert(depth.new_layout == vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+}
+
+fn void semantic_texture_barrier_rejects_invalid_ranges_and_uses() @test {
+    gpu::vk::TextureSlot slot = {
+        .format       = gpu::Format.RGBA8_UNORM,
+        .mip_levels   = 4,
+        .array_layers = 2,
+    };
+    gpu::TextureBarrier barrier = {
+        .before = gpu::TextureUse.UNDEFINED,
+        .after  = gpu::TextureUse.TRANSFER_DESTINATION,
+    };
+
+    barrier.view.base_mip = 4;
+    assert(@catch(gpu::vk::texture_barrier_to_vk(&barrier, &slot))
+            == gpu::INVALID_ARGUMENT,
+        "a mip base at the texture limit is invalid");
+
+    barrier.view = { .base_layer = 1, .layer_count = 2 };
+    assert(@catch(gpu::vk::texture_barrier_to_vk(&barrier, &slot))
+            == gpu::INVALID_ARGUMENT,
+        "a layer range extending past the texture is invalid");
+
+    barrier.view = { .format = gpu::Format.R32_FLOAT };
+    assert(@catch(gpu::vk::texture_barrier_to_vk(&barrier, &slot))
+            == gpu::INVALID_ARGUMENT,
+        "format reinterpretation is invalid");
+
+    barrier.view = {};
+    barrier.after = gpu::TextureUse.UNDEFINED;
+    assert(@catch(gpu::vk::texture_barrier_to_vk(&barrier, &slot))
+            == gpu::INVALID_ARGUMENT,
+        "undefined is invalid as a destination use");
+
+    barrier.after = bitcast(999, gpu::TextureUse);
+    assert(@catch(gpu::vk::texture_barrier_to_vk(&barrier, &slot))
+            == gpu::INVALID_ARGUMENT,
+        "unknown semantic uses are invalid");
+}
+
 fn void semantic_barrier_stage_masks_map_exactly() @test {
     gpu::StageMask stages = {
         .compute = true,
@@ -500,35 +684,4 @@ fn void semantic_barrier_queue_flags_reject_unsupported_stages() @test {
             graphics_only,
         ),
         "graphics-capable families accept depth/stencil hazards");
-}
-
-fn void combined_texture_hazards_map_to_both_access_bits() @test {
-    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.NONE) == 0,
-        "NONE maps to no Vulkan access");
-
-    ulong shader_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
-        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT;
-    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.SHADER_READ_WRITE) == shader_expected,
-        "shader read/write maps both access bits");
-
-    ulong color_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT
-        | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.COLOR_READ_WRITE) == color_expected,
-        "color read/write maps both access bits");
-
-    ulong depth_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
-        | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.DEPTH_READ_WRITE) == depth_expected,
-        "depth read/write maps both access bits");
-}
-
-fn void presentation_scope_translations_are_exact() @test {
-    assert(gpu::vk::stage_to_vk(gpu::Stage.NONE) == vk::PipelineStageFlagBits2.STAGE_2_NONE,
-        "NONE maps to no Vulkan execution stage");
-    assert(gpu::vk::hazard_to_vk_access(gpu::Hazard.NONE) == vk::AccessFlagBits2.ACCESS_2_NONE,
-        "NONE maps to no Vulkan access");
-    assert(gpu::vk::stage_to_vk(gpu::Stage.PRESENT) == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
-        "legacy PRESENT keeps its broad execution stage");
-    assert(gpu::vk::hazard_to_vk_access(gpu::Hazard.PRESENT_READ) == vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT,
-        "legacy PRESENT_READ keeps its broad memory access");
 }

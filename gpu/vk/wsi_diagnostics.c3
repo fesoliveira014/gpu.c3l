@@ -203,17 +203,3 @@ fn void? check_swapchain_resize_lifecycle(
         )~;
     }
 }
-
-fn void? check_swapchain_present_layout(
-    WsiDiagnosticContext* context,
-    TextureSlot* image_slot,
-) {
-    if (texture_layout(image_slot) != gpu::TextureLayout.PRESENT) {
-        return report_wsi_contract(
-            context:        context,
-            public_fault:   gpu::INVALID_RESOURCE_STATE,
-            rejected_field: "acquired image layout",
-            invariant:      "must be TextureLayout.PRESENT",
-        )~;
-    }
-}

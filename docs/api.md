@@ -380,7 +380,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; no adapter can provide the requested semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
-| `INVALID_RESOURCE_STATE` | swapchain lifecycle, `cmd_texture_barrier` | an acquired swapchain image is pending during resize, or `old_layout` disagrees with the list's effective layout |
+| `INVALID_RESOURCE_STATE` | swapchain lifecycle | an acquired swapchain image is pending during resize, or a readiness/acquisition state transition is invalid |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
@@ -961,7 +961,7 @@ Backend family indices and native handles remain private. Resource descriptions
 require a non-empty subset of the selected roles. A queue may use a resource when
 at least one of its roles appears in the resource's `access` set. A `GpuSpan` also rejects empty,
 unknown, or wider-than-backing access metadata. These checks run before command
-or tracked-layout mutation.
+or command mutation.
 
 Allocations reached only through root GPU pointers remain a caller contract:
 every reachable allocation must admit the recording role because nested pointers
@@ -1078,7 +1078,8 @@ negative-height viewport flips or off-pass overscan.
 
 A pass names at least one color target or a depth target; depth-only passes
 (the shadow-map shape) are valid. A depth target needs `depth_attach` usage
-and the `DEPTH_STENCIL` tracked layout. `D32_FLOAT` is the only supported
+and an explicit transition to `TextureUse.DEPTH_ATTACHMENT`. `D32_FLOAT` is
+the only supported
 depth format; pipelines name it in `GraphicsPipelineDesc.depth_format`.
 Every selected color mip and the depth texture's mip zero must cover the pass
 dimensions; smaller compatible render areas are valid. The color count must
@@ -1239,70 +1240,57 @@ derived from the stage masks. `draw_arguments`, `descriptors`, and
 shader or `all` consumer stage. The library does not infer barriers. Cross-queue
 dependencies use `SubmitDesc.completion_waits`, not `cmd_barrier`.
 
-Texture transitions remain explicit through `TextureBarrier`:
+Texture transitions remain explicit and semantic:
 
 ```text
+TextureUse
+    UNDEFINED
+    TRANSFER_SOURCE
+    TRANSFER_DESTINATION
+    SAMPLED_COMPUTE
+    SAMPLED_FRAGMENT
+    STORAGE_COMPUTE
+    COLOR_ATTACHMENT
+    DEPTH_ATTACHMENT
+    PRESENT
+
 TextureBarrier
     TextureHandle texture
-    Stage before_stage
-    Stage after_stage
-    Hazard before_hazard
-    Hazard after_hazard
-    TextureLayout old_layout
-    TextureLayout new_layout
+    TextureViewDesc view
+    TextureUse before
+    TextureUse after
 
+texture_transition(TextureHandle texture, TextureUse before, TextureUse after)
+    -> TextureBarrier?
+texture_view_transition(TextureHandle texture, TextureViewDesc view,
+    TextureUse before, TextureUse after) -> TextureBarrier?
 cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) -> void?
 ```
 
-For texture transitions, `Stage.NONE` is an empty execution scope. Explicit
-`Stage.PRESENT` and `Hazard.PRESENT_READ` map to all commands and memory read.
-The `TextureUse.PRESENT` preset instead uses `COLOR_ATTACHMENT` with no access
-scope so its barriers chain with private WSI wait and signal stages.
+`before` declares the prior use; `after` declares the next use. The backend maps
+both uses to private execution, access, and layout scopes. `UNDEFINED` is
+source-only and faults `INVALID_ARGUMENT` as `after`. Same-use transitions are
+valid explicit memory dependencies. Sampled depth/stencil textures use the
+appropriate read-only depth/stencil state.
 
-`TextureLayout` values: UNDEFINED, GENERAL, COLOR_ATTACHMENT, DEPTH_STENCIL,
-SHADER_READ, TRANSFER_SRC, TRANSFER_DST, PRESENT. `old_layout` must match the
-list's effective layout — its own pending transitions if it has recorded any
-for the texture, else the tracked layout — or the barrier faults
-`INVALID_RESOURCE_STATE`. A recorded transition is staged on the list and
-only commits onto tracked state when the list submits; a list that never
-submits leaves tracked state untouched.
+A zero `view` selects the full texture. Zero mip or layer counts select the
+remaining range from their respective base. Format reinterpretation and
+out-of-range subresources fault `INVALID_ARGUMENT`.
 
-For common whole-texture transitions, `TextureUse` maps resource intent to
-an exact synchronization tuple:
+The constructors are pure and insert no synchronization. Recording validates
+the texture handle, queue access, semantic values, texture usage and format,
+presentation ownership, and the subresource range. It does not infer, track, or
+repair prior use; a wrong `before` declaration is a caller synchronization
+error and does not change
+release behavior.
 
-| `TextureUse` | `Stage` | `Hazard` | `TextureLayout` |
-|---|---|---|---|
-| `UNDEFINED` | `HOST` | `NONE` | `UNDEFINED` |
-| `TRANSFER_DESTINATION` | `TRANSFER` | `TRANSFER_WRITE` | `TRANSFER_DST` |
-| `SAMPLED_COMPUTE` | `COMPUTE_SHADER` | `SHADER_READ` | `SHADER_READ` |
-| `SAMPLED_FRAGMENT` | `FRAGMENT_SHADER` | `SHADER_READ` | `SHADER_READ` |
-| `STORAGE_COMPUTE` | `COMPUTE_SHADER` | `SHADER_READ_WRITE` | `GENERAL` |
-| `COLOR_ATTACHMENT` | `COLOR_ATTACHMENT` | `COLOR_READ_WRITE` | `COLOR_ATTACHMENT` |
-| `DEPTH_ATTACHMENT` | `DEPTH_STENCIL` | `DEPTH_READ_WRITE` | `DEPTH_STENCIL` |
-| `PRESENT` | `COLOR_ATTACHMENT` | `NONE` | `PRESENT` |
+At the presentation boundary, `AcquiredImage.prior_use` supplies the first
+transition's `before` value. `PRESENT` maps to presentation state with no access
+scope; transitions to and from color attachment state provide the rendering
+access scopes.
 
-```text
-texture_transition(TextureHandle texture, TextureUse before, TextureUse after)
-    -> TextureBarrier?
-```
-
-The constructor is pure: it does not inspect tracked layout, record a command,
-or insert synchronization. `UNDEFINED` is source-only and faults
-`INVALID_ARGUMENT` as `after`. Same-use barriers remain valid for explicit
-memory ordering. Presets intentionally cover only common cases; construct a
-raw `TextureBarrier` for transfer sources, other shader stages, read-only
-attachments, subresource-specific work, or any unusual tuple.
-
-At the presentation boundary, both barrier sides use `COLOR_ATTACHMENT` for
-the texture transition itself. The private readiness bridge conservatively
-covers the complete submission. Access remains asymmetric by composition:
-`PRESENT -> COLOR_ATTACHMENT` uses `NONE -> COLOR_READ_WRITE`, while
-`COLOR_ATTACHMENT -> PRESENT` uses `COLOR_READ_WRITE -> NONE`.
-
-The `UNDEFINED` preset's `HOST`/`NONE` source scope is only for first use or
-discard when no earlier GPU work still accesses the texture. Reinitializing a
-texture that an earlier submission may still read requires a raw barrier whose
-source stage and hazard cover that access.
+`UNDEFINED` supplies no source dependency and discards prior contents. Use it
+only for first use or after earlier access has been ordered separately.
 
 No command helper should silently insert barriers for a later use.
 
@@ -1411,7 +1399,7 @@ AcquiredImage
     SwapchainReadiness readiness
     uint index
     bool suboptimal
-    TextureLayout prior_layout
+    TextureUse prior_use
 
 create_swapchain(Device*, Surface*, SwapchainDesc*) -> SwapchainHandle?
 destroy_swapchain(Device*, SwapchainHandle) -> void?
@@ -1440,9 +1428,9 @@ gpu::present(&device, &acquired, rendered)!;
 ```
 
 A successful or enqueued present consumes `acquired`; validation failure and
-native host/device allocation failure leave it retryable. `present` requires the
-texture's tracked layout to be `PRESENT`. Resize rejects a pending acquisition;
-destruction waits submitted render work and invalidates it.
+native host/device allocation failure leave it retryable. The caller explicitly
+transitions the acquired texture to `PRESENT` before submission. Resize rejects
+a pending acquisition; destruction waits submitted render work and invalidates it.
 
 `WAIT_TIMEOUT` from acquire leaves the swapchain unchanged. It can mean the
 native acquire timed out or reported not ready, or that both private acquire
@@ -1456,9 +1444,9 @@ mode, and dormant state. Re-query after resize and rebuild format-dependent
 pipelines when the format changes. A dormant swapchain reports `UNDEFINED`,
 zero extent/count, and FIFO until resize succeeds.
 
-`AcquiredImage.prior_layout` is the committed texture layout: `UNDEFINED` for a
-newly wrapped image and `PRESENT` after the normal presentation cycle. Resize
-stales prior borrowed texture handles. Destroy descriptors that reference
+`AcquiredImage.prior_use` is `UNDEFINED` for a newly wrapped image and `PRESENT`
+after the normal presentation cycle. Resize stales prior borrowed texture
+handles. Destroy descriptors that reference
 swapchain textures before resize.
 
 SDL integration belongs in samples or an optional helper module.

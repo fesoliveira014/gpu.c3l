@@ -471,7 +471,7 @@ fn gpu::AcquiredImage make_acquired_image(
         .readiness    = readiness,
         .index        = index,
         .suboptimal   = suboptimal,
-        .prior_layout = texture_layout(texture),
+        .prior_use    = swapchain_prior_use(texture),
     };
 }
 
@@ -1015,8 +1015,6 @@ fn void? vk_present_with(
         context: &context,
         handle:  image.texture,
     )!;
-    check_swapchain_present_layout(&context, image_slot)!;
-
     vk::PresentInfoKHR info = {
         .s_type               = vk::StructureType.PRESENT_INFO_KHR,
         .wait_semaphore_count = 1,
@@ -1030,6 +1028,9 @@ fn void? vk_present_with(
     queue_mutex.lock()!!;
     vk::Result result = present_fn(state.presentation.queue, &info);
     queue_mutex.unlock();
+    if (present_result_consumes_acquisition(result)) {
+        mark_texture_presented(image_slot);
+    }
     commit_present_result(slot, image, result);
     return check_wsi_backend_result(
         context: &context,
