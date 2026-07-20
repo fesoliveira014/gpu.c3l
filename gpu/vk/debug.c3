@@ -104,19 +104,6 @@ fn uint route_debug_message(
     return vk::FALSE;
 }
 
-fn void report_debug_messenger_failure(VkDeviceState* state, ZString text) {
-    if (state.debug_callback == null) {
-        io::eprintfn("vk: %s; relying on layer stderr", text);
-        return;
-    }
-    gpu::DebugMessage message = {
-        .severity     = gpu::DebugMessageSeverity.WARNING,
-        .category     = { .backend },
-        .operation    = "create_device",
-        .backend_text = text,
-    };
-    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
-}
 
 <* Emit exactly one public-contract ERROR when configured, return public_fault
    unchanged, and permit delivery while internal locks are held. *>

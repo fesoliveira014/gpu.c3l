@@ -116,14 +116,14 @@ fn void initialize_adapter(
 
     vk::PhysicalDeviceLimits* limits = &adapter.properties.limits;
     adapter.info = {
-        .name         = ((ZString)&adapter.properties.device_name[0]).str_view(),
-        .vendor_id    = adapter.properties.vendor_id,
-        .device_id    = adapter.properties.device_id,
-        .device_class = adapter_class(adapter.properties.device_type),
-        .memory       = query_adapter_memory(physical_device),
-        .queues       = query_adapter_queues(physical_device),
+        .name             = ((ZString)&adapter.properties.device_name[0]).str_view(),
+        .vendor_id        = adapter.properties.vendor_id,
+        .device_id        = adapter.properties.device_id,
+        .device_class     = adapter_class(adapter.properties.device_type),
+        .memory           = query_adapter_memory(physical_device),
+        .queues           = query_adapter_queues(physical_device),
         .strict_supported = strict_adapter_supported(physical_device, config),
-        .limits       = {
+        .limits           = {
             .max_texture_dimension_2d  = limits.max_image_dimension2d,
             .max_texture_array_layers  = limits.max_image_array_layers,
             .max_color_attachments     = limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS

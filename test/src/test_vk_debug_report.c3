@@ -17,7 +17,6 @@ struct DebugCapture {
     bool              validation_strings_match;
     bool              barrier_strings_match;
     bool              device_name_matches;
-    bool              messenger_failure_strings_match;
 }
 
 struct SamplerNameCapture {
@@ -66,10 +65,6 @@ fn void capture_debug_message(gpu::DebugMessage* message, void* user_data) {
     }
     if (message.resource.kind == gpu::DebugResourceKind.DEVICE && message.resource.debug_name != null) {
         capture.device_name_matches = message.resource.debug_name.str_view() == "named_device";
-    }
-    if (message.backend_text != null && message.backend_text.str_view() == "fabricated messenger failure") {
-        capture.messenger_failure_strings_match = message.operation != null
-            && message.operation.str_view() == "create_device";
     }
 }
 
@@ -423,22 +418,6 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
         "helper exposes borrowed contract strings only during callback delivery");
 }
 
-fn void debug_messenger_failure_routes_backend_warning() @test {
-    DebugCapture capture;
-    vk::VkDeviceState state = {
-        .debug_callback  = &capture_debug_message,
-        .debug_user_data = &capture,
-    };
-
-    vk::report_debug_messenger_failure(&state, "fabricated messenger failure");
-
-    assert(capture.calls == 1, "messenger setup failure routes exactly once");
-    assert(capture.last.severity == gpu::DebugMessageSeverity.WARNING, "messenger setup failure is a warning");
-    assert(capture.last.category.backend, "messenger setup failure is a backend diagnostic");
-    assert(!capture.last.has_fault, "best-effort messenger setup failure carries no public fault");
-    assert(capture.messenger_failure_strings_match,
-        "callback observes borrowed create-device operation and failure text while valid");
-}
 
 fn void debug_names_do_not_require_validation() @test {
     gpu::RuntimeDesc desc = {
