@@ -7,11 +7,11 @@ exactly as an external project would — the genuine consumer path.
 
 ## Baseline
 
-The samples repository contains 18 samples and `shared_selftest`. Its root
-README is the authoritative target index, capability matrix, and smoke-command
-reference. CI checks generated ABI files, builds shaders, runs all nine
-headless/helper targets, and runs all ten windowed targets under xvfb/lavapipe
-with bounded application-render iterations.
+The samples repository contains 18 samples and two helper self-tests. Its root
+README is the authoritative 20-target index, capability matrix, and
+smoke-command reference. CI checks strict API usage and generated ABI files,
+builds shaders, runs all ten headless/helper targets, and runs all ten windowed
+targets under xvfb/lavapipe with bounded application-render iterations.
 
 ## Conventions
 

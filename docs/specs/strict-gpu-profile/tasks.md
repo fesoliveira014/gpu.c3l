@@ -336,7 +336,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 7.3 Rewrite current-state documentation and tooling
 
-- [ ] Update `docs/architecture.md`, `docs/api.md`, `docs/memory.md`, `docs/shader_abi.md`, `docs/threading.md`, `docs/vulkan_backend.md`, getting-started/cookbook/limitations/testing documents, public doc strings, manifest source lists, and CI scripts.
+- [x] Update `docs/architecture.md`, `docs/api.md`, `docs/memory.md`, `docs/shader_abi.md`, `docs/threading.md`, `docs/vulkan_backend.md`, getting-started/cookbook/limitations/testing documents, public doc strings, manifest source lists, and CI scripts.
   - **Depends on:** 7.1 and 7.2.
   - **Contract:** documentation describes implemented behavior, remains lean, and contains no narration, development labels, issue or PR references, or backend details in public contracts.
   - **Edges:** distinguish target planning documents from current API until release; keep platform and VMA setup accurate without leaking implementation into usage APIs.

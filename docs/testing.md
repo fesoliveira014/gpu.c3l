@@ -318,7 +318,8 @@ c3c build sampler_operations --path test/cpu
 c3c build texture_view_operations --path test/cpu
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
-python -m unittest scripts.test_check_public_api scripts.test_check_backend_dispatch
+python -m unittest scripts.test_check_docs scripts.test_check_public_api scripts.test_check_backend_dispatch
+python scripts/check_docs.py
 python scripts/check_public_api.py
 python scripts/check_backend_dispatch.py
 python scripts/check_retired_api.py
@@ -420,8 +421,8 @@ C3 0.8.0 constraints:
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
   a `project.json` key); dependencies are declared per-target and resolved by
   the consumer's search path.
-- `manifest.json` `sources` must list files explicitly — all 21 public source
-  files under `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the
+- `manifest.json` `sources` must cover every public source file under
+  `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the
   default does not recurse into `gpu/vk/`.
 
 ## 10. CI matrix
@@ -429,12 +430,12 @@ C3 0.8.0 constraints:
 CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
 
 ```text
-linux (blocking): generator tests, ABI drift gate, shader build, full
-    lavapipe test sweep, then a c3c docgen API reference uploaded as the
-    api-reference artifact
-windows (blocking): same suite via mesa-dist-win lavapipe, registered in the
-    HKLM Vulkan driver registry; private heap selection is covered by the
-    shared mocked and native targets
+linux (blocking): documentation/source-list gate, generator tests, ABI drift
+    gate, shader build, full lavapipe test sweep, then a c3c docgen API
+    reference uploaded as the api-reference artifact
+windows (blocking): documentation/source-list gate and the same suite via
+    mesa-dist-win lavapipe, registered in the HKLM Vulkan driver registry;
+    private heap selection is covered by the shared mocked and native targets
 docs-walkthrough (blocking): executes docs/getting_started.md verbatim on a
     bare runner
 ```
@@ -568,4 +569,7 @@ memory stats report plausible budgets
 leak reports are clean after all samples
 public API docs match signatures
 no public API signature exposes vk::, vma::, or sdl:: types
+public sources declare only gpu and the three platform surface modules
+documentation links resolve
+manifest sources cover every shipped C3 source
 ```

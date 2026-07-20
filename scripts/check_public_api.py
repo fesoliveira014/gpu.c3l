@@ -1328,6 +1328,63 @@ def validate_private_backend_source(relative: Path, source: str) -> list[str]:
     return failures
 
 
+def expected_public_module(relative: Path) -> str:
+    parts = relative.parts
+    if (
+        len(parts) >= 4
+        and parts[:2] == ("gpu", "surface")
+        and parts[2] in {"wayland", "win32", "x11"}
+    ):
+        return f"gpu::surface::{parts[2]}"
+    return "gpu"
+
+
+def validate_public_module_source(
+    relative: Path,
+    source: str,
+) -> list[str]:
+    normalized = source.lstrip("﻿")
+    module_declarations = list(MODULE_DECLARATION.finditer(normalized))
+    expected = expected_public_module(relative)
+    if not module_declarations:
+        return [
+            f"{relative.as_posix()} must declare public module {expected}"
+        ]
+    failures = []
+    for declaration in module_declarations:
+        name = declaration.group("name")
+        if name == expected:
+            continue
+        line_number = normalized.count(
+            "\n",
+            0,
+            declaration.start(),
+        ) + 1
+        failures.append(
+            f"{relative.as_posix()}:{line_number} "
+            f"public source may only declare {expected}, found {name}"
+        )
+    return failures
+
+
+def scan_public_module_sources() -> list[str]:
+    failures = []
+    for path in sorted((ROOT / "gpu").rglob("*")):
+        relative = path.relative_to(ROOT)
+        if (
+            path.is_file()
+            and path.suffix in {".c3", ".c3i"}
+            and "vk" not in relative.parts
+        ):
+            failures.extend(
+                validate_public_module_source(
+                    relative,
+                    path.read_text(encoding="utf-8"),
+                )
+            )
+    return failures
+
+
 def scan_private_backend_modules() -> list[str]:
     failures = []
     for path in sorted((ROOT / "gpu" / "vk").rglob("*.c3")):
@@ -1367,6 +1424,7 @@ def main() -> int:
         )
     )
     failures.extend(scan_retired_source_symbols())
+    failures.extend(scan_public_module_sources())
     failures.extend(scan_private_backend_modules())
     if failures:
         print("public GPU API contract violations:", file=sys.stderr)
