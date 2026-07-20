@@ -328,7 +328,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 7.2 Canonicalize and audit strict samples
 
-- [ ] Finish and audit the incremental `gpu.c3l-samples` migration to runtime → adapter → request → device → queue → allocation → record → submit → completion usage, keep allocation policy local to samples, and pin the samples repository to the merged 7.1 library commit.
+- [x] Finish and audit the incremental `gpu.c3l-samples` migration to runtime → adapter → request → device → queue → allocation → record → submit → completion usage, keep allocation policy local to samples, and pin the samples repository to the merged 7.1 library commit.
   - **Depends on:** 7.1.
   - **Contract:** getting-started material teaches strict use first; no sample imports compatibility; readback and presentation use the approved completion/lifetime flow.
   - **Edges:** headless compute, windowed rendering, upload/readback, resize, multiple devices, and cleanup after partial setup.
