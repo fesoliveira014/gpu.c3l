@@ -219,7 +219,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.1 Interned sampler identity and strict publication
 
-- [ ] Split immutable device-interned `Sampler` identity from capability-gated strict heap publication in `gpu/texture.c3`, `gpu/descriptor_heap.c3`, and corresponding Vulkan files.
+- [x] Split immutable device-interned `Sampler` identity from capability-gated strict heap publication in `gpu/texture.c3`, `gpu/descriptor_heap.c3`, and corresponding Vulkan files.
   - **Depends on:** 2.2 and 2.3.
   - **Contract:** sampler identity works on compatibility-only devices; strict publication returns a backend-neutral shader index only when strict capability is enabled; samplers live until device destruction.
   - **Edges:** duplicate descriptors, exhaustion, unsupported strict publication, cross-device sampler, and concurrent interning.
