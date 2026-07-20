@@ -70,7 +70,7 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 |---|---|---:|---:|
 | Descriptor churn | Texture single / batch of 16, one worker | 320 each | 512 / 313 ns/descriptor |
 | Sampler lookup | Intern + stable publication hits, one worker | 320 | 239 ns/op |
-| Command recording | Global / buffer barrier / indirect dispatch | 20,000 × 5 | 123 / 142 / 173 ns/record median |
+| Command recording | Barrier / hazard barrier / indirect dispatch | 20,000 × 5 | 123 / 142 / 173 ns/record median |
 | Pipeline creation | Cold / cached duplicate | 200 / 200,000 | 14,808 / 137 ns/create |
 | Async overlap | Serialized / independent queues | 5 | 8.872 / 9.464 ms wall median; overlap observed |
 

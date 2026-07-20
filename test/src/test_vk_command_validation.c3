@@ -1672,6 +1672,7 @@ fn void barrier_hazard_matrix_submits() @test {
     )!!;
     gpu::wait_completion(completion)!!;
 }
+
 fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;

@@ -290,8 +290,8 @@ Transfer storage is caller-owned. Uploads use `CPU_WRITE` allocations: borrow
 the span, mapping, and address as needed, write, flush, record and submit the
 copy, wait for or poll the covering completion point, then free or reuse the
 owning allocation.
-Readback uses `CPU_READ` allocations: record the copy and a destination barrier
-from `TRANSFER_WRITE` to `HOST_READ`, submit, wait or poll, invalidate, then
+Readback uses `CPU_READ` allocations: record the copy and a global barrier with
+`before.transfer` and `after.host`, submit, wait or poll, invalidate, then
 read the mapping before freeing or reusing the owning allocation.
 
 The core does not allocate transfer storage, choose fallback policy, or create

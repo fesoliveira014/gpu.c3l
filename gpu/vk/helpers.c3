@@ -442,6 +442,24 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
     return (vk::AccessFlags2)mask;
 }
 
+fn vk::MemoryBarrier2 barrier_to_vk(
+    gpu::Barrier* barrier,
+    bool descriptor_buffer,
+) {
+    return vk::memory_barrier2()
+        .set_src_stage_mask(barrier_before_stages_to_vk(barrier.before))
+        .set_src_access_mask(barrier_before_access_to_vk(barrier.before))
+        .set_dst_stage_mask(barrier_after_stages_to_vk(
+            barrier.after,
+            barrier.hazards,
+        ))
+        .set_dst_access_mask(barrier_after_access_to_vk(
+            barrier.after,
+            barrier.hazards,
+            descriptor_buffer,
+        ));
+}
+
 fn bool barrier_stage_mask_valid(gpu::StageMask stages) @private {
     uint raw = (uint)stages;
     if (raw == 0 || (raw & BARRIER_STAGE_BITS) != raw) return false;

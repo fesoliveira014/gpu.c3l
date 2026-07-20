@@ -81,7 +81,7 @@ Running example: `bindless_texture_compute` (compute),
 Goal: wait for a result and read it on the CPU.
 
 Allocate `CPU_READ` memory, record the resource transition and copy into its
-span, then record a buffer barrier from `TRANSFER_WRITE` to `HOST_READ`.
+span, then record a global barrier with `before.transfer` and `after.host`.
 Call `submit`, wait for the returned completion point, invalidate the mapped
 span, and read it. Free or reuse the allocation only after completion.
 
@@ -91,8 +91,8 @@ Running examples: `offscreen_triangle`, `multithreaded_recording`.
 
 Goal: overlap GPU work with CPU consumption.
 
-Allocate a `CPU_READ` destination, record the copy and a `TRANSFER_WRITE` to
-`HOST_READ` barrier on that destination, then keep the completion point returned
+Allocate a `CPU_READ` destination, record the copy and a global barrier with
+`before.transfer` and `after.host`, then keep the completion point returned
 by `submit`. Once `poll_completion` succeeds, call
 `invalidate_mapped_span` and read the mapped span. Reuse or free the allocation
 only after completion.
@@ -296,7 +296,7 @@ Use `AllocationInfo` for actual capabilities; do not assume coherence. For
 long-lived CPU-written data, borrow the allocation's span, mapping, and address
 as needed, write, flush, record and submit, wait for or poll the covering
 completion point, then free the owning allocation. For readback, record a
-`TRANSFER_WRITE` to `HOST_READ` barrier on the destination, wait or poll
+global barrier with `before.transfer` and `after.host`, wait or poll
 completion, invalidate the `CPU_READ` span, then read its mapping. Running
 example: `memory_report`.
 
