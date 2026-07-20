@@ -101,15 +101,12 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
         "cmd_copy_texture_to_buffer rejects a null descriptor"
     );
     assert(
-        @catch(gpu::cmd_buffer_barrier(&commands, (gpu::BufferBarrier*)null))
+        @catch(gpu::cmd_barrier(&commands, (gpu::Barrier*)null))
             == gpu::INVALID_ARGUMENT,
-        "cmd_buffer_barrier rejects a null barrier"
+        "cmd_barrier rejects a null barrier"
     );
-    assert(
-        @catch(gpu::cmd_global_barrier(&commands, (gpu::GlobalBarrier*)null))
-            == gpu::INVALID_ARGUMENT,
-        "cmd_global_barrier rejects a null barrier"
-    );
+
+
     assert(
         @catch(gpu::cmd_texture_barrier(&commands, (gpu::TextureBarrier*)null))
             == gpu::INVALID_ARGUMENT,

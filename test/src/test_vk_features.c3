@@ -270,6 +270,207 @@ fn void polygon_mode_optional_gate() @test {
         "LINE without optional support faults UNSUPPORTED_FEATURE");
 }
 
+fn void semantic_barrier_stage_masks_map_exactly() @test {
+    gpu::StageMask stages = {
+        .compute = true,
+        .color_output = true,
+    };
+    ulong expected = (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    assert((ulong)gpu::vk::barrier_before_stages_to_vk(stages) == expected,
+        "combined semantic producer stages map exactly");
+
+    gpu::HazardFlags hazards = {
+        .draw_arguments = true,
+        .depth_stencil = true,
+    };
+    expected |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    assert((ulong)gpu::vk::barrier_after_stages_to_vk(stages, hazards) == expected,
+        "special consumer hazards extend the destination stage scope");
+
+    gpu::StageMask all = { .all = true };
+    assert(gpu::vk::barrier_before_stages_to_vk(all)
+            == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        "all maps to the broad execution scope");
+    gpu::StageMask present = { .present = true };
+    assert(gpu::vk::barrier_after_stages_to_vk(present, {})
+            == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        "presentation maps to the broad execution scope");
+}
+
+fn void semantic_barrier_access_masks_map_exactly() @test {
+    gpu::StageMask stages = {
+        .host = true,
+        .transfer = true,
+        .compute = true,
+        .color_output = true,
+    };
+    ulong before_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_HOST_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    assert((ulong)gpu::vk::barrier_before_access_to_vk(stages) == before_expected,
+        "producer stages make their writes available");
+
+    gpu::HazardFlags hazards = {
+        .draw_arguments = true,
+        .descriptors = true,
+        .depth_stencil = true,
+    };
+    ulong after_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_HOST_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_TRANSFER_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    assert((ulong)gpu::vk::barrier_after_access_to_vk(stages, hazards, true)
+            == after_expected,
+        "consumer stages and special hazards map to required access scopes");
+    ulong indexing_expected = after_expected
+        & ~(ulong)vk::AccessFlagBits2.ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT;
+    assert((ulong)gpu::vk::barrier_after_access_to_vk(stages, hazards, false)
+            == indexing_expected,
+        "descriptor-buffer access is omitted for the indexing implementation");
+
+    gpu::StageMask present = { .present = true };
+    assert(gpu::vk::barrier_after_access_to_vk(present, {}, false)
+            == vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT,
+        "presentation consumes memory");
+}
+
+fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
+    gpu::Barrier valid = {
+        .before = { .compute = true },
+        .after = { .fragment_shader = true },
+        .hazards = { .descriptors = true },
+    };
+    assert(gpu::vk::barrier_masks_valid(&valid),
+        "nonempty semantic masks are valid");
+
+    gpu::Barrier empty_before = valid;
+    empty_before.before = {};
+    assert(!gpu::vk::barrier_masks_valid(&empty_before),
+        "empty producer masks are invalid");
+
+    gpu::Barrier empty_after = valid;
+    empty_after.after = {};
+    assert(!gpu::vk::barrier_masks_valid(&empty_after),
+        "empty consumer masks are invalid");
+
+    gpu::Barrier all_and_specific = valid;
+    all_and_specific.before.all = true;
+    assert(!gpu::vk::barrier_masks_valid(&all_and_specific),
+        "all cannot be combined with a specific stage");
+
+    gpu::Barrier present_and_specific = valid;
+    present_and_specific.after.present = true;
+    assert(!gpu::vk::barrier_masks_valid(&present_and_specific),
+        "present cannot be combined with a device stage");
+
+    gpu::Barrier present_with_hazard = {
+        .before = { .color_output = true },
+        .after = { .present = true },
+        .hazards = { .draw_arguments = true },
+    };
+    assert(!gpu::vk::barrier_masks_valid(&present_with_hazard),
+        "presentation cannot carry a special hazard");
+
+    gpu::Barrier unknown_stage = valid;
+    unknown_stage.before = (gpu::StageMask)0x200u;
+    assert(!gpu::vk::barrier_masks_valid(&unknown_stage),
+        "unknown stage-mask bits are invalid");
+
+    gpu::Barrier unknown_hazard = valid;
+    unknown_hazard.hazards = (gpu::HazardFlags)0x8u;
+    assert(!gpu::vk::barrier_masks_valid(&unknown_hazard),
+        "unknown hazard bits are invalid");
+
+    gpu::Barrier descriptor_without_shader = {
+        .before = { .transfer = true },
+        .after = { .transfer = true },
+        .hazards = { .descriptors = true },
+    };
+    assert(!gpu::vk::barrier_masks_valid(&descriptor_without_shader),
+        "descriptor hazards require a shader consumer stage");
+}
+
+fn void semantic_barrier_queue_flags_reject_unsupported_stages() @test {
+    vk::QueueFlags transfer_only =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.TRANSFER_BIT;
+    vk::QueueFlags compute_only =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.COMPUTE_BIT;
+    vk::QueueFlags graphics_only =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.GRAPHICS_BIT;
+    vk::QueueFlags graphics_compute = (vk::QueueFlags)(
+        (uint)vk::QueueFlagBits.GRAPHICS_BIT
+            | (uint)vk::QueueFlagBits.COMPUTE_BIT
+    );
+
+    gpu::Barrier transfer = {
+        .before = { .host = true },
+        .after = { .transfer = true },
+    };
+    assert(gpu::vk::barrier_queue_flags_valid(&transfer, transfer_only),
+        "transfer-only queues accept host and transfer scopes");
+
+    gpu::Barrier compute = {
+        .before = { .transfer = true },
+        .after = { .compute = true },
+    };
+    assert(!gpu::vk::barrier_queue_flags_valid(&compute, transfer_only),
+        "transfer-only queues reject compute scopes");
+    assert(gpu::vk::barrier_queue_flags_valid(&compute, compute_only),
+        "compute-capable families accept transfer and compute scopes");
+
+    gpu::Barrier color = {
+        .before = { .compute = true },
+        .after = { .color_output = true },
+    };
+    assert(!gpu::vk::barrier_queue_flags_valid(&color, compute_only),
+        "compute-only queues reject graphics scopes");
+    assert(gpu::vk::barrier_queue_flags_valid(&color, graphics_compute),
+        "graphics-compute families accept both scopes");
+
+    gpu::Barrier draw_arguments = {
+        .before = { .transfer = true },
+        .after = { .transfer = true },
+        .hazards = { .draw_arguments = true },
+    };
+    assert(!gpu::vk::barrier_queue_flags_valid(
+            &draw_arguments,
+            transfer_only,
+        ),
+        "transfer-only queues reject indirect-command hazards");
+    assert(gpu::vk::barrier_queue_flags_valid(
+            &draw_arguments,
+            compute_only,
+        ),
+        "compute-capable families accept indirect-command hazards");
+
+    gpu::Barrier depth_stencil = {
+        .before = { .transfer = true },
+        .after = { .transfer = true },
+        .hazards = { .depth_stencil = true },
+    };
+    assert(!gpu::vk::barrier_queue_flags_valid(
+            &depth_stencil,
+            compute_only,
+        ),
+        "compute-only queues reject depth/stencil hazards");
+    assert(gpu::vk::barrier_queue_flags_valid(
+            &depth_stencil,
+            graphics_only,
+        ),
+        "graphics-capable families accept depth/stencil hazards");
+}
+
 fn void combined_texture_hazards_map_to_both_access_bits() @test {
     assert((ulong)gpu::vk::hazard_to_vk_access(gpu::Hazard.NONE) == 0,
         "NONE maps to no Vulkan access");

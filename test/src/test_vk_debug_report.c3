@@ -15,7 +15,7 @@ struct DebugCapture {
     uint              calls;
     gpu::DebugMessage last;
     bool              validation_strings_match;
-    bool              span_strings_match;
+    bool              barrier_strings_match;
     bool              device_name_matches;
     bool              messenger_failure_strings_match;
 }
@@ -56,13 +56,13 @@ fn void capture_debug_message(gpu::DebugMessage* message, void* user_data) {
             && message.resource.debug_name != null
             && message.resource.debug_name.str_view() == "named_gpu_span";
     }
-    if (message.operation != null && message.operation.str_view() == "cmd_buffer_barrier") {
-        capture.span_strings_match = message.resource.debug_name != null
-            && message.resource.debug_name.str_view() == "debug_span"
+    if (message.operation != null && message.operation.str_view() == "cmd_barrier") {
+        capture.barrier_strings_match = message.resource.debug_name == null
             && message.rejected_field != null
-            && message.rejected_field.str_view() == "BufferBarrier.span"
+            && message.rejected_field.str_view() == "Barrier.before"
             && message.invariant != null
-            && message.invariant.str_view() == "span range must fit its live owner";
+            && message.invariant.str_view()
+                == "stage mask must be nonempty and noncontradictory";
     }
     if (message.resource.kind == gpu::DebugResourceKind.DEVICE && message.resource.debug_name != null) {
         capture.device_name_matches = message.resource.debug_name.str_view() == "named_device";
@@ -342,7 +342,7 @@ fn void vulkan_debug_message_handles_null_callback_data() @test {
     assert(!capture.last.resource.has_public_identity, "missing objects produce no public identity");
 }
 
-fn void allocation_span_diagnostic_preserves_fault() @test {
+fn void barrier_mask_diagnostic_preserves_fault() @test {
     DebugCapture capture;
     gpu::DeviceDesc device_desc = {
         .backend          = gpu::BackendKind.VULKAN,
@@ -352,45 +352,38 @@ fn void allocation_span_diagnostic_preserves_fault() @test {
     };
     gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-
-    OwnedSpan owned = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics },
-        debug_name:   "debug_span",
-    )!!;
-    defer free_owned_span(&device, &owned)!!;
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
     defer discard_test_commands(&commands)!!;
-    gpu::BufferBarrier barrier = {
-        .span          = owned.span.unchecked_subspan(48, 32),
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
+    gpu::Barrier barrier = {
+        .before = {
+            .all = true,
+            .compute = true,
+        },
+        .after = { .compute = true },
     };
 
     uint before = capture.calls;
-    fault rejected = @catch(gpu::cmd_buffer_barrier(&commands, &barrier));
+    fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
 
-    assert(rejected == gpu::INVALID_ARGUMENT, "structured diagnostics do not change the public fault");
-    assert(capture.calls == before + 1, "one public-contract message accompanies the fault");
-    assert(capture.last.severity == gpu::DebugMessageSeverity.ERROR, "public rejection is an error");
-    assert(capture.last.category.public_contract, "public rejection carries the contract category");
-    assert(capture.last.has_fault && capture.last.public_fault == gpu::INVALID_ARGUMENT,
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "structured diagnostics do not change the public fault");
+    assert(capture.calls == before + 1,
+        "one public-contract message accompanies the fault");
+    assert(capture.last.severity == gpu::DebugMessageSeverity.ERROR,
+        "public rejection is an error");
+    assert(capture.last.category.public_contract,
+        "public rejection carries the contract category");
+    assert(capture.last.has_fault
+        && capture.last.public_fault == gpu::INVALID_ARGUMENT,
         "diagnostic carries the same public fault");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.ALLOCATION,
-        "rejected allocation resource kind is identified");
-    assert(capture.last.resource.has_public_identity,
-        "rejected allocation preserves its public identity");
-    assert(capture.last.resource.index == owned.span.index
-        && capture.last.resource.generation == owned.span.generation,
-        "rejected allocation preserves its slot identity");
-    assert(capture.span_strings_match,
-        "callback observes borrowed allocation/span metadata while valid");
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.NONE,
+        "global barrier rejection carries no resource kind");
+    assert(!capture.last.resource.has_public_identity,
+        "global barrier rejection carries no public identity");
+    assert(capture.barrier_strings_match,
+        "callback observes borrowed semantic barrier metadata while valid");
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
@@ -405,29 +398,29 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
 
     fault returned = vk::report_contract_failure(
         state:               &state,
-        operation:           "cmd_buffer_barrier",
+        operation:           "cmd_barrier",
         public_fault:        gpu::INVALID_ARGUMENT,
-        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
-        has_public_identity: true,
-        index:               7,
-        generation:          9,
-        debug_name:          "debug_span",
-        rejected_field:      "BufferBarrier.span",
-        invariant:           "span range must fit its live owner",
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+        debug_name:          null,
+        rejected_field:      "Barrier.before",
+        invariant:           "stage mask must be nonempty and noncontradictory",
         backend_text:        null,
     );
 
-    assert(returned == gpu::INVALID_ARGUMENT, "helper returns the unchanged public fault");
+    assert(returned == gpu::INVALID_ARGUMENT,
+        "helper returns the unchanged public fault");
     assert(capture.calls == 1, "helper dispatches exactly once");
     assert(capture.last.has_fault && capture.last.public_fault == returned,
         "structured message carries the returned fault");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.ALLOCATION,
-        "helper preserves resource kind");
-    assert(capture.last.resource.has_public_identity
-        && capture.last.resource.index == 7
-        && capture.last.resource.generation == 9,
-        "helper preserves public slot identity");
-    assert(capture.span_strings_match, "helper exposes borrowed contract strings only during callback delivery");
+    assert(capture.last.resource.kind == gpu::DebugResourceKind.NONE,
+        "helper preserves the absent resource kind");
+    assert(!capture.last.resource.has_public_identity,
+        "helper preserves the absent resource identity");
+    assert(capture.barrier_strings_match,
+        "helper exposes borrowed contract strings only during callback delivery");
 }
 
 fn void debug_messenger_failure_routes_backend_warning() @test {

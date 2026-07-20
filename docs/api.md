@@ -1190,7 +1190,7 @@ Use a caller-owned `CPU_READ` allocation as the copy destination:
 allocate_memory(CPU_READ)
 get_allocation_span
 cmd_copy_buffer or cmd_copy_texture_to_buffer
-cmd_buffer_barrier(TRANSFER_WRITE -> HOST_READ) on the destination
+cmd_barrier(TRANSFER -> HOST)
 submit
 poll_completion or wait_completion
 invalidate_mapped_span
@@ -1203,43 +1203,45 @@ No application work boundary or readback-specific token is required.
 ### Barriers
 
 ```text
-Stage
-    HOST
-    TRANSFER
-    COMPUTE_SHADER
-    VERTEX_SHADER
-    FRAGMENT_SHADER
-    COLOR_ATTACHMENT
-    DEPTH_STENCIL
-    INDIRECT_COMMAND
-    PRESENT
-    NONE
+StageMask
+    all
+    host
+    transfer
+    compute
+    vertex_shader
+    fragment_shader
+    color_output
+    depth_output
+    present
 
-Hazard
-    HOST_WRITE
-    HOST_READ
-    TRANSFER_READ
-    TRANSFER_WRITE
-    SHADER_READ
-    SHADER_WRITE
-    COLOR_READ
-    COLOR_WRITE
-    DEPTH_READ
-    DEPTH_WRITE
-    INDIRECT_READ
-    PRESENT_READ
-    NONE
-    SHADER_READ_WRITE
-    COLOR_READ_WRITE
-    DEPTH_READ_WRITE
+HazardFlags
+    draw_arguments
+    descriptors
+    depth_stencil
 
-BufferBarrier
-    GpuSpan span
-    Stage before_stage
-    Stage after_stage
-    Hazard before_hazard
-    Hazard after_hazard
+Barrier
+    StageMask before
+    StageMask after
+    HazardFlags hazards
 
+cmd_barrier(CommandList* commands, Barrier* barrier) -> void?
+```
+
+`Barrier` is a global execution and memory dependency. It has no resource
+handle, address, range, layout, or queue-family field. Each stage mask must be
+nonempty; `all` and `present` are each exclusive. Unknown mask bits, special
+hazards combined with presentation, and stages or hazards unsupported by the
+recording queue fault `INVALID_ARGUMENT`.
+
+Normal host, transfer, shader, color-output, and depth-output access scopes are
+derived from the stage masks. `draw_arguments`, `descriptors`, and
+`depth_stencil` opt into special consumer data paths; `descriptors` requires a
+shader or `all` consumer stage. The library does not infer barriers. Cross-queue
+dependencies use `SubmitDesc.completion_waits`, not `cmd_barrier`.
+
+Texture transitions remain explicit through `TextureBarrier`:
+
+```text
 TextureBarrier
     TextureHandle texture
     Stage before_stage
@@ -1249,26 +1251,13 @@ TextureBarrier
     TextureLayout old_layout
     TextureLayout new_layout
 
-GlobalBarrier
-    Stage before_stage
-    Stage after_stage
-    Hazard before_hazard
-    Hazard after_hazard
-
-cmd_buffer_barrier(CommandList* commands, BufferBarrier* barrier) -> void?
 cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) -> void?
-cmd_global_barrier(CommandList* commands, GlobalBarrier* barrier) -> void?
 ```
 
-`BufferBarrier` applies to the exact nonzero span. It has no whole-buffer or
-zero-size shorthand.
-
-`Stage.NONE` is an empty execution scope. Use it only for a barrier side that
-has no pipeline work to wait for. Explicit `Stage.PRESENT` and
-`Hazard.PRESENT_READ` are broad raw-barrier spellings that map to all commands
-and memory read. The `TextureUse.PRESENT` preset instead uses
-`COLOR_ATTACHMENT` with no access scope so its barriers chain with private WSI
-wait and signal stages.
+For texture transitions, `Stage.NONE` is an empty execution scope. Explicit
+`Stage.PRESENT` and `Hazard.PRESENT_READ` map to all commands and memory read.
+The `TextureUse.PRESENT` preset instead uses `COLOR_ATTACHMENT` with no access
+scope so its barriers chain with private WSI wait and signal stages.
 
 `TextureLayout` values: UNDEFINED, GENERAL, COLOR_ATTACHMENT, DEPTH_STENCIL,
 SHADER_READ, TRANSFER_SRC, TRANSFER_DST, PRESENT. `old_layout` must match the

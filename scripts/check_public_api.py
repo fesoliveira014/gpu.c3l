@@ -39,6 +39,10 @@ FORBIDDEN_TEXT = {
     "bufferhandle": "retired BufferHandle",
     "bufferdesc": "retired BufferDesc",
     "bufferusage": "retired BufferUsage",
+    "bufferbarrier": "retired resource-scoped BufferBarrier",
+    "globalbarrier": "retired Vulkan-shaped GlobalBarrier",
+    '"name":"cmd_buffer_barrier"': "retired cmd_buffer_barrier",
+    '"name":"cmd_global_barrier"': "retired cmd_global_barrier",
     "texturedescriptordesc": "retired TextureDescriptorDesc",
     '"name":"create_texture_descriptor"': (
         "retired texture descriptor lifecycle"
@@ -136,6 +140,10 @@ RETIRED_SOURCE_SYMBOLS = (
     "BufferHandle",
     "BufferDesc",
     "BufferUsage",
+    "BufferBarrier",
+    "GlobalBarrier",
+    "cmd_buffer_barrier(",
+    "cmd_global_barrier(",
     "TextureDescriptorDesc",
     "DescriptorHeapMode",
     "descriptor_heap_mode",
@@ -409,8 +417,8 @@ def validate_document(document: dict) -> list[str]:
             ("CommandList*", "GpuSpan", "uint"),
             "void?",
         ),
-        "cmd_buffer_barrier": (
-            ("CommandList*", "BufferBarrier*"),
+        "cmd_barrier": (
+            ("CommandList*", "Barrier*"),
             "void?",
         ),
         "cmd_copy_buffer_to_texture": (
@@ -507,7 +515,7 @@ def validate_document(document: dict) -> list[str]:
         ),
         "cmd_copy_buffer": ("commands", "desc"),
         "cmd_fill_buffer": ("commands", "dst", "value"),
-        "cmd_buffer_barrier": ("commands", "barrier"),
+        "cmd_barrier": ("commands", "barrier"),
         "cmd_copy_buffer_to_texture": ("commands", "desc"),
         "cmd_copy_texture_to_buffer": ("commands", "desc"),
         "cmd_draw_indexed": (
@@ -595,7 +603,9 @@ def validate_document(document: dict) -> list[str]:
         ("BufferCopyDesc", "struct"),
         ("BufferTextureCopyDesc", "struct"),
         ("TextureBufferCopyDesc", "struct"),
-        ("BufferBarrier", "struct"),
+        ("StageMask", "bitstruct"),
+        ("HazardFlags", "bitstruct"),
+        ("Barrier", "struct"),
         ("GeneratedDrawRecord", "struct"),
         ("GeneratedDrawIndexedRecord", "struct"),
         ("GeneratedDispatchRecord", "struct"),
@@ -753,15 +763,13 @@ def validate_document(document: dict) -> list[str]:
             ),
             "TextureBufferCopyDesc must contain one destination span",
         ),
-        "BufferBarrier": (
+        "Barrier": (
             (
-                ("span", "GpuSpan"),
-                ("before_stage", "Stage"),
-                ("after_stage", "Stage"),
-                ("before_hazard", "Hazard"),
-                ("after_hazard", "Hazard"),
+                ("before", "StageMask"),
+                ("after", "StageMask"),
+                ("hazards", "HazardFlags"),
             ),
-            "BufferBarrier must contain exactly one span and semantic hazards",
+            "Barrier must contain only semantic stage masks and hazard flags",
         ),
         "MemoryStats": (
             (
@@ -808,6 +816,41 @@ def validate_document(document: dict) -> list[str]:
             failures.append(
                 f"{name} must be a generation-free 32-bit shader index"
             )
+
+    expected_flag_schemas = {
+        "StageMask": (
+            "all",
+            "host",
+            "transfer",
+            "compute",
+            "vertex_shader",
+            "fragment_shader",
+            "color_output",
+            "depth_output",
+            "present",
+        ),
+        "HazardFlags": (
+            "draw_arguments",
+            "descriptors",
+            "depth_stencil",
+        ),
+    }
+    for name, expected_names in expected_flag_schemas.items():
+        definition = types.get(name, {})
+        members = definition.get("members", [])
+        exact_flags = (
+            definition.get("kind") == "bitstruct"
+            and definition.get("base_type", {}).get("name") == "uint"
+            and tuple(member.get("name") for member in members)
+                == expected_names
+            and all(
+                member.get("type", {}).get("name") == "bool"
+                and member.get("bit_range") == [bit, bit]
+                for bit, member in enumerate(members)
+            )
+        )
+        if not exact_flags:
+            failures.append(f"{name} must match the exact semantic flag schema")
 
     present = functions.get("present")
     if present is None:

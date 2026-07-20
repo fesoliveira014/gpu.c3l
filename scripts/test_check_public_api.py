@@ -231,10 +231,10 @@ def valid_document() -> dict:
                         ("value", "uint"),
                     ),
                     api_function(
-                        "cmd_buffer_barrier",
+                        "cmd_barrier",
                         "void?",
                         ("commands", "CommandList*"),
-                        ("barrier", "BufferBarrier*"),
+                        ("barrier", "Barrier*"),
                     ),
                     api_function(
                         "cmd_copy_buffer_to_texture",
@@ -664,26 +664,52 @@ def valid_document() -> dict:
                         ],
                     },
                     {
-                        "name": "BufferBarrier",
+                        "name": "StageMask",
+                        "kind": "bitstruct",
+                        "base_type": {"name": "uint"},
+                        "members": [
+                            {
+                                "name": name,
+                                "type": {"name": "bool"},
+                                "bit_range": [bit, bit],
+                            }
+                            for bit, name in enumerate((
+                                "all",
+                                "host",
+                                "transfer",
+                                "compute",
+                                "vertex_shader",
+                                "fragment_shader",
+                                "color_output",
+                                "depth_output",
+                                "present",
+                            ))
+                        ],
+                    },
+                    {
+                        "name": "HazardFlags",
+                        "kind": "bitstruct",
+                        "base_type": {"name": "uint"},
+                        "members": [
+                            {
+                                "name": name,
+                                "type": {"name": "bool"},
+                                "bit_range": [bit, bit],
+                            }
+                            for bit, name in enumerate((
+                                "draw_arguments",
+                                "descriptors",
+                                "depth_stencil",
+                            ))
+                        ],
+                    },
+                    {
+                        "name": "Barrier",
                         "kind": "struct",
                         "members": [
-                            {"name": "span", "type": {"name": "GpuSpan"}},
-                            {
-                                "name": "before_stage",
-                                "type": {"name": "Stage"},
-                            },
-                            {
-                                "name": "after_stage",
-                                "type": {"name": "Stage"},
-                            },
-                            {
-                                "name": "before_hazard",
-                                "type": {"name": "Hazard"},
-                            },
-                            {
-                                "name": "after_hazard",
-                                "type": {"name": "Hazard"},
-                            },
+                            {"name": "before", "type": {"name": "StageMask"}},
+                            {"name": "after", "type": {"name": "StageMask"}},
+                            {"name": "hazards", "type": {"name": "HazardFlags"}},
                         ],
                     },
                     {
@@ -1052,7 +1078,7 @@ class PublicApiCheckTests(unittest.TestCase):
         for name in (
             "cmd_copy_buffer",
             "cmd_fill_buffer",
-            "cmd_buffer_barrier",
+            "cmd_barrier",
             "cmd_copy_buffer_to_texture",
             "cmd_copy_texture_to_buffer",
             "cmd_draw_indexed",
@@ -1213,20 +1239,62 @@ class PublicApiCheckTests(unittest.TestCase):
             check_public_api.validate_document(document),
         )
 
-    def test_rejects_legacy_buffer_barrier_schema(self) -> None:
+    def test_accepts_global_semantic_barrier_contract(self) -> None:
+        self.assertEqual(
+            [],
+            check_public_api.validate_document(valid_document()),
+        )
+
+    def test_rejects_global_barrier_flag_schema_drift(self) -> None:
+        for name in ("StageMask", "HazardFlags"):
+            with self.subTest(name=name):
+                document = valid_document()
+                flags = next(
+                    entry for entry in document["modules"]["gpu"]["types"]
+                    if entry["name"] == name
+                )
+                flags["members"][0]["bit_range"] = [1, 1]
+                self.assertIn(
+                    f"{name} must match the exact semantic flag schema",
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_retired_generic_barrier_symbols(self) -> None:
+        for name, kind, failure in (
+            (
+                "BufferBarrier",
+                "struct",
+                "retired resource-scoped BufferBarrier",
+            ),
+            (
+                "GlobalBarrier",
+                "struct",
+                "retired Vulkan-shaped GlobalBarrier",
+            ),
+        ):
+            with self.subTest(name=name):
+                document = valid_document()
+                document["modules"]["gpu"]["types"].append({
+                    "name": name,
+                    "kind": kind,
+                })
+                self.assertIn(
+                    failure,
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_resource_shaped_barrier_schema(self) -> None:
         document = valid_document()
         barrier = next(
             entry for entry in document["modules"]["gpu"]["types"]
-            if entry["name"] == "BufferBarrier"
+            if entry["name"] == "Barrier"
         )
         barrier["members"] = [
-            {"name": "buffer", "type": {"name": "BufferHandle"}},
-            {"name": "offset", "type": {"name": "usz"}},
-            {"name": "size", "type": {"name": "usz"}},
-            *barrier["members"][1:],
+            {"name": "span", "type": {"name": "GpuSpan"}},
+            *barrier["members"],
         ]
         self.assertIn(
-            "BufferBarrier must contain exactly one span and semantic hazards",
+            "Barrier must contain only semantic stage masks and hazard flags",
             check_public_api.validate_document(document),
         )
 

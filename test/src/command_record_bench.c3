@@ -8,17 +8,15 @@ const char[*] COMMAND_BENCH_SHADER_SPIRV = $embed("shaders/root_pointer.comp.spv
 const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 
-fn double record_global_barriers(gpu::Device* device) {
+fn double record_barriers(gpu::Device* device) {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
-    gpu::GlobalBarrier barrier = {
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after = { .compute = true },
     };
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
-        gpu::cmd_global_barrier(&commands, &barrier)!!;
+        gpu::cmd_barrier(&commands, &barrier)!!;
     }
     long elapsed_ns = (long)start.to_now();
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
@@ -26,18 +24,20 @@ fn double record_global_barriers(gpu::Device* device) {
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
-fn double record_buffer_barriers(gpu::Device* device, gpu::GpuSpan span) {
+fn double record_hazard_barriers(gpu::Device* device) {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
-    gpu::BufferBarrier barrier = {
-        .span          = span,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after = { .compute = true },
+        .hazards = {
+            .draw_arguments = true,
+            .descriptors = true,
+            .depth_stencil = true,
+        },
     };
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
-        gpu::cmd_buffer_barrier(&commands, &barrier)!!;
+        gpu::cmd_barrier(&commands, &barrier)!!;
     }
     long elapsed_ns = (long)start.to_now();
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
@@ -124,26 +124,26 @@ fn int main() {
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    (void)record_global_barriers(&device);
-    (void)record_buffer_barriers(&device, buffer_span);
+    (void)record_barriers(&device);
+    (void)record_hazard_barriers(&device);
     (void)record_indirect_dispatches(&device, pipeline, gpu::get_span_address(&device, buffer_span)!!, args);
 
-    double[COMMAND_RECORD_REPETITIONS] global_results;
-    double[COMMAND_RECORD_REPETITIONS] buffer_results;
+    double[COMMAND_RECORD_REPETITIONS] barrier_results;
+    double[COMMAND_RECORD_REPETITIONS] hazard_results;
     double[COMMAND_RECORD_REPETITIONS] indirect_results;
     for (uint i = 0; i < COMMAND_RECORD_REPETITIONS; i++) {
-        global_results[i] = record_global_barriers(&device);
-        buffer_results[i] = record_buffer_barriers(&device, buffer_span);
+        barrier_results[i] = record_barriers(&device);
+        hazard_results[i] = record_hazard_barriers(&device);
         indirect_results[i] = record_indirect_dispatches(&device, pipeline, gpu::get_span_address(&device, buffer_span)!!, args);
     }
 
     io::printfn(
-        "global barrier: iterations=%d repetitions=%d median=%.1f ns/record",
-        COMMAND_RECORD_ITERATIONS, COMMAND_RECORD_REPETITIONS, command_median(global_results),
+        "barrier: iterations=%d repetitions=%d median=%.1f ns/record",
+        COMMAND_RECORD_ITERATIONS, COMMAND_RECORD_REPETITIONS, command_median(barrier_results),
     );
     io::printfn(
-        "buffer barrier: iterations=%d repetitions=%d median=%.1f ns/record",
-        COMMAND_RECORD_ITERATIONS, COMMAND_RECORD_REPETITIONS, command_median(buffer_results),
+        "hazard barrier: iterations=%d repetitions=%d median=%.1f ns/record",
+        COMMAND_RECORD_ITERATIONS, COMMAND_RECORD_REPETITIONS, command_median(hazard_results),
     );
     io::printfn(
         "indirect dispatch: iterations=%d repetitions=%d median=%.1f ns/record",

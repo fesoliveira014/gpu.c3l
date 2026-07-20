@@ -515,13 +515,15 @@ storage and perform no blocking work.
 Barriers are explicit:
 
 ```text
-cmd_buffer_barrier(command_list, BufferBarrier)
+cmd_barrier(command_list, Barrier)
 cmd_texture_barrier(command_list, TextureBarrier)
-cmd_global_barrier(command_list, GlobalBarrier)
 ```
 
-`BufferBarrier` scopes the hazard to one exact span and has no zero-size
-shorthand.
+`Barrier` declares a global semantic dependency between nonempty stage masks.
+It carries no resource identity, address, range, layout, or queue family;
+special draw-argument, descriptor, and depth/stencil hazards are explicit.
+Texture layout transitions remain resource-specific. Cross-queue dependencies
+use completion waits.
 
 Render pass boundaries do not imply shader-read or transfer-read readiness.
 

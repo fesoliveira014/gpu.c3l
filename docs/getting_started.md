@@ -293,14 +293,11 @@ fn void? run_compute(
         root:     root_address,
         groups:   { (COUNT + 63) / 64, 1, 1 },
     )!;
-    gpu::BufferBarrier to_host = {
-        .span          = output_span,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.HOST_READ,
+    gpu::Barrier to_host = {
+        .before = { .compute = true },
+        .after  = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &to_host)!;
+    gpu::cmd_barrier(&cmd, &to_host)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!;
     defer (void)gpu::discard_executable_commands(&executable);
 

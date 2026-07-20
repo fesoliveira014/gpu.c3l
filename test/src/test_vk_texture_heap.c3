@@ -133,12 +133,11 @@ fn void bindless_texture_write_then_sample() @test {
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
 
-    gpu::BufferBarrier out_bar = {
-        .span = output.span,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier out_bar = {
+        .before = { .compute = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &out_bar)!!;
+    gpu::cmd_barrier(&cmd, &out_bar)!!;
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -206,7 +205,7 @@ fn void bindless_texture_write_then_sample() @test {
         root:     test_span_address(&device, sample_root_span),
         groups:   { REUSED_GROUPS, REUSED_GROUPS, 1 },
     )!!;
-    gpu::cmd_buffer_barrier(&reused_cmd, &out_bar)!!;
+    gpu::cmd_barrier(&reused_cmd, &out_bar)!!;
 
     gpu::ExecutableCommandList reused_executable = gpu::end_commands(&reused_cmd)!!;
     defer discard_test_executable(&reused_executable)!!;

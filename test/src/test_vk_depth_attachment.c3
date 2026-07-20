@@ -147,12 +147,11 @@ fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, 
     gpu::cmd_texture_barrier(cmd, &to_src)!!;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
-    gpu::BufferBarrier host_read = {
-        .span = *rb_span,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(cmd, &host_read)!!;
+    gpu::cmd_barrier(cmd, &host_read)!!;
 }
 
 fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, gpu::GpuSpan* rb_span) {
@@ -168,12 +167,11 @@ fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, g
     gpu::cmd_texture_barrier(cmd, &to_src)!!;
     gpu::TextureBufferCopyDesc copy = { .texture = depth, .dst = *rb_span };
     gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
-    gpu::BufferBarrier host_read = {
-        .span = *rb_span,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(cmd, &host_read)!!;
+    gpu::cmd_barrier(cmd, &host_read)!!;
 }
 
 fn OwnedSpan make_readback(gpu::Device* device, usz size) {
@@ -594,12 +592,11 @@ fn void sampled_depth_matches_readback() @test {
         root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;
-    gpu::BufferBarrier host_read = {
-        .span = out_span,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .compute = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
+    gpu::cmd_barrier(&cmd, &host_read)!!;
     submit_and_finish(&device, &cmd);
     gpu::invalidate_mapped_span(&device, out_span)!!;
 
@@ -751,12 +748,11 @@ fn void compare_sampler_exact_results() @test {
         root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;
-    gpu::BufferBarrier host_read = {
-        .span = out_span,
-        .before_stage = gpu::Stage.COMPUTE_SHADER, .after_stage = gpu::Stage.HOST,
-        .before_hazard = gpu::Hazard.SHADER_WRITE, .after_hazard = gpu::Hazard.HOST_READ,
+    gpu::Barrier host_read = {
+        .before = { .compute = true },
+        .after = { .host = true },
     };
-    gpu::cmd_buffer_barrier(&cmd, &host_read)!!;
+    gpu::cmd_barrier(&cmd, &host_read)!!;
     submit_and_finish(&device, &cmd);
     gpu::invalidate_mapped_span(&device, out_span)!!;
 

@@ -4,55 +4,70 @@ import gpu @public;
 import vk;
 import std::io;
 
-fn void? vk_cmd_buffer_barrier(
+fn void? vk_cmd_barrier(
     gpu::CommandList* commands,
-    gpu::BufferBarrier* barrier,
+    gpu::Barrier* barrier,
 ) @private {
     CommandRecord* record = resolve_command(commands)!;
-    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
-    uint reference_checkpoint = record.reference_count;
-    defer catch rollback_command_references(state, record, reference_checkpoint);
-    ResolvedSpan resolved = resolve_span_slot(
-        state:          state,
-        span:           &barrier.span,
-        required:       0,
-        operation:      "cmd_buffer_barrier",
-        rejected_field: "BufferBarrier.span",
-    )!;
-    validate_span_recording_access(
-        state:     state,
-        record:    record,
-        resolved:  &resolved,
-        span:      &barrier.span,
-        operation: "cmd_buffer_barrier",
-    )!;
+    if (record.state != CommandState.RECORDING) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state =
+        (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    ZString rejected_field = barrier_masks_rejected_field(barrier);
+    ZString invariant;
+    if (rejected_field != null) {
+        invariant = rejected_field.str_view() == "Barrier.hazards"
+            ? "hazard flags must be known and match the consumer stages"
+            : "stage mask must be nonempty and noncontradictory";
+    } else {
+        QueueCompletionState* completion = queue_completion_state(
+            state,
+            record.queue.id,
+        )!;
+        rejected_field = barrier_queue_rejected_field(
+            barrier,
+            completion.queue_flags,
+        );
+        if (rejected_field != null) {
+            invariant = rejected_field.str_view() == "Barrier.hazards"
+                ? "hazard flags must be supported by the recording queue"
+                : "stage mask must be supported by the recording queue";
+        }
+    }
+    if (rejected_field != null) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_barrier",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      rejected_field,
+            invariant:           invariant,
+            backend_text:        null,
+        )~;
+    }
 
-    vk::BufferMemoryBarrier2 bar = vk::buffer_memory_barrier2()
-        .set_src_stage_mask(stage_to_vk(barrier.before_stage))
-        .set_src_access_mask(hazard_to_vk_access(barrier.before_hazard))
-        .set_dst_stage_mask(stage_to_vk(barrier.after_stage))
-        .set_dst_access_mask(hazard_to_vk_access(barrier.after_hazard))
-        .set_src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .set_buffer(resolved.slot.buffer)
-        .set_offset((vk::DeviceSize)resolved.offset)
-        .set_size((vk::DeviceSize)resolved.size);
-
-    vk::DependencyInfo dep = vk::dependency_info().set_buffer_memory_barriers((&bar)[:1]);
-    vk::cmd_pipeline_barrier2(record.command_buffer, &dep);
-}
-
-fn void? vk_cmd_global_barrier(gpu::CommandList* commands, gpu::GlobalBarrier* barrier) @private {
-    CommandRecord* record = resolve_command(commands)!;
-    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    vk::MemoryBarrier2 bar = vk::memory_barrier2()
-        .set_src_stage_mask(stage_to_vk(barrier.before_stage))
-        .set_src_access_mask(hazard_to_vk_access(barrier.before_hazard))
-        .set_dst_stage_mask(stage_to_vk(barrier.after_stage))
-        .set_dst_access_mask(hazard_to_vk_access(barrier.after_hazard));
-    vk::DependencyInfo dep = vk::dependency_info().set_memory_barriers((&bar)[:1]);
-    vk::cmd_pipeline_barrier2(record.command_buffer, &dep);
+    bool descriptor_buffer = state.strict_heap.implementation
+        == VkHeapImplementation.DESCRIPTOR_BUFFER;
+    vk::MemoryBarrier2 native_barrier = vk::memory_barrier2()
+        .set_src_stage_mask(barrier_before_stages_to_vk(barrier.before))
+        .set_src_access_mask(barrier_before_access_to_vk(barrier.before))
+        .set_dst_stage_mask(barrier_after_stages_to_vk(
+            barrier.after,
+            barrier.hazards,
+        ))
+        .set_dst_access_mask(barrier_after_access_to_vk(
+            barrier.after,
+            barrier.hazards,
+            descriptor_buffer,
+        ));
+    vk::DependencyInfo dependency =
+        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
+    vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
 }
 
 <* Record-time layout for `tex` on `list`: its own pending transition if it

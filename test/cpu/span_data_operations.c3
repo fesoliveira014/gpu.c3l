@@ -21,8 +21,11 @@ fn void check_span_data_operations(
         value:    0,
     );
 
-    gpu::BufferBarrier barrier = { .span = dst };
-    (void)gpu::cmd_buffer_barrier(
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after = { .compute = true },
+    };
+    (void)gpu::cmd_barrier(
         commands: commands,
         barrier:  &barrier,
     );

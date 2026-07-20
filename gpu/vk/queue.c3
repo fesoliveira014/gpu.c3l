@@ -7,6 +7,7 @@ import std::core::mem;
 import std::atomic;
 import std::atomic::types;
 
+alias QueueFamilyFlags @private = vk::QueueFlags;
 alias QueueSubmit2Fn @private = fn vk::Result (
     vk::Queue,
     uint,
@@ -70,6 +71,7 @@ struct QueueCompletionState {
     vk::Semaphore   timeline;
     Mutex           submit_mutex;
     gpu::QueueRoles roles;
+    QueueFamilyFlags queue_flags;
     ulong           native_id;
     ulong           next_sequence;
     ulong           observed_completed_sequence;
@@ -90,6 +92,31 @@ fn vk::Result real_queue_submit2(
     vk::Fence fence,
 ) @private {
     return vk::queue_submit2(queue, submit_count, submits, fence);
+}
+
+fn vk::QueueFlags? query_queue_family_flags(
+    vk::PhysicalDevice physical_device,
+    uint family,
+) @private {
+    uint count;
+    vk::get_physical_device_queue_family_properties(
+        physical_device,
+        &count,
+        null,
+    );
+    if (count == 0 || family >= count) return gpu::BACKEND_ERROR~;
+
+    @pool() {
+        vk::QueueFamilyProperties[] families =
+            mem::talloc_array(vk::QueueFamilyProperties, (sz)count);
+        vk::get_physical_device_queue_family_properties(
+            physical_device,
+            &count,
+            families.ptr,
+        );
+        if (family >= count) return gpu::BACKEND_ERROR~;
+        return families[family].queue_flags;
+    };
 }
 
 fn bool queue_family_supports_graphics(
@@ -1569,6 +1596,10 @@ fn void? bind_queue_completion_role(
             continue;
         }
 
+        completion.queue_flags = query_queue_family_flags(
+            state.physical_device,
+            native_queue_family(native_id),
+        )!;
         completion.native_id = native_id;
         completion.bound = true;
         vk::get_device_queue(

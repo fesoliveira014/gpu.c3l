@@ -139,9 +139,9 @@ fn void? command_pin_discard(
     if (fixture == null) return gpu::INVALID_HANDLE~;
 }
 
-fn void? command_pin_global_barrier(
+fn void? command_pin_barrier(
     gpu::CommandList* commands,
-    gpu::GlobalBarrier* barrier,
+    gpu::Barrier* barrier,
 ) {
     CommandPinFixture* fixture =
         (CommandPinFixture*)gpu::device_backend_state_ptr(&commands.device);
@@ -205,7 +205,7 @@ gpu::BackendVTable command_pin_vtable = {
     .end_commands       = &command_pin_end,
     .discard_commands   = &command_pin_discard,
     .submit             = &command_pin_submit,
-    .cmd_global_barrier = &command_pin_global_barrier,
+    .cmd_barrier = &command_pin_barrier,
 };
 
 fn int destroy_device_worker(void* raw_args) {
@@ -228,8 +228,11 @@ fn int device_operation_worker(void* raw_args) {
 
 fn int stale_command_worker(void* raw_args) {
     StaleCommandWorkerArgs* args = (StaleCommandWorkerArgs*)raw_args;
-    gpu::GlobalBarrier barrier;
-    if (catch command_fault = gpu::cmd_global_barrier(
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after = { .compute = true },
+    };
+    if (catch command_fault = gpu::cmd_barrier(
         &args.commands,
         &barrier,
     )) {
@@ -301,8 +304,11 @@ fn void command_calls_borrow_the_lifetime_pin() @test {
     gpu::DeviceSlotControl after_begin =
         (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
 
-    gpu::GlobalBarrier barrier;
-    gpu::cmd_global_barrier(&commands, &barrier)!!;
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after = { .compute = true },
+    };
+    gpu::cmd_barrier(&commands, &barrier)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::DeviceSlotControl after_end =
         (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
@@ -403,8 +409,11 @@ fn void lost_commands_can_be_discarded() @test {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::mark_device_lost(&device);
 
-    gpu::GlobalBarrier barrier;
-    fault record_fault = @catch(gpu::cmd_global_barrier(&commands, &barrier));
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after = { .compute = true },
+    };
+    fault record_fault = @catch(gpu::cmd_barrier(&commands, &barrier));
     fault destroy_fault = @catch(gpu::destroy_device(&device));
     uint destroy_calls_before_discard =
         fixture.destroy_calls.load(AtomicOrdering.ACQUIRE);
@@ -486,8 +495,11 @@ fn void forged_command_owners_cannot_borrow_lifetime_pins() @test {
 
     bool real_borrows = gpu::has_retained_command_pin(&commands);
     bool forged_borrows = gpu::has_retained_command_pin(&forged);
-    gpu::GlobalBarrier barrier;
-    fault forged_fault = @catch(gpu::cmd_global_barrier(&forged, &barrier));
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after = { .compute = true },
+    };
+    fault forged_fault = @catch(gpu::cmd_barrier(&forged, &barrier));
 
     assert(real_borrows, "the exact command owner borrows its lifetime pin");
     assert(!forged_borrows,
@@ -517,8 +529,11 @@ fn void stale_command_generation_cannot_borrow_reused_slot_pin() @test {
     gpu::CommandList live = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
 
     bool stale_borrows = gpu::has_retained_command_pin(&stale);
-    gpu::GlobalBarrier barrier;
-    fault stale_fault = @catch(gpu::cmd_global_barrier(&stale, &barrier));
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after = { .compute = true },
+    };
+    fault stale_fault = @catch(gpu::cmd_barrier(&stale, &barrier));
 
     assert(stale.handle.index == live.handle.index,
         "the command slot is reused");
