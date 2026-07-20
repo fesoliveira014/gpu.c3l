@@ -302,7 +302,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.4 Address-based direct, indirect, and generated work
 
-- [ ] Complete address-based draw, indexed draw, dispatch, indirect/count, and optional generated-work recording in `gpu/command.c3`, `gpu/vk/command.c3`, and workload tests.
+- [x] Complete address-based draw, indexed draw, dispatch, indirect/count, and optional generated-work recording in `gpu/command.c3`, `gpu/vk/command.c3`, and workload tests.
   - **Depends on:** 5.7, 6.1, and 6.3.
   - **Contract:** execution arguments remain pipeline-free and buffer-object-free; generated work is exposed only when supported; no CPU-loop emulation.
   - **Edges:** alignment, count bounds, missing barriers, unsupported generated work, index format, and zero-work commands.
