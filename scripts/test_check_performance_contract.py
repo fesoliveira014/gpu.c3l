@@ -12,6 +12,7 @@ REQUIRED_PATHS = (
     "gpu/command.c3",
     "gpu/device.c3",
     "gpu/vk/command.c3",
+    "gpu/vk/device.c3",
     "gpu/vk/command_state.c3",
     "gpu/vk/lifetime.c3",
     "gpu/vk/queue.c3",
@@ -435,6 +436,54 @@ class PerformanceContractTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "ownership flow must match reviewed source" in error
+                    for error in errors
+                )
+            )
+
+    def test_generated_pool_growth_duplication_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                (
+                    "    for (uint i = 0; "
+                    "i < state.generated_preprocess_pool_count; i++) {\n"
+                    "        grown[i] = state.generated_preprocess_pool[i];\n"
+                    "    }"
+                ),
+                (
+                    "    for (uint i = 0; "
+                    "i < state.generated_preprocess_pool_count; i++) {\n"
+                    "        grown[i] = state.generated_preprocess_pool[i];\n"
+                    "    }\n"
+                    "    if (state.generated_preprocess_pool_count > 1) {\n"
+                    "        grown[0] = grown[1];\n"
+                    "    }"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "ownership flow must match reviewed source" in error
+                    for error in errors
+                )
+            )
+
+    def test_unreviewed_generated_preprocess_function_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            unreviewed = root / "gpu/vk/unreviewed_generated_preprocess.c3"
+            unreviewed.write_text(
+                "module gpu::vk;\n\nfn void unreviewed_generated_preprocess_owner() {}\n",
+                encoding="utf-8",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "ownership flow is unreviewed" in error
                     for error in errors
                 )
             )
