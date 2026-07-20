@@ -46,6 +46,12 @@ POINT_ALLOCATION_FORBIDDEN = (
     ".alloc(",
 )
 BACKEND_OWNERSHIP_DIGESTS = {
+    "vk_begin_commands_with_context": "3292d8a58303e0fc2992ffe89976ecc542e0712da03aecc0efdee0fc4deb37de",
+    "generated_preprocess_compatible": "df5842124c9c4e5427be4440e3a6ce3df20282e3d3b7d9d7557ac6bec007b5a0",
+    "ensure_generated_preprocess_pool_capacity_locked": "8f07b4af72b8e015ec80aee966099e0a362323110017cff1c37172133ab00569",
+    "command_recording_stats": "381e23f43057fb0882396bc074d75c196da6fc3fe2b74547f300223eced04a2e",
+    "free_generated_preprocess_buffers": "a4e9fc1d9b5e6d1a010e634ceab4bfd7090707552f5d39abf84d736faa59c744",
+    "ensure_generated_preprocess_capacity": "f95bc1998ad4440be1ce002753025c62638647437ae6d5af14a1237effa18b95",
     "execute_generated_work": "2c7d0ee833035e94166a955d64f02ca8addbf9bc8050a343d62ccf15b9b90bf8",
     "recycle_generated_preprocess_buffers_locked": "4710b2f580e8c148f0ae4e13a6454bbd270f5dc6b54ba8b82a218a91c57f40b1",
     "take_generated_preprocess_buffer": "7a0262396bf857c810ab5b08a384bcdb12d404b9da2f05133d0513dde605628e",
@@ -53,11 +59,16 @@ BACKEND_OWNERSHIP_DIGESTS = {
 }
 COMMAND_STATE_OWNERSHIP_DIGESTS = {
     "release_command": "052c7e5e284197a6d22729dc7045397c37535c0a9c50aaf3ec163211d0859157",
+    "destroy_command_table": "45c57c05ed629582c17062c6829d1a2a9146ba44bce9552b186cefc0692723d7",
 }
 LIFETIME_OWNERSHIP_DIGESTS = {
     "publish_submitted_commands": "cdbc47b4f1b25be4fc79e04f6ae8ff410b219ab6854924df0edabd389376f066",
     "release_submitted_command_batch": "f9b2c92ba67ebdf818a8d6417074d55012b6756dad85106e05593c68748f775f",
     "release_completed_submitted_commands_locked": "bd81cb2ab4514a5428d70fa75883594913b7e77d0c15f123593b008f7e0e50d4",
+    "destroy_submitted_commands": "1858d0b6e5a0d7659b1ed6ca6a08abf7e13f5577cdcea9cdc48dfdcde0d95d60",
+}
+DEVICE_OWNERSHIP_DIGESTS = {
+    "destroy_state": "aa9b3c53333b2eb21b29bc54b629f7a184ff66602ed9dfaefb328baf8d93b0b2",
 }
 
 
@@ -81,6 +92,15 @@ def function_body(source: str, name: str) -> str:
             if depth == 0:
                 return source[start:index + 1]
     raise ValueError(f"unterminated body for {name}")
+
+
+def function_names(source: str) -> tuple[str, ...]:
+    return tuple(
+        re.findall(
+            r"(?m)^fn\s+[^\n]*\b([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+            source,
+        )
+    )
 
 
 def read(root: Path, relative: str) -> str:
@@ -108,6 +128,7 @@ def check(root: Path = ROOT) -> list[str]:
     texture_source = read(root, "gpu/vk/texture.c3")
     device_source = read(root, "gpu/device.c3")
     command_state_source = read(root, "gpu/vk/command_state.c3")
+    backend_device_source = read(root, "gpu/vk/device.c3")
     lifetime_source = read(root, "gpu/vk/lifetime.c3")
     command_bench = read(root, "test/src/command_record_bench.c3")
     lifecycle_bench = read(root, "test/src/lifecycle_bench.c3")
@@ -120,6 +141,7 @@ def check(root: Path = ROOT) -> list[str]:
             COMMAND_STATE_OWNERSHIP_DIGESTS,
         ),
         ("gpu/vk/lifetime.c3", lifetime_source, LIFETIME_OWNERSHIP_DIGESTS),
+        ("gpu/vk/device.c3", backend_device_source, DEVICE_OWNERSHIP_DIGESTS),
     )
     for relative, source, digests in ownership_sources:
         for name, expected in digests.items():
@@ -129,6 +151,26 @@ def check(root: Path = ROOT) -> list[str]:
                 errors.append(
                     f"{relative}:{name} generated preprocess ownership flow "
                     "must match reviewed source"
+                )
+
+    reviewed_ownership = {
+        relative: digests
+        for relative, _, digests in ownership_sources
+    }
+    for path in sorted((root / "gpu/vk").rglob("*.c3")):
+        relative = path.relative_to(root).as_posix()
+        source = path.read_text(encoding="utf-8")
+        digests = reviewed_ownership.get(relative, {})
+        for name in function_names(source):
+            body = function_body(source, name)
+            touches_ownership = (
+                "generated_preprocess" in name
+                or "generated_preprocess" in body
+            )
+            if touches_ownership and name not in digests:
+                errors.append(
+                    f"{relative}:{name} generated preprocess ownership flow "
+                    "is unreviewed"
                 )
 
     for name in PUBLIC_COMMANDS:
