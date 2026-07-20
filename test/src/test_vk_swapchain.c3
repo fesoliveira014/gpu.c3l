@@ -391,6 +391,8 @@ fn void present_path_guards_precede_native_mutation() @test {
     )!!;
     assert(captured_present_calls == 1,
         "valid present reaches the native seam exactly once");
+    assert(state.presentation.swapchains.get(handle)!!.present_fence_pending[0],
+        "an enqueued present tracks its private completion fence");
     assert(capture.calls == 0, "valid present emits no diagnostic");
 
     fault replay_fault = @catch(gpu::vk::vk_present_with(

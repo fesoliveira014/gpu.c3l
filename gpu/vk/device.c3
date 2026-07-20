@@ -396,6 +396,10 @@ fn gpu::Device? create_vk_device_with_probe(
     };
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = gpu::requested_surface(*request);
+    if (requested_surface.is_valid()
+        && !runtime_state.instance_capabilities.surface_maintenance) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     gpu::QueueRequirements queue_requirements =
         gpu::requested_queue_requirements(*request);
     vk::SurfaceKHR presentation_surface = requested_surface.is_valid()
