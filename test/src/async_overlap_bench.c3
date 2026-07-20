@@ -276,13 +276,13 @@ fn int main() {
     gpu::PipelineHandle gfx_pipeline = gpu::create_graphics_pipeline(&device, &gfx_pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, gfx_pipeline)!!;
 
-    // One startup transition: re-recording UNDEFINED->COLOR_ATTACHMENT per rep
-    // would fault INVALID_RESOURCE_STATE under the pending-layout model.
+    // One startup transition establishes attachment use; repeated passes keep
+    // the texture in the same semantic use.
     gpu::CommandList transition_cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::TextureBarrier to_attach = {
-        .texture = rt, .before_stage = gpu::Stage.HOST, .after_stage = gpu::Stage.COLOR_ATTACHMENT,
-        .before_hazard = gpu::Hazard.HOST_WRITE, .after_hazard = gpu::Hazard.COLOR_WRITE,
-        .old_layout = gpu::TextureLayout.UNDEFINED, .new_layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .texture = rt,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
     };
     gpu::cmd_texture_barrier(&transition_cmd, &to_attach)!!;
     gpu::ExecutableCommandList transition_cmd_executable = gpu::end_commands(&transition_cmd)!!;

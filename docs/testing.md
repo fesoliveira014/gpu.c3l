@@ -163,7 +163,7 @@ runtime info: selected format/mode, clamped extent, actual image count
 image acquire/present
 resize and out-of-date recovery
 coherent info refresh and dormant sentinel after zero/failed resize
-UNDEFINED/PRESENT acquired-image prior layout without a seen table
+UNDEFINED/PRESENT acquired-image prior use without a seen table
 present mode selection
 application render-loop pacing sanity
 ```
@@ -274,7 +274,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Compute | root pointer shader read/write, readback, active-pipeline kind and root validation. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback; explicit pipeline and depth state; nonzero stage roots; dynamic viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
-| Swapchain | Runtime-info selection, dormant sentinel, acquired prior layout; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
+| Swapchain | Runtime-info selection, dormant sentinel, acquired prior use; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start. |
 | Threading | automatic per-worker recording pools, parallel record, identical submit. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |

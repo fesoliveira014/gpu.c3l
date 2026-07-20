@@ -385,9 +385,8 @@ fn void texture_barrier_faults() @test {
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier bar = {
         .texture = gpu::TEXTURE_HANDLE_INVALID,
-        .before_stage = gpu::Stage.TRANSFER, .after_stage = gpu::Stage.FRAGMENT_SHADER,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE, .after_hazard = gpu::Hazard.SHADER_READ,
-        .old_layout = gpu::TextureLayout.TRANSFER_DST, .new_layout = gpu::TextureLayout.SHADER_READ,
+        .before  = gpu::TextureUse.TRANSFER_DESTINATION,
+        .after   = gpu::TextureUse.SAMPLED_FRAGMENT,
     };
     fault barrier_fault = @catch(gpu::cmd_texture_barrier(&cmd, &bar));
     assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on an invalid texture handle faults INVALID_HANDLE");

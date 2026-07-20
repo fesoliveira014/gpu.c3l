@@ -237,6 +237,27 @@ def valid_document() -> dict:
                         ("barrier", "Barrier*"),
                     ),
                     api_function(
+                        "cmd_texture_barrier",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("barrier", "TextureBarrier*"),
+                    ),
+                    api_function(
+                        "texture_transition",
+                        "TextureBarrier?",
+                        ("texture", "TextureHandle"),
+                        ("before", "TextureUse"),
+                        ("after", "TextureUse"),
+                    ),
+                    api_function(
+                        "texture_view_transition",
+                        "TextureBarrier?",
+                        ("texture", "TextureHandle"),
+                        ("view", "TextureViewDesc"),
+                        ("before", "TextureUse"),
+                        ("after", "TextureUse"),
+                    ),
+                    api_function(
                         "cmd_copy_buffer_to_texture",
                         "void?",
                         ("commands", "CommandList*"),
@@ -713,6 +734,33 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "TextureUse",
+                        "kind": "enum",
+                        "members": [
+                            {"name": name, "type": {"name": "TextureUse"}}
+                            for name in (
+                                "UNDEFINED",
+                                "TRANSFER_SOURCE",
+                                "TRANSFER_DESTINATION",
+                                "SAMPLED_COMPUTE",
+                                "SAMPLED_FRAGMENT",
+                                "STORAGE_COMPUTE",
+                                "COLOR_ATTACHMENT",
+                                "DEPTH_ATTACHMENT",
+                                "PRESENT",
+                            )
+                        ],
+                    },
+                    {
+                        "name": "TextureBarrier",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "texture", "type": {"name": "TextureHandle"}},
+                            {"name": "view", "type": {"name": "TextureViewDesc"}},
+                            {"name": "before", "type": {"name": "TextureUse"}},
+                            {"name": "after", "type": {"name": "TextureUse"}},
+                        ],
+                    },                    {
                         "name": "GeneratedDrawRecord",
                         "kind": "struct",
                         "members": [
@@ -785,10 +833,16 @@ def valid_document() -> dict:
                     {
                         "name": "AcquiredImage",
                         "kind": "struct",
-                        "members": [{
-                            "name": "readiness",
-                            "type": {"name": "SwapchainReadiness"},
-                        }],
+                        "members": [
+                            {"name": "texture", "type": {"name": "TextureHandle"}},
+                            {
+                                "name": "readiness",
+                                "type": {"name": "SwapchainReadiness"},
+                            },
+                            {"name": "index", "type": {"name": "uint"}},
+                            {"name": "suboptimal", "type": {"name": "bool"}},
+                            {"name": "prior_use", "type": {"name": "TextureUse"}},
+                        ],
                     },
                 ],
             },
@@ -1283,6 +1337,34 @@ class PublicApiCheckTests(unittest.TestCase):
                     check_public_api.validate_document(document),
                 )
 
+    def test_rejects_retired_texture_transition_types(self) -> None:
+        for name in ("Stage", "Hazard", "TextureLayout"):
+            with self.subTest(name=name):
+                document = valid_document()
+                document["modules"]["gpu"]["types"].append({
+                    "name": name,
+                    "kind": "enum",
+                })
+                self.assertIn(
+                    name,
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_backend_shaped_texture_barrier_schema(self) -> None:
+        document = valid_document()
+        barrier = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "TextureBarrier"
+        )
+        barrier["members"] = [
+            {"name": "texture", "type": {"name": "TextureHandle"}},
+            {"name": "old_layout", "type": {"name": "TextureLayout"}},
+            {"name": "new_layout", "type": {"name": "TextureLayout"}},
+        ]
+        self.assertIn(
+            "TextureBarrier must contain only a texture range and semantic uses",
+            check_public_api.validate_document(document),
+        )
     def test_rejects_resource_shaped_barrier_schema(self) -> None:
         document = valid_document()
         barrier = next(

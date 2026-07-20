@@ -86,7 +86,7 @@ struct TextureSlot {
     uint               height;
     uint               mip_levels;
     uint               array_layers;
-    Atomic{int}        current_layout;
+    Atomic{bool}       presented;
     Atomic{uint}        validation_references;
     bool               swapchain_owned;
     bool               placed;
@@ -350,14 +350,14 @@ fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     }
 }
 
-<* Tracked layout is a relaxed atomic: exact under the per-texture
-   single-recorder discipline, best-effort outside it. *>
-fn gpu::TextureLayout texture_layout(TextureSlot* slot) {
-    return (gpu::TextureLayout)slot.current_layout.load(AtomicOrdering.RELAXED);
+fn gpu::TextureUse swapchain_prior_use(TextureSlot* slot) {
+    return slot.presented.load(AtomicOrdering.RELAXED)
+        ? gpu::TextureUse.PRESENT
+        : gpu::TextureUse.UNDEFINED;
 }
 
-fn void set_texture_layout(TextureSlot* slot, gpu::TextureLayout layout) {
-    slot.current_layout.store((int)layout, AtomicOrdering.RELAXED);
+fn void mark_texture_presented(TextureSlot* slot) {
+    slot.presented.store(true, AtomicOrdering.RELAXED);
 }
 
 fn void? check_texture_view_backend_result(

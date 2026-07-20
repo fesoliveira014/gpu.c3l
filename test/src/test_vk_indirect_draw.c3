@@ -74,13 +74,11 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
 
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
     upload_test_texture_data(
-        device:      device,
-        dst:         ctx.pattern,
-        mip:         0,
-        data:        white[..],
-        next_stage:  gpu::Stage.FRAGMENT_SHADER,
-        next_hazard: gpu::Hazard.SHADER_READ,
-        next_layout: gpu::TextureLayout.SHADER_READ,
+        device:   device,
+        dst:      ctx.pattern,
+        mip:      0,
+        data:     white[..],
+        next_use: gpu::TextureUse.SAMPLED_FRAGMENT,
     )!!;
     return ctx;
 }
@@ -115,13 +113,9 @@ fn void write_triangle_verts(gpu::Device* device, gpu::GpuSpan* span) {
 
 fn void record_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target) {
     gpu::TextureBarrier to_attach = {
-        .texture       = target,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.COLOR_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .texture = target,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
     };
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
@@ -132,13 +126,9 @@ fn void record_target_readback(
     gpu::GpuSpan* rb_span,
 ) {
     gpu::TextureBarrier to_src = {
-        .texture       = target,
-        .before_stage  = gpu::Stage.COLOR_ATTACHMENT,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.COLOR_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        .texture = target,
+        .before  = gpu::TextureUse.COLOR_ATTACHMENT,
+        .after   = gpu::TextureUse.TRANSFER_SOURCE,
     };
     gpu::cmd_texture_barrier(cmd, &to_src)!!;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };

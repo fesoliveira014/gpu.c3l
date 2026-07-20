@@ -309,7 +309,7 @@ fn void texture_stale_handle_rejected() @test {
     assert(stale_fault == gpu::INVALID_HANDLE, "double destroy faults INVALID_HANDLE");
 }
 
-fn void texture_barrier_transitions_layout() @test {
+fn void texture_barrier_records_semantic_uses() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
 
@@ -327,27 +327,16 @@ fn void texture_barrier_transitions_layout() @test {
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_general = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.STORAGE_COMPUTE,
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
-    fault mismatch_fault = @catch(gpu::cmd_texture_barrier(&cmd, &to_general));
-    assert(mismatch_fault == gpu::INVALID_RESOURCE_STATE, "old_layout disagreeing with the tracked layout faults INVALID_RESOURCE_STATE");
-
     gpu::TextureBarrier general_to_general = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
-        .old_layout    = gpu::TextureLayout.GENERAL,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .texture = texture,
+        .before  = gpu::TextureUse.STORAGE_COMPUTE,
+        .after   = gpu::TextureUse.STORAGE_COMPUTE,
     };
     gpu::cmd_texture_barrier(&cmd, &general_to_general)!!;
 
@@ -402,13 +391,9 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.STORAGE_COMPUTE,
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
@@ -420,6 +405,43 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
+fn void texture_barrier_rejects_unsupported_semantic_uses() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics },
+        .width     = 8,
+        .height    = 8,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .transfer_dst },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::TextureBarrier sampled = gpu::texture_transition(
+        texture: texture,
+        before:  gpu::TextureUse.UNDEFINED,
+        after:   gpu::TextureUse.SAMPLED_FRAGMENT,
+    )!!;
+    assert(@catch(gpu::cmd_texture_barrier(&commands, &sampled))
+        == gpu::INVALID_ARGUMENT,
+        "sampled use requires sampled texture usage");
+
+    gpu::TextureBarrier present = gpu::texture_transition(
+        texture: texture,
+        before:  gpu::TextureUse.UNDEFINED,
+        after:   gpu::TextureUse.PRESENT,
+    )!!;
+    assert(@catch(gpu::cmd_texture_barrier(&commands, &present))
+        == gpu::INVALID_ARGUMENT,
+        "present use requires a swapchain texture");
+}
 fn void texture_barrier_stale_handle_rejected() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
@@ -438,9 +460,9 @@ fn void texture_barrier_stale_handle_rejected() @test {
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier barrier = {
-        .texture    = texture,
-        .old_layout = gpu::TextureLayout.UNDEFINED,
-        .new_layout = gpu::TextureLayout.GENERAL,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.STORAGE_COMPUTE,
     };
     fault barrier_fault = @catch(gpu::cmd_texture_barrier(&cmd, &barrier));
     assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on a destroyed texture faults INVALID_HANDLE");
@@ -512,24 +534,20 @@ fn void transfer_only_texture_round_trips() @test {
     char[64] pixels;
     for (uint i = 0; i < 64; i++) pixels[i] = (char)i;
     upload_test_texture_data(
-        device:      &device,
-        dst:         tex,
-        mip:         0,
-        data:        pixels[..],
-        next_stage:  gpu::Stage.TRANSFER,
-        next_hazard: gpu::Hazard.TRANSFER_WRITE,
-        next_layout: gpu::TextureLayout.TRANSFER_DST,
+        device:   &device,
+        dst:      tex,
+        mip:      0,
+        data:     pixels[..],
+        next_use: gpu::TextureUse.TRANSFER_DESTINATION,
     )!!;
 
     char[64] readback;
     readback_test_texture_data(
-        device:      &device,
-        src:         tex,
-        mip:         0,
-        out_data:    readback[..],
-        from_stage:  gpu::Stage.TRANSFER,
-        from_hazard: gpu::Hazard.TRANSFER_WRITE,
-        from_layout: gpu::TextureLayout.TRANSFER_DST,
+        device:   &device,
+        src:      tex,
+        mip:      0,
+        out_data: readback[..],
+        from_use: gpu::TextureUse.TRANSFER_DESTINATION,
     )!!;
     for (uint i = 0; i < 64; i++) {
         assert(readback[i] == (char)i, "transfer-only texture round-trips bytes");
@@ -762,12 +780,12 @@ fn void unsupported_texture_capability_diagnostic_preserves_fault() @test {
     assert(capture.calls == 1, "null callback emits no additional diagnostic");
 }
 
-fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
+fn void texture_barrier_invalid_use_diagnostic_identifies_resource() @test {
     TextureDiagnosticCapture capture = {
         .expected_operation      = "cmd_texture_barrier",
-        .expected_debug_name     = "layout_diagnostic_texture",
-        .expected_rejected_field = "TextureBarrier.old_layout",
-        .expected_invariant      = "old_layout must match the command list effective layout",
+        .expected_debug_name     = "texture_barrier_diagnostic",
+        .expected_rejected_field = "TextureBarrier.after",
+        .expected_invariant      = "after use must be a valid concrete texture use",
     };
     gpu::Device device = make_texture_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
@@ -779,49 +797,52 @@ fn void texture_layout_mismatch_diagnostic_identifies_resource() @test {
         .height     = 8,
         .format     = gpu::Format.RGBA8_UNORM,
         .usage      = { .sampled, .storage },
-        .debug_name = "layout_diagnostic_texture",
+        .debug_name = "texture_barrier_diagnostic",
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
     defer discard_test_commands(&commands)!!;
     gpu::TextureBarrier barrier = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.UNDEFINED,
     };
-    gpu::cmd_texture_barrier(&commands, &barrier)!!;
-    fault with_callback = @catch(gpu::cmd_texture_barrier(&commands, &barrier));
+    fault with_callback = @catch(gpu::cmd_texture_barrier(
+        &commands,
+        &barrier,
+    ));
 
-    assert(with_callback == gpu::INVALID_RESOURCE_STATE, "layout mismatch keeps INVALID_RESOURCE_STATE");
-    assert(capture.calls == 1, "layout mismatch emits exactly one diagnostic");
+    assert(with_callback == gpu::INVALID_ARGUMENT,
+        "invalid semantic use keeps INVALID_ARGUMENT");
+    assert(capture.calls == 1, "invalid semantic use emits exactly one diagnostic");
     assert(capture.operation_matches, "operation is cmd_texture_barrier");
     assert(capture.has_fault && capture.public_fault == with_callback,
-        "diagnostic carries the unchanged layout fault");
-    assert(capture.public_contract, "layout mismatch is a public-contract diagnostic");
-    assert(capture.resource_kind == gpu::DebugResourceKind.TEXTURE, "resource kind is texture");
+        "diagnostic carries the unchanged semantic-use fault");
+    assert(capture.public_contract, "invalid semantic use is a public-contract diagnostic");
+    assert(capture.resource_kind == gpu::DebugResourceKind.TEXTURE,
+        "resource kind is texture");
     assert(capture.has_public_identity, "live texture identity is present");
     assert(capture.index == texture.index, "texture index is preserved");
-    assert(capture.generation == texture.generation, "texture generation is preserved");
+    assert(capture.generation == texture.generation,
+        "texture generation is preserved");
     assert(capture.debug_name_matches, "texture debug name is preserved");
-    assert(capture.rejected_field_matches, "old_layout field is identified");
-    assert(capture.invariant_matches, "tracked-layout invariant is identified");
+    assert(capture.rejected_field_matches, "after-use field is identified");
+    assert(capture.invariant_matches, "semantic-use invariant is identified");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::vk::VkDeviceState* state =
+        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
     state.debug_callback = null;
-    fault without_callback = @catch(gpu::cmd_texture_barrier(&commands, &barrier));
-    assert(without_callback == with_callback, "callback presence does not alter the layout fault");
+    fault without_callback = @catch(gpu::cmd_texture_barrier(
+        &commands,
+        &barrier,
+    ));
+    assert(without_callback == with_callback,
+        "callback presence does not alter the semantic-use fault");
     assert(capture.calls == 1, "null callback emits no additional diagnostic");
-
-    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
-
-    defer discard_test_executable(&commands_executable)!!;
 }
-
 fn void placed_texture_requirements_validate_and_release_storage() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;

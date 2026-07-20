@@ -314,7 +314,7 @@ fn void present_path_guards_precede_native_mutation() @test {
     defer state.presentation.swapchains.slots = {};
 
     gpu::vk::TextureSlot texture;
-    gpu::vk::set_texture_layout(&texture, gpu::TextureLayout.PRESENT);
+    gpu::vk::mark_texture_presented(&texture);
     gpu::TextureHandle texture_handle = state.textures.alloc(texture)!!;
     defer state.textures.free(texture_handle)!!;
 
@@ -689,7 +689,7 @@ fn void swapchain_info_snapshots_are_coherent() @test {
     assert(slot.acquisition == 9, "dormancy does not reuse acquisition identities");
 }
 
-fn void acquired_image_reports_committed_prior_layout() @test {
+fn void acquired_image_reports_prior_semantic_use() @test {
     gpu::vk::TextureSlot texture;
     gpu::Device device = { .generation = 1 };
     gpu::SwapchainHandle swapchain = { .index = 1, .generation = 1 };
@@ -707,13 +707,13 @@ fn void acquired_image_reports_committed_prior_layout() @test {
         index:      1,
         suboptimal: false,
     );
-    assert(first.prior_layout == gpu::TextureLayout.UNDEFINED,
-        "newly wrapped image reports undefined prior layout");
+    assert(first.prior_use == gpu::TextureUse.UNDEFINED,
+        "newly wrapped image reports undefined prior use");
     assert(first.texture == handle && first.index == 1 && !first.suboptimal,
         "acquired-image construction preserves existing fields");
     assert(first.readiness == readiness, "acquired image carries one-shot readiness");
 
-    gpu::vk::set_texture_layout(&texture, gpu::TextureLayout.PRESENT);
+    gpu::vk::mark_texture_presented(&texture);
     gpu::AcquiredImage presented = gpu::vk::make_acquired_image(
         texture:    &texture,
         handle:     handle,
@@ -721,8 +721,8 @@ fn void acquired_image_reports_committed_prior_layout() @test {
         index:      1,
         suboptimal: true,
     );
-    assert(presented.prior_layout == gpu::TextureLayout.PRESENT,
-        "presented image reports committed present prior layout");
+    assert(presented.prior_use == gpu::TextureUse.PRESENT,
+        "presented image reports prior presentation use");
     assert(presented.suboptimal, "acquired-image construction preserves suboptimal state");
 }
 

@@ -322,13 +322,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::CommandList compute_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&compute_commands)!!;
     gpu::TextureBarrier to_general = {
-        .texture       = shared_texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .texture = shared_texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.STORAGE_COMPUTE,
     };
     gpu::cmd_texture_barrier(&compute_commands, &to_general)!!;
     const uint GROUPS = (TEX_SIZE + 7) / 8;
@@ -339,13 +335,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
     gpu::TextureBarrier write_to_sample = {
-        .texture       = shared_texture,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
-        .old_layout    = gpu::TextureLayout.GENERAL,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .texture = shared_texture,
+        .before  = gpu::TextureUse.STORAGE_COMPUTE,
+        .after   = gpu::TextureUse.STORAGE_COMPUTE,
     };
     gpu::cmd_texture_barrier(&compute_commands, &write_to_sample)!!;
     bind_test_compute_pipeline(&compute_commands, sample_pipeline);
@@ -368,13 +360,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::CommandList graphics_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&graphics_commands)!!;
     gpu::TextureBarrier target_to_attachment = {
-        .texture       = target,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.COLOR_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .texture = target,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
     };
     gpu::cmd_texture_barrier(&graphics_commands, &target_to_attachment)!!;
     gpu::ColorTargetDesc[1] colors = {{
@@ -396,13 +384,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     )!!;
     gpu::cmd_end_render_pass(&graphics_commands)!!;
     gpu::TextureBarrier target_to_source = {
-        .texture       = target,
-        .before_stage  = gpu::Stage.COLOR_ATTACHMENT,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.COLOR_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        .texture = target,
+        .before  = gpu::TextureUse.COLOR_ATTACHMENT,
+        .after   = gpu::TextureUse.TRANSFER_SOURCE,
     };
     gpu::cmd_texture_barrier(&graphics_commands, &target_to_source)!!;
     gpu::GpuSpan readback_span = readback.span;
@@ -564,13 +548,9 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.STORAGE_COMPUTE,
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
@@ -583,13 +563,9 @@ fn void descriptor_buffer_write_then_sample() @test {
     )!!;
 
     gpu::TextureBarrier write_to_sample = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.COMPUTE_SHADER,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.SHADER_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
-        .old_layout    = gpu::TextureLayout.GENERAL,
-        .new_layout    = gpu::TextureLayout.GENERAL,
+        .texture = texture,
+        .before  = gpu::TextureUse.STORAGE_COMPUTE,
+        .after   = gpu::TextureUse.STORAGE_COMPUTE,
     };
     gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
     bind_test_compute_pipeline(&cmd, sample_pipe);

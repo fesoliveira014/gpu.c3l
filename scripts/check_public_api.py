@@ -106,6 +106,9 @@ FORBIDDEN_SYMBOLS = {
     "SubmitFn",
     "CmdDispatchFn",
     "CmdDrawFn",
+    "Stage",
+    "Hazard",
+    "TextureLayout",
     "CmdReadbackBufferFn",
     "ResolveReadbackFn",
     "create_wayland_surface",
@@ -142,6 +145,14 @@ RETIRED_SOURCE_SYMBOLS = (
     "BufferUsage",
     "BufferBarrier",
     "GlobalBarrier",
+    "TextureLayout",
+    "before_stage",
+    "after_stage",
+    "before_hazard",
+    "after_hazard",
+    "old_layout",
+    "new_layout",
+    "prior_layout",
     "cmd_buffer_barrier(",
     "cmd_global_barrier(",
     "TextureDescriptorDesc",
@@ -421,6 +432,18 @@ def validate_document(document: dict) -> list[str]:
             ("CommandList*", "Barrier*"),
             "void?",
         ),
+        "cmd_texture_barrier": (
+            ("CommandList*", "TextureBarrier*"),
+            "void?",
+        ),
+        "texture_transition": (
+            ("TextureHandle", "TextureUse", "TextureUse"),
+            "TextureBarrier?",
+        ),
+        "texture_view_transition": (
+            ("TextureHandle", "TextureViewDesc", "TextureUse", "TextureUse"),
+            "TextureBarrier?",
+        ),
         "cmd_copy_buffer_to_texture": (
             ("CommandList*", "BufferTextureCopyDesc*"),
             "void?",
@@ -516,6 +539,9 @@ def validate_document(document: dict) -> list[str]:
         "cmd_copy_buffer": ("commands", "desc"),
         "cmd_fill_buffer": ("commands", "dst", "value"),
         "cmd_barrier": ("commands", "barrier"),
+        "cmd_texture_barrier": ("commands", "barrier"),
+        "texture_transition": ("texture", "before", "after"),
+        "texture_view_transition": ("texture", "view", "before", "after"),
         "cmd_copy_buffer_to_texture": ("commands", "desc"),
         "cmd_copy_texture_to_buffer": ("commands", "desc"),
         "cmd_draw_indexed": (
@@ -606,6 +632,8 @@ def validate_document(document: dict) -> list[str]:
         ("StageMask", "bitstruct"),
         ("HazardFlags", "bitstruct"),
         ("Barrier", "struct"),
+        ("TextureUse", "enum"),
+        ("TextureBarrier", "struct"),
         ("GeneratedDrawRecord", "struct"),
         ("GeneratedDrawIndexedRecord", "struct"),
         ("GeneratedDispatchRecord", "struct"),
@@ -771,6 +799,29 @@ def validate_document(document: dict) -> list[str]:
             ),
             "Barrier must contain only semantic stage masks and hazard flags",
         ),
+        "TextureUse": (
+            (
+                ("UNDEFINED", "TextureUse"),
+                ("TRANSFER_SOURCE", "TextureUse"),
+                ("TRANSFER_DESTINATION", "TextureUse"),
+                ("SAMPLED_COMPUTE", "TextureUse"),
+                ("SAMPLED_FRAGMENT", "TextureUse"),
+                ("STORAGE_COMPUTE", "TextureUse"),
+                ("COLOR_ATTACHMENT", "TextureUse"),
+                ("DEPTH_ATTACHMENT", "TextureUse"),
+                ("PRESENT", "TextureUse"),
+            ),
+            "TextureUse must match the exact semantic use schema",
+        ),
+        "TextureBarrier": (
+            (
+                ("texture", "TextureHandle"),
+                ("view", "TextureViewDesc"),
+                ("before", "TextureUse"),
+                ("after", "TextureUse"),
+            ),
+            "TextureBarrier must contain only a texture range and semantic uses",
+        ),
         "MemoryStats": (
             (
                 ("heaps", "MemoryHeapBudget[16]"),
@@ -894,12 +945,16 @@ def validate_document(document: dict) -> list[str]:
         failures.append("missing SwapchainReadiness token")
 
     acquired = types.get("AcquiredImage")
-    acquired_fields = {
-        member.get("name"): member.get("type", {}).get("name")
-        for member in (acquired or {}).get("members", [])
-    }
-    if acquired_fields.get("readiness") != "SwapchainReadiness":
-        failures.append("AcquiredImage must carry SwapchainReadiness")
+    if member_schema(acquired) != (
+        ("texture", "TextureHandle"),
+        ("readiness", "SwapchainReadiness"),
+        ("index", "uint"),
+        ("suboptimal", "bool"),
+        ("prior_use", "TextureUse"),
+    ):
+        failures.append(
+            "AcquiredImage must carry readiness and semantic prior use"
+        )
 
     for module_name, handle_names in PLATFORM_HANDLE_TYPES.items():
         module = modules.get(module_name)

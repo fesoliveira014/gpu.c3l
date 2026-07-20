@@ -313,7 +313,7 @@ fn void wrapped_image_failure_is_backend_with_swapchain_identity() @test {
         "wrapped-image failure does not blame a caller field");
 }
 
-fn void wsi_lifecycle_and_layout_diagnostics_are_contract_failures() @test {
+fn void wsi_lifecycle_diagnostics_are_contract_failures() @test {
     WsiDiagnosticCapture capture;
     gpu::vk::VkDeviceState state = {
         .debug_callback  = &capture_wsi_diagnostic,
@@ -358,17 +358,6 @@ fn void wsi_lifecycle_and_layout_diagnostics_are_contract_failures() @test {
     assert(capture.calls == 1 && capture.last.category.public_contract,
         "unconsumed present reports one contract diagnostic");
 
-    capture = {};
-    gpu::vk::TextureSlot image_slot;
-    assert(@catch(gpu::vk::check_swapchain_present_layout(&context, &image_slot)) == gpu::INVALID_RESOURCE_STATE,
-        "wrong present layout preserves INVALID_RESOURCE_STATE");
-    assert(capture.calls == 1 && capture.last.rejected_field.str_view() == "acquired image layout",
-        "wrong layout reports its exact field");
-
-    capture = {};
-    gpu::vk::set_texture_layout(&image_slot, gpu::TextureLayout.PRESENT);
-    gpu::vk::check_swapchain_present_layout(&context, &image_slot)!!;
-    assert(capture.calls == 0, "valid present layout emits nothing");
 }
 
 fn void capability_failures_are_backend_only_and_success_is_silent() @test {

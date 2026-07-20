@@ -89,21 +89,6 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
                         backend_text:        null,
                     )~;
                 }
-                if (effective_layout(record, slot, target.texture) != gpu::TextureLayout.COLOR_ATTACHMENT) {
-                    return report_contract_failure(
-                        state:               state,
-                        operation:           "cmd_begin_render_pass",
-                        public_fault:        gpu::INVALID_RESOURCE_STATE,
-                        resource_kind:       gpu::DebugResourceKind.TEXTURE,
-                        has_public_identity: true,
-                        index:               target.texture.index,
-                        generation:          target.texture.generation,
-                        debug_name:          slot_name(&slot.debug_name[0]),
-                        rejected_field:      "ColorTargetDesc.texture",
-                        invariant:           "color attachment must be in COLOR_ATTACHMENT layout",
-                        backend_text:        null,
-                    )~;
-                }
             }
         }
 
@@ -119,7 +104,6 @@ fn void? vk_cmd_begin_render_pass(gpu::CommandList* commands, gpu::RenderPassDes
             )!;
             if (!depth_slot.usage.depth_attach) return gpu::INVALID_ARGUMENT~;
             if (desc.width > depth_slot.width || desc.height > depth_slot.height) return gpu::INVALID_ARGUMENT~;
-            if (effective_layout(record, depth_slot, desc.depth.texture) != gpu::TextureLayout.DEPTH_STENCIL) return gpu::INVALID_RESOURCE_STATE~;
         }
 
         state.texture_view_cache_mutex.lock()!!;

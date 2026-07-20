@@ -117,9 +117,7 @@ fn void? upload_test_texture_data(
     gpu::TextureHandle dst,
     uint mip,
     char[] data,
-    gpu::Stage next_stage,
-    gpu::Hazard next_hazard,
-    gpu::TextureLayout next_layout,
+    gpu::TextureUse next_use,
 ) {
     OwnedSpan upload = allocate_owned_span(
         device:       device,
@@ -136,8 +134,13 @@ fn void? upload_test_texture_data(
     gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!;
     gpu::CommandList commands = gpu::begin_commands(queue)!;
     defer (void)discard_test_commands(&commands);
-    gpu::TextureBarrier to_transfer = gpu::texture_transition(
+    gpu::TextureViewDesc view = {
+        .base_mip  = mip,
+        .mip_count = 1,
+    };
+    gpu::TextureBarrier to_transfer = gpu::texture_view_transition(
         texture: dst,
+        view:    view,
         before:  gpu::TextureUse.UNDEFINED,
         after:   gpu::TextureUse.TRANSFER_DESTINATION,
     )!;
@@ -148,16 +151,13 @@ fn void? upload_test_texture_data(
         .mip     = mip,
     };
     gpu::cmd_copy_buffer_to_texture(&commands, &copy)!;
-    gpu::TextureBarrier next_use = {
-        .texture       = dst,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = next_stage,
-        .before_hazard = gpu::Hazard.TRANSFER_WRITE,
-        .after_hazard  = next_hazard,
-        .old_layout    = gpu::TextureLayout.TRANSFER_DST,
-        .new_layout    = next_layout,
-    };
-    gpu::cmd_texture_barrier(&commands, &next_use)!;
+    gpu::TextureBarrier transition = gpu::texture_view_transition(
+        texture: dst,
+        view:    view,
+        before:  gpu::TextureUse.TRANSFER_DESTINATION,
+        after:   next_use,
+    )!;
+    gpu::cmd_texture_barrier(&commands, &transition)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
     defer (void)discard_test_executable(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };
@@ -171,9 +171,7 @@ fn void? readback_test_texture_data(
     gpu::TextureHandle src,
     uint mip,
     char[] out_data,
-    gpu::Stage from_stage,
-    gpu::Hazard from_hazard,
-    gpu::TextureLayout from_layout,
+    gpu::TextureUse from_use,
 ) {
     OwnedSpan readback = allocate_owned_span(
         device:       device,
@@ -187,15 +185,16 @@ fn void? readback_test_texture_data(
     gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!;
     gpu::CommandList commands = gpu::begin_commands(queue)!;
     defer (void)discard_test_commands(&commands);
-    gpu::TextureBarrier to_transfer = {
-        .texture       = src,
-        .before_stage  = from_stage,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = from_hazard,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = from_layout,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+    gpu::TextureViewDesc view = {
+        .base_mip  = mip,
+        .mip_count = 1,
     };
+    gpu::TextureBarrier to_transfer = gpu::texture_view_transition(
+        texture: src,
+        view:    view,
+        before:  from_use,
+        after:   gpu::TextureUse.TRANSFER_SOURCE,
+    )!;
     gpu::cmd_texture_barrier(&commands, &to_transfer)!;
     gpu::TextureBufferCopyDesc copy = {
         .texture = src,
@@ -205,18 +204,15 @@ fn void? readback_test_texture_data(
     gpu::cmd_copy_texture_to_buffer(&commands, &copy)!;
     gpu::Barrier host_read = {
         .before = { .transfer = true },
-        .after = { .host = true },
+        .after  = { .host = true },
     };
     gpu::cmd_barrier(&commands, &host_read)!;
-    gpu::TextureBarrier restore = {
-        .texture       = src,
-        .before_stage  = gpu::Stage.TRANSFER,
-        .after_stage   = from_stage,
-        .before_hazard = gpu::Hazard.TRANSFER_READ,
-        .after_hazard  = from_hazard,
-        .old_layout    = gpu::TextureLayout.TRANSFER_SRC,
-        .new_layout    = from_layout,
-    };
+    gpu::TextureBarrier restore = gpu::texture_view_transition(
+        texture: src,
+        view:    view,
+        before:  gpu::TextureUse.TRANSFER_SOURCE,
+        after:   from_use,
+    )!;
     gpu::cmd_texture_barrier(&commands, &restore)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
     defer (void)discard_test_executable(&executable);

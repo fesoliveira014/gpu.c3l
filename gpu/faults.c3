@@ -17,9 +17,8 @@ faultdef
     // A handle is stale (generation mismatch after destroy) or was never
     // live; also raised for zero, consumed, or stale device tokens.
     INVALID_HANDLE,
-    // An operation found a resource in the wrong tracked state — most
-    // commonly a texture barrier whose old_layout disagrees with the
-    // tracked layout chain.
+    // A stateful token or resource lifecycle is incompatible with the
+    // requested operation.
     INVALID_RESOURCE_STATE,
     // Host-side allocation failure reported by the driver.
     OUT_OF_HOST_MEMORY,

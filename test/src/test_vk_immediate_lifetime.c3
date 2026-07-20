@@ -187,13 +187,9 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
     gpu::TextureBarrier barrier = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.TRANSFER_DESTINATION,
     };
     gpu::cmd_texture_barrier(&commands, &barrier)!!;
     bind_test_compute_pipeline(&commands, pipeline);
@@ -229,15 +225,13 @@ fn void failed_command_validation_retains_no_resource_reference() @test {
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
     gpu::TextureBarrier barrier = {
-        .texture      = texture,
-        .before_stage = gpu::Stage.TRANSFER,
-        .after_stage  = gpu::Stage.TRANSFER,
-        .old_layout   = gpu::TextureLayout.TRANSFER_DST,
-        .new_layout   = gpu::TextureLayout.TRANSFER_DST,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.UNDEFINED,
     };
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
-        == gpu::INVALID_RESOURCE_STATE,
-        "the deliberately mismatched barrier faults");
+        == gpu::INVALID_ARGUMENT,
+        "an invalid semantic use faults");
     gpu::destroy_texture(&device, texture)!!;
     gpu::discard_commands(&commands)!!;
 }

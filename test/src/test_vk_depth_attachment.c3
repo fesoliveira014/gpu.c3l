@@ -123,26 +123,18 @@ fn void record_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle depth) 
 
 fn void record_color_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target) {
     gpu::TextureBarrier to_attach = {
-        .texture       = target,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.COLOR_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .texture = target,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
     };
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
 
 fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, gpu::GpuSpan* rb_span) {
     gpu::TextureBarrier to_src = {
-        .texture       = target,
-        .before_stage  = gpu::Stage.COLOR_ATTACHMENT,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.COLOR_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        .texture = target,
+        .before  = gpu::TextureUse.COLOR_ATTACHMENT,
+        .after   = gpu::TextureUse.TRANSFER_SOURCE,
     };
     gpu::cmd_texture_barrier(cmd, &to_src)!!;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
@@ -156,13 +148,9 @@ fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, 
 
 fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, gpu::GpuSpan* rb_span) {
     gpu::TextureBarrier to_src = {
-        .texture       = depth,
-        .before_stage  = gpu::Stage.DEPTH_STENCIL,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.DEPTH_WRITE,
-        .after_hazard  = gpu::Hazard.TRANSFER_READ,
-        .old_layout    = gpu::TextureLayout.DEPTH_STENCIL,
-        .new_layout    = gpu::TextureLayout.TRANSFER_SRC,
+        .texture = depth,
+        .before  = gpu::TextureUse.DEPTH_ATTACHMENT,
+        .after   = gpu::TextureUse.TRANSFER_SOURCE,
     };
     gpu::cmd_texture_barrier(cmd, &to_src)!!;
     gpu::TextureBufferCopyDesc copy = { .texture = depth, .dst = *rb_span };
@@ -577,13 +565,9 @@ fn void sampled_depth_matches_readback() @test {
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::TextureBarrier to_read = {
-        .texture       = depth,
-        .before_stage  = gpu::Stage.DEPTH_STENCIL,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.DEPTH_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
-        .old_layout    = gpu::TextureLayout.DEPTH_STENCIL,
-        .new_layout    = gpu::TextureLayout.SHADER_READ,
+        .texture = depth,
+        .before  = gpu::TextureUse.DEPTH_ATTACHMENT,
+        .after   = gpu::TextureUse.SAMPLED_COMPUTE,
     };
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
     bind_test_compute_pipeline(&cmd, sample_pipeline);
@@ -619,8 +603,6 @@ fn void depth_pass_validation_faults() @test {
     gpu::TextureHandle sampled_only = gpu::create_texture(&device, &sampled_only_desc)!!;
     defer gpu::destroy_texture(&device, sampled_only)!!;
 
-    gpu::TextureHandle unbarriered = make_depth_texture(&device);
-    defer gpu::destroy_texture(&device, unbarriered)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
@@ -628,11 +610,6 @@ fn void depth_pass_validation_faults() @test {
     gpu::RenderPassDesc no_usage_pass = { .depth = &no_usage, .width = DP_RT, .height = DP_RT };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &no_usage_pass)) == gpu::INVALID_ARGUMENT,
         "depth target without depth_attach usage faults INVALID_ARGUMENT");
-
-    gpu::DepthTargetDesc wrong_layout = { .texture = unbarriered, .load_op = gpu::LoadOp.CLEAR, .clear = { .depth = 1.0f } };
-    gpu::RenderPassDesc wrong_layout_pass = { .depth = &wrong_layout, .width = DP_RT, .height = DP_RT };
-    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &wrong_layout_pass)) == gpu::INVALID_RESOURCE_STATE,
-        "depth target outside the DEPTH_STENCIL layout faults INVALID_RESOURCE_STATE");
 
     gpu::RenderPassDesc empty_pass = { .width = DP_RT, .height = DP_RT };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &empty_pass)) == gpu::INVALID_ARGUMENT,
@@ -733,13 +710,9 @@ fn void compare_sampler_exact_results() @test {
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::TextureBarrier to_read = {
-        .texture       = depth,
-        .before_stage  = gpu::Stage.DEPTH_STENCIL,
-        .after_stage   = gpu::Stage.COMPUTE_SHADER,
-        .before_hazard = gpu::Hazard.DEPTH_WRITE,
-        .after_hazard  = gpu::Hazard.SHADER_READ,
-        .old_layout    = gpu::TextureLayout.DEPTH_STENCIL,
-        .new_layout    = gpu::TextureLayout.SHADER_READ,
+        .texture = depth,
+        .before  = gpu::TextureUse.DEPTH_ATTACHMENT,
+        .after   = gpu::TextureUse.SAMPLED_COMPUTE,
     };
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
     bind_test_compute_pipeline(&cmd, probe_pipeline);

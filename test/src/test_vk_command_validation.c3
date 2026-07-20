@@ -13,6 +13,7 @@ const char[*] VAL_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 const char[*] VAL_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
 const uint VAL_RT = 16;
+const vk::QueueFamilyFlags TRANSFER_ONLY_QUEUE_FLAGS = (vk::QueueFamilyFlags)0x00000004;
 
 struct SyncDiagnosticCapture {
     uint                   calls;
@@ -125,13 +126,11 @@ fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
 
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
     upload_test_texture_data(
-        device:      device,
-        dst:         ctx.pattern,
-        mip:         0,
-        data:        white[..],
-        next_stage:  gpu::Stage.FRAGMENT_SHADER,
-        next_hazard: gpu::Hazard.SHADER_READ,
-        next_layout: gpu::TextureLayout.SHADER_READ,
+        device:   device,
+        dst:      ctx.pattern,
+        mip:      0,
+        data:     white[..],
+        next_use: gpu::TextureUse.SAMPLED_FRAGMENT,
     )!!;
     return ctx;
 }
@@ -194,11 +193,9 @@ fn gpu::TextureHandle make_val_depth_target_mips(gpu::Device* device, uint width
 
 fn void record_val_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle depth) {
     record_val_texture_transition(
-        cmd:          cmd,
-        texture:      depth,
-        new_layout:   gpu::TextureLayout.DEPTH_STENCIL,
-        after_stage:  gpu::Stage.DEPTH_STENCIL,
-        after_hazard: gpu::Hazard.DEPTH_WRITE,
+        commands: cmd,
+        texture:  depth,
+        after:    gpu::TextureUse.DEPTH_ATTACHMENT,
     );
 }
 
@@ -238,17 +235,17 @@ fn void destroy_val_compute_ctx(gpu::Device* device, ValComputeCtx* ctx) {
     gpu::destroy_pipeline(device, ctx.pipeline)!!;
 }
 
-fn void record_val_texture_transition(gpu::CommandList* cmd, gpu::TextureHandle texture, gpu::TextureLayout new_layout, gpu::Stage after_stage, gpu::Hazard after_hazard) {
-    gpu::TextureBarrier barrier = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = after_stage,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = after_hazard,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = new_layout,
-    };
-    gpu::cmd_texture_barrier(cmd, &barrier)!!;
+fn void record_val_texture_transition(
+    gpu::CommandList* commands,
+    gpu::TextureHandle texture,
+    gpu::TextureUse after,
+) {
+    gpu::TextureBarrier barrier = gpu::texture_transition(
+        texture: texture,
+        before:  gpu::TextureUse.UNDEFINED,
+        after:   after,
+    )!!;
+    gpu::cmd_texture_barrier(commands, &barrier)!!;
 }
 
 fn gpu::GpuAddress val_span_address(gpu::Device* device, gpu::GpuSpan span) {
@@ -268,13 +265,9 @@ fn void write_val_triangle_verts(gpu::Device* device, gpu::GpuSpan* span) {
 
 fn void record_val_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target) {
     gpu::TextureBarrier to_attach = {
-        .texture       = target,
-        .before_stage  = gpu::Stage.HOST,
-        .after_stage   = gpu::Stage.COLOR_ATTACHMENT,
-        .before_hazard = gpu::Hazard.HOST_WRITE,
-        .after_hazard  = gpu::Hazard.COLOR_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .texture = target,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
     };
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
@@ -424,20 +417,16 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     )!!;
     record.queue.roles = { .graphics };
     gpu::TextureBarrier barrier = {
-        .texture       = texture,
-        .before_stage  = gpu::Stage.NONE,
-        .after_stage   = gpu::Stage.TRANSFER,
-        .before_hazard = gpu::Hazard.NONE,
-        .after_hazard  = gpu::Hazard.TRANSFER_WRITE,
-        .old_layout    = gpu::TextureLayout.UNDEFINED,
-        .new_layout    = gpu::TextureLayout.TRANSFER_DST,
+        .texture = texture,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.TRANSFER_DESTINATION,
     };
-    uint pending_before = record.pending_layout_count;
+    uint references_before = record.reference_count;
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,
         "compute-only texture rejects a disjoint recording-role token");
-    assert(record.pending_layout_count == pending_before,
-        "access rejection precedes pending-layout mutation");
+    assert(record.reference_count == references_before,
+        "access rejection precedes validation-reference mutation");
 
     gpu::BufferTextureCopyDesc copy = {
         .src     = span,
@@ -1407,7 +1396,7 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    record_val_texture_transition(&cmd, texture, gpu::TextureLayout.TRANSFER_DST, gpu::Stage.TRANSFER, gpu::Hazard.TRANSFER_WRITE);
+    record_val_texture_transition(&cmd, texture, gpu::TextureUse.TRANSFER_DESTINATION);
 
     gpu::BufferTextureCopyDesc up = { .src = escaped, .texture = texture, .width = 4, .height = 4 };
     fault beyond = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &up));
@@ -1445,7 +1434,7 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    record_val_texture_transition(&cmd, texture, gpu::TextureLayout.TRANSFER_SRC, gpu::Stage.TRANSFER, gpu::Hazard.TRANSFER_READ);
+    record_val_texture_transition(&cmd, texture, gpu::TextureUse.TRANSFER_SOURCE);
 
     gpu::TextureBufferCopyDesc down = { .texture = texture, .dst = escaped, .width = 4, .height = 4 };
     fault beyond = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &down));
@@ -1483,7 +1472,7 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     gpu::GpuSpan boundary = full_span.checked_subspan(32, 64)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
-    record_val_texture_transition(&cmd, texture, gpu::TextureLayout.TRANSFER_DST, gpu::Stage.TRANSFER, gpu::Hazard.TRANSFER_WRITE);
+    record_val_texture_transition(&cmd, texture, gpu::TextureUse.TRANSFER_DESTINATION);
 
     gpu::BufferTextureCopyDesc up = { .src = boundary, .texture = texture, .width = 4, .height = 4 };
     gpu::cmd_copy_buffer_to_texture(&cmd, &up)!!;
@@ -1614,6 +1603,59 @@ fn void barrier_queue_stage_mismatch_faults_without_poisoning_recording() @test 
     defer discard_test_executable(&executable)!!;
 }
 
+fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .transfer },
+        .width     = 1,
+        .height    = 1,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .color_attach, .transfer_dst },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, record.queue.id)!!;
+    vk::QueueFamilyFlags selected_flags = completion.queue_flags;
+    defer completion.queue_flags = selected_flags;
+    completion.queue_flags = TRANSFER_ONLY_QUEUE_FLAGS;
+    gpu::TextureBarrier barrier = gpu::texture_transition(
+        texture: texture,
+        before:  gpu::TextureUse.COLOR_ATTACHMENT,
+        after:   gpu::TextureUse.TRANSFER_DESTINATION,
+    )!!;
+    uint references_before = record.reference_count;
+
+    assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
+        == gpu::INVALID_ARGUMENT,
+        "queue-incompatible before use faults INVALID_ARGUMENT");
+    assert(record.reference_count == references_before,
+        "before-use rejection retains no texture reference");
+
+    barrier.before = gpu::TextureUse.UNDEFINED;
+    barrier.after = gpu::TextureUse.COLOR_ATTACHMENT;
+    assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
+        == gpu::INVALID_ARGUMENT,
+        "queue-incompatible after use faults INVALID_ARGUMENT");
+    assert(record.reference_count == references_before,
+        "after-use rejection retains no texture reference");
+
+    completion.queue_flags = selected_flags;
+    barrier.after = gpu::TextureUse.TRANSFER_DESTINATION;
+    gpu::cmd_texture_barrier(&commands, &barrier)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+}
+
 fn void barrier_hazard_matrix_submits() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -1690,13 +1732,13 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         mip_levels: 1,
     );
     defer gpu::destroy_texture(&device, small)!!;
-    gpu::TextureHandle unbarriered = make_val_color_target(
+    gpu::TextureHandle invalid_range = make_val_color_target(
         device:     &device,
         width:      16,
         height:     16,
         mip_levels: 5,
     );
-    defer gpu::destroy_texture(&device, unbarriered)!!;
+    defer gpu::destroy_texture(&device, invalid_range)!!;
     gpu::TextureHandle depth = make_val_depth_target(&device, 8, 8);
     defer gpu::destroy_texture(&device, depth)!!;
     gpu::TextureHandle mip_depth = make_val_depth_target_mips(
@@ -1731,11 +1773,11 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     uint cached_before = val_cached_view_count(&device, large);
     gpu::ColorTargetDesc[2] invalid_later = {
         { .texture = large, .mip_level = 2 },
-        { .texture = unbarriered, .mip_level = 99 },
+        { .texture = invalid_range, .mip_level = 99 },
     };
     gpu::RenderPassDesc invalid_later_pass = { .colors = invalid_later[..], .width = 4, .height = 4 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &invalid_later_pass)) == gpu::INVALID_ARGUMENT,
-        "invalid later mip range faults before its invalid layout");
+        "invalid later mip range faults before recording");
     assert(val_cached_view_count(&device, large) == cached_before,
         "later validation failure creates no cached view for an earlier target");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "later attachment rejection records no pass");
@@ -2065,11 +2107,9 @@ fn void buffer_to_texture_access_diagnostic_precedes_recording() @test {
     gpu::QueueRoles texture_access = texture_slot.access;
     texture_slot.access = { .transfer };
     record_val_texture_transition(
-        cmd:          &commands,
-        texture:      texture,
-        new_layout:   gpu::TextureLayout.TRANSFER_DST,
-        after_stage:  gpu::Stage.TRANSFER,
-        after_hazard: gpu::Hazard.TRANSFER_WRITE,
+        commands: &commands,
+        texture:  texture,
+        after:    gpu::TextureUse.TRANSFER_DESTINATION,
     );
     gpu::cmd_copy_buffer_to_texture(&commands, &copy)!!;
     assert(capture.calls == 1,
@@ -2358,27 +2398,6 @@ fn void tranche_b_command_and_render_diagnostics() @test {
 
     gpu::ColorTargetDesc[1] colors = {{ .texture = color_target }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = 8, .height = 8 };
-    reset_sync_diagnostic(
-        capture:        &capture,
-        operation:      "cmd_begin_render_pass",
-        debug_name:     "color_target",
-        rejected_field: "ColorTargetDesc.texture",
-        invariant:      "color attachment must be in COLOR_ATTACHMENT layout",
-    );
-    fault layout_fault = @catch(gpu::cmd_begin_render_pass(&commands, &pass));
-    assert(layout_fault == gpu::INVALID_RESOURCE_STATE, "attachment layout fault is unchanged");
-    assert_sync_contract_diagnostic(
-        capture:             &capture,
-        expected_fault:      layout_fault,
-        resource_kind:       gpu::DebugResourceKind.TEXTURE,
-        has_public_identity: true,
-        index:               color_target.index,
-        generation:          color_target.generation,
-    );
-    state.debug_callback = null;
-    assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass)) == layout_fault,
-        "attachment layout fault is callback-independent");
-    state.debug_callback = &capture_sync_diagnostic;
 
     record_val_target_to_attach(&commands, color_target);
     gpu::RenderPassDesc oversized = { .colors = colors[..], .width = 9, .height = 8 };
