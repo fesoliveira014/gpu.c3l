@@ -5,7 +5,7 @@ import gpu::vk @public;
 
 fn gpu::Device make_transition_device() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_texture_transition_test",
     };

@@ -133,17 +133,6 @@ fn vk::PhysicalDevice fake_physical_device(uptr value) {
     return (vk::PhysicalDevice)value;
 }
 
-fn vk::PhysicalDeviceCandidate candidate(uptr device, int score, bool suitable, vk::QueueFamilies families = {}) {
-    return {
-        .selection = {
-            .physical_device = fake_physical_device(device),
-            .families = families,
-        },
-        .score = score,
-        .suitable = suitable,
-    };
-}
-
 fn bool probe_descriptor_buffer_capacity(
     void* user_data,
     vk::PhysicalDevice physical_device,
@@ -242,7 +231,7 @@ fn void descriptor_buffer_only_candidate_uses_capacity_probe_result() @test {
     assert(state.calls == 1, "capacity rejection still probes exactly once");
 }
 
-fn void descriptor_buffer_capacity_failure_falls_back_to_lower_candidate() @test {
+fn void descriptor_buffer_capacity_is_checked_per_adapter() @test {
     DescriptorBufferCapacityProbeState state = { .fits = false };
     vk::DescriptorBufferCapacityProbe probe = descriptor_buffer_capacity_probe(&state);
     vk::IndexingHeapLimits limits = permissive_candidate_indexing_limits();
@@ -275,169 +264,15 @@ fn void descriptor_buffer_capacity_failure_falls_back_to_lower_candidate() @test
     )!!;
     assert(
         fallback == vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
-        "a lower-scored indexing candidate can satisfy the same semantic capacity"
+        "another adapter may satisfy the same capacity through descriptor indexing"
     );
 
-    vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(
-            device:   0xA0,
-            score:    100,
-            suitable: preferred_fault != gpu::UNSUPPORTED_FEATURE,
-        ),
-        candidate(
-            device:   0xB0,
-            score:    50,
-            suitable: fallback != vk::VkHeapImplementation.NONE,
-        ),
-    };
-    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
-    assert(
-        selected.physical_device == fake_physical_device(0xB0),
-        "capacity rejection falls back to the lower-scored viable adapter"
-    );
-    assert(state.calls == 1, "only the descriptor-buffer candidate runs the capacity probe");
-}
-
-fn void later_unsuitable_high_score_does_not_replace_selection() @test {
-    vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(device: 0x92, score: 50, suitable: true),
-        candidate(device: 0x93, score: 100, suitable: false),
-    };
-    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
-    assert(selected.physical_device == fake_physical_device(0x92),
-        "later unsuitable candidate does not replace the selected adapter");
-}
-
-fn void unsuitable_high_score_falls_back_and_preserves_families() @test {
-    vk::QueueFamilies fallback_families = {
-        .graphics = 3,
-        .compute = 5,
-        .compute_index = 1,
-        .transfer = 7,
-        .async_compute = true,
-    };
-    vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(0x10, 100, false),
-        candidate(
-            device: 0x20,
-            score: 50,
-            suitable: true,
-            families: fallback_families,
-        ),
-    };
-
-    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
-    assert(selected.physical_device == fake_physical_device(0x20), "lower-scored suitable adapter selected");
-    assert(selected.families.graphics == 3, "cached graphics family preserved");
-    assert(selected.families.compute == 5 && selected.families.compute_index == 1, "cached compute family preserved");
-    assert(
-        selected.families.transfer == 7 && selected.families.async_compute,
-        "cached transfer and async fields preserved"
-    );
-}
-
-fn void higher_scored_suitable_candidate_replaces_first_and_preserves_families() @test {
-    vk::QueueFamilies first_families = { .graphics = 1, .compute = 1, .transfer = 1 };
-    vk::QueueFamilies higher_scored_families = {
-        .graphics = 3,
-        .compute = 5,
-        .compute_index = 1,
-        .transfer = 7,
-        .async_compute = true,
-    };
-    vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(
-            device: 0x30,
-            score: 50,
-            suitable: true,
-            families: first_families,
-        ),
-        candidate(
-            device: 0x40,
-            score: 100,
-            suitable: true,
-            families: higher_scored_families,
-        ),
-    };
-
-    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
-    assert(
-        selected.physical_device == fake_physical_device(0x40),
-        "higher-scored suitable adapter replaces first"
-    );
-    assert(selected.families.graphics == 3, "replacement graphics family preserved");
-    assert(
-        selected.families.compute == 5 && selected.families.compute_index == 1,
-        "replacement compute family preserved"
-    );
-    assert(
-        selected.families.transfer == 7 && selected.families.async_compute,
-        "replacement transfer and async fields preserved"
-    );
-}
-
-fn void device_score_wins_without_async_bonus() @test {
-    vk::QueueFamilies alias_families = { .graphics = 1, .compute = 1, .transfer = 1 };
-    vk::QueueFamilies async_families = {
-        .graphics = 2,
-        .compute = 2,
-        .compute_index = 1,
-        .transfer = 2,
-        .async_compute = true,
-    };
-    vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(
-            device: 0x30,
-            score: 100,
-            suitable: true,
-            families: alias_families,
-        ),
-        candidate(
-            device: 0x40,
-            score: 50,
-            suitable: true,
-            families: async_families,
-        ),
-    };
-
-    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
-    assert(
-        selected.physical_device == fake_physical_device(0x30),
-        "device score remains the only cross-adapter preference"
-    );
-    assert(!selected.families.async_compute, "async topology is not a score bonus");
-}
-
-fn void equal_device_scores_keep_first_candidate() @test {
-    vk::QueueFamilies first_families = { .graphics = 4, .compute = 4, .transfer = 4 };
-    vk::PhysicalDeviceCandidate[2] candidates = {
-        candidate(
-            device: 0x50,
-            score: 50,
-            suitable: true,
-            families: first_families,
-        ),
-        candidate(0x60, 50, true),
-    };
-
-    vk::PhysicalDeviceSelection selected = vk::choose_physical_device(candidates[..])!!;
-    assert(selected.physical_device == fake_physical_device(0x50), "equal scores preserve enumeration order");
-}
-
-fn void no_suitable_physical_device_faults() @test {
-    vk::PhysicalDeviceCandidate[2] unsuitable = {
-        candidate(0x70, 100, false),
-        candidate(0x80, 50, false),
-    };
-    fault empty_fault = @catch(vk::choose_physical_device({}));
-    fault unsuitable_fault = @catch(vk::choose_physical_device(unsuitable[..]));
-    assert(empty_fault == gpu::UNSUPPORTED_FEATURE, "empty candidate set faults unsupported");
-    assert(unsuitable_fault == gpu::UNSUPPORTED_FEATURE, "all-unsuitable candidate set faults unsupported");
+    assert(state.calls == 1, "only the descriptor-buffer path runs the capacity probe");
 }
 
 fn gpu::Device make_queue_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_queue_selection_test",
     };

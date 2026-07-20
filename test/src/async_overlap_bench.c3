@@ -140,7 +140,7 @@ fn int main() {
         REPS,
     );
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = validation_enabled(),
         .application_name  = "gpu_async_overlap_bench",
     };

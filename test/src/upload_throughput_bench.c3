@@ -245,7 +245,7 @@ fn int main() {
     );
 
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = false,
         .application_name  = "gpu_upload_throughput_bench",
     };

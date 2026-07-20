@@ -21,7 +21,7 @@ fn vk::Result lifetime_counter_query(
 
 fn gpu::Device make_lifetime_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_immediate_lifetime_test",
     };

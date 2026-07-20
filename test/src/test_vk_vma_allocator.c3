@@ -1,14 +1,13 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk;
 import std::core::mem;
 
 // Headless (lavapipe): the device's VMA allocator + memory stats.
 
 fn void allocator_stats_and_report() @test {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_vma_test",
     };

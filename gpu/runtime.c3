@@ -162,9 +162,21 @@ fn void? runtime_release_device(Runtime* runtime) @private {
     }
 }
 
+fn void? validate_runtime_desc(RuntimeDesc* desc) @private {
+    if (desc == null) return INVALID_ARGUMENT~;
+    if (desc.texture_heap_capacity > MAX_SHADER_HEAP_CAPACITY
+        || desc.sampler_heap_capacity > MAX_SHADER_HEAP_CAPACITY
+        || desc.texture_capacity > MAX_SHADER_HEAP_CAPACITY
+        || desc.pipeline_capacity > MAX_SHADER_HEAP_CAPACITY) {
+        return INVALID_ARGUMENT~;
+    }
+    if (desc.pipeline_cache_data.len > 0
+        && desc.pipeline_cache_data.ptr == null) return INVALID_ARGUMENT~;
+}
+
 <* Initialize backend discovery. Importing gpu performs no initialization. *>
 fn Runtime? create_runtime(RuntimeDesc* desc) {
-    if (desc == null) return INVALID_ARGUMENT~;
+    validate_runtime_desc(desc)!;
     switch (desc.backend) {
         case BackendKind.VULKAN:
             return gpu::vk::create_vk_runtime(desc);

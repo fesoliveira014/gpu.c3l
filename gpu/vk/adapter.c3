@@ -85,10 +85,13 @@ fn gpu::AdapterQueueInfo query_adapter_queues(vk::PhysicalDevice physical_device
     return info;
 }
 
-fn bool strict_adapter_supported(vk::PhysicalDevice physical_device) {
-    StandaloneDeviceConfig desc;
+fn bool strict_adapter_supported(
+    vk::PhysicalDevice physical_device,
+    VkDeviceConfig* config,
+) {
+    if (config == null) return false;
     if (try families = select_queue_families(physical_device)) {
-        return candidate_satisfies(physical_device, &desc, &families);
+        return candidate_satisfies(physical_device, config, &families);
     }
     return false;
 }
@@ -96,6 +99,7 @@ fn bool strict_adapter_supported(vk::PhysicalDevice physical_device) {
 fn void initialize_adapter(
     VkAdapterState* adapter,
     vk::PhysicalDevice physical_device,
+    VkDeviceConfig* config,
 ) {
     adapter.physical_device = physical_device;
     vk::get_physical_device_properties(physical_device, &adapter.properties);
@@ -118,7 +122,7 @@ fn void initialize_adapter(
         .device_class = adapter_class(adapter.properties.device_type),
         .memory       = query_adapter_memory(physical_device),
         .queues       = query_adapter_queues(physical_device),
-        .strict_supported = strict_adapter_supported(physical_device),
+        .strict_supported = strict_adapter_supported(physical_device, config),
         .limits       = {
             .max_texture_dimension_2d  = limits.max_image_dimension2d,
             .max_texture_array_layers  = limits.max_image_array_layers,
@@ -165,9 +169,10 @@ fn void? enumerate_vk_adapters(VkRuntimeState* state) {
         ),
     )!;
 
+    VkDeviceConfig config = runtime_device_config(state);
     state.adapters = mem::new_array(VkAdapterState, (usz)count);
     foreach (i, physical_device : physical_devices[:count]) {
-        initialize_adapter(&state.adapters[i], physical_device);
+        initialize_adapter(&state.adapters[i], physical_device, &config);
     }
 }
 

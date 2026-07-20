@@ -30,7 +30,7 @@ struct TransferRecordArgs {
 
 fn gpu::Device make_thr_device() {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_threading_test",
     };

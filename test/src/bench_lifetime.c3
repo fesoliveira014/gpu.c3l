@@ -54,8 +54,9 @@ fn void? wait_bench_queue(gpu::Device* device, gpu::QueueKind queue) {
 fn void? destroy_bench_device(gpu::Device* device) {
     if (device == null || !device.is_valid()) return;
     gpu::Runtime runtime;
-    gpu::DeviceData* data = gpu::resolve_pinned_device(device);
-    if (data != null && data.runtime_retained) runtime = data.runtime;
+    gpu::DeviceOperation operation = gpu::begin_device_operation(device, true)!;
+    if (operation.data.runtime_retained) runtime = operation.data.runtime;
+    gpu::end_device_operation(&operation);
     gpu::QueueCounts? counts_result = gpu::get_queue_counts(device);
     if (catch err = counts_result) {
         if (err == gpu::DEVICE_LOST) {

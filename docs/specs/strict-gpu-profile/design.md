@@ -130,6 +130,8 @@ A compatibility-only request originates from `gpu::compat` but still produces `g
 
 All contributed capability groups are explicit requirements. Applications query support before adding a group when they want conditional behavior. Merely detecting support or importing a module enables nothing.
 
+`RuntimeDesc` owns backend-neutral device defaults. Adapter strict-support caching and `supports_device_request` evaluate those defaults together with the explicit request, so a supported result describes the same configuration that `create_device` will attempt.
+
 Device creation:
 
 1. resolves the adapter;

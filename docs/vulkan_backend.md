@@ -135,10 +135,11 @@ use the same callback contract with independent instance and messenger lifetimes
 Runtime creation enumerates every physical adapter once and caches semantic memory totals, queue counts, general limits, strict support, and separate backend diagnostics. Public enumeration and queries allocate nothing. Cached strings remain valid until runtime destruction.
 
 The cached `AdapterInfo.strict_supported` flag describes support for the
-default strict profile. Applications select an exact adapter from that cache;
+runtime's configured strict profile, including its exact semantic heap
+capacities. Applications select an exact adapter from that cache;
 `supports_device_request` then evaluates the requested queue and presentation
-semantics without enabling state. Device creation validates the runtime's
-semantic heap capacities against that selected adapter.
+semantics without enabling state. Device creation uses that same runtime
+configuration for the selected adapter.
 
 The strict profile requires:
 

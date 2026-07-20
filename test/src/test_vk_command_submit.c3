@@ -48,7 +48,7 @@ fn void discard_consumes_recording_and_executable_lists() @test {
 
 fn void copy_upload_to_readback() @test {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_command_test",
     };

@@ -4,7 +4,7 @@ import gpu;
 
 fn void allocation_spans_expose_mapping_address_and_liveness() @test {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_span_test",
     };
@@ -45,7 +45,7 @@ fn void allocation_spans_expose_mapping_address_and_liveness() @test {
 
 fn void live_allocations_block_device_destruction() @test {
     gpu::RuntimeDesc device_desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_allocation_lifetime_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;
@@ -68,8 +68,8 @@ fn void live_allocations_block_device_destruction() @test {
 
 fn void span_range_and_alignment_validation() @test {
     gpu::RuntimeDesc device_desc = {
-        .enable_validation = true,
         .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
         .application_name  = "gpu_range_validation_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;

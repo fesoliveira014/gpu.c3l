@@ -14,9 +14,9 @@ const uint TEX_SIZE = 16;
 
 fn void bindless_texture_write_then_sample() @test {
     gpu::RuntimeDesc device_desc = {
-        .backend = gpu::BackendKind.VULKAN,
-        .enable_validation    = true,
-        .application_name     = "gpu_texture_heap_test",
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .application_name  = "gpu_texture_heap_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
@@ -246,7 +246,7 @@ fn uint quantize_unorm8(float value) {
 
 fn void anisotropic_sampler_caps_honest() @test {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
+        .backend           = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_aniso_test",
     };
@@ -276,8 +276,8 @@ fn void anisotropic_sampler_caps_honest() @test {
 
 fn void anisotropy_range_validated() @test {
     gpu::RuntimeDesc device_desc = {
-        .enable_validation = true,
         .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
         .application_name  = "gpu_aniso_range_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;
