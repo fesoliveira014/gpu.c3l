@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from functools import lru_cache
+
 import hashlib
 import re
 import sys
@@ -97,21 +99,72 @@ QUEUE_OWNERSHIP_DIGESTS = {
 }
 
 
+@lru_cache(maxsize=128)
+def mask_c3_comments(source: str) -> str:
+    masked = list(source)
+    index = 0
+    quote = None
+    block_depth = 0
+
+    while index < len(source):
+        if quote is not None:
+            if source[index] == "\\":
+                index += 2
+            elif source[index] == quote:
+                quote = None
+                index += 1
+            else:
+                index += 1
+            continue
+
+        if block_depth > 0:
+            if source.startswith("/*", index):
+                masked[index:index + 2] = "  "
+                block_depth += 1
+                index += 2
+            elif source.startswith("*/", index):
+                masked[index:index + 2] = "  "
+                block_depth -= 1
+                index += 2
+            else:
+                if source[index] not in "\r\n":
+                    masked[index] = " "
+                index += 1
+            continue
+
+        if source.startswith("//", index):
+            while index < len(source) and source[index] not in "\r\n":
+                masked[index] = " "
+                index += 1
+        elif source.startswith("/*", index):
+            masked[index:index + 2] = "  "
+            block_depth = 1
+            index += 2
+        elif source[index] in "\"'":
+            quote = source[index]
+            index += 1
+        else:
+            index += 1
+
+    return "".join(masked)
+
+
 def function_body(source: str, name: str) -> str:
+    masked_source = mask_c3_comments(source)
     declaration = re.search(
         rf"(?m)^fn\s+[^\n]*\b{re.escape(name)}\s*\(",
-        source,
+        masked_source,
     )
     if declaration is None:
         raise ValueError(f"missing function {name}")
-    start = source.find("{", declaration.end())
+    start = masked_source.find("{", declaration.end())
     if start < 0:
         raise ValueError(f"missing body for {name}")
     depth = 0
-    for index in range(start, len(source)):
-        if source[index] == "{":
+    for index in range(start, len(masked_source)):
+        if masked_source[index] == "{":
             depth += 1
-        elif source[index] == "}":
+        elif masked_source[index] == "}":
             depth -= 1
             if depth == 0:
                 return source[start:index + 1]
@@ -122,7 +175,7 @@ def function_names(source: str) -> tuple[str, ...]:
     return tuple(
         re.findall(
             r"(?m)^fn\s+[^\n]*\b([A-Za-z_][A-Za-z0-9_]*)\s*\(",
-            source,
+            mask_c3_comments(source),
         )
     )
 
@@ -189,11 +242,12 @@ def check(root: Path = ROOT) -> list[str]:
         digests = reviewed_ownership.get(relative, {})
         for name in function_names(source):
             body = function_body(source, name)
+            code_body = mask_c3_comments(body)
             touches_ownership = (
                 "generated_preprocess" in name
-                or "generated_preprocess" in body
+                or "generated_preprocess" in code_body
                 or any(
-                    re.search(rf"\b{re.escape(callee)}\s*\(", body)
+                    re.search(rf"\b{re.escape(callee)}\s*\(", code_body)
                     for callee in OWNERSHIP_TRANSFER_CALLEES
                 )
             )

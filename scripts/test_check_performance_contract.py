@@ -510,6 +510,29 @@ class PerformanceContractTests(unittest.TestCase):
                 )
             )
 
+    def test_comment_separated_completion_release_caller_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            unreviewed = root / "gpu/vk/unreviewed_completion_release.c3"
+            unreviewed.write_text(
+                (
+                    "module gpu::vk;\n\n"
+                    "fn void unreviewed_release /* reviewed? */ (VkDeviceState* state) {\n"
+                    "    release_submitted_command_batch // completion gate\n"
+                    "        (state, 0);\n"
+                    "}\n"
+                ),
+                encoding="utf-8",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "ownership flow is unreviewed" in error
+                    for error in errors
+                )
+            )
+
     def test_generated_early_completion_recycle_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
