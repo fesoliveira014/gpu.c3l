@@ -197,27 +197,29 @@ def check(root: Path = ROOT) -> list[str]:
             "gpu/vk/command.c3 generated execution must acquire a fresh buffer"
         )
     take = function_body(backend_source, "take_generated_preprocess_buffer")
+    take_success_block = (
+        "*out_buffer = *candidate;\n"
+        "        state.generated_preprocess_pool_count--;\n"
+        "        *candidate = state.generated_preprocess_pool[\n"
+        "            state.generated_preprocess_pool_count\n"
+        "        ];\n"
+        "        state.generated_preprocess_pool["
+        "state.generated_preprocess_pool_count] = {};\n"
+        "        (void)state.generated_preprocess_reuses.add("
+        "1, AtomicOrdering.RELAXED);\n"
+        "        return true;"
+    )
     take_steps = (
         "state.resource_mutex.lock()!!;",
         "defer state.resource_mutex.unlock();",
-        "*out_buffer = *candidate;",
-        "state.generated_preprocess_pool_count--;",
-        (
-            "*candidate = state.generated_preprocess_pool[\n"
-            "            state.generated_preprocess_pool_count\n"
-            "        ];"
-        ),
-        (
-            "state.generated_preprocess_pool["
-            "state.generated_preprocess_pool_count] = {};"
-        ),
-        "return true;",
+        take_success_block,
     )
     try:
         take_positions = [take.index(step) for step in take_steps]
         take_is_unique_removal = (
             take_positions == sorted(take_positions)
             and all(take.count(step) == 1 for step in take_steps)
+            and take.count("*out_buffer =") == 1
         )
     except ValueError:
         take_is_unique_removal = False
