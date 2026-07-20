@@ -47,6 +47,12 @@
         "import_surface_win32.c3"
       ]
     },
+    "canonical_strict_surface": {
+      "type": "object-files",
+      "sources": [
+        "canonical_strict_surface.c3"
+      ]
+    },
     "import_surface_wayland": {
       "type": "executable",
       "sources": [

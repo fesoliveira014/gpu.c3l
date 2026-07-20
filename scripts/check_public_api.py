@@ -256,6 +256,29 @@ def member_schema(
     )
 
 
+def validate_generated_backend_privacy(document: dict) -> list[str]:
+    failures = []
+    for module_name, module in document.get("modules", {}).items():
+        if not (
+            module_name == "gpu::vk"
+            or module_name.startswith("gpu::vk::")
+        ):
+            continue
+        for contents in module.values():
+            if not isinstance(contents, list):
+                continue
+            for entry in contents:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("visibility") == "private":
+                    continue
+                identity = entry.get("uid") or (
+                    f"{module_name}::{entry.get('name', '<anonymous>')}"
+                )
+                failures.append(f"generated {identity} must remain private")
+    return failures
+
+
 def validate_document(document: dict) -> list[str]:
     modules = document.get("modules", {})
     public_module = modules.get("gpu")
@@ -265,11 +288,12 @@ def validate_document(document: dict) -> list[str]:
     public_surface = public_entries(public_module)
     encoded = json.dumps(public_surface, separators=(",", ":"))
     lowered = encoded.lower()
-    failures = [
+    failures = validate_generated_backend_privacy(document)
+    failures.extend([
         label
         for token, label in FORBIDDEN_TEXT.items()
         if token in lowered
-    ]
+    ])
     failures.extend(
         symbol
         for symbol in FORBIDDEN_SYMBOLS
