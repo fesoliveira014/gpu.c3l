@@ -152,6 +152,7 @@ struct GraphicsPipelineDesc {
     BlendState        blend;
     Format[]          color_formats;
     Format            depth_format;
+    SampleCount       sample_count;
     ZString           debug_name;
 }
 

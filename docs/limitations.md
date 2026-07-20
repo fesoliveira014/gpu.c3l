@@ -51,9 +51,10 @@ page doesn't explain it, that's a bug in this page — file an issue.
   `docs/getting_started.md`.
 - **C3 0.8.0 pinned.** The language is pre-1.0 and syntax moves between
   releases; the pin is deliberate and bumped explicitly.
-- **2D, single-sample textures only.** `TEX_1D`/`TEX_3D`/`CUBE` and
-  multisample counts remain outside the backend profile. Unsupported profile
-  values preflight false and fault `INVALID_ARGUMENT` at creation.
+- **2D textures only.** `TEX_1D`/`TEX_3D`/`CUBE` remain outside the backend
+  profile. Multisample textures are supported for color/depth attachments when
+  the adapter reports the requested count; they have one mip and cannot be
+  sampled, stored, or transferred directly.
 - **D24S8 remains outside the backend profile.** Graphics pipelines and render
   passes are D32-only, so capability queries report empty D24S8 support and
   creation faults `INVALID_ARGUMENT`.
@@ -143,7 +144,7 @@ backend profile and the physical adapter:
   including combined usages and adapter extent/mip/layer limits, without
   allocating. Use it to preflight optional formats and adapt asset choices.
 
-The required backend profile is currently 2D and single-sample. Per-format
-usages and filterability are optional adapter capabilities. The support summary
-therefore masks 1D, 3D, cube, multisample counts, and D24S8 until the
-rendering path supports it end to end.
+The required backend profile is 2D. Per-format usages, sample counts, and
+filterability are optional adapter capabilities. The support summary masks 1D,
+3D, cube, and D24S8. Higher sample-count bits reflect exact color-attachment or
+depth-attachment descriptors supported end to end.

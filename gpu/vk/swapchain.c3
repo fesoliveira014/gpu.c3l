@@ -672,6 +672,7 @@ fn void? build_swapchain(
                 .format          = format,
                 .usage           = swapchain_image_usage(usage),
                 .access          = { .graphics },
+                .sample_count    = gpu::SampleCount.ONE,
                 .width           = extent.width,
                 .height          = extent.height,
                 .mip_levels      = 1,

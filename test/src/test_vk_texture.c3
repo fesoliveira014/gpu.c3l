@@ -603,12 +603,45 @@ fn void texture_capability_queries_match_creation() @test {
         assert(!support.dimensions.tex_1d && !support.dimensions.tex_3d
             && !support.dimensions.cube, "unimplemented dimensions stay masked");
         assert(support.sample_counts.one, "single-sample support is reported");
-        assert(!support.sample_counts.two && !support.sample_counts.four
-            && !support.sample_counts.eight && !support.sample_counts.sixteen
-            && !support.sample_counts.thirty_two && !support.sample_counts.sixty_four,
-            "unimplemented sample counts stay masked");
-
         bool is_depth = format == gpu::Format.D32_FLOAT;
+        gpu::TextureUsage attachment_usage = is_depth
+            ? (gpu::TextureUsage){ .depth_attach }
+            : (gpu::TextureUsage){ .color_attach };
+        bool attachment_supported = is_depth
+            ? support.features.depth_attach
+            : support.features.color_attach;
+        gpu::SampleCount[6] sample_counts = {
+            gpu::SampleCount.TWO,
+            gpu::SampleCount.FOUR,
+            gpu::SampleCount.EIGHT,
+            gpu::SampleCount.SIXTEEN,
+            gpu::SampleCount.THIRTY_TWO,
+            gpu::SampleCount.SIXTY_FOUR,
+        };
+        bool[6] reported_counts = {
+            support.sample_counts.two,
+            support.sample_counts.four,
+            support.sample_counts.eight,
+            support.sample_counts.sixteen,
+            support.sample_counts.thirty_two,
+            support.sample_counts.sixty_four,
+        };
+        foreach (i, sample_count : sample_counts) {
+            gpu::TextureDesc sample_desc = {
+                .dimension    = gpu::TextureDimension.TEX_2D,
+                .access       = { .graphics, .compute, .transfer },
+                .width        = 4,
+                .height       = 4,
+                .format       = format,
+                .usage        = attachment_usage,
+                .sample_count = sample_count,
+            };
+            bool exact_support = attachment_supported
+                && gpu::supports_texture_desc(&device, &sample_desc)!!;
+            assert(reported_counts[i] == exact_support,
+                "reported sample counts match exact attachment descriptors");
+        }
+
         foreach (usage : usages) {
             if (is_depth && (usage.storage || usage.color_attach)) continue;
             if (!is_depth && usage.depth_attach) continue;

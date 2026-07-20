@@ -571,6 +571,15 @@ TextureDimension
     TEX_3D   (query false; creation faults INVALID_ARGUMENT)
     CUBE     (query false; creation faults INVALID_ARGUMENT)
 
+SampleCount
+    ONE
+    TWO
+    FOUR
+    EIGHT
+    SIXTEEN
+    THIRTY_TWO
+    SIXTY_FOUR
+
 TextureDesc
     TextureDimension dimension
     uint width
@@ -581,6 +590,7 @@ TextureDesc
     Format format
     TextureUsage usage
     QueueRoles access
+    SampleCount sample_count
     ZString debug_name
 
 TextureViewDesc
@@ -618,14 +628,24 @@ destroy_texture_view(Device* device, TextureView view) -> void?
 create_texture_views(Device* device, TextureViewCreateDesc[] descs, TextureView[] out_views) -> void?
 ```
 
-`get_texture_format_support` reports library-creatable support, not every raw Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling query used by creation, but the bits are independent; use `supports_texture_desc` for a usage combination. The backend profile masks every dimension except 2D and every sample count except one. Per-format usages and linear filtering remain adapter-dependent; D24S8 reports empty support until the rendering path supports it end to end. `supports_texture_desc` returns false for an empty, unknown, or unavailable access set.
+`get_texture_format_support` reports library-creatable support, not every raw
+Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling
+query used by creation, but the bits are independent; use
+`supports_texture_desc` for a usage combination. The backend profile masks every
+dimension except 2D. Higher sample-count bits report exact color-attachment or
+depth-attachment descriptors, as appropriate for the format. Per-format usages,
+sample counts, and linear filtering remain adapter-dependent; D24S8 reports
+empty support until the rendering path supports it end to end.
+`supports_texture_desc` returns false for an empty, unknown, or unavailable
+access set.
 
 `supports_texture_desc` checks the exact optimal-tiling format, combined usage,
-normalized extent, mip and layer counts, access roles, and required single-sample
-image properties without allocating. A false result caused by malformed input
-corresponds to `INVALID_ARGUMENT` at creation; a structurally valid descriptor
-rejected by the adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion
-can still make creation fail after a true capability result.
+normalized extent, mip and layer counts, access roles, sample count, and image
+properties without allocating. Multisample textures require one mip and
+attachment-only usage. A false result caused by malformed input corresponds to
+`INVALID_ARGUMENT` at creation; a structurally valid descriptor rejected by the
+adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion can still make
+creation fail after a true capability result.
 
 `get_texture_requirements` returns size, alignment, a device-owned opaque
 compatibility value, and whether dedicated storage is required. Pass every
@@ -812,6 +832,7 @@ GraphicsPipelineDesc
     BlendState blend
     Format[] color_formats
     Format depth_format
+    SampleCount sample_count
     ZString debug_name
 
 create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) -> PipelineHandle?
@@ -832,8 +853,9 @@ using it; unsupported LINE creation returns `UNSUPPORTED_FEATURE`.
 
 Pipeline creation deduplicates through a descriptor-keyed cache. Every create
 returns a fresh handle, but descriptors identical in immutable state (exact
-shader code identity, topology, polygon mode, blend, formats, and — for compute
-— push size) alias one backend pipeline underneath. Digest collisions are
+shader code identity, topology, polygon mode, blend, attachment formats and
+sample count, and — for compute — push size) alias one backend pipeline
+underneath. Digest collisions are
 resolved by stage, entry point, length, and exact SPIR-V bytes. Raster
 cull/front-face state is immutable graphics identity. Depth test/write/compare,
 viewport, and scissor are separate dynamic command state.
@@ -1002,10 +1024,17 @@ of `DeviceCaps.max_compute_work_group_count`. An over-limit call faults
 ### Render pass
 
 ```text
+ClearColor
+    float[4] rgba
+    uint[4] uint_rgba
+
 ColorTargetDesc
     TextureHandle texture
     uint mip_level
     uint array_layer
+    TextureHandle resolve_texture
+    uint resolve_mip_level
+    uint resolve_array_layer
     LoadOp load_op
     StoreOp store_op
     ClearColor clear
@@ -1076,15 +1105,31 @@ handle switches. The next render-pass begin restores the full-pass defaults.
 The current API intentionally exposes one rectangle only and does not support
 negative-height viewport flips or off-pass overscan.
 
+Use `ClearColor.rgba` for normalized and floating-point attachments, and
+`ClearColor.uint_rgba` for unsigned-integer attachments. The inactive union
+member is ignored.
+
 A pass names at least one color target or a depth target; depth-only passes
 (the shadow-map shape) are valid. A depth target needs `depth_attach` usage
 and an explicit transition to `TextureUse.DEPTH_ATTACHMENT`. `D32_FLOAT` is
-the only supported
-depth format; pipelines name it in `GraphicsPipelineDesc.depth_format`.
-Every selected color mip and the depth texture's mip zero must cover the pass
-dimensions; smaller compatible render areas are valid. The color count must
-not exceed `DeviceCaps.max_color_attachments`, which is the lesser of the
-library ceiling and the selected device's Vulkan limit.
+the only supported depth format; pipelines name it in
+`GraphicsPipelineDesc.depth_format`. Every selected color mip and the depth
+texture's mip zero must cover the pass dimensions; smaller compatible render
+areas are valid. All color and depth sources use the same sample count. The
+color count must not exceed `DeviceCaps.max_color_attachments`, which is the
+lesser of the library ceiling and the selected device's Vulkan limit.
+
+A color target may resolve a multisample source into a distinct, single-sample
+texture with the same format and sufficient selected-mip extent. Both textures
+need `color_attach` usage and explicit transitions to
+`TextureUse.COLOR_ATTACHMENT`. Normalized and floating-point formats average
+samples; integer formats select sample zero. Depth resolve is not exposed.
+
+A bound graphics pipeline must exactly match the pass color count and formats,
+depth format, and sample count. Compatibility is checked before render-pass
+begin or pipeline bind changes native recording state or retained references.
+Render-pass boundaries and resolves add no synchronization; callers declare
+all attachment transitions and later shader/transfer visibility explicitly.
 
 Depth clear values are explicit: a zero-initialized `ClearDepthStencil`
 clears depth to **0.0**, which fails every LESS-compare draw. The standard

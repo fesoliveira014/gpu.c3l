@@ -267,7 +267,10 @@ submitted token and alias. Completion observation and discard retire native
 buffers to their recording context. The context owner reclaims them before its
 next allocation; device teardown relies on command-pool destruction.
 Invalid transitions return faults,
-and render-pass command constraints remain enforced.
+and render-pass command constraints remain enforced. A render pass records its
+attachment formats and sample count; a graphics pipeline must match them before
+begin or bind mutates native command state. Resolve and pass boundaries do not
+add implicit synchronization.
 
 ### Independent allocations
 

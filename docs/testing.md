@@ -348,6 +348,9 @@ vk_queue vk_debug upload_bench_observation vk_device_request
 ```
 
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.
+`vk_depth` covers validation-clean offscreen color/depth rendering, including a
+supported multisample source, average color resolve, explicit attachment
+transitions, depth testing, and pixel readback.
 
 The advisory benchmark runner builds these seven executable targets with
 `-O1`: `allocation_bench`, `resource_create_bench`,
@@ -407,9 +410,9 @@ C3 0.8.0 constraints:
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
   a `project.json` key); dependencies are declared per-target and resolved by
   the consumer's search path.
-- `manifest.json` `sources` must list files explicitly — all 20 public source
-  files under `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the default does not
-  recurse into `gpu/vk/`.
+- `manifest.json` `sources` must list files explicitly — all 21 public source
+  files under `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the
+  default does not recurse into `gpu/vk/`.
 
 ## 10. CI matrix
 

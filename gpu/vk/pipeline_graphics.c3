@@ -177,6 +177,7 @@ fn void? validate_graphics_pipeline_desc(
     gpu::GraphicsPipelineDesc* desc,
 ) {
     if (desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS
+        || !gpu::sample_count_valid(desc.sample_count)
         || !primitive_topology_valid(desc.topology)
         || !cull_mode_valid(desc.raster.cull_mode)
         || !front_face_valid(desc.raster.front_face)
@@ -189,11 +190,27 @@ fn void? validate_graphics_pipeline_desc(
         && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
     if (desc.color_formats.len == 0
         && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+    gpu::TextureUsage color_usage = { .color_attach };
     foreach (format : desc.color_formats) {
         if (format == gpu::Format.UNDEFINED
             || format == gpu::Format.D32_FLOAT
             || format == gpu::Format.D24_UNORM_S8_UINT
             || format_to_vk(format) == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+        if (!format_supports_sample_count(
+            state,
+            format,
+            color_usage,
+            desc.sample_count,
+        )!) return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (desc.depth_format != gpu::Format.UNDEFINED) {
+        gpu::TextureUsage depth_usage = { .depth_attach };
+        if (!format_supports_sample_count(
+            state,
+            desc.depth_format,
+            depth_usage,
+            desc.sample_count,
+        )!) return gpu::UNSUPPORTED_FEATURE~;
     }
     check_polygon_mode_support(desc.raster.polygon_mode, state.caps.line_polygon_mode)!;
 }
@@ -330,7 +347,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         }
 
         vk::PipelineMultisampleStateCreateInfo multisample = vk::pipeline_multisample_state_create_info();
-        multisample.rasterization_samples = vk::SampleCountFlagBits.COUNT_1_BIT;
+        multisample.rasterization_samples = sample_count_to_vk(desc.sample_count);
 
         vk::PipelineDepthStencilStateCreateInfo depth_stencil = vk::pipeline_depth_stencil_state_create_info();
 

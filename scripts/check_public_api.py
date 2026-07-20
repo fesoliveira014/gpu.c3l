@@ -114,6 +114,14 @@ FORBIDDEN_SYMBOLS = {
     "create_wayland_surface",
     "create_win32_surface",
     "create_x11_surface",
+    "RenderPass",
+    "RenderPassHandle",
+    "Framebuffer",
+    "FramebufferHandle",
+    "create_render_pass",
+    "destroy_render_pass",
+    "create_framebuffer",
+    "destroy_framebuffer",
 }
 
 PLATFORM_HANDLE_TYPES = {
@@ -273,13 +281,133 @@ def validate_document(document: dict) -> list[str]:
         for entry in public_surface.get("types", [])
     }
 
+    sample_count = types.get("SampleCount")
+    expected_sample_counts = (
+        "ONE",
+        "TWO",
+        "FOUR",
+        "EIGHT",
+        "SIXTEEN",
+        "THIRTY_TWO",
+        "SIXTY_FOUR",
+    )
+    if (
+        sample_count is None
+        or sample_count.get("kind") != "enum"
+        or tuple(
+            member.get("name")
+            for member in sample_count.get("members", [])
+        ) != expected_sample_counts
+    ):
+        failures.append("SampleCount must define the strict sample counts")
+
     graphics_pipeline_desc = types.get("GraphicsPipelineDesc")
     if graphics_pipeline_desc is None:
         failures.append("missing GraphicsPipelineDesc")
-    elif "depth" in dict(member_schema(graphics_pipeline_desc)):
-        failures.append(
-            "GraphicsPipelineDesc must not contain dynamic depth state"
-        )
+    else:
+        graphics_pipeline_fields = dict(member_schema(graphics_pipeline_desc))
+        if "depth" in graphics_pipeline_fields:
+            failures.append(
+                "GraphicsPipelineDesc must not contain dynamic depth state"
+            )
+        if graphics_pipeline_fields.get("sample_count") != "SampleCount":
+            failures.append(
+                "GraphicsPipelineDesc.sample_count must be SampleCount"
+            )
+
+    texture_desc_fields = dict(member_schema(types.get("TextureDesc")))
+    if texture_desc_fields.get("sample_count") != "SampleCount":
+        failures.append("TextureDesc.sample_count must be SampleCount")
+
+    strict_render_enums = (
+        (
+            "LoadOp",
+            ("LOAD", "CLEAR", "DONT_CARE"),
+            "LoadOp must define the strict load operations",
+        ),
+        (
+            "StoreOp",
+            ("STORE", "DONT_CARE"),
+            "StoreOp must define the strict store operations",
+        ),
+    )
+    for type_name, expected_members, failure in strict_render_enums:
+        definition = types.get(type_name)
+        if (
+            definition is None
+            or definition.get("kind") != "enum"
+            or tuple(
+                member.get("name")
+                for member in definition.get("members", [])
+            ) != expected_members
+        ):
+            failures.append(failure)
+
+    strict_render_schemas = (
+        (
+            "ClearColor",
+            "union",
+            (("rgba", "float[4]"), ("uint_rgba", "uint[4]")),
+            "ClearColor must expose typed color values",
+        ),
+        (
+            "ClearDepthStencil",
+            "struct",
+            (("depth", "float"), ("stencil", "uint")),
+            "ClearDepthStencil must match the strict schema",
+        ),
+        (
+            "ColorTargetDesc",
+            "struct",
+            (
+                ("texture", "TextureHandle"),
+                ("mip_level", "uint"),
+                ("array_layer", "uint"),
+                ("resolve_texture", "TextureHandle"),
+                ("resolve_mip_level", "uint"),
+                ("resolve_array_layer", "uint"),
+                ("load_op", "LoadOp"),
+                ("store_op", "StoreOp"),
+                ("clear", "ClearColor"),
+            ),
+            "ColorTargetDesc must match the strict schema",
+        ),
+        (
+            "DepthTargetDesc",
+            "struct",
+            (
+                ("texture", "TextureHandle"),
+                ("load_op", "LoadOp"),
+                ("store_op", "StoreOp"),
+                ("clear", "ClearDepthStencil"),
+            ),
+            "DepthTargetDesc must match the strict schema",
+        ),
+        (
+            "RenderPassDesc",
+            "struct",
+            (
+                ("colors", "ColorTargetDesc[]"),
+                ("depth", "DepthTargetDesc*"),
+                ("width", "uint"),
+                ("height", "uint"),
+            ),
+            "RenderPassDesc must match the strict schema",
+        ),
+    )
+    for (
+        type_name,
+        expected_kind,
+        expected_members,
+        failure,
+    ) in strict_render_schemas:
+        definition = types.get(type_name)
+        if (
+            definition is None
+            or definition.get("kind") != expected_kind
+            or member_schema(definition) != expected_members
+        ):
+            failures.append(failure)
 
     device_desc_fields = dict(member_schema(types.get("DeviceDesc")))
     for field in ("texture_heap_capacity", "sampler_heap_capacity"):
@@ -327,6 +455,38 @@ def validate_document(document: dict) -> list[str]:
             failures.append(
                 "end_commands must return ExecutableCommandList?"
             )
+
+    begin_render_pass = functions.get("cmd_begin_render_pass")
+    if begin_render_pass is None:
+        failures.append("missing cmd_begin_render_pass")
+    else:
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in begin_render_pass.get("members", [])
+        )
+        if parameter_types != ("CommandList*", "RenderPassDesc*"):
+            failures.append(
+                "cmd_begin_render_pass has the wrong parameters"
+            )
+        if begin_render_pass.get("return_type", {}).get("name") != "void?":
+            failures.append(
+                "cmd_begin_render_pass must return void?"
+            )
+
+    end_render_pass = functions.get("cmd_end_render_pass")
+    if end_render_pass is None:
+        failures.append("missing cmd_end_render_pass")
+    else:
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in end_render_pass.get("members", [])
+        )
+        if parameter_types != ("CommandList*",):
+            failures.append(
+                "cmd_end_render_pass has the wrong parameters"
+            )
+        if end_render_pass.get("return_type", {}).get("name") != "void?":
+            failures.append("cmd_end_render_pass must return void?")
 
     submit = functions.get("submit")
     if submit is None:

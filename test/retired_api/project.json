@@ -21,6 +21,7 @@
     "../../gpu/descriptor_heap.c3",
     "../../gpu/pipeline.c3",
     "../../gpu/command.c3",
+    "../../gpu/render_pass.c3",
     "../../gpu/sync.c3",
     "../../gpu/queue.c3",
     "../../gpu/swapchain.c3",

@@ -37,6 +37,17 @@ enum TextureDimension : int {
     CUBE,
 }
 
+<* Rasterization samples per texel. The zero value is single-sampled. *>
+enum SampleCount : int {
+    ONE,
+    TWO,
+    FOUR,
+    EIGHT,
+    SIXTEEN,
+    THIRTY_TWO,
+    SIXTY_FOUR,
+}
+
 <* Sampler texel filtering. *>
 enum Filter : int {
     NEAREST,
@@ -133,6 +144,7 @@ struct TextureDesc {
     Format           format;
     TextureUsage     usage;
     QueueRoles       access;
+    SampleCount      sample_count;
     ZString          debug_name;
 }
 
@@ -230,6 +242,21 @@ fn bool texture_format_in_backend_profile(Format format) @private {
     }
 }
 
+fn bool sample_count_valid(SampleCount sample_count) @private {
+    switch (sample_count) {
+        case SampleCount.ONE:
+        case SampleCount.TWO:
+        case SampleCount.FOUR:
+        case SampleCount.EIGHT:
+        case SampleCount.SIXTEEN:
+        case SampleCount.THIRTY_TWO:
+        case SampleCount.SIXTY_FOUR:
+            return true;
+        default:
+            return false;
+    }
+}
+
 fn bool texture_desc_valid(TextureDesc* desc) @private {
     if (desc.dimension != TextureDimension.TEX_2D) return false;
     if (desc.width == 0 || desc.height == 0 || desc.depth > 1) return false;
@@ -239,6 +266,17 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
     bool has_usage = desc.usage.sampled || desc.usage.storage || desc.usage.color_attach
         || desc.usage.depth_attach || desc.usage.transfer_src || desc.usage.transfer_dst;
     if (!has_usage) return false;
+
+    if (!sample_count_valid(desc.sample_count)) return false;
+    if (desc.sample_count != SampleCount.ONE
+        && (texture_mip_levels(desc) != 1
+            || desc.usage.sampled
+            || desc.usage.storage
+            || desc.usage.transfer_src
+            || desc.usage.transfer_dst
+            || (!desc.usage.color_attach && !desc.usage.depth_attach))) {
+        return false;
+    }
 
     bool is_depth = desc.format == Format.D32_FLOAT;
     if (is_depth && (desc.usage.color_attach || desc.usage.storage)) return false;
