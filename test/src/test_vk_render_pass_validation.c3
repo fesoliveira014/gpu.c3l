@@ -288,6 +288,50 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     gpu::cmd_end_render_pass(&in_pass)!!;
 }
 
+fn void end_render_pass_scopes_graphics_binding_to_pass() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    gpu::TextureHandle first = make_render_validation_target(
+        &device,
+        gpu::Format.RGBA8_UNORM,
+    );
+    defer gpu::destroy_texture(&device, first)!!;
+    gpu::TextureHandle second = make_render_validation_target(
+        &device,
+        gpu::Format.BGRA8_UNORM,
+    );
+    defer gpu::destroy_texture(&device, second)!!;
+    gpu::ColorTargetDesc[1] first_colors = {{ .texture = first }};
+    gpu::RenderPassDesc first_pass = {
+        .colors = first_colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::ColorTargetDesc[1] second_colors = {{ .texture = second }};
+    gpu::RenderPassDesc second_pass = {
+        .colors = second_colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    record_val_target_to_attach(&commands, first);
+    record_val_target_to_attach(&commands, second);
+    gpu::cmd_begin_render_pass(&commands, &first_pass)!!;
+    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    assert(record.active_pipeline == gpu::PIPELINE_HANDLE_INVALID,
+        "ending a render pass releases the graphics pipeline binding");
+    gpu::cmd_begin_render_pass(&commands, &second_pass)!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+}
+
 fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
