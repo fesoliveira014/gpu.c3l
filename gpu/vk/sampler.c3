@@ -312,7 +312,7 @@ fn gpu::SamplerIndex? vk_publish_sampler(
             index:               sampler.index,
             generation:          sampler.generation,
             debug_name:          null,
-            rejected_field:      "DeviceDesc.sampler_heap_capacity",
+            rejected_field:      "RuntimeDesc.sampler_heap_capacity",
             invariant:           "must exceed published samplers",
             backend_text:        null,
         )~;

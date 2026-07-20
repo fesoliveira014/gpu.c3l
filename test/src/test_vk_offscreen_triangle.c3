@@ -15,12 +15,12 @@ const uint RT_SIZE = 32;
 const usz RT_BYTES = RT_SIZE * RT_SIZE * 4;
 
 fn gpu::Device make_offscreen_test_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_offscreen_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn uint unorm_byte(float value) {

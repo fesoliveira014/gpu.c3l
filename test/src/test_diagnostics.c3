@@ -18,12 +18,6 @@ fn void diagnostic_dispatch_is_null_safe() @test {
     dispatch_debug_message(null, null, &message);
 }
 
-fn void null_device_descriptor_faults_without_dereference() @test {
-    fault result = @catch(create_device_from_desc((DeviceDesc*)null));
-    assert(result == INVALID_ARGUMENT,
-        "null device descriptor faults INVALID_ARGUMENT");
-}
-
 fn void null_command_owner_faults_as_invalid_handle() @test {
     fault command_result = @catch(end_commands((CommandList*)null));
 
@@ -96,31 +90,7 @@ fn void diagnostic_dispatch_preserves_absent_fault() @test {
     assert(capture.message.public_fault == no_fault, "absent public fault remains zero");
 }
 
-fn void invalid_backend_delivers_diagnostic_before_unchanged_fault() @test {
-    DiagnosticCapture capture = {};
-    BackendKind invalid_backend = bitcast(99, BackendKind);
-    DeviceDesc desc = {
-        .backend         = invalid_backend,
-        .debug_callback  = &capture_diagnostic,
-        .debug_user_data = &capture,
-    };
-
-    fault result = @catch(create_device_from_desc(&desc));
-
-    assert(result == UNSUPPORTED_BACKEND, "invalid backend keeps UNSUPPORTED_BACKEND");
-    assert(capture.calls == 1, "invalid backend emits exactly one diagnostic");
-    assert(capture.message.severity == DebugMessageSeverity.ERROR, "invalid backend is an error");
-    assert(capture.message.category.public_contract, "invalid backend is a public-contract diagnostic");
-    assert(capture.message.operation.str_view() == "create_device_from_desc", "device creation operation is identified");
-    assert(capture.message.has_fault, "invalid backend carries its public fault");
-    assert(capture.message.public_fault == UNSUPPORTED_BACKEND, "diagnostic fault matches the returned fault");
-    assert(capture.message.resource.kind == DebugResourceKind.NONE, "invalid backend has no resource");
-    assert(!capture.message.resource.has_public_identity, "invalid backend has no public identity");
-    assert(capture.message.rejected_field.str_view() == "DeviceDesc.backend", "rejected backend field is identified");
-    assert(capture.message.invariant.str_view() == "backend must be supported", "backend invariant is identified");
-}
-
-fn void invalid_runtime_backend_reports_backend_text() @test {
+fn void invalid_runtime_backend_delivers_diagnostic_before_unchanged_fault() @test {
     DiagnosticCapture capture = {};
     BackendKind invalid_backend = bitcast(99, BackendKind);
     RuntimeDesc desc = {
@@ -132,8 +102,24 @@ fn void invalid_runtime_backend_reports_backend_text() @test {
     fault result = @catch(create_runtime(&desc));
 
     assert(result == UNSUPPORTED_BACKEND, "invalid runtime backend keeps UNSUPPORTED_BACKEND");
-    assert(capture.calls == 1, "invalid runtime backend emits exactly one diagnostic");
-    assert(capture.message.operation.str_view() == "create_runtime", "runtime creation operation is identified");
+    assert(capture.calls == 1, "invalid backend emits exactly one diagnostic");
+    assert(capture.message.severity == DebugMessageSeverity.ERROR,
+        "invalid backend is an error");
+    assert(capture.message.category.public_contract,
+        "invalid backend is a public-contract diagnostic");
+    assert(capture.message.operation.str_view() == "create_runtime",
+        "runtime creation operation is identified");
+    assert(capture.message.has_fault, "invalid backend carries its public fault");
+    assert(capture.message.public_fault == UNSUPPORTED_BACKEND,
+        "diagnostic fault matches the returned fault");
+    assert(capture.message.resource.kind == DebugResourceKind.NONE,
+        "invalid backend has no resource");
+    assert(!capture.message.resource.has_public_identity,
+        "invalid backend has no public identity");
+    assert(capture.message.rejected_field.str_view() == "RuntimeDesc.backend",
+        "rejected backend field is identified");
+    assert(capture.message.invariant.str_view() == "backend must be supported",
+        "backend invariant is identified");
     assert(capture.message.backend_text != null, "invalid runtime backend includes backend text");
     assert(
         capture.message.backend_text.str_view() == "unsupported GPU backend",
@@ -141,18 +127,18 @@ fn void invalid_runtime_backend_reports_backend_text() @test {
     );
 }
 
-fn void invalid_backend_fault_is_callback_independent() @test {
+fn void invalid_runtime_backend_fault_is_callback_independent() @test {
     BackendKind invalid_backend = bitcast(99, BackendKind);
-    DeviceDesc without_callback = { .backend = invalid_backend };
-    fault without_callback_fault = @catch(create_device_from_desc(&without_callback));
+    RuntimeDesc without_callback = { .backend = invalid_backend };
+    fault without_callback_fault = @catch(create_runtime(&without_callback));
 
     DiagnosticCapture capture = {};
-    DeviceDesc with_callback = {
+    RuntimeDesc with_callback = {
         .backend         = invalid_backend,
         .debug_callback  = &capture_diagnostic,
         .debug_user_data = &capture,
     };
-    fault with_callback_fault = @catch(create_device_from_desc(&with_callback));
+    fault with_callback_fault = @catch(create_runtime(&with_callback));
 
     assert(without_callback_fault == UNSUPPORTED_BACKEND, "null callback keeps the original fault");
     assert(with_callback_fault == without_callback_fault, "callback presence does not alter fault identity");

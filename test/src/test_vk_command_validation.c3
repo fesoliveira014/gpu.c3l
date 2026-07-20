@@ -59,23 +59,23 @@ fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
 }
 
 fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
-    gpu::DeviceDesc desc = {
-        .backend              = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
         .application_name     = "gpu_sync_diagnostic_test",
         .debug_callback       = &capture_sync_diagnostic,
         .debug_user_data      = capture,
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn gpu::Device make_val_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_command_validation_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 <* Textured draw context, same shape as the indirect-draw tests: offscreen

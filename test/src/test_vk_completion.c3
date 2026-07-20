@@ -5,11 +5,11 @@ import gpu::vk @public;
 import vk;
 
 fn gpu::Device create_completion_test_device() {
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .application_name = "gpu_completion_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn void queue_completion_publication_rejects_gaps() @test {

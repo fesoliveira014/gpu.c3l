@@ -82,21 +82,21 @@ fn void assert_shader_rejection(
 }
 
 fn gpu::Device make_diagnostic_reflection_test_device(ShaderDiagnosticCapture* capture) {
-    gpu::DeviceDesc desc = {
-        .backend         = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .debug_callback  = capture == null ? null : &capture_shader_diagnostic,
         .debug_user_data = capture,
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn gpu::Device make_reflection_test_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_shader_reflection_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn gpu::PipelineHandle? create_reflection_compute_pipeline(
@@ -298,9 +298,9 @@ fn void shader_diagnostic_callback_preserves_fault_parity() @test {
     uint before = capture.calls;
     fault callback_fault = @catch(create_reflection_compute_pipeline(&callback_device, &rejected));
     assert(capture.calls == before + 1, "callback shader rejection emits exactly once");
-    gpu::destroy_device(&callback_device)!!;
+    destroy_test_device(&callback_device)!!;
     gpu::Device plain_device = make_diagnostic_reflection_test_device(null);
     fault plain_fault = @catch(create_reflection_compute_pipeline(&plain_device, &rejected));
-    gpu::destroy_device(&plain_device)!!;
+    destroy_test_device(&plain_device)!!;
     assert(plain_fault == callback_fault, "callback presence does not change shader fault");
 }

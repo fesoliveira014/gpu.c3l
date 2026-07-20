@@ -154,12 +154,12 @@ fn void extent_clamp_rules() @test {
 }
 
 fn void swapchain_requires_a_presentation_request() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_swapchain_gate_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::Surface surface;
@@ -293,14 +293,14 @@ fn void swapchain_present_guard_lifecycle() @test {
 
 fn void present_path_guards_precede_native_mutation() @test {
     WsiDiagnosticCapture capture;
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_present_guard_test",
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
         (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -788,12 +788,12 @@ fn void acquired_image_reports_prior_semantic_use() @test {
 }
 
 fn void swapchain_info_query_rejects_invalid_handle() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
         .enable_validation = true,
+        .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "gpu_swapchain_info_invalid_handle_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };

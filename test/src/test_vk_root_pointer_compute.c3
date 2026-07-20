@@ -6,12 +6,12 @@ const char[*] ROOT_POINTER_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
 fn void root_pointer_compute_readback() @test {
     const uint COUNT = 256;
-    gpu::DeviceDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_root_pointer_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
 
     OwnedSpan input = allocate_owned_span(

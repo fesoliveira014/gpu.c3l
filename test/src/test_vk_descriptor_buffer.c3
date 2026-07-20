@@ -69,15 +69,14 @@ fn void descriptor_buffer_creation_skip_policy_is_exact() @test {
 }
 
 fn gpu::Device? create_descriptor_buffer_test_device(
-    gpu::DeviceDesc* desc,
+    gpu::vk::StandaloneDeviceConfig* desc,
     gpu::vk::DeviceCreationProbe* probe,
 ) {
-    return gpu::vk::create_vk_device_from_desc_with_probe(desc, probe);
+    return gpu::vk::create_standalone_device_with_probe(desc, probe);
 }
 
 fn void descriptor_buffer_device_and_heap() @test {
-    gpu::DeviceDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
+    gpu::vk::StandaloneDeviceConfig desc = {
         .enable_validation     = true,
         .texture_heap_capacity = 8,
         .sampler_heap_capacity = 4,
@@ -144,8 +143,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     const uint TARGET_SIZE = 32;
     const usz TARGET_BYTES = TARGET_SIZE * TARGET_SIZE * 4;
     const usz VERTEX_BYTES = 3 * 16;
-    gpu::DeviceDesc device_desc = {
-        .backend              = gpu::BackendKind.VULKAN,
+    gpu::vk::StandaloneDeviceConfig device_desc = {
         .enable_validation    = true,
         .application_name     = "gpu_descriptor_buffer_compute_to_graphics",
     };
@@ -443,8 +441,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     }
 
     const uint TEX = 16;
-    gpu::DeviceDesc device_desc = {
-        .backend              = gpu::BackendKind.VULKAN,
+    gpu::vk::StandaloneDeviceConfig device_desc = {
         .enable_validation    = true,
         .application_name     = "gpu_descriptor_buffer_e2e",
     };

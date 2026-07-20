@@ -26,20 +26,20 @@ struct IndDrawCtx {
 }
 
 fn gpu::Device make_ind_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_indirect_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn gpu::Device make_generated_work_device() {
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .application_name = "gpu_generated_work_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 <* Textured draw context: offscreen vertex/fragment code, one graphics pipeline, and a 1x1
@@ -271,12 +271,12 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
 }
 
 fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
         .enable_validation = true,
+        .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "caller_owned_reuse_cross_family",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     if (!distinct_graphics_compute_families(&device, "reused caller-owned span")) return;
 
@@ -1183,7 +1183,7 @@ fn void discard_consumes_active_render_pass_recording() @test {
     assert(!commands.handle.is_valid(),
         "discard consumes a recording with an active render pass");
     gpu::destroy_texture(&device, target)!!;
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 }
 
 fn void indirect_argument_validation() @test {

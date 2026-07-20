@@ -19,8 +19,8 @@ fn void command_tokens_are_small_owner_values() @test {
 }
 
 fn void discard_consumes_recording_and_executable_lists() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
 
     gpu::CommandList recording = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&recording)!!;
@@ -43,16 +43,16 @@ fn void discard_consumes_recording_and_executable_lists() @test {
     assert(@catch(gpu::discard_executable_commands(&stale)) == gpu::INVALID_HANDLE,
         "a consumed executable-list alias is stale");
 
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 }
 
 fn void copy_upload_to_readback() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_command_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     OwnedSpan upload = allocate_owned_span(
@@ -106,8 +106,8 @@ fn void copy_upload_to_readback() @test {
 }
 
 fn void empty_command_list_submits() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -121,8 +121,8 @@ fn void empty_command_list_submits() @test {
 }
 
 fn void command_list_owns_its_device_token_value() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::Device temporary = device;
@@ -139,8 +139,8 @@ fn void command_list_owns_its_device_token_value() @test {
 }
 
 fn void stale_command_owner_faults_invalid_handle() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -162,8 +162,8 @@ fn void stale_command_owner_faults_invalid_handle() @test {
 }
 
 fn void copied_alias_cannot_resubmit_after_success() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::CommandList original = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -197,8 +197,8 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
 }
 
 fn void command_generation_exhaustion_retires_slot() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::CommandList final_generation = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -235,8 +235,8 @@ fn void command_generation_exhaustion_retires_slot() @test {
 }
 
 fn void duplicate_token_batch_rejects_without_consuming() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -257,8 +257,8 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
 }
 
 fn void readiness_only_submit_validates_stale_swapchain() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -280,8 +280,8 @@ fn void readiness_only_submit_validates_stale_swapchain() @test {
 }
 
 fn void readiness_only_submit_rejects_malformed_identity() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::SwapchainReadiness malformed = {
@@ -297,9 +297,9 @@ fn void readiness_only_submit_rejects_malformed_identity() @test {
 }
 
 fn void simultaneous_devices_submit_independently() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device first = gpu::create_device_from_desc(&desc)!!;
-    gpu::Device second = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device first = create_test_device(&desc)!!;
+    gpu::Device second = create_test_device(&desc)!!;
     defer destroy_test_device(&second)!!;
 
     gpu::CommandList first_cmd = gpu::begin_commands(gpu::get_queue(&first, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -310,7 +310,7 @@ fn void simultaneous_devices_submit_independently() @test {
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
     submit_test_queue(&first, gpu::QueueKind.GRAPHICS, &first_submit)!!;
     wait_test_queue(&first, gpu::QueueKind.GRAPHICS)!!;
-    gpu::destroy_device(&first)!!;
+    destroy_test_device(&first)!!;
 
     assert(gpu::get_device_caps(&second)!!.strict_enabled, "destroying one device leaves the other live");
     gpu::CommandList second_cmd = gpu::begin_commands(gpu::get_queue(&second, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -324,8 +324,8 @@ fn void simultaneous_devices_submit_independently() @test {
 }
 
 fn void discarded_command_buffer_is_reclaimed_by_recording_owner() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -353,10 +353,10 @@ fn void discarded_command_buffer_is_reclaimed_by_recording_owner() @test {
 }
 
 fn void bad_command_state_rejected() @test {
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
@@ -378,8 +378,8 @@ fn void bad_command_state_rejected() @test {
         "recording through an ended alias faults COMMAND_RECORDING_ERROR");
 }
 fn void texture_barrier_faults() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -395,8 +395,8 @@ fn void texture_barrier_faults() @test {
 }
 
 fn void submitted_command_buffer_retires_at_completion() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -433,8 +433,8 @@ fn void submitted_command_buffer_retires_at_completion() @test {
 }
 
 fn void command_recording_requires_no_lifecycle_boundary() @test {
-    gpu::DeviceDesc desc = { .backend = gpu::BackendKind.VULKAN };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     for (uint i = 0; i < 4; i++) {

@@ -82,15 +82,15 @@ fn void capture_cache_diagnostic(gpu::DebugMessage* message, void* user_data) {
 }
 
 fn gpu::Device make_cache_io_device(char[] blob = {}, CacheBackendCapture* capture = null) {
-    gpu::DeviceDesc desc = {
-        .backend             = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation   = true,
         .pipeline_cache_data = blob,
         .debug_callback      = capture == null ? null : &capture_cache_backend_diagnostic,
         .debug_user_data     = capture,
         .application_name    = "gpu_pipeline_cache_io_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn gpu::PipelineHandle build_cache_io_pipeline(gpu::Device* device) {
@@ -192,7 +192,7 @@ fn void cache_blob_round_trip() @test {
     assert(mem::equals(blob, blob2), "export is idempotent in content");
 
     gpu::destroy_pipeline(&device_a, pipe_a)!!;
-    gpu::destroy_device(&device_a)!!;
+    destroy_test_device(&device_a)!!;
 
     gpu::Device device_b = make_cache_io_device(blob);
     defer destroy_test_device(&device_b)!!;
@@ -238,7 +238,7 @@ fn void cache_corrupt_blob_tolerated() @test {
     assert(gpu::vk::cache_blob_compatible(state_a, blob),
         "corrupt payload retains a compatible header and reaches the driver retry path");
     gpu::destroy_pipeline(&device_a, pipe_a)!!;
-    gpu::destroy_device(&device_a)!!;
+    destroy_test_device(&device_a)!!;
 
     CacheBackendCapture retry_capture;
     gpu::Device device_b = make_cache_io_device(blob, &retry_capture);
@@ -256,7 +256,7 @@ fn void cache_foreign_uuid_blob_starts_empty() @test {
     char[] blob = export_cache_blob(&device_a);
     defer mem::free(blob.ptr);
     gpu::destroy_pipeline(&device_a, pipe_a)!!;
-    gpu::destroy_device(&device_a)!!;
+    destroy_test_device(&device_a)!!;
 
     // Flip the UUID bytes: a foreign-device blob must never break device
     // creation, whichever layer drops it (pre-screen, retry, or the driver).

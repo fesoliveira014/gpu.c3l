@@ -3,12 +3,12 @@ module gpu_test;
 import gpu;
 
 fn void allocation_spans_expose_mapping_address_and_liveness() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_span_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     OwnedSpan device_data = allocate_owned_span(
@@ -44,11 +44,11 @@ fn void allocation_spans_expose_mapping_address_and_liveness() @test {
 }
 
 fn void live_allocations_block_device_destruction() @test {
-    gpu::DeviceDesc device_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .application_name = "gpu_allocation_lifetime_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     gpu::Device original = device;
     OwnedSpan data = allocate_owned_span(
         device:       &device,
@@ -63,16 +63,16 @@ fn void live_allocations_block_device_destruction() @test {
     assert(device == original, "live-child rejection preserves the device token");
 
     free_owned_span(&device, &data)!!;
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 }
 
 fn void span_range_and_alignment_validation() @test {
-    gpu::DeviceDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
         .enable_validation = true,
+        .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "gpu_range_validation_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
 
     gpu::AllocationDesc zero = {

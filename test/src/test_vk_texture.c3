@@ -195,23 +195,23 @@ fn void capture_texture_diagnostic(gpu::DebugMessage* message, void* user_data) 
 }
 
 fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture) {
-    gpu::DeviceDesc desc = {
-        .backend              = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation    = true,
         .application_name     = "gpu_texture_diagnostic_test",
         .debug_callback       = &capture_texture_diagnostic,
         .debug_user_data      = capture,
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn gpu::Device make_texture_test_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_texture_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn void texture_create_destroy() @test {
@@ -473,13 +473,13 @@ fn void texture_barrier_stale_handle_rejected() @test {
 }
 
 fn void raised_texture_capacity_holds_more_than_default() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
         .enable_validation = true,
+        .backend          = gpu::BackendKind.VULKAN,
         .texture_capacity  = 2048,
         .application_name  = "gpu_texture_capacity_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
     const uint COUNT = 1500;

@@ -654,30 +654,6 @@ fn DeviceCaps? get_device_caps(Device* device) {
     return operation.data.caps;
 }
 
-<* Create a device for the requested backend.
-   Ownership: the caller must release the returned device with destroy_device. *>
-fn Device? create_device_from_desc(DeviceDesc* desc) {
-    if (desc == null) return INVALID_ARGUMENT~;
-    if (!device_slot_available()) return SLOT_TABLE_FULL~;
-    switch (desc.backend) {
-        case BackendKind.VULKAN:
-            return gpu::vk::create_vk_device_from_desc(desc);
-        default:
-            DebugMessage message = {
-                .severity       = DebugMessageSeverity.ERROR,
-                .category       = { .public_contract },
-                .operation      = "create_device_from_desc",
-                .has_fault      = true,
-                .public_fault   = UNSUPPORTED_BACKEND,
-                .rejected_field = "DeviceDesc.backend",
-                .invariant      = "backend must be supported",
-                .backend_text   = "unsupported GPU backend",
-            };
-            dispatch_debug_message(desc.debug_callback, desc.debug_user_data, &message);
-            return UNSUPPORTED_BACKEND~;
-    }
-}
-
 <* Create a strict device from one exact borrowed adapter.
    Ownership: the caller must release the returned device with destroy_device. *>
 fn Device? create_device(Adapter* adapter, DeviceRequest* request) {

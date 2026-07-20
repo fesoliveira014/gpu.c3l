@@ -123,6 +123,12 @@ Public shape:
 RuntimeDesc
     BackendKind backend
     bool enable_validation
+    bool enable_debug_names
+    uint texture_heap_capacity
+    uint sampler_heap_capacity
+    uint texture_capacity
+    uint pipeline_capacity
+    char[] pipeline_cache_data
     ZString application_name
     DebugMessageCallback debug_callback
     void* debug_user_data
@@ -137,7 +143,7 @@ destroy_runtime(Runtime*)          -> void?
 
 `AdapterList` is an allocation-free view. Its adapters and the read-only strings in adapter query results are borrowed until their runtime is destroyed. Destroying a runtime consumes its token, invalidates its adapter views and handles, and returns `RESOURCE_IN_USE` while a dependent surface or device is live.
 
-Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact borrowed adapter, retains its runtime, and reuses the runtime-owned backend instance. `supports_device_request` is read-only and does not enable state. The direct `create_device_from_desc(DeviceDesc*)` path is headless, performs independent discovery, and owns a separate backend instance.
+Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact borrowed adapter, retains its runtime, and reuses the runtime-owned backend instance. `supports_device_request` is read-only and enables no state. Backend-neutral device defaults are copied by `create_runtime` and inherited by devices created from that runtime.
 
 ### Surfaces
 
@@ -364,7 +370,7 @@ deduplicates exact shader code and pipeline identity, then publishes every
 handle transactionally. The pipeline cache fronts a serializable driver cache:
 `get_pipeline_cache_size` /
 `get_pipeline_cache_data` export the driver blob, and
-`DeviceDesc.pipeline_cache_data` warm-starts it at device creation.
+`RuntimeDesc.pipeline_cache_data` warm-starts it for devices created from that runtime.
 
 ### Synchronization
 

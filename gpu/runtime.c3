@@ -31,6 +31,13 @@ const Runtime RUNTIME_INVALID = {};
 struct RuntimeDesc {
     BackendKind          backend;
     bool                 enable_validation;
+    bool                 enable_debug_names;
+    uint                 texture_heap_capacity;
+    uint                 sampler_heap_capacity;
+    uint                 texture_capacity;
+    uint                 pipeline_capacity;
+    // Borrowed input copied by create_runtime for later device creation.
+    char[]               pipeline_cache_data;
     ZString              application_name;
     DebugMessageCallback debug_callback;
     void*                debug_user_data;

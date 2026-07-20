@@ -130,11 +130,11 @@ fn void run_phase(gpu::Device* device, vk::VkDeviceState* state, BenchPhase phas
 
 fn int main() {
     io::printfn("iterations=%d/worker units=ns/op", BENCH_ITERS_PER_WORKER);
-    gpu::DeviceDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .application_name = "gpu_resource_create_bench",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 

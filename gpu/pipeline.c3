@@ -3,7 +3,7 @@ module gpu;
 import std::core::mem;
 import std::hash::fnv64a;
 
-// Default DeviceDesc.pipeline_capacity when zero.
+// Default pipeline slot capacity when RuntimeDesc.pipeline_capacity is zero.
 const uint MAX_PIPELINES                  = 256;
 const uint MAX_COLOR_ATTACHMENTS          = 8;
 const uint SPIRV_MAGIC @private           = 0x07230203;
@@ -306,8 +306,9 @@ fn usz? get_pipeline_cache_size(Device* device) {
 
 <* Fill `out` with the driver pipeline cache blob and return the bytes
    written; faults INVALID_ARGUMENT if `out` is smaller than the current
-   blob. Feed the blob to DeviceDesc.pipeline_cache_data to warm-start a
-   later device. Must not be called concurrently with pipeline creation. *>
+   blob. Feed the blob to RuntimeDesc.pipeline_cache_data before creating a
+   later runtime and device. Must not be called concurrently with pipeline
+   creation. *>
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);

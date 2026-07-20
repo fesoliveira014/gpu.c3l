@@ -16,12 +16,12 @@ fn ZString device_type_name(vk::PhysicalDeviceType device_type) {
 }
 
 fn int main() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = false,
         .application_name  = "gpu_benchmark_info",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 

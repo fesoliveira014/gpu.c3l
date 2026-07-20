@@ -17,14 +17,14 @@ fn void capture_wsi_diagnostic(gpu::DebugMessage* message, void* user_data) {
 
 fn void wsi_presentation_gate_diagnostic() @test {
     WsiDiagnosticCapture capture;
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_wsi_diagnostic_gate_test",
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     capture = {};
 
@@ -80,14 +80,14 @@ fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
 
 fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
     WsiDiagnosticCapture capture;
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = true,
         .application_name  = "gpu_wsi_stale_handle_test",
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     capture = {};
 

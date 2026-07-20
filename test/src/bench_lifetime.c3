@@ -2,6 +2,29 @@ module gpu_bench;
 
 import gpu @public;
 
+fn gpu::Device? create_bench_device(
+    gpu::RuntimeDesc* desc,
+) {
+    if (desc == null) return gpu::INVALID_ARGUMENT~;
+    gpu::Runtime runtime = gpu::create_runtime(desc)!;
+    defer catch (void)gpu::destroy_runtime(&runtime);
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::DeviceRequestSupport support =
+            gpu::supports_device_request(&adapter, &request)!;
+        if (!support.supported) continue;
+        gpu::Device? device = gpu::create_device(&adapter, &request);
+        if (catch err = device) {
+            if (err == gpu::UNSUPPORTED_FEATURE) continue;
+            return err~;
+        }
+        return device;
+    }
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn void? discard_bench_executable(gpu::ExecutableCommandList* commands) {
     if (commands == null || !commands.handle.is_valid()) return;
     if (catch err = gpu::discard_executable_commands(commands)) {
@@ -30,10 +53,14 @@ fn void? wait_bench_queue(gpu::Device* device, gpu::QueueKind queue) {
 
 fn void? destroy_bench_device(gpu::Device* device) {
     if (device == null || !device.is_valid()) return;
+    gpu::Runtime runtime;
+    gpu::DeviceData* data = gpu::resolve_pinned_device(device);
+    if (data != null && data.runtime_retained) runtime = data.runtime;
     gpu::QueueCounts? counts_result = gpu::get_queue_counts(device);
     if (catch err = counts_result) {
         if (err == gpu::DEVICE_LOST) {
             gpu::destroy_device(device)!;
+            if (runtime.is_valid()) gpu::destroy_runtime(&runtime)!;
             return;
         }
         return err~;
@@ -49,4 +76,5 @@ fn void? destroy_bench_device(gpu::Device* device) {
         wait_bench_queue(device, gpu::QueueKind.TRANSFER)!;
     }
     gpu::destroy_device(device)!;
+    if (runtime.is_valid()) gpu::destroy_runtime(&runtime)!;
 }

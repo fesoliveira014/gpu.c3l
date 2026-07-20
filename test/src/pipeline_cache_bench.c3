@@ -25,12 +25,12 @@ fn int main() {
         BENCH_BATCH_SIZE,
         BENCH_BATCH_ROUNDS,
     );
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .pipeline_capacity = BENCH_DISTINCT_COUNT + BENCH_BATCH_SIZE,
         .application_name  = "gpu_pipeline_cache_bench",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
 
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = BENCH_VERT_SPIRV[..], .entry_point = "main" };

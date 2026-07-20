@@ -344,13 +344,13 @@ fn void vulkan_debug_message_handles_null_callback_data() @test {
 
 fn void barrier_mask_diagnostic_preserves_fault() @test {
     DebugCapture capture;
-    gpu::DeviceDesc device_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .debug_callback   = &capture_debug_message,
         .debug_user_data  = &capture,
         .application_name = "gpu_debug_contract_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
@@ -441,13 +441,13 @@ fn void debug_messenger_failure_routes_backend_warning() @test {
 }
 
 fn void debug_names_do_not_require_validation() @test {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
+        .backend = gpu::BackendKind.VULKAN,
         .enable_validation = false,
         .enable_debug_names = true,
         .application_name  = "gpu_debug_names_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&desc)!!;
+    gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
@@ -465,12 +465,12 @@ fn void debug_names_do_not_require_validation() @test {
 }
 
 fn void interned_sampler_keeps_first_debug_name() @test {
-    gpu::DeviceDesc device_desc = {
-        .backend            = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
         .enable_debug_names = true,
+        .backend            = gpu::BackendKind.VULKAN,
         .application_name   = "gpu_sampler_name_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     SamplerNameCapture capture;
@@ -498,12 +498,12 @@ fn void interned_sampler_keeps_first_debug_name() @test {
 }
 
 fn gpu::Device make_dbg_device() {
-    gpu::DeviceDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc desc = {
         .enable_validation = true,
+        .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "gpu_debug_test",
     };
-    return gpu::create_device_from_desc(&desc)!!;
+    return create_test_device(&desc)!!;
 }
 
 fn void leak_reporters_count_leaks() @test {
@@ -610,7 +610,7 @@ fn void leak_reporters_count_leaks() @test {
 
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
     assert(capture.total == 5, "clean leak report emits nothing");
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 }
 
 fn void debug_name_copy_is_independent() @test {
@@ -751,7 +751,7 @@ fn void live_backend_resource_is_reported_before_device_teardown() @test {
     assert(buffer.is_valid(), "private backend storage is live");
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 1, "the live private backing is reported");
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 }
 
 fn void callback_reports_leaks_without_validation() @test {
@@ -759,13 +759,13 @@ fn void callback_reports_leaks_without_validation() @test {
         .metadata_valid        = true,
         .named_resources_valid = true,
     };
-    gpu::DeviceDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+    gpu::RuntimeDesc device_desc = {
         .debug_callback    = &capture_leak_message,
+        .backend             = gpu::BackendKind.VULKAN,
         .debug_user_data   = &capture,
         .application_name  = "gpu_callback_leak_test",
     };
-    gpu::Device device = gpu::create_device_from_desc(&device_desc)!!;
+    gpu::Device device = create_test_device(&device_desc)!!;
     vk::BufferDesc buffer_desc = {
         .size        = 128,
         .usage       = { .storage },
@@ -786,5 +786,5 @@ fn void callback_reports_leaks_without_validation() @test {
     assert(capture.private_span_wording_valid,
         "private backing storage uses semantic GPU span wording");
     vk::vk_destroy_buffer(&device, buffer)!!;
-    gpu::destroy_device(&device)!!;
+    destroy_test_device(&device)!!;
 }

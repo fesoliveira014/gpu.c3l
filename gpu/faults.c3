@@ -33,8 +33,7 @@ faultdef
     // Destruction found a live owner: a device child, runtime dependent,
     // surface swapchain, or texture descriptor. Release the owner first.
     RESOURCE_IN_USE,
-    // A handle table hit capacity (buffers, textures, pipelines, ...);
-    // for textures the capacity is DeviceDesc.texture_capacity.
+    // A handle table hit its configured resource capacity.
     SLOT_TABLE_FULL,
     // No free descriptor slot: capacity is too small for live descriptors.
     DESCRIPTOR_HEAP_FULL,

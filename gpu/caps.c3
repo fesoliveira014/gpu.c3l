@@ -14,23 +14,6 @@ enum QueueKind : int {
     TRANSFER,
 }
 
-<* Device creation options. Zero-initialized fields select documented defaults. *>
-struct DeviceDesc {
-    BackendKind          backend;
-    bool                 enable_validation;
-    bool                 enable_debug_names;
-    uint                 texture_heap_capacity;
-    uint                 sampler_heap_capacity;
-    uint                 texture_capacity;
-    uint                 pipeline_capacity;
-    // Warm-start blob from get_pipeline_cache_data; empty = cold. Only read
-    // during create_device_from_desc (the driver copies it).
-    char[]               pipeline_cache_data;
-    ZString              application_name;
-    DebugMessageCallback debug_callback;
-    void*                debug_user_data;
-}
-
 <* Capabilities of the created device. Query with get_device_caps instead of
    hardcoding limits. *>
 struct DeviceCaps {
@@ -48,11 +31,9 @@ struct DeviceCaps {
     QueueCounts queues;
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
-    // Configured heap capacity (DeviceDesc.texture_heap_capacity), not
-    // the hardware maximum; see create_device_from_desc's limit rejection.
+    // Configured semantic heap capacity, not the hardware maximum.
     uint texture_heap_capacity;
-    // Configured heap capacity (DeviceDesc.sampler_heap_capacity), not
-    // the hardware maximum; see create_device_from_desc's limit rejection.
+    // Configured semantic heap capacity, not the hardware maximum.
     uint sampler_heap_capacity;
     // Effective MRT limit: the lesser of the library and selected device caps.
     uint max_color_attachments;

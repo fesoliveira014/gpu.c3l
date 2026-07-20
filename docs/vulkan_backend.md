@@ -84,7 +84,7 @@ Each `VkRuntimeState` owns one instance, its instance dispatch, one optional
 debug messenger, and a stable adapter cache. Runtime creation publishes its
 public slot only after instance creation and adapter enumeration succeed.
 
-Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact cached physical device and borrows the runtime-owned instance. Device destruction never destroys that borrowed instance; the retained runtime remains unavailable for destruction until the device is gone. The direct `create_device_from_desc(DeviceDesc*)` path owns a separate instance and performs its own adapter selection.
+`create_device(Adapter*, DeviceRequest*)` uses the exact cached physical device and borrows the runtime-owned instance. Device destruction never destroys that instance; the retained runtime remains unavailable for destruction until the device is gone. Runtime device defaults are copied before instance creation and inherited by each created device.
 
 Instance creation responsibilities:
 
@@ -101,8 +101,7 @@ Runtime creation enables available platform surface extensions and owns the
 surface dispatch. A device retains surface procedures only for a presentation
 request and loads only the selected device dispatch groups after logical-device
 creation. Headless devices create no presentation state. Missing platform
-support faults when that platform constructor is called. The direct-device path
-is headless.
+support faults when that platform constructor is called.
 
 `VK_EXT_debug_utils` is requested when validation, Vulkan debug names, or a
 structured callback needs it. `enable_debug_names` remains independent of
@@ -135,7 +134,13 @@ use the same callback contract with independent instance and messenger lifetimes
 
 Runtime creation enumerates every physical adapter once and caches semantic memory totals, queue counts, general limits, strict support, and separate backend diagnostics. Public enumeration and queries allocate nothing. Cached strings remain valid until runtime destruction.
 
-The direct device path still applies these selection criteria:
+The cached `AdapterInfo.strict_supported` flag describes support for the
+default strict profile. Applications select an exact adapter from that cache;
+`supports_device_request` then evaluates the requested queue and presentation
+semantics without enabling state. Device creation validates the runtime's
+semantic heap capacities against that selected adapter.
+
+The strict profile requires:
 
 ```text
 must support Vulkan 1.3
@@ -147,24 +152,9 @@ must support shaderInt64
 must support multiDrawIndirect
 must support shaderDrawParameters
 must support one exact shader-heap implementation
-must satisfy the requested semantic texture and sampler capacities
-must satisfy the default one-graphics, one-compute, one-transfer queue request;
+must satisfy the default one-graphics, one-compute, one-transfer queue profile;
 roles may alias or use separate families
 ```
-
-Scoring is by device type only (`score_device`):
-
-```text
-discrete > integrated > virtual > cpu > other
-```
-
-Device selection result:
-
-```text
-pick_physical_device(instance, desc) -> PhysicalDeviceSelection?
-```
-
-Each feature-compatible candidate's queue topology is resolved once during selection. The winning `PhysicalDeviceSelection` carries that cached `QueueFamilies` value into logical-device creation; queue topology remains a suitability filter rather than a scoring bonus.
 
 A presentation request names a runtime-owned surface. Device creation requires
 at least one requested graphics queue, instance extensions
@@ -539,7 +529,7 @@ digests participate in the key, while cache matches also compare stage, entry
 point, length, and exact SPIR-V bytes. Cache entries clone those borrowed
 identity inputs with the device host allocator, so digest collisions stay
 distinct and a prepared value can be reused across devices. The driver cache is
-created with `DeviceDesc.pipeline_cache_data` as initial data and exported
+created with `RuntimeDesc.pipeline_cache_data` as initial data and exported
 through `get_pipeline_cache_size` / `get_pipeline_cache_data`.
 
 Compute pipeline layouts are shared per push-constant size in a packed

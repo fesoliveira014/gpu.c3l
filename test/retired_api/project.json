@@ -32,6 +32,18 @@
   ],
   "output": "build",
   "targets": {
+    "device_desc": {
+      "type": "object-files",
+      "sources": [
+        "device_desc.c3"
+      ]
+    },
+    "create_device_from_desc": {
+      "type": "object-files",
+      "sources": [
+        "create_device_from_desc.c3"
+      ]
+    },
     "create_sampler": {
       "type": "object-files",
       "sources": [
@@ -72,24 +84,6 @@
       "type": "object-files",
       "sources": [
         "descriptor_heap_mode.c3"
-      ]
-    },
-    "descriptor_heap_mode_field": {
-      "type": "object-files",
-      "sources": [
-        "descriptor_heap_mode_field.c3"
-      ]
-    },
-    "texture_descriptor_capacity": {
-      "type": "object-files",
-      "sources": [
-        "texture_descriptor_capacity.c3"
-      ]
-    },
-    "sampler_descriptor_capacity": {
-      "type": "object-files",
-      "sources": [
-        "sampler_descriptor_capacity.c3"
       ]
     },
     "descriptor_buffer_caps": {
@@ -362,18 +356,6 @@
         "default_frame_arena_size.c3"
       ]
     },
-    "frame_arena_size": {
-      "type": "object-files",
-      "sources": [
-        "frame_arena_size.c3"
-      ]
-    },
-    "frames_in_flight": {
-      "type": "object-files",
-      "sources": [
-        "frames_in_flight.c3"
-      ]
-    },
     "debug_frame": {
       "type": "object-files",
       "sources": [
@@ -384,18 +366,6 @@
       "type": "object-files",
       "sources": [
         "arena_full.c3"
-      ]
-    },
-    "staging_arena_size": {
-      "type": "object-files",
-      "sources": [
-        "staging_arena_size.c3"
-      ]
-    },
-    "readback_arena_size": {
-      "type": "object-files",
-      "sources": [
-        "readback_arena_size.c3"
       ]
     },
     "default_staging_arena_size": {
@@ -438,12 +408,6 @@
       "type": "object-files",
       "sources": [
         "default_persistent_arena_size.c3"
-      ]
-    },
-    "persistent_arena_size": {
-      "type": "object-files",
-      "sources": [
-        "persistent_arena_size.c3"
       ]
     },
     "alloc_persistent_span": {
