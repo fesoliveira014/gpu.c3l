@@ -64,6 +64,9 @@ struct QueueCandidatePool {
 <* Submit accounting, whitebox-exposed via submit_stats. *>
 struct SubmitStats {
     ulong queue_submits;
+    ulong completion_point_publications;
+    ulong completion_point_allocations;
+    ulong completion_wait_calls;
 }
 
 struct QueueCompletionState {
@@ -2172,6 +2175,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             );
             command_reservation = 0;
             state.submit_stats.queue_submits++;
+            state.submit_stats.completion_point_publications++;
             if (swapchain != null) {
                 commit_swapchain_submit(swapchain, point);
             }

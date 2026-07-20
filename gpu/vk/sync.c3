@@ -519,6 +519,7 @@ fn void? vk_wait_completion(
 ) @private {
     VkDeviceState* state =
         (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    state.submit_stats.completion_wait_calls++;
     QueueCompletionState* completion = published_queue_completion_state(
         state,
         queue_id,

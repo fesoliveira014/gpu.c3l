@@ -22,6 +22,7 @@ struct SubmittedCommandBatch {
     CommandResourceReference[] references;
     uint                       reference_count;
     GeneratedPreprocessBuffer[] generated_preprocess;
+    uint                        generated_preprocess_count;
 }
 
 struct CommandBufferStats {
@@ -211,6 +212,7 @@ fn void publish_submitted_commands(
             .references           = record.references,
             .reference_count      = record.reference_count,
             .generated_preprocess = record.generated_preprocess,
+            .generated_preprocess_count = record.generated_preprocess_count,
         };
         record.references = {};
         record.reference_count = 0;
@@ -230,7 +232,11 @@ fn void release_submitted_command_batch(
         batch.reference_count,
     );
     alloc::free(state.host_allocator, batch.references.ptr);
-    free_generated_preprocess_buffers(state, batch.generated_preprocess);
+    recycle_generated_preprocess_buffers_locked(
+        state,
+        batch.generated_preprocess,
+        batch.generated_preprocess_count,
+    );
     enqueue_retired_command_buffer_locked(
         state:          state,
         context_handle: batch.context,

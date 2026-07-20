@@ -189,7 +189,11 @@ fn void rollback_command_references(
 fn void release_command(VkDeviceState* state, gpu::CommandListHandle handle) {
     if (try record = state.commands.get(handle)) {
         free_command_references(state, record);
-        free_generated_preprocess_buffers(state, record.generated_preprocess);
+        recycle_generated_preprocess_buffers_locked(
+            state,
+            record.generated_preprocess,
+            record.generated_preprocess_count,
+        );
         record.generated_preprocess = {};
         record.generated_preprocess_count = 0;
         (void)state.commands.free(handle);

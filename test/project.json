@@ -48,6 +48,12 @@
       "type": "executable",
       "sources": [ "src/command_record_bench.c3" ]
     },
+    // Advisory submission, completed-point polling, and immediate destruction
+    // timing; executable so it never gates CI. Needs an ICD.
+    "lifecycle_bench": {
+      "type": "executable",
+      "sources": [ "src/lifecycle_bench.c3" ]
+    },
     // Advisory resource and shader-code operation timing across worker counts 1/2/4;
     // executable so it never gates CI. Needs an ICD — pin lavapipe via
     // VK_DRIVER_FILES.

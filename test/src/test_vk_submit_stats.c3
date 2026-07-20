@@ -513,7 +513,7 @@ fn void empty_submit_returns_completion_point() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     gpu::SubmitDesc desc;
-    ulong before = stats_of(&device).queue_submits;
+    vk::SubmitStats before = stats_of(&device);
 
     gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;
 
@@ -523,9 +523,19 @@ fn void empty_submit_returns_completion_point() @test {
     assert(gpu::completion_point_queue_id(point)
         == state.graphics_completion_id,
         "an empty submit targets the selected graphics queue");
-    assert(stats_of(&device).queue_submits == before + 1,
+    assert(stats_of(&device).queue_submits == before.queue_submits + 1,
         "an empty submit emits one completion signal");
+    vk::SubmitStats after = stats_of(&device);
+    assert(after.completion_point_publications
+        == before.completion_point_publications + 1,
+        "a successful submit publishes one scalar completion point");
+    assert(after.completion_point_allocations
+        == before.completion_point_allocations,
+        "publishing a scalar completion point allocates no table object");
     gpu::wait_completion(point, 1_000_000_000)!!;
+    vk::SubmitStats waited = stats_of(&device);
+    assert(waited.completion_wait_calls == after.completion_wait_calls + 1,
+        "a completion wait records one blocking wait call");
 }
 
 fn void foreign_completion_wait_rejects_before_native_submit() @test {

@@ -145,6 +145,11 @@ struct VkDeviceState {
     SubmittedCommandBatch[]    submitted_commands;
     uint                       submitted_command_count;
     uint                       submitted_command_reserved;
+    GeneratedPreprocessBuffer[] generated_preprocess_pool;
+    uint                       generated_preprocess_pool_count;
+    Atomic{ulong}              generated_preprocess_allocations;
+    Atomic{ulong}              generated_preprocess_reuses;
+    Atomic{ulong}              generated_recording_allocations;
     ulong                      command_buffers_allocated;
     ulong                      command_buffers_freed;
     ulong                      pipeline_shader_modules_created;
@@ -851,6 +856,7 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         }
         destroy_pipeline_shared(state);
         destroy_command_table(state);
+        free_generated_preprocess_buffers(state, state.generated_preprocess_pool);
         if (state.recording_contexts.slots.ptr != null) {
             foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
                 if (cell.used) destroy_context_pools(state, &cell.value);
