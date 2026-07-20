@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -44,6 +45,21 @@ POINT_ALLOCATION_FORBIDDEN = (
     "mem::new",
     ".alloc(",
 )
+BACKEND_OWNERSHIP_DIGESTS = {
+    "execute_generated_work": "2c7d0ee833035e94166a955d64f02ca8addbf9bc8050a343d62ccf15b9b90bf8",
+    "recycle_generated_preprocess_buffers_locked": "4710b2f580e8c148f0ae4e13a6454bbd270f5dc6b54ba8b82a218a91c57f40b1",
+    "take_generated_preprocess_buffer": "7a0262396bf857c810ab5b08a384bcdb12d404b9da2f05133d0513dde605628e",
+    "acquire_generated_preprocess_buffer": "41cdde328b77255c518829a196a22bd8091e12a3361e6d70486cf986fa43a754",
+}
+COMMAND_STATE_OWNERSHIP_DIGESTS = {
+    "release_command": "052c7e5e284197a6d22729dc7045397c37535c0a9c50aaf3ec163211d0859157",
+}
+LIFETIME_OWNERSHIP_DIGESTS = {
+    "publish_submitted_commands": "cdbc47b4f1b25be4fc79e04f6ae8ff410b219ab6854924df0edabd389376f066",
+    "release_submitted_command_batch": "f9b2c92ba67ebdf818a8d6417074d55012b6756dad85106e05593c68748f775f",
+    "release_completed_submitted_commands_locked": "bd81cb2ab4514a5428d70fa75883594913b7e77d0c15f123593b008f7e0e50d4",
+}
+
 
 
 def function_body(source: str, name: str) -> str:
@@ -95,6 +111,25 @@ def check(root: Path = ROOT) -> list[str]:
     lifetime_source = read(root, "gpu/vk/lifetime.c3")
     command_bench = read(root, "test/src/command_record_bench.c3")
     lifecycle_bench = read(root, "test/src/lifecycle_bench.c3")
+
+    ownership_sources = (
+        ("gpu/vk/command.c3", backend_source, BACKEND_OWNERSHIP_DIGESTS),
+        (
+            "gpu/vk/command_state.c3",
+            command_state_source,
+            COMMAND_STATE_OWNERSHIP_DIGESTS,
+        ),
+        ("gpu/vk/lifetime.c3", lifetime_source, LIFETIME_OWNERSHIP_DIGESTS),
+    )
+    for relative, source, digests in ownership_sources:
+        for name, expected in digests.items():
+            body = function_body(source, name)
+            actual = hashlib.sha256(body.encode("utf-8")).hexdigest()
+            if actual != expected:
+                errors.append(
+                    f"{relative}:{name} generated preprocess ownership flow "
+                    "must match reviewed source"
+                )
 
     for name in PUBLIC_COMMANDS:
         reject_tokens(

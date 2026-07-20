@@ -289,6 +289,40 @@ class PerformanceContractTests(unittest.TestCase):
                 )
             )
 
+    def test_generated_native_execute_loop_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                (
+                    "    state.device_dispatch.generated_work."
+                    "cmd_execute_generated_commands(\n"
+                    "        record.command_buffer,\n"
+                    "        vk::FALSE,\n"
+                    "        &info,\n"
+                    "    );"
+                ),
+                (
+                    "    for (uint i = 0; i < 2; i++) {\n"
+                    "    state.device_dispatch.generated_work."
+                    "cmd_execute_generated_commands(\n"
+                    "        record.command_buffer,\n"
+                    "        vk::FALSE,\n"
+                    "        &info,\n"
+                    "    );\n"
+                    "    }"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "ownership flow must match reviewed source" in error
+                    for error in errors
+                )
+            )
+
     def test_generated_pool_take_without_removal_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -378,6 +412,29 @@ class PerformanceContractTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "successful pool take must remove" in error
+                    for error in errors
+                )
+            )
+
+    def test_generated_pool_pre_take_duplication_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "        *out_buffer = *candidate;",
+                (
+                    "        state.generated_preprocess_pool[\n"
+                    "            (i + 1) % state.generated_preprocess_pool_count\n"
+                    "        ] = *candidate;\n"
+                    "        *out_buffer = *candidate;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "ownership flow must match reviewed source" in error
                     for error in errors
                 )
             )
