@@ -1014,6 +1014,108 @@ def valid_document() -> dict:
 
 
 class PublicApiCheckTests(unittest.TestCase):
+    def test_canonical_fixture_requires_every_public_root_function(self) -> None:
+        document = {
+            "modules": {
+                "gpu": {
+                    "functions": [
+                        {"name": "create_runtime"},
+                        {"name": "destroy_runtime"},
+                        {
+                            "name": "register_runtime",
+                            "visibility": "private",
+                        },
+                    ],
+                },
+            },
+        }
+        source = "(void)gpu::create_runtime(&desc);\n"
+
+        self.assertEqual(
+            check_public_api.validate_canonical_function_fixture(
+                document,
+                source,
+            ),
+            ["canonical strict fixture missing gpu::destroy_runtime"],
+        )
+
+    def test_canonical_manifest_pins_every_public_entry_kind(self) -> None:
+        document = {
+            "modules": {
+                "gpu": {
+                    "functions": [
+                        {
+                            "name": "create_runtime",
+                            "kind": "function",
+                            "uid": "gpu::create_runtime",
+                        },
+                        {
+                            "name": "register_runtime",
+                            "kind": "function",
+                            "uid": "gpu::register_runtime",
+                            "visibility": "private",
+                        },
+                    ],
+                    "methods": [{
+                        "name": "is_valid",
+                        "kind": "method",
+                        "uid": "gpu::Runtime.is_valid",
+                    }],
+                    "types": [
+                        {
+                            "name": "Runtime",
+                            "kind": "bitstruct",
+                            "uid": "gpu::Runtime",
+                        },
+                        {
+                            "name": "INVALID_HANDLE",
+                            "kind": "fault",
+                            "uid": "gpu::INVALID_HANDLE",
+                        },
+                    ],
+                    "variables": [{
+                        "name": "RUNTIME_INVALID",
+                        "kind": "constant",
+                        "uid": "gpu::RUNTIME_INVALID",
+                    }],
+                },
+            },
+        }
+        source = """
+bitstruct gpu::Runtime
+constant gpu::RUNTIME_INVALID
+fault gpu::INVALID_HANDLE
+function gpu::create_runtime
+method gpu::Runtime.is_valid
+"""
+
+        self.assertEqual(
+            check_public_api.validate_canonical_surface_manifest(
+                document,
+                source,
+            ),
+            [],
+        )
+        self.assertEqual(
+            check_public_api.validate_canonical_surface_manifest(
+                document,
+                source.replace(
+                    "bitstruct gpu::Runtime",
+                    "constant gpu::REMOVED",
+                ),
+            ),
+            [
+                (
+                    "canonical manifest entry missing from generated API: "
+                    "constant gpu::REMOVED"
+                ),
+                (
+                    "generated public entry missing from canonical manifest: "
+                    "bitstruct gpu::Runtime"
+                ),
+            ],
+        )
+
     def test_accepts_distinct_platform_handle_modules(self) -> None:
         self.assertEqual(check_public_api.validate_document(valid_document()), [])
 
@@ -1784,7 +1886,6 @@ class PublicApiCheckTests(unittest.TestCase):
         for declaration in (
             "module gpu::vk;",
             "module gpu::vk @public;",
-            "module gpu;",
         ):
             with self.subTest(declaration=declaration):
                 self.assertEqual(
@@ -1797,6 +1898,95 @@ class PublicApiCheckTests(unittest.TestCase):
                         "gpu::vk backend module"
                     ],
                 )
+
+        self.assertEqual(
+            check_public_api.validate_private_backend_source(
+                relative,
+                "module gpu;",
+            ),
+            [
+                (
+                    "gpu/vk/buffer.c3:1 backend file may only declare "
+                    "gpu::vk modules, found gpu"
+                ),
+            ],
+        )
+
+    def test_rejects_backend_source_visibility_escapes(self) -> None:
+        relative = Path("gpu/vk/helpers.c3")
+        nested_source = (
+            "module gpu::vk @private;\n"
+            "import gpu @public;\n"
+            "module gpu::vk::probe;\n"
+            "fn void open_backend_escape() {}\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_private_backend_source(
+                relative,
+                nested_source,
+            ),
+            [
+                "gpu/vk/helpers.c3 must declare the private "
+                "gpu::vk backend module"
+            ],
+        )
+
+        public_declaration_source = (
+            "module gpu::vk @private;\n"
+            "import gpu @public;\n"
+            "fn void open_backend_escape() @public {}\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_private_backend_source(
+                relative,
+                public_declaration_source,
+            ),
+            [
+                "gpu/vk/helpers.c3:3 "
+                "backend declaration may not use @public"
+            ],
+        )
+
+        wrong_module_source = (
+            "module gpu::vk @private;\n"
+            "import gpu @public;\n"
+            "module gpu::probe;\n"
+            "fn int probe_leak() { return 7; }\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_private_backend_source(
+                relative,
+                wrong_module_source,
+            ),
+            [
+                (
+                    "gpu/vk/helpers.c3:3 backend file may only declare "
+                    "gpu::vk modules, found gpu::probe"
+                ),
+            ],
+        )
+
+    def test_rejects_retired_standalone_backend_lifecycle(self) -> None:
+        relative = Path("gpu/vk/device.c3")
+        source = (
+            "module gpu::vk @private;\n"
+            "struct StandaloneDeviceConfig {}\n"
+            "fn void create_standalone_device_with_probe() {}\n"
+        )
+
+        self.assertEqual(
+            check_public_api.validate_private_backend_source(relative, source),
+            [
+                (
+                    "retired backend StandaloneDeviceConfig "
+                    "in gpu/vk/device.c3"
+                ),
+                (
+                    "retired backend create_standalone_device_with_probe "
+                    "in gpu/vk/device.c3"
+                ),
+            ],
+        )
 
     def test_rejects_span_backend_details(self) -> None:
         document = valid_document()

@@ -31,6 +31,9 @@ fn void pin_runtime_adapter_device() {
     (void)gpu::get_device_caps(&device);
     (void)gpu::get_queue_counts(&device);
     (void)gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
+    (void)gpu::get_queue_info(&device, {});
+    (void)gpu::get_memory_stats(&device);
+    (void)gpu::build_memory_report(&device, false);
     (void)gpu::destroy_device(&device);
     (void)gpu::destroy_runtime(&runtime);
 }
@@ -41,7 +44,11 @@ fn void pin_memory_and_resources() {
         .size         = 256,
         .alignment    = 16,
         .memory_class = gpu::MemoryClass.CPU_WRITE,
-        .access       = { .graphics, .compute, .transfer },
+        .access       = {
+            .graphics = true,
+            .compute  = true,
+            .transfer = true,
+        },
     };
     gpu::GpuAllocation allocation = {};
     gpu::GpuSpan span = {};
@@ -51,13 +58,20 @@ fn void pin_memory_and_resources() {
         .depth  = 1,
         .format = gpu::Format.RGBA8_UNORM,
         .usage  = { .sampled },
-        .access = { .graphics, .compute },
+        .access = {
+            .graphics = true,
+            .compute  = true,
+        },
     };
     gpu::TextureHandle texture = {};
     gpu::TextureViewDesc view_desc = {};
     gpu::TextureView view = {};
     gpu::SamplerDesc sampler_desc = {};
     gpu::Sampler sampler = {};
+    gpu::TextureViewCreateDesc[1] view_descs = {
+        { .texture = texture },
+    };
+    gpu::TextureView[1] views;
 
     (void)gpu::allocate_memory(&device, &allocation_desc);
     (void)gpu::get_allocation_info(&device, allocation);
@@ -66,7 +80,10 @@ fn void pin_memory_and_resources() {
     (void)gpu::get_span_address(&device, span);
     (void)gpu::flush_mapped_span(&device, span);
     (void)gpu::invalidate_mapped_span(&device, span);
+    (void)gpu::get_texture_format_support(&device, texture_desc.format);
+    (void)gpu::supports_texture_desc(&device, &texture_desc);
     (void)gpu::get_texture_requirements(&device, &texture_desc);
+    (void)gpu::create_texture(&device, &texture_desc);
     (void)gpu::create_placed_texture(
         device:     &device,
         desc:       &texture_desc,
@@ -79,11 +96,55 @@ fn void pin_memory_and_resources() {
         allocation_desc: &allocation_desc,
     );
     (void)gpu::create_texture_view(&device, texture, &view_desc);
+    (void)gpu::create_texture_views(
+        &device,
+        view_descs[..],
+        views[..],
+    );
     (void)gpu::intern_sampler(&device, &sampler_desc);
     (void)gpu::publish_sampler(&device, sampler);
     (void)gpu::destroy_texture_view(&device, view);
     (void)gpu::destroy_texture(&device, texture);
     (void)gpu::free_allocation(&device, &allocation);
+}
+
+fn void pin_shaders_and_pipelines() {
+    gpu::Device device = {};
+    char[4] spirv;
+    gpu::ShaderDesc shader_desc = {
+        .stage = gpu::ShaderStage.COMPUTE,
+        .spirv = spirv[..],
+    };
+    gpu::ShaderCode shader = {};
+    gpu::ComputePipelineDesc compute_desc = {
+        .shader = shader,
+    };
+    gpu::ComputePipelineDesc[1] compute_descs = { compute_desc };
+    gpu::GraphicsPipelineDesc graphics_desc = {
+        .vertex_shader   = shader,
+        .fragment_shader = shader,
+    };
+    gpu::GraphicsPipelineDesc[1] graphics_descs = { graphics_desc };
+    gpu::PipelineHandle pipeline = {};
+    gpu::PipelineHandle[1] pipelines;
+    char[1] pipeline_cache;
+
+    (void)gpu::prepare_shader_code(&shader_desc);
+    (void)gpu::create_compute_pipeline(&device, &compute_desc);
+    (void)gpu::create_compute_pipelines(
+        &device,
+        compute_descs[..],
+        pipelines[..],
+    );
+    (void)gpu::create_graphics_pipeline(&device, &graphics_desc);
+    (void)gpu::create_graphics_pipelines(
+        &device,
+        graphics_descs[..],
+        pipelines[..],
+    );
+    (void)gpu::get_pipeline_cache_size(&device);
+    (void)gpu::get_pipeline_cache_data(&device, pipeline_cache[..]);
+    (void)gpu::destroy_pipeline(&device, pipeline);
 }
 
 fn void pin_commands_and_completion() {
@@ -99,18 +160,126 @@ fn void pin_commands_and_completion() {
         .before = { .compute = true },
         .after  = { .compute = true },
     };
+    gpu::TextureHandle texture = {};
+    gpu::TextureViewDesc view = {};
+    gpu::TextureBarrier texture_barrier = {};
+    gpu::BufferTextureCopyDesc buffer_texture_copy = {
+        .src     = span,
+        .texture = texture,
+    };
+    gpu::TextureBufferCopyDesc texture_buffer_copy = {
+        .texture = texture,
+        .dst     = span,
+    };
+    gpu::PipelineHandle pipeline = {};
+    gpu::DepthState depth = {};
+    gpu::Viewport viewport = {};
+    gpu::ScissorRect scissor = {};
+    gpu::ColorTargetDesc[1] colors = {
+        { .texture = texture },
+    };
+    gpu::RenderPassDesc render_pass = {
+        .colors = colors[..],
+        .width  = 1,
+        .height = 1,
+    };
     gpu::SubmitDesc submit = {};
     gpu::CompletionPoint completion = {};
 
     (void)gpu::begin_commands(queue);
     (void)gpu::cmd_copy_buffer(&commands, &copy);
     (void)gpu::cmd_fill_buffer(&commands, span, 0);
+    (void)gpu::cmd_copy_buffer_to_texture(&commands, &buffer_texture_copy);
+    (void)gpu::cmd_copy_texture_to_buffer(&commands, &texture_buffer_copy);
     (void)gpu::cmd_barrier(&commands, &barrier);
+    (void)gpu::texture_transition(
+        texture,
+        gpu::TextureUse.UNDEFINED,
+        gpu::TextureUse.TRANSFER_DESTINATION,
+    );
+    (void)gpu::texture_view_transition(
+        texture: texture,
+        view:    view,
+        before:  gpu::TextureUse.TRANSFER_DESTINATION,
+        after:   gpu::TextureUse.SAMPLED_COMPUTE,
+    );
+    (void)gpu::cmd_texture_barrier(&commands, &texture_barrier);
+    (void)gpu::cmd_bind_pipeline(&commands, pipeline);
     (void)gpu::cmd_dispatch(
         commands: &commands,
         root:     {},
         groups:   { 1, 1, 1 },
     );
+    (void)gpu::cmd_dispatch_indirect(&commands, {}, span);
+    (void)gpu::cmd_dispatch_generated(
+        commands:           &commands,
+        records:            span,
+        count_span:         span,
+        max_dispatch_count: 1,
+    );
+    (void)gpu::cmd_begin_render_pass(&commands, &render_pass);
+    (void)gpu::cmd_set_depth_state(&commands, &depth);
+    (void)gpu::cmd_set_viewport(&commands, &viewport);
+    (void)gpu::cmd_set_scissor(&commands, &scissor);
+    (void)gpu::cmd_draw(
+        commands:      &commands,
+        vertex_root:   {},
+        fragment_root: {},
+        vertex_count:  3,
+        instance_count: 1,
+    );
+    (void)gpu::cmd_draw_indexed(
+        commands:       &commands,
+        vertex_root:    {},
+        fragment_root:  {},
+        index_span:     span,
+        index_count:    3,
+        instance_count: 1,
+        index_type:     gpu::IndexType.U32,
+    );
+    (void)gpu::cmd_draw_indirect(
+        commands:      &commands,
+        vertex_root:   {},
+        fragment_root: {},
+        args:          span,
+        draw_count:    1,
+    );
+    (void)gpu::cmd_draw_indexed_indirect(
+        commands:      &commands,
+        vertex_root:   {},
+        fragment_root: {},
+        args:          span,
+        draw_count:    1,
+        index_span:    span,
+        index_type:    gpu::IndexType.U32,
+    );
+    (void)gpu::cmd_draw_indexed_indirect_count(
+        commands:       &commands,
+        vertex_root:    {},
+        fragment_root:  {},
+        args:           span,
+        count_span:     span,
+        max_draw_count: 1,
+        index_span:     span,
+        index_type:     gpu::IndexType.U32,
+    );
+    (void)gpu::cmd_draw_generated(
+        commands:       &commands,
+        records:        span,
+        count_span:     span,
+        max_draw_count: 1,
+    );
+    (void)gpu::cmd_draw_indexed_generated(
+        commands:       &commands,
+        records:        span,
+        count_span:     span,
+        max_draw_count: 1,
+        index_span:     span,
+        index_type:     gpu::IndexType.U32,
+    );
+    (void)gpu::cmd_begin_label(&commands, "canonical");
+    (void)gpu::cmd_end_label(&commands);
+    (void)gpu::cmd_end_render_pass(&commands);
     (void)gpu::end_commands(&commands);
     (void)gpu::discard_commands(&commands);
     (void)gpu::submit(queue, &submit);
@@ -122,6 +291,7 @@ fn void pin_commands_and_completion() {
 fn void pin_presentation() {
     gpu::DeviceRequest request = gpu::strict_device_request();
     gpu::Surface surface = {};
+    gpu::Adapter adapter = {};
     gpu::Device device = {};
     gpu::SwapchainDesc desc = {
         .width  = 1,
@@ -132,11 +302,18 @@ fn void pin_presentation() {
     gpu::CompletionPoint completion = {};
 
     (void)gpu::request_presentation(request, &surface);
+    (void)gpu::supports_presentation(&adapter, &surface);
     (void)gpu::create_swapchain(&device, &surface, &desc);
     (void)gpu::get_swapchain_info(&device, swapchain);
     (void)gpu::get_present_mode_support(&device, swapchain);
     (void)gpu::acquire_next_image(&device, swapchain);
     (void)gpu::present(&device, &image, completion);
-    (void)gpu::resize_swapchain(&device, swapchain, 1, 1);
+    (void)gpu::resize_swapchain(
+        device:    &device,
+        swapchain: swapchain,
+        width:     1,
+        height:    1,
+    );
     (void)gpu::destroy_swapchain(&device, swapchain);
+    (void)gpu::destroy_surface(&surface);
 }

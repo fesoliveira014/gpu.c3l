@@ -9,7 +9,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CPU_PROJECT = ROOT / "test" / "cpu"
-PRIVATE_BACKEND_DECLARATION = "module gpu::vk @private;"
+CANONICAL_STRICT_SURFACE = CPU_PROJECT / "canonical_strict_surface.c3"
+CANONICAL_STRICT_MANIFEST = CPU_PROJECT / "canonical_strict_surface.txt"
+ROOT_FUNCTION_REFERENCE = re.compile(r"\bgpu::([a-z_][a-z0-9_]*)\s*\(")
+MODULE_DECLARATION = re.compile(
+    r"(?m)^\s*module\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:::[A-Za-z_][A-Za-z0-9_]*)*)\s*(?P<attributes>[^;]*);"
+)
 
 FORBIDDEN_TEXT = {
     "devicedesc": "retired transitional DeviceDesc",
@@ -228,6 +234,11 @@ RETIRED_SOURCE_SYMBOLS = (
     "FRAME,",
 )
 
+RETIRED_BACKEND_SOURCE_SYMBOLS = (
+    "StandaloneDeviceConfig",
+    "create_standalone_device_with_probe",
+)
+
 RETIRED_SOURCE_PATTERNS = {
     r"struct\s+SubmitDesc\s*\{[^}]*\bwaits\b": "SubmitDesc.waits",
     r"struct\s+SubmitDesc\s*\{[^}]*\bsignals\b": "SubmitDesc.signals",
@@ -242,6 +253,62 @@ def public_entries(module: dict) -> dict:
         )
         for section, contents in module.items()
     }
+
+
+def validate_canonical_function_fixture(
+    document: dict,
+    source: str,
+) -> list[str]:
+    module = document.get("modules", {}).get("gpu")
+    if module is None:
+        return []
+    public_functions = {
+        entry.get("name")
+        for entry in public_entries(module).get("functions", [])
+        if entry.get("name")
+    }
+    referenced_functions = {
+        match.group(1)
+        for match in ROOT_FUNCTION_REFERENCE.finditer(source)
+    }
+    return [
+        f"canonical strict fixture missing gpu::{name}"
+        for name in sorted(public_functions - referenced_functions)
+    ]
+
+
+def canonical_public_entries(document: dict) -> set[str]:
+    module = document.get("modules", {}).get("gpu")
+    if module is None:
+        return set()
+    entries = public_entries(module)
+    return {
+        f"{entry['kind']} {entry['uid']}"
+        for category in ("functions", "methods", "types", "variables")
+        for entry in entries.get(category, [])
+        if entry.get("kind") and entry.get("uid")
+    }
+
+
+def validate_canonical_surface_manifest(
+    document: dict,
+    source: str,
+) -> list[str]:
+    expected = {
+        line.strip()
+        for line in source.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    actual = canonical_public_entries(document)
+    failures = [
+        f"canonical manifest entry missing from generated API: {entry}"
+        for entry in sorted(expected - actual)
+    ]
+    failures.extend(
+        f"generated public entry missing from canonical manifest: {entry}"
+        for entry in sorted(actual - expected)
+    )
+    return failures
 
 
 def member_schema(
@@ -1215,12 +1282,50 @@ def scan_retired_source_symbols() -> list[str]:
 
 
 def validate_private_backend_source(relative: Path, source: str) -> list[str]:
-    lines = source.lstrip("﻿").splitlines()
-    if lines and lines[0].strip() == PRIVATE_BACKEND_DECLARATION:
-        return []
-    return [
-        f"{relative.as_posix()} must declare the private gpu::vk backend module"
-    ]
+    failures = []
+    normalized = source.lstrip("﻿")
+    module_declarations = list(MODULE_DECLARATION.finditer(normalized))
+    if not module_declarations:
+        failures.append(
+            f"{relative.as_posix()} must declare the private gpu::vk backend module"
+        )
+    for declaration in module_declarations:
+        name = declaration.group("name")
+        line_number = normalized.count(
+            "\n",
+            0,
+            declaration.start(),
+        ) + 1
+        if name != "gpu::vk" and not name.startswith("gpu::vk::"):
+            failures.append(
+                f"{relative.as_posix()}:{line_number} "
+                "backend file may only declare gpu::vk modules, "
+                f"found {name}"
+            )
+            continue
+        if "@private" not in declaration.group("attributes").split():
+            failures.append(
+                f"{relative.as_posix()} must declare the private gpu::vk backend module"
+            )
+
+    for line_number, line in enumerate(normalized.splitlines(), start=1):
+        stripped = line.strip()
+        if (
+            "@public" in stripped
+            and not stripped.startswith("import ")
+            and not stripped.startswith("module ")
+        ):
+            failures.append(
+                f"{relative.as_posix()}:{line_number} "
+                "backend declaration may not use @public"
+            )
+
+    failures.extend(
+        f"retired backend {symbol} in {relative.as_posix()}"
+        for symbol in RETIRED_BACKEND_SOURCE_SYMBOLS
+        if symbol in source
+    )
+    return failures
 
 
 def scan_private_backend_modules() -> list[str]:
@@ -1249,6 +1354,18 @@ def main() -> int:
 
     document = json.loads(result.stdout)
     failures = validate_document(document)
+    failures.extend(
+        validate_canonical_function_fixture(
+            document,
+            CANONICAL_STRICT_SURFACE.read_text(encoding="utf-8"),
+        )
+    )
+    failures.extend(
+        validate_canonical_surface_manifest(
+            document,
+            CANONICAL_STRICT_MANIFEST.read_text(encoding="utf-8"),
+        )
+    )
     failures.extend(scan_retired_source_symbols())
     failures.extend(scan_private_backend_modules())
     if failures:

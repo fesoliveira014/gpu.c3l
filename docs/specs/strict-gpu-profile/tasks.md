@@ -320,7 +320,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 7.1 Remove transitional root API
 
-- [ ] Delete or replace every superseded public symbol in `gpu/gpu.c3`, `gpu/gpu.c3i`, module sources, tests, and docs; add compile fixtures that pin the canonical strict surface.
+- [x] Delete or replace every superseded public symbol in `gpu/gpu.c3`, `gpu/gpu.c3i`, module sources, tests, and docs; add compile fixtures that pin the canonical strict surface.
   - **Depends on:** Milestones 1–6.
   - **Contract:** no parallel profile, legacy alias, backend-shaped escape hatch, `BufferHandle`, `ShaderHandle`, `FrameToken`, public semaphore, readback ticket, `DescriptorHeapMode`, or `TextureLayout` remains.
   - **Edges:** recursive imports and generated interface output must not accidentally expose private backend declarations.

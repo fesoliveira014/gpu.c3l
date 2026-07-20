@@ -137,13 +137,34 @@ fn void device_heap_capacities() @test {
 
 fn void device_capacity_over_ceiling_rejected() @test {
     gpu::RuntimeDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
-        .texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1,
-        .application_name      = "gpu_vk_capacity_test",
+        .backend          = gpu::BackendKind.VULKAN,
+        .application_name = "gpu_vk_capacity_test",
     };
+    uint over_ceiling = gpu::MAX_SHADER_HEAP_CAPACITY + 1;
 
-    fault capacity_fault = @catch(create_test_device(&desc));
-    assert(capacity_fault == gpu::INVALID_ARGUMENT, "capacity above the descriptor heap limit fails with INVALID_ARGUMENT");
+    desc.texture_heap_capacity = over_ceiling;
+    assert(
+        @catch(create_test_device(&desc)) == gpu::INVALID_ARGUMENT,
+        "texture heap capacity above the limit fails with INVALID_ARGUMENT"
+    );
+    desc.texture_heap_capacity = 0;
+    desc.sampler_heap_capacity = over_ceiling;
+    assert(
+        @catch(create_test_device(&desc)) == gpu::INVALID_ARGUMENT,
+        "sampler heap capacity above the limit fails with INVALID_ARGUMENT"
+    );
+    desc.sampler_heap_capacity = 0;
+    desc.texture_capacity = over_ceiling;
+    assert(
+        @catch(create_test_device(&desc)) == gpu::INVALID_ARGUMENT,
+        "texture capacity above the limit fails with INVALID_ARGUMENT"
+    );
+    desc.texture_capacity = 0;
+    desc.pipeline_capacity = over_ceiling;
+    assert(
+        @catch(create_test_device(&desc)) == gpu::INVALID_ARGUMENT,
+        "pipeline capacity above the limit fails with INVALID_ARGUMENT"
+    );
 }
 
 // Note: the UNSUPPORTED_BACKEND default arm is unreachable while BackendKind has

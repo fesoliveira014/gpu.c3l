@@ -208,6 +208,32 @@ fn void vulkan_debug_message_delivery_uses_consumer_synchronization() @test {
     assert(capture.errors == MESSAGES_PER_THREAD, "error deliveries remain exact under concurrency");
 }
 
+fn void runtime_debug_messenger_failure_routes_structured_warning() @test {
+    DebugCapture capture;
+    vk::VkRuntimeState state = {
+        .debug_callback  = &capture_debug_message,
+        .debug_user_data = &capture,
+    };
+
+    vk::report_runtime_debug_messenger_failure(&state);
+
+    assert(capture.calls == 1,
+        "runtime messenger failure reaches the configured callback exactly once");
+    assert(capture.last.severity == gpu::DebugMessageSeverity.WARNING,
+        "runtime messenger failure is a warning");
+    assert(capture.last.category.backend,
+        "runtime messenger failure carries the backend category");
+    assert(capture.last.operation != null
+        && capture.last.operation.str_view() == "create_runtime",
+        "runtime messenger failure identifies create_runtime");
+    assert(capture.last.backend_text != null
+        && capture.last.backend_text.str_view()
+            == "debug-utils messenger unavailable",
+        "runtime messenger failure preserves its backend diagnostic");
+    assert(!capture.last.has_fault,
+        "runtime messenger failure does not invent a public fault");
+}
+
 fn void vulkan_debug_message_routes_structured_fields() @test {
     DebugCapture capture;
     vk::VkDeviceState state = {
