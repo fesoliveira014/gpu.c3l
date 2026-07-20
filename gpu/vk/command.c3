@@ -360,10 +360,15 @@ fn void? vk_begin_commands_with_context(
 
     GeneratedPreprocessBuffer[] generated_preprocess;
     if (state.generated_work.enabled) {
+        usz capacity = GENERATED_PREPROCESS_INITIAL_CAPACITY;
+        state.resource_mutex.lock()!!;
+        usz pooled = (usz)state.generated_preprocess_pool_count;
+        state.resource_mutex.unlock();
+        if (pooled > capacity) capacity = pooled;
         generated_preprocess = alloc::new_array(
             state.host_allocator,
             GeneratedPreprocessBuffer,
-            (sz)GENERATED_PREPROCESS_INITIAL_CAPACITY,
+            (sz)capacity,
         );
     }
 
@@ -1346,19 +1351,6 @@ fn bool take_generated_preprocess_buffer(
     return false;
 }
 
-fn GeneratedPreprocessBuffer* find_generated_preprocess_buffer(
-    CommandRecord* record,
-    vk::MemoryRequirements* requirements,
-) {
-    for (uint i = 0; i < record.generated_preprocess_count; i++) {
-        GeneratedPreprocessBuffer* candidate = &record.generated_preprocess[i];
-        if (generated_preprocess_compatible(candidate, requirements)) {
-            return candidate;
-        }
-    }
-    return null;
-}
-
 fn CommandRecordingStats command_recording_stats(VkDeviceState* state) {
     return {
         .preprocess_allocations = state.generated_preprocess_allocations.load(
@@ -1413,12 +1405,6 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     CommandRecord* record,
     vk::MemoryRequirements* requirements,
 ) {
-    GeneratedPreprocessBuffer* existing = find_generated_preprocess_buffer(
-        record,
-        requirements,
-    );
-    if (existing != null) return existing;
-
     GeneratedPreprocessBuffer pooled;
     if (take_generated_preprocess_buffer(state, requirements, &pooled)) {
         ensure_generated_preprocess_capacity(state, record);

@@ -139,8 +139,12 @@ def check(root: Path = ROOT) -> list[str]:
         backend_source,
         "acquire_generated_preprocess_buffer",
     )
+    if "find_generated_preprocess_buffer(" in acquire:
+        errors.append(
+            "gpu/vk/command.c3 reuses a generated preprocess address "
+            "within one command record"
+        )
     acquire_steps = (
-        "find_generated_preprocess_buffer(",
         "take_generated_preprocess_buffer(",
         "create_buffer_with_alignment(",
     )

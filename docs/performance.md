@@ -42,9 +42,10 @@ The suite covers:
 | `async_overlap_bench` | Serialized and independent graphics/compute submissions |
 
 Each timing target performs its own warmup and fixed repetitions. Generated
-dispatch records one untimed command per command list, then measures 1,000
-records. The warm command reuses device-pooled preprocess storage; later
-records in the list reuse the same compatible buffer.
+dispatch prewarms one untimed 1,000-record command list, then measures five
+1,000-record lists. Every execute call in a live list receives a distinct
+preprocess address. Completed or discarded lists return compatible buffers to
+the device pool.
 
 The runner rejects nonzero hot-path invariants. The CPU-only
 `scripts/check_performance_contract.py` gate also rejects registry locking or
@@ -87,22 +88,23 @@ The table reports the median of the three target medians and their full range.
 
 | Area | Case | Fixed method | Median | Range |
 |---|---|---:|---:|---:|
-| Allocation | Allocate / free | 4,000 per phase | 497.3 / 174.3 ns | 487.7–546.3 / 169.8–213.5 ns |
-| Command recording | Barrier | 20,000 × 5 | 131.5 ns/record | 130.1–131.7 |
-| Command recording | Hazard barrier | 20,000 × 5 | 137.6 ns/record | 136.6–140.4 |
-| Command recording | Indirect dispatch | 20,000 × 5 | 179.6 ns/record | 169.9–180.4 |
-| Command recording | Generated dispatch | 1 warmup + 1,000 × 5 | 745.6 ns/record | 740.3–755.4 |
-| Lifecycle | Submission | 256 × 5 | 8,653.9 ns/submit | 8,641.4–9,190.2 |
-| Lifecycle | Completed-point poll | 100,000 × 5 | 42.2 ns/poll | 41.9–42.8 |
-| Lifecycle | Texture destruction | 300 × 5 | 244.0 ns/destroy | 240.7–247.3 |
-| Pipeline | Cold creation | 200 | 52,304.0 ns/create | 48,971.5–52,474.5 |
-| Pipeline | Cached duplicate | 200,000 | 1,063.9 ns/create | 1,055.6–1,069.9 |
-| Pipeline | Cached batch | 64 × 2,000 | 2,048.1 ns/create | 2,041.7–2,095.6 |
+| Allocation | Allocate / free | 4,000 per phase | 519.1 / 183.8 ns | 487.6–609.5 / 172.7–188.7 ns |
+| Command recording | Barrier | 20,000 × 5 | 131.4 ns/record | 131.3–136.6 |
+| Command recording | Hazard barrier | 20,000 × 5 | 136.8 ns/record | 135.2–144.0 |
+| Command recording | Indirect dispatch | 20,000 × 5 | 180.3 ns/record | 179.6–189.4 |
+| Command recording | Generated dispatch | 1,000 prewarm + 1,000 × 5 | 742.0 ns/record | 684.1–797.9 |
+| Lifecycle | Submission | 256 × 5 | 8,840.6 ns/submit | 8,102.7–11,106.2 |
+| Lifecycle | Completed-point poll | 100,000 × 5 | 41.7 ns/poll | 41.7–41.9 |
+| Lifecycle | Texture destruction | 300 × 5 | 241.7 ns/destroy | 240.3–247.0 |
+| Pipeline | Cold creation | 200 | 49,669.0 ns/create | 49,105.5–51,123.0 |
+| Pipeline | Cached duplicate | 200,000 | 1,062.8 ns/create | 1,056.5–1,063.3 |
+| Pipeline | Cached batch | 64 × 2,000 | 2,051.9 ns/create | 2,044.4–2,065.9 |
 
 Every run reported:
 
 ```text
 invariants: registry_locks=0 recording_allocations=0 draw_compilations=0 preprocess_allocations=0
+generated preprocess: reuse_events=5000
 invariants: point_allocations=0 destruction_waits=0 deferred_releases=0
 ```
 
@@ -117,7 +119,8 @@ path for collecting debug cost with a matching layer.
 - Reuse caller-owned upload and destination allocations only after their
   covering completion point completes.
 - Cache pipelines; cold creation and cached lookup are different workloads.
-- Generated command recording reuses preprocess storage after the first
-  compatible allocation instead of allocating per command.
+- Generated command recording assigns a unique preprocess address to every
+  execute call and pools compatible storage only after the owning command list
+  is discarded or completed.
 - Queue overlap depends on topology, driver scheduling, and workload balance;
   treat it as an observation, not a guarantee.

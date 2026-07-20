@@ -133,6 +133,27 @@ class PerformanceContractTests(unittest.TestCase):
                 )
             )
 
+    def test_same_record_preprocess_reuse_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "GeneratedPreprocessBuffer pooled;",
+                (
+                    "find_generated_preprocess_buffer(record, requirements);\n"
+                    "    GeneratedPreprocessBuffer pooled;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "within one command record" in error
+                    for error in errors
+                )
+            )
+
     def test_generated_fallback_before_reuse_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -141,12 +162,10 @@ class PerformanceContractTests(unittest.TestCase):
                 root,
                 "gpu/vk/command.c3",
                 (
-                    "GeneratedPreprocessBuffer* existing = "
-                    "find_generated_preprocess_buffer("
+                    "if (take_generated_preprocess_buffer("
                 ),
                 (
-                    "GeneratedPreprocessBuffer* existing = "
-                    "missing_generated_preprocess_lookup("
+                    "if (missing_generated_preprocess_lookup("
                 ),
             )
             errors = check_performance_contract.check(root)

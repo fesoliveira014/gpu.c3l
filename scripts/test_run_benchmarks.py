@@ -35,7 +35,7 @@ COMMAND_OUTPUT = "\n".join(
             "invariants: registry_locks=0 recording_allocations=0 "
             "draw_compilations=0 preprocess_allocations=0"
         ),
-        "generated preprocess: reuse_events=5",
+        "generated preprocess: reuse_events=5000",
     )
 )
 
@@ -77,7 +77,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
             ("warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4", "uploads/s"),
         )
         self.assertIn("repetitions=5", runner.BENCHMARK_METHODS["command_record_bench"][0])
-        self.assertIn("generated=1 warmup+1000/repetition", runner.BENCHMARK_METHODS["command_record_bench"][0])
+        self.assertIn(
+            "generated=1000 prewarm+1000/repetition",
+            runner.BENCHMARK_METHODS["command_record_bench"][0],
+        )
         self.assertEqual(
             runner.BENCHMARK_METHODS["lifecycle_bench"],
             (

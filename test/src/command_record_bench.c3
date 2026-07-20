@@ -79,12 +79,6 @@ fn double record_generated_dispatches(
         gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
-    gpu::cmd_dispatch_generated(
-        commands:           &commands,
-        records:            records,
-        count_span:         count,
-        max_dispatch_count: 1,
-    )!!;
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < GENERATED_RECORD_ITERATIONS; i++) {
         gpu::cmd_dispatch_generated(
@@ -244,12 +238,13 @@ fn int main() {
     assert(recording_allocations == 0,
         "warmed recording performs no backend allocation");
     assert(preprocess_allocations == 0,
-        "generated recording reuses preprocess storage");
+        "generated recording uses distinct pooled preprocess storage");
     assert(draw_compilations == 0,
         "recording does not compile pipelines");
     if (caps.generated_work) {
-        assert(preprocess_reuses >= COMMAND_RECORD_REPETITIONS,
-            "each measured generated recording reuses pooled preprocess storage");
+        assert(preprocess_reuses
+            >= GENERATED_RECORD_ITERATIONS * COMMAND_RECORD_REPETITIONS,
+            "each measured execute uses distinct pooled preprocess storage");
     }
 
     io::printfn(

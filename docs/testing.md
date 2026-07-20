@@ -367,7 +367,9 @@ The benchmark runner builds eight executable targets with `-O1`:
 `upload_throughput_bench`, `command_record_bench`, `lifecycle_bench`,
 `pipeline_cache_bench`, and `async_overlap_bench`. Command recording covers
 ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
-generated dispatch with one untimed preprocess warmup per command list.
+generated dispatch. It prewarms one untimed 1,000-record command list, then
+measures five 1,000-record lists with a distinct preprocess address for each
+execute call and pool reuse only after a list is discarded.
 Lifecycle measurements cover submission, completed-point polling, and
 immediate texture destruction.
 
