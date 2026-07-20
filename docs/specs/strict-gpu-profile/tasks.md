@@ -294,7 +294,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.3 Dynamic render-pass commands
 
-- [ ] Express render passes as begin and end commands with attachments, load/store operations, and clear values in `gpu/command.c3`, a new `gpu/render_pass.c3`, and `gpu/vk/render_pass.c3`.
+- [x] Express render passes as begin and end commands with attachments, load/store operations, and clear values in `gpu/command.c3`, a new `gpu/render_pass.c3`, and `gpu/vk/render_pass.c3`.
   - **Depends on:** 6.2 and 5.6.
   - **Contract:** no public render-pass or framebuffer objects; begin/end add no synchronization; Vulkan 1.3 uses an appropriate private implementation without exposing it.
   - **Edges:** attachment extent or sample mismatch, missing transitions, resolve/depth attachments, nested passes, and pipeline incompatibility detected before recording mutation.
