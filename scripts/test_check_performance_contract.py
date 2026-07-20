@@ -232,6 +232,63 @@ class PerformanceContractTests(unittest.TestCase):
                 )
             )
 
+    def test_generated_native_execute_hidden_double_call_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "fn void? execute_generated_work(",
+                (
+                    "fn void execute_generated_commands_twice(\n"
+                    "    VkDeviceState* state,\n"
+                    "    vk::CommandBuffer command_buffer,\n"
+                    "    vk::GeneratedCommandsInfoEXT* info,\n"
+                    ") {\n"
+                    "    state.device_dispatch.generated_work."
+                    "cmd_execute_generated_commands(\n"
+                    "        command_buffer,\n"
+                    "        vk::FALSE,\n"
+                    "        info,\n"
+                    "    );\n"
+                    "    state.device_dispatch.generated_work."
+                    "cmd_execute_generated_commands(\n"
+                    "        command_buffer,\n"
+                    "        vk::FALSE,\n"
+                    "        info,\n"
+                    "    );\n"
+                    "}\n\n"
+                    "fn void? execute_generated_work("
+                ),
+            )
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                (
+                    "    state.device_dispatch.generated_work."
+                    "cmd_execute_generated_commands(\n"
+                    "        record.command_buffer,\n"
+                    "        vk::FALSE,\n"
+                    "        &info,\n"
+                    "    );"
+                ),
+                (
+                    "    execute_generated_commands_twice(\n"
+                    "        state,\n"
+                    "        record.command_buffer,\n"
+                    "        &info,\n"
+                    "    );"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "must issue exactly one native call" in error
+                    for error in errors
+                )
+            )
+
     def test_generated_pool_take_without_removal_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -292,6 +349,29 @@ class PerformanceContractTests(unittest.TestCase):
                     "        *out_buffer = state.generated_preprocess_pool[\n"
                     "            state.generated_preprocess_pool_count - 1\n"
                     "        ];"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "successful pool take must remove" in error
+                    for error in errors
+                )
+            )
+
+    def test_generated_pool_take_deferred_compact_assignment_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "        *out_buffer = *candidate;",
+                (
+                    "        defer {\n"
+                    "            *out_buffer=state.generated_preprocess_pool[0];\n"
+                    "        }\n"
+                    "        *out_buffer = *candidate;"
                 ),
             )
             errors = check_performance_contract.check(root)

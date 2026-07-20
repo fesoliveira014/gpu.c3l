@@ -180,6 +180,14 @@ def check(root: Path = ROOT) -> list[str]:
             f"{error.args[0]}"
         )
     execute = function_body(backend_source, "execute_generated_work")
+    native_execute_call = (
+        "state.device_dispatch.generated_work.cmd_execute_generated_commands(\n"
+        "        record.command_buffer,\n"
+        "        vk::FALSE,\n"
+        "        &info,\n"
+        "    );"
+    )
+
     allowed_execute_record_lines = (
         "record,",
         "record.command_buffer,",
@@ -195,6 +203,13 @@ def check(root: Path = ROOT) -> list[str]:
     ):
         errors.append(
             "gpu/vk/command.c3 generated execution must acquire a fresh buffer"
+        )
+    if (
+        execute.count(native_execute_call) != 1
+        or backend_source.count("cmd_execute_generated_commands") != 1
+    ):
+        errors.append(
+            "gpu/vk/command.c3 generated execution must issue exactly one native call"
         )
     take = function_body(backend_source, "take_generated_preprocess_buffer")
     take_success_block = (
@@ -219,7 +234,8 @@ def check(root: Path = ROOT) -> list[str]:
         take_is_unique_removal = (
             take_positions == sorted(take_positions)
             and all(take.count(step) == 1 for step in take_steps)
-            and take.count("*out_buffer =") == 1
+            and len(re.findall(r"\bout_buffer\b", take)) == 1
+            and take.count("defer") == 1
         )
     except ValueError:
         take_is_unique_removal = False
