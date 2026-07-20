@@ -4,14 +4,20 @@ import gpu @public;
 import vk;
 import std::thread;
 import std::core::mem;
+import std::atomic::types;
 
 alias SwapchainCompletionPollFn = fn bool? (
     gpu::Device*,
     gpu::CompletionPoint,
 );
-alias SwapchainCompletionWaitFn = fn void? (
-    gpu::Device*,
-    gpu::CompletionPoint,
+alias SwapchainFenceStatusFn = fn vk::Result (
+    vk::Device,
+    vk::Fence,
+);
+alias SwapchainFenceResetFn = fn vk::Result (
+    vk::Device,
+    uint,
+    vk::Fence*,
 );
 
 // Concrete (non-generic) slot table for swapchains. Monomorphized twin of
@@ -35,6 +41,8 @@ struct SwapchainSlot {
     uint                     image_count;
     gpu::TextureHandle[MAX_SWAPCHAIN_IMAGES] textures;
     vk::Semaphore[MAX_SWAPCHAIN_IMAGES]      present_semaphores;
+    vk::Fence[MAX_SWAPCHAIN_IMAGES]          present_fences;
+    bool[MAX_SWAPCHAIN_IMAGES]               present_fence_pending;
     vk::Semaphore[]          acquire_semaphores;
     gpu::CompletionPoint[]   acquire_retirements;
     gpu::SwapchainDesc       requested;
@@ -246,75 +254,100 @@ fn bool? poll_swapchain_completion(
     );
 }
 
-fn void? wait_swapchain_completion(
-    gpu::Device* device,
-    gpu::CompletionPoint point,
+fn vk::Result real_swapchain_fence_status(
+    vk::Device device,
+    vk::Fence fence,
 ) @private {
-    return vk_wait_completion(
-        device,
-        gpu::completion_point_queue_id(point),
-        gpu::completion_point_sequence(point),
-        ulong::max,
-    );
+    return vk::get_fence_status(device, fence);
 }
 
-fn void? wait_pending_swapchain_render_with(
-    gpu::Device* device,
-    SwapchainSlot* slot,
-    SwapchainCompletionWaitFn wait_fn,
+fn vk::Result real_swapchain_fence_reset(
+    vk::Device device,
+    uint fence_count,
+    vk::Fence* fences,
+) @private {
+    return vk::reset_fences(device, fence_count, fences);
+}
+
+fn void? swapchain_release_guard(
+    bool acquire_pending,
+    bool images_referenced,
+    bool presentations_pending,
 ) {
-    if (!slot.acquire_pending || !slot.readiness_consumed) return;
-    if (!slot.render_completion.is_valid()) return gpu::BACKEND_ERROR~;
-    wait_fn(device, slot.render_completion)!;
+    if (acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
+    if (images_referenced || presentations_pending) {
+        return gpu::RESOURCE_IN_USE~;
+    }
 }
 
-fn void? wait_pending_swapchain_render(
-    gpu::Device* device,
-    SwapchainSlot* slot,
-) @private {
-    return wait_pending_swapchain_render_with(
-        device,
-        slot,
-        &wait_swapchain_completion,
-    );
-}
-
-fn void? consume_unsubmitted_swapchain_acquire_with(
+fn bool? poll_present_fences_with(
     VkDeviceState* state,
-    WsiDiagnosticContext* context,
     SwapchainSlot* slot,
-    QueueSubmit2Fn submit_fn,
+    SwapchainFenceStatusFn status_fn,
 ) {
-    if (!slot.acquire_pending || slot.readiness_consumed) return;
-    if (slot.pending_acquire_semaphore == null) return gpu::BACKEND_ERROR~;
+    bool ready = true;
+    for (uint i = 0; i < slot.image_count; i++) {
+        if (!slot.present_fence_pending[i]) continue;
+        vk::Result result = status_fn(
+            state.device,
+            slot.present_fences[i],
+        );
+        if (result == vk::Result.SUCCESS) {
+            slot.present_fence_pending[i] = false;
+        } else if (result == vk::Result.NOT_READY) {
+            ready = false;
+        } else {
+            check_backend_result(
+                state,
+                "poll swapchain presentation retirement",
+                result,
+            )!;
+        }
+    }
+    return ready;
+}
 
-    vk::SemaphoreSubmitInfo[1] waits = {
-        vk::semaphore_submit_info()
-            .set_semaphore(slot.pending_acquire_semaphore)
-            .set_stage_mask(
-                vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
-            ),
-    };
-    vk::SubmitInfo2 submit = vk::submit_info2()
-        .set_wait_semaphore_infos(waits[..]);
-    Mutex* queue_mutex = native_queue_mutex_for(
+fn void? prepare_present_fence_with(
+    VkDeviceState* state,
+    SwapchainSlot* slot,
+    uint image_index,
+    SwapchainFenceStatusFn status_fn,
+    SwapchainFenceResetFn reset_fn,
+) {
+    if (image_index >= slot.image_count
+        || slot.present_fences[image_index] == null) {
+        return gpu::BACKEND_ERROR~;
+    }
+    if (!slot.present_fence_pending[image_index]) return;
+
+    vk::Fence fence = slot.present_fences[image_index];
+    vk::Result status = status_fn(state.device, fence);
+    if (status == vk::Result.NOT_READY) return gpu::WAIT_TIMEOUT~;
+    check_backend_result(
         state,
-        state.graphics_queue,
-    );
-    queue_mutex.lock()!!;
-    vk::Result result = submit_fn(
-        state.graphics_queue,
-        1,
-        &submit,
-        (vk::Fence)null,
-    );
-    queue_mutex.unlock();
-    check_wsi_backend_result(
-        context: context,
-        kind:    WsiResultKind.COMMON,
-        result:  result,
+        "poll swapchain presentation fence",
+        status,
     )!;
-    clear_swapchain_acquisition(slot);
+    check_backend_result(
+        state,
+        "reset swapchain presentation fence",
+        reset_fn(state.device, 1, &fence),
+    )!;
+    slot.present_fence_pending[image_index] = false;
+}
+
+fn void? prepare_present_fence(
+    VkDeviceState* state,
+    SwapchainSlot* slot,
+    uint image_index,
+) @private {
+    return prepare_present_fence_with(
+        state:       state,
+        slot:        slot,
+        image_index: image_index,
+        status_fn:   &real_swapchain_fence_status,
+        reset_fn:    &real_swapchain_fence_reset,
+    );
 }
 
 fn uint? select_acquire_semaphore_with(
@@ -354,9 +387,6 @@ fn void commit_swapchain_submit(
     slot.acquire_retirements[slot.pending_acquire_semaphore_index] = point;
 }
 
-fn void? swapchain_resize_guard(bool acquire_pending) {
-    if (acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
-}
 
 fn void? swapchain_submit_guard(
     bool acquire_pending,
@@ -718,6 +748,17 @@ fn void? build_swapchain(
                     p_semaphore:   &slot.present_semaphores[i],
                 ),
             )!;
+            vk::FenceCreateInfo fence_info = vk::fence_create_info();
+            check_wsi_backend_result(
+                context: context,
+                kind:    WsiResultKind.COMMON,
+                result:  vk::create_fence(
+                    device:        state.device,
+                    p_create_info: &fence_info,
+                    p_allocator:   null,
+                    p_fence:       &slot.present_fences[i],
+                ),
+            )!;
         }
 
         publish_active_swapchain_info(
@@ -732,25 +773,110 @@ fn void? build_swapchain(
     };
 }
 
-<* Release the wrapped image slots, views, and present semaphores — everything
-   `build_swapchain` created except the vk swapchain itself. *>
-fn void release_swapchain_images(VkDeviceState* state, SwapchainSlot* slot) @private {
+<* Release the wrapped image slots, views, semaphores, and fences created by
+   `build_swapchain`. The caller holds `resource_mutex`. *>
+fn void release_swapchain_images_locked(
+    VkDeviceState* state,
+    SwapchainSlot* slot,
+) @private {
     for (uint i = 0; i < slot.image_count; i++) {
         if (try texture = state.textures.get(slot.textures[i])) {
             vk::destroy_image_view(state.device, texture.default_view, null);
             destroy_cached_views(state, texture);
-            {
-                state.resource_mutex.lock()!!;
-                defer state.resource_mutex.unlock();
-                (void)state.textures.free(slot.textures[i]);
-            }
+            (void)state.textures.free(slot.textures[i]);
         }
         if (slot.present_semaphores[i] != null) {
-            vk::destroy_semaphore(state.device, slot.present_semaphores[i], null);
+            vk::destroy_semaphore(
+                state.device,
+                slot.present_semaphores[i],
+                null,
+            );
             slot.present_semaphores[i] = (vk::Semaphore)null;
         }
+        if (slot.present_fences[i] != null) {
+            vk::destroy_fence(
+                state.device,
+                slot.present_fences[i],
+                null,
+            );
+            slot.present_fences[i] = (vk::Fence)null;
+            slot.present_fence_pending[i] = false;
+        }
+        slot.textures[i] = {};
     }
     slot.image_count = 0;
+}
+
+fn void release_swapchain_images(
+    VkDeviceState* state,
+    SwapchainSlot* slot,
+) @private {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    release_swapchain_images_locked(state, slot);
+}
+
+fn bool? swapchain_images_referenced_locked(
+    VkDeviceState* state,
+    SwapchainSlot* slot,
+) @private {
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    for (uint i = 0; i < slot.image_count; i++) {
+        gpu::TextureHandle handle = slot.textures[i];
+        TextureSlot* texture = state.textures.get(handle)!;
+        if (texture.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+            return true;
+        }
+        foreach (&cell : heap.texture_cells[:heap.texture_next_new]) {
+            if (cell.used && cell.owner == handle) return true;
+        }
+    }
+    return false;
+}
+
+fn void? release_swapchain_images_for_lifecycle(
+    VkDeviceState* state,
+    WsiDiagnosticContext* context,
+    SwapchainSlot* slot,
+) @private {
+    if (slot.acquire_pending) {
+        return report_wsi_contract(
+            context:        context,
+            public_fault:   gpu::INVALID_RESOURCE_STATE,
+            rejected_field: "swapchain acquire lifecycle",
+            invariant:      "the acquired image must be submitted and presented before release",
+        )~;
+    }
+
+    bool presentations_pending = !poll_present_fences_with(
+        state,
+        slot,
+        &real_swapchain_fence_status,
+    )!;
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    drain_completed_submitted_commands(state)!;
+    bool images_referenced = swapchain_images_referenced_locked(
+        state,
+        slot,
+    )!;
+    if (catch guard_fault = swapchain_release_guard(
+        acquire_pending:       false,
+        images_referenced:     images_referenced,
+        presentations_pending: presentations_pending,
+    )) {
+        return report_wsi_contract(
+            context:        context,
+            public_fault:   guard_fault,
+            rejected_field: presentations_pending
+                ? "presentation resource retirement"
+                : "swapchain image references",
+            invariant:      presentations_pending
+                ? "all prior presentations must complete before release is retried"
+                : "all command and texture-view references must be released first",
+        )~;
+    }
+    release_swapchain_images_locked(state, slot);
 }
 
 fn gpu::SwapchainHandle? vk_create_swapchain(
@@ -860,51 +986,58 @@ fn void destroy_swapchain_slot(VkDeviceState* state, SwapchainSlot* slot) @priva
     }
 }
 
-fn void? wait_swapchain_queues_idle(
-    VkDeviceState* state,
-    WsiDiagnosticContext* context,
+fn void? vk_destroy_swapchain(
+    gpu::Device* device,
+    gpu::SwapchainHandle handle,
 ) @private {
-    vk::Queue[2] queues;
-    uint queue_count = swapchain_idle_queues(state, queues[..]);
-    for (uint index = 0; index < queue_count; index++) {
-        {
-            Mutex* queue_mutex = native_queue_mutex_for(state, queues[index]);
-            queue_mutex.lock()!!;
-            defer queue_mutex.unlock();
-            check_wsi_backend_result(
-                context: context,
-                kind:    WsiResultKind.COMMON,
-                result:  vk::queue_wait_idle(queues[index]),
-            )!;
-        }
-    }
-}
-
-fn void? vk_destroy_swapchain(gpu::Device* device, gpu::SwapchainHandle handle) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    WsiDiagnosticContext context = { .state = state, .operation = "destroy_swapchain" };
-    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
-    consume_unsubmitted_swapchain_acquire_with(
-        state:     state,
-        context:   &context,
-        slot:      slot,
-        submit_fn: &real_queue_submit2,
+    WsiDiagnosticContext context = {
+        .state     = state,
+        .operation = "destroy_swapchain",
+    };
+    SwapchainSlot* slot = resolve_swapchain_for_operation(
+        &context,
+        handle,
     )!;
-    wait_pending_swapchain_render(device, slot)!;
-    wait_swapchain_queues_idle(state, &context)!;
+    release_swapchain_images_for_lifecycle(
+        state,
+        &context,
+        slot,
+    )!;
+    if (slot.swapchain != null) {
+        state.device_dispatch.presentation.destroy_swapchain(
+            state.device,
+            slot.swapchain,
+            null,
+        );
+        slot.swapchain = (vk::SwapchainKHR)null;
+    }
     destroy_swapchain_slot(state, slot);
     state.presentation.swapchains.free(handle)!;
 }
 
-fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, uint width, uint height) @private {
+fn void? vk_resize_swapchain(
+    gpu::Device* device,
+    gpu::SwapchainHandle handle,
+    uint width,
+    uint height,
+) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    WsiDiagnosticContext context = { .state = state, .operation = "resize_swapchain" };
-    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
-    check_swapchain_resize_lifecycle(&context, slot)!;
-    wait_swapchain_queues_idle(state, &context)!;
+    WsiDiagnosticContext context = {
+        .state     = state,
+        .operation = "resize_swapchain",
+    };
+    SwapchainSlot* slot = resolve_swapchain_for_operation(
+        &context,
+        handle,
+    )!;
+    release_swapchain_images_for_lifecycle(
+        state,
+        &context,
+        slot,
+    )!;
 
     vk::SwapchainKHR old = slot.swapchain;
-    release_swapchain_images(state, slot);
     slot.swapchain = (vk::SwapchainKHR)null;
 
     fault build_fault = @catch(build_swapchain(
@@ -915,12 +1048,22 @@ fn void? vk_resize_swapchain(gpu::Device* device, gpu::SwapchainHandle handle, u
         old:     old,
         context: &context,
     ));
-    if (old != null) state.device_dispatch.presentation.destroy_swapchain(state.device, old, null);
+    if (old != null) {
+        state.device_dispatch.presentation.destroy_swapchain(
+            state.device,
+            old,
+            null,
+        );
+    }
     if (build_fault) {
         // A failed rebuild remains dormant and queryable.
         release_swapchain_images(state, slot);
         if (slot.swapchain != null) {
-            state.device_dispatch.presentation.destroy_swapchain(state.device, slot.swapchain, null);
+            state.device_dispatch.presentation.destroy_swapchain(
+                state.device,
+                slot.swapchain,
+                null,
+            );
             slot.swapchain = (vk::SwapchainKHR)null;
         }
         publish_dormant_swapchain_info(slot);
@@ -1016,13 +1159,20 @@ fn void? vk_present_with(
         context: &context,
         handle:  image.texture,
     )!;
+    uint image_index = slot.pending_image;
+    prepare_present_fence(state, slot, image_index)!;
+    vk::Fence present_fence = slot.present_fences[image_index];
+    vk::SwapchainPresentFenceInfoEXT fence_info =
+        vk::swapchain_present_fence_info_ext()
+            .set_fences((&present_fence)[:1]);
     vk::PresentInfoKHR info = {
         .s_type               = vk::StructureType.PRESENT_INFO_KHR,
+        .p_next               = &fence_info,
         .wait_semaphore_count = 1,
-        .p_wait_semaphores    = &slot.present_semaphores[slot.pending_image],
+        .p_wait_semaphores    = &slot.present_semaphores[image_index],
         .swapchain_count      = 1,
         .p_swapchains         = &slot.swapchain,
-        .p_image_indices      = &slot.pending_image,
+        .p_image_indices      = &image_index,
     };
 
     Mutex* queue_mutex = present_queue_mutex_for(state);
@@ -1030,6 +1180,7 @@ fn void? vk_present_with(
     vk::Result result = present_fn(state.presentation.queue, &info);
     queue_mutex.unlock();
     if (present_result_consumes_acquisition(result)) {
+        slot.present_fence_pending[image_index] = true;
         mark_texture_presented(image_slot);
     }
     commit_present_result(slot, image, result);

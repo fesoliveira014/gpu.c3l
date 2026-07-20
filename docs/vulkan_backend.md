@@ -167,11 +167,17 @@ pick_physical_device(instance, desc) -> PhysicalDeviceSelection?
 Each feature-compatible candidate's queue topology is resolved once during selection. The winning `PhysicalDeviceSelection` carries that cached `QueueFamilies` value into logical-device creation; queue topology remains a suitability filter rather than a scoring bonus.
 
 A presentation request names a runtime-owned surface. Device creation requires
-at least one requested graphics queue, enables `VK_KHR_swapchain`, and selects a
-presentation-capable queue for that surface. It prefers the representative
-graphics queue, then compute or transfer representatives, and otherwise uses a
-private queue. Split graphics/presentation families use concurrent sharing.
-`supports_presentation` reports surface capability.
+at least one requested graphics queue, instance extensions
+`VK_KHR_get_surface_capabilities2` and `VK_EXT_surface_maintenance1`, device
+extensions `VK_KHR_swapchain` and
+`VK_EXT_swapchain_maintenance1`, and the maintenance feature enabled, then
+selects a presentation-capable queue for that surface. The maintenance
+extension supplies
+non-blocking proof that presentation no longer uses private WSI objects. The
+backend prefers the representative graphics queue, then compute or transfer
+representatives, and otherwise uses a private queue. Split
+graphics/presentation families use concurrent sharing. `supports_presentation`
+reports the complete surface and strict-presentation capability.
 `supports_device_request` additionally preflights the requested queue counts,
 distinct-role constraints, graphics minimum, and presentation topology without
 enabling state. Surface formats and present modes remain swapchain-creation
@@ -545,7 +551,8 @@ grows to the device's finite valid-size count.
 The context-free Vulkan result mapper handles success, host/device allocation
 failures, explicit device loss, and missing features, extensions, or layers.
 Operations with additional result semantics use dedicated mappers: backend
-bootstrap, surface and swapchain work, texture creation, shader-module creation,
+bootstrap, surface and swapchain work, presentation-fence polling/reset, texture
+creation, shader-module creation,
 pipeline creation, descriptor allocation, and enumeration.
 Unclassified native failures are logged and surface as `BACKEND_ERROR`; they
 must never be inferred as device loss.
@@ -555,13 +562,13 @@ With a callback, failures preserve the mapped public fault and emit one backend
 diagnostic with the exact operation (`submit` or `wait_completion`) and native
 result text. With a null callback, mapped results return their public faults
 silently; only unmapped results retain the stderr fallback. Surface creation and
-query, swapchain creation and enumeration, acquire, present, resize/destroy idle
-waits, and present-mode queries use the same operation-aware rule while
-preserving their specialized WSI fault mappings and the raw signed VkResult. A
-swapchain identity is attached only after its handle resolves. Expected WSI
-recovery outcomes are silent even with a callback: acquire `TIMEOUT`/`NOT_READY`
-returns `WAIT_TIMEOUT`, and dormant acquire returns `SWAPCHAIN_OUT_OF_DATE`,
-without diagnostic delivery.
+query, swapchain creation and enumeration, acquire, present, non-blocking
+presentation-fence queries, and present-mode queries use the same
+operation-aware rule while preserving their specialized WSI fault mappings and
+the raw signed VkResult. A swapchain identity is attached only after its handle
+resolves. Expected WSI recovery outcomes are silent even with a callback:
+acquire `TIMEOUT`/`NOT_READY` and a busy present fence return `WAIT_TIMEOUT`, and
+dormant acquire returns `SWAPCHAIN_OUT_OF_DATE`, without diagnostic delivery.
 
 A rejected warm pipeline-cache blob may be retried with an empty cache. Host or
 device allocation failure and explicit device loss propagate without retry.
@@ -708,8 +715,8 @@ Do not transition attachments to shader-read automatically.
 A swapchain borrows its runtime-owned `vk::SurfaceKHR` and retains the public
 surface until destruction. Each live slot owns its `vk::SwapchainKHR`, wrapped
 images, a fixed two-slot acquire-semaphore ring with per-slot retirement points,
-per-image present semaphores, runtime snapshot, and one pending acquisition
-state.
+per-image present semaphores and presentation-retirement fences, runtime
+snapshot, and one pending acquisition state.
 
 Acquire first checks identity headroom, then scans the private ring from its next
 slot and polls each slot's retirement `CompletionPoint`. If neither slot is
@@ -728,11 +735,13 @@ A readiness-consuming graphics submit:
 4. commits readiness consumption and the returned completion point only after
    `vkQueueSubmit2` succeeds.
 
-Present requires that exact completion point and image identity, then waits the
-private present semaphore in `vkQueuePresentKHR`. The caller records the
-explicit transition to `TextureUse.PRESENT` in the submitted command list.
-Successful and enqueued WSI outcomes retire the acquisition.
-Host or device allocation failure preserves it for retry.
+Present requires that exact completion point and image identity, then attaches a
+private `VkSwapchainPresentFenceInfoEXT` fence and waits the private present
+semaphore in `vkQueuePresentKHR`. The caller records the explicit transition to
+`TextureUse.PRESENT` in the submitted command list. Successful and enqueued WSI
+outcomes retire the acquisition. Host or device allocation failure preserves
+it for retry. Reuse polls the image's previous fence; `NOT_READY` becomes
+`WAIT_TIMEOUT` without calling native present.
 
 | Vulkan result | Public outcome | Recovery |
 |---|---|---|
@@ -745,6 +754,13 @@ Host or device allocation failure preserves it for retry.
 Creation and resize publish `SwapchainInfo` only after every image is wrapped.
 Zero extent or failed rebuild publishes the dormant sentinel. Resize preserves
 the acquisition sequence, so stale readiness cannot alias later work.
+
+Destroy and resize poll all pending presentation fences and drain only already
+completed command-reference records. They return `INVALID_RESOURCE_STATE` for
+a pending acquisition and `RESOURCE_IN_USE` for unfinished presentation or live
+command/view references. They never call `vkQueueWaitIdle`, wait a fence, submit
+cleanup work, or defer release. Once the guards pass, wrapped texture slots,
+views, semaphores, fences, and the native swapchain are released immediately.
 
 ## 17. Debug implementation
 
@@ -765,10 +781,9 @@ Object naming should happen immediately after successful backend object creation
 
 ## 18. Immediate resource lifetime
 
-Non-WSI core destruction releases native objects immediately. The backend
-performs no wait and owns no deferred-release queue. Swapchain destruction and
-resize retain the current WSI wait contract until strict presentation
-integration.
+Core destruction releases native objects immediately. The backend performs no
+wait and owns no deferred-release queue. Swapchain destruction and resize use
+private presentation fences to prove WSI retirement without hidden waits.
 
 Validation-only command references cover explicitly named spans, textures, and
 pipelines across recording, executable, and incomplete submitted work.

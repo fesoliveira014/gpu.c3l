@@ -8,7 +8,9 @@ alias InstanceExtensionQuery = fn bool(ZString name);
 
 const ZString VALIDATION_LAYER      = "VK_LAYER_KHRONOS_validation";
 const ZString DEBUG_UTILS_EXTENSION = "VK_EXT_debug_utils";
-const ZString SURFACE_EXTENSION     = "VK_KHR_surface";
+const ZString SURFACE_EXTENSION              = "VK_KHR_surface";
+const ZString SURFACE_CAPABILITIES_EXTENSION = "VK_KHR_get_surface_capabilities2";
+const ZString SURFACE_MAINTENANCE_EXTENSION  = "VK_EXT_surface_maintenance1";
 const ZString WAYLAND_SURFACE_EXTENSION = "VK_KHR_wayland_surface";
 const ZString XLIB_SURFACE_EXTENSION    = "VK_KHR_xlib_surface";
 const ZString WIN32_SURFACE_EXTENSION   = "VK_KHR_win32_surface";
@@ -25,6 +27,7 @@ struct VkInstanceDesc {
 struct VkInstanceCapabilities {
     bool debug_utils;
     bool surface;
+    bool surface_maintenance;
     bool win32_surface;
     bool wayland_surface;
     bool xlib_surface;
@@ -68,6 +71,9 @@ fn VkInstanceCapabilities resolve_instance_capabilities(
     capabilities.surface = desc.enable_available_surfaces
         && supports(SURFACE_EXTENSION);
     if (capabilities.surface) {
+        capabilities.surface_maintenance =
+            supports(SURFACE_CAPABILITIES_EXTENSION)
+            && supports(SURFACE_MAINTENANCE_EXTENSION);
         capabilities.wayland_surface =
             supports(WAYLAND_SURFACE_EXTENSION);
         capabilities.xlib_surface =
@@ -118,6 +124,10 @@ fn VkInstanceCreateResult? create_vk_instance(VkInstanceDesc* desc) {
         }
         if (capabilities.surface) {
             extensions[extension_count++] = SURFACE_EXTENSION;
+            if (capabilities.surface_maintenance) {
+                extensions[extension_count++] = SURFACE_CAPABILITIES_EXTENSION;
+                extensions[extension_count++] = SURFACE_MAINTENANCE_EXTENSION;
+            }
             if (capabilities.wayland_surface) {
                 extensions[extension_count++] = WAYLAND_SURFACE_EXTENSION;
             }
