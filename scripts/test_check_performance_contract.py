@@ -257,6 +257,28 @@ class PerformanceContractTests(unittest.TestCase):
                 )
             )
 
+    def test_generated_pool_swap_to_self_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                (
+                    "        *candidate = state.generated_preprocess_pool[\n"
+                    "            state.generated_preprocess_pool_count\n"
+                    "        ];"
+                ),
+                "        *candidate = state.generated_preprocess_pool[i];",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "successful pool take must remove" in error
+                    for error in errors
+                )
+            )
+
     def test_generated_fallback_before_reuse_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

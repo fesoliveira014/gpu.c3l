@@ -202,7 +202,11 @@ def check(root: Path = ROOT) -> list[str]:
         "defer state.resource_mutex.unlock();",
         "*out_buffer = *candidate;",
         "state.generated_preprocess_pool_count--;",
-        "*candidate = state.generated_preprocess_pool[",
+        (
+            "*candidate = state.generated_preprocess_pool[\n"
+            "            state.generated_preprocess_pool_count\n"
+            "        ];"
+        ),
         (
             "state.generated_preprocess_pool["
             "state.generated_preprocess_pool_count] = {};"
