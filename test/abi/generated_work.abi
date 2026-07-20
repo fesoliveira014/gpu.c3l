@@ -1,0 +1,15 @@
+abi generated_work;
+
+root GeneratedWorkBuildRoot {
+    GpuAddress draw_records_gpu;
+    GpuAddress indexed_records_gpu;
+    GpuAddress dispatch_records_gpu;
+    GpuAddress count_gpu;
+    GpuAddress vertex_root_gpu;
+    GpuAddress fragment_root_gpu;
+    GpuAddress dispatch_root_gpu;
+    uint       vertex_count;
+    uint       index_count;
+    uint       dispatch_x;
+    uint       count_value;
+}

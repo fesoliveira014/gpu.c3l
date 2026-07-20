@@ -36,6 +36,8 @@ struct CommandRecord {
     bool                        depth_state_set;
     CommandResourceReference[]  references;
     uint                        reference_count;
+    GeneratedPreprocessBuffer[] generated_preprocess;
+    uint                        generated_preprocess_count;
 }
 
 struct CommandCell {
@@ -187,6 +189,9 @@ fn void rollback_command_references(
 fn void release_command(VkDeviceState* state, gpu::CommandListHandle handle) {
     if (try record = state.commands.get(handle)) {
         free_command_references(state, record);
+        free_generated_preprocess_buffers(state, record.generated_preprocess);
+        record.generated_preprocess = {};
+        record.generated_preprocess_count = 0;
         (void)state.commands.free(handle);
     }
 }
@@ -196,6 +201,7 @@ fn void destroy_command_table(VkDeviceState* state) {
     foreach (&cell : state.commands.slots[:state.commands.next_new]) {
         if (cell.used) {
             free_command_references(state, &cell.value);
+            free_generated_preprocess_buffers(state, cell.value.generated_preprocess);
         }
     }
     mem::free(state.commands.slots.ptr);

@@ -54,7 +54,7 @@ def main():
         ROOT / "include" / "shaders" / "generated" / "shader_abi.glsl",
         sorted((ROOT / "abi").glob("*.abi")))
 
-    for name in ["root_pointer", "bindless", "offscreen", "depth", "indirect"]:
+    for name in ["root_pointer", "bindless", "offscreen", "depth", "indirect", "generated_work"]:
         gen(gen_bin, check, "gpu_test",
             ROOT / "test" / "src" / f"{name}_abi.c3",
             ROOT / "test" / "shaders" / "generated" / f"{name}_abi.glsl",

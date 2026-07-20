@@ -124,6 +124,14 @@ fn usz? indirect_argument_bytes(
     return argument_size * size_count;
 }
 
+fn usz? generated_work_bytes(
+    usz record_size,
+    uint count,
+    uint max_count,
+) @private {
+    return indirect_argument_bytes(record_size, count, max_count);
+}
+
 fn DeviceOperation? command_operation(
     CommandList* commands,
     bool allow_lost = false,
@@ -404,4 +412,30 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     return vtable.cmd_dispatch_indirect(commands, root, args);
+}
+
+<* Execute up to max_draw_count GPU-written draw records. The GPU-written uint
+   at count_span selects the actual count. Ordering against producer writes is
+   the caller's barrier with hazards.draw_arguments set. *>
+fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
+    BackendVTable* vtable = operation.vtable;
+    return vtable.cmd_draw_generated(commands, records, count_span, max_draw_count);
+}
+
+<* Indexed generated-work variant. Index bounds remain GPU execution-time data. *>
+fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
+    BackendVTable* vtable = operation.vtable;
+    return vtable.cmd_draw_indexed_generated(commands, records, count_span, max_draw_count, index_span, index_type);
+}
+
+<* Execute up to max_dispatch_count GPU-written dispatch records. *>
+fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
+    DeviceOperation operation = command_operation(commands)!;
+    defer end_device_operation(&operation);
+    BackendVTable* vtable = operation.vtable;
+    return vtable.cmd_dispatch_generated(commands, records, count_span, max_dispatch_count);
 }

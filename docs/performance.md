@@ -54,6 +54,15 @@ fields. Compare rates only with the same environment context emitted by
 `benchmark_info`. This document records the method but does not publish upload
 throughput numbers until fresh output is added to the canonical baseline.
 
+## Command recording
+
+`command_record_bench` measures ordinary and semantic-hazard barriers plus
+indirect dispatch over 20,000 records per repetition. When generated work is
+supported, it also records 1,000 generated dispatches per repetition using
+fixed caller-owned record and count spans. The smaller generated phase bounds
+the distinct preprocess regions required by Vulkan while retaining a stable
+per-record measurement. Unsupported adapters report that phase as unsupported.
+
 ## Windows baseline
 
 Environment recorded 2026-07-13 with C3 0.8.0_2 on Windows 11. The
@@ -70,7 +79,7 @@ queues: graphics=0:0 compute=0:1 compute_distinct=true transfer=1:0 transfer_dis
 |---|---|---:|---:|
 | Descriptor churn | Texture single / batch of 16, one worker | 320 each | 512 / 313 ns/descriptor |
 | Sampler lookup | Intern + stable publication hits, one worker | 320 | 239 ns/op |
-| Command recording | Barrier / hazard barrier / indirect dispatch | 20,000 × 5 | 123 / 142 / 173 ns/record median |
+| Command recording | Barrier / hazard barrier / indirect / generated dispatch | 20,000 × 5 direct; 1,000 × 5 generated | 135 / 140 / 191 / 1,243 ns/record median |
 | Pipeline creation | Cold / cached duplicate | 200 / 200,000 | 14,808 / 137 ns/create |
 | Async overlap | Serialized / independent queues | 5 | 8.872 / 9.464 ms wall median; overlap observed |
 

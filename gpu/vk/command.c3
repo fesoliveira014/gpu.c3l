@@ -2,6 +2,7 @@ module gpu::vk @private;
 
 import gpu @public;
 import vk;
+import vma;
 import std::thread;
 import std::core::mem;
 
@@ -20,6 +21,13 @@ struct RecordingContextHandle {
 struct ThreadRecordingContext {
     gpu::Device            device;
     RecordingContextHandle context;
+}
+
+struct GeneratedPreprocessBuffer {
+    vk::Buffer      buffer;
+    vma::Allocation allocation;
+    vk::DeviceAddress address;
+    vk::DeviceSize size;
 }
 
 struct RetiredCommandBuffer {
@@ -1062,4 +1070,311 @@ fn void? vk_cmd_dispatch_indirect(
         args_buffer.slot.buffer,
         (vk::DeviceSize)args_buffer.offset,
     );
+}
+
+fn void? validate_generated_work_count(
+    VkDeviceState* state,
+    uint count,
+    ZString operation,
+    ZString rejected_field,
+) {
+    if (count <= state.caps.max_generated_work_count) return;
+    return report_contract_failure(
+        state:               state,
+        operation:           operation,
+        public_fault:        gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+        debug_name:          null,
+        rejected_field:      rejected_field,
+        invariant:           "count must not exceed DeviceCaps.max_generated_work_count",
+        backend_text:        null,
+    )~;
+}
+
+fn ResolvedSpan? resolve_generated_work_records(
+    VkDeviceState* state,
+    CommandRecord* record,
+    gpu::GpuSpan* records,
+    usz record_size,
+    uint max_count,
+    ZString operation,
+) {
+    validate_generated_work_count(state, max_count, operation, "max_count")!;
+    usz required = gpu::generated_work_bytes(
+        record_size,
+        max_count,
+        state.caps.max_generated_work_count,
+    )!;
+    ResolvedSpan resolved = resolve_span_slot(
+        state:          state,
+        span:           records,
+        required:       required,
+        operation:      operation,
+        rejected_field: "records",
+    )!;
+    validate_span_recording_access(
+        state:     state,
+        record:    record,
+        resolved:  &resolved,
+        span:      records,
+        operation: operation,
+    )!;
+    if (!resolved.slot.usage.indirect || !resolved.slot.usage.addressable) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (resolved.offset % 8 != 0) return gpu::INVALID_ARGUMENT~;
+    return resolved;
+}
+
+fn vk::IndirectCommandsLayoutEXT? generated_dispatch_layout(
+    VkDeviceState* state,
+    vk::PipelineLayout pipeline_layout,
+) {
+    foreach (&entry : state.compute_layout_cache.entries[:state.compute_layout_cache.count]) {
+        if (entry.layout == pipeline_layout) return entry.generated_dispatch_layout;
+    }
+    return gpu::BACKEND_ERROR~;
+}
+
+fn void? execute_generated_work(
+    VkDeviceState* state,
+    CommandRecord* record,
+    PipelineSlot* pipeline,
+    vk::IndirectCommandsLayoutEXT layout,
+    vk::ShaderStageFlags shader_stages,
+    ResolvedSpan* records,
+    ResolvedSpan* count,
+    uint max_count,
+) {
+    vk::GeneratedCommandsPipelineInfoEXT pipeline_info =
+        vk::generated_commands_pipeline_info_ext()
+            .set_pipeline(pipeline.pipeline);
+    vk::GeneratedCommandsMemoryRequirementsInfoEXT requirements_info =
+        vk::generated_commands_memory_requirements_info_ext()
+            .set_next(&pipeline_info)
+            .set_indirect_commands_layout(layout)
+            .set_max_sequence_count(max_count);
+    vk::MemoryRequirements2 requirements2 = vk::memory_requirements2();
+    state.device_dispatch.generated_work.get_memory_requirements(
+        state.device,
+        &requirements_info,
+        &requirements2,
+    );
+
+    GeneratedPreprocessBuffer* preprocess = null;
+    if (requirements2.memory_requirements.size > 0) {
+        preprocess = allocate_generated_preprocess_buffer(
+            state,
+            record,
+            &requirements2.memory_requirements,
+        )!;
+    }
+    vk::GeneratedCommandsInfoEXT info = vk::generated_commands_info_ext()
+        .set_next(&pipeline_info)
+        .set_shader_stages(shader_stages)
+        .set_indirect_commands_layout(layout)
+        .set_indirect_address((vk::DeviceAddress)(records.slot.gpu_base + (gpu::GpuAddress)records.offset))
+        .set_indirect_address_size((vk::DeviceSize)records.size)
+        .set_max_sequence_count(max_count)
+        .set_sequence_count_address((vk::DeviceAddress)(count.slot.gpu_base + (gpu::GpuAddress)count.offset));
+    if (preprocess != null) {
+        info = info
+            .set_preprocess_address(preprocess.address)
+            .set_preprocess_size(preprocess.size);
+    }
+    state.device_dispatch.generated_work.cmd_execute_generated_commands(
+        record.command_buffer,
+        vk::FALSE,
+        &info,
+    );
+}
+
+fn void? vk_cmd_dispatch_generated(
+    gpu::CommandList* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+) @private {
+    CommandRecord* record = resolve_command(commands)!;
+    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    PipelineSlot* pipeline = active_pipeline_slot(
+        state:         state,
+        record:        record,
+        expected_kind: PipelineKind.COMPUTE,
+        operation:     "cmd_dispatch_generated",
+    )!;
+    if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
+    validate_generated_work_count(
+        state,
+        max_dispatch_count,
+        "cmd_dispatch_generated",
+        "max_dispatch_count",
+    )!;
+    if (max_dispatch_count == 0) return;
+
+    uint reference_checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, reference_checkpoint);
+    ResolvedSpan resolved_records = resolve_generated_work_records(
+        state:       state,
+        record:      record,
+        records:     &records,
+        record_size: gpu::GeneratedDispatchRecord::size,
+        max_count:   max_dispatch_count,
+        operation:   "cmd_dispatch_generated",
+    )!;
+    ResolvedSpan resolved_count = resolve_indirect_span(
+        state:          state,
+        record:         record,
+        span:           &count_span,
+        arg_size:       4,
+        count:          1,
+        operation:      "cmd_dispatch_generated",
+        rejected_field: "count_span",
+    )!;
+    vk::IndirectCommandsLayoutEXT layout = generated_dispatch_layout(
+        state,
+        pipeline.layout,
+    )!;
+    execute_generated_work(
+        state:         state,
+        record:        record,
+        pipeline:      pipeline,
+        layout:        layout,
+        shader_stages: vk::ShaderStageFlagBits.COMPUTE_BIT,
+        records:       &resolved_records,
+        count:         &resolved_count,
+        max_count:     max_dispatch_count,
+    )!;
+}
+
+fn void free_generated_preprocess_buffers(
+    VkDeviceState* state,
+    GeneratedPreprocessBuffer[] buffers,
+) {
+    foreach (&buffer : buffers) {
+        if (buffer.buffer != null) {
+            state.allocator.destroy_buffer(buffer.buffer, buffer.allocation);
+        }
+    }
+    if (buffers.ptr != null) alloc::free(state.host_allocator, buffers.ptr);
+}
+
+fn void ensure_generated_preprocess_capacity(
+    VkDeviceState* state,
+    CommandRecord* record,
+) {
+    if (record.generated_preprocess_count < record.generated_preprocess.len) return;
+    usz capacity = record.generated_preprocess.len == 0
+        ? 4
+        : record.generated_preprocess.len * 2;
+    GeneratedPreprocessBuffer[] grown = alloc::new_array(
+        state.host_allocator,
+        GeneratedPreprocessBuffer,
+        (sz)capacity,
+    );
+    for (uint i = 0; i < record.generated_preprocess_count; i++) {
+        grown[i] = record.generated_preprocess[i];
+    }
+    if (record.generated_preprocess.ptr != null) {
+        alloc::free(state.host_allocator, record.generated_preprocess.ptr);
+    }
+    record.generated_preprocess = grown;
+}
+
+fn GeneratedPreprocessBuffer*? allocate_generated_preprocess_buffer(
+    VkDeviceState* state,
+    CommandRecord* record,
+    vk::MemoryRequirements* requirements,
+) {
+    vk::BufferUsageFlags2CreateInfoKHR usage2 = {
+        .s_type = vk::StructureType.BUFFER_USAGE_FLAGS_2_CREATE_INFO_KHR,
+        .usage = (vk::BufferUsageFlags2KHR)(
+            (ulong)vk::BufferUsageFlagBits2KHR.USAGE_2_PREPROCESS_BUFFER_BIT_EXT
+            | (ulong)vk::BufferUsageFlagBits2KHR.USAGE_2_SHADER_DEVICE_ADDRESS_BIT_KHR
+        ),
+    };
+    vk::BufferCreateInfo buffer_info = vk::buffer_create_info()
+        .set_next(&usage2)
+        .set_size(requirements.size)
+        .set_usage(vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT);
+    vma::AllocationCreateInfo allocation_info = {
+        .usage            = vma::MemoryUsage.AUTO_PREFER_DEVICE,
+        .memory_type_bits = requirements.memory_type_bits,
+    };
+    GeneratedPreprocessBuffer buffer;
+    vma::AllocationInfo native_info;
+    bool owns_pair;
+    defer catch {
+        if (owns_pair) state.allocator.destroy_buffer(buffer.buffer, buffer.allocation);
+    }
+    check_device_result(state, state.allocator.create_buffer_with_alignment(
+        bi:            &buffer_info,
+        ci:            &allocation_info,
+        min_alignment: requirements.alignment,
+        out_buffer:    &buffer.buffer,
+        out_alloc:     &buffer.allocation,
+        out_info:      &native_info,
+    ))!;
+    owns_pair = true;
+    vk::BufferDeviceAddressInfo address_info =
+        vk::buffer_device_address_info().set_buffer(buffer.buffer);
+    buffer.address = vk::get_buffer_device_address(state.device, &address_info);
+    buffer.size = requirements.size;
+    if (buffer.address == 0) return gpu::BACKEND_ERROR~;
+
+    ensure_generated_preprocess_capacity(state, record);
+    uint index = record.generated_preprocess_count++;
+    record.generated_preprocess[index] = buffer;
+    owns_pair = false;
+    return &record.generated_preprocess[index];
+}
+
+fn vk::IndirectCommandsLayoutEXT? create_generated_work_layout(
+    VkDeviceState* state,
+    vk::PipelineLayout pipeline_layout,
+    vk::ShaderStageFlags shader_stages,
+    uint root_size,
+    vk::IndirectCommandsTokenTypeEXT action_type,
+    uint action_offset,
+    uint stride,
+) {
+    vk::PushConstantRange range = {
+        .stage_flags = shader_stages,
+        .offset      = 0,
+        .size        = root_size,
+    };
+    vk::IndirectCommandsPushConstantTokenEXT push = {
+        .update_range = range,
+    };
+    vk::IndirectCommandsLayoutTokenEXT[2] tokens = {
+        vk::indirect_commands_layout_token_ext()
+            .set_type(vk::IndirectCommandsTokenTypeEXT.PUSH_CONSTANT_EXT)
+            .set_data({ .p_push_constant = &push })
+            .set_offset(0),
+        vk::indirect_commands_layout_token_ext()
+            .set_type(action_type)
+            .set_offset(action_offset),
+    };
+    vk::IndirectCommandsLayoutCreateInfoEXT info =
+        vk::indirect_commands_layout_create_info_ext()
+            .set_shader_stages(shader_stages)
+            .set_indirect_stride(stride)
+            .set_pipeline_layout(pipeline_layout)
+            .set_tokens(tokens[..]);
+    vk::IndirectCommandsLayoutEXT layout;
+    check_backend_result(
+        state:     state,
+        operation: "create_generated_work_layout",
+        result:    state.device_dispatch.generated_work.create_layout(
+            state.device,
+            &info,
+            null,
+            &layout,
+        ),
+    )!;
+    return layout;
 }

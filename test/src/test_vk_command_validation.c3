@@ -1290,6 +1290,229 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     defer discard_test_executable(&cmd_executable)!!;
 }
 
+fn void generated_work_commands_require_capability() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    gpu::TextureHandle target = make_val_target(&device);
+    defer gpu::destroy_texture(&device, target)!!;
+
+    OwnedSpan records = allocate_owned_span(
+        device:       &device,
+        size:         256,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "generated_records",
+    )!!;
+    defer free_owned_span(&device, &records)!!;
+    OwnedSpan count = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "generated_count",
+    )!!;
+    defer free_owned_span(&device, &count)!!;
+    OwnedSpan indices = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "generated_indices",
+    )!!;
+    defer free_owned_span(&device, &indices)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    bool original_enabled = state.generated_work.enabled;
+    state.generated_work.enabled = false;
+    defer state.generated_work.enabled = original_enabled;
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    bind_test_compute_pipeline(&commands, compute.pipeline);
+    fault dispatch_unsupported = @catch(gpu::cmd_dispatch_generated(
+        commands:          &commands,
+        records:           records.span,
+        count_span:        count.span,
+        max_dispatch_count: 1,
+    ));
+    assert(dispatch_unsupported == gpu::UNSUPPORTED_FEATURE,
+        "generated dispatch requires the generated-work capability");
+
+    record_val_target_to_attach(&commands, target);
+    gpu::ColorTargetDesc[1] colors = {{
+        .texture  = target,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    bind_test_graphics_pipeline(&commands, draw.graphics);
+    fault draw_unsupported = @catch(gpu::cmd_draw_generated(
+        commands:      &commands,
+        records:       records.span,
+        count_span:    count.span,
+        max_draw_count: 1,
+    ));
+    assert(draw_unsupported == gpu::UNSUPPORTED_FEATURE,
+        "generated draw requires the generated-work capability");
+    fault indexed_unsupported = @catch(gpu::cmd_draw_indexed_generated(
+        commands:      &commands,
+        records:       records.span,
+        count_span:    count.span,
+        max_draw_count: 1,
+        index_span:    indices.span,
+    ));
+    assert(indexed_unsupported == gpu::UNSUPPORTED_FEATURE,
+        "generated indexed draw requires the generated-work capability");
+
+    state.generated_work.enabled = true;
+    gpu::cmd_draw_generated(
+        commands:      &commands,
+        records:       {},
+        count_span:    {},
+        max_draw_count: 0,
+    )!!;
+    gpu::IndexType unknown_type;
+    *(int*)&unknown_type = 99;
+    fault invalid_zero_index_type = @catch(gpu::cmd_draw_indexed_generated(
+        commands:      &commands,
+        records:       {},
+        count_span:    {},
+        max_draw_count: 0,
+        index_span:    {},
+        index_type:    unknown_type,
+    ));
+    assert(invalid_zero_index_type == gpu::INVALID_ARGUMENT,
+        "zero generated indexed draws still validate the index type");
+    gpu::cmd_draw_indexed_generated(
+        commands:      &commands,
+        records:       {},
+        count_span:    {},
+        max_draw_count: 0,
+        index_span:    {},
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+}
+
+fn void generated_dispatch_validates_zero_count_bounds_and_alignment() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+
+    OwnedSpan records = allocate_owned_span(
+        device:       &device,
+        size:         gpu::GeneratedDispatchRecord::size + 8,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "generated_dispatch_records",
+    )!!;
+    defer free_owned_span(&device, &records)!!;
+    OwnedSpan count = allocate_owned_span(
+        device:       &device,
+        size:         8,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "generated_dispatch_count",
+    )!!;
+    defer free_owned_span(&device, &count)!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    bool original_enabled = state.generated_work.enabled;
+    uint original_limit = state.caps.max_generated_work_count;
+    state.generated_work.enabled = true;
+    state.caps.max_generated_work_count = 1;
+    defer {
+        state.generated_work.enabled = original_enabled;
+        state.caps.max_generated_work_count = original_limit;
+    }
+
+    gpu::GpuSpan valid_records = records.span.checked_subspan(
+        0,
+        gpu::GeneratedDispatchRecord::size,
+    )!!;
+    gpu::GpuSpan misaligned_records = records.span.checked_subspan(
+        4,
+        gpu::GeneratedDispatchRecord::size,
+    )!!;
+    gpu::GpuSpan short_records = records.span.checked_subspan(
+        0,
+        gpu::GeneratedDispatchRecord::size - 1,
+    )!!;
+    gpu::GpuSpan valid_count = count.span.checked_subspan(0, 4)!!;
+    gpu::GpuSpan misaligned_count = count.span.checked_subspan(2, 4)!!;
+    gpu::GpuSpan short_count = count.span.checked_subspan(0, 2)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    bind_test_compute_pipeline(&commands, compute.pipeline);
+
+    gpu::cmd_dispatch_generated(
+        commands:          &commands,
+        records:           {},
+        count_span:        {},
+        max_dispatch_count: 0,
+    )!!;
+    fault over_limit = @catch(gpu::cmd_dispatch_generated(
+        commands:          &commands,
+        records:           valid_records,
+        count_span:        valid_count,
+        max_dispatch_count: 2,
+    ));
+    assert(over_limit == gpu::INVALID_ARGUMENT,
+        "generated dispatch rejects counts above the selected-device limit");
+    fault record_alignment = @catch(gpu::cmd_dispatch_generated(
+        commands:          &commands,
+        records:           misaligned_records,
+        count_span:        valid_count,
+        max_dispatch_count: 1,
+    ));
+    assert(record_alignment == gpu::INVALID_ARGUMENT,
+        "generated records require eight-byte alignment");
+    fault record_size = @catch(gpu::cmd_dispatch_generated(
+        commands:          &commands,
+        records:           short_records,
+        count_span:        valid_count,
+        max_dispatch_count: 1,
+    ));
+    assert(record_size == gpu::INVALID_ARGUMENT,
+        "generated record span must hold the declared maximum count");
+    fault count_alignment = @catch(gpu::cmd_dispatch_generated(
+        commands:          &commands,
+        records:           valid_records,
+        count_span:        misaligned_count,
+        max_dispatch_count: 1,
+    ));
+    assert(count_alignment == gpu::INVALID_ARGUMENT,
+        "generated count span requires four-byte alignment");
+    fault count_size = @catch(gpu::cmd_dispatch_generated(
+        commands:          &commands,
+        records:           valid_records,
+        count_span:        short_count,
+        max_dispatch_count: 1,
+    ));
+    assert(count_size == gpu::INVALID_ARGUMENT,
+        "generated count span must hold one uint");
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+}
+
 fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;

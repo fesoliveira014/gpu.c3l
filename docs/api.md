@@ -1182,13 +1182,29 @@ cmd_draw_indirect(commands, vertex_root, fragment_root, args, draw_count) -> voi
 cmd_draw_indexed_indirect(commands, vertex_root, fragment_root, args, draw_count, index_span, index_type) -> void?
 cmd_draw_indexed_indirect_count(commands, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type) -> void?
 cmd_dispatch_indirect(commands, root, args) -> void?
+cmd_draw_generated(commands, records, count_span, max_draw_count) -> void?
+cmd_draw_indexed_generated(commands, records, count_span, max_draw_count, index_span, index_type) -> void?
+cmd_dispatch_generated(commands, records, count_span, max_dispatch_count) -> void?
 ```
 
 The generated records have fixed std430 strides of 32, 40, and 24 bytes. They
 pair the roots and arguments written by a GPU producer without a parallel
 `gl_DrawID` lookup table. `DeviceCaps.generated_work` reports whether the
-created device supports all three layouts. The existing shared-root commands
-remain the portable public execution path.
+created device supports all three commands. Unsupported devices fault
+`UNSUPPORTED_FEATURE`; the shared-root indirect commands remain the portable
+execution path and the library never emulates generated work with a CPU loop.
+
+Generated record spans are 8-byte aligned and must hold the declared maximum
+count. The count span is a 4-byte-aligned GPU-readable `uint`. Both spans must
+come from live allocations admitted to the recording queue. The GPU-written
+count may be zero and must not exceed either the command maximum or
+`DeviceCaps.max_generated_work_count`. A zero command maximum records no
+native work. Generated indexed draws accept only `IndexType.U16` or
+`IndexType.U32`; GPU-written index bounds remain subject to device robustness.
+The active pipeline supplies execution state and is not an API argument.
+Root-reachable allocations and resources are caller-owned, are not tracked from
+GPU-written addresses, and must remain live until the covering completion point
+finishes.
 
 Argument spans must support indirect-command reads, be 4-byte aligned, and
 contain `draw_count` (or `max_draw_count`) times the tight argument size. One

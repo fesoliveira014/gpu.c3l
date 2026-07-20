@@ -21,6 +21,7 @@ struct SubmittedCommandBatch {
     vk::CommandBuffer          command_buffer;
     CommandResourceReference[] references;
     uint                       reference_count;
+    GeneratedPreprocessBuffer[] generated_preprocess;
 }
 
 struct CommandBufferStats {
@@ -207,11 +208,14 @@ fn void publish_submitted_commands(
             .command_pool    = record.command_pool,
             .command_buffer  = record.command_buffer,
             .completion      = completion,
-            .references      = record.references,
-            .reference_count = record.reference_count,
+            .references           = record.references,
+            .reference_count      = record.reference_count,
+            .generated_preprocess = record.generated_preprocess,
         };
         record.references = {};
         record.reference_count = 0;
+        record.generated_preprocess = {};
+        record.generated_preprocess_count = 0;
     }
 }
 
@@ -226,6 +230,7 @@ fn void release_submitted_command_batch(
         batch.reference_count,
     );
     alloc::free(state.host_allocator, batch.references.ptr);
+    free_generated_preprocess_buffers(state, batch.generated_preprocess);
     enqueue_retired_command_buffer_locked(
         state:          state,
         context_handle: batch.context,
@@ -324,6 +329,7 @@ fn void destroy_submitted_commands(VkDeviceState* state) {
             batch.reference_count,
         );
         alloc::free(state.host_allocator, batch.references.ptr);
+        free_generated_preprocess_buffers(state, batch.generated_preprocess);
     }
     if (state.submitted_commands.ptr != null) {
         alloc::free(state.host_allocator, state.submitted_commands.ptr);

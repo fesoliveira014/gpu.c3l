@@ -29,7 +29,7 @@ BENCHMARK_METHODS = {
         "warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4",
         "uploads/s",
     ),
-    "command_record_bench": ("20000/phase/repetition; repetitions=5", "ns/record"),
+    "command_record_bench": ("direct=20000/phase/repetition; generated=1000/repetition; repetitions=5", "ns/record"),
     "pipeline_cache_bench": ("cold=200; duplicate=200000; batch=64x2000", "ns/create"),
     "async_overlap_bench": ("calibration=2; measured=5", "ms"),
 }
