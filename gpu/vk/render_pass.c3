@@ -445,6 +445,17 @@ fn void? vk_cmd_end_render_pass(gpu::CommandList* commands) @private {
     CommandRecord* record = resolve_command(commands)!;
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     vk::cmd_end_rendering(record.command_buffer);
+    if (record.active_pipeline.is_valid()) {
+        VkDeviceState* state =
+            (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+        PipelineSlot* slot = state.pipelines.get(record.active_pipeline)!;
+        // Graphics bindings are scoped to their pass; a binding that leaked into
+        // the next begin would fail its compatibility preflight.
+        if ((PipelineKind)state.pipeline_cache.entries[slot.entry].key.kind
+            == PipelineKind.GRAPHICS) {
+            record.active_pipeline = gpu::PIPELINE_HANDLE_INVALID;
+        }
+    }
     record.active_render_width = 0;
     record.active_render_height = 0;
     record.active_render = {};

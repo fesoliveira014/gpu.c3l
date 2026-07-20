@@ -1128,6 +1128,9 @@ samples; integer formats select sample zero. Depth resolve is not exposed.
 A bound graphics pipeline must exactly match the pass color count and formats,
 depth format, and sample count. Compatibility is checked before render-pass
 begin or pipeline bind changes native recording state or retained references.
+A graphics binding is scoped to its render pass: `cmd_end_render_pass`
+releases it, so a multi-pass command list binds a pipeline inside (or
+immediately before) each pass. Compute bindings persist across passes.
 Render-pass boundaries and resolves add no synchronization; callers declare
 all attachment transitions and later shader/transfer visibility explicitly.
 
