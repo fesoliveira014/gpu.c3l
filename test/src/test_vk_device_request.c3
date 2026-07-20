@@ -9,6 +9,10 @@ import std::io;
 const gpu::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
     .destroy_device = &destroy_registry_blocker,
 };
+const gpu::RuntimeBackendVTable PRESENTATION_INSTANCE_GATE_VTABLE @private = {
+    .destroy_runtime = &destroy_presentation_instance_gate_runtime,
+    .destroy_surface = &destroy_presentation_instance_gate_surface,
+};
 fn uint live_device_slot_count() @private {
     uint live_count;
     for (uint i = 0; i < gpu::MAX_DEVICES; i++) {
@@ -22,6 +26,20 @@ fn uint live_device_slot_count() @private {
 
 fn void destroy_registry_blocker(void* backend_state) @private {
     (void)backend_state;
+}
+
+fn void destroy_presentation_instance_gate_runtime(
+    void* backend_state,
+) @private {
+    (void)backend_state;
+}
+
+fn void destroy_presentation_instance_gate_surface(
+    void* backend_state,
+    void* backend_surface,
+) @private {
+    (void)backend_state;
+    (void)backend_surface;
 }
 
 fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
@@ -458,6 +476,44 @@ fn void malformed_native_request_preserves_runtime_state() @test {
         "failed creation leaves runtime-owned adapter state intact"
     );
     gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void presentation_device_creation_requires_instance_maintenance() @test {
+    gpu::vk::VkAdapterState[1] adapter_states;
+    gpu::vk::VkRuntimeState runtime_state = {
+        .adapters = adapter_states[..],
+    };
+    gpu::Runtime runtime = gpu::register_runtime(
+        backend:       gpu::BackendKind.VULKAN,
+        vtable:        &PRESENTATION_INSTANCE_GATE_VTABLE,
+        backend_state: &runtime_state,
+        adapter_count: 1,
+    )!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::Surface surface = gpu::register_surface(&runtime, (void*)1)!!;
+    defer gpu::destroy_surface(&surface)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::Adapter adapter = adapters.get(0)!!;
+    gpu::DeviceRequest request = gpu::request_presentation(
+        gpu::strict_device_request(),
+        &surface,
+    )!!;
+    gpu::vk::DeviceCreationProbe probe;
+
+    assert(
+        @catch(gpu::vk::create_vk_device_with_probe(
+            adapter:          &adapter,
+            request:          &request,
+            retained_runtime: &runtime,
+            probe:            &probe,
+        )) == gpu::UNSUPPORTED_FEATURE,
+        "presentation creation requires instance maintenance support"
+    );
+    assert(
+        probe.reached == gpu::vk::DeviceCreationCheckpoint.NONE
+            && probe.rollback_count == 0,
+        "the instance capability gate precedes backend device mutation"
+    );
 }
 
 fn void device_creation_checkpoint_ordinals_match_exact_schema() @test {
