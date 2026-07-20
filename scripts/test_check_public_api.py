@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from scripts import check_public_api
 
@@ -2038,6 +2040,42 @@ method gpu::Runtime.is_valid
                 ),
             ],
         )
+
+    def test_scans_only_the_canonical_backend_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sibling = root / "gpu" / "surface" / "vk" / "escape.c3"
+            sibling.parent.mkdir(parents=True)
+            sibling.write_text(
+                "module gpu::escape;\n",
+                encoding="utf-8",
+            )
+            backend = root / "gpu" / "vk" / "escape.c3i"
+            backend.parent.mkdir(parents=True)
+            backend.write_text(
+                "module gpu::escape;\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(check_public_api, "ROOT", root):
+                self.assertEqual(
+                    check_public_api.scan_public_module_sources(),
+                    [
+                        (
+                            "gpu/surface/vk/escape.c3:1 public source may "
+                            "only declare gpu, found gpu::escape"
+                        ),
+                    ],
+                )
+                self.assertEqual(
+                    check_public_api.scan_private_backend_modules(),
+                    [
+                        (
+                            "gpu/vk/escape.c3i:1 backend file may only "
+                            "declare gpu::vk modules, found gpu::escape"
+                        ),
+                    ],
+                )
 
     def test_rejects_span_backend_details(self) -> None:
         document = valid_document()

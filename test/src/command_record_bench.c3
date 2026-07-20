@@ -1,6 +1,7 @@
 module gpu_bench;
 
 import gpu @public;
+import gpu::vk @public;
 import std::io;
 import std::time;
 
@@ -78,6 +79,12 @@ fn double record_generated_dispatches(
         gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::cmd_dispatch_generated(
+        commands:           &commands,
+        records:            records,
+        count_span:         count,
+        max_dispatch_count: 1,
+    )!!;
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < GENERATED_RECORD_ITERATIONS; i++) {
         gpu::cmd_dispatch_generated(
@@ -196,6 +203,13 @@ fn int main() {
         );
     }
 
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong registry_locks_before = gpu::device_registry_lock_count();
+    vk::CommandRecordingStats recording_before =
+        vk::command_recording_stats(state);
+    ulong pipelines_before = vk::pipeline_native_create_count(state);
+
     double[COMMAND_RECORD_REPETITIONS] barrier_results;
     double[COMMAND_RECORD_REPETITIONS] hazard_results;
     double[COMMAND_RECORD_REPETITIONS] indirect_results;
@@ -212,6 +226,30 @@ fn int main() {
                 generated_count,
             );
         }
+    }
+    ulong registry_locks =
+        gpu::device_registry_lock_count() - registry_locks_before;
+    vk::CommandRecordingStats recording_after =
+        vk::command_recording_stats(state);
+    ulong recording_allocations = recording_after.recording_allocations
+        - recording_before.recording_allocations;
+    ulong preprocess_allocations = recording_after.preprocess_allocations
+        - recording_before.preprocess_allocations;
+    ulong preprocess_reuses = recording_after.preprocess_reuses
+        - recording_before.preprocess_reuses;
+    ulong draw_compilations = vk::pipeline_native_create_count(state)
+        - pipelines_before;
+    assert(registry_locks == 0,
+        "recording does not acquire the device registry lock");
+    assert(recording_allocations == 0,
+        "warmed recording performs no backend allocation");
+    assert(preprocess_allocations == 0,
+        "generated recording reuses preprocess storage");
+    assert(draw_compilations == 0,
+        "recording does not compile pipelines");
+    if (caps.generated_work) {
+        assert(preprocess_reuses >= COMMAND_RECORD_REPETITIONS,
+            "each measured generated recording reuses pooled preprocess storage");
     }
 
     io::printfn(
@@ -236,5 +274,13 @@ fn int main() {
     } else {
         io::printfn("generated dispatch: unsupported");
     }
+    io::printfn(
+        "invariants: registry_locks=%d recording_allocations=%d draw_compilations=%d preprocess_allocations=%d",
+        registry_locks,
+        recording_allocations,
+        draw_compilations,
+        preprocess_allocations,
+    );
+    io::printfn("generated preprocess: reuse_events=%d", preprocess_reuses);
     return 0;
 }

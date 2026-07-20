@@ -115,6 +115,21 @@ class DocumentationCheckTests(unittest.TestCase):
             [],
         )
 
+    def test_vk_named_public_directory_remains_current_state(self) -> None:
+        relative = Path("gpu/surface/vk/escape.c3")
+        source = "<* Added for M7.4. *>\n"
+
+        self.assertFalse(check_docs.is_private_backend_source(relative))
+        self.assertEqual(
+            check_docs.validate_current_state_text(relative, source),
+            [
+                (
+                    "gpu/surface/vk/escape.c3:1: public source text uses "
+                    "development label M7.4"
+                ),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

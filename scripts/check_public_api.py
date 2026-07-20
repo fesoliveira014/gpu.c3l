@@ -1367,6 +1367,10 @@ def validate_public_module_source(
     return failures
 
 
+def is_private_backend_source(relative: Path) -> bool:
+    return relative.parts[:2] == ("gpu", "vk")
+
+
 def scan_public_module_sources() -> list[str]:
     failures = []
     for path in sorted((ROOT / "gpu").rglob("*")):
@@ -1374,7 +1378,7 @@ def scan_public_module_sources() -> list[str]:
         if (
             path.is_file()
             and path.suffix in {".c3", ".c3i"}
-            and "vk" not in relative.parts
+            and not is_private_backend_source(relative)
         ):
             failures.extend(
                 validate_public_module_source(
@@ -1387,7 +1391,9 @@ def scan_public_module_sources() -> list[str]:
 
 def scan_private_backend_modules() -> list[str]:
     failures = []
-    for path in sorted((ROOT / "gpu" / "vk").rglob("*.c3")):
+    for path in sorted((ROOT / "gpu" / "vk").rglob("*")):
+        if not path.is_file() or path.suffix not in {".c3", ".c3i"}:
+            continue
         failures.extend(
             validate_private_backend_source(
                 path.relative_to(ROOT),

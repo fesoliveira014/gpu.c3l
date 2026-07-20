@@ -152,6 +152,10 @@ def strip_json_comments(source: str) -> str:
     )
 
 
+def is_private_backend_source(relative: Path) -> bool:
+    return relative.parts[:2] == ("gpu", "vk")
+
+
 def collect_failures(root: Path) -> list[str]:
     failures = []
     for path in sorted((root / "docs").rglob("*.md")):
@@ -166,7 +170,7 @@ def collect_failures(root: Path) -> list[str]:
         if (
             path.is_file()
             and path.suffix in {".c3", ".c3i"}
-            and "vk" not in relative.parts
+            and not is_private_backend_source(relative)
         ):
             source = path.read_text(encoding="utf-8")
             failures.extend(

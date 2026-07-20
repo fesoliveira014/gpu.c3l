@@ -344,7 +344,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 7.4 Strict correctness and performance evidence
 
-- [ ] Replace obsolete benchmarks and publish reproducible baselines for allocation, pipeline creation, command recording, submission, completion polling, barriers, indirect work, and destruction in `test/src/`, `scripts/run_benchmarks.py`, and `docs/performance.md`.
+- [x] Replace obsolete benchmarks and publish reproducible baselines for allocation, pipeline creation, command recording, submission, completion polling, barriers, indirect work, and destruction in `test/src/`, `scripts/run_benchmarks.py`, and `docs/performance.md`.
   - **Depends on:** 7.1–7.3.
   - **Contract:** hot command recording has no registry lock, hidden per-command allocation, or draw-time compilation; completion points have no per-point allocation; destruction has no wait or deferred work.
   - **Edges:** separate debug validation cost, cold/warm pipeline cache, CPU-only evidence, driver variability, and hardware metadata.

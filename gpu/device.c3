@@ -234,15 +234,21 @@ const ulong MAX_DEVICE_RESOURCE_OWNER = ulong::max / RESOURCE_OWNER_KIND_COUNT;
 DeviceSlot[MAX_DEVICES] device_slots @private;
 Atomic{bool} device_registry_lock @private;
 Atomic{ulong} device_resource_owner_counter @private;
+Atomic{ulong} device_registry_lock_acquisitions @private;
 
 fn void lock_device_registry() @private {
     while (device_registry_lock.set(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
+    (void)device_registry_lock_acquisitions.add(1, AtomicOrdering.RELAXED);
 }
 
 fn void unlock_device_registry() @private {
     (void)device_registry_lock.clear(AtomicOrdering.RELEASE);
+}
+
+fn ulong device_registry_lock_count() @private {
+    return device_registry_lock_acquisitions.load(AtomicOrdering.RELAXED);
 }
 
 fn ulong? allocate_device_resource_owner() @private {

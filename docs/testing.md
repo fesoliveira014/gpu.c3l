@@ -323,6 +323,8 @@ python scripts/check_docs.py
 python scripts/check_public_api.py
 python scripts/check_backend_dispatch.py
 python scripts/check_retired_api.py
+python -B -m unittest scripts.test_run_benchmarks scripts.test_check_performance_contract
+python -B scripts/check_performance_contract.py
 ```
 
 Smoke target, as CI runs it:
@@ -360,24 +362,21 @@ records; all three generated commands then verify observable output. Command
 validation separately covers unsupported capability, count bounds, alignment,
 short spans, zero work, index formats, and generated-preprocess barrier masks.
 
-The advisory benchmark runner builds these seven executable targets with
-`-O1`: `allocation_bench`, `resource_create_bench`,
-`descriptor_churn_bench`, `upload_throughput_bench`,
-`command_record_bench`, `pipeline_cache_bench`, and
-`async_overlap_bench`. Descriptor churn reports texture single/batch work in
-`ns/descriptor` and sampler intern-hit plus stable-publication lookup work in
-`ns/op`. Pipeline-cache work reports cold creation, cached single creation, and
-cached transactional batch creation in `ns/create`. Resource operations report
-texture create/destroy, shader-code preparation, allocation allocate/free, and
-mixed work at 1/2/4 workers in
-`ns/op`. Command recording compares ordinary barriers, semantic-hazard
-barriers, indirect dispatch, and capability-gated generated dispatch. The
-generated phase uses 1,000 calls per repetition to bound the distinct private
-preprocess regions required by Vulkan. The allocation target must emit exactly
-two phases for 4,000 64-byte, 16-byte-aligned `CPU_WRITE` allocations:
-`cpu_write allocate` in `ns/allocation`, then `cpu_write free` in
-`ns/free`. Run the suite with `python scripts/run_benchmarks.py`; benchmark
-timings are advisory and never gate CI.
+The benchmark runner builds eight executable targets with `-O1`:
+`allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
+`upload_throughput_bench`, `command_record_bench`, `lifecycle_bench`,
+`pipeline_cache_bench`, and `async_overlap_bench`. Command recording covers
+ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
+generated dispatch with one untimed preprocess warmup per command list.
+Lifecycle measurements cover submission, completed-point polling, and
+immediate texture destruction.
+
+Run `python -B scripts/run_benchmarks.py` for validation-disabled release
+evidence. Run `python -B scripts/run_benchmarks.py --validation --output
+test/build/benchmark-report-validation.md` separately for debug-layer cost.
+Timing values remain advisory; exact schemas, zero hot-path invariants, broad
+regression thresholds, and `scripts/check_performance_contract.py` are
+blocking CI gates. See [Performance](performance.md) for methods and baselines.
 
 Distinct-adapter ownership is gated deterministically by the CPU stub suite.
 `vk_device_request` also uses two physical adapters when both support the strict

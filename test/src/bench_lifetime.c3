@@ -1,12 +1,22 @@
 module gpu_bench;
 
 import gpu @public;
+import std::os::env;
+
+fn bool bench_validation_enabled() {
+    if (try value = env::tget_var("GPU_C3L_BENCH_VALIDATION")) {
+        return value == "1";
+    }
+    return false;
+}
 
 fn gpu::Device? create_bench_device(
     gpu::RuntimeDesc* desc,
 ) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
-    gpu::Runtime runtime = gpu::create_runtime(desc)!;
+    gpu::RuntimeDesc runtime_desc = *desc;
+    runtime_desc.enable_validation = bench_validation_enabled();
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
     gpu::DeviceRequest request = gpu::strict_device_request();
