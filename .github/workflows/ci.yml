@@ -33,6 +33,11 @@ jobs:
           python3 -B -m unittest scripts/test_check_ci_matrix.py
           python3 -B scripts/check_ci_matrix.py
 
+      - name: Documentation and source-list gate
+        run: |
+          python3 -B -m unittest scripts.test_check_docs
+          python3 -B scripts/check_docs.py
+
       - name: Cache c3c
         uses: actions/cache@v4
         with:
@@ -188,6 +193,11 @@ jobs:
           # Fine-grained PAT (Contents: read) covering this repo + the private
           # binding submodules; default GITHUB_TOKEN cannot read sibling repos.
           token: ${{ secrets.SUBMODULE_TOKEN }}
+
+      - name: Documentation and source-list gate
+        run: |
+          python -B -m unittest scripts.test_check_docs
+          python -B scripts/check_docs.py
 
       - name: Cache toolchain
         uses: actions/cache@v4

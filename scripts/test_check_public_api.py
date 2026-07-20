@@ -1988,6 +1988,57 @@ method gpu::Runtime.is_valid
             ],
         )
 
+    def test_rejects_sibling_modules_in_public_sources(self) -> None:
+        relative = Path("gpu/memory.c3")
+        self.assertEqual(
+            check_public_api.validate_public_module_source(
+                relative,
+                "struct AllocationInfo {}\n",
+            ),
+            [
+                "gpu/memory.c3 must declare public module gpu",
+            ],
+        )
+
+        source = (
+            "module gpu;\n"
+            "struct AllocationInfo {}\n"
+            "module gpu::util;\n"
+            "fn int probe_leak() { return 7; }\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_public_module_source(
+                relative,
+                source,
+            ),
+            [
+                (
+                    "gpu/memory.c3:3 public source may only declare "
+                    "gpu, found gpu::util"
+                ),
+            ],
+        )
+
+        self.assertEqual(
+            check_public_api.validate_public_module_source(
+                Path("gpu/surface/win32/surface.c3"),
+                "module gpu::surface::win32;\n",
+            ),
+            [],
+        )
+        self.assertEqual(
+            check_public_api.validate_public_module_source(
+                Path("gpu/surface/util/surface.c3"),
+                "module gpu::surface::util;\n",
+            ),
+            [
+                (
+                    "gpu/surface/util/surface.c3:1 public source may only "
+                    "declare gpu, found gpu::surface::util"
+                ),
+            ],
+        )
+
     def test_rejects_span_backend_details(self) -> None:
         document = valid_document()
         document["modules"]["gpu"]["types"].append({
