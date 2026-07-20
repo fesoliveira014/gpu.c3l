@@ -179,6 +179,24 @@ def check(root: Path = ROOT) -> list[str]:
             "gpu/vk/command.c3 generated preprocess acquisition is missing "
             f"{error.args[0]}"
         )
+    execute = function_body(backend_source, "execute_generated_work")
+    allowed_execute_record_lines = (
+        "record,",
+        "record.command_buffer,",
+    )
+    execute_record_lines = tuple(
+        line.strip()
+        for line in execute.splitlines()
+        if re.search(r"\brecord\b", line)
+    )
+    if (
+        execute_record_lines != allowed_execute_record_lines
+        or execute.count("acquire_generated_preprocess_buffer(") != 1
+    ):
+        errors.append(
+            "gpu/vk/command.c3 generated execution must acquire a fresh buffer"
+        )
+
 
     required_text = (
         (

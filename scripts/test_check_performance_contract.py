@@ -198,6 +198,40 @@ class PerformanceContractTests(unittest.TestCase):
                 )
             )
 
+    def test_execute_generated_work_same_record_reuse_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                (
+                    "        preprocess = acquire_generated_preprocess_buffer(\n"
+                    "            state,\n"
+                    "            record,\n"
+                    "            &requirements2.memory_requirements,\n"
+                    "        )!;"
+                ),
+                (
+                    "        if (record.generated_preprocess_count > 0) {\n"
+                    "            preprocess = &record.generated_preprocess[0];\n"
+                    "        } else {\n"
+                    "            preprocess = acquire_generated_preprocess_buffer(\n"
+                    "                state,\n"
+                    "                record,\n"
+                    "                &requirements2.memory_requirements,\n"
+                    "            )!;\n"
+                    "        }"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "must acquire a fresh buffer" in error
+                    for error in errors
+                )
+            )
+
     def test_generated_fallback_before_reuse_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
