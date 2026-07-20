@@ -169,11 +169,12 @@ application render-loop pacing sanity
 ```
 
 The local `vk_swapchain` target covers result mapping, readiness identity and
-replay guards, acquire-semaphore retirement, present OOM retry, exact render
-completion waits, diagnostics, and dormant publication. `vk_queue` covers
-native submit rollback, full-submission bridge scopes, and all selected graphics
-families. Surface loss and acquire starvation remain manual recovery cases in
-the windowed samples.
+replay guards, acquire-semaphore retirement, present OOM retry, per-image
+presentation-fence attachment/reuse, immediate destroy/resize rejection, shared
+texture-reference detection, diagnostics, and dormant publication. `vk_queue`
+covers native submit rollback, full-submission bridge scopes, and all selected
+graphics families. Surface loss and acquire starvation remain manual recovery
+cases in the windowed samples.
 
 Windowed tests may be manual at first. Automated windowed tests can be added only when CI/window-system support is stable.
 

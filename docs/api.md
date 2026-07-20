@@ -380,12 +380,12 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; no adapter can provide the requested semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
-| `INVALID_RESOURCE_STATE` | swapchain lifecycle | an acquired swapchain image is pending during resize, or a readiness/acquisition state transition is invalid |
+| `INVALID_RESOURCE_STATE` | swapchain lifecycle | an acquired swapchain image is pending during resize or destruction, or a readiness/acquisition state transition is invalid |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
-| `RESOURCE_IN_USE` | resource destruction, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, or incomplete submitted work explicitly references a resource; a placed or dedicated texture depends on an allocation; a live texture view owns a texture; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
+| `RESOURCE_IN_USE` | resource or swapchain destruction/resize, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, incomplete submitted work, a texture view, or unfinished presentation still references the resource; a placed or dedicated texture depends on an allocation; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
 | `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `intern_sampler`; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `publish_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler publication leave existing entries untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
@@ -393,7 +393,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, execution without a bound pipeline, draw without required per-pass depth state, duplicate command token in one submit batch, or token that is already being submitted |
-| `WAIT_TIMEOUT` | `wait_completion`, `acquire_next_image` | bounded wait or transient image unavailability; retry with the unchanged completion point or resource |
+| `WAIT_TIMEOUT` | `wait_completion`, `acquire_next_image`, `present` | bounded wait, transient image unavailability, or a private present fence not yet reusable; retry with the unchanged value |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
 Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled. `DEVICE_LOST` is reserved for an explicit native device-loss result; an unmapped native result becomes `BACKEND_ERROR`.
@@ -1491,17 +1491,28 @@ gpu::CompletionPoint rendered = gpu::submit(graphics, &submit)!;
 gpu::present(&device, &acquired, rendered)!;
 ```
 
-A successful or enqueued present consumes `acquired`; validation failure and
-native host/device allocation failure leave it retryable. The caller explicitly
-transitions the acquired texture to `PRESENT` before submission. Resize rejects
-a pending acquisition; destruction waits submitted render work and invalidates it.
+A successful or enqueued present consumes `acquired`; validation failure,
+private-fence `WAIT_TIMEOUT`, and native host/device allocation failure leave it
+retryable. The caller explicitly transitions the acquired texture to `PRESENT`
+before submission. Native presentation resource retirement is tracked with
+private fences. Presentation requires `VK_KHR_get_surface_capabilities2` and
+`VK_EXT_surface_maintenance1` on the instance, plus
+`VK_EXT_swapchain_maintenance1` on the device.
+
+Destroy and resize are immediate. They never wait for a queue or submit hidden
+work. A pending acquisition returns `INVALID_RESOURCE_STATE`; unfinished
+presentation or live command/view references return `RESOURCE_IN_USE`. Every
+fault preserves the swapchain for retry. Present an acquired image, discard or
+finish explicit references, and poll/retry after presentation can complete.
 
 `WAIT_TIMEOUT` from acquire leaves the swapchain unchanged. It can mean the
 native acquire timed out or reported not ready, or that both private acquire
-semaphore slots remain retired behind incomplete render completions. Out-of-date
-requires resize; surface loss requires a new surface and swapchain. A
-suboptimal image is valid and may be presented before resizing. Unsupported
-requested present modes fall back to FIFO; query `get_present_mode_support` to choose explicitly.
+semaphore slots remain retired behind incomplete render completions.
+`WAIT_TIMEOUT` from present means the per-image presentation fence is not yet
+reusable and preserves the acquired image. Out-of-date requires resize; surface
+loss requires a new surface and swapchain. A suboptimal image is valid and may
+be presented before resizing. Unsupported requested present modes fall back to
+FIFO; query `get_present_mode_support` to choose explicitly.
 
 `get_swapchain_info` returns the selected format, extent, image count, present
 mode, and dormant state. Re-query after resize and rebuild format-dependent
@@ -1510,8 +1521,8 @@ zero extent/count, and FIFO until resize succeeds.
 
 `AcquiredImage.prior_use` is `UNDEFINED` for a newly wrapped image and `PRESENT`
 after the normal presentation cycle. Resize stales prior borrowed texture
-handles. Destroy descriptors that reference
-swapchain textures before resize.
+handles. Destroy descriptors that reference swapchain textures, and discard or
+complete commands that name them, before resize or destruction.
 
 SDL integration belongs in samples or an optional helper module.
 

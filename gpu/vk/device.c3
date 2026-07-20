@@ -25,8 +25,9 @@ alias SemaphoreCounterQueryFn @private = fn vk::Result (
     ulong*,
 );
 
-const ZString SWAPCHAIN_EXTENSION      = "VK_KHR_swapchain";
-const ZString GENERATED_WORK_EXTENSION       = "VK_EXT_device_generated_commands";
+const ZString SWAPCHAIN_EXTENSION             = "VK_KHR_swapchain";
+const ZString SWAPCHAIN_MAINTENANCE_EXTENSION = "VK_EXT_swapchain_maintenance1";
+const ZString GENERATED_WORK_EXTENSION        = "VK_EXT_device_generated_commands";
 const ZString GENERATED_WORK_USAGE_EXTENSION = "VK_KHR_maintenance5";
 const uint GENERATED_WORK_TOKEN_COUNT  = 2;
 const uint GENERATED_WORK_TOKEN_OFFSET = 16;
@@ -171,6 +172,32 @@ struct CapsInputs {
     uint                 texture_capacity;
     uint                 sampler_capacity;
     GeneratedWorkSupport generated_work;
+}
+
+fn bool presentation_maintenance_supported(
+    bool extension_supported,
+    uint feature_enabled,
+) {
+    return extension_supported && feature_enabled != 0;
+}
+
+fn bool device_supports_swapchain_maintenance(
+    vk::PhysicalDevice physical_device,
+) @private {
+    if (!device_supports_extension(
+        physical_device,
+        SWAPCHAIN_MAINTENANCE_EXTENSION,
+    )) return false;
+
+    vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT features =
+        vk::physical_device_swapchain_maintenance1features_ext();
+    vk::PhysicalDeviceFeatures2 features2 =
+        vk::physical_device_features2().set_next(&features);
+    vk::get_physical_device_features2(physical_device, &features2);
+    return presentation_maintenance_supported(
+        true,
+        features.swapchain_maintenance1,
+    );
 }
 
 fn GeneratedWorkSupport resolve_generated_work_support(
@@ -492,6 +519,11 @@ fn gpu::Device? create_vk_device_with_selection(
             )!;
     }
 
+    bool swapchain_maintenance_extension = state.presentation.enabled
+        && device_supports_extension(
+            state.physical_device,
+            SWAPCHAIN_MAINTENANCE_EXTENSION,
+        );
     bool generated_work_extension = state.strict_heap.enabled
         && device_supports_extension(
             state.physical_device,
@@ -506,11 +538,19 @@ fn gpu::Device? create_vk_device_with_selection(
         vk::physical_device_device_generated_commands_features_ext();
     vk::PhysicalDeviceMaintenance5FeaturesKHR maintenance5_features =
         vk::physical_device_maintenance5features_khr();
+    vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT presentation_features =
+        vk::physical_device_swapchain_maintenance1features_ext();
     vk::PhysicalDeviceVulkan13Features features13 =
         vk::physical_device_vulkan13features();
     if (generated_work_usage_extension) {
         maintenance5_features = maintenance5_features.set_next(&generated_work_features);
         features13 = features13.set_next(&maintenance5_features);
+    }
+    if (swapchain_maintenance_extension) {
+        presentation_features = presentation_features.set_next(
+            features13.p_next,
+        );
+        features13 = features13.set_next(&presentation_features);
     }
     vk::PhysicalDeviceVulkan12Features features12 =
         vk::physical_device_vulkan12features().set_next(&features13);
@@ -525,6 +565,13 @@ fn gpu::Device? create_vk_device_with_selection(
         v12:  &features12,
         v13:  &features13,
     )!;
+    if (state.presentation.enabled
+        && !presentation_maintenance_supported(
+            swapchain_maintenance_extension,
+            presentation_features.swapchain_maintenance1,
+        )) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     state.draw_indirect_count = features12.draw_indirect_count != 0;
     state.generated_work = query_generated_work_support(
         physical_device:        state.physical_device,
@@ -1309,6 +1356,9 @@ fn void? create_logical_device_with_queue_infos(
     vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features =
         vk::physical_device_descriptor_buffer_features_ext()
             .set_descriptor_buffer(vk::TRUE);
+    vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT presentation_features =
+        vk::physical_device_swapchain_maintenance1features_ext()
+            .set_swapchain_maintenance1(vk::TRUE);
     vk::PhysicalDeviceVulkan13Features features13 =
         vk::physical_device_vulkan13features()
             .set_dynamic_rendering(vk::TRUE)
@@ -1321,6 +1371,12 @@ fn void? create_logical_device_with_queue_infos(
         features13 = features13.set_next(&db_features);
     } else if (state.generated_work.enabled) {
         features13 = features13.set_next(&maintenance5_features);
+    }
+    if (state.presentation.enabled) {
+        presentation_features = presentation_features.set_next(
+            features13.p_next,
+        );
+        features13 = features13.set_next(&presentation_features);
     }
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features()
         .set_buffer_device_address(vk::TRUE)
@@ -1356,7 +1412,7 @@ fn void? create_logical_device_with_queue_infos(
     }
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[5] extensions;
+    ZString[6] extensions;
     uint extension_count = 0;
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
     if (state.generated_work.enabled) {
@@ -1367,8 +1423,17 @@ fn void? create_logical_device_with_queue_infos(
         extensions[extension_count++] = "VK_EXT_descriptor_buffer";
     }
     if (state.presentation.enabled) {
-        if (!device_supports_extension(state.physical_device, SWAPCHAIN_EXTENSION)) return gpu::UNSUPPORTED_FEATURE~;
+        if (!device_supports_extension(
+                state.physical_device,
+                SWAPCHAIN_EXTENSION,
+            ) || !device_supports_extension(
+                state.physical_device,
+                SWAPCHAIN_MAINTENANCE_EXTENSION,
+            )) {
+            return gpu::UNSUPPORTED_FEATURE~;
+        }
         extensions[extension_count++] = SWAPCHAIN_EXTENSION;
+        extensions[extension_count++] = SWAPCHAIN_MAINTENANCE_EXTENSION;
     }
 
     vk::DeviceCreateInfo device_info = vk::device_create_info()

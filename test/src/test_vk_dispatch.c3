@@ -38,6 +38,11 @@ fn bool supports_win32_instance_extensions(ZString name) {
         || name.str_view() == gpu::vk::WIN32_SURFACE_EXTENSION.str_view();
 }
 
+fn bool supports_surface_maintenance_without_capabilities2(ZString name) {
+    return name.str_view() == gpu::vk::SURFACE_EXTENSION.str_view()
+        || name.str_view() == gpu::vk::SURFACE_MAINTENANCE_EXTENSION.str_view();
+}
+
 fn void instance_capabilities_require_request_and_support() @test {
     gpu::vk::VkInstanceDesc desc = {
         .enable_debug_utils        = true,
@@ -50,6 +55,8 @@ fn void instance_capabilities_require_request_and_support() @test {
         );
     assert(!capabilities.debug_utils, "unsupported debug utils remain disabled");
     assert(!capabilities.surface, "unsupported base surface support remains disabled");
+    assert(!capabilities.surface_maintenance,
+        "unsupported surface maintenance remains disabled");
     assert(!capabilities.win32_surface, "platform surfaces require the base surface extension");
     assert(!capabilities.wayland_surface, "platform surfaces require the base surface extension");
     assert(!capabilities.xlib_surface, "platform surfaces require the base surface extension");
@@ -60,6 +67,8 @@ fn void instance_capabilities_require_request_and_support() @test {
     );
     assert(capabilities.debug_utils, "requested supported debug utils are enabled");
     assert(capabilities.surface, "requested supported surface discovery is enabled");
+    assert(capabilities.surface_maintenance,
+        "requested supported surface maintenance is enabled");
     assert(capabilities.win32_surface, "available Win32 surface support is enabled");
     assert(capabilities.wayland_surface, "available Wayland surface support is enabled");
     assert(capabilities.xlib_surface, "available Xlib surface support is enabled");
@@ -69,9 +78,18 @@ fn void instance_capabilities_require_request_and_support() @test {
         &supports_win32_instance_extensions,
     );
     assert(capabilities.surface, "supported base surface discovery is enabled");
+    assert(!capabilities.surface_maintenance,
+        "missing optional surface maintenance stays disabled");
     assert(capabilities.win32_surface, "supported Win32 surface support is enabled");
     assert(!capabilities.wayland_surface, "unsupported Wayland surface support remains disabled");
     assert(!capabilities.xlib_surface, "unsupported Xlib surface support remains disabled");
+
+    capabilities = gpu::vk::resolve_instance_capabilities(
+        &desc,
+        &supports_surface_maintenance_without_capabilities2,
+    );
+    assert(!capabilities.surface_maintenance,
+        "surface maintenance requires get-surface-capabilities2");
 
     desc.enable_available_surfaces = false;
     capabilities = gpu::vk::resolve_instance_capabilities(
@@ -79,6 +97,8 @@ fn void instance_capabilities_require_request_and_support() @test {
         &supports_all_instance_extensions,
     );
     assert(!capabilities.surface, "unrequested surface discovery remains disabled");
+    assert(!capabilities.surface_maintenance,
+        "unrequested surface maintenance remains disabled");
     assert(!capabilities.win32_surface, "unrequested Win32 surface support remains disabled");
     assert(!capabilities.wayland_surface, "unrequested Wayland surface support remains disabled");
     assert(!capabilities.xlib_surface, "unrequested Xlib surface support remains disabled");

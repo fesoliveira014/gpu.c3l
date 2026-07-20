@@ -97,8 +97,8 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
     return swapchain;
 }
 
-<* Counterpart of create_swapchain. Waits for submitted swapchain work and
-   invalidates any pending acquisition. *>
+<* Counterpart of create_swapchain. Immediate: pending acquisition,
+   presentation, command, or view use faults without consuming the handle. *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
@@ -109,8 +109,8 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
 <* Recreate under the same handle at a new extent. A zero clamped extent or
    a failed rebuild leaves the swapchain dormant (acquire faults
    SWAPCHAIN_OUT_OF_DATE) until a successful resize. Prior acquired-image
-   handles become stale. An acquired image must be presented or its swapchain
-   destroyed before resize. *>
+   handles become stale. Pending acquisition, presentation, command, or view
+   use faults immediately and leaves the swapchain unchanged. *>
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
@@ -134,7 +134,8 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) 
 }
 
 <* Present and consume an acquired image after its readiness-consuming submit.
-   `render_completion` must be the point returned by that submit. *>
+   `render_completion` must be the point returned by that submit. WAIT_TIMEOUT
+   preserves the image for retry when private present completion is still busy. *>
 fn void? present(
     Device* device,
     AcquiredImage* image,

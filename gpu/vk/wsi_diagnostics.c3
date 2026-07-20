@@ -189,17 +189,3 @@ fn void? check_swapchain_present_contract(
         )~;
     }
 }
-
-fn void? check_swapchain_resize_lifecycle(
-    WsiDiagnosticContext* context,
-    SwapchainSlot* slot,
-) {
-    if (catch guard_fault = swapchain_resize_guard(slot.acquire_pending)) {
-        return report_wsi_contract(
-            context:        context,
-            public_fault:   guard_fault,
-            rejected_field: "swapchain acquire lifecycle",
-            invariant:      "an acquired image must be presented or destroyed before resize",
-        )~;
-    }
-}

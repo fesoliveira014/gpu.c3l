@@ -30,8 +30,8 @@ token's retained device pin while another call can still be in flight.
 | `destroy_device` | S | per target device; success invalidates the caller's token; live children return `RESOURCE_IN_USE`, while active operations, incomplete queue work, or closing state return retryable `DEVICE_BUSY` |
 | `submit` / `present` | E | externally synchronize each acquired image; submit consumes readiness, present consumes the image |
 | `poll_completion` / `wait_completion` | S | reusable value queries; host waits do not consume the point |
-| `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction invalidates a pending acquire and waits its render work |
-| `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; resize rejects a pending acquire and waits graphics/present work |
+| `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction rejects pending acquisition or use and never waits |
+| `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; resize rejects pending acquisition or use and never waits |
 | `allocate_memory` / `free_allocation` | S | internally synchronized; free must happen-after the last use |
 | `get_allocation_info` / `get_allocation_span` / `get_span_mapping` / `get_span_address` | S | lock-free slot resolution |
 | `flush_mapped_span` / `invalidate_mapped_span` | S | lock-free validation; coherent no-op; native calls are internally synchronized |

@@ -376,7 +376,10 @@ implicit. Native timelines and swapchain semaphores remain backend-private.
 
 Swapchains are optional. Headless compute and offscreen graphics must work without a swapchain.
 
-A swapchain borrows a runtime-owned `Surface`. SDL3 supplies native handles to the platform surface module in samples; SDL types do not enter the core API.
+A swapchain borrows a runtime-owned `Surface`. Its images are ordinary borrowed
+texture handles used by shared transitions, render passes, and command lifetime
+validation. SDL3 supplies native handles to the platform surface module in
+samples; SDL types do not enter the core API.
 
 ## 5. Backend dispatch
 
@@ -423,10 +426,12 @@ valid destruction           -> invalidate slot and increment generation
 
 ### Immediate resource lifetime
 
-Non-WSI resource destruction never waits or queues backend work. The caller
-must keep every GPU-visible resource alive until recording tokens are discarded
-and submitted completion points finish. Swapchain destruction and resize remain
-under the current presentation contract until strict presentation integration.
+GPU-visible resource destruction, including swapchain destruction and resize,
+never waits, submits hidden work, or queues deferred release. The caller keeps
+every resource alive until recording tokens are discarded, submitted completion
+points finish, and private presentation resource retirement completes. A pending acquired
+image returns `INVALID_RESOURCE_STATE`; detected command/view or presentation
+use returns `RESOURCE_IN_USE`; faults preserve the owning token for retry.
 
 With validation enabled, the backend rejects destruction when an explicitly
 named span, texture, or pipeline is referenced by a recording token, executable
@@ -573,13 +578,17 @@ Only successful native submission consumes readiness and records its returned
 
 Presentation consumes the exact `AcquiredImage` and accepts only that render
 completion point. The point remains reusable for host observation. Native
-binary synchronization stays in the backend; public ordering uses readiness
-and completion values only.
+binary synchronization and presentation-retirement fences stay in the backend;
+public ordering uses readiness and completion values only. If an image's prior
+presentation fence is not yet reusable, `present` returns `WAIT_TIMEOUT` and
+preserves the acquired image.
 
 `SwapchainInfo` reports the selected format, extent, image count, present mode,
 and dormant state. `AcquiredImage.prior_use` is `UNDEFINED` before first use
 and `PRESENT` after presentation. Resize stales borrowed textures and never
-reuses acquisition identities.
+reuses acquisition identities. Resize and destruction reject a pending
+acquisition or live command/view/presentation use without waiting, preserving
+the swapchain for retry.
 
 Surface creation remains platform-specific. SDL helpers live outside `gpu`.
 

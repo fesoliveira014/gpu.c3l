@@ -794,3 +794,18 @@ fn void index_type_validation_rejects_unknown_values() @test {
     fault unknown = @catch(gpu::vk::index_element_size(unknown_type));
     assert(unknown == gpu::INVALID_ARGUMENT, "unknown index format faults");
 }
+
+fn void strict_presentation_requires_completion_fences() @test {
+    assert(gpu::vk::presentation_maintenance_supported(
+        extension_supported: true,
+        feature_enabled:     vk::TRUE,
+    ));
+    assert(!gpu::vk::presentation_maintenance_supported(
+        extension_supported: false,
+        feature_enabled:     vk::TRUE,
+    ));
+    assert(!gpu::vk::presentation_maintenance_supported(
+        extension_supported: true,
+        feature_enabled:     vk::FALSE,
+    ));
+}
