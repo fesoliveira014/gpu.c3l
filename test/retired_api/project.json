@@ -169,6 +169,30 @@
         "buffer_handle.c3"
       ]
     },
+    "buffer_barrier": {
+      "type": "object-files",
+      "sources": [
+        "buffer_barrier.c3"
+      ]
+    },
+    "global_barrier": {
+      "type": "object-files",
+      "sources": [
+        "global_barrier.c3"
+      ]
+    },
+    "cmd_buffer_barrier": {
+      "type": "object-files",
+      "sources": [
+        "cmd_buffer_barrier.c3"
+      ]
+    },
+    "cmd_global_barrier": {
+      "type": "object-files",
+      "sources": [
+        "cmd_global_barrier.c3"
+      ]
+    },
     "public_semaphore": {
       "type": "object-files",
       "sources": [

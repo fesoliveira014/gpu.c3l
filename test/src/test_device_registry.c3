@@ -205,7 +205,7 @@ gpu::BackendVTable command_pin_vtable = {
     .end_commands       = &command_pin_end,
     .discard_commands   = &command_pin_discard,
     .submit             = &command_pin_submit,
-    .cmd_barrier = &command_pin_barrier,
+    .cmd_barrier        = &command_pin_barrier,
 };
 
 fn int destroy_device_worker(void* raw_args) {

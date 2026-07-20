@@ -345,6 +345,37 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
         "presentation consumes memory");
 }
 
+fn void semantic_barrier_native_wiring_preserves_direction() @test {
+    gpu::Barrier barrier = {
+        .before = { .host = true },
+        .after = { .compute = true },
+        .hazards = {
+            .draw_arguments = true,
+            .descriptors = true,
+        },
+    };
+    vk::MemoryBarrier2 native = gpu::vk::barrier_to_vk(&barrier, true);
+
+    assert(native.src_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_HOST_BIT,
+        "the source stage comes from Barrier.before");
+    assert(native.src_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_HOST_WRITE_BIT,
+        "the source access comes from Barrier.before");
+    ulong expected_dst_stages =
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+    assert((ulong)native.dst_stage_mask == expected_dst_stages,
+        "the destination stages come from Barrier.after and hazards");
+    ulong expected_dst_access =
+        (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT;
+    assert((ulong)native.dst_access_mask == expected_dst_access,
+        "the destination access comes from Barrier.after and hazards");
+}
+
 fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
     gpu::Barrier valid = {
         .before = { .compute = true },
@@ -383,9 +414,9 @@ fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
         "presentation cannot carry a special hazard");
 
     gpu::Barrier unknown_stage = valid;
-    unknown_stage.before = (gpu::StageMask)0x200u;
+    unknown_stage.before = (gpu::StageMask)((uint)valid.before | 0x200u);
     assert(!gpu::vk::barrier_masks_valid(&unknown_stage),
-        "unknown stage-mask bits are invalid");
+        "mixed known and unknown stage-mask bits are invalid");
 
     gpu::Barrier unknown_hazard = valid;
     unknown_hazard.hazards = (gpu::HazardFlags)0x8u;

@@ -476,9 +476,9 @@ work, wait for or poll its covering completion point, then free the owning
 `flush_mapped_span` is required before GPU use.
 
 For GPU-to-CPU data, allocate `CPU_READ` memory, borrow its span and mapping,
-record the copy and a `TRANSFER_WRITE` to `HOST_READ` barrier on the
-destination, submit, wait for or poll completion, invalidate the span, then
-read its mapping. Free or reuse the owning allocation only after completion.
+record the copy and a global barrier with `before.transfer` and `after.host`,
+submit, wait for or poll completion, invalidate the span, then read its mapping.
+Free or reuse the owning allocation only after completion.
 
 Applications choose whether to reuse allocations, suballocate rings, or create
 one-shot storage. `GpuSpan.checked_subspan` defines partial transfers.
@@ -1154,8 +1154,8 @@ overflow; violations fault `INVALID_ARGUMENT` before recording.
 
 Each GPU-written `DispatchIndirectCommand` component must not exceed the
 corresponding `DeviceCaps.max_compute_work_group_count` component. Ordering
-between argument writes and indirect consumption is the caller's barrier
-(`INDIRECT_COMMAND` / `INDIRECT_READ`).
+between argument writes and indirect consumption is the caller's barrier with
+`hazards.draw_arguments` set.
 
 The count variant requires `DeviceCaps.draw_indirect_count` and faults
 `UNSUPPORTED_FEATURE` without it.

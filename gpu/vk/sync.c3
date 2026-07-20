@@ -17,9 +17,13 @@ fn void? vk_cmd_barrier(
     ZString rejected_field = barrier_masks_rejected_field(barrier);
     ZString invariant;
     if (rejected_field != null) {
-        invariant = rejected_field.str_view() == "Barrier.hazards"
-            ? "hazard flags must be known and match the consumer stages"
-            : "stage mask must be nonempty and noncontradictory";
+        if (rejected_field.str_view() == "Barrier") {
+            invariant = "barrier must be non-null";
+        } else if (rejected_field.str_view() == "Barrier.hazards") {
+            invariant = "hazard flags must be known and match the consumer stages";
+        } else {
+            invariant = "stage mask must be nonempty and noncontradictory";
+        }
     } else {
         QueueCompletionState* completion = queue_completion_state(
             state,
@@ -53,18 +57,7 @@ fn void? vk_cmd_barrier(
 
     bool descriptor_buffer = state.strict_heap.implementation
         == VkHeapImplementation.DESCRIPTOR_BUFFER;
-    vk::MemoryBarrier2 native_barrier = vk::memory_barrier2()
-        .set_src_stage_mask(barrier_before_stages_to_vk(barrier.before))
-        .set_src_access_mask(barrier_before_access_to_vk(barrier.before))
-        .set_dst_stage_mask(barrier_after_stages_to_vk(
-            barrier.after,
-            barrier.hazards,
-        ))
-        .set_dst_access_mask(barrier_after_access_to_vk(
-            barrier.after,
-            barrier.hazards,
-            descriptor_buffer,
-        ));
+    vk::MemoryBarrier2 native_barrier = barrier_to_vk(barrier, descriptor_buffer);
     vk::DependencyInfo dependency =
         vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
     vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);

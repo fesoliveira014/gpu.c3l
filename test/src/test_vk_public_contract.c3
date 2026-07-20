@@ -106,7 +106,6 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
         "cmd_barrier rejects a null barrier"
     );
 
-
     assert(
         @catch(gpu::cmd_texture_barrier(&commands, (gpu::TextureBarrier*)null))
             == gpu::INVALID_ARGUMENT,
