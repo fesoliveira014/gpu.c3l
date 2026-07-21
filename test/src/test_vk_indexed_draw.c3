@@ -52,6 +52,11 @@ fn void u16v_draw(
     };
     gpu::TextureHandle target = gpu::create_texture(device, &rt_desc)!!;
     defer gpu::destroy_texture(device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(device, &target_view)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
@@ -62,7 +67,7 @@ fn void u16v_draw(
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = U16V_RT, .height = U16V_RT };

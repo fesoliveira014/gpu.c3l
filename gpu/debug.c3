@@ -21,6 +21,7 @@ enum DebugResourceKind : int {
     TEXTURE_DESCRIPTOR,
     SAMPLER,
     ALLOCATION,
+    ATTACHMENT_VIEW,
 }
 
 bitstruct DebugMessageCategory : uint {

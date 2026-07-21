@@ -435,6 +435,8 @@ fn void debug_resource_kind_ordinals_match_exact_schema() @test {
     assert((int)gpu::DebugResourceKind.SAMPLER == 9);
     assert((int)gpu::DebugResourceKind.ALLOCATION == 10,
         "allocation keeps the exact ordinal 10");
+    assert((int)gpu::DebugResourceKind.ATTACHMENT_VIEW == 11,
+        "attachment views append without changing existing ordinals");
 }
 
 fn vk::Result allocation_probe_create_buffer(

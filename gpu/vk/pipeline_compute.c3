@@ -335,6 +335,9 @@ fn void? vk_destroy_pipeline(gpu::Device* device, gpu::PipelineHandle handle) @p
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     PipelineSlot* slot = state.pipelines.get(handle)!;
+    if (generated_scratch_references_pipeline(state, handle)) {
+        return gpu::RESOURCE_IN_USE~;
+    }
     if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
         drain_completed_submitted_commands(state)!;
         if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {

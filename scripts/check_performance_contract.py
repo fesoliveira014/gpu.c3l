@@ -43,6 +43,12 @@ BACKEND_RECORDING_FORBIDDEN = (
     "device_backend_state_ptr(",
     "resolve_command(",
     ".commands.get(",
+    "alloc::new",
+    "mem::new",
+    "vk::allocate_command_buffers(",
+    "vk::free_command_buffers(",
+    "vk::create_image_view(",
+    "create_buffer_with_alignment(",
 )
 POST_BIND_PIPELINE_PATTERNS = (
     re.compile(r"\.pipelines\s*\.\s*get(?:_cell)?\s*\("),
@@ -52,6 +58,9 @@ RECORDING_PIPELINE_RESOLUTION_ALLOWLIST = frozenset((
     "bind_pipeline_state",
     "retain_validation_reference",
     "release_validation_reference",
+))
+RECORDING_COLD_GROWTH_ALLOWLIST = frozenset((
+    "ensure_command_reference_capacity",
 ))
 DESTRUCTION_FORBIDDEN = (
     "wait_completion(",
@@ -77,17 +86,21 @@ OWNERSHIP_TRANSFER_CALLEES = (
     "vk_submit_with",
 )
 BACKEND_OWNERSHIP_DIGESTS = {
-    "vk_discard_commands": "814545f684a3e5804d1c4458ad5433b7438192735fd32afa5355bdba6dc4a852",
-    "vk_begin_commands_with_context": "ee2065568712853ce457925927c76c7c27f1d1d1ecc68381bbc37403f9ab27df",
+    "destroy_context_pools_with_ops": "3557e590bc22dc2c68fbce07a214ea56ffd136c1203b339cdac4db3c7edca975",
+    "generated_scratch_requirements": "0d2fc883196ed20b3592c3c8141668f7f43047858614e6592eb836a3d837fb29",
+    "vk_reserve_generated_scratch": "aa90c235e2fe339391bcf97831b6f0d325b9e2ae817393916e07a7e25af3ece6",
+    "vk_release_generated_scratch": "2daebee02d4d33e23ffc870a86b879243c735f55226b8a0254b337ad3e060104",
+    "take_available_command_buffer": "862b1ca13ac29dd551057bdf41896f22fb57cffebaaf19bc63440cbc07eab238",
+    "vk_begin_commands_with_context": "993b27c291128abaf97f92195b0ec28cc15b7b6fd9c5b606a5bbb87f1f19911d",
+    "vk_discard_commands": "de31365009abdfaa8746e216c78f84a814626bdfc89b5d0e88336a37fb3a33e1",
+    "execute_generated_work": "0c1fb3884d112926a75f6cc5bee54722a74868f1ab7aae69bb69a4d8af0360be",
     "generated_preprocess_compatible": "df5842124c9c4e5427be4440e3a6ce3df20282e3d3b7d9d7557ac6bec007b5a0",
-    "ensure_generated_preprocess_pool_capacity_locked": "8f07b4af72b8e015ec80aee966099e0a362323110017cff1c37172133ab00569",
+    "recycle_generated_preprocess_buffers_locked": "38b1c600ce0ea88ec08d5fa56b3e61eaf97007c10afc94aec6893d1dc9a5da8b",
     "command_recording_stats": "381e23f43057fb0882396bc074d75c196da6fc3fe2b74547f300223eced04a2e",
-    "free_generated_preprocess_buffers": "a4e9fc1d9b5e6d1a010e634ceab4bfd7090707552f5d39abf84d736faa59c744",
-    "ensure_generated_preprocess_capacity": "f95bc1998ad4440be1ce002753025c62638647437ae6d5af14a1237effa18b95",
-    "execute_generated_work": "48dc3a55756d0405016e0e7641a96ec29080e6479978bb26176fded87b36868e",
-    "recycle_generated_preprocess_buffers_locked": "4710b2f580e8c148f0ae4e13a6454bbd270f5dc6b54ba8b82a218a91c57f40b1",
-    "take_generated_preprocess_buffer": "7a0262396bf857c810ab5b08a384bcdb12d404b9da2f05133d0513dde605628e",
-    "acquire_generated_preprocess_buffer": "41cdde328b77255c518829a196a22bd8091e12a3361e6d70486cf986fa43a754",
+    "free_generated_preprocess_buffers": "ff81c290557da4ecc7722c172fc4a3904655642220de6056e8c9c3412eea0874",
+    "free_reserved_generated_preprocess_buffers": "a4e9fc1d9b5e6d1a010e634ceab4bfd7090707552f5d39abf84d736faa59c744",
+    "allocate_generated_preprocess_buffer": "5e726f32786526ffc3c674902100be1a15c430ec71a13c0e476e0b78dde97e48",
+    "acquire_generated_preprocess_buffer": "d941f2be232aaaee3236a9a041104c793766c136640bbfd87627c3144357107d",
 }
 COMMAND_STATE_OWNERSHIP_DIGESTS = {
     "release_command": "052c7e5e284197a6d22729dc7045397c37535c0a9c50aaf3ec163211d0859157",
@@ -95,7 +108,7 @@ COMMAND_STATE_OWNERSHIP_DIGESTS = {
 }
 LIFETIME_OWNERSHIP_DIGESTS = {
     "publish_submitted_commands": "cdbc47b4f1b25be4fc79e04f6ae8ff410b219ab6854924df0edabd389376f066",
-    "release_submitted_command_batch": "f9b2c92ba67ebdf818a8d6417074d55012b6756dad85106e05593c68748f775f",
+    "release_submitted_command_batch": "62e62aa38aadd18bf69a42b62d3851be0ce30b9007e948f9123261bcf091656e",
     "release_completed_submitted_commands_locked": "bd81cb2ab4514a5428d70fa75883594913b7e77d0c15f123593b008f7e0e50d4",
     "destroy_submitted_commands": "1858d0b6e5a0d7659b1ed6ca6a08abf7e13f5577cdcea9cdc48dfdcde0d95d60",
     "release_completed_submitted_commands": "55704517d5dbeb414da3f31d973f083bcd7f0cf6203d058bd70f84b466fa19bd",
@@ -104,7 +117,7 @@ LIFETIME_OWNERSHIP_DIGESTS = {
     "drain_submitted_commands_if_needed": "98335236132105a4225003e82c431d6c0bfe68d998260320edce4d00302e5ff8",
 }
 DEVICE_OWNERSHIP_DIGESTS = {
-    "destroy_state": "aa9b3c53333b2eb21b29bc54b629f7a184ff66602ed9dfaefb328baf8d93b0b2",
+    "destroy_state": "b3fbea364f5723c79a3804460bedd5a96eae9fe636d44e78677b6d9fddea0a19",
 }
 
 SYNC_OWNERSHIP_DIGESTS = {
@@ -259,6 +272,8 @@ def check(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     public_source = read(root, "gpu/command.c3")
     backend_source = read(root, "gpu/vk/command.c3")
+    render_source = read(root, "gpu/vk/render_pass.c3")
+    attachment_source = read(root, "gpu/vk/attachment_view.c3")
     sync_source = read(root, "gpu/vk/sync.c3")
     queue_source = read(root, "gpu/vk/queue.c3")
     texture_source = read(root, "gpu/vk/texture.c3")
@@ -298,12 +313,18 @@ def check(root: Path = ROOT) -> list[str]:
                 if candidate_relative == relative
             )
         )
+        forbidden = BACKEND_RECORDING_FORBIDDEN
+        if name in RECORDING_COLD_GROWTH_ALLOWLIST:
+            forbidden = tuple(
+                token for token in forbidden
+                if token not in ("alloc::new", "mem::new")
+            )
         reject_tokens(
             errors,
             relative,
             name,
             body,
-            BACKEND_RECORDING_FORBIDDEN,
+            forbidden,
         )
         if name in RECORDING_PIPELINE_RESOLUTION_ALLOWLIST:
             continue
@@ -419,46 +440,31 @@ def check(root: Path = ROOT) -> list[str]:
         backend_source,
         "acquire_generated_preprocess_buffer",
     )
-    if "find_generated_preprocess_buffer(" in acquire:
-        errors.append(
-            "gpu/vk/command.c3 reuses a generated preprocess address "
-            "within one command record"
-        )
-    allowed_record_lines = (
-        "ensure_generated_preprocess_capacity(state, record);",
-        "uint index = record.generated_preprocess_count++;",
-        "record.generated_preprocess[index] = pooled;",
-        "return &record.generated_preprocess[index];",
-        "ensure_generated_preprocess_capacity(state, record);",
-        "uint index = record.generated_preprocess_count++;",
-        "record.generated_preprocess[index] = buffer;",
-        "return &record.generated_preprocess[index];",
+    reject_tokens(
+        errors,
+        "gpu/vk/command.c3",
+        "acquire_generated_preprocess_buffer",
+        acquire,
+        (
+            "alloc::",
+            "mem::new",
+            "create_buffer_with_alignment(",
+            "take_generated_preprocess_buffer(",
+        ),
     )
-    record_lines = tuple(
-        line.strip()
-        for line in acquire.splitlines()
-        if re.search(r"\brecord\b", line)
-    )
-    if record_lines != allowed_record_lines:
-        errors.append(
-            "gpu/vk/command.c3 generated preprocess acquisition must only "
-            "append newly acquired buffers"
-        )
-    acquire_steps = (
-        "take_generated_preprocess_buffer(",
-        "create_buffer_with_alignment(",
-    )
-    try:
-        positions = [acquire.index(step) for step in acquire_steps]
-        if positions != sorted(positions):
+    for token in (
+        "generated_reservation_matches(reserved, pipeline, kind)",
+        "max_count > reserved.reservation_max_commands",
+        "reserved.reservation_in_use",
+        "generated_preprocess_compatible(",
+        "record.generated_preprocess_count++",
+        "return gpu::GENERATED_SCRATCH_EXHAUSTED~;",
+    ):
+        if token not in acquire:
             errors.append(
-                "gpu/vk/command.c3 generated preprocess reuse must precede allocation"
+                "gpu/vk/command.c3 generated scratch acquisition is missing "
+                f"the bounded reservation step {token}"
             )
-    except ValueError as error:
-        errors.append(
-            "gpu/vk/command.c3 generated preprocess acquisition is missing "
-            f"{error.args[0]}"
-        )
     execute = function_body(backend_source, "execute_generated_work")
     native_execute_call = (
         "state.device_dispatch.generated_work.cmd_execute_generated_commands(\n"
@@ -469,7 +475,7 @@ def check(root: Path = ROOT) -> list[str]:
     )
 
     allowed_execute_record_lines = (
-        "record,",
+        "record:       record,",
         "record.command_buffer,",
     )
     execute_record_lines = tuple(
@@ -491,41 +497,74 @@ def check(root: Path = ROOT) -> list[str]:
         errors.append(
             "gpu/vk/command.c3 generated execution must issue exactly one native call"
         )
-    take = function_body(backend_source, "take_generated_preprocess_buffer")
-    take_success_block = (
-        "*out_buffer = *candidate;\n"
-        "        state.generated_preprocess_pool_count--;\n"
-        "        *candidate = state.generated_preprocess_pool[\n"
-        "            state.generated_preprocess_pool_count\n"
-        "        ];\n"
-        "        state.generated_preprocess_pool["
-        "state.generated_preprocess_pool_count] = {};\n"
-        "        (void)state.generated_preprocess_reuses.add("
-        "1, AtomicOrdering.RELAXED);\n"
-        "        return true;"
+    render = function_body(render_source, "vk_cmd_begin_render_pass")
+    reject_tokens(
+        errors,
+        "gpu/vk/render_pass.c3",
+        "vk_cmd_begin_render_pass",
+        render,
+        (
+            "alloc::",
+            "mem::new",
+            "create_image_view(",
+            "resolve_texture_view_tracked(",
+        ),
     )
-    take_steps = (
-        "state.resource_mutex.lock()!!;",
-        "defer state.resource_mutex.unlock();",
-        take_success_block,
-    )
+    begin = function_body(backend_source, "vk_begin_commands_with_context")
     try:
-        take_positions = [take.index(step) for step in take_steps]
-        take_is_unique_removal = (
-            take_positions == sorted(take_positions)
-            and all(take.count(step) == 1 for step in take_steps)
-            and len(re.findall(r"\bout_buffer\b", take)) == 1
-            and take.count("defer") == 1
-        )
-    except ValueError:
-        take_is_unique_removal = False
-    if not take_is_unique_removal:
+        reuse = begin.index("take_available_command_buffer(")
+        allocate = begin.index("vk::allocate_command_buffers(")
+        reset = begin.index("vk::reset_command_buffer(")
+        if not (reuse < reset < allocate):
+            errors.append(
+                "gpu/vk/command.c3 warm command reuse must precede cold allocation"
+            )
+    except ValueError as error:
         errors.append(
-            "gpu/vk/command.c3 successful pool take must remove "
-            "the selected preprocess buffer"
+            "gpu/vk/command.c3 command recycling is missing "
+            f"{error.args[0]}"
         )
-
-
+    if backend_source.count("vk::free_command_buffers(") != 1:
+        errors.append(
+            "gpu/vk/command.c3 may free command buffers only in failed cold begin"
+        )
+    seam_checks = (
+        (
+            "gpu/vk/command.c3:vk_begin_commands_with_context",
+            begin,
+            "vk::allocate_command_buffers(",
+            "note_command_buffer_allocation(state);",
+        ),
+        (
+            "gpu/vk/command.c3:vk_begin_commands_with_context",
+            begin,
+            "vk::free_command_buffers(",
+            "note_command_buffer_free(state);",
+        ),
+        (
+            "gpu/vk/command.c3:vk_begin_commands_with_context",
+            begin,
+            "vk::reset_command_buffer(",
+            "note_command_buffer_reset(state);",
+        ),
+        (
+            "gpu/vk/attachment_view.c3:vk_create_attachment_view",
+            function_body(attachment_source, "vk_create_attachment_view"),
+            "vk::create_image_view(",
+            "state.recording_image_view_creations.add(",
+        ),
+        (
+            "gpu/vk/command.c3:allocate_generated_preprocess_buffer",
+            function_body(backend_source, "allocate_generated_preprocess_buffer"),
+            "create_buffer_with_alignment(",
+            "note_recording_vma_allocation(state);",
+        ),
+    )
+    for label, body, native, counter in seam_checks:
+        if body.count(native) != 1 or body.count(counter) != 1:
+            errors.append(
+                f"{label} must count its single native work seam {native}"
+            )
 
     required_text = (
         (

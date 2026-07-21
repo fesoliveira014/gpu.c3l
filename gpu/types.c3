@@ -47,6 +47,13 @@ struct TextureHandle {
 }
 $assert TextureHandle::size <= ulong::size * 2;
 
+struct AttachmentViewHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
+}
+$assert AttachmentViewHandle::size <= ulong::size * 2;
+
 <* Owning CPU token for one published texture view. `index` is the raw value
    stored in shader data; ownership and generation stay CPU-only. *>
 struct TextureView {
@@ -85,14 +92,15 @@ struct CommandListHandle {
 }
 $assert CommandListHandle::size <= ulong::size * 2;
 
-const Device            DEVICE_INVALID              = {};
-const GpuAllocation     GPU_ALLOCATION_INVALID      = {};
-const TextureHandle     TEXTURE_HANDLE_INVALID      = {};
-const TextureView       TEXTURE_VIEW_INVALID        = {};
-const Sampler           SAMPLER_INVALID             = {};
-const PipelineHandle    PIPELINE_HANDLE_INVALID     = {};
-const SwapchainHandle   SWAPCHAIN_HANDLE_INVALID    = {};
-const CommandListHandle COMMAND_LIST_HANDLE_INVALID = {};
+const Device               DEVICE_INVALID                 = {};
+const GpuAllocation        GPU_ALLOCATION_INVALID         = {};
+const TextureHandle        TEXTURE_HANDLE_INVALID         = {};
+const AttachmentViewHandle ATTACHMENT_VIEW_HANDLE_INVALID = {};
+const TextureView          TEXTURE_VIEW_INVALID           = {};
+const Sampler              SAMPLER_INVALID                = {};
+const PipelineHandle       PIPELINE_HANDLE_INVALID        = {};
+const SwapchainHandle      SWAPCHAIN_HANDLE_INVALID       = {};
+const CommandListHandle    COMMAND_LIST_HANDLE_INVALID    = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
@@ -108,6 +116,12 @@ fn bool GpuAllocation.equals(self, GpuAllocation other) @operator(==) {
 }
 fn bool TextureHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool AttachmentViewHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+fn bool AttachmentViewHandle.equals(self, AttachmentViewHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;

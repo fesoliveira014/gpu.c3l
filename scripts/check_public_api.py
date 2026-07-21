@@ -150,6 +150,7 @@ DEBUG_RESOURCE_KINDS = (
     "TEXTURE_DESCRIPTOR",
     "SAMPLER",
     "ALLOCATION",
+    "ATTACHMENT_VIEW",
 )
 
 RETIRED_SOURCE_SYMBOLS = (
@@ -452,15 +453,21 @@ def validate_document(document: dict) -> list[str]:
             "ClearDepthStencil must match the strict schema",
         ),
         (
-            "ColorTargetDesc",
+            "AttachmentViewDesc",
             "struct",
             (
                 ("texture", "TextureHandle"),
                 ("mip_level", "uint"),
                 ("array_layer", "uint"),
-                ("resolve_texture", "TextureHandle"),
-                ("resolve_mip_level", "uint"),
-                ("resolve_array_layer", "uint"),
+            ),
+            "AttachmentViewDesc must match the strict schema",
+        ),
+        (
+            "ColorTargetDesc",
+            "struct",
+            (
+                ("view", "AttachmentViewHandle"),
+                ("resolve_view", "AttachmentViewHandle"),
                 ("load_op", "LoadOp"),
                 ("store_op", "StoreOp"),
                 ("clear", "ClearColor"),
@@ -471,7 +478,7 @@ def validate_document(document: dict) -> list[str]:
             "DepthTargetDesc",
             "struct",
             (
-                ("texture", "TextureHandle"),
+                ("view", "AttachmentViewHandle"),
                 ("load_op", "LoadOp"),
                 ("store_op", "StoreOp"),
                 ("clear", "ClearDepthStencil"),
@@ -630,6 +637,22 @@ def validate_document(document: dict) -> list[str]:
             ("Device*", "TextureViewCreateDesc[]", "TextureView[]"),
             "void?",
         ),
+        "create_attachment_view": (
+            ("Device*", "AttachmentViewDesc*"),
+            "AttachmentViewHandle?",
+        ),
+        "destroy_attachment_view": (
+            ("Device*", "AttachmentViewHandle"),
+            "void?",
+        ),
+        "reserve_generated_scratch": (
+            ("Queue", "GeneratedScratchDesc*"),
+            "void?",
+        ),
+        "release_generated_scratch": (
+            ("Queue", "PipelineHandle", "GeneratedWorkKind"),
+            "void?",
+        ),
         "get_texture_requirements": (
             ("Device*", "TextureDesc*"),
             "TextureRequirements?",
@@ -785,6 +808,10 @@ def validate_document(document: dict) -> list[str]:
         "create_texture_view": ("device", "texture", "desc"),
         "destroy_texture_view": ("device", "view"),
         "create_texture_views": ("device", "descs", "out_views"),
+        "create_attachment_view": ("device", "desc"),
+        "destroy_attachment_view": ("device", "view"),
+        "reserve_generated_scratch": ("queue", "desc"),
+        "release_generated_scratch": ("queue", "pipeline", "kind"),
         "get_texture_requirements": ("device", "desc"),
         "create_placed_texture": ("device", "desc", "allocation", "offset"),
         "create_dedicated_texture": (
@@ -883,6 +910,10 @@ def validate_document(document: dict) -> list[str]:
         ("TextureIndex", "bitstruct"),
         ("SamplerIndex", "bitstruct"),
         ("TextureViewCreateDesc", "struct"),
+        ("AttachmentViewHandle", "struct"),
+        ("AttachmentViewDesc", "struct"),
+        ("GeneratedWorkKind", "enum"),
+        ("GeneratedScratchDesc", "struct"),
         ("GpuSpan", "struct"),
         ("MemoryClass", "enum"),
         ("MemoryStats", "struct"),
@@ -932,6 +963,23 @@ def validate_document(document: dict) -> list[str]:
                 ("generation", "uint"),
             ),
             "GpuAllocation must match the exact identity schema",
+        ),
+        "AttachmentViewHandle": (
+            (
+                ("owner", "ulong"),
+                ("index", "uint"),
+                ("generation", "uint"),
+            ),
+            "AttachmentViewHandle must match the exact identity schema",
+        ),
+        "GeneratedScratchDesc": (
+            (
+                ("pipeline", "PipelineHandle"),
+                ("kind", "GeneratedWorkKind"),
+                ("max_commands_per_list", "uint"),
+                ("preprocess_buffer_count", "uint"),
+            ),
+            "GeneratedScratchDesc must match the exact public schema",
         ),
         "Sampler": (
             (
@@ -1213,13 +1261,14 @@ def validate_document(document: dict) -> list[str]:
     acquired = types.get("AcquiredImage")
     if member_schema(acquired) != (
         ("texture", "TextureHandle"),
+        ("attachment_view", "AttachmentViewHandle"),
         ("readiness", "SwapchainReadiness"),
         ("index", "uint"),
         ("suboptimal", "bool"),
         ("prior_use", "TextureUse"),
     ):
         failures.append(
-            "AcquiredImage must carry readiness and semantic prior use"
+            "AcquiredImage must carry borrowed render handles, readiness, and semantic prior use"
         )
 
     for module_name, handle_names in PLATFORM_HANDLE_TYPES.items():

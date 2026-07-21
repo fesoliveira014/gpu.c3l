@@ -257,6 +257,33 @@ fn uint report_texture_leaks(VkDeviceState* state) {
     return count;
 }
 
+fn uint report_attachment_view_leaks(VkDeviceState* state) {
+    uint count;
+    if (state.attachment_views.slots.ptr == null) return 0;
+    foreach (i, &cell : state.attachment_views.slots[
+        :state.attachment_views.next_new
+    ]) {
+        if (!cell.used || cell.value.swapchain_owned) continue;
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.ATTACHMENT_VIEW,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          null,
+            backend_text:        "attachment view remains live",
+        )) {
+            io::eprintfn(
+                "gpu: leaked attachment view (index %d, generation %d)",
+                i,
+                cell.generation,
+            );
+        }
+        count++;
+    }
+    return count;
+}
+
 fn uint report_pipeline_leaks(VkDeviceState* state) {
     uint count = 0;
     if (state.pipeline_cache.entries.ptr == null) return 0;
@@ -294,6 +321,7 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     uint count = report_allocation_leaks(state);
     count += report_buffer_leaks(state);
     count += report_texture_leaks(state);
+    count += report_attachment_view_leaks(state);
     count += report_pipeline_leaks(state);
     return count;
 }

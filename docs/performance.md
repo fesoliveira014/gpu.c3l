@@ -42,16 +42,20 @@ The suite covers:
 | `async_overlap_bench` | Serialized and independent graphics/compute submissions |
 
 Each timing target performs its own warmup and fixed repetitions. Generated
-dispatch prewarms one untimed 1,000-record command list, then measures five
-1,000-record lists. Every execute call in a live list receives a distinct
-preprocess address. Completed or discarded lists return compatible buffers to
-the device pool.
+dispatch first reserves 64 context-local preprocess buffers, prewarms one
+untimed 64-record command list, then measures five 64-record lists. Every
+execute call in a live list receives a distinct reserved preprocess address.
+Completed or discarded lists return compatible buffers to the same recording
+context.
 
 The runner rejects nonzero hot-path invariants. The CPU-only
 `scripts/check_performance_contract.py` gate also rejects registry locking or
 pipeline construction in recording entry points, per-point allocation,
 destruction waits or deferred releases, and allocation-before-reuse in the
-generated preprocess path. Its mutation tests run without a Vulkan ICD.
+generated preprocess path. It walks the reachable Vulkan recording graph and
+rejects host allocation, native command-buffer allocation/free, image-view
+creation, and VMA allocation outside named cold seams. Its mutation tests run
+without a Vulkan ICD.
 
 Release runs use deliberately broad order-of-magnitude thresholds:
 
@@ -92,7 +96,6 @@ The table reports the median of the three target medians and their full range.
 | Command recording | Barrier | 20,000 × 5 | 131.4 ns/record | 131.3–136.6 |
 | Command recording | Hazard barrier | 20,000 × 5 | 136.8 ns/record | 135.2–144.0 |
 | Command recording | Indirect dispatch | 20,000 × 5 | 180.3 ns/record | 179.6–189.4 |
-| Command recording | Generated dispatch | 1,000 prewarm + 1,000 × 5 | 742.0 ns/record | 684.1–797.9 |
 | Lifecycle | Submission | 256 × 5 | 8,840.6 ns/submit | 8,102.7–11,106.2 |
 | Lifecycle | Completed-point poll | 100,000 × 5 | 41.7 ns/poll | 41.7–41.9 |
 | Lifecycle | Texture destruction | 300 × 5 | 241.7 ns/destroy | 240.3–247.0 |
@@ -103,10 +106,15 @@ The table reports the median of the three target medians and their full range.
 Every run reported:
 
 ```text
-invariants: registry_locks=0 recording_allocations=0 draw_compilations=0 preprocess_allocations=0
-generated preprocess: reuse_events=5000
 invariants: point_allocations=0 destruction_waits=0 deferred_releases=0
 ```
+
+Generated-dispatch timing is reported only for runs using an explicit
+64-buffer reservation. A release run is accepted only when it also reports zero
+warm host allocations, command-buffer allocations/frees, image-view creations,
+VMA allocations, and generated-scratch misses. Command-buffer resets are
+expected reuse evidence. The runner publishes cold and warm work-counter lines
+and at least 320 generated preprocess reuse events for the measured lists.
 
 The installed local validation layer was Vulkan 1.3.250 and did not recognize
 the newer generated-command and maintenance structures used by the current
@@ -119,8 +127,9 @@ path for collecting debug cost with a matching layer.
 - Reuse caller-owned upload and destination allocations only after their
   covering completion point completes.
 - Cache pipelines; cold creation and cached lookup are different workloads.
-- Generated command recording assigns a unique preprocess address to every
-  execute call and pools compatible storage only after the owning command list
-  is discarded or completed.
+- Reserve generated scratch per worker and pipeline before timing. Generated
+  command recording assigns a unique reserved preprocess address to every
+  execute call and returns it to the same context only after the owning command
+  list is discarded or completed.
 - Queue overlap depends on topology, driver scheduling, and workload balance;
   treat it as an observation, not a guarantee.

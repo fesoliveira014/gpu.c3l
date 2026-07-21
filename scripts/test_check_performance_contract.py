@@ -11,6 +11,7 @@ from scripts import check_performance_contract
 REQUIRED_PATHS = (
     "gpu/command.c3",
     "gpu/device.c3",
+    "gpu/vk/attachment_view.c3",
     "gpu/vk/command.c3",
     "gpu/vk/device.c3",
     "gpu/vk/command_state.c3",
@@ -277,105 +278,6 @@ class PerformanceContractTests(unittest.TestCase):
                 )
             )
 
-    def test_same_record_preprocess_reuse_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                "GeneratedPreprocessBuffer pooled;",
-                (
-                    "find_generated_preprocess_buffer(record, requirements);\n"
-                    "    GeneratedPreprocessBuffer pooled;"
-                ),
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "within one command record" in error
-                    for error in errors
-                )
-            )
-
-    def test_inline_same_record_preprocess_reuse_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                "GeneratedPreprocessBuffer pooled;",
-                (
-                    "if (record.generated_preprocess_count > 0) {\n"
-                    "        return &record.generated_preprocess[0];\n"
-                    "    }\n\n"
-                    "    GeneratedPreprocessBuffer pooled;"
-                ),
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "only append newly acquired buffers" in error
-                    for error in errors
-                )
-            )
-
-    def test_renamed_same_record_reuse_helper_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                "GeneratedPreprocessBuffer pooled;",
-                (
-                    "reuse_existing_preprocess(record);\n"
-                    "    GeneratedPreprocessBuffer pooled;"
-                ),
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "only append newly acquired buffers" in error
-                    for error in errors
-                )
-            )
-
-    def test_execute_generated_work_same_record_reuse_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                (
-                    "        preprocess = acquire_generated_preprocess_buffer(\n"
-                    "            state,\n"
-                    "            record,\n"
-                    "            &requirements2.memory_requirements,\n"
-                    "        )!;"
-                ),
-                (
-                    "        if (record.generated_preprocess_count > 0) {\n"
-                    "            preprocess = &record.generated_preprocess[0];\n"
-                    "        } else {\n"
-                    "            preprocess = acquire_generated_preprocess_buffer(\n"
-                    "                state,\n"
-                    "                record,\n"
-                    "                &requirements2.memory_requirements,\n"
-                    "            )!;\n"
-                    "        }"
-                ),
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "must acquire a fresh buffer" in error
-                    for error in errors
-                )
-            )
-
     def test_generated_native_execute_hidden_double_call_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -456,153 +358,6 @@ class PerformanceContractTests(unittest.TestCase):
                     "        vk::FALSE,\n"
                     "        &info,\n"
                     "    );\n"
-                    "    }"
-                ),
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "ownership flow must match reviewed source" in error
-                    for error in errors
-                )
-            )
-
-    def test_generated_pool_take_without_removal_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                (
-                    "        *out_buffer = *candidate;\n"
-                    "        state.generated_preprocess_pool_count--;\n"
-                    "        *candidate = state.generated_preprocess_pool[\n"
-                    "            state.generated_preprocess_pool_count\n"
-                    "        ];\n"
-                    "        state.generated_preprocess_pool[state.generated_preprocess_pool_count] = {};"
-                ),
-                "        *out_buffer = *candidate;",
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "successful pool take must remove" in error
-                    for error in errors
-                )
-            )
-
-    def test_generated_pool_swap_to_self_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                (
-                    "        *candidate = state.generated_preprocess_pool[\n"
-                    "            state.generated_preprocess_pool_count\n"
-                    "        ];"
-                ),
-                "        *candidate = state.generated_preprocess_pool[i];",
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "successful pool take must remove" in error
-                    for error in errors
-                )
-            )
-
-    def test_generated_pool_take_output_reassignment_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                "        *out_buffer = *candidate;",
-                (
-                    "        *out_buffer = *candidate;\n"
-                    "        *out_buffer = state.generated_preprocess_pool[\n"
-                    "            state.generated_preprocess_pool_count - 1\n"
-                    "        ];"
-                ),
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "successful pool take must remove" in error
-                    for error in errors
-                )
-            )
-
-    def test_generated_pool_take_deferred_compact_assignment_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                "        *out_buffer = *candidate;",
-                (
-                    "        defer {\n"
-                    "            *out_buffer=state.generated_preprocess_pool[0];\n"
-                    "        }\n"
-                    "        *out_buffer = *candidate;"
-                ),
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "successful pool take must remove" in error
-                    for error in errors
-                )
-            )
-
-    def test_generated_pool_pre_take_duplication_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                "        *out_buffer = *candidate;",
-                (
-                    "        state.generated_preprocess_pool[\n"
-                    "            (i + 1) % state.generated_preprocess_pool_count\n"
-                    "        ] = *candidate;\n"
-                    "        *out_buffer = *candidate;"
-                ),
-            )
-            errors = check_performance_contract.check(root)
-            self.assertTrue(
-                any(
-                    "ownership flow must match reviewed source" in error
-                    for error in errors
-                )
-            )
-
-    def test_generated_pool_growth_duplication_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.copied_tree(root)
-            self.mutate(
-                root,
-                "gpu/vk/command.c3",
-                (
-                    "    for (uint i = 0; "
-                    "i < state.generated_preprocess_pool_count; i++) {\n"
-                    "        grown[i] = state.generated_preprocess_pool[i];\n"
-                    "    }"
-                ),
-                (
-                    "    for (uint i = 0; "
-                    "i < state.generated_preprocess_pool_count; i++) {\n"
-                    "        grown[i] = state.generated_preprocess_pool[i];\n"
-                    "    }\n"
-                    "    if (state.generated_preprocess_pool_count > 1) {\n"
-                    "        grown[0] = grown[1];\n"
                     "    }"
                 ),
             )
@@ -697,7 +452,7 @@ class PerformanceContractTests(unittest.TestCase):
                 )
             )
 
-    def test_generated_fallback_before_reuse_is_rejected(self):
+    def test_generated_hot_acquisition_allocation_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.copied_tree(root)
@@ -705,14 +460,87 @@ class PerformanceContractTests(unittest.TestCase):
                 root,
                 "gpu/vk/command.c3",
                 (
-                    "if (take_generated_preprocess_buffer("
+                    "    uint max_count,\n"
+                    ") {\n"
+                    "    state.resource_mutex.lock()!!;"
                 ),
                 (
-                    "if (missing_generated_preprocess_lookup("
+                    "    uint max_count,\n"
+                    ") {\n"
+                    "    alloc::new_array(state.host_allocator, char, 1);\n"
+                    "    state.resource_mutex.lock()!!;"
                 ),
             )
             errors = check_performance_contract.check(root)
-            self.assertTrue(any("acquisition is missing" in error for error in errors))
+            self.assertTrue(any("contains forbidden alloc::" in error for error in errors))
+
+    def test_render_pass_image_view_creation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/render_pass.c3",
+                "    vk::RenderingAttachmentInfo depth_attachment;",
+                (
+                    "    vk::create_image_view(state.device, null, null, null);\n"
+                    "    vk::RenderingAttachmentInfo depth_attachment;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any("create_image_view(" in error for error in errors))
+
+    def test_generated_vma_allocation_counter_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "    note_recording_vma_allocation(state);",
+                "    (void)state;",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any("native work seam" in error for error in errors))
+
+    def test_command_buffer_reset_counter_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "        note_command_buffer_reset(state);",
+                "        (void)state;",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any("native work seam" in error for error in errors))
+
+    def test_attachment_image_view_counter_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/attachment_view.c3",
+                "            (void)state.recording_image_view_creations.add(",
+                "            (void)state.generated_scratch_misses.add(",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any("native work seam" in error for error in errors))
+
+    def test_generated_capacity_guard_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "max_count > reserved.reservation_max_commands",
+                "max_count > reservation_max_commands",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any("bounded reservation step" in error for error in errors))
 
 
 if __name__ == "__main__":

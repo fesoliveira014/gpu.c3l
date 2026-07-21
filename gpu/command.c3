@@ -1,5 +1,12 @@
 module gpu;
 
+<* Generated-work record kind a scratch reservation serves. *>
+enum GeneratedWorkKind : int {
+    DRAW,
+    DRAW_INDEXED,
+    DISPATCH,
+}
+
 <* Unsigned 3-vector; dispatches take their workgroup counts as one. *>
 struct Vec3u {
     uint x;
@@ -70,6 +77,16 @@ struct ExecutableCommandList {
     void*             encoder;
 }
 $assert ExecutableCommandList::size <= ulong::size * 4;
+
+<* Cold reservation for one generated-work pipeline and command kind on the
+   calling thread's device context. Count bounds each generated call; buffer
+   count bounds simultaneously retained calls. *>
+struct GeneratedScratchDesc {
+    PipelineHandle    pipeline;
+    GeneratedWorkKind kind;
+    uint              max_commands_per_list;
+    uint              preprocess_buffer_count;
+}
 
 <* Byte-range copy for cmd_copy_buffer; src and dst must have equal size and
    must not overlap. *>
@@ -280,6 +297,64 @@ fn DeviceOperation? executable_command_operation(
         return INVALID_HANDLE~;
     }
     return operation;
+}
+
+fn bool generated_work_kind_valid(GeneratedWorkKind kind) @private {
+    switch (kind) {
+        case GeneratedWorkKind.DRAW:
+        case GeneratedWorkKind.DRAW_INDEXED:
+        case GeneratedWorkKind.DISPATCH:
+            return true;
+        default:
+            return false;
+    }
+}
+
+<* Reserve driver-compatible generated-command preprocess storage outside
+   command recording. Replacement requires a quiescent calling-thread device
+   context; insufficient warm capacity faults GENERATED_SCRATCH_EXHAUSTED. *>
+fn void? reserve_generated_scratch(
+    Queue queue,
+    GeneratedScratchDesc* desc,
+) {
+    Device device = queue.device;
+    DeviceOperation operation = begin_device_operation(&device)!;
+    defer end_device_operation(&operation);
+    validate_queue(&operation, &device, queue)!;
+    if (desc == null) return INVALID_ARGUMENT~;
+    validate_resource_owner(
+        &operation,
+        desc.pipeline.owner,
+        ResourceOwnerKind.PIPELINE,
+    )!;
+    if (!generated_work_kind_valid(desc.kind)
+        || desc.max_commands_per_list == 0
+        || desc.preprocess_buffer_count == 0
+        || desc.max_commands_per_list
+            > operation.data.caps.max_generated_work_count) {
+        return INVALID_ARGUMENT~;
+    }
+    return operation.vtable.reserve_generated_scratch(queue, desc);
+}
+
+<* Release one quiescent generated-work reservation from the calling thread's
+   device context. *>
+fn void? release_generated_scratch(
+    Queue queue,
+    PipelineHandle pipeline,
+    GeneratedWorkKind kind,
+) {
+    Device device = queue.device;
+    DeviceOperation operation = begin_device_operation(&device)!;
+    defer end_device_operation(&operation);
+    validate_queue(&operation, &device, queue)!;
+    validate_resource_owner(
+        &operation,
+        pipeline.owner,
+        ResourceOwnerKind.PIPELINE,
+    )!;
+    if (!generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
+    return operation.vtable.release_generated_scratch(queue, pipeline, kind);
 }
 
 <* Begin recording on a selected queue. The token retains its device until

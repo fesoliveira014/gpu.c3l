@@ -144,6 +144,7 @@ fn void ensure_command_reference_capacity(
         CommandResourceReference,
         (sz)capacity,
     );
+    note_recording_host_allocation(state);
     for (uint i = 0; i < record.reference_count; i++) {
         grown[i] = record.references[i];
     }
@@ -160,7 +161,7 @@ fn void? track_command_reference(
     uint index,
     uint generation,
 ) {
-    if (!state.validation) return;
+    if (!state.validation && owner != state.attachment_views.owner) return;
     CommandResourceReference reference = {
         .owner = owner, .index = index, .generation = generation,
     };

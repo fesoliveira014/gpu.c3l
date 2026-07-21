@@ -19,8 +19,10 @@ bitstruct gpu::TextureIndex
 bitstruct gpu::TextureSampleCountSupport
 bitstruct gpu::TextureUsage
 constant gpu::ADAPTER_INVALID
+constant gpu::ATTACHMENT_VIEW_HANDLE_INVALID
 constant gpu::COMMAND_LIST_HANDLE_INVALID
 constant gpu::COMPLETION_POINT_INVALID
+constant gpu::DEFAULT_ATTACHMENT_VIEW_CAPACITY
 constant gpu::DEFAULT_SAMPLER_HEAP_CAPACITY
 constant gpu::DEFAULT_TEXTURE_CAPACITY
 constant gpu::DEFAULT_TEXTURE_HEAP_CAPACITY
@@ -59,6 +61,7 @@ enum gpu::DebugResourceKind
 enum gpu::Filter
 enum gpu::Format
 enum gpu::FrontFace
+enum gpu::GeneratedWorkKind
 enum gpu::IndexType
 enum gpu::LoadOp
 enum gpu::MemoryClass
@@ -76,6 +79,7 @@ fault gpu::COMMAND_RECORDING_ERROR
 fault gpu::DESCRIPTOR_HEAP_FULL
 fault gpu::DEVICE_BUSY
 fault gpu::DEVICE_LOST
+fault gpu::GENERATED_SCRATCH_EXHAUSTED
 fault gpu::INVALID_ARGUMENT
 fault gpu::INVALID_HANDLE
 fault gpu::INVALID_RESOURCE_STATE
@@ -118,6 +122,7 @@ function gpu::cmd_set_depth_state
 function gpu::cmd_set_scissor
 function gpu::cmd_set_viewport
 function gpu::cmd_texture_barrier
+function gpu::create_attachment_view
 function gpu::create_compute_pipeline
 function gpu::create_compute_pipelines
 function gpu::create_dedicated_texture
@@ -130,6 +135,7 @@ function gpu::create_swapchain
 function gpu::create_texture
 function gpu::create_texture_view
 function gpu::create_texture_views
+function gpu::destroy_attachment_view
 function gpu::destroy_device
 function gpu::destroy_pipeline
 function gpu::destroy_runtime
@@ -167,8 +173,10 @@ function gpu::poll_completion
 function gpu::prepare_shader_code
 function gpu::present
 function gpu::publish_sampler
+function gpu::release_generated_scratch
 function gpu::request_presentation
 function gpu::request_queues
+function gpu::reserve_generated_scratch
 function gpu::resize_swapchain
 function gpu::strict_device_request
 function gpu::submit
@@ -180,6 +188,8 @@ function gpu::texture_view_transition
 function gpu::wait_completion
 method gpu::Adapter.is_valid
 method gpu::AdapterList.get
+method gpu::AttachmentViewHandle.equals
+method gpu::AttachmentViewHandle.is_valid
 method gpu::CommandListHandle.equals
 method gpu::CommandListHandle.is_valid
 method gpu::CompletionPoint.equals
@@ -219,6 +229,8 @@ struct gpu::AdapterMemoryInfo
 struct gpu::AdapterQueueInfo
 struct gpu::AllocationDesc
 struct gpu::AllocationInfo
+struct gpu::AttachmentViewDesc
+struct gpu::AttachmentViewHandle
 struct gpu::BackendVersion
 struct gpu::Barrier
 struct gpu::BlendState
@@ -244,6 +256,7 @@ struct gpu::ExecutableCommandList
 struct gpu::GeneratedDispatchRecord
 struct gpu::GeneratedDrawIndexedRecord
 struct gpu::GeneratedDrawRecord
+struct gpu::GeneratedScratchDesc
 struct gpu::GpuAllocation
 struct gpu::GpuSpan
 struct gpu::GraphicsPipelineDesc

@@ -372,13 +372,14 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
-| `INVALID_RESOURCE_STATE` | swapchain lifecycle | an acquired swapchain image is pending during resize or destruction, or a readiness/acquisition state transition is invalid |
+| `INVALID_RESOURCE_STATE` | swapchain lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, a borrowed swapchain attachment view was passed for destruction, or the requested generated-scratch key is not reserved |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
 | `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
-| `RESOURCE_IN_USE` | resource or swapchain destruction/resize, `free_allocation`, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, incomplete submitted work, a texture view, or unfinished presentation still references the resource; a placed or dedicated texture depends on an allocation; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
+| `RESOURCE_IN_USE` | resource or swapchain destruction/resize, `free_allocation`, generated-scratch reservation/release, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, incomplete submitted work, a texture view, generated-scratch reservation, or unfinished presentation still references the resource; a placed or dedicated texture depends on an allocation; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
 | `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `intern_sampler`; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
+| `GENERATED_SCRATCH_EXHAUSTED` | generated draw/dispatch recording | the calling thread has no compatible reserved preprocess buffer for the pipeline, generated-work kind, command count, or concurrent retained-list demand |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `publish_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler publication leave existing entries untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V structure or backend reflection/module rejection |
@@ -958,7 +959,8 @@ tokens for retry or discard. An empty batch signals the selected queue.
 Duplicate or non-executable tokens fault `COMMAND_RECORDING_ERROR`; a token for
 another queue faults `INVALID_ARGUMENT`. Discard consumes an unsubmitted token.
 Completed native command buffers return to their recording context. Only that
-context owner reclaims them, before its next allocation.
+context owner resets and reuses them after completion or discard; native
+allocation is a cold-path fallback only when no reusable buffer is available.
 
 `SubmitDesc.completion_waits` accepts published points from the same device.
 Cross-queue points become waits on their queue-owned timelines. Published points
@@ -1043,19 +1045,23 @@ ClearColor
     float[4] rgba
     uint[4] uint_rgba
 
-ColorTargetDesc
+AttachmentViewDesc
     TextureHandle texture
     uint mip_level
     uint array_layer
-    TextureHandle resolve_texture
-    uint resolve_mip_level
-    uint resolve_array_layer
+
+create_attachment_view(Device* device, AttachmentViewDesc* desc) -> AttachmentViewHandle?
+destroy_attachment_view(Device* device, AttachmentViewHandle view) -> void?
+
+ColorTargetDesc
+    AttachmentViewHandle view
+    AttachmentViewHandle resolve_view
     LoadOp load_op
     StoreOp store_op
     ClearColor clear
 
 DepthTargetDesc
-    TextureHandle texture
+    AttachmentViewHandle view
     LoadOp load_op
     StoreOp store_op
     ClearDepthStencil clear
@@ -1069,6 +1075,23 @@ RenderPassDesc
 cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) -> void?
 cmd_end_render_pass(CommandList* commands) -> void?
 ```
+
+An `AttachmentViewHandle` is an immutable device child for one texture mip and
+array layer. Create every color, resolve, and depth view before recording and
+destroy it only after every recorded or submitted reference has completed.
+Creation validates texture ownership and subresource bounds and creates any
+required native image view on the cold path. Pass begin resolves only the fixed
+attachment-view table and records from fixed-size stack storage; it neither
+creates image views nor grows a cache.
+
+Each device has a fixed table of 4096 attachment views. Creation returns
+`SLOT_TABLE_FULL` when all slots are live or permanently retired by generation
+exhaustion.
+
+Attachment views are distinct from shader-visible `TextureView` values. They
+retain their texture, are not published in a descriptor heap, and cannot be
+destroyed while a command list holds an explicit reference. Zero, stale,
+foreign-device, and mismatched view handles fault before native recording.
 
 Render-pass begin initializes one viewport and one scissor to the full pass
 extent. Callers may override either state for subsequent draws:
@@ -1125,17 +1148,17 @@ Use `ClearColor.rgba` for normalized and floating-point attachments, and
 member is ignored.
 
 A pass names at least one color target or a depth target; depth-only passes
-(the shadow-map shape) are valid. A depth target needs `depth_attach` usage
-and an explicit transition to `TextureUse.DEPTH_ATTACHMENT`. `D32_FLOAT` is
+(the shadow-map shape) are valid. A depth target's texture needs `depth_attach`
+usage and an explicit transition to `TextureUse.DEPTH_ATTACHMENT`. `D32_FLOAT` is
 the only supported depth format; pipelines name it in
-`GraphicsPipelineDesc.depth_format`. Every selected color mip and the depth
-texture's mip zero must cover the pass dimensions; smaller compatible render
+`GraphicsPipelineDesc.depth_format`. Every selected color and depth view must
+cover the pass dimensions; smaller compatible render
 areas are valid. All color and depth sources use the same sample count. The
 color count must not exceed `DeviceCaps.max_color_attachments`, which is the
 lesser of the library ceiling and the selected device's Vulkan limit.
 
 A color target may resolve a multisample source into a distinct, single-sample
-texture with the same format and sufficient selected-mip extent. Both textures
+view with the same format and sufficient selected-mip extent. Both textures
 need `color_attach` usage and explicit transitions to
 `TextureUse.COLOR_ATTACHMENT`. Normalized and floating-point formats average
 samples; integer formats select sample zero. Depth resolve is not exposed.
@@ -1193,6 +1216,21 @@ GeneratedDrawRecord        { vertex_root_gpu, fragment_root_gpu, arguments }
 GeneratedDrawIndexedRecord { vertex_root_gpu, fragment_root_gpu, arguments, _pad0 }
 GeneratedDispatchRecord    { root_gpu, arguments, _pad0 }
 
+GeneratedWorkKind          { DRAW, DRAW_INDEXED, DISPATCH }
+
+GeneratedScratchDesc
+    PipelineHandle pipeline
+    GeneratedWorkKind kind
+    uint max_commands_per_list
+    uint preprocess_buffer_count
+
+reserve_generated_scratch(Queue queue, GeneratedScratchDesc* desc) -> void?
+release_generated_scratch(
+    Queue queue,
+    PipelineHandle pipeline,
+    GeneratedWorkKind kind,
+) -> void?
+
 cmd_draw_indirect(commands, vertex_root, fragment_root, args, draw_count) -> void?
 cmd_draw_indexed_indirect(commands, vertex_root, fragment_root, args, draw_count, index_span, index_type) -> void?
 cmd_draw_indexed_indirect_count(commands, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type) -> void?
@@ -1208,6 +1246,28 @@ pair the roots and arguments written by a GPU producer without a parallel
 created device supports all three commands. Unsupported devices fault
 `UNSUPPORTED_FEATURE`; the shared-root indirect commands remain the portable
 execution path and the library never emulates generated work with a CPU loop.
+
+Generated commands require an explicit cold reservation on the calling
+thread's device recording context. The queue selects and validates the device;
+the reservation can be consumed by compatible selected queues on that device.
+Each reservation is keyed by its exact pipeline and `GeneratedWorkKind`.
+`max_commands_per_list` bounds the maximum generated count accepted by one
+call, and `preprocess_buffer_count` bounds simultaneously retained calls for
+that key across incomplete command lists. The backend asks the driver for the
+exact size, alignment, and memory-type requirements for the pipeline, layout,
+and count before allocating. Reserving the same key replaces it; other keys in
+the context remain live. A live reservation retains its pipeline; release every
+key before destroying the pipeline.
+
+Reservation replacement or `release_generated_scratch` returns
+`RESOURCE_IN_USE` while the calling context has recording, executable, or
+submitted work. Descriptors must set every field and remain within
+`DeviceCaps.max_generated_work_count`, or reservation returns
+`INVALID_ARGUMENT`. Releasing a key that is not reserved returns
+`INVALID_RESOURCE_STATE`. Generated recording returns deterministic
+`GENERATED_SCRATCH_EXHAUSTED` when the count or compatible-buffer supply is
+insufficient. A failed recording call preserves the command list for retry or
+discard.
 
 Generated record spans are 8-byte aligned and must hold the declared maximum
 count. The count span is a 4-byte-aligned GPU-readable `uint`. Both spans must
@@ -1475,6 +1535,7 @@ SwapchainReadiness
 
 AcquiredImage
     TextureHandle texture
+    AttachmentViewHandle attachment_view
     SwapchainReadiness readiness
     uint index
     bool suboptimal
@@ -1498,6 +1559,7 @@ points fault before native mutation.
 
 ```c3
 gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
+// Use acquired.attachment_view as the color target; it is borrowed.
 gpu::SubmitDesc submit = {
     .command_lists = lists[..],
     .readiness     = acquired.readiness,
@@ -1535,9 +1597,11 @@ pipelines when the format changes. A dormant swapchain reports `UNDEFINED`,
 zero extent/count, and FIFO until resize succeeds.
 
 `AcquiredImage.prior_use` is `UNDEFINED` for a newly wrapped image and `PRESENT`
-after the normal presentation cycle. Resize stales prior borrowed texture
-handles. Destroy descriptors that reference swapchain textures, and discard or
-complete commands that name them, before resize or destruction.
+after the normal presentation cycle. `AcquiredImage.attachment_view` is the
+borrowed, swapchain-owned color target for the texture; callers must not destroy
+it. Resize stales both borrowed handles. Destroy descriptors that reference
+swapchain textures, and discard or complete commands that name either handle,
+before resize or destruction.
 
 SDL integration belongs in samples or an optional helper module.
 

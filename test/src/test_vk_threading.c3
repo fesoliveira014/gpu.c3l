@@ -28,6 +28,18 @@ struct TransferRecordArgs {
     gpu::ExecutableCommandList  list;
 }
 
+struct ReuseWorkerArgs {
+    gpu::Device*                  device;
+    gpu::ExecutableCommandList[2] executables;
+}
+
+struct ScratchWorkerArgs {
+    gpu::Device*        device;
+    gpu::PipelineHandle pipeline;
+    Atomic{bool}*       start;
+    bool                failed;
+}
+
 fn gpu::Device make_thr_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -171,7 +183,7 @@ fn void texture_view_cache_uses_device_allocator_across_threads() @test {
 
 struct RenderViewGateArgs {
     gpu::CommandList           commands;
-    gpu::TextureHandle         texture;
+    gpu::AttachmentViewHandle  view;
     gpu::ExecutableCommandList executable;
     Atomic{bool}               entered;
     Atomic{bool}               completed;
@@ -181,10 +193,9 @@ fn int render_view_gate_worker(void* raw_args) {
     RenderViewGateArgs* args = (RenderViewGateArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
         gpu::ColorTargetDesc[1] colors = { {
-            .texture   = args.texture,
-            .mip_level = 1,
-            .load_op   = gpu::LoadOp.DONT_CARE,
-            .store_op  = gpu::StoreOp.DONT_CARE,
+            .view     = args.view,
+            .load_op  = gpu::LoadOp.DONT_CARE,
+            .store_op = gpu::StoreOp.DONT_CARE,
         } };
         gpu::RenderPassDesc pass = {
             .colors = colors[..],
@@ -200,7 +211,7 @@ fn int render_view_gate_worker(void* raw_args) {
     return 0;
 }
 
-fn void render_view_resolution_uses_shared_cache_lock() @test {
+fn void render_view_recording_avoids_texture_view_cache_lock() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
@@ -214,25 +225,31 @@ fn void render_view_resolution_uses_shared_cache_lock() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
+    gpu::AttachmentViewHandle view = create_test_attachment_view(
+        &device,
+        texture,
+        1,
+    )!!;
+    defer destroy_test_attachment_view(&device, &view)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     RenderViewGateArgs args = {
         .commands = gpu::begin_commands(
             gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
         )!!,
-        .texture = texture,
+        .view = view,
     };
     state.texture_view_cache_mutex.lock()!!;
     Thread worker;
     worker.create(&render_view_gate_worker, &args)!!;
     while (!args.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
     thread::sleep_ms(25)!!;
-    assert(!args.completed.load(AtomicOrdering.ACQUIRE),
-        "render view resolution waits for the shared cache lock");
+    assert(args.completed.load(AtomicOrdering.ACQUIRE),
+        "precreated attachment recording avoids the texture-view cache lock");
     state.texture_view_cache_mutex.unlock();
     assert(worker.join()!! == 0,
-        "render recording resumes after cache publication releases the lock");
+        "render recording completes independently of texture-view publication");
     assert(args.completed.load(AtomicOrdering.ACQUIRE),
-        "render recording completes after synchronized cache resolution");
+        "render recording publishes the executable without cache resolution");
     discard_test_executable(&args.executable)!!;
 }
 
@@ -337,9 +354,61 @@ fn void same_descriptor_pipeline_race() @test {
     assert(vk::pipeline_cache_entry_count(state) == 0, "all aliases released the entry");
 }
 
-struct ReuseWorkerArgs {
-    gpu::Device*                  device;
-    gpu::ExecutableCommandList[2] executables;
+fn int generated_scratch_worker(void* raw_args) {
+    ScratchWorkerArgs* args = (ScratchWorkerArgs*)raw_args;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        while (!args.start.load(AtomicOrdering.ACQUIRE)) thread::yield();
+        gpu::Queue queue = gpu::get_queue(
+            args.device,
+            gpu::QueueKind.COMPUTE,
+        )!!;
+        gpu::GeneratedScratchDesc reservation = {
+            .pipeline                = args.pipeline,
+            .kind                    = gpu::GeneratedWorkKind.DISPATCH,
+            .max_commands_per_list   = 1,
+            .preprocess_buffer_count = 1,
+        };
+        if (catch reserve_fault = gpu::reserve_generated_scratch(
+            queue,
+            &reservation,
+        )) {
+            (void)reserve_fault;
+            args.failed = true;
+            return 1;
+        }
+        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        vk::VkDeviceState* state =
+            (vk::VkDeviceState*)gpu::device_backend_state(*args.device);
+        vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+        vk::RecordingContextState* context = state.recording_contexts.get(
+            record.context,
+        )!!;
+        vk::GeneratedPreprocessBuffer* reserved =
+            &context.reserved_preprocess[0];
+        vk::MemoryRequirements requirements = {
+            .size             = reserved.size,
+            .alignment        = 1,
+            .memory_type_bits = 1 << reserved.memory_type,
+        };
+        if (catch acquire_fault = vk::acquire_generated_preprocess_buffer(
+            state:        state,
+            record:       record,
+            pipeline:     args.pipeline,
+            kind:         gpu::GeneratedWorkKind.DISPATCH,
+            requirements: &requirements,
+            max_count:    1,
+        )) {
+            (void)acquire_fault;
+            args.failed = true;
+        }
+        gpu::discard_commands(&commands)!!;
+        gpu::release_generated_scratch(
+            queue,
+            args.pipeline,
+            gpu::GeneratedWorkKind.DISPATCH,
+        )!!;
+    };
+    return args.failed ? 1 : 0;
 }
 
 fn int reuse_recording_pool_worker(void* raw_args) {
@@ -374,6 +443,49 @@ fn void worker_thread_reuses_private_recording_pool() @test {
     gpu::ExecutableCommandList[2] lists = args.executables;
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
+}
+
+fn void generated_scratch_reservations_are_thread_context_local() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    if (!gpu::get_device_caps(&device)!!.generated_work) return;
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = THR_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ComputePipelineDesc pipeline_desc = {
+        .shader             = shader,
+        .push_constant_size = gpu::RootPush::size,
+    };
+    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(
+        &device,
+        &pipeline_desc,
+    )!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+
+    Atomic{bool} start;
+    ScratchWorkerArgs[2] args;
+    Thread[2] workers;
+    for (uint i = 0; i < 2; i++) {
+        args[i] = {
+            .device   = &device,
+            .pipeline = pipeline,
+            .start    = &start,
+        };
+        workers[i].create(&generated_scratch_worker, &args[i])!!;
+    }
+    start.store(true, AtomicOrdering.RELEASE);
+    foreach (i, &worker : workers) {
+        assert(worker.join()!! == 0 && !args[i].failed,
+            "each worker reserves and consumes its own generated scratch");
+    }
+
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(state.recording_contexts.next_new == 2,
+        "two worker threads own two independent recording contexts");
 }
 
 fn char transfer_pattern(uint worker_index, usz byte_index) {

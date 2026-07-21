@@ -39,7 +39,8 @@ struct SwapchainSlot {
     vk::SurfaceKHR           surface;
     vk::SwapchainKHR         swapchain;
     uint                     image_count;
-    gpu::TextureHandle[MAX_SWAPCHAIN_IMAGES] textures;
+    gpu::TextureHandle[MAX_SWAPCHAIN_IMAGES]        textures;
+    gpu::AttachmentViewHandle[MAX_SWAPCHAIN_IMAGES] attachment_views;
     vk::Semaphore[MAX_SWAPCHAIN_IMAGES]      present_semaphores;
     vk::Fence[MAX_SWAPCHAIN_IMAGES]          present_fences;
     bool[MAX_SWAPCHAIN_IMAGES]               present_fence_pending;
@@ -492,16 +493,18 @@ fn void publish_dormant_swapchain_info(SwapchainSlot* slot) {
 fn gpu::AcquiredImage make_acquired_image(
     TextureSlot* texture,
     gpu::TextureHandle handle,
+    gpu::AttachmentViewHandle attachment_view,
     gpu::SwapchainReadiness readiness,
     uint index,
     bool suboptimal,
 ) {
     return {
-        .texture      = handle,
-        .readiness    = readiness,
-        .index        = index,
-        .suboptimal   = suboptimal,
-        .prior_use    = swapchain_prior_use(texture),
+        .texture         = handle,
+        .attachment_view = attachment_view,
+        .readiness       = readiness,
+        .index           = index,
+        .suboptimal      = suboptimal,
+        .prior_use       = swapchain_prior_use(texture),
     };
 }
 
@@ -722,7 +725,21 @@ fn void? build_swapchain(
                 defer state.resource_mutex.unlock();
                 if (try handle = state.textures.alloc(texture)) {
                     slot.textures[i] = handle;
-                    published = true;
+                    AttachmentViewSlot attachment_view = {
+                        .texture         = handle,
+                        .native          = view,
+                        .format          = format,
+                        .sample_count    = gpu::SampleCount.ONE,
+                        .width           = extent.width,
+                        .height          = extent.height,
+                        .swapchain_owned = true,
+                    };
+                    if (try attachment_handle =
+                        state.attachment_views.alloc(attachment_view)) {
+                        slot.attachment_views[i] = attachment_handle;
+                        published = true;
+                    }
+                    if (!published) (void)state.textures.free(handle);
                 }
             }
             if (!published) {
@@ -730,7 +747,7 @@ fn void? build_swapchain(
                 return report_wsi_backend_failure(
                     context:      context,
                     public_fault: gpu::SLOT_TABLE_FULL,
-                    backend_text: "backend texture slot capacity exhausted while wrapping swapchain images",
+                    backend_text: "backend resource slot capacity exhausted while wrapping swapchain images",
                 )~;
             }
             // Count as we go so a mid-loop failure leaves the slot cleanable
@@ -780,6 +797,9 @@ fn void release_swapchain_images_locked(
     SwapchainSlot* slot,
 ) @private {
     for (uint i = 0; i < slot.image_count; i++) {
+        if (try state.attachment_views.get(slot.attachment_views[i])) {
+            (void)state.attachment_views.free(slot.attachment_views[i]);
+        }
         if (try texture = state.textures.get(slot.textures[i])) {
             vk::destroy_image_view(state.device, texture.default_view, null);
             destroy_cached_views(state, texture);
@@ -802,6 +822,7 @@ fn void release_swapchain_images_locked(
             slot.present_fences[i] = (vk::Fence)null;
             slot.present_fence_pending[i] = false;
         }
+        slot.attachment_views[i] = {};
         slot.textures[i] = {};
     }
     slot.image_count = 0;
@@ -825,6 +846,14 @@ fn bool? swapchain_images_referenced_locked(
         gpu::TextureHandle handle = slot.textures[i];
         TextureSlot* texture = state.textures.get(handle)!;
         if (texture.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+            return true;
+        }
+        AttachmentViewSlot* attachment_view = state.attachment_views.get(
+            slot.attachment_views[i],
+        )!;
+        if (attachment_view.validation_references.load(
+            AtomicOrdering.RELAXED,
+        ) > 0) {
             return true;
         }
         foreach (&cell : heap.texture_cells[:heap.texture_next_new]) {
@@ -1125,11 +1154,12 @@ fn gpu::AcquiredImage? vk_acquire_next_image(
     slot.pending_acquire_semaphore = acquire_semaphore;
     slot.render_completion = {};
     return make_acquired_image(
-        texture:    texture,
-        handle:     slot.textures[image_index],
-        readiness:  readiness,
-        index:      image_index,
-        suboptimal: result == vk::Result.SUBOPTIMAL_KHR,
+        texture:         texture,
+        handle:          slot.textures[image_index],
+        attachment_view: slot.attachment_views[image_index],
+        readiness:       readiness,
+        index:           image_index,
+        suboptimal:      result == vk::Result.SUBOPTIMAL_KHR,
     );
 }
 

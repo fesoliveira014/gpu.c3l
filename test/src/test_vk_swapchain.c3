@@ -550,14 +550,22 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
 fn void swapchain_release_detects_shared_resource_references() @test {
     gpu::vk::VkDeviceState state;
     gpu::vk::TextureCell[1] textures;
+    gpu::vk::AttachmentViewCell[1] attachment_views;
     gpu::vk::TextureDescriptorCell[1] descriptors;
     state.textures.owner = 41;
     state.textures.slots = textures[..];
+    state.attachment_views.owner = 43;
+    state.attachment_views.slots = attachment_views[..];
     state.strict_heap.descriptors.texture_cells = descriptors[..];
 
     gpu::TextureHandle texture = state.textures.alloc({})!!;
+    gpu::AttachmentViewHandle attachment_view = state.attachment_views.alloc({
+        .texture         = texture,
+        .swapchain_owned = true,
+    })!!;
     gpu::vk::SwapchainSlot slot = { .image_count = 1 };
     slot.textures[0] = texture;
+    slot.attachment_views[0] = attachment_view;
     assert(!gpu::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
@@ -572,6 +580,19 @@ fn void swapchain_release_detects_shared_resource_references() @test {
         &slot,
     )!!, "recorded or submitted texture use blocks release");
     state.textures.get(texture)!!.validation_references.sub(
+        1,
+        AtomicOrdering.RELAXED,
+    );
+
+    state.attachment_views.get(attachment_view)!!.validation_references.add(
+        1,
+        AtomicOrdering.RELAXED,
+    );
+    assert(gpu::vk::swapchain_images_referenced_locked(
+        &state,
+        &slot,
+    )!!, "recorded or submitted attachment use blocks release");
+    state.attachment_views.get(attachment_view)!!.validation_references.sub(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -760,27 +781,33 @@ fn void acquired_image_reports_prior_semantic_use() @test {
         1,
     )!!;
     gpu::TextureHandle handle = { .index = 2, .generation = 7 };
+    gpu::AttachmentViewHandle attachment_view = {
+        .index = 3, .generation = 11,
+    };
 
     gpu::AcquiredImage first = gpu::vk::make_acquired_image(
-        texture:    &texture,
-        handle:     handle,
-        readiness:  readiness,
-        index:      1,
-        suboptimal: false,
+        texture:         &texture,
+        handle:          handle,
+        attachment_view: attachment_view,
+        readiness:       readiness,
+        index:           1,
+        suboptimal:      false,
     );
     assert(first.prior_use == gpu::TextureUse.UNDEFINED,
         "newly wrapped image reports undefined prior use");
-    assert(first.texture == handle && first.index == 1 && !first.suboptimal,
+    assert(first.texture == handle && first.attachment_view == attachment_view
+        && first.index == 1 && !first.suboptimal,
         "acquired-image construction preserves existing fields");
     assert(first.readiness == readiness, "acquired image carries one-shot readiness");
 
     gpu::vk::mark_texture_presented(&texture);
     gpu::AcquiredImage presented = gpu::vk::make_acquired_image(
-        texture:    &texture,
-        handle:     handle,
-        readiness:  readiness,
-        index:      1,
-        suboptimal: true,
+        texture:         &texture,
+        handle:          handle,
+        attachment_view: attachment_view,
+        readiness:       readiness,
+        index:           1,
+        suboptimal:      true,
     );
     assert(presented.prior_use == gpu::TextureUse.PRESENT,
         "presented image reports prior presentation use");

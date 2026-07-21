@@ -64,6 +64,8 @@ fn void pin_memory_and_resources() {
         },
     };
     gpu::TextureHandle texture = {};
+    gpu::AttachmentViewHandle attachment_view = {};
+    gpu::AttachmentViewDesc attachment_desc = { .texture = texture };
     gpu::TextureViewDesc view_desc = {};
     gpu::TextureView view = {};
     gpu::SamplerDesc sampler_desc = {};
@@ -101,8 +103,10 @@ fn void pin_memory_and_resources() {
         view_descs[..],
         views[..],
     );
+    (void)gpu::create_attachment_view(&device, &attachment_desc);
     (void)gpu::intern_sampler(&device, &sampler_desc);
     (void)gpu::publish_sampler(&device, sampler);
+    (void)gpu::destroy_attachment_view(&device, attachment_view);
     (void)gpu::destroy_texture_view(&device, view);
     (void)gpu::destroy_texture(&device, texture);
     (void)gpu::free_allocation(&device, &allocation);
@@ -172,11 +176,12 @@ fn void pin_commands_and_completion() {
         .dst     = span,
     };
     gpu::PipelineHandle pipeline = {};
+    gpu::AttachmentViewHandle attachment_view = {};
     gpu::DepthState depth = {};
     gpu::Viewport viewport = {};
     gpu::ScissorRect scissor = {};
     gpu::ColorTargetDesc[1] colors = {
-        { .texture = texture },
+        { .view = attachment_view },
     };
     gpu::RenderPassDesc render_pass = {
         .colors = colors[..],
@@ -185,7 +190,19 @@ fn void pin_commands_and_completion() {
     };
     gpu::SubmitDesc submit = {};
     gpu::CompletionPoint completion = {};
+    gpu::GeneratedScratchDesc generated_scratch = {
+        .pipeline                = pipeline,
+        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
+        .max_commands_per_list   = 1,
+        .preprocess_buffer_count = 1,
+    };
 
+    (void)gpu::reserve_generated_scratch(queue, &generated_scratch);
+    (void)gpu::release_generated_scratch(
+        queue,
+        pipeline,
+        gpu::GeneratedWorkKind.DISPATCH,
+    );
     (void)gpu::begin_commands(queue);
     (void)gpu::cmd_copy_buffer(&commands, &copy);
     (void)gpu::cmd_fill_buffer(&commands, span, 0);

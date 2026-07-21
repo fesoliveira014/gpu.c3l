@@ -106,11 +106,11 @@
     },
     "vk_command": {
       "type": "test",
-      "sources": [ "src/test_vk_command_submit.c3", "src/test_vk_command_validation.c3", "src/test_vk_render_pass_validation.c3", "src/test_vk_texture_transition.c3", "src/offscreen_abi.c3" ]
+      "sources": [ "src/test_vk_command_submit.c3", "src/test_generated_scratch.c3", "src/test_vk_command_validation.c3", "src/test_vk_render_pass_validation.c3", "src/test_vk_texture_transition.c3", "src/offscreen_abi.c3" ]
     },
     "vk_texture": {
       "type": "test",
-      "sources": [ "src/test_vk_texture.c3", "src/test_vk_dedicated_texture.c3" ]
+      "sources": [ "src/test_vk_texture.c3", "src/test_vk_dedicated_texture.c3", "src/test_attachment_view_table.c3" ]
     },
     "vk_descriptor_heap": {
       "type": "test",

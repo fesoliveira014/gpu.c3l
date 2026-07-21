@@ -134,6 +134,31 @@ def valid_document() -> dict:
                         ("out_views", "TextureView[]"),
                     ),
                     api_function(
+                        "create_attachment_view",
+                        "AttachmentViewHandle?",
+                        ("device", "Device*"),
+                        ("desc", "AttachmentViewDesc*"),
+                    ),
+                    api_function(
+                        "destroy_attachment_view",
+                        "void?",
+                        ("device", "Device*"),
+                        ("view", "AttachmentViewHandle"),
+                    ),
+                    api_function(
+                        "reserve_generated_scratch",
+                        "void?",
+                        ("queue", "Queue"),
+                        ("desc", "GeneratedScratchDesc*"),
+                    ),
+                    api_function(
+                        "release_generated_scratch",
+                        "void?",
+                        ("queue", "Queue"),
+                        ("pipeline", "PipelineHandle"),
+                        ("kind", "GeneratedWorkKind"),
+                    ),
+                    api_function(
                         "get_texture_requirements",
                         "TextureRequirements?",
                         ("device", "Device*"),
@@ -470,15 +495,20 @@ def valid_document() -> dict:
                         ],
                     },
                     {
-                        "name": "ColorTargetDesc",
+                        "name": "AttachmentViewDesc",
                         "kind": "struct",
                         "members": [
                             {"name": "texture", "type": {"name": "TextureHandle"}},
                             {"name": "mip_level", "type": {"name": "uint"}},
                             {"name": "array_layer", "type": {"name": "uint"}},
-                            {"name": "resolve_texture", "type": {"name": "TextureHandle"}},
-                            {"name": "resolve_mip_level", "type": {"name": "uint"}},
-                            {"name": "resolve_array_layer", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "ColorTargetDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "view", "type": {"name": "AttachmentViewHandle"}},
+                            {"name": "resolve_view", "type": {"name": "AttachmentViewHandle"}},
                             {"name": "load_op", "type": {"name": "LoadOp"}},
                             {"name": "store_op", "type": {"name": "StoreOp"}},
                             {"name": "clear", "type": {"name": "ClearColor"}},
@@ -488,7 +518,7 @@ def valid_document() -> dict:
                         "name": "DepthTargetDesc",
                         "kind": "struct",
                         "members": [
-                            {"name": "texture", "type": {"name": "TextureHandle"}},
+                            {"name": "view", "type": {"name": "AttachmentViewHandle"}},
                             {"name": "load_op", "type": {"name": "LoadOp"}},
                             {"name": "store_op", "type": {"name": "StoreOp"}},
                             {"name": "clear", "type": {"name": "ClearDepthStencil"}},
@@ -511,6 +541,30 @@ def valid_document() -> dict:
                             {"name": "owner", "type": {"name": "ulong"}},
                             {"name": "index", "type": {"name": "uint"}},
                             {"name": "generation", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "AttachmentViewHandle",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "owner", "type": {"name": "ulong"}},
+                            {"name": "index", "type": {"name": "uint"}},
+                            {"name": "generation", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "GeneratedWorkKind",
+                        "kind": "enum",
+                        "members": [],
+                    },
+                    {
+                        "name": "GeneratedScratchDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "pipeline", "type": {"name": "PipelineHandle"}},
+                            {"name": "kind", "type": {"name": "GeneratedWorkKind"}},
+                            {"name": "max_commands_per_list", "type": {"name": "uint"}},
+                            {"name": "preprocess_buffer_count", "type": {"name": "uint"}},
                         ],
                     },
                     {
@@ -988,6 +1042,10 @@ def valid_document() -> dict:
                         "kind": "struct",
                         "members": [
                             {"name": "texture", "type": {"name": "TextureHandle"}},
+                            {
+                                "name": "attachment_view",
+                                "type": {"name": "AttachmentViewHandle"},
+                            },
                             {
                                 "name": "readiness",
                                 "type": {"name": "SwapchainReadiness"},
@@ -1561,6 +1619,11 @@ method gpu::Runtime.is_valid
                 "ClearDepthStencil must match the strict schema",
             ),
             (
+                "AttachmentViewDesc",
+                lambda entry: entry["members"].pop(),
+                "AttachmentViewDesc must match the strict schema",
+            ),
+            (
                 "ColorTargetDesc",
                 lambda entry: entry["members"].pop(),
                 "ColorTargetDesc must match the strict schema",
@@ -1616,7 +1679,7 @@ method gpu::Runtime.is_valid
         )
         desc["members"] = [
             member for member in desc["members"]
-            if member["name"] != "resolve_texture"
+            if member["name"] != "resolve_view"
         ]
         self.assertIn(
             "ColorTargetDesc must match the strict schema",
@@ -2414,6 +2477,23 @@ method gpu::Runtime.is_valid
         self.assertIn("create_texture_view has the wrong return type", failures)
         self.assertIn("destroy_texture_view has the wrong parameters", failures)
         self.assertIn("create_texture_views has the wrong parameters", failures)
+
+    def test_rejects_wrong_attachment_and_scratch_contracts(self) -> None:
+        document = valid_document()
+        functions = document["modules"]["gpu"]["functions"]
+        create = next(entry for entry in functions
+            if entry["name"] == "create_attachment_view")
+        destroy = next(entry for entry in functions
+            if entry["name"] == "destroy_attachment_view")
+        reserve = next(entry for entry in functions
+            if entry["name"] == "reserve_generated_scratch")
+        create["return_type"]["name"] = "TextureView?"
+        destroy["members"][1]["type"]["name"] = "TextureView"
+        reserve["members"][1]["type"]["name"] = "GeneratedScratchDesc"
+        failures = check_public_api.validate_document(document)
+        self.assertIn("create_attachment_view has the wrong return type", failures)
+        self.assertIn("destroy_attachment_view has the wrong parameters", failures)
+        self.assertIn("reserve_generated_scratch has the wrong parameters", failures)
 
     def test_rejects_wrong_texture_view_identity_schema(self) -> None:
         document = valid_document()

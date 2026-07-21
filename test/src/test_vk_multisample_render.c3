@@ -68,6 +68,11 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         debug_name:   "multisample_color",
     );
     defer gpu::destroy_texture(&device, color)!!;
+    gpu::AttachmentViewHandle color_view = create_test_attachment_view(
+        &device,
+        color,
+    )!!;
+    defer destroy_test_attachment_view(&device, &color_view)!!;
     gpu::TextureHandle depth = make_multisample_target(
         device:       &device,
         format:       gpu::Format.D32_FLOAT,
@@ -76,6 +81,11 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         debug_name:   "multisample_depth",
     );
     defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(
+        &device,
+        depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
     gpu::TextureHandle resolve = make_multisample_target(
         device:       &device,
         format:       gpu::Format.RGBA8_UNORM,
@@ -84,6 +94,11 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         debug_name:   "multisample_resolve",
     );
     defer gpu::destroy_texture(&device, resolve)!!;
+    gpu::AttachmentViewHandle resolve_view = create_test_attachment_view(
+        &device,
+        resolve,
+    )!!;
+    defer destroy_test_attachment_view(&device, &resolve_view)!!;
 
     DepthCtx shaders = make_depth_ctx();
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
@@ -119,11 +134,11 @@ fn void multisample_color_depth_resolves_to_readback() @test {
     record_depth_to_attach(&commands, depth);
 
     gpu::ColorTargetDesc[1] colors = {{
-        .texture         = color,
-        .resolve_texture = resolve,
-        .load_op         = gpu::LoadOp.CLEAR,
-        .store_op        = gpu::StoreOp.DONT_CARE,
-        .clear           = {
+        .view         = color_view,
+        .resolve_view = resolve_view,
+        .load_op      = gpu::LoadOp.CLEAR,
+        .store_op     = gpu::StoreOp.DONT_CARE,
+        .clear        = {
             .rgba = {
                 8.0f / 255.0f,
                 16.0f / 255.0f,
@@ -133,7 +148,7 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         },
     }};
     gpu::DepthTargetDesc depth_target = {
-        .texture  = depth,
+        .view     = depth_view,
         .load_op  = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.DONT_CARE,
         .clear    = { .depth = 1.0f },

@@ -77,6 +77,17 @@ fn void? retain_validation_reference(
         );
         return;
     }
+    if (reference.owner == state.attachment_views.owner) {
+        gpu::AttachmentViewHandle view = {
+            .owner = reference.owner, .index = reference.index,
+            .generation = reference.generation,
+        };
+        state.attachment_views.get(view)!.validation_references.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+        return;
+    }
     if (reference.owner == state.pipelines.owner) {
         gpu::PipelineHandle pipeline = {
             .owner = reference.owner, .index = reference.index,
@@ -122,6 +133,15 @@ fn void release_validation_reference(
             1,
             AtomicOrdering.RELAXED,
         );
+    } else if (reference.owner == state.attachment_views.owner) {
+        gpu::AttachmentViewHandle view = {
+            .owner = reference.owner, .index = reference.index,
+            .generation = reference.generation,
+        };
+        state.attachment_views.get(view)!!.validation_references.sub(
+            1,
+            AtomicOrdering.RELAXED,
+        );
     } else if (reference.owner == state.pipelines.owner) {
         gpu::PipelineHandle pipeline = {
             .owner = reference.owner, .index = reference.index,
@@ -163,6 +183,7 @@ fn void ensure_submitted_command_capacity(
         SubmittedCommandBatch,
         (sz)capacity,
     );
+    note_recording_host_allocation(state);
     for (uint i = 0; i < state.submitted_command_count; i++) {
         grown[i] = state.submitted_commands[i];
     }
@@ -231,17 +252,18 @@ fn void release_submitted_command_batch(
         batch.references,
         batch.reference_count,
     );
-    alloc::free(state.host_allocator, batch.references.ptr);
     recycle_generated_preprocess_buffers_locked(
         state,
         batch.generated_preprocess,
         batch.generated_preprocess_count,
     );
     enqueue_retired_command_buffer_locked(
-        state:          state,
-        context_handle: batch.context,
-        pool:           batch.command_pool,
-        buffer:         batch.command_buffer,
+        state:                state,
+        context_handle:       batch.context,
+        pool:                 batch.command_pool,
+        buffer:               batch.command_buffer,
+        references:           batch.references,
+        generated_preprocess: batch.generated_preprocess,
     );
     state.submitted_command_count--;
     *batch = state.submitted_commands[state.submitted_command_count];

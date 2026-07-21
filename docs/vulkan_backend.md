@@ -225,8 +225,19 @@ pipeline slot carries the generated-dispatch layout paired with its ordinary
 pipeline layout. Recording reads that stable slot value directly; it never
 searches layout-cache storage that pipeline creation may grow. The device-owned
 compute-layout cache remains the sole owner and destroys both handles at device
-teardown. Calls use implicit preprocessing and private preprocess memory whose
-lifetime extends through command completion. A barrier with
+teardown. Generated recording uses implicit preprocessing with buffers reserved
+explicitly by `reserve_generated_scratch` on the calling thread's device
+recording context. The queue argument selects and validates the device. For
+each pipeline and generated-work kind, reservation queries
+`vkGetGeneratedCommandsMemoryRequirementsEXT` with the exact layout and maximum
+sequence count, then allocates the requested number of addressable VMA buffers
+using the returned size, alignment, and memory-type mask. Warm generated calls
+borrow a matching buffer, retain it through command completion, and return
+`GENERATED_SCRATCH_EXHAUSTED` without allocating when the count or available
+compatible-buffer bound is exhausted. Discard and completion return each
+buffer to its owning context. `release_generated_scratch` removes one quiescent
+pipeline/kind reservation.
+A barrier with
 `hazards.draw_arguments` includes both indirect-command and generated
 command-preprocess reads when this capability is enabled.
 
@@ -611,10 +622,18 @@ failure before native acceptance restores every claim; success commits pending
 texture state and invalidates each encoder before its command-table index becomes
 reusable. No fallible token resolution occurs after native acceptance.
 
-Discard retires the native buffer to its recording context. `submit` transfers it
-to a completion-tracked batch; completion observation retires the buffer to the
-same context. Only the context owner frees retired buffers, before allocating
-again; device teardown relies on command-pool destruction.
+Render passes resolve explicit `AttachmentViewHandle` values from a fixed
+device-owned table into fixed-size local arrays. Attachment creation owns any
+non-default native `VkImageView`; render-pass begin performs no image-view
+creation, texture-view-cache lookup, or host allocation.
+
+Discard retires the native buffer to its recording context. `submit` transfers
+it to a completion-tracked batch; completion observation retires the buffer to
+the same context. Before its next begin, only the context owner resets a
+compatible retired buffer and reuses its reference and generated-scratch arrays.
+Allocation of a native command buffer or growth of those arrays occurs only on
+the cold path when no reusable capacity exists. Device teardown relies on
+command-pool destruction.
 
 ## 13. Synchronization
 

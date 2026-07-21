@@ -276,13 +276,33 @@ the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
 batch as `SUBMITTING`. Validation or native failure restores it without publishing
 queue progress. Success publishes one `CompletionPoint` and invalidates every
 submitted token and alias. Completion observation and discard retire native
-buffers to their recording context. The context owner reclaims them before its
-next allocation; device teardown relies on command-pool destruction.
+buffers to their recording context. The context owner resets compatible buffers
+before its next begin and reuses their host-side reference and generated-scratch
+arrays. Native command-buffer and host allocation are cold fallbacks only when
+the context has no reusable unit. A retained reference array may also grow on
+the cold path when a command list establishes a new high-water mark. Device
+teardown relies on command-pool destruction.
 Invalid transitions return faults,
 and render-pass command constraints remain enforced. A render pass records its
 attachment formats and sample count; a graphics pipeline must match them before
 begin or bind mutates native command state. Resolve and pass boundaries do not
 add implicit synchronization.
+
+Render targets name explicit `AttachmentViewHandle` children created before
+recording. Each immutable view selects one texture mip and layer, retains the
+texture, and owns any non-default native image view. Render-pass begin resolves
+the fixed view table into fixed-size local arrays. It does not create image
+views, grow a cache, or allocate host storage.
+
+Generated commands consume preprocess buffers from explicit reservations on
+the calling thread's device recording context. Each reservation is keyed by
+pipeline and generated-work kind; its count bound is translated into exact
+driver-reported size, alignment, and memory-type requirements. The queue passed
+to reservation selects and validates the device rather than creating a
+queue-scoped pool. Warm recording returns `GENERATED_SCRATCH_EXHAUSTED` instead
+of allocating when the count or compatible-buffer supply is exhausted. Discard
+and completion return reserved buffers to the same context; a different worker
+never acquires them implicitly.
 
 Pipeline bind resolves the stable pipeline cell and cache entry once, then
 publishes a complete bound snapshot: expected generation, native pipeline and
@@ -592,7 +612,9 @@ rendered = submit(graphics, command lists + acquired.readiness)
 present(device, acquired, rendered)
 ```
 
-Acquisition returns a borrowed texture and compact one-shot readiness value.
+Acquisition returns a borrowed texture, its swapchain-owned color attachment
+view, and a compact one-shot readiness value. Callers render with the view but
+do not destroy it.
 Submission validates the exact device, swapchain generation, acquisition
 identity, and graphics role before waiting the private native acquire bridge.
 Only successful native submission consumes readiness and records its returned
@@ -607,7 +629,8 @@ preserves the acquired image.
 
 `SwapchainInfo` reports the selected format, extent, image count, present mode,
 and dormant state. `AcquiredImage.prior_use` is `UNDEFINED` before first use
-and `PRESENT` after presentation. Resize stales borrowed textures and never
+and `PRESENT` after presentation. Resize stales borrowed texture and attachment
+view handles and never
 reuses acquisition identities. Resize and destruction reject a pending
 acquisition or live command/view/presentation use without waiting, preserving
 the swapchain for retry.

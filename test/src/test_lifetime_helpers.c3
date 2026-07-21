@@ -94,6 +94,29 @@ fn void? discard_test_executable(gpu::ExecutableCommandList* commands) {
     }
 }
 
+fn gpu::AttachmentViewHandle? create_test_attachment_view(
+    gpu::Device* device,
+    gpu::TextureHandle texture,
+    uint mip_level = 0,
+    uint array_layer = 0,
+) {
+    gpu::AttachmentViewDesc desc = {
+        .texture     = texture,
+        .mip_level   = mip_level,
+        .array_layer = array_layer,
+    };
+    return gpu::create_attachment_view(device, &desc);
+}
+
+fn void? destroy_test_attachment_view(
+    gpu::Device* device,
+    gpu::AttachmentViewHandle* view,
+) {
+    if (view == null || !view.is_valid()) return;
+    gpu::destroy_attachment_view(device, *view)!;
+    *view = {};
+}
+
 fn gpu::CompletionPoint? submit_test_queue(
     gpu::Device* device,
     gpu::QueueKind kind,

@@ -130,6 +130,8 @@ root-pointer compute shader
 TextureView publication and raw TextureIndex sampling in compute
 offscreen render target clear/draw/readback
 dynamic viewport/scissor validation, clipping pixels, pass reset, and pipeline-alias persistence
+attachment-view capacity/generation/ownership, creation rollback, texture
+retention, in-flight destruction rejection, and allocation-free pass begin
 texture-view capacity, batch rollback, immediate index reuse, stale and
 cross-device release rejection, and concurrent publication/release
 sampler interning, stable strict publication, publication exhaustion, concurrent
@@ -271,13 +273,13 @@ Test names describe behavior, not roadmap or ticket labels.
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
-| Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback, explicit pipeline/depth state, retired execution signatures, and zero execution-time pipeline creation. |
+| Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback, completion-safe context-local command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/depth state, retired execution signatures, and zero execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind and root validation. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback; explicit pipeline and depth state; nonzero stage roots; dynamic viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
+| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline and depth state; nonzero stage roots; dynamic viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior use; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start, and stable generated-dispatch layouts across compute-layout cache relocation. |
-| Threading | automatic per-worker recording pools, parallel record, identical submit. |
+| Threading | automatic per-worker recording contexts, private command-buffer and generated-scratch reuse, parallel record, identical submit. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
 | Depth | depth attachment creation, depth-tested draw, readback. |
@@ -378,9 +380,11 @@ The benchmark runner builds eight executable targets with `-O1`:
 `upload_throughput_bench`, `command_record_bench`, `lifecycle_bench`,
 `pipeline_cache_bench`, and `async_overlap_bench`. Command recording covers
 ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
-generated dispatch. It prewarms one untimed 1,000-record command list, then
-measures five 1,000-record lists with a distinct preprocess address for each
-execute call and pool reuse only after a list is discarded.
+generated dispatch. It measures five 64-record lists after an untimed 64-record
+warmup. Before warmup, the calling worker reserves 64 preprocess buffers sized
+for the declared generated workload. Each execute receives a distinct reserved
+address, and
+reuse occurs only after a list is discarded.
 The command target enables test-only resolution counters, resets them after
 begin/pipeline bind, reports measured native command count with every resolution
 count, and requires zero registry, retained-pin, lifecycle-vtable, command-table,
@@ -388,6 +392,11 @@ pipeline-table/cache, and policy selections during warm recording.
 These process-wide counters use relaxed atomics and are compared only across
 externally synchronized benchmark intervals. The native count covers every
 Vulkan command emitted by recording paths.
+The same target reports cold and warm recording-work snapshots. Warm host
+allocations, command-buffer allocations/frees, image-view creations, VMA
+allocations, and generated-scratch misses must all be zero; command-buffer
+resets demonstrate reuse. The source contract follows every reachable Vulkan
+recording helper and rejects those operations except at explicit cold seams.
 Lifecycle measurements cover submission, completed-point polling, and
 immediate texture destruction.
 

@@ -401,10 +401,25 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
     };
     gpu::TextureHandle target_culled = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, target_culled)!!;
+    gpu::AttachmentViewHandle culled_view = create_test_attachment_view(
+        &device,
+        target_culled,
+    )!!;
+    defer destroy_test_attachment_view(&device, &culled_view)!!;
     gpu::TextureHandle target_drawn = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, target_drawn)!!;
+    gpu::AttachmentViewHandle drawn_view = create_test_attachment_view(
+        &device,
+        target_drawn,
+    )!!;
+    defer destroy_test_attachment_view(&device, &drawn_view)!!;
     gpu::TextureHandle target_reset = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, target_reset)!!;
+    gpu::AttachmentViewHandle reset_view = create_test_attachment_view(
+        &device,
+        target_reset,
+    )!!;
+    defer destroy_test_attachment_view(&device, &reset_view)!!;
 
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc no_cull_desc = base_graphics_desc(&shaders, formats[..]);
@@ -477,6 +492,11 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureHandle[3] targets = { target_culled, target_drawn, target_reset };
+    gpu::AttachmentViewHandle[3] target_views = {
+        culled_view,
+        drawn_view,
+        reset_view,
+    };
     gpu::PipelineHandle[3] pipelines = { culled, no_cull, no_cull };
     gpu::GpuSpan[3] readbacks = { rb_culled.span, rb_drawn.span, rb_reset.span };
     for (uint i = 0; i < targets.len; i++) {
@@ -488,7 +508,7 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
         gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
         gpu::ColorTargetDesc[1] colors = {{
-            .texture = targets[i],
+            .view = target_views[i],
             .load_op = gpu::LoadOp.CLEAR,
             .store_op = gpu::StoreOp.STORE,
             .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
@@ -590,6 +610,11 @@ fn void alias_survives_peer_destroy() @test {
     };
     gpu::TextureHandle target = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
     OwnedSpan verts_owned = allocate_owned_span(
         device:       &device,
         size:         3 * 16,
@@ -618,7 +643,7 @@ fn void alias_survives_peer_destroy() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
@@ -829,9 +854,18 @@ fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
     )!!;
     defer free_owned_span(&device, &count)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::GeneratedScratchDesc scratch = {
+        .pipeline                = pipeline,
+        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
+        .max_commands_per_list   = 1,
+        .preprocess_buffer_count = 1,
+    };
+    gpu::reserve_generated_scratch(queue, &scratch)!!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, pipeline);
 
@@ -886,6 +920,12 @@ fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
         args.failure);
     assert(state.generated_dispatch_layout_read_observed == expected_layout,
         "recording reads the original pipeline slot's generated layout");
+    gpu::discard_commands(&commands)!!;
+    gpu::release_generated_scratch(
+        queue,
+        pipeline,
+        gpu::GeneratedWorkKind.DISPATCH,
+    )!!;
 }
 
 fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test {

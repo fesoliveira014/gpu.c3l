@@ -36,6 +36,7 @@ fn void failed_submit_records_nothing() @test {
     gpu::ExecutableCommandList[1] not_executable = {{
         .device = unfinished.device,
         .handle = unfinished.handle,
+        .encoder = unfinished.encoder,
     }};
     gpu::SubmitDesc bad_submit = { .command_lists = not_executable[..] };
 

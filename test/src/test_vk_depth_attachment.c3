@@ -207,8 +207,18 @@ fn void depth_test_occludes_both_orders() @test {
     foreach (near_first : near_first_options) {
         gpu::TextureHandle target = make_color_target(&device);
         defer gpu::destroy_texture(&device, target)!!;
+        gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+            &device,
+            target,
+        )!!;
+        defer destroy_test_attachment_view(&device, &target_view)!!;
         gpu::TextureHandle depth = make_depth_texture(&device);
         defer gpu::destroy_texture(&device, depth)!!;
+        gpu::AttachmentViewHandle depth_view = create_test_attachment_view(
+            &device,
+            depth,
+        )!!;
+        defer destroy_test_attachment_view(&device, &depth_view)!!;
         OwnedSpan color_rb = make_readback(&device, DP_COLOR_BYTES);
         defer free_owned_span(&device, &color_rb)!!;
         OwnedSpan depth_rb = make_readback(&device, DP_DEPTH_BYTES);
@@ -234,11 +244,11 @@ fn void depth_test_occludes_both_orders() @test {
         record_depth_to_attach(&cmd, depth);
 
         gpu::ColorTargetDesc[1] colors = {{
-            .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+            .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
             .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
         }};
         gpu::DepthTargetDesc depth_target = {
-            .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+            .view = depth_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
             .clear = { .depth = 1.0f },
         };
         gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
@@ -289,8 +299,18 @@ fn void depth_write_toggle_honored() @test {
     DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle target = make_color_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
     gpu::TextureHandle depth = make_depth_texture(&device);
     defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(
+        &device,
+        depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
     OwnedSpan color_rb = make_readback(&device, DP_COLOR_BYTES);
     defer free_owned_span(&device, &color_rb)!!;
     OwnedSpan depth_rb = make_readback(&device, DP_DEPTH_BYTES);
@@ -322,10 +342,10 @@ fn void depth_write_toggle_honored() @test {
     record_color_to_attach(&cmd, target);
     record_depth_to_attach(&cmd, depth);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::DepthTargetDesc depth_target = {
-        .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = depth_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
@@ -364,8 +384,18 @@ fn void depth_state_variants_share_entry() @test {
     DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle target = make_color_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
     gpu::TextureHandle depth = make_depth_texture(&device);
     defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(
+        &device,
+        depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
     OwnedSpan color_rb = make_readback(&device, DP_COLOR_BYTES);
     defer free_owned_span(&device, &color_rb)!!;
     gpu::GpuSpan color_rb_span = color_rb.span;
@@ -397,10 +427,10 @@ fn void depth_state_variants_share_entry() @test {
     record_color_to_attach(&cmd, target);
     record_depth_to_attach(&cmd, depth);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::DepthTargetDesc depth_target = {
-        .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = depth_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
@@ -436,6 +466,11 @@ fn void depth_only_pass_renders_footprint() @test {
     DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle depth = make_depth_texture(&device);
     defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(
+        &device,
+        depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
     OwnedSpan depth_rb = make_readback(&device, DP_DEPTH_BYTES);
     defer free_owned_span(&device, &depth_rb)!!;
     gpu::GpuSpan depth_rb_span = depth_rb.span;
@@ -458,7 +493,7 @@ fn void depth_only_pass_renders_footprint() @test {
     defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, depth);
     gpu::DepthTargetDesc depth_target = {
-        .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = depth_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
@@ -487,6 +522,11 @@ fn void sampled_depth_matches_readback() @test {
     DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle depth = make_depth_texture(&device, sampled: true);
     defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(
+        &device,
+        depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
 
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, depth, null)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
@@ -549,7 +589,7 @@ fn void sampled_depth_matches_readback() @test {
     defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, depth);
     gpu::DepthTargetDesc depth_target = {
-        .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = depth_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
@@ -606,10 +646,10 @@ fn void depth_pass_validation_faults() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
-    gpu::DepthTargetDesc no_usage = { .texture = sampled_only, .load_op = gpu::LoadOp.CLEAR, .clear = { .depth = 1.0f } };
-    gpu::RenderPassDesc no_usage_pass = { .depth = &no_usage, .width = DP_RT, .height = DP_RT };
-    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &no_usage_pass)) == gpu::INVALID_ARGUMENT,
-        "depth target without depth_attach usage faults INVALID_ARGUMENT");
+    gpu::AttachmentViewDesc no_usage = { .texture = sampled_only };
+    assert(@catch(gpu::create_attachment_view(&device, &no_usage))
+        == gpu::INVALID_ARGUMENT,
+        "attachment creation rejects a texture without attachment usage");
 
     gpu::RenderPassDesc empty_pass = { .width = DP_RT, .height = DP_RT };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &empty_pass)) == gpu::INVALID_ARGUMENT,
@@ -628,6 +668,11 @@ fn void compare_sampler_exact_results() @test {
     DepthCtx ctx = make_depth_ctx();
     gpu::TextureHandle depth = make_depth_texture(&device, sampled: true);
     defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(
+        &device,
+        depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
 
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, depth, null)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
@@ -694,7 +739,7 @@ fn void compare_sampler_exact_results() @test {
     defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, depth);
     gpu::DepthTargetDesc depth_target = {
-        .texture = depth, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = depth_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
@@ -753,8 +798,18 @@ fn void depth_bias_shifts_stored_depth() @test {
 
     gpu::TextureHandle plain_depth = make_depth_texture(&device);
     defer gpu::destroy_texture(&device, plain_depth)!!;
+    gpu::AttachmentViewHandle plain_view = create_test_attachment_view(
+        &device,
+        plain_depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &plain_view)!!;
     gpu::TextureHandle biased_depth = make_depth_texture(&device);
     defer gpu::destroy_texture(&device, biased_depth)!!;
+    gpu::AttachmentViewHandle biased_view = create_test_attachment_view(
+        &device,
+        biased_depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &biased_view)!!;
 
     gpu::PipelineHandle plain = make_biased_pipeline(&device, &ctx, 0.0f);
     defer gpu::destroy_pipeline(&device, plain)!!;
@@ -777,12 +832,16 @@ fn void depth_bias_shifts_stored_depth() @test {
     defer discard_test_commands(&cmd)!!;
     gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
     gpu::TextureHandle[2] targets = { plain_depth, biased_depth };
+    gpu::AttachmentViewHandle[2] target_views = {
+        plain_view,
+        biased_view,
+    };
     gpu::PipelineHandle[2] pipelines = { plain, biased };
     gpu::GpuSpan*[2] readbacks = { &rb_plain, &rb_biased };
     for (uint i = 0; i < 2; i++) {
         record_depth_to_attach(&cmd, targets[i]);
         gpu::DepthTargetDesc depth_target = {
-            .texture = targets[i], .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+            .view = target_views[i], .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
             .clear = { .depth = 1.0f },
         };
         gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };

@@ -141,19 +141,25 @@ struct VkDeviceState {
     ComputeLayoutCache         compute_layout_cache;
     vk::PipelineCache          driver_cache;
     TextureTable               textures;
+    AttachmentViewTable        attachment_views;
     SamplerTable               samplers;
     VkPresentationState        presentation;
     VkStrictHeapState          strict_heap;
     SubmittedCommandBatch[]    submitted_commands;
     uint                       submitted_command_count;
     uint                       submitted_command_reserved;
-    GeneratedPreprocessBuffer[] generated_preprocess_pool;
-    uint                       generated_preprocess_pool_count;
     Atomic{ulong}              generated_preprocess_allocations;
     Atomic{ulong}              generated_preprocess_reuses;
     Atomic{ulong}              generated_recording_allocations;
     ulong                      command_buffers_allocated;
     ulong                      command_buffers_freed;
+    Atomic{ulong}              recording_host_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              recording_command_buffer_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              recording_command_buffer_frees @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              command_buffer_resets @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              recording_image_view_creations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              recording_vma_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              generated_scratch_misses @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     ulong                      pipeline_shader_modules_created;
     ulong                      pipelines_created;
     bool                       pipeline_creation_failure_enabled;
@@ -305,52 +311,56 @@ const gpu::CommandOps VK_COMMAND_OPS @private = {
 
 // One static lifecycle table shared by every Vulkan device.
 const gpu::BackendVTable VK_VTABLE @private = {
-    .check_device_destroy    = &vk_check_device_destroy,
-    .destroy_device          = &vk_destroy_device,
-    .report_contract_failure = &vk_report_root_contract_failure,
-    .get_memory_stats     = &vk_get_memory_stats,
-    .build_memory_report  = &vk_build_memory_report,
-    .allocate_memory        = &vk_allocate_memory,
-    .free_allocation        = &vk_free_allocation,
-    .get_allocation_info    = &vk_get_allocation_info,
-    .get_allocation_span    = &vk_get_allocation_span,
-    .get_span_mapping       = &vk_get_span_mapping,
-    .get_span_address       = &vk_get_span_address,
-    .flush_mapped_span      = &vk_flush_mapped_span,
-    .invalidate_mapped_span = &vk_invalidate_mapped_span,
-    .begin_commands            = &vk_begin_commands,
-    .end_commands              = &vk_end_commands,
-    .discard_commands          = &vk_discard_commands,
-    .submit                    = &vk_submit,
-    .poll_completion           = &vk_poll_completion,
-    .wait_completion           = &vk_wait_completion,
-    .command_ops               = &VK_COMMAND_OPS,
-    .get_texture_format_support = &vk_get_texture_format_support,
-    .supports_texture_desc      = &vk_supports_texture_desc,
-    .get_texture_requirements   = &vk_get_texture_requirements,
-    .create_texture             = &vk_create_texture,
-    .create_placed_texture      = &vk_create_placed_texture,
-    .create_dedicated_texture   = &vk_create_dedicated_texture,
-    .destroy_texture            = &vk_destroy_texture,
-    .create_texture_view        = &vk_create_texture_view,
-    .destroy_texture_view       = &vk_destroy_texture_view,
-    .create_texture_views       = &vk_create_texture_views,
-    .intern_sampler             = &vk_intern_sampler,
-    .publish_sampler            = &vk_publish_sampler,
-    .create_compute_pipeline   = &vk_create_compute_pipeline,
-    .create_graphics_pipeline  = &vk_create_graphics_pipeline,
-    .create_compute_pipelines  = &vk_create_compute_pipelines,
-    .create_graphics_pipelines = &vk_create_graphics_pipelines,
-    .destroy_pipeline          = &vk_destroy_pipeline,
-    .get_pipeline_cache_size   = &vk_get_pipeline_cache_size,
-    .get_pipeline_cache_data   = &vk_get_pipeline_cache_data,
-    .create_swapchain        = &vk_create_swapchain,
-    .destroy_swapchain       = &vk_destroy_swapchain,
-    .resize_swapchain        = &vk_resize_swapchain,
-    .get_swapchain_info      = &vk_get_swapchain_info,
-    .acquire_next_image      = &vk_acquire_next_image,
-    .present                 = &vk_present,
-    .get_present_mode_support = &vk_get_present_mode_support,
+    .check_device_destroy        = &vk_check_device_destroy,
+    .destroy_device              = &vk_destroy_device,
+    .report_contract_failure     = &vk_report_root_contract_failure,
+    .get_memory_stats            = &vk_get_memory_stats,
+    .build_memory_report         = &vk_build_memory_report,
+    .allocate_memory             = &vk_allocate_memory,
+    .free_allocation             = &vk_free_allocation,
+    .get_allocation_info         = &vk_get_allocation_info,
+    .get_allocation_span         = &vk_get_allocation_span,
+    .get_span_mapping            = &vk_get_span_mapping,
+    .get_span_address            = &vk_get_span_address,
+    .flush_mapped_span           = &vk_flush_mapped_span,
+    .invalidate_mapped_span      = &vk_invalidate_mapped_span,
+    .reserve_generated_scratch   = &vk_reserve_generated_scratch,
+    .release_generated_scratch   = &vk_release_generated_scratch,
+    .begin_commands              = &vk_begin_commands,
+    .end_commands                = &vk_end_commands,
+    .discard_commands            = &vk_discard_commands,
+    .submit                      = &vk_submit,
+    .poll_completion             = &vk_poll_completion,
+    .wait_completion             = &vk_wait_completion,
+    .command_ops                 = &VK_COMMAND_OPS,
+    .get_texture_format_support  = &vk_get_texture_format_support,
+    .supports_texture_desc       = &vk_supports_texture_desc,
+    .get_texture_requirements    = &vk_get_texture_requirements,
+    .create_texture              = &vk_create_texture,
+    .create_placed_texture       = &vk_create_placed_texture,
+    .create_dedicated_texture    = &vk_create_dedicated_texture,
+    .destroy_texture             = &vk_destroy_texture,
+    .create_attachment_view      = &vk_create_attachment_view,
+    .destroy_attachment_view     = &vk_destroy_attachment_view,
+    .create_texture_view         = &vk_create_texture_view,
+    .destroy_texture_view        = &vk_destroy_texture_view,
+    .create_texture_views        = &vk_create_texture_views,
+    .intern_sampler              = &vk_intern_sampler,
+    .publish_sampler             = &vk_publish_sampler,
+    .create_compute_pipeline     = &vk_create_compute_pipeline,
+    .create_graphics_pipeline    = &vk_create_graphics_pipeline,
+    .create_compute_pipelines    = &vk_create_compute_pipelines,
+    .create_graphics_pipelines   = &vk_create_graphics_pipelines,
+    .destroy_pipeline            = &vk_destroy_pipeline,
+    .get_pipeline_cache_size     = &vk_get_pipeline_cache_size,
+    .get_pipeline_cache_data     = &vk_get_pipeline_cache_data,
+    .create_swapchain            = &vk_create_swapchain,
+    .destroy_swapchain           = &vk_destroy_swapchain,
+    .resize_swapchain            = &vk_resize_swapchain,
+    .get_swapchain_info          = &vk_get_swapchain_info,
+    .acquire_next_image          = &vk_acquire_next_image,
+    .present                     = &vk_present,
+    .get_present_mode_support    = &vk_get_present_mode_support,
 };
 
 fn VkDeviceConfig runtime_device_config(VkRuntimeState* state) {
@@ -686,6 +696,14 @@ fn gpu::Device? create_vk_device_from_runtime(
     }
     state.textures.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.TEXTURE);
     state.textures.slots = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
+    state.attachment_views.owner = gpu::resource_owner_tag(
+        state.resource_owner,
+        gpu::ResourceOwnerKind.ATTACHMENT_VIEW,
+    );
+    state.attachment_views.slots = mem::new_array(
+        AttachmentViewCell,
+        gpu::DEFAULT_ATTACHMENT_VIEW_CAPACITY,
+    );
     create_sampler_table(state)!;
     if (state.presentation.enabled) {
         state.presentation.swapchains.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN);
@@ -833,6 +851,7 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         if (state.validation || state.debug_callback != null) report_descriptor_leaks(state);
         destroy_descriptor_heap(state);
         destroy_sampler_table(state);
+        destroy_attachment_view_table(state);
         // Internal textures and device-loss leftovers remain backend-owned.
         if (state.textures.slots.ptr != null) {
             foreach (&cell : state.textures.slots[:state.textures.next_new]) {
@@ -864,7 +883,6 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         }
         destroy_pipeline_shared(state);
         destroy_command_table(state);
-        free_generated_preprocess_buffers(state, state.generated_preprocess_pool);
         if (state.recording_contexts.slots.ptr != null) {
             foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
                 if (cell.used) destroy_context_pools(state, &cell.value);

@@ -28,6 +28,15 @@ fn vk::TextureSlot* render_validation_slot(
     return state.textures.get(texture)!!;
 }
 
+fn vk::AttachmentViewSlot* render_validation_view_slot(
+    gpu::Device* device,
+    gpu::AttachmentViewHandle view,
+) {
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(*device);
+    return state.attachment_views.get(view)!!;
+}
+
 fn void texture_create_info_uses_requested_sample_count() @test {
     gpu::TextureDesc desc = {
         .dimension    = gpu::TextureDimension.TEX_2D,
@@ -151,6 +160,16 @@ fn void render_pass_rejects_mixed_samples_before_mutation() @test {
     defer gpu::destroy_texture(&device, second)!!;
     render_validation_slot(&device, second).sample_count =
         gpu::SampleCount.FOUR;
+    gpu::AttachmentViewHandle first_view = create_test_attachment_view(
+        &device,
+        first,
+    )!!;
+    defer destroy_test_attachment_view(&device, &first_view)!!;
+    gpu::AttachmentViewHandle second_view = create_test_attachment_view(
+        &device,
+        second,
+    )!!;
+    defer destroy_test_attachment_view(&device, &second_view)!!;
 
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
@@ -161,8 +180,8 @@ fn void render_pass_rejects_mixed_samples_before_mutation() @test {
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.reference_count;
     gpu::ColorTargetDesc[2] colors = {
-        { .texture = first },
-        { .texture = second },
+        { .view = first_view },
+        { .view = second_view },
     };
     gpu::RenderPassDesc pass = {
         .colors = colors[..],
@@ -192,6 +211,16 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
         gpu::Format.RGBA8_UNORM,
     );
     defer gpu::destroy_texture(&device, resolve)!!;
+    gpu::AttachmentViewHandle source_view = create_test_attachment_view(
+        &device,
+        source,
+    )!!;
+    defer destroy_test_attachment_view(&device, &source_view)!!;
+    gpu::AttachmentViewHandle resolve_view = create_test_attachment_view(
+        &device,
+        resolve,
+    )!!;
+    defer destroy_test_attachment_view(&device, &resolve_view)!!;
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
@@ -201,8 +230,8 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.reference_count;
     gpu::ColorTargetDesc[1] colors = {{
-        .texture         = source,
-        .resolve_texture = resolve,
+        .view         = source_view,
+        .resolve_view = resolve_view,
     }};
     gpu::RenderPassDesc pass = {
         .colors = colors[..],
@@ -218,8 +247,14 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
     assert(record.reference_count == references_before,
         "invalid resolve retains no attachment references");
 
-    vk::TextureSlot* source_slot = render_validation_slot(&device, source);
-    vk::TextureSlot* resolve_slot = render_validation_slot(&device, resolve);
+    vk::AttachmentViewSlot* source_slot = render_validation_view_slot(
+        &device,
+        source_view,
+    );
+    vk::AttachmentViewSlot* resolve_slot = render_validation_view_slot(
+        &device,
+        resolve_view,
+    );
     source_slot.sample_count = gpu::SampleCount.FOUR;
     resolve_slot.format = gpu::Format.BGRA8_UNORM;
     assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
@@ -247,7 +282,12 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
         gpu::Format.BGRA8_UNORM,
     );
     defer gpu::destroy_texture(&device, target)!!;
-    gpu::ColorTargetDesc[1] colors = {{ .texture = target }};
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
+    gpu::ColorTargetDesc[1] colors = {{ .view = target_view }};
     gpu::RenderPassDesc pass = {
         .colors = colors[..],
         .width  = VAL_RT,
@@ -303,13 +343,23 @@ fn void end_render_pass_scopes_graphics_binding_to_pass() @test {
         gpu::Format.BGRA8_UNORM,
     );
     defer gpu::destroy_texture(&device, second)!!;
-    gpu::ColorTargetDesc[1] first_colors = {{ .texture = first }};
+    gpu::AttachmentViewHandle first_view = create_test_attachment_view(
+        &device,
+        first,
+    )!!;
+    defer destroy_test_attachment_view(&device, &first_view)!!;
+    gpu::AttachmentViewHandle second_view = create_test_attachment_view(
+        &device,
+        second,
+    )!!;
+    defer destroy_test_attachment_view(&device, &second_view)!!;
+    gpu::ColorTargetDesc[1] first_colors = {{ .view = first_view }};
     gpu::RenderPassDesc first_pass = {
         .colors = first_colors[..],
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    gpu::ColorTargetDesc[1] second_colors = {{ .texture = second }};
+    gpu::ColorTargetDesc[1] second_colors = {{ .view = second_view }};
     gpu::RenderPassDesc second_pass = {
         .colors = second_colors[..],
         .width  = VAL_RT,
@@ -344,7 +394,12 @@ fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
     defer gpu::destroy_texture(&device, target)!!;
     render_validation_slot(&device, target).sample_count =
         gpu::SampleCount.FOUR;
-    gpu::ColorTargetDesc[1] colors = {{ .texture = target }};
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
+    gpu::ColorTargetDesc[1] colors = {{ .view = target_view }};
     gpu::RenderPassDesc pass = {
         .colors = colors[..],
         .width  = VAL_RT,

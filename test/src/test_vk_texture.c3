@@ -4,6 +4,7 @@ import gpu @public;
 import gpu::vk @public;
 import vma;
 import vk;
+import std::atomic;
 
 struct PlacementNativeProbe {
     vk::Result create_result;
@@ -470,6 +471,218 @@ fn void texture_barrier_stale_handle_rejected() @test {
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
     defer discard_test_executable(&cmd_executable)!!;
+}
+
+fn void attachment_views_own_exact_subresources_and_retain_textures() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics },
+        .width      = 16,
+        .height     = 8,
+        .mip_levels = 2,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .color_attach },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    gpu::AttachmentViewDesc view_desc = {
+        .texture   = texture,
+        .mip_level = 1,
+    };
+    gpu::AttachmentViewHandle view = gpu::create_attachment_view(
+        &device,
+        &view_desc,
+    )!!;
+
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
+        &device,
+    );
+    vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
+    assert(slot.texture == texture && slot.width == 8 && slot.height == 4,
+        "attachment slots pin exact immutable subresource metadata");
+    assert(slot.owns_native,
+        "non-default attachment subresources own a cold-created native view");
+    assert(@catch(gpu::destroy_texture(&device, texture))
+        == gpu::RESOURCE_IN_USE,
+        "a live attachment view retains its texture");
+
+    gpu::destroy_attachment_view(&device, view)!!;
+    assert(@catch(gpu::destroy_attachment_view(&device, view))
+        == gpu::INVALID_HANDLE,
+        "destroyed attachment handles are stale");
+    gpu::destroy_texture(&device, texture)!!;
+}
+
+fn void default_attachment_view_aliases_texture_native_view() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics },
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .color_attach },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    gpu::AttachmentViewDesc view_desc = { .texture = texture };
+    gpu::AttachmentViewHandle view = gpu::create_attachment_view(
+        &device,
+        &view_desc,
+    )!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
+        &device,
+    );
+    vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
+    assert(!slot.owns_native
+        && slot.native == state.textures.get(texture)!!.default_view,
+        "single-subresource attachments alias the texture-owned default view");
+    gpu::destroy_attachment_view(&device, view)!!;
+    gpu::destroy_texture(&device, texture)!!;
+}
+
+fn void swapchain_owned_attachment_view_rejects_caller_destruction() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics },
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .color_attach },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    gpu::AttachmentViewDesc view_desc = { .texture = texture };
+    gpu::AttachmentViewHandle view = gpu::create_attachment_view(
+        &device,
+        &view_desc,
+    )!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
+        &device,
+    );
+    vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
+    slot.swapchain_owned = true;
+
+    assert(@catch(gpu::destroy_attachment_view(&device, view))
+        == gpu::INVALID_RESOURCE_STATE,
+        "borrowed swapchain attachment views reject caller destruction");
+    assert(state.attachment_views.get(view)!! == slot,
+        "rejected borrowed-view destruction preserves the handle");
+
+    slot.swapchain_owned = false;
+    gpu::destroy_attachment_view(&device, view)!!;
+    gpu::destroy_texture(&device, texture)!!;
+}
+
+fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics },
+        .width      = 8,
+        .height     = 8,
+        .mip_levels = 2,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .color_attach },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::AttachmentViewDesc view_desc = {
+        .texture   = texture,
+        .mip_level = 1,
+    };
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
+        &device,
+    );
+    vk::TextureSlot* texture_slot = state.textures.get(texture)!!;
+    uint references_before = texture_slot.validation_references.load(
+        AtomicOrdering.RELAXED,
+    );
+    uint next_new = state.attachment_views.next_new;
+    uint free_head = state.attachment_views.free_head;
+    state.attachment_views.next_new = (uint)state.attachment_views.slots.len;
+    state.attachment_views.free_head = 0;
+
+    assert(@catch(gpu::create_attachment_view(&device, &view_desc))
+        == gpu::SLOT_TABLE_FULL,
+        "attachment publication capacity faults after cold native creation");
+    assert(texture_slot.validation_references.load(AtomicOrdering.RELAXED)
+        == references_before,
+        "failed attachment publication does not retain the texture");
+    state.attachment_views.next_new = next_new;
+    state.attachment_views.free_head = free_head;
+
+    gpu::AttachmentViewHandle retry = gpu::create_attachment_view(
+        &device,
+        &view_desc,
+    )!!;
+    gpu::destroy_attachment_view(&device, retry)!!;
+}
+
+fn void foreign_attachment_view_destroy_rejects_without_consuming() @test {
+    gpu::Device owner = make_texture_test_device();
+    defer destroy_test_device(&owner)!!;
+    gpu::Device foreign = make_texture_test_device();
+    defer destroy_test_device(&foreign)!!;
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics },
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .color_attach },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&owner, &desc)!!;
+    gpu::AttachmentViewDesc view_desc = { .texture = texture };
+    gpu::AttachmentViewHandle view = gpu::create_attachment_view(
+        &owner,
+        &view_desc,
+    )!!;
+
+    assert(@catch(gpu::destroy_attachment_view(&foreign, view))
+        == gpu::INVALID_HANDLE,
+        "foreign devices cannot consume an attachment-view handle");
+    gpu::destroy_attachment_view(&owner, view)!!;
+    gpu::destroy_texture(&owner, texture)!!;
+}
+
+fn void recorded_attachment_view_destruction_is_retryable() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics },
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .color_attach },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    gpu::AttachmentViewDesc view_desc = { .texture = texture };
+    gpu::AttachmentViewHandle view = gpu::create_attachment_view(
+        &device,
+        &view_desc,
+    )!!;
+    gpu::ColorTargetDesc[1] colors = { { .view = view } };
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = 4,
+        .height = 4,
+    };
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+
+    assert(@catch(gpu::destroy_attachment_view(&device, view))
+        == gpu::RESOURCE_IN_USE,
+        "recorded attachment references make destruction retryable");
+    gpu::discard_commands(&commands)!!;
+    gpu::destroy_attachment_view(&device, view)!!;
+    gpu::destroy_texture(&device, texture)!!;
 }
 
 fn void raised_texture_capacity_holds_more_than_default() @test {
