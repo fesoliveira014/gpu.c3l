@@ -241,6 +241,7 @@ struct gpu::ColorTargetDesc
 struct gpu::CommandList
 struct gpu::CommandListHandle
 struct gpu::CompletionPoint
+struct gpu::CompletionWait
 struct gpu::ComputePipelineDesc
 struct gpu::DebugMessage
 struct gpu::DebugResourceRef

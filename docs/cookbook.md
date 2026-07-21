@@ -130,11 +130,15 @@ gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
 gpu::SubmitDesc sim_submit = { .command_lists = sim_lists[..] };
 gpu::CompletionPoint sim_done = gpu::submit(compute, &sim_submit)!;
 
-gpu::CompletionPoint[1] draw_waits = { sim_done };
+gpu::CompletionWait[1] draw_waits = {{
+    .point  = sim_done,
+    .before = { .vertex_shader },
+}};
 gpu::SubmitDesc draw_submit = {
     .command_lists    = draw_lists[..],
     .completion_waits = draw_waits[..],
     .readiness        = acquired.readiness,
+    .readiness_before = { .color_output },
 };
 gpu::CompletionPoint draw_done = gpu::submit(graphics, &draw_submit)!;
 gpu::present(&device, &acquired, draw_done)!;

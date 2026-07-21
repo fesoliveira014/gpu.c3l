@@ -1023,6 +1023,20 @@ def valid_document() -> dict:
                     },
                     {"name": "ExecutableCommandList", "kind": "struct"},
                     {
+                        "name": "CompletionWait",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "point",
+                                "type": {"name": "CompletionPoint"},
+                            },
+                            {
+                                "name": "before",
+                                "type": {"name": "StageMask"},
+                            },
+                        ],
+                    },
+                    {
                         "name": "SubmitDesc",
                         "kind": "struct",
                         "members": [
@@ -1031,8 +1045,16 @@ def valid_document() -> dict:
                                 "type": {"name": "ExecutableCommandList[]"},
                             },
                             {
+                                "name": "completion_waits",
+                                "type": {"name": "CompletionWait[]"},
+                            },
+                            {
                                 "name": "readiness",
                                 "type": {"name": "SwapchainReadiness"},
+                            },
+                            {
+                                "name": "readiness_before",
+                                "type": {"name": "StageMask"},
                             },
                         ],
                     },
@@ -1401,11 +1423,30 @@ method gpu::Runtime.is_valid
         }]
         failures = check_public_api.validate_document(document)
         self.assertIn(
-            "SubmitDesc must not expose swapchain coupling",
+            "SubmitDesc must match the exact stage-scoped schema",
+            failures,
+        )
+
+    def test_requires_exact_stage_scoped_submit_schema(self) -> None:
+        document = valid_document()
+        types = document["modules"]["gpu"]["types"]
+        completion_wait = next(
+            entry for entry in types
+            if entry["name"] == "CompletionWait"
+        )
+        completion_wait["members"][1]["type"]["name"] = "HazardFlags"
+        submit_desc = next(
+            entry for entry in types
+            if entry["name"] == "SubmitDesc"
+        )
+        submit_desc["members"][1]["type"]["name"] = "CompletionPoint[]"
+        failures = check_public_api.validate_document(document)
+        self.assertIn(
+            "CompletionWait must match the exact stage-scoped schema",
             failures,
         )
         self.assertIn(
-            "SubmitDesc.readiness must contain one-shot swapchain readiness",
+            "SubmitDesc must match the exact stage-scoped schema",
             failures,
         )
 

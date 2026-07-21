@@ -1,6 +1,7 @@
 module gpu;
 
 const CompletionPoint COMPLETION_POINT_INVALID = {};
+const uint STAGE_MASK_BITS @private = 0x01FF;
 
 <* Execution scopes for a global barrier. `all` and `present` are exclusive. *>
 bitstruct StageMask : uint {
@@ -41,6 +42,13 @@ struct CompletionPoint {
     ulong  payload;
 }
 
+<* A published queue completion and the first destination stages that consume
+   its work. *>
+struct CompletionWait {
+    CompletionPoint point;
+    StageMask       before;
+}
+
 <* Global execution and memory dependency with no resource identity or range. *>
 struct Barrier {
     StageMask   before;
@@ -61,6 +69,18 @@ fn bool CompletionPoint.is_valid(self) => self.device.is_valid()
     && completion_point_sequence(self) != 0;
 fn bool CompletionPoint.equals(self, CompletionPoint other) @operator(==) {
     return self.device == other.device && self.payload == other.payload;
+}
+
+fn bool stage_mask_valid(StageMask stages) @private {
+    uint raw = (uint)stages;
+    if (raw == 0 || (raw & STAGE_MASK_BITS) != raw) return false;
+    if (stages.all && raw != 1) return false;
+    if (stages.present && raw != 1u << 8) return false;
+    return true;
+}
+
+fn bool submit_wait_stage_mask_valid(StageMask stages) @private {
+    return stage_mask_valid(stages) && !stages.host && !stages.present;
 }
 
 fn bool texture_use_valid(TextureUse use) @private {

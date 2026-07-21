@@ -473,7 +473,11 @@ fn int main() {
             timestamps_ok: timestamps_ok,
         );
         gpu::ExecutableCommandList[1] a_graphics_lists = { a_graphics };
-        gpu::CompletionPoint[1] a_graphics_waits = { a_compute_completion };
+        // Phase A is the serialized baseline, including pre-fragment work.
+        gpu::CompletionWait[1] a_graphics_waits = {{
+            .point  = a_compute_completion,
+            .before = { .all },
+        }};
         gpu::SubmitDesc a_graphics_submit = {
             .command_lists    = a_graphics_lists[..],
             .completion_waits = a_graphics_waits[..],

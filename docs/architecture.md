@@ -411,8 +411,10 @@ handle transactionally. The pipeline cache fronts a serializable driver cache:
 ### Synchronization
 
 Each successful submission returns a reusable `CompletionPoint`. Cross-queue
-submission dependencies use `SubmitDesc.completion_waits`; same-queue order is
-implicit. Native timelines and swapchain semaphores remain backend-private.
+submission dependencies use stage-scoped `SubmitDesc.completion_waits`;
+same-queue order is implicit after point and stage validation. Swapchain
+readiness likewise names its first destination stages. Native timelines and
+swapchain semaphores remain backend-private.
 
 ### Swapchains
 
@@ -608,7 +610,7 @@ identical on either path.
 
 ```text
 acquired = acquire_next_image(device, swapchain)
-rendered = submit(graphics, command lists + acquired.readiness)
+rendered = submit(graphics, command lists + acquired.readiness before color output)
 present(device, acquired, rendered)
 ```
 
@@ -616,7 +618,8 @@ Acquisition returns a borrowed texture, its swapchain-owned color attachment
 view, and a compact one-shot readiness value. Callers render with the view but
 do not destroy it.
 Submission validates the exact device, swapchain generation, acquisition
-identity, and graphics role before waiting the private native acquire bridge.
+identity, graphics role, and caller-provided first destination stages before
+waiting the private native acquire bridge.
 Only successful native submission consumes readiness and records its returned
 `CompletionPoint` as the acquisition's render completion.
 

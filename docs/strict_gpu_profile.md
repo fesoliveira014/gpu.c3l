@@ -74,7 +74,8 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 - Command lists are transient and one-shot.
 - Recording storage is device-managed and safe for concurrent recording.
 - Successful submission consumes command tokens and returns a compact queue-owned `CompletionPoint`.
-- Completion points support host poll/wait and cross-queue waits; same-queue order is inherent.
+- Completion points support host poll/wait and stage-scoped cross-queue waits;
+  same-queue order is inherent after point and stage validation.
 - Failed submission publishes no point and preserves retryable command tokens.
 - Creating a completion point allocates no public synchronization object.
 - Allocations and textures declare admitted queue roles; cross-family resources use backend-managed concurrent sharing rather than inferred ownership transfers.

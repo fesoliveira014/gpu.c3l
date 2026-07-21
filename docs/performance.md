@@ -132,4 +132,8 @@ path for collecting debug cost with a matching layer.
   execute call and returns it to the same context only after the owning command
   list is discarded or completed.
 - Queue overlap depends on topology, driver scheduling, and workload balance;
-  treat it as an observation, not a guarantee.
+  treat it as an observation, not a guarantee. For cross-queue dependencies,
+  choose the earliest real consumer in `CompletionWait.before`; an unnecessarily
+  broad `.all` mask can reduce available overlap. Indirect and generated command
+  argument consumption has no dedicated public wait-stage bit, so waits for
+  GPU-produced draw/dispatch arguments must use `.all`.

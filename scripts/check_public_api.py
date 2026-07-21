@@ -1238,22 +1238,21 @@ def validate_document(document: dict) -> list[str]:
     if executable is None or executable.get("kind") != "struct":
         failures.append("missing ExecutableCommandList token")
 
-    submit_desc = types.get("SubmitDesc")
-    submit_fields = {
-        member.get("name"): member.get("type", {}).get("name")
-        for member in (submit_desc or {}).get("members", [])
-    }
-    if submit_fields.get("command_lists") != "ExecutableCommandList[]":
-        failures.append(
-            "SubmitDesc.command_lists must contain executable tokens"
-        )
-    if submit_fields.get("readiness") != "SwapchainReadiness":
-        failures.append(
-            "SubmitDesc.readiness must contain one-shot swapchain readiness"
-        )
-    if "swapchain" in submit_fields:
-        failures.append("SubmitDesc must not expose swapchain coupling")
+    if member_schema(types.get("CompletionWait")) != (
+        ("point", "CompletionPoint"),
+        ("before", "StageMask"),
+    ):
+        failures.append("CompletionWait must match the exact stage-scoped schema")
 
+    submit_desc = types.get("SubmitDesc")
+    submit_schema = member_schema(submit_desc)
+    if submit_schema != (
+        ("command_lists", "ExecutableCommandList[]"),
+        ("completion_waits", "CompletionWait[]"),
+        ("readiness", "SwapchainReadiness"),
+        ("readiness_before", "StageMask"),
+    ):
+        failures.append("SubmitDesc must match the exact stage-scoped schema")
     readiness = types.get("SwapchainReadiness")
     if readiness is None or readiness.get("kind") != "struct":
         failures.append("missing SwapchainReadiness token")

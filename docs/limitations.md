@@ -37,7 +37,10 @@ page doesn't explain it, that's a bug in this page — file an issue.
   when available and reported by `DeviceCaps.async_compute`. Resources declare
   their semantic access roles; distinct admitted families use private concurrent
   sharing, while aliased roles stay exclusive. Barriers and queue ordering remain
-  explicit. Exclusive cross-family ownership transfers are unsupported.
+  explicit. Completion and swapchain readiness waits require an explicit,
+  destination-queue-supported device stage; host and presentation stages are
+  not valid wait destinations. Exclusive cross-family ownership transfers are
+  unsupported.
 - **Wireframe polygon rasterization is optional.** `DeviceCaps.line_polygon_mode`
   reports whether `PolygonMode.LINE` is enabled. Unsupported adapters reject
   it with `UNSUPPORTED_FEATURE`; filled rasterization and
