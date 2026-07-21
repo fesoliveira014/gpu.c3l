@@ -98,7 +98,7 @@ fn gpu::PipelineHandle build_cache_io_pipeline(gpu::Device* device) {
         .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_IO_COMP_SPIRV[..], .entry_point = "main",
     };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc pipe_desc = { .shader = shader };
     return gpu::create_compute_pipeline(device, &pipe_desc)!!;
 }
 

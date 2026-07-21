@@ -38,7 +38,7 @@ BENCHMARK_METHODS = {
         "submit=256x5; poll=100000x5; destroy=300x5",
         "ns/submit, ns/poll, ns/destroy",
     ),
-    "pipeline_cache_bench": ("cold=200; duplicate=200000; batch=64x2000", "ns/create"),
+    "pipeline_cache_bench": ("raster=200; duplicate=200000; batch=64x2000", "ns/create, ns/state"),
     "async_overlap_bench": ("calibration=2; measured=5", "ms"),
 }
 
@@ -114,6 +114,16 @@ COMMAND_RECORD_WARM_WORK = re.compile(
     r"generated_scratch_misses=0$",
     re.MULTILINE,
 )
+PIPELINE_CACHE_MATRIX = re.compile(
+    r"^phase 1 \(raster matrix, requested=200 native=1 "
+    r"cache_entries=1 aliases=200\): [0-9]+(?:\.[0-9]+)? ns/create$",
+    re.MULTILINE,
+)
+PIPELINE_CACHE_RASTER_RECORDING = re.compile(
+    r"^raster recording \(requested=200 native=1\): "
+    r"[0-9]+(?:\.[0-9]+)? ns/state$",
+    re.MULTILINE,
+)
 
 REGRESSION_THRESHOLDS = {
     "allocation_bench": (
@@ -132,7 +142,7 @@ REGRESSION_THRESHOLDS = {
         ("texture destruction", re.compile(r"^texture destroy:.* median=(?P<value>[0-9]+(?:\.[0-9]+)?) ns/destroy$", re.MULTILINE), 10_000.0, True),
     ),
     "pipeline_cache_bench": (
-        ("cold pipeline creation", re.compile(r"^phase 1 .*: (?P<value>[0-9]+(?:\.[0-9]+)?) ns/create$", re.MULTILINE), 500_000.0, True),
+        ("raster-matrix pipeline aliases", re.compile(r"^phase 1 .*: (?P<value>[0-9]+(?:\.[0-9]+)?) ns/create$", re.MULTILINE), 500_000.0, True),
         ("duplicate pipeline lookup", re.compile(r"^phase 2 .*: (?P<value>[0-9]+(?:\.[0-9]+)?) ns/create$", re.MULTILINE), 20_000.0, True),
         ("cached pipeline batch", re.compile(r"^phase 3 .*: (?P<value>[0-9]+(?:\.[0-9]+)?) ns/create$", re.MULTILINE), 20_000.0, True),
     ),
@@ -181,6 +191,15 @@ def require_measurement(output, target, enforce_thresholds=True):
         raise ValueError(f"{target} cold recording work evidence is missing")
     if target == "command_record_bench" and not COMMAND_RECORD_WARM_WORK.search(output):
         raise ValueError(f"{target} warm recording work is missing or nonzero")
+    if target == "pipeline_cache_bench" and not PIPELINE_CACHE_MATRIX.search(output):
+        raise ValueError(
+            f"{target} raster matrix did not collapse to one native pipeline"
+        )
+    if (
+        target == "pipeline_cache_bench"
+        and not PIPELINE_CACHE_RASTER_RECORDING.search(output)
+    ):
+        raise ValueError(f"{target} raster recording evidence is missing")
     if enforce_thresholds:
         require_regression_thresholds(output, target)
 

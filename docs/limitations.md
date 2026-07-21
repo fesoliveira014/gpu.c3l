@@ -45,6 +45,12 @@ page doesn't explain it, that's a bug in this page — file an issue.
   reports whether `PolygonMode.LINE` is enabled. Unsupported adapters reject
   it with `UNSUPPORTED_FEATURE`; filled rasterization and
   `PrimitiveTopology.LINES` remain available.
+- **Dynamic raster state is part of the strict device profile.** Device
+  creation requires independent blending, depth-bias clamp, and unrestricted
+  dynamic topology classes plus the extension that supplies the topology
+  property. An adapter missing any of them is rejected with
+  `UNSUPPORTED_FEATURE`; the backend does not synthesize raster-specific
+  pipeline variants.
 - **GPU-generated roots are optional.** `DeviceCaps.generated_work` requires
   one backend facility that supports the draw, indexed-draw, and dispatch
   record layouts together. Unsupported devices retain the shared-root indirect
@@ -80,7 +86,6 @@ exists (else the limit is compile-time).
 | Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY` in `gpu/texture.c3`; `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
 | Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
 | Live pipelines | 256 by default (`MAX_PIPELINES` in `gpu/pipeline.c3`) | `pipeline_capacity` | `SLOT_TABLE_FULL` |
-| Compute push-constant range | Selected-device `maxPushConstantsSize`, reported by `DeviceCaps.max_push_constant_size` | — | `INVALID_ARGUMENT` |
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
 | Generated work items | Selected-device semantic limit reported by `DeviceCaps.max_generated_work_count`; zero when unsupported | — | — |

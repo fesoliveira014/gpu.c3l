@@ -17,12 +17,20 @@ fn vk::PhysicalDeviceFeatures base_with_required() {
     vk::PhysicalDeviceFeatures base;
     base.shader_int64 = vk::TRUE;
     base.multi_draw_indirect = vk::TRUE;
+    base.independent_blend = vk::TRUE;
+    base.depth_bias_clamp = vk::TRUE;
     return base;
 }
 
 fn vk::PhysicalDeviceVulkan11Features v11_with_required() {
     return vk::physical_device_vulkan11features()
         .set_shader_draw_parameters(vk::TRUE);
+}
+
+fn vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT
+dynamic_properties_with_required() {
+    return vk::physical_device_extended_dynamic_state3properties_ext()
+        .set_dynamic_primitive_topology_unrestricted(vk::TRUE);
 }
 
 fn void required_features_present_ok() @test {
@@ -34,8 +42,16 @@ fn void required_features_present_ok() @test {
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        dynamic_properties_with_required();
 
-    assert(!@catch(gpu::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13)), "all required features present must pass the gate");
+    assert(!@catch(gpu::vk::check_required_features(
+        base:               &base,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_properties: &dynamic_properties,
+    )), "all required features present must pass the gate");
 }
 
 fn void missing_feature_rejected() @test {
@@ -44,8 +60,16 @@ fn void missing_feature_rejected() @test {
     vk::PhysicalDeviceVulkan11Features v11 = vk::physical_device_vulkan11features();
     vk::PhysicalDeviceVulkan12Features v12 = vk::physical_device_vulkan12features();
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features();
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        vk::physical_device_extended_dynamic_state3properties_ext();
 
-    fault gate_fault = @catch(gpu::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13));
+    fault gate_fault = @catch(gpu::vk::check_required_features(
+        base:               &base,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_properties: &dynamic_properties,
+    ));
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "a missing required feature raises UNSUPPORTED_FEATURE");
 }
 
@@ -58,8 +82,16 @@ fn void one_missing_feature_rejected() @test {
         .set_timeline_semaphore(vk::TRUE);
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        dynamic_properties_with_required();
 
-    fault gate_fault = @catch(gpu::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13));
+    fault gate_fault = @catch(gpu::vk::check_required_features(
+        base:               &base,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_properties: &dynamic_properties,
+    ));
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "a single missing feature still raises UNSUPPORTED_FEATURE");
 }
 
@@ -67,6 +99,8 @@ fn void missing_shader_int64_rejected() @test {
     // Everything except shaderInt64.
     vk::PhysicalDeviceFeatures base;
     base.multi_draw_indirect = vk::TRUE;
+    base.independent_blend = vk::TRUE;
+    base.depth_bias_clamp = vk::TRUE;
     vk::PhysicalDeviceVulkan11Features v11 = v11_with_required();
     vk::PhysicalDeviceVulkan12Features v12 = vk::physical_device_vulkan12features()
         .set_buffer_device_address(vk::TRUE)
@@ -74,8 +108,16 @@ fn void missing_shader_int64_rejected() @test {
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        dynamic_properties_with_required();
 
-    fault gate_fault = @catch(gpu::vk::check_required_features(base: &base, v11: &v11, v12: &v12, v13: &v13));
+    fault gate_fault = @catch(gpu::vk::check_required_features(
+        base:               &base,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_properties: &dynamic_properties,
+    ));
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "missing shaderInt64 raises UNSUPPORTED_FEATURE");
 }
 
@@ -86,19 +128,78 @@ fn void missing_indirect_features_rejected() @test {
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        dynamic_properties_with_required();
 
     // multiDrawIndirect unset.
     vk::PhysicalDeviceFeatures base_no_mdi;
     base_no_mdi.shader_int64 = vk::TRUE;
+    base_no_mdi.independent_blend = vk::TRUE;
+    base_no_mdi.depth_bias_clamp = vk::TRUE;
     vk::PhysicalDeviceVulkan11Features v11 = v11_with_required();
-    fault mdi_fault = @catch(gpu::vk::check_required_features(base: &base_no_mdi, v11: &v11, v12: &v12, v13: &v13));
+    fault mdi_fault = @catch(gpu::vk::check_required_features(
+        base:               &base_no_mdi,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_properties: &dynamic_properties,
+    ));
     assert(mdi_fault == gpu::UNSUPPORTED_FEATURE, "missing multiDrawIndirect raises UNSUPPORTED_FEATURE");
 
     // shaderDrawParameters unset.
     vk::PhysicalDeviceFeatures base = base_with_required();
     vk::PhysicalDeviceVulkan11Features v11_empty = vk::physical_device_vulkan11features();
-    fault sdp_fault = @catch(gpu::vk::check_required_features(base: &base, v11: &v11_empty, v12: &v12, v13: &v13));
+    fault sdp_fault = @catch(gpu::vk::check_required_features(
+        base:               &base,
+        v11:                &v11_empty,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_properties: &dynamic_properties,
+    ));
     assert(sdp_fault == gpu::UNSUPPORTED_FEATURE, "missing shaderDrawParameters raises UNSUPPORTED_FEATURE");
+}
+
+fn void raster_feature_requirements_rejected_individually() @test {
+    vk::PhysicalDeviceFeatures base = base_with_required();
+    vk::PhysicalDeviceVulkan11Features v11 = v11_with_required();
+    vk::PhysicalDeviceVulkan12Features v12 = vk::physical_device_vulkan12features()
+        .set_buffer_device_address(vk::TRUE)
+        .set_timeline_semaphore(vk::TRUE);
+    vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
+        .set_synchronization2(vk::TRUE)
+        .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        dynamic_properties_with_required();
+
+    base.independent_blend = vk::FALSE;
+    assert(@catch(gpu::vk::check_required_features(
+        base:               &base,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_properties: &dynamic_properties,
+    )) == gpu::UNSUPPORTED_FEATURE, "missing independentBlend rejects the candidate");
+
+    base = base_with_required();
+    base.depth_bias_clamp = vk::FALSE;
+    assert(@catch(gpu::vk::check_required_features(
+        base:               &base,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_properties: &dynamic_properties,
+    )) == gpu::UNSUPPORTED_FEATURE, "missing depthBiasClamp rejects the candidate");
+
+    base = base_with_required();
+    dynamic_properties.dynamic_primitive_topology_unrestricted = vk::FALSE;
+    assert(@catch(gpu::vk::check_required_features(
+        base:               &base,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_properties: &dynamic_properties,
+    )) == gpu::UNSUPPORTED_FEATURE,
+        "restricted dynamic topology rejects the candidate before scoring");
 }
 
 fn vk::PhysicalDeviceVulkan12Features v12_with_heap_bits() {

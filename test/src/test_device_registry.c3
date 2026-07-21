@@ -261,6 +261,15 @@ fn void? command_pin_set_depth_state(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn void? command_pin_set_raster_state(
+    gpu::CommandEncoderState* encoder,
+    gpu::DynamicRasterState* raster,
+) {
+    (void)encoder;
+    (void)raster;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn void? command_pin_dispatch(
     gpu::CommandEncoderState* encoder,
     gpu::GpuAddress root,
@@ -520,6 +529,7 @@ gpu::CommandOps command_pin_ops = {
     .texture_barrier             = &command_pin_texture_barrier,
     .bind_pipeline               = &command_pin_bind_pipeline,
     .set_depth_state             = &command_pin_set_depth_state,
+    .set_raster_state            = &command_pin_set_raster_state,
     .dispatch                    = &command_pin_dispatch,
     .begin_render_pass           = &command_pin_begin_render_pass,
     .set_viewport                = &command_pin_set_viewport,

@@ -280,6 +280,8 @@ def check(root: Path = ROOT) -> list[str]:
     device_source = read(root, "gpu/device.c3")
     command_state_source = read(root, "gpu/vk/command_state.c3")
     backend_device_source = read(root, "gpu/vk/device.c3")
+    pipeline_cache_source = read(root, "gpu/vk/pipeline_cache.c3")
+    pipeline_compute_source = read(root, "gpu/vk/pipeline_compute.c3")
     lifetime_source = read(root, "gpu/vk/lifetime.c3")
     command_bench = read(root, "test/src/command_record_bench.c3")
     lifecycle_bench = read(root, "test/src/lifecycle_bench.c3")
@@ -336,19 +338,91 @@ def check(root: Path = ROOT) -> list[str]:
                 )
 
     backend_root = root / "gpu/vk"
+    legacy_layout_cache_references = 0
     for path in sorted(backend_root.glob("*.c3")):
-        relative = path.relative_to(root).as_posix()
-        if relative == "gpu/vk/pipeline_cache.c3":
-            continue
-        reference_count = mask_c3_comments(
+        legacy_layout_cache_references += mask_c3_comments(
             path.read_text(encoding="utf-8")
         ).count("compute_layout_cache")
-        allowed_count = 1 if relative == "gpu/vk/device.c3" else 0
-        if reference_count != allowed_count:
+    if legacy_layout_cache_references != 0:
+        errors.append(
+            "gpu/vk must use singleton compute layouts, not compute-layout "
+            "cache storage"
+        )
+
+    if backend_device_source.count(
+        "vk::PipelineLayout         compute_layout;"
+    ) != 1:
+        errors.append(
+            "gpu/vk/device.c3 must own exactly one compute pipeline layout"
+        )
+    if backend_device_source.count(
+        "vk::IndirectCommandsLayoutEXT generated_dispatch_layout;"
+    ) != 1:
+        errors.append(
+            "gpu/vk/device.c3 must own exactly one generated dispatch layout"
+        )
+
+    shared_creation = function_body(
+        pipeline_cache_source,
+        "create_pipeline_shared",
+    )
+    if shared_creation.count("&state.compute_layout") != 1:
+        errors.append(
+            "gpu/vk/pipeline_cache.c3 must create one fixed compute layout "
+            "during device setup"
+        )
+    if shared_creation.count(
+        "state.generated_dispatch_layout = create_generated_work_layout("
+    ) != 1:
+        errors.append(
+            "gpu/vk/pipeline_cache.c3 must create one generated dispatch "
+            "layout during device setup"
+        )
+
+    compute_creation = function_body(
+        pipeline_compute_source,
+        "create_compute_pipeline_from_module",
+    )
+    if compute_creation.count("pipe_info.layout = state.compute_layout;") != 1:
+        errors.append(
+            "gpu/vk/pipeline_compute.c3 must use the singleton compute layout"
+        )
+    if "create_pipeline_layout(" in compute_creation:
+        errors.append(
+            "gpu/vk/pipeline_compute.c3 must not create per-pipeline layouts"
+        )
+
+    required_pipeline_key_tokens = (
+        "ColorTargetKey[gpu::MAX_COLOR_ATTACHMENTS] color_targets;",
+        "$assert ColorTargetKey::size == 36;",
+        "$assert PipelineKey::size == 328;",
+    )
+    for token in required_pipeline_key_tokens:
+        if token not in pipeline_cache_source:
             errors.append(
-                f"{relative} must not access compute-layout cache storage "
-                "outside gpu/vk/pipeline_cache.c3"
+                "gpu/vk/pipeline_cache.c3 is missing immutable key shape "
+                f"token {token}"
             )
+    graphics_key = function_body(pipeline_cache_source, "build_graphics_key")
+    for token in ("desc.colors", "target.blend", "target.write_mask", "desc.polygon_mode"):
+        if token not in graphics_key:
+            errors.append(
+                "gpu/vk/pipeline_cache.c3 graphics key is missing immutable "
+                f"state {token}"
+            )
+    reject_tokens(
+        errors,
+        "gpu/vk/pipeline_cache.c3",
+        "build_graphics_key",
+        graphics_key,
+        ("desc.topology", "desc.raster", "depth_bias", "cull_mode", "front_face"),
+    )
+    compute_key = function_body(pipeline_cache_source, "build_compute_key")
+    if "desc.shader.digest" not in compute_key or "push_constant" in compute_key:
+        errors.append(
+            "gpu/vk/pipeline_cache.c3 compute key must use shader identity "
+            "with the fixed root layout"
+        )
 
     ownership_sources = (
         ("gpu/vk/command.c3", backend_source, BACKEND_OWNERSHIP_DIGESTS),

@@ -83,6 +83,21 @@ enum IndexType : int {
     U16,
 }
 
+<* Color channels written by one graphics target; zero disables all writes. *>
+bitstruct ColorWriteMask : uint {
+    bool red   : 0;
+    bool green : 1;
+    bool blue  : 2;
+    bool alpha : 3;
+}
+
+const ColorWriteMask COLOR_WRITE_ALL = {
+    .red   = true,
+    .green = true,
+    .blue  = true,
+    .alpha = true,
+};
+
 <* Borrowed SPIR-V preparation input; the bytes must match `stage`. *>
 struct ShaderDesc {
     ShaderStage stage;
@@ -109,19 +124,7 @@ struct DepthState {
     CompareOp compare;
 }
 
-<* Immutable rasterizer state in graphics pipeline identity. *>
-struct RasterState {
-    CullMode    cull_mode;
-    FrontFace   front_face;
-    PolygonMode polygon_mode;
-    // Any non-zero bias field enables depth bias.
-    float       depth_bias_constant;
-    float       depth_bias_slope;
-    float       depth_bias_clamp;
-}
-
-<* Blend equation, applied to every color target alike; disabled (the zero
-   value) writes source unmodified. *>
+<* Blend equation for one color target; disabled is the zero value. *>
 struct BlendState {
     bool        enable;
     BlendFactor src_color;
@@ -132,28 +135,41 @@ struct BlendState {
     BlendOp     alpha_op;
 }
 
-<* Inputs to create_compute_pipeline; the layout is the global heap set plus
-   a push range of push_constant_size bytes. *>
+<* Immutable format, blend equation, and write mask for one color target. *>
+struct ColorTargetState {
+    Format         format;
+    BlendState     blend;
+    ColorWriteMask write_mask;
+}
+
+<* Pass-bounded raster state; zero means triangles, no culling,
+   counter-clockwise front faces, and disabled depth bias. *>
+struct DynamicRasterState {
+    PrimitiveTopology topology;
+    CullMode          cull_mode;
+    FrontFace         front_face;
+    bool              depth_bias_enable;
+    float             depth_bias_constant;
+    float             depth_bias_slope;
+    float             depth_bias_clamp;
+}
+
+<* Inputs to create_compute_pipeline; the layout uses the fixed RootPush ABI. *>
 struct ComputePipelineDesc {
     ShaderCode shader;
-    // At least RootPush::size, four-byte aligned, and no greater than
-    // DeviceCaps.max_push_constant_size.
-    uint         push_constant_size;
-    ZString      debug_name;
+    ZString    debug_name;
 }
 
 <* Inputs to create_graphics_pipeline, targeting dynamic rendering. The layout
    is fixed: the global heap set plus a 16-byte vertex/fragment root push range. *>
 struct GraphicsPipelineDesc {
-    ShaderCode        vertex_shader;
-    ShaderCode        fragment_shader;
-    PrimitiveTopology topology;
-    RasterState       raster;
-    BlendState        blend;
-    Format[]          color_formats;
-    Format            depth_format;
-    SampleCount       sample_count;
-    ZString           debug_name;
+    ShaderCode         vertex_shader;
+    ShaderCode         fragment_shader;
+    ColorTargetState[] colors;
+    Format             depth_format;
+    SampleCount        sample_count;
+    PolygonMode        polygon_mode;
+    ZString            debug_name;
 }
 
 fn bool ShaderCode.is_valid(self) {
@@ -244,7 +260,7 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
    the global heap set plus a 16-byte vertex/fragment root push range.
    Descriptors identical in immutable state alias one backend pipeline under
    distinct handles. Depth state is bound separately during command recording.
-   At most MAX_COLOR_ATTACHMENTS color formats. Ownership:
+   At most MAX_COLOR_ATTACHMENTS color targets. Ownership:
    release with destroy_pipeline, once per create. *>
 fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;

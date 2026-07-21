@@ -4,6 +4,7 @@ alias gpu::Vec2f
 alias gpu::Vec4f
 alias gpu::Vec4u
 bitstruct gpu::Adapter
+bitstruct gpu::ColorWriteMask
 bitstruct gpu::DebugMessageCategory
 bitstruct gpu::Device
 bitstruct gpu::HazardFlags
@@ -21,6 +22,7 @@ bitstruct gpu::TextureUsage
 constant gpu::ADAPTER_INVALID
 constant gpu::ATTACHMENT_VIEW_HANDLE_INVALID
 constant gpu::COMMAND_LIST_HANDLE_INVALID
+constant gpu::COLOR_WRITE_ALL
 constant gpu::COMPLETION_POINT_INVALID
 constant gpu::DEFAULT_ATTACHMENT_VIEW_CAPACITY
 constant gpu::DEFAULT_SAMPLER_HEAP_CAPACITY
@@ -119,6 +121,7 @@ function gpu::cmd_end_label
 function gpu::cmd_end_render_pass
 function gpu::cmd_fill_buffer
 function gpu::cmd_set_depth_state
+function gpu::cmd_set_raster_state
 function gpu::cmd_set_scissor
 function gpu::cmd_set_viewport
 function gpu::cmd_texture_barrier
@@ -237,6 +240,7 @@ struct gpu::BlendState
 struct gpu::BufferCopyDesc
 struct gpu::BufferTextureCopyDesc
 struct gpu::ClearDepthStencil
+struct gpu::ColorTargetState
 struct gpu::ColorTargetDesc
 struct gpu::CommandList
 struct gpu::CommandListHandle
@@ -253,6 +257,7 @@ struct gpu::DeviceRequestSupport
 struct gpu::DispatchIndirectCommand
 struct gpu::DrawIndexedIndirectCommand
 struct gpu::DrawIndirectCommand
+struct gpu::DynamicRasterState
 struct gpu::ExecutableCommandList
 struct gpu::GeneratedDispatchRecord
 struct gpu::GeneratedDrawIndexedRecord
@@ -269,7 +274,6 @@ struct gpu::Queue
 struct gpu::QueueCounts
 struct gpu::QueueInfo
 struct gpu::QueueRequirements
-struct gpu::RasterState
 struct gpu::RenderPassDesc
 struct gpu::RootPush
 struct gpu::RuntimeDesc

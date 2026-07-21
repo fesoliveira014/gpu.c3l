@@ -180,8 +180,14 @@ gpu::SamplerDesc shadow_sampler_desc = {
 gpu::Sampler shadow_sampler = gpu::intern_sampler(&device, &shadow_sampler_desc)!;
 gpu::SamplerIndex shadow_sampler_index =
     gpu::publish_sampler(&device, shadow_sampler)!;
-// The shadow pipeline has no color formats, uses D32, and applies depth bias.
+// The shadow pipeline has no color targets and uses D32. Bias is pass state.
 gpu::cmd_bind_pipeline(&cmd, shadow_pipeline)!;
+gpu::DynamicRasterState raster = {
+    .depth_bias_enable   = true,
+    .depth_bias_constant = 1.25f,
+    .depth_bias_slope    = 1.75f,
+};
+gpu::cmd_set_raster_state(&cmd, &raster)!;
 gpu::DepthState depth_state = {
     .test_enable  = true,
     .write_enable = true,
@@ -220,7 +226,8 @@ gpu::ColorTargetDesc[3] colors = {
     { .view = position_view },
 };
 gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, ... };
-// pipeline: .color_formats lists all three; frag writes location 0..2
+// pipeline: .colors lists all three target formats/blends/write masks;
+// frag writes locations 0..2.
 ```
 
 Create the depth attachment view the same way. After the covering completion
@@ -261,7 +268,10 @@ if (support.mailbox) { /* recreate swapchain with PresentMode.MAILBOX */ }
 gpu::SwapchainInfo info = gpu::get_swapchain_info(&device, swapchain)!;
 if (info.dormant) { /* wait for a non-zero resize */ }
 
-gpu::Format[1] color_formats = { info.format };
+gpu::ColorTargetState[1] pipeline_colors = {{
+    .format     = info.format,
+    .write_mask = gpu::COLOR_WRITE_ALL,
+}};
 
 gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
 // Render with acquired.attachment_view; the swapchain owns it.

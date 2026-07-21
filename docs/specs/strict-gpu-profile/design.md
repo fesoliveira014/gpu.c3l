@@ -310,9 +310,12 @@ There is no public `ShaderHandle`. Backend shader modules are temporary pipeline
 Pipeline creation is explicit and is the only operation that may compile native pipeline code.
 
 - A compute pipeline contains compute shader code.
-- A graphics pipeline contains shader code, attachment compatibility, topology, culling, sample state, and baseline blend state.
+- A graphics pipeline contains shader code, per-target format/blend/write-mask
+  state, depth format, sample state, and polygon mode.
 - Depth/stencil state is a separate immutable object.
-- Viewport and scissor are dynamic command state.
+- Topology, culling, front face, depth bias, viewport, and scissor are dynamic
+  command state.
+- Every compute pipeline shares the fixed `RootPush` device layout.
 
 Batch pipeline creation deduplicates identical shader modules within the batch and uses the device pipeline cache. It publishes either the documented successful handles or a transactional failure result.
 
@@ -322,6 +325,7 @@ Binding is separate from execution:
 
 ```text
 set strict pipeline
+set raster state
 set depth/stencil state
 draw or dispatch with root addresses
 ```
@@ -416,7 +420,7 @@ Examples:
 | Texture transitions | image memory barriers with private layouts |
 | Dynamic render passes | dynamic rendering or cached legacy render passes |
 | Placed texture requirements | maintenance4 queries or an equivalent private probe |
-| Dynamic raster state | Vulkan core or extended dynamic state |
+| Dynamic raster state | Vulkan 1.3 promoted dynamic state with unrestricted topology classes |
 | Optional GPU-generated work | device-generated commands |
 
 No specific extension name is part of the public contract. The backend can use a promoted core feature, an extension variant, or another exact implementation.

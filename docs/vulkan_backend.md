@@ -67,7 +67,20 @@ timeline semaphores
 shaderInt64
 multiDrawIndirect
 shaderDrawParameters
+independentBlend
+depthBiasClamp
+dynamicPrimitiveTopologyUnrestricted
+VK_EXT_extended_dynamic_state3
 ```
+
+`independentBlend` and `depthBiasClamp` are core physical-device features.
+`dynamicPrimitiveTopologyUnrestricted` is the
+`VkPhysicalDeviceExtendedDynamicState3PropertiesEXT` property; requiring it
+allows `cmd_set_raster_state` to switch topology classes without compiling
+pipeline variants. The backend requires and enables the extension that supplies
+that property so it remains active and visible to validation. Vulkan 1.3 still
+supplies the promoted topology, cull, front-face, and depth-bias core commands;
+no extended-dynamic-state feature structure is enabled.
 
 Shader heaps are selected automatically. Descriptor indexing is preferred when
 its features and limits satisfy the requested semantic capacities. Descriptor
@@ -188,7 +201,12 @@ timelineSemaphore
 shaderInt64
 multiDrawIndirect
 shaderDrawParameters
+independentBlend
+depthBiasClamp
 ```
+
+`VK_EXT_extended_dynamic_state3` is also always enabled to activate the required
+unrestricted-topology property; command dispatch remains Vulkan 1.3 core.
 
 `maintenance4` is always enabled. The strict request adds its heap features:
 
@@ -219,13 +237,11 @@ layouts, token offset 16, record stride 40, and a nonzero work-count limit.
 semantically; unsupported devices report false and zero. These extensions are
 not physical-device selection requirements.
 
-The backend owns one indirect-command layout for each draw shape and one per
-cached compute pipeline layout. Each compute pipeline cache entry and live
-pipeline slot carries the generated-dispatch layout paired with its ordinary
-pipeline layout. Recording reads that stable slot value directly; it never
-searches layout-cache storage that pipeline creation may grow. The device-owned
-compute-layout cache remains the sole owner and destroys both handles at device
-teardown. Generated recording uses implicit preprocessing with buffers reserved
+The backend owns one indirect-command layout for each draw shape and one
+generated-dispatch layout paired with the device's singleton compute pipeline
+layout. Each compute cache entry and live pipeline slot borrows that stable
+pair. Recording reads the slot value directly, and the device destroys both
+owned singleton handles at teardown. Generated recording uses implicit preprocessing with buffers reserved
 explicitly by `reserve_generated_scratch` on the calling thread's device
 recording context. The queue argument selects and validates the device. For
 each pipeline and generated-work kind, reservation queries
@@ -489,12 +505,9 @@ descriptor heap bindings match convention
 
 ### Compute pipeline
 
-Compute pipeline creation:
-
-Before shader-code lookup, reject a push-constant size below
-`RootPush::size`, not divisible by four, or above
-`DeviceCaps.max_push_constant_size`. These public
-input faults return `INVALID_ARGUMENT` before any Vulkan call.
+Compute pipeline creation uses the device-owned singleton layout. Its push
+constant range is exactly `RootPush::size`; no per-pipeline layout dimension is
+accepted or cached.
 
 ```text
 shader module
@@ -512,29 +525,35 @@ vertex shader
 fragment shader
 pipeline layout with vertex/fragment root push constants
 color/depth formats for dynamic rendering
-immutable raster and blend state
-separate dynamic depth state
+per-target immutable blend and write-mask state
+immutable polygon mode
+separate dynamic raster and depth state
 viewport/scissor dynamic state
 pipeline cache lookup
 vk::Pipeline
 ```
 
 Dynamic rendering begins with fixed-count `vkCmdSetViewport` and
-`vkCmdSetScissor` calls covering the full pass. Public overrides use those
+`vkCmdSetScissor` calls covering the full pass, followed by the zero raster
+default. Public overrides use those
 same Vulkan 1.3 core commands after library validation: finite viewport
 values, nonnegative/positive extents as appropriate, representable scissor
 endpoints, depth endpoints in `[0, 1]`, and rectangles bounded by the active
 pass. The command list carries the active pass extent only while
 `RECORDING_RENDER_PASS`.
 
-Viewport, scissor, and depth state are absent from `PipelineKey` and
-`PipelineSlot`. Explicit pipeline binding emits the native pipeline and heap
+Topology, cull mode, front face, depth bias, viewport, scissor, and depth state
+are absent from `PipelineKey` and `PipelineSlot`. `PipelineKey` stores each
+color target's format, blend equation, and write mask, plus depth format,
+sample count, polygon mode, and shader identity. Explicit pipeline binding emits the native pipeline and heap
 binds when the active cache entry changes; rebinding the same entry or an alias
-emits neither. `cmd_set_depth_state` emits the Vulkan 1.3 dynamic depth commands and
+emits neither. `cmd_set_raster_state` emits the promoted Vulkan 1.3 topology,
+cull, front-face, depth-bias-enable, and depth-bias commands as one validated
+operation. `cmd_set_depth_state` emits the Vulkan 1.3 dynamic depth commands and
 marks depth state valid for the active pass. Draw and dispatch only validate
 active state, push roots, and execute; they never create a native pipeline.
-Viewport and scissor survive pipeline switches, while pass begin resets them to
-the full pass and requires depth state again. Multi-viewport arrays,
+Raster, viewport, and scissor survive pipeline switches, while pass begin
+resets them to zero/full-pass defaults and requires depth state again. Multi-viewport arrays,
 negative-height viewport flips, and off-pass overscan are outside the portable
 contract.
 
@@ -549,13 +568,10 @@ distinct and a prepared value can be reused across devices. The driver cache is
 created with `RuntimeDesc.pipeline_cache_data` as initial data and exported
 through `get_pipeline_cache_size` / `get_pipeline_cache_data`.
 
-Compute pipeline layouts are shared per push-constant size in a packed
-device-owned cache. Host storage uses pipeline capacity as an initial hint and
-grows to the device's finite valid-size count. Lookup returns the ordinary and
-generated-dispatch layouts as one value, and publication copies that pair into
-the canonical pipeline cache entry and every resulting pipeline slot. Those
-copies are non-owning; only the compute-layout cache destroys the native
-layouts.
+All compute pipelines borrow one device-owned pipeline layout with the fixed
+`RootPush` range. Generated dispatch likewise borrows one device-owned indirect
+command layout. Pipeline cache entries and live slots carry non-owning copies;
+device teardown destroys the singleton handles after cached pipelines.
 
 ### Result mapping
 

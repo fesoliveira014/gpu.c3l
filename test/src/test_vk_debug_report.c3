@@ -549,7 +549,7 @@ fn void leak_reporters_count_leaks() @test {
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DBG_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = 8 };
+    gpu::ComputePipelineDesc pipe_desc = { .shader = shader };
     gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
 

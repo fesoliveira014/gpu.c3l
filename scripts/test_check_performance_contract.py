@@ -17,6 +17,7 @@ REQUIRED_PATHS = (
     "gpu/vk/command_state.c3",
     "gpu/vk/lifetime.c3",
     "gpu/vk/pipeline_cache.c3",
+    "gpu/vk/pipeline_compute.c3",
     "gpu/vk/queue.c3",
     "gpu/vk/render_pass.c3",
     "gpu/vk/sync.c3",
@@ -159,7 +160,7 @@ class PerformanceContractTests(unittest.TestCase):
                 any("post-bind pipeline resolution" in error for error in errors)
             )
 
-    def test_compute_layout_cache_access_from_recording_is_rejected(self):
+    def test_legacy_compute_layout_cache_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.copied_tree(root)
@@ -168,7 +169,7 @@ class PerformanceContractTests(unittest.TestCase):
                 "gpu/vk/command.c3",
                 "fn void? vk_cmd_dispatch_generated(",
                 (
-                    "fn uint forbidden_layout_cache_read(VkDeviceState* state) {\n"
+                    "fn uint legacy_layout_cache_read(VkDeviceState* state) {\n"
                     "    return state.compute_layout_cache.count;\n"
                     "}\n\n"
                     "fn void? vk_cmd_dispatch_generated("
@@ -177,33 +178,78 @@ class PerformanceContractTests(unittest.TestCase):
             errors = check_performance_contract.check(root)
             self.assertTrue(
                 any(
-                    "must not access compute-layout cache storage" in error
+                    "singleton compute layouts" in error
                     for error in errors
                 )
             )
 
-    def test_compute_layout_cache_access_from_other_recording_file_is_rejected(self):
+    def test_missing_singleton_compute_layout_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.copied_tree(root)
             self.mutate(
                 root,
-                "gpu/vk/render_pass.c3",
-                "fn void? vk_cmd_draw_generated(",
-                (
-                    "fn uint forbidden_layout_cache_helper(VkDeviceState* state) {\n"
-                    "    return state.compute_layout_cache.count;\n"
-                    "}\n\n"
-                    "fn void? vk_cmd_draw_generated("
-                ),
+                "gpu/vk/device.c3",
+                "vk::PipelineLayout         compute_layout;",
+                "vk::PipelineLayout         compute_layout_removed;",
             )
             errors = check_performance_contract.check(root)
             self.assertTrue(
                 any(
-                    "gpu/vk/render_pass.c3 must not access compute-layout "
-                    "cache storage" in error
+                    "exactly one compute pipeline layout" in error
                     for error in errors
                 )
+            )
+
+    def test_compute_push_size_in_pipeline_key_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/pipeline_cache.c3",
+                "key.vertex_shader_digest = desc.shader.digest;",
+                (
+                    "key.vertex_shader_digest = desc.shader.digest;\n"
+                    "    key.sample_count = (int)desc.push_constant_size;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any("fixed root layout" in error for error in errors)
+            )
+
+    def test_dynamic_raster_state_in_pipeline_key_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/pipeline_cache.c3",
+                "key.sample_count           = (int)desc.sample_count;",
+                (
+                    "key.sample_count           = (int)desc.sample_count;\n"
+                    "    key.depth_format = (int)desc.raster.cull_mode;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any("build_graphics_key" in error for error in errors)
+            )
+
+    def test_per_target_pipeline_key_shape_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/pipeline_cache.c3",
+                "ColorTargetKey[gpu::MAX_COLOR_ATTACHMENTS] color_targets;",
+                "int[gpu::MAX_COLOR_ATTACHMENTS] color_formats;",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any("immutable key shape" in error for error in errors)
             )
 
     def test_completion_point_allocation_is_rejected(self):

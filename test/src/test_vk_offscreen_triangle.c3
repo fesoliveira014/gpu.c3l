@@ -239,12 +239,14 @@ fn void offscreen_textured_triangle() @test {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OFFSCREEN_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc pipe_desc = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-        .color_formats   = color_formats[..],
+        .colors          = pipeline_colors[..],
         .debug_name      = "offscreen_triangle",
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipe_desc)!!;
@@ -379,12 +381,14 @@ fn void dynamic_viewport_scissor_pixels() @test {
         .stage = gpu::ShaderStage.FRAGMENT, .spirv = DYNAMIC_RECT_FRAG_SPIRV[..], .entry_point = "main",
     };
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_desc)!!;
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-        .color_formats   = formats[..],
+        .colors          = pipeline_colors[..],
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
@@ -617,11 +621,14 @@ fn void graphics_pipeline_depth_format_validation() @test {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OFFSCREEN_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc with_depth = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .color_formats   = color_formats[..],
+        .colors          = pipeline_colors[..],
         .depth_format    = gpu::Format.D32_FLOAT,
     };
     gpu::PipelineHandle depth_pipeline = gpu::create_graphics_pipeline(&device, &with_depth)!!;
@@ -630,7 +637,7 @@ fn void graphics_pipeline_depth_format_validation() @test {
     gpu::GraphicsPipelineDesc packed_depth = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .color_formats   = color_formats[..],
+        .colors          = pipeline_colors[..],
         .depth_format    = gpu::Format.D24_UNORM_S8_UINT,
     };
     assert(@catch(gpu::create_graphics_pipeline(&device, &packed_depth)) == gpu::INVALID_ARGUMENT,

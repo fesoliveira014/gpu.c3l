@@ -265,7 +265,7 @@ fn int main() {
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = OVERLAP_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode comp_shader = gpu::prepare_shader_code(&comp_sd)!!;
-    gpu::ComputePipelineDesc comp_pipe_desc = { .shader = comp_shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc comp_pipe_desc = { .shader = comp_shader };
     gpu::PipelineHandle comp_pipeline = gpu::create_compute_pipeline(&device, &comp_pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, comp_pipeline)!!;
 
@@ -273,11 +273,15 @@ fn int main() {
     gpu::ShaderCode vert_shader = gpu::prepare_shader_code(&vert_sd)!!;
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OVERLAP_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag_shader = gpu::prepare_shader_code(&frag_sd)!!;
-    gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc gfx_pipe_desc = {
-        .vertex_shader = vert_shader, .fragment_shader = frag_shader,
-        .topology = gpu::PrimitiveTopology.TRIANGLES, .color_formats = color_formats[..],
-        .debug_name = "overlap_graphics",
+        .vertex_shader   = vert_shader,
+        .fragment_shader = frag_shader,
+        .colors          = pipeline_colors[..],
+        .debug_name      = "overlap_graphics",
     };
     gpu::PipelineHandle gfx_pipeline = gpu::create_graphics_pipeline(&device, &gfx_pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, gfx_pipeline)!!;

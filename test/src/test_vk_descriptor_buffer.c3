@@ -319,7 +319,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
 
     gpu::ShaderDesc write_shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_WRITE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode write_shader = gpu::prepare_shader_code(&write_shader_desc)!!;
-    gpu::ComputePipelineDesc compute_pipeline_desc = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc compute_pipeline_desc = { .shader = write_shader };
     gpu::PipelineHandle compute_pipeline = gpu::create_compute_pipeline(&device, &compute_pipeline_desc)!!;
     gpu::ShaderDesc sample_shader_desc = {
         .stage       = gpu::ShaderStage.COMPUTE,
@@ -328,8 +328,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     };
     gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_shader_desc)!!;
     gpu::ComputePipelineDesc sample_pipeline_desc = {
-        .shader             = sample_shader,
-        .push_constant_size = gpu::RootPush::size,
+        .shader = sample_shader,
     };
     gpu::PipelineHandle sample_pipeline = gpu::create_compute_pipeline(&device, &sample_pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
@@ -339,12 +338,14 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::ShaderCode vertex_shader = gpu::prepare_shader_code(&vertex_shader_desc)!!;
     gpu::ShaderDesc fragment_shader_desc = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = DB_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode fragment_shader = gpu::prepare_shader_code(&fragment_shader_desc)!!;
-    gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc graphics_pipeline_desc = {
         .vertex_shader   = vertex_shader,
         .fragment_shader = fragment_shader,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-        .color_formats   = color_formats[..],
+        .colors          = pipeline_colors[..],
     };
     gpu::PipelineHandle graphics_pipeline = gpu::create_graphics_pipeline(&device, &graphics_pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, graphics_pipeline)!!;
@@ -539,10 +540,10 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::ShaderDesc sample_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DB_SAMPLE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_sd)!!;
 
-    gpu::ComputePipelineDesc write_pd = { .shader = write_shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc write_pd = { .shader = write_shader };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pd)!!;
     defer gpu::destroy_pipeline(&device, write_pipe)!!;
-    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
     OwnedSpan write_root_owned = allocate_owned_span(

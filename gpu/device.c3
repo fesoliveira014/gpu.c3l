@@ -97,6 +97,7 @@ alias GetPipelineCacheSizeFn @private   = fn usz? (Device*);
 alias GetPipelineCacheDataFn @private   = fn usz? (Device*, char[]);
 alias CmdBindPipelineFn @private             = fn void? (CommandEncoderState*, PipelineHandle);
 alias CmdSetDepthStateFn @private            = fn void? (CommandEncoderState*, DepthState*);
+alias CmdSetRasterStateFn @private           = fn void? (CommandEncoderState*, DynamicRasterState*);
 alias CmdDispatchFn @private                 = fn void? (CommandEncoderState*, GpuAddress, Vec3u);
 alias CmdBeginRenderPassFn @private          = fn void? (CommandEncoderState*, RenderPassDesc*);
 alias CmdSetViewportFn @private              = fn void? (CommandEncoderState*, Viewport*);
@@ -245,6 +246,7 @@ struct CommandOps @private {
     CmdTextureBarrierFn           texture_barrier;
     CmdBindPipelineFn             bind_pipeline;
     CmdSetDepthStateFn            set_depth_state;
+    CmdSetRasterStateFn           set_raster_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;

@@ -85,6 +85,12 @@ FIXTURES = {
     "retired_cmd_draw_indexed_indirect_pipeline": "pipeline",
     "retired_cmd_draw_indexed_indirect_count_pipeline": "pipeline",
     "retired_graphics_pipeline_depth": "depth",
+    "retired_graphics_pipeline_topology": "topology",
+    "retired_graphics_pipeline_raster": "raster",
+    "retired_graphics_pipeline_blend": "blend",
+    "retired_graphics_pipeline_color_formats": "color_formats",
+    "retired_compute_pipeline_push_constant_size": "push_constant_size",
+    "retired_raster_state": "RasterState",
 }
 
 ERROR_DIAGNOSTIC = re.compile(
@@ -96,6 +102,11 @@ INVALID_MEMBER_TYPES = {
     "submit_waits": "SubmitDesc",
     "submit_signals": "SubmitDesc",
     "retired_graphics_pipeline_depth": "GraphicsPipelineDesc",
+    "retired_graphics_pipeline_topology": "GraphicsPipelineDesc",
+    "retired_graphics_pipeline_raster": "GraphicsPipelineDesc",
+    "retired_graphics_pipeline_blend": "GraphicsPipelineDesc",
+    "retired_graphics_pipeline_color_formats": "GraphicsPipelineDesc",
+    "retired_compute_pipeline_push_constant_size": "ComputePipelineDesc",
 }
 
 ENUM_VALUES = {

@@ -20,30 +20,29 @@ enum PipelineKind : int {
     GRAPHICS,
 }
 
-// Canonical packed key over the immutable pipeline state. Field order keeps
-// the struct padding-free; zero-init plus field-wise assignment keeps the
-// byte view deterministic for hashing. Viewport, scissor, separate depth state,
+struct ColorTargetKey {
+    int    format;
+    int    blend_enable;
+    int[6] blend;
+    uint   write_mask;
+}
+$assert ColorTargetKey::size == 36;
+
+// Canonical packed key over immutable pipeline state. Zero-init plus field-wise
+// assignment keeps the byte view deterministic for hashing. Command-time state
 // and debug_name stay out.
 struct PipelineKey {
     ulong vertex_shader_digest;
     ulong fragment_shader_digest;
-    uint  color_format_count;
-    uint  push_constant_size;
-    int[gpu::MAX_COLOR_ATTACHMENTS] color_formats;
+    uint  color_target_count;
+    ColorTargetKey[gpu::MAX_COLOR_ATTACHMENTS] color_targets;
     int   depth_format;
     int   sample_count;
-    int   topology;
     int   polygon_mode;
-    int   blend_enable;
-    int[6] blend;
     int   kind;
-    int   cull_mode;
-    float bias_constant;
-    float bias_slope;
-    float bias_clamp;
-    int   front_face;
+    uint  reserved;
 }
-$assert PipelineKey::size == 128;
+$assert PipelineKey::size == 328;
 
 struct PipelineCacheEntry {
     ulong                          hash;
@@ -65,22 +64,6 @@ struct PipelineCacheTable {
     uint[]                bucket_heads;
     uint                  free_head;
     uint                  next_new;
-}
-
-struct ComputeLayoutEntry {
-    uint                          push_size;
-    vk::PipelineLayout            layout;
-    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
-}
-
-struct ComputeLayoutCache {
-    ComputeLayoutEntry[] entries;
-    uint                 count;
-}
-
-struct ComputeLayoutRef {
-    vk::PipelineLayout            layout;
-    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
 }
 
 struct PipelineCacheCreateOps @private {
@@ -236,40 +219,47 @@ fn bool cached_shader_codes_match(
 }
 
 fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
-    PipelineKey key;
+    PipelineKey key = {};
     key.kind                   = (int)PipelineKind.GRAPHICS;
     key.vertex_shader_digest   = desc.vertex_shader.digest;
     key.fragment_shader_digest = desc.fragment_shader.digest;
-    key.topology               = (int)desc.topology;
-    key.polygon_mode           = (int)desc.raster.polygon_mode;
-    key.cull_mode              = (int)desc.raster.cull_mode;
-    key.front_face             = (int)desc.raster.front_face;
-    key.bias_constant          = desc.raster.depth_bias_constant == 0.0f
-        ? 0.0f : desc.raster.depth_bias_constant;
-    key.bias_slope             = desc.raster.depth_bias_slope == 0.0f
-        ? 0.0f : desc.raster.depth_bias_slope;
-    key.bias_clamp             = desc.raster.depth_bias_clamp == 0.0f
-        ? 0.0f : desc.raster.depth_bias_clamp;
+    key.polygon_mode           = (int)desc.polygon_mode;
     key.depth_format           = (int)desc.depth_format;
     key.sample_count           = (int)desc.sample_count;
-    key.color_format_count     = (uint)desc.color_formats.len;
-    foreach (i, format : desc.color_formats) key.color_formats[i] = (int)format;
-    if (desc.blend.enable) {
-        key.blend_enable = 1;
-        key.blend = {
-            (int)desc.blend.src_color, (int)desc.blend.dst_color, (int)desc.blend.color_op,
-            (int)desc.blend.src_alpha, (int)desc.blend.dst_alpha, (int)desc.blend.alpha_op,
-        };
+    key.color_target_count     = (uint)desc.colors.len;
+    foreach (i, &target : desc.colors) {
+        ColorTargetKey* color = &key.color_targets[i];
+        color.format = (int)target.format;
+        color.write_mask = color_write_mask_bits(target.write_mask);
+        if (target.blend.enable && color.write_mask != 0) {
+            color.blend_enable = 1;
+            color.blend = {
+                (int)target.blend.src_color,
+                (int)target.blend.dst_color,
+                (int)target.blend.color_op,
+                (int)target.blend.src_alpha,
+                (int)target.blend.dst_alpha,
+                (int)target.blend.alpha_op,
+            };
+        }
     }
     return key;
 }
 
 fn PipelineKey build_compute_key(gpu::ComputePipelineDesc* desc) @private {
-    PipelineKey key;
+    PipelineKey key = {};
     key.kind                 = (int)PipelineKind.COMPUTE;
     key.vertex_shader_digest = desc.shader.digest;
-    key.push_constant_size   = desc.push_constant_size;
     return key;
+}
+
+fn uint color_write_mask_bits(gpu::ColorWriteMask mask) @private {
+    uint bits = 0;
+    if (mask.red) bits |= 1u << 0;
+    if (mask.green) bits |= 1u << 1;
+    if (mask.blue) bits |= 1u << 2;
+    if (mask.alpha) bits |= 1u << 3;
+    return bits;
 }
 
 fn ulong hash_key(PipelineKey* key) @private {
@@ -421,96 +411,6 @@ fn bool pipeline_cache_index_consistent(VkDeviceState* state) {
     return linked == pipeline_cache_entry_count(state);
 }
 
-fn usz compute_layout_size_count(VkDeviceState* state) @private {
-    return (usz)((state.caps.max_push_constant_size - gpu::RootPush::size) / 4 + 1);
-}
-
-<* Caller holds resource_mutex. Pipeline capacity is only the first-allocation
-   hint; geometric growth continues to the finite valid-size count. *>
-fn void? grow_compute_layout_cache(VkDeviceState* state) @private {
-    ComputeLayoutCache* cache = &state.compute_layout_cache;
-    usz max_capacity = compute_layout_size_count(state);
-    usz new_capacity = cache.entries.len == 0 ? state.pipelines.slots.len : cache.entries.len * 2;
-    if (new_capacity == 0) new_capacity = 1;
-    if (new_capacity > max_capacity) new_capacity = max_capacity;
-    if (new_capacity <= cache.entries.len) return gpu::INVALID_ARGUMENT~;
-
-    ComputeLayoutEntry[] grown = alloc::new_array(state.host_allocator, ComputeLayoutEntry, (sz)new_capacity);
-    for (uint i = 0; i < cache.count; i++) grown[i] = cache.entries[i];
-    if (cache.entries.ptr != null) alloc::free(state.host_allocator, cache.entries.ptr);
-    cache.entries = grown;
-}
-
-<* Compute layout pair for `push_size`, created on first use. All pairs share
-   the global heap set-0 layout and differ only in push range size. *>
-fn ComputeLayoutRef? get_compute_layout(VkDeviceState* state, uint push_size) {
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    ComputeLayoutCache* cache = &state.compute_layout_cache;
-    foreach (&entry : cache.entries[:cache.count]) {
-        if (entry.push_size == push_size) {
-            return {
-                .layout                    = entry.layout,
-                .generated_dispatch_layout = entry.generated_dispatch_layout,
-            };
-        }
-    }
-    if (cache.count == cache.entries.len) grow_compute_layout_cache(state)!;
-
-    vk::PushConstantRange range = {
-        .stage_flags = vk::ShaderStageFlagBits.COMPUTE_BIT,
-        .offset      = 0,
-        .size        = push_size,
-    };
-    vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
-        .set_set_layouts((&state.strict_heap.descriptors.set_layout)[:1])
-        .set_push_constant_ranges((&range)[:1]);
-    vk::PipelineLayout layout;
-    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
-    defer catch {
-        if (generated_dispatch_layout != null) {
-            state.device_dispatch.generated_work.destroy_layout(
-                state.device,
-                generated_dispatch_layout,
-                null,
-            );
-        }
-        if (layout != null) vk::destroy_pipeline_layout(state.device, layout, null);
-    }
-    check_backend_result(
-        state:     state,
-        operation: "create_compute_pipeline",
-        result:    vk::create_pipeline_layout(state.device, &layout_info, null, &layout),
-    )!;
-    if (state.generated_work.enabled) {
-        generated_dispatch_layout = create_generated_work_layout(
-            state:           state,
-            pipeline_layout: layout,
-            shader_stages:   vk::ShaderStageFlagBits.COMPUTE_BIT,
-            root_size:       gpu::RootPush::size,
-            action_type:     vk::IndirectCommandsTokenTypeEXT.DISPATCH_EXT,
-            action_offset:   8,
-            stride:          gpu::GeneratedDispatchRecord::size,
-        )!;
-    }
-    set_object_name(
-        state:         state,
-        object_type:   vk::ObjectType.PIPELINE_LAYOUT,
-        object_handle: (ulong)layout,
-        name:          "gpu_compute_layout",
-    );
-    ComputeLayoutEntry* entry = &cache.entries[cache.count++];
-    *entry = {
-        .push_size                 = push_size,
-        .layout                    = layout,
-        .generated_dispatch_layout = generated_dispatch_layout,
-    };
-    return {
-        .layout                    = entry.layout,
-        .generated_dispatch_layout = entry.generated_dispatch_layout,
-    };
-}
-
 <* Spec-recommended pre-screen; the driver retry is the real safety net. *>
 fn bool cache_blob_compatible(VkDeviceState* state, char[] blob) @private {
     if (blob.len == 0) return true;
@@ -525,8 +425,8 @@ fn bool cache_blob_compatible(VkDeviceState* state, char[] blob) @private {
     return mem::equals(blob[16:16], (char[])props.pipeline_cache_uuid[0:16]);
 }
 
-<* Shared graphics layout, cache entry storage, and the driver VkPipelineCache.
-   Requires the descriptor heap (set layout) to exist. *>
+<* Shared layouts, cache entry storage, and the driver VkPipelineCache. Requires
+   the descriptor heap (set layout) to exist. *>
 fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data, uint capacity) {
     uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     vk::PushConstantRange range = {
@@ -548,7 +448,42 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         object_handle: (ulong)state.graphics_layout,
         name:          "gpu_graphics_layout",
     );
+
+    vk::PushConstantRange compute_root = {
+        .stage_flags = vk::ShaderStageFlagBits.COMPUTE_BIT,
+        .offset      = 0,
+        .size        = gpu::RootPush::size,
+    };
+    vk::PipelineLayoutCreateInfo compute_layout_info =
+        vk::pipeline_layout_create_info()
+            .set_set_layouts((&state.strict_heap.descriptors.set_layout)[:1])
+            .set_push_constant_ranges((&compute_root)[:1]);
+    check_backend_result(
+        state:     state,
+        operation: "create_device",
+        result:    vk::create_pipeline_layout(
+            state.device,
+            &compute_layout_info,
+            null,
+            &state.compute_layout,
+        ),
+    )!;
+    set_object_name(
+        state:         state,
+        object_type:   vk::ObjectType.PIPELINE_LAYOUT,
+        object_handle: (ulong)state.compute_layout,
+        name:          "gpu_compute_layout",
+    );
     if (state.generated_work.enabled) {
+        state.generated_dispatch_layout = create_generated_work_layout(
+            state:           state,
+            pipeline_layout: state.compute_layout,
+            shader_stages:   vk::ShaderStageFlagBits.COMPUTE_BIT,
+            root_size:       gpu::RootPush::size,
+            action_type:     vk::IndirectCommandsTokenTypeEXT.DISPATCH_EXT,
+            action_offset:   8,
+            stride:          gpu::GeneratedDispatchRecord::size,
+        )!;
         state.generated_draw_layout = create_generated_work_layout(
             state:           state,
             pipeline_layout: state.graphics_layout,
@@ -638,19 +573,18 @@ fn void destroy_pipeline_shared(VkDeviceState* state) {
         mem::free(state.pipeline_cache.bucket_heads.ptr);
         state.pipeline_cache.bucket_heads = {};
     }
-    ComputeLayoutCache* layout_cache = &state.compute_layout_cache;
-    foreach (&entry : layout_cache.entries[:layout_cache.count]) {
-        if (entry.generated_dispatch_layout != null) {
-            state.device_dispatch.generated_work.destroy_layout(
-                state.device,
-                entry.generated_dispatch_layout,
-                null,
-            );
-        }
-        vk::destroy_pipeline_layout(state.device, entry.layout, null);
+    if (state.generated_dispatch_layout != null) {
+        state.device_dispatch.generated_work.destroy_layout(
+            state.device,
+            state.generated_dispatch_layout,
+            null,
+        );
+        state.generated_dispatch_layout = (vk::IndirectCommandsLayoutEXT)null;
     }
-    if (layout_cache.entries.ptr != null) alloc::free(state.host_allocator, layout_cache.entries.ptr);
-    *layout_cache = {};
+    if (state.compute_layout != null) {
+        vk::destroy_pipeline_layout(state.device, state.compute_layout, null);
+        state.compute_layout = (vk::PipelineLayout)null;
+    }
     if (state.generated_indexed_draw_layout != null) {
         state.device_dispatch.generated_work.destroy_layout(
             state.device,

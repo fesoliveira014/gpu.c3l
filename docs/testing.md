@@ -274,12 +274,12 @@ Test names describe behavior, not roadmap or ticket labels.
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
-| Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback, completion-safe context-local command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/depth state, retired execution signatures, and zero execution-time pipeline creation. |
+| Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback, completion-safe context-local command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/raster/depth state, retired execution signatures, and zero execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind and root validation. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline and depth state; nonzero stage roots; dynamic viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
+| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline, raster, and depth state; nonzero stage roots; per-target blend/write masks; dynamic raster/viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior use; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
-| Pipeline cache | cache create/reuse, blob save/load, warm start, and stable generated-dispatch layouts across compute-layout cache relocation. |
+| Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, per-target immutable identity, and singleton compute/generated-dispatch layouts. |
 | Threading | automatic per-worker recording contexts, private command-buffer and generated-scratch reuse, parallel record, identical submit. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
@@ -365,12 +365,12 @@ records; all three generated commands then verify observable output. Command
 validation separately covers unsupported capability, count bounds, alignment,
 short spans, zero work, index formats, and generated-preprocess barrier masks.
 `vk_pipeline_cache` uses a test-only synchronization hook immediately before a
-generated-dispatch layout read, relocates the compute-layout cache on another
-thread, and verifies that recording observes the layout stored in the bound
-pipeline slot. This proves safe creation/recording overlap with the published
-slot state; it does not recreate the removed mid-scan interleaving. The
-platform-independent source contract is the regression guard and rejects
-compute-layout cache access outside its owning cache implementation. It also
+generated-dispatch layout read, creates another compute pipeline on a second
+thread, and verifies that recording observes the device's unchanged singleton
+layout through the bound pipeline slot. The platform-independent source
+contract rejects legacy compute-layout-cache storage, per-pipeline compute
+layout creation, dynamic raster fields in `PipelineKey`, and loss of per-target
+immutable key state. It also
 walks every Vulkan recording root and reachable helper across backend files,
 rejecting device/backend re-resolution, command-table lookup, lifecycle-vtable
 dispatch, and post-bind pipeline resolution. Helper-relocation mutations prove
@@ -379,7 +379,11 @@ that moving forbidden work to another source file does not evade the gate.
 The benchmark runner builds eight executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
 `upload_throughput_bench`, `command_record_bench`, `lifecycle_bench`,
-`pipeline_cache_bench`, and `async_overlap_bench`. Command recording covers
+`pipeline_cache_bench`, and `async_overlap_bench`. The pipeline-cache target
+requests 200 topology/cull/front-face/depth-bias permutations through
+`cmd_set_raster_state`, reports the requested count, native graphics creates,
+cache entries/aliases, and recording/create timings; all permutations share
+one immutable pipeline. Command recording covers
 ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
 generated dispatch. It measures five 64-record lists after an untimed 64-record
 warmup. Before warmup, the calling worker reserves 64 preprocess buffers sized

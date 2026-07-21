@@ -4,15 +4,9 @@ import gpu @public;
 import vk;
 import std::thread;
 import std::core::mem;
-import std::math;
 
 const uint GRAPHICS_ROOT_PUSH_SIZE = gpu::GraphicsRootPush::size;
-
-const vk::ColorComponentFlags COLOR_WRITE_ALL = (vk::ColorComponentFlags)(
-    (uint)vk::ColorComponentFlagBits.R_BIT
-    | (uint)vk::ColorComponentFlagBits.G_BIT
-    | (uint)vk::ColorComponentFlagBits.B_BIT
-    | (uint)vk::ColorComponentFlagBits.A_BIT);
+const uint COLOR_WRITE_MASK_BITS = 0x0f;
 
 fn vk::PrimitiveTopology topology_to_vk(gpu::PrimitiveTopology topology) @private {
     switch (topology) {
@@ -44,6 +38,12 @@ fn vk::CullModeFlagBits cull_mode_to_vk(gpu::CullMode mode) @private {
         case gpu::CullMode.BACK:  return vk::CullModeFlagBits.BACK_BIT;
         default:                  return vk::CullModeFlagBits.NONE;
     }
+}
+
+fn vk::FrontFace front_face_to_vk(gpu::FrontFace face) @private {
+    return face == gpu::FrontFace.CLOCKWISE
+        ? vk::FrontFace.CLOCKWISE
+        : vk::FrontFace.COUNTER_CLOCKWISE;
 }
 
 fn vk::BlendFactor blend_factor_to_vk(gpu::BlendFactor factor) @private {
@@ -168,6 +168,20 @@ fn bool blend_state_valid(gpu::BlendState* blend) {
         && blend_op_valid(blend.alpha_op);
 }
 
+fn bool color_write_mask_valid(gpu::ColorWriteMask mask) @private {
+    uint raw = (uint)mask;
+    return (raw & COLOR_WRITE_MASK_BITS) == raw;
+}
+
+fn vk::ColorComponentFlags color_write_mask_to_vk(uint mask) @private {
+    uint flags = 0;
+    if ((mask & (1u << 0)) != 0) flags |= (uint)vk::ColorComponentFlagBits.R_BIT;
+    if ((mask & (1u << 1)) != 0) flags |= (uint)vk::ColorComponentFlagBits.G_BIT;
+    if ((mask & (1u << 2)) != 0) flags |= (uint)vk::ColorComponentFlagBits.B_BIT;
+    if ((mask & (1u << 3)) != 0) flags |= (uint)vk::ColorComponentFlagBits.A_BIT;
+    return (vk::ColorComponentFlags)flags;
+}
+
 fn void? check_polygon_mode_support(gpu::PolygonMode mode, bool line_supported) {
     if (mode == gpu::PolygonMode.LINE && !line_supported) return gpu::UNSUPPORTED_FEATURE~;
 }
@@ -176,29 +190,26 @@ fn void? validate_graphics_pipeline_desc(
     VkDeviceState* state,
     gpu::GraphicsPipelineDesc* desc,
 ) {
-    if (desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS
+    if (desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
         || !gpu::sample_count_valid(desc.sample_count)
-        || !primitive_topology_valid(desc.topology)
-        || !cull_mode_valid(desc.raster.cull_mode)
-        || !front_face_valid(desc.raster.front_face)
-        || !polygon_mode_valid(desc.raster.polygon_mode)
-        || !blend_state_valid(&desc.blend)
-        || !math::is_finite(desc.raster.depth_bias_constant)
-        || !math::is_finite(desc.raster.depth_bias_slope)
-        || !math::is_finite(desc.raster.depth_bias_clamp)) return gpu::INVALID_ARGUMENT~;
+        || !polygon_mode_valid(desc.polygon_mode)) return gpu::INVALID_ARGUMENT~;
     if (desc.depth_format != gpu::Format.UNDEFINED
         && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
-    if (desc.color_formats.len == 0
+    if (desc.colors.len == 0
         && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
     gpu::TextureUsage color_usage = { .color_attach };
-    foreach (format : desc.color_formats) {
-        if (format == gpu::Format.UNDEFINED
-            || format == gpu::Format.D32_FLOAT
-            || format == gpu::Format.D24_UNORM_S8_UINT
-            || format_to_vk(format) == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+    foreach (&target : desc.colors) {
+        if (!blend_state_valid(&target.blend)
+            || !color_write_mask_valid(target.write_mask)
+            || target.format == gpu::Format.UNDEFINED
+            || target.format == gpu::Format.D32_FLOAT
+            || target.format == gpu::Format.D24_UNORM_S8_UINT
+            || format_to_vk(target.format) == vk::Format.UNDEFINED) {
+            return gpu::INVALID_ARGUMENT~;
+        }
         if (!format_supports_sample_count(
             state,
-            format,
+            target.format,
             color_usage,
             desc.sample_count,
         )!) return gpu::UNSUPPORTED_FEATURE~;
@@ -212,7 +223,7 @@ fn void? validate_graphics_pipeline_desc(
             desc.sample_count,
         )!) return gpu::UNSUPPORTED_FEATURE~;
     }
-    check_polygon_mode_support(desc.raster.polygon_mode, state.caps.line_polygon_mode)!;
+    check_polygon_mode_support(desc.polygon_mode, state.caps.line_polygon_mode)!;
 }
 
 fn bool graphics_pipeline_is_cached(
@@ -297,10 +308,10 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     }
     @pool() {
         vk::Format[] color_formats = {};
-        if (desc.color_formats.len > 0) {
-            color_formats = mem::talloc_array(vk::Format, desc.color_formats.len);
-            foreach (i, format : desc.color_formats) {
-                vk::Format vk_format = format_to_vk(format);
+        if (desc.colors.len > 0) {
+            color_formats = mem::talloc_array(vk::Format, desc.colors.len);
+            foreach (i, &target : desc.colors) {
+                vk::Format vk_format = format_to_vk(target.format);
                 if (vk_format == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
                 color_formats[i] = vk_format;
             }
@@ -326,25 +337,19 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         vk::PipelineVertexInputStateCreateInfo vertex_input = vk::pipeline_vertex_input_state_create_info();
 
         vk::PipelineInputAssemblyStateCreateInfo input_assembly = vk::pipeline_input_assembly_state_create_info();
-        input_assembly.topology = topology_to_vk(desc.topology);
+        input_assembly.topology = vk::PrimitiveTopology.TRIANGLE_LIST;
 
         vk::PipelineViewportStateCreateInfo viewport_state = vk::pipeline_viewport_state_create_info();
         viewport_state.viewport_count = 1;
         viewport_state.scissor_count = 1;
 
         vk::PipelineRasterizationStateCreateInfo raster = vk::pipeline_rasterization_state_create_info();
-        raster.polygon_mode = desc.raster.polygon_mode == gpu::PolygonMode.LINE ? vk::PolygonMode.LINE : vk::PolygonMode.FILL;
-        raster.cull_mode    = cull_mode_to_vk(desc.raster.cull_mode);
-        raster.front_face   = desc.raster.front_face == gpu::FrontFace.CLOCKWISE
-            ? vk::FrontFace.CLOCKWISE
-            : vk::FrontFace.COUNTER_CLOCKWISE;
-        raster.line_width   = 1.0;
-        if (desc.raster.depth_bias_constant != 0 || desc.raster.depth_bias_slope != 0 || desc.raster.depth_bias_clamp != 0) {
-            raster.depth_bias_enable          = vk::TRUE;
-            raster.depth_bias_constant_factor = desc.raster.depth_bias_constant;
-            raster.depth_bias_slope_factor    = desc.raster.depth_bias_slope;
-            raster.depth_bias_clamp           = desc.raster.depth_bias_clamp;
-        }
+        raster.polygon_mode = desc.polygon_mode == gpu::PolygonMode.LINE
+            ? vk::PolygonMode.LINE
+            : vk::PolygonMode.FILL;
+        raster.cull_mode  = vk::CullModeFlagBits.NONE;
+        raster.front_face = vk::FrontFace.COUNTER_CLOCKWISE;
+        raster.line_width = 1.0;
 
         vk::PipelineMultisampleStateCreateInfo multisample = vk::pipeline_multisample_state_create_info();
         multisample.rasterization_samples = sample_count_to_vk(desc.sample_count);
@@ -354,25 +359,31 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         vk::PipelineColorBlendStateCreateInfo blend_state = vk::pipeline_color_blend_state_create_info();
         if (color_formats.len > 0) {
             vk::PipelineColorBlendAttachmentState[] blend_attachments = mem::talloc_array(vk::PipelineColorBlendAttachmentState, color_formats.len);
-            foreach (&attachment : blend_attachments) {
+            foreach (i, &attachment : blend_attachments) {
+                ColorTargetKey* target = &key.color_targets[i];
                 *attachment = {
-                    .blend_enable           = desc.blend.enable ? vk::TRUE : vk::FALSE,
-                    .src_color_blend_factor = blend_factor_to_vk(desc.blend.src_color),
-                    .dst_color_blend_factor = blend_factor_to_vk(desc.blend.dst_color),
-                    .color_blend_op         = blend_op_to_vk(desc.blend.color_op),
-                    .src_alpha_blend_factor = blend_factor_to_vk(desc.blend.src_alpha),
-                    .dst_alpha_blend_factor = blend_factor_to_vk(desc.blend.dst_alpha),
-                    .alpha_blend_op         = blend_op_to_vk(desc.blend.alpha_op),
-                    .color_write_mask       = COLOR_WRITE_ALL,
+                    .blend_enable           = target.blend_enable != 0 ? vk::TRUE : vk::FALSE,
+                    .src_color_blend_factor = blend_factor_to_vk((gpu::BlendFactor)target.blend[0]),
+                    .dst_color_blend_factor = blend_factor_to_vk((gpu::BlendFactor)target.blend[1]),
+                    .color_blend_op         = blend_op_to_vk((gpu::BlendOp)target.blend[2]),
+                    .src_alpha_blend_factor = blend_factor_to_vk((gpu::BlendFactor)target.blend[3]),
+                    .dst_alpha_blend_factor = blend_factor_to_vk((gpu::BlendFactor)target.blend[4]),
+                    .alpha_blend_op         = blend_op_to_vk((gpu::BlendOp)target.blend[5]),
+                    .color_write_mask       = color_write_mask_to_vk(target.write_mask),
                 };
             }
             blend_state.attachment_count = (uint)blend_attachments.len;
             blend_state.p_attachments = blend_attachments.ptr;
         }
 
-        vk::DynamicState[5] dynamic_states = {
+        vk::DynamicState[10] dynamic_states = {
             vk::DynamicState.VIEWPORT,
             vk::DynamicState.SCISSOR,
+            vk::DynamicState.PRIMITIVE_TOPOLOGY,
+            vk::DynamicState.CULL_MODE,
+            vk::DynamicState.FRONT_FACE,
+            vk::DynamicState.DEPTH_BIAS_ENABLE,
+            vk::DynamicState.DEPTH_BIAS,
             vk::DynamicState.DEPTH_TEST_ENABLE,
             vk::DynamicState.DEPTH_WRITE_ENABLE,
             vk::DynamicState.DEPTH_COMPARE_OP,

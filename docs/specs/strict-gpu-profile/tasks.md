@@ -254,7 +254,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 - [x] Redesign graphics and compute pipeline creation in `gpu/pipeline.c3`, `gpu/vk/pipeline_compute.c3`, `gpu/vk/pipeline_graphics.c3`, and `gpu/vk/pipeline_cache.c3` around explicit immutable state and batch deduplication.
   - **Depends on:** 5.4 and 5.3.
-  - **Contract:** native compilation occurs during creation; shared shader IR deduplicates within a batch; depth/stencil is separate immutable state; viewport/scissor are dynamic; baseline blend state remains in graphics identity.
+  - **Contract:** native compilation occurs during creation; shared shader IR deduplicates within a batch; depth/stencil and raster controls are dynamic; per-target format/blend/write-mask state and polygon mode remain graphics identity; compute uses one fixed `RootPush` layout.
   - **Edges:** partial batch failure, cache failure, duplicate pipeline descriptions, shared shader stages, unsupported state, and transactional publication.
   - **Verify:** identity tests, shared-IR native creation counters, failure rollback tests, and pipeline-cache benchmarks.
 

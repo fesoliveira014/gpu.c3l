@@ -101,12 +101,14 @@ fn void multisample_color_depth_resolves_to_readback() @test {
     defer destroy_test_attachment_view(&device, &resolve_view)!!;
 
     DepthCtx shaders = make_depth_ctx();
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader   = shaders.vert,
         .fragment_shader = shaders.frag,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-        .color_formats   = formats[..],
+        .colors          = pipeline_colors[..],
         .depth_format    = gpu::Format.D32_FLOAT,
         .sample_count    = sample_count,
         .debug_name      = "multisample_color_depth",

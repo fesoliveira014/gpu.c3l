@@ -320,6 +320,12 @@ def valid_document() -> dict:
                         ("depth", "DepthState*"),
                     ),
                     api_function(
+                        "cmd_set_raster_state",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("raster", "DynamicRasterState*"),
+                    ),
+                    api_function(
                         "cmd_dispatch",
                         "void?",
                         ("commands", "CommandList*"),
@@ -386,7 +392,137 @@ def valid_document() -> dict:
                         ("args", "GpuSpan"),
                     ),
                 ],
+                "variables": [{
+                    "name": "COLOR_WRITE_ALL",
+                    "kind": "constant",
+                    "type": {"name": "ColorWriteMask"},
+                    "value": (
+                        "{ .red = true, .green = true, .blue = true, "
+                        ".alpha = true, }"
+                    ),
+                }],
                 "types": [
+                    {
+                        "name": "ColorWriteMask",
+                        "kind": "bitstruct",
+                        "base_type": {"name": "uint"},
+                        "members": [
+                            {
+                                "name": "red",
+                                "type": {"name": "bool"},
+                                "bit_range": [0, 0],
+                            },
+                            {
+                                "name": "green",
+                                "type": {"name": "bool"},
+                                "bit_range": [1, 1],
+                            },
+                            {
+                                "name": "blue",
+                                "type": {"name": "bool"},
+                                "bit_range": [2, 2],
+                            },
+                            {
+                                "name": "alpha",
+                                "type": {"name": "bool"},
+                                "bit_range": [3, 3],
+                            },
+                        ],
+                    },
+                    {
+                        "name": "BlendState",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "enable", "type": {"name": "bool"}},
+                            {
+                                "name": "src_color",
+                                "type": {"name": "BlendFactor"},
+                            },
+                            {
+                                "name": "dst_color",
+                                "type": {"name": "BlendFactor"},
+                            },
+                            {
+                                "name": "color_op",
+                                "type": {"name": "BlendOp"},
+                            },
+                            {
+                                "name": "src_alpha",
+                                "type": {"name": "BlendFactor"},
+                            },
+                            {
+                                "name": "dst_alpha",
+                                "type": {"name": "BlendFactor"},
+                            },
+                            {
+                                "name": "alpha_op",
+                                "type": {"name": "BlendOp"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "ColorTargetState",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "format", "type": {"name": "Format"}},
+                            {
+                                "name": "blend",
+                                "type": {"name": "BlendState"},
+                            },
+                            {
+                                "name": "write_mask",
+                                "type": {"name": "ColorWriteMask"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "DynamicRasterState",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "topology",
+                                "type": {"name": "PrimitiveTopology"},
+                            },
+                            {
+                                "name": "cull_mode",
+                                "type": {"name": "CullMode"},
+                            },
+                            {
+                                "name": "front_face",
+                                "type": {"name": "FrontFace"},
+                            },
+                            {
+                                "name": "depth_bias_enable",
+                                "type": {"name": "bool"},
+                            },
+                            {
+                                "name": "depth_bias_constant",
+                                "type": {"name": "float"},
+                            },
+                            {
+                                "name": "depth_bias_slope",
+                                "type": {"name": "float"},
+                            },
+                            {
+                                "name": "depth_bias_clamp",
+                                "type": {"name": "float"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "ComputePipelineDesc",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "shader",
+                                "type": {"name": "ShaderCode"},
+                            },
+                            {
+                                "name": "debug_name",
+                                "type": {"name": "ZString"},
+                            },
+                        ],
+                    },
                     {
                         "name": "GraphicsPipelineDesc",
                         "kind": "struct",
@@ -400,20 +536,8 @@ def valid_document() -> dict:
                                 "type": {"name": "ShaderCode"},
                             },
                             {
-                                "name": "topology",
-                                "type": {"name": "PrimitiveTopology"},
-                            },
-                            {
-                                "name": "raster",
-                                "type": {"name": "RasterState"},
-                            },
-                            {
-                                "name": "blend",
-                                "type": {"name": "BlendState"},
-                            },
-                            {
-                                "name": "color_formats",
-                                "type": {"name": "Format[]"},
+                                "name": "colors",
+                                "type": {"name": "ColorTargetState[]"},
                             },
                             {
                                 "name": "depth_format",
@@ -422,6 +546,10 @@ def valid_document() -> dict:
                             {
                                 "name": "sample_count",
                                 "type": {"name": "SampleCount"},
+                            },
+                            {
+                                "name": "polygon_mode",
+                                "type": {"name": "PolygonMode"},
                             },
                             {
                                 "name": "debug_name",
@@ -1618,7 +1746,7 @@ method gpu::Runtime.is_valid
             (
                 "GraphicsPipelineDesc",
                 "sample_count",
-                "GraphicsPipelineDesc.sample_count must be SampleCount",
+                "GraphicsPipelineDesc must match the strict schema",
             ),
         ):
             with self.subTest(type_name=type_name):
@@ -1636,6 +1764,46 @@ method gpu::Runtime.is_valid
                     failure,
                     check_public_api.validate_document(document),
                 )
+
+    def test_requires_pipeline_identity_schemas(self) -> None:
+        for type_name in (
+            "BlendState",
+            "ColorTargetState",
+            "DynamicRasterState",
+            "ComputePipelineDesc",
+            "GraphicsPipelineDesc",
+        ):
+            with self.subTest(type_name=type_name):
+                document = valid_document()
+                definition = next(
+                    entry for entry in document["modules"]["gpu"]["types"]
+                    if entry["name"] == type_name
+                )
+                definition["members"].pop()
+                self.assertIn(
+                    f"{type_name} must match the strict schema",
+                    check_public_api.validate_document(document),
+                )
+
+    def test_requires_color_write_mask_contract(self) -> None:
+        document = valid_document()
+        color_write_mask = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "ColorWriteMask"
+        )
+        color_write_mask["members"][3]["bit_range"] = [4, 4]
+        self.assertIn(
+            "ColorWriteMask must match the strict channel bits",
+            check_public_api.validate_document(document),
+        )
+
+        document = valid_document()
+        color_write_all = document["modules"]["gpu"]["variables"][0]
+        color_write_all["value"] = "{}"
+        self.assertIn(
+            "COLOR_WRITE_ALL must enable every color channel",
+            check_public_api.validate_document(document),
+        )
 
     def test_requires_full_render_pass_schema(self) -> None:
         mutations = (
@@ -1750,7 +1918,7 @@ method gpu::Runtime.is_valid
             "type": {"name": "DepthState"},
         })
         self.assertIn(
-            "GraphicsPipelineDesc must not contain dynamic depth state",
+            "GraphicsPipelineDesc must match the strict schema",
             check_public_api.validate_document(document),
         )
 

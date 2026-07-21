@@ -239,7 +239,6 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader = shader,
-        .push_constant_size = gpu::RootPush::size,
     };
     gpu::PipelineHandle pipeline =
         gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
