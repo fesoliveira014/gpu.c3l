@@ -300,7 +300,7 @@ struct DeviceData @private {
     DeviceCaps     caps;
     QueueSelection queues;
     BackendVTable* vtable;
-    CommandOps*     command_ops;
+    CommandOps*    command_ops;
     void*          backend_state;
     ulong          resource_owner;
     Runtime        runtime;
@@ -469,7 +469,6 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
         ),
     };
 }
-
 
 DeviceSlot[MAX_DEVICES] device_slots @private;
 Atomic{bool} device_registry_lock @private;

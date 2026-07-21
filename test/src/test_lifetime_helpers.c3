@@ -255,6 +255,7 @@ fn void? readback_test_texture_data(
     char[] mapping = gpu::get_span_mapping(device, readback.span)!;
     out_data[..] = mapping[..];
 }
+
 fn void assert_warm_command_resolution(
     gpu::CommandResolutionStats stats,
     ulong expected_commands,

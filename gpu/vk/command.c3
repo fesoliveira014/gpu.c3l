@@ -1007,15 +1007,15 @@ fn void? bind_pipeline_state(
     }
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
     BoundPipeline bound = {
-        .handle              = pipeline,
-        .validation_cell     = cell,
-        .pipeline            = slot.pipeline,
-        .layout              = slot.layout,
+        .handle                    = pipeline,
+        .validation_cell           = cell,
+        .pipeline                  = slot.pipeline,
+        .layout                    = slot.layout,
         .generated_dispatch_layout = slot.generated_dispatch_layout,
-        .expected_generation = cell.generation,
-        .cache_entry         = slot.entry,
-        .kind                = (PipelineKind)entry.key.kind,
-        .render              = pipeline_render_compatibility(&entry.key),
+        .expected_generation       = cell.generation,
+        .cache_entry               = slot.entry,
+        .kind                      = (PipelineKind)entry.key.kind,
+        .render                    = pipeline_render_compatibility(&entry.key),
     };
     if (record.state == CommandState.RECORDING_RENDER_PASS) {
         validate_pipeline_render_compatibility(

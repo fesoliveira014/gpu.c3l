@@ -924,7 +924,7 @@ fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
 
 fn void reused_command_index_publishes_while_prior_discard_returns() @test {
     CommandPinFixture fixture = {
-        .block_discard      = true,
+        .block_discard       = true,
         .reuse_command_index = true,
     };
     gpu::Device device = gpu::register_device(
