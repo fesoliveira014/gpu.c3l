@@ -515,3 +515,45 @@ fn void command_recording_requires_no_lifecycle_boundary() @test {
         gpu::wait_completion(completion, ulong::max)!!;
     }
 }
+
+
+fn void warm_command_begin_reuses_context_owned_storage() @test {
+    gpu::RuntimeDesc desc = {
+        .backend          = gpu::BackendKind.VULKAN,
+        .application_name = "warm_command_reuse_test",
+    };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
+        &device,
+    );
+
+    gpu::CommandList first = gpu::begin_commands(queue)!!;
+    gpu::ExecutableCommandList first_executable = gpu::end_commands(&first)!!;
+    gpu::discard_executable_commands(&first_executable)!!;
+    vk::reset_command_recording_work_counters(state);
+    gpu::RecordingWorkCounters before = vk::command_recording_work_counters(
+        state,
+    );
+
+    gpu::CommandList second = gpu::begin_commands(queue)!!;
+    gpu::ExecutableCommandList second_executable = gpu::end_commands(&second)!!;
+    gpu::discard_executable_commands(&second_executable)!!;
+    gpu::RecordingWorkCounters after = vk::command_recording_work_counters(
+        state,
+    );
+
+    assert(after.command_buffer_allocations
+        == before.command_buffer_allocations,
+        "warm begin reuses the context-owned native command buffer");
+    assert(after.command_buffer_frees == before.command_buffer_frees,
+        "normal discard never frees a reusable command buffer");
+    assert(after.command_buffer_resets == before.command_buffer_resets + 1,
+        "warm begin individually resets the completed command buffer");
+    assert(after.host_allocations == before.host_allocations,
+        "warm begin/discard retains reusable host bookkeeping");
+}

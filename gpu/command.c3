@@ -1,5 +1,12 @@
 module gpu;
 
+<* Generated-work record kind a scratch reservation serves. *>
+enum GeneratedWorkKind : int {
+    DRAW,
+    DRAW_INDEXED,
+    DISPATCH,
+}
+
 <* Unsigned 3-vector; dispatches take their workgroup counts as one. *>
 struct Vec3u {
     uint x;
@@ -54,12 +61,6 @@ struct DispatchIndirectCommand {
     uint z;
 }
 $assert DispatchIndirectCommand::size == 12;
-
-enum GeneratedWorkKind : int {
-    DRAW,
-    DRAW_INDEXED,
-    DISPATCH,
-}
 
 <* A recording command token. Successful end consumes it. *>
 struct CommandList {
