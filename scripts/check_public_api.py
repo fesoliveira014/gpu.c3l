@@ -1253,10 +1253,6 @@ def validate_document(document: dict) -> list[str]:
         ("readiness_before", "StageMask"),
     ):
         failures.append("SubmitDesc must match the exact stage-scoped schema")
-    submit_fields = dict(submit_schema)
-    if "swapchain" in submit_fields:
-        failures.append("SubmitDesc must not expose swapchain coupling")
-
     readiness = types.get("SwapchainReadiness")
     if readiness is None or readiness.get("kind") != "struct":
         failures.append("missing SwapchainReadiness token")

@@ -431,7 +431,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::ExecutableCommandList[1] graphics_lists = { graphics_commands_executable };
     gpu::CompletionWait[1] graphics_waits = {{
         .point  = compute_completion,
-        .before = { .transfer },
+        .before = { .fragment_shader },
     }};
     gpu::SubmitDesc graphics_submit = {
         .command_lists    = graphics_lists[..],

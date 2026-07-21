@@ -61,8 +61,8 @@ struct QueueSelection @private {
 }
 
 <* Work submitted to an explicit queue. Every wait names its first destination
-   stages. Non-zero readiness requires an explicit supported destination stage
-   and is consumed only by successful submission. *>
+   stages. Non-zero readiness requires a graphics-capable queue and an explicit
+   supported destination stage, and is consumed only by successful submission. *>
 struct SubmitDesc {
     ExecutableCommandList[] command_lists;
     CompletionWait[]        completion_waits;
@@ -558,6 +558,9 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     }
     foreach (wait : desc.completion_waits) {
         validate_completion_point(&operation, &device, wait.point)!;
+        if (!submit_wait_stage_mask_valid(wait.before)) {
+            return INVALID_ARGUMENT~;
+        }
     }
     if (desc.readiness != SWAPCHAIN_READINESS_INVALID) {
         if (!desc.readiness.is_valid()
@@ -565,6 +568,11 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
             return INVALID_HANDLE~;
         }
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
+        if (!submit_wait_stage_mask_valid(desc.readiness_before)) {
+            return INVALID_ARGUMENT~;
+        }
+    } else if ((uint)desc.readiness_before != 0) {
+        return INVALID_ARGUMENT~;
     }
     note_command_lifecycle_vtable_dispatch();
     CompletionPoint point = operation.vtable.submit(queue, desc)!;
