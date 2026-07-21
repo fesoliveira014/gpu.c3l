@@ -1276,7 +1276,7 @@ fn void? vk_cmd_dispatch_generated(
     $if env::TESTING:
         state.generated_dispatch_layout_read_observed = layout;
     $endif
-    if (layout == null) return gpu::UNSUPPORTED_FEATURE~;
+    if (layout == null) return gpu::BACKEND_ERROR~;
     execute_generated_work(
         state:         state,
         record:        record,

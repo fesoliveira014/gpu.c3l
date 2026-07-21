@@ -441,8 +441,8 @@ fn void? grow_compute_layout_cache(VkDeviceState* state) @private {
     cache.entries = grown;
 }
 
-<* Compute layout for `push_size`, created on first use. All compute layouts
-   share the global heap set-0 layout and differ only in push range size. *>
+<* Compute layout pair for `push_size`, created on first use. All pairs share
+   the global heap set-0 layout and differ only in push range size. *>
 fn ComputeLayoutRef? get_compute_layout(VkDeviceState* state, uint push_size) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();

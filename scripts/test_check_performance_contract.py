@@ -15,7 +15,9 @@ REQUIRED_PATHS = (
     "gpu/vk/device.c3",
     "gpu/vk/command_state.c3",
     "gpu/vk/lifetime.c3",
+    "gpu/vk/pipeline_cache.c3",
     "gpu/vk/queue.c3",
+    "gpu/vk/render_pass.c3",
     "gpu/vk/sync.c3",
     "gpu/vk/texture.c3",
     "test/src/command_record_bench.c3",
@@ -81,6 +83,30 @@ class PerformanceContractTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "must not access compute-layout cache storage" in error
+                    for error in errors
+                )
+            )
+
+    def test_compute_layout_cache_access_from_other_recording_file_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/render_pass.c3",
+                "fn void? vk_cmd_draw_generated(",
+                (
+                    "fn uint forbidden_layout_cache_helper(VkDeviceState* state) {\n"
+                    "    return state.compute_layout_cache.count;\n"
+                    "}\n\n"
+                    "fn void? vk_cmd_draw_generated("
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "gpu/vk/render_pass.c3 must not access compute-layout "
+                    "cache storage" in error
                     for error in errors
                 )
             )

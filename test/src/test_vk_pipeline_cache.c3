@@ -38,6 +38,15 @@ fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
     return create_test_device(&desc)!!;
 }
 
+fn gpu::Device make_generated_work_cache_test_device() {
+    gpu::RuntimeDesc desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .pipeline_capacity = 2,
+        .application_name  = "gpu_generated_work_cache_test",
+    };
+    return create_test_device(&desc)!!;
+}
+
 fn uint cache_entry_count(gpu::Device* device) {
     return vk::pipeline_cache_entry_count((vk::VkDeviceState*)gpu::device_backend_state(*device));
 }
@@ -783,7 +792,7 @@ fn void compute_layout_cache_grows_beyond_pipeline_capacity_hint() @test {
 }
 
 fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
-    gpu::Device device = make_cache_test_device_with_capacity(2);
+    gpu::Device device = make_generated_work_cache_test_device();
     defer destroy_test_device(&device)!!;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
     if (!caps.generated_work) return;
@@ -873,7 +882,8 @@ fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
     assert(cache_relocated,
         "distinct compute layouts relocate the cache while recording pauses");
     assert(worker_result == 0,
-        "generated dispatch recording resumes after cache relocation");
+        "generated dispatch recording resumes after cache relocation: %s",
+        args.failure);
     assert(state.generated_dispatch_layout_read_observed == expected_layout,
         "recording reads the original pipeline slot's generated layout");
 }
