@@ -673,8 +673,9 @@ Presentation transitions use these exact synchronization2 scopes:
 
 The presentation-facing access scope is empty because the presentation engine
 is external to the Vulkan pipeline. The texture transitions keep their narrow
-color-attachment scopes; the private acquire and present semaphores
-conservatively cover the complete readiness-consuming submission.
+color-attachment scopes. The private acquire semaphore uses the exact
+`SubmitDesc.readiness_before` destination mask. The private present signal keeps
+the backend's full-submission scope.
 
 ## 14. Timeline semaphores
 
@@ -693,8 +694,8 @@ two words. Reservation and publication allocate nothing.
 
 Every public `submit(queue, desc)` signals one sequence on the selected queue
 and returns its point. Empty batches are valid. Completion waits resolve to the
-owning private timeline and use
-`ALL_COMMANDS`; waits owned by the target queue are validated and elided.
+owning private timeline and use the exact validated `CompletionWait.before`
+stage mask; waits owned by the target queue are validated and elided.
 The queue mutex covers sequence reservation and `vkQueueSubmit2`, satisfying
 Vulkan external synchronization. Near the timeline-value-difference limit, the
 backend queries completed progress and returns `DEVICE_BUSY` before reservation
@@ -705,7 +706,13 @@ commit only after native success.
 ```text
 SubmitDesc
     ExecutableCommandList[] command_lists
-    CompletionPoint[] completion_waits
+    CompletionWait[] completion_waits
+    SwapchainReadiness readiness
+    StageMask readiness_before
+
+CompletionWait
+    CompletionPoint point
+    StageMask before
 ```
 
 Host poll and wait reject unpublished sequences and query the owning timeline
@@ -760,8 +767,9 @@ completion. The native semaphore never enters the public value.
 
 A readiness-consuming graphics submit:
 
-1. validates the exact pending acquisition;
-2. waits its private acquire semaphore across the complete submission;
+1. validates the exact pending acquisition and the caller's nonempty supported
+   destination stage mask;
+2. waits its private acquire semaphore at those exact destination stages;
 3. signals the image's private present semaphore and the queue timeline;
 4. commits readiness consumption and the returned completion point only after
    `vkQueueSubmit2` succeeds.

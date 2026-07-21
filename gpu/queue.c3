@@ -60,12 +60,14 @@ struct QueueSelection @private {
     QueueRoles[MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
 }
 
-<* Work submitted to an explicit queue. Non-zero readiness requires a
-   graphics-capable queue and is consumed only by successful submission. *>
+<* Work submitted to an explicit queue. Every wait names its first destination
+   stages. Non-zero readiness requires an explicit supported destination stage
+   and is consumed only by successful submission. *>
 struct SubmitDesc {
     ExecutableCommandList[] command_lists;
-    CompletionPoint[]       completion_waits;
+    CompletionWait[]        completion_waits;
     SwapchainReadiness      readiness;
+    StageMask               readiness_before;
 }
 
 fn bool Queue.is_valid(self) => self.device.is_valid();
@@ -555,7 +557,7 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
         )!;
     }
     foreach (wait : desc.completion_waits) {
-        validate_completion_point(&operation, &device, wait)!;
+        validate_completion_point(&operation, &device, wait.point)!;
     }
     if (desc.readiness != SWAPCHAIN_READINESS_INVALID) {
         if (!desc.readiness.is_valid()

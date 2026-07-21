@@ -429,7 +429,10 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::ExecutableCommandList graphics_commands_executable = gpu::end_commands(&graphics_commands)!!;
     defer discard_test_executable(&graphics_commands_executable)!!;
     gpu::ExecutableCommandList[1] graphics_lists = { graphics_commands_executable };
-    gpu::CompletionPoint[1] graphics_waits = { compute_completion };
+    gpu::CompletionWait[1] graphics_waits = {{
+        .point  = compute_completion,
+        .before = { .transfer },
+    }};
     gpu::SubmitDesc graphics_submit = {
         .command_lists    = graphics_lists[..],
         .completion_waits = graphics_waits[..],

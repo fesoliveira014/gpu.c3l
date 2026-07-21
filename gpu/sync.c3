@@ -41,6 +41,13 @@ struct CompletionPoint {
     ulong  payload;
 }
 
+<* A published queue completion and the first destination stages that consume
+   its work. *>
+struct CompletionWait {
+    CompletionPoint point;
+    StageMask       before;
+}
+
 <* Global execution and memory dependency with no resource identity or range. *>
 struct Barrier {
     StageMask   before;

@@ -171,8 +171,9 @@ through the matching destroy return; no callback occurs afterward.
 Each selected queue identity owns one private timeline. A successful `submit`
 signals its next value and returns a `CompletionPoint` for that queue. Same-queue
 submissions are ordered by the queue. Cross-queue dependencies are explicit in
-`SubmitDesc.completion_waits`; no application work boundary adds waits or
-signals.
+`SubmitDesc.completion_waits`; each wait names its first destination stages,
+and no application work boundary adds waits or signals. Same-queue waits are
+still stage-validated before the redundant native wait is elided.
 
 Polling or waiting a point advances cached progress for its queue. Command
 buffers from accepted submissions become reusable only after their covering
