@@ -4,6 +4,9 @@ import gpu @public;
 import gpu::vk @public;
 import vk;
 import std::core::mem;
+import std::core::mem::allocators;
+import std::atomic;
+import std::thread;
 
 // Headless (lavapipe): deterministic pipeline identity, transactional batches,
 // refcounted cache entries, shared layouts, and dynamic viewport/scissor state.
@@ -46,6 +49,41 @@ fn bool cache_index_consistent(gpu::Device* device) {
 struct CacheShaders {
     gpu::ShaderCode vert;
     gpu::ShaderCode frag;
+}
+
+struct GeneratedLayoutGate {
+    Atomic{bool} entered;
+    Atomic{bool} release;
+}
+
+struct GeneratedDispatchRecordArgs {
+    gpu::CommandList commands;
+    gpu::GpuSpan     records;
+    gpu::GpuSpan     count;
+    fault            failure;
+}
+
+fn void block_generated_layout_read(void* raw_gate) {
+    GeneratedLayoutGate* gate = (GeneratedLayoutGate*)raw_gate;
+    gate.entered.store(true, AtomicOrdering.RELEASE);
+    while (!gate.release.load(AtomicOrdering.ACQUIRE)) thread::yield();
+}
+
+fn int record_generated_dispatch(void* raw_args) {
+    GeneratedDispatchRecordArgs* args =
+        (GeneratedDispatchRecordArgs*)raw_args;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        if (catch dispatch_fault = gpu::cmd_dispatch_generated(
+            commands:           &args.commands,
+            records:            args.records,
+            count_span:         args.count,
+            max_dispatch_count: 1,
+        )) {
+            args.failure = dispatch_fault;
+            return 1;
+        }
+    };
+    return 0;
 }
 
 fn CacheShaders make_cache_shaders() {
@@ -742,6 +780,102 @@ fn void compute_layout_cache_grows_beyond_pipeline_capacity_hint() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(state.compute_layout_cache.count == sizes.len, "each distinct size has one cached layout");
     assert(state.compute_layout_cache.entries.len >= sizes.len, "layout cache grows beyond the one-pipeline hint");
+}
+
+fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
+    gpu::Device device = make_cache_test_device_with_capacity(2);
+    defer destroy_test_device(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    if (!caps.generated_work) return;
+
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ComputePipelineDesc pipeline_desc = {
+        .shader             = shader,
+        .push_constant_size = gpu::RootPush::size,
+    };
+    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(
+        &device,
+        &pipeline_desc,
+    )!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    OwnedSpan records = allocate_owned_span(
+        device:       &device,
+        size:         gpu::GeneratedDispatchRecord::size,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "generated_dispatch_relocation_records",
+    )!!;
+    defer free_owned_span(&device, &records)!!;
+    OwnedSpan count = allocate_owned_span(
+        device:       &device,
+        size:         uint::size,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "generated_dispatch_relocation_count",
+    )!!;
+    defer free_owned_span(&device, &count)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    bind_test_compute_pipeline(&commands, pipeline);
+
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::IndirectCommandsLayoutEXT expected_layout =
+        state.pipelines.slots[pipeline.index].value.generated_dispatch_layout;
+    GeneratedLayoutGate gate;
+    vk::set_generated_dispatch_layout_read_hook(
+        state,
+        &block_generated_layout_read,
+        &gate,
+    );
+    defer vk::set_generated_dispatch_layout_read_hook(state, null, null);
+    GeneratedDispatchRecordArgs args = {
+        .commands = commands,
+        .records  = records.span,
+        .count    = count.span,
+    };
+    Thread worker;
+    worker.create(&record_generated_dispatch, &args)!!;
+    while (!gate.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
+
+    bool initial_capacity_is_two = state.compute_layout_cache.entries.len == 2;
+    vk::ComputeLayoutEntry* before_growth =
+        state.compute_layout_cache.entries.ptr;
+    uint[2] push_sizes = { 12, 16 };
+    foreach (push_size : push_sizes) {
+        gpu::ComputePipelineDesc variant = {
+            .shader             = shader,
+            .push_constant_size = push_size,
+        };
+        gpu::PipelineHandle handle = gpu::create_compute_pipeline(
+            &device,
+            &variant,
+        )!!;
+        gpu::destroy_pipeline(&device, handle)!!;
+    }
+    bool cache_relocated =
+        state.compute_layout_cache.entries.ptr != before_growth;
+    gate.release.store(true, AtomicOrdering.RELEASE);
+    int worker_result = worker.join()!!;
+
+    assert(expected_layout != null,
+        "generated-work compute pipelines publish a generated layout");
+    assert(initial_capacity_is_two,
+        "the fixture begins at the capacity required to force growth");
+    assert(cache_relocated,
+        "distinct compute layouts relocate the cache while recording pauses");
+    assert(worker_result == 0,
+        "generated dispatch recording resumes after cache relocation");
+    assert(state.generated_dispatch_layout_read_observed == expected_layout,
+        "recording reads the original pipeline slot's generated layout");
 }
 
 fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test {

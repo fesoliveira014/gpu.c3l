@@ -220,9 +220,14 @@ semantically; unsupported devices report false and zero. These extensions are
 not physical-device selection requirements.
 
 The backend owns one indirect-command layout for each draw shape and one per
-cached compute pipeline layout. Calls use implicit preprocessing and private
-preprocess memory whose lifetime extends through command completion. A barrier
-with `hazards.draw_arguments` includes both indirect-command and generated
+cached compute pipeline layout. Each compute pipeline cache entry and live
+pipeline slot carries the generated-dispatch layout paired with its ordinary
+pipeline layout. Recording reads that stable slot value directly; it never
+searches layout-cache storage that pipeline creation may grow. The device-owned
+compute-layout cache remains the sole owner and destroys both handles at device
+teardown. Calls use implicit preprocessing and private preprocess memory whose
+lifetime extends through command completion. A barrier with
+`hazards.draw_arguments` includes both indirect-command and generated
 command-preprocess reads when this capability is enabled.
 
 The selected strict heap path adds either descriptor-buffer support or the
@@ -535,7 +540,11 @@ through `get_pipeline_cache_size` / `get_pipeline_cache_data`.
 
 Compute pipeline layouts are shared per push-constant size in a packed
 device-owned cache. Host storage uses pipeline capacity as an initial hint and
-grows to the device's finite valid-size count.
+grows to the device's finite valid-size count. Lookup returns the ordinary and
+generated-dispatch layouts as one value, and publication copies that pair into
+the canonical pipeline cache entry and every resulting pipeline slot. Those
+copies are non-owning; only the compute-layout cache destroys the native
+layouts.
 
 ### Result mapping
 

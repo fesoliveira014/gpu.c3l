@@ -62,6 +62,29 @@ class PerformanceContractTests(unittest.TestCase):
             errors = check_performance_contract.check(root)
             self.assertTrue(any("lock_device_registry(" in error for error in errors))
 
+    def test_compute_layout_cache_access_from_recording_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "fn void? vk_cmd_dispatch_generated(",
+                (
+                    "fn uint forbidden_layout_cache_read(VkDeviceState* state) {\n"
+                    "    return state.compute_layout_cache.count;\n"
+                    "}\n\n"
+                    "fn void? vk_cmd_dispatch_generated("
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "must not access compute-layout cache storage" in error
+                    for error in errors
+                )
+            )
+
     def test_completion_point_allocation_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

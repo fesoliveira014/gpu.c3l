@@ -210,6 +210,12 @@ def check(root: Path = ROOT) -> list[str]:
     command_bench = read(root, "test/src/command_record_bench.c3")
     lifecycle_bench = read(root, "test/src/lifecycle_bench.c3")
 
+    if "compute_layout_cache" in mask_c3_comments(backend_source):
+        errors.append(
+            "gpu/vk/command.c3 recording paths must not access "
+            "compute-layout cache storage"
+        )
+
     ownership_sources = (
         ("gpu/vk/command.c3", backend_source, BACKEND_OWNERSHIP_DIGESTS),
         (

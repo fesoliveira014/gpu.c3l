@@ -120,6 +120,10 @@ ownership transfers.
   the submitting thread is the required hand-off. Copies remain aliases and
   must not be used concurrently. Its embedded `Device` value is independent of
   the caller variable passed to `begin_commands`.
+- Pipeline slots live in a fixed table and carry every native layout needed by
+  recording. Pipeline creation may grow packed layout-cache storage while
+  another thread records with an existing pipeline because recording does not
+  inspect that cache.
 - Destruction must happen-after the last use of the handle on any thread.
 
 ## Worker-thread setup (C3)

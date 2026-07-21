@@ -10,10 +10,11 @@ import std::core::mem;
 const uint PIPELINE_FREE_NONE = 0;
 
 struct PipelineSlot {
-    vk::Pipeline       pipeline;
-    vk::PipelineLayout layout;
-    uint               entry;
-    Atomic{uint}        validation_references;
+    vk::Pipeline                    pipeline;
+    vk::PipelineLayout              layout;
+    vk::IndirectCommandsLayoutEXT   generated_dispatch_layout;
+    uint                            entry;
+    Atomic{uint}                    validation_references;
 }
 
 struct PipelineCell {
@@ -147,9 +148,10 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
             PipelineCacheEntry* entry = &state.pipeline_cache.entries[hit];
             entry.refcount++;
             if (try handle = state.pipelines.alloc({
-                .pipeline = entry.pipeline,
-                .layout   = entry.layout,
-                .entry    = hit,
+                .pipeline                  = entry.pipeline,
+                .layout                    = entry.layout,
+                .generated_dispatch_layout = entry.generated_dispatch_layout,
+                .entry                     = hit,
             })) {
                 return handle;
             }
@@ -158,7 +160,10 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         }
     }
 
-    vk::PipelineLayout layout = get_compute_layout(state, desc.push_constant_size)!;
+    ComputeLayoutRef compute_layout = get_compute_layout(
+        state,
+        desc.push_constant_size,
+    )!;
     PipelineShaderModule owned_shader;
     defer destroy_pipeline_shader_module(state, &owned_shader);
     PipelineShaderModule* shader = batch_shader;
@@ -178,7 +183,7 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         .set_stage(vk::ShaderStageFlagBits.COMPUTE_BIT)
         .set_mod(shader.shader_module)
         .set_name(&shader.entry_point[0]);
-    pipe_info.layout = layout;
+    pipe_info.layout = compute_layout.layout;
     if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
         pipe_info.flags = vk::PipelineCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT;
     }
@@ -217,14 +222,14 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         vk::destroy_pipeline(state.device, pipeline, null);
         state.pipeline_cache.entries[raced].refcount++;
         entry_index = raced;
-        pipeline = state.pipeline_cache.entries[raced].pipeline;
     } else if (try idx = insert_entry(
         state: state,
         value: {
-            .hash     = hash,
-            .key      = key,
-            .pipeline = pipeline,
-            .layout   = layout,
+            .hash                      = hash,
+            .key                       = key,
+            .pipeline                  = pipeline,
+            .layout                    = compute_layout.layout,
+            .generated_dispatch_layout = compute_layout.generated_dispatch_layout,
         },
         first_shader:  &desc.shader,
         second_shader: null,
@@ -235,10 +240,12 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         return gpu::SLOT_TABLE_FULL~;
     }
 
+    PipelineCacheEntry* entry = &state.pipeline_cache.entries[entry_index];
     if (try handle = state.pipelines.alloc({
-        .pipeline = pipeline,
-        .layout   = layout,
-        .entry    = entry_index,
+        .pipeline                  = entry.pipeline,
+        .layout                    = entry.layout,
+        .generated_dispatch_layout = entry.generated_dispatch_layout,
+        .entry                     = entry_index,
     })) {
         return handle;
     }
