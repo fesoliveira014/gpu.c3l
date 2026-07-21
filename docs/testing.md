@@ -276,7 +276,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback; explicit pipeline and depth state; nonzero stage roots; dynamic viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior use; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
-| Pipeline cache | cache create/reuse, blob save/load, warm start. |
+| Pipeline cache | cache create/reuse, blob save/load, warm start, and stable generated-dispatch layouts across compute-layout cache relocation. |
 | Threading | automatic per-worker recording pools, parallel record, identical submit. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
@@ -361,6 +361,13 @@ capability: a compute producer writes draw, indexed-draw, dispatch, and count
 records; all three generated commands then verify observable output. Command
 validation separately covers unsupported capability, count bounds, alignment,
 short spans, zero work, index formats, and generated-preprocess barrier masks.
+`vk_pipeline_cache` uses a test-only synchronization hook immediately before a
+generated-dispatch layout read, relocates the compute-layout cache on another
+thread, and verifies that recording observes the layout stored in the bound
+pipeline slot. This proves safe creation/recording overlap with the published
+slot state; it does not recreate the removed mid-scan interleaving. The
+platform-independent source contract is the regression guard and rejects
+compute-layout cache access outside its owning cache implementation.
 
 The benchmark runner builds eight executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,

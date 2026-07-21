@@ -210,6 +210,21 @@ def check(root: Path = ROOT) -> list[str]:
     command_bench = read(root, "test/src/command_record_bench.c3")
     lifecycle_bench = read(root, "test/src/lifecycle_bench.c3")
 
+    backend_root = root / "gpu/vk"
+    for path in sorted(backend_root.glob("*.c3")):
+        relative = path.relative_to(root).as_posix()
+        if relative == "gpu/vk/pipeline_cache.c3":
+            continue
+        reference_count = mask_c3_comments(
+            path.read_text(encoding="utf-8")
+        ).count("compute_layout_cache")
+        allowed_count = 1 if relative == "gpu/vk/device.c3" else 0
+        if reference_count != allowed_count:
+            errors.append(
+                f"{relative} must not access compute-layout cache storage "
+                "outside gpu/vk/pipeline_cache.c3"
+            )
+
     ownership_sources = (
         ("gpu/vk/command.c3", backend_source, BACKEND_OWNERSHIP_DIGESTS),
         (

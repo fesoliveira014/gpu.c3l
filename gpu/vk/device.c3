@@ -4,6 +4,7 @@ import gpu @public;
 import vk;
 import vma;
 import std::core::mem;
+import std::core::env;
 import std::atomic;
 import std::atomic::types;
 import std::thread;
@@ -24,6 +25,7 @@ alias SemaphoreCounterQueryFn @private = fn vk::Result (
     vk::Semaphore,
     ulong*,
 );
+alias GeneratedDispatchLayoutReadHook @private @if(env::TESTING) = fn void (void*);
 
 const ZString SWAPCHAIN_EXTENSION             = "VK_KHR_swapchain";
 const ZString SWAPCHAIN_MAINTENANCE_EXTENSION = "VK_EXT_swapchain_maintenance1";
@@ -156,6 +158,9 @@ struct VkDeviceState {
     ulong                      pipelines_created;
     bool                       pipeline_creation_failure_enabled;
     usz                        pipeline_creation_failure_index;
+    GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);
+    void*                       generated_dispatch_layout_read_user_data @if(env::TESTING);
+    vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;

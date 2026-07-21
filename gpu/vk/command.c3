@@ -5,6 +5,7 @@ import vk;
 import vma;
 import std::thread;
 import std::core::mem;
+import std::core::env;
 import std::atomic;
 import std::atomic::types;
 
@@ -1157,14 +1158,15 @@ fn ResolvedSpan? resolve_generated_work_records(
     return resolved;
 }
 
-fn vk::IndirectCommandsLayoutEXT? generated_dispatch_layout(
+fn void set_generated_dispatch_layout_read_hook(
     VkDeviceState* state,
-    vk::PipelineLayout pipeline_layout,
-) {
-    foreach (&entry : state.compute_layout_cache.entries[:state.compute_layout_cache.count]) {
-        if (entry.layout == pipeline_layout) return entry.generated_dispatch_layout;
-    }
-    return gpu::BACKEND_ERROR~;
+    GeneratedDispatchLayoutReadHook hook,
+    void* user_data,
+) @if(env::TESTING) {
+    state.generated_dispatch_layout_read_hook = hook;
+    state.generated_dispatch_layout_read_user_data = user_data;
+    state.generated_dispatch_layout_read_observed =
+        (vk::IndirectCommandsLayoutEXT)null;
 }
 
 fn void? execute_generated_work(
@@ -1263,10 +1265,18 @@ fn void? vk_cmd_dispatch_generated(
         operation:      "cmd_dispatch_generated",
         rejected_field: "count_span",
     )!;
-    vk::IndirectCommandsLayoutEXT layout = generated_dispatch_layout(
-        state,
-        pipeline.layout,
-    )!;
+    $if env::TESTING:
+        if (state.generated_dispatch_layout_read_hook != null) {
+            state.generated_dispatch_layout_read_hook(
+                state.generated_dispatch_layout_read_user_data,
+            );
+        }
+    $endif
+    vk::IndirectCommandsLayoutEXT layout = pipeline.generated_dispatch_layout;
+    $if env::TESTING:
+        state.generated_dispatch_layout_read_observed = layout;
+    $endif
+    if (layout == null) return gpu::BACKEND_ERROR~;
     execute_generated_work(
         state:         state,
         record:        record,

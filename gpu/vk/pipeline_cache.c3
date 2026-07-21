@@ -46,16 +46,17 @@ struct PipelineKey {
 $assert PipelineKey::size == 128;
 
 struct PipelineCacheEntry {
-    ulong              hash;
-    PipelineKey        key;
-    gpu::ShaderCode    first_shader;
-    gpu::ShaderCode    second_shader;
-    vk::Pipeline       pipeline;
-    vk::PipelineLayout layout;
-    uint               refcount;
-    uint               next_free;
-    uint               next_in_bucket;
-    bool               used;
+    ulong                          hash;
+    PipelineKey                    key;
+    gpu::ShaderCode                first_shader;
+    gpu::ShaderCode                second_shader;
+    vk::Pipeline                   pipeline;
+    vk::PipelineLayout             layout;
+    vk::IndirectCommandsLayoutEXT  generated_dispatch_layout;
+    uint                           refcount;
+    uint                           next_free;
+    uint                           next_in_bucket;
+    bool                           used;
 }
 
 struct PipelineCacheTable {
@@ -75,6 +76,11 @@ struct ComputeLayoutEntry {
 struct ComputeLayoutCache {
     ComputeLayoutEntry[] entries;
     uint                 count;
+}
+
+struct ComputeLayoutRef {
+    vk::PipelineLayout            layout;
+    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
 }
 
 struct PipelineCacheCreateOps @private {
@@ -435,14 +441,19 @@ fn void? grow_compute_layout_cache(VkDeviceState* state) @private {
     cache.entries = grown;
 }
 
-<* Compute layout for `push_size`, created on first use. All compute layouts
-   share the global heap set-0 layout and differ only in push range size. *>
-fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) {
+<* Compute layout pair for `push_size`, created on first use. All pairs share
+   the global heap set-0 layout and differ only in push range size. *>
+fn ComputeLayoutRef? get_compute_layout(VkDeviceState* state, uint push_size) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     ComputeLayoutCache* cache = &state.compute_layout_cache;
     foreach (&entry : cache.entries[:cache.count]) {
-        if (entry.push_size == push_size) return entry.layout;
+        if (entry.push_size == push_size) {
+            return {
+                .layout                    = entry.layout,
+                .generated_dispatch_layout = entry.generated_dispatch_layout,
+            };
+        }
     }
     if (cache.count == cache.entries.len) grow_compute_layout_cache(state)!;
 
@@ -488,12 +499,16 @@ fn vk::PipelineLayout? get_compute_layout(VkDeviceState* state, uint push_size) 
         object_handle: (ulong)layout,
         name:          "gpu_compute_layout",
     );
-    cache.entries[cache.count++] = {
+    ComputeLayoutEntry* entry = &cache.entries[cache.count++];
+    *entry = {
         .push_size                 = push_size,
         .layout                    = layout,
         .generated_dispatch_layout = generated_dispatch_layout,
     };
-    return layout;
+    return {
+        .layout                    = entry.layout,
+        .generated_dispatch_layout = entry.generated_dispatch_layout,
+    };
 }
 
 <* Spec-recommended pre-screen; the driver retry is the real safety net. *>
