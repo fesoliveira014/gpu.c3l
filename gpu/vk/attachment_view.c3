@@ -17,6 +17,7 @@ struct AttachmentViewSlot {
     uint               width;
     uint               height;
     bool               owns_native;
+    bool               swapchain_owned;
     Atomic{uint}       validation_references;
 }
 
@@ -175,6 +176,7 @@ fn void? vk_destroy_attachment_view(
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     AttachmentViewSlot* slot = state.attachment_views.get(handle)!;
+    if (slot.swapchain_owned) return gpu::INVALID_RESOURCE_STATE~;
     if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
         drain_completed_submitted_commands(state)!;
         if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {

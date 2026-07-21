@@ -263,7 +263,7 @@ fn uint report_attachment_view_leaks(VkDeviceState* state) {
     foreach (i, &cell : state.attachment_views.slots[
         :state.attachment_views.next_new
     ]) {
-        if (!cell.used) continue;
+        if (!cell.used || cell.value.swapchain_owned) continue;
         if (!report_resource_lifetime(
             state:               state,
             resource_kind:       gpu::DebugResourceKind.ATTACHMENT_VIEW,

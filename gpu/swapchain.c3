@@ -54,14 +54,16 @@ struct SwapchainReadiness {
 }
 $assert(SwapchainReadiness::size <= ulong::size * 2);
 
-<* Borrowed swapchain texture and its one-shot acquisition identity. Resize
-   invalidates the texture; an enqueued presentation consumes the value. *>
+<* Borrowed swapchain texture, its color attachment view, and its one-shot
+   acquisition identity. Resize invalidates both handles; an enqueued
+   presentation consumes the value. *>
 struct AcquiredImage {
-    TextureHandle       texture;
-    SwapchainReadiness  readiness;
-    uint                index;
-    bool                suboptimal;
-    TextureUse          prior_use;
+    TextureHandle        texture;
+    AttachmentViewHandle attachment_view;
+    SwapchainReadiness   readiness;
+    uint                 index;
+    bool                 suboptimal;
+    TextureUse           prior_use;
 }
 
 fn bool SwapchainReadiness.is_valid(self) => self.device.is_valid()
@@ -125,8 +127,9 @@ fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) 
     return operation.vtable.get_swapchain_info(device, swapchain);
 }
 
-<* Acquire a borrowed texture and one-shot readiness. WAIT_TIMEOUT is retryable;
-   out-of-date requires resize and surface loss requires replacement. *>
+<* Acquire a borrowed texture, its color attachment view, and one-shot
+   readiness. WAIT_TIMEOUT is retryable; out-of-date requires resize and
+   surface loss requires replacement. *>
 fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);

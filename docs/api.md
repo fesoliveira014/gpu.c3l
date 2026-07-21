@@ -372,7 +372,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
-| `INVALID_RESOURCE_STATE` | swapchain lifecycle; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, or the requested generated-scratch key is not reserved |
+| `INVALID_RESOURCE_STATE` | swapchain lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, a borrowed swapchain attachment view was passed for destruction, or the requested generated-scratch key is not reserved |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
@@ -1535,6 +1535,7 @@ SwapchainReadiness
 
 AcquiredImage
     TextureHandle texture
+    AttachmentViewHandle attachment_view
     SwapchainReadiness readiness
     uint index
     bool suboptimal
@@ -1558,6 +1559,7 @@ points fault before native mutation.
 
 ```c3
 gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
+// Use acquired.attachment_view as the color target; it is borrowed.
 gpu::SubmitDesc submit = {
     .command_lists = lists[..],
     .readiness     = acquired.readiness,
@@ -1595,9 +1597,11 @@ pipelines when the format changes. A dormant swapchain reports `UNDEFINED`,
 zero extent/count, and FIFO until resize succeeds.
 
 `AcquiredImage.prior_use` is `UNDEFINED` for a newly wrapped image and `PRESENT`
-after the normal presentation cycle. Resize stales prior borrowed texture
-handles. Destroy descriptors that reference swapchain textures, and discard or
-complete commands that name them, before resize or destruction.
+after the normal presentation cycle. `AcquiredImage.attachment_view` is the
+borrowed, swapchain-owned color target for the texture; callers must not destroy
+it. Resize stales both borrowed handles. Destroy descriptors that reference
+swapchain textures, and discard or complete commands that name either handle,
+before resize or destruction.
 
 SDL integration belongs in samples or an optional helper module.
 

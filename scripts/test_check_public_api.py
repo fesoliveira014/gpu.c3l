@@ -1043,6 +1043,10 @@ def valid_document() -> dict:
                         "members": [
                             {"name": "texture", "type": {"name": "TextureHandle"}},
                             {
+                                "name": "attachment_view",
+                                "type": {"name": "AttachmentViewHandle"},
+                            },
+                            {
                                 "name": "readiness",
                                 "type": {"name": "SwapchainReadiness"},
                             },

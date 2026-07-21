@@ -542,6 +542,40 @@ fn void default_attachment_view_aliases_texture_native_view() @test {
     gpu::destroy_texture(&device, texture)!!;
 }
 
+fn void swapchain_owned_attachment_view_rejects_caller_destruction() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics },
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .color_attach },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    gpu::AttachmentViewDesc view_desc = { .texture = texture };
+    gpu::AttachmentViewHandle view = gpu::create_attachment_view(
+        &device,
+        &view_desc,
+    )!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
+        &device,
+    );
+    vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
+    slot.swapchain_owned = true;
+
+    assert(@catch(gpu::destroy_attachment_view(&device, view))
+        == gpu::INVALID_RESOURCE_STATE,
+        "borrowed swapchain attachment views reject caller destruction");
+    assert(state.attachment_views.get(view)!! == slot,
+        "rejected borrowed-view destruction preserves the handle");
+
+    slot.swapchain_owned = false;
+    gpu::destroy_attachment_view(&device, view)!!;
+    gpu::destroy_texture(&device, texture)!!;
+}
+
 fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;

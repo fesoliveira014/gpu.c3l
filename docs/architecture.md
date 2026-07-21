@@ -612,7 +612,9 @@ rendered = submit(graphics, command lists + acquired.readiness)
 present(device, acquired, rendered)
 ```
 
-Acquisition returns a borrowed texture and compact one-shot readiness value.
+Acquisition returns a borrowed texture, its swapchain-owned color attachment
+view, and a compact one-shot readiness value. Callers render with the view but
+do not destroy it.
 Submission validates the exact device, swapchain generation, acquisition
 identity, and graphics role before waiting the private native acquire bridge.
 Only successful native submission consumes readiness and records its returned
@@ -627,7 +629,8 @@ preserves the acquired image.
 
 `SwapchainInfo` reports the selected format, extent, image count, present mode,
 and dormant state. `AcquiredImage.prior_use` is `UNDEFINED` before first use
-and `PRESENT` after presentation. Resize stales borrowed textures and never
+and `PRESENT` after presentation. Resize stales borrowed texture and attachment
+view handles and never
 reuses acquisition identities. Resize and destruction reject a pending
 acquisition or live command/view/presentation use without waiting, preserving
 the swapchain for retry.

@@ -1261,13 +1261,14 @@ def validate_document(document: dict) -> list[str]:
     acquired = types.get("AcquiredImage")
     if member_schema(acquired) != (
         ("texture", "TextureHandle"),
+        ("attachment_view", "AttachmentViewHandle"),
         ("readiness", "SwapchainReadiness"),
         ("index", "uint"),
         ("suboptimal", "bool"),
         ("prior_use", "TextureUse"),
     ):
         failures.append(
-            "AcquiredImage must carry readiness and semantic prior use"
+            "AcquiredImage must carry borrowed render handles, readiness, and semantic prior use"
         )
 
     for module_name, handle_names in PLATFORM_HANDLE_TYPES.items():

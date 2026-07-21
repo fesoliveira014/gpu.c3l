@@ -260,6 +260,7 @@ if (info.dormant) { /* wait for a non-zero resize */ }
 gpu::Format[1] color_formats = { info.format };
 
 gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
+gpu::AttachmentViewHandle color_target = acquired.attachment_view;
 gpu::TextureBarrier to_color = gpu::texture_transition(
     acquired.texture,
     acquired.prior_use,
