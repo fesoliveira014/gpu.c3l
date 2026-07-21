@@ -478,6 +478,23 @@ fn bool barrier_stage_mask_supported(
     return true;
 }
 
+<* Validate and lower the first destination stages of a queue submission wait. *>
+fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
+    gpu::StageMask stages,
+    vk::QueueFlags flags,
+) {
+    uint raw = (uint)stages;
+    if (raw == 0
+        || (raw & BARRIER_STAGE_BITS) != raw
+        || stages.host
+        || stages.present
+        || (stages.all && raw != 1)
+        || !barrier_stage_mask_supported(stages, flags)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return barrier_before_stages_to_vk(stages);
+}
+
 fn ZString barrier_queue_rejected_field(
     gpu::Barrier* barrier,
     vk::QueueFlags flags,

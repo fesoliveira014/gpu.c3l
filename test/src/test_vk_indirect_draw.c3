@@ -257,7 +257,10 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
     gpu::ExecutableCommandList graphics_executable = gpu::end_commands(&graphics)!!;
     defer discard_test_executable(&graphics_executable)!!;
     gpu::ExecutableCommandList[1] graphics_lists = { graphics_executable };
-    gpu::CompletionPoint[1] waits = { compute_completion };
+    gpu::CompletionWait[1] waits = {{
+        .point  = compute_completion,
+        .before = { .all },
+    }};
     gpu::SubmitDesc graphics_submit = {
         .command_lists    = graphics_lists[..],
         .completion_waits = waits[..],

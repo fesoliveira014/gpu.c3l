@@ -906,6 +906,10 @@ CompletionPoint
     Device device
     ulong payload
 
+CompletionWait
+    CompletionPoint point
+    StageMask before
+
 Queue
     Device device
     uint id
@@ -927,8 +931,9 @@ QueueInfo
 
 SubmitDesc
     ExecutableCommandList[] command_lists
-    CompletionPoint[] completion_waits
-    SwapchainHandle swapchain
+    CompletionWait[] completion_waits
+    SwapchainReadiness readiness
+    StageMask readiness_before
 ```
 
 `CompletionPoint` is a reusable queue-progress value. It fits in two machine
@@ -963,9 +968,13 @@ context owner resets and reuses them after completion or discard; native
 allocation is a cold-path fallback only when no reusable buffer is available.
 
 `SubmitDesc.completion_waits` accepts published points from the same device.
-Cross-queue points become waits on their queue-owned timelines. Published points
-from the target queue are validated and then elided because queue order is
-inherent. Stale, unpublished, malformed, and foreign-device waits fault
+Each `CompletionWait.before` names the first destination stages that consume
+the dependency. It must be nonempty, supported by the destination queue, and
+must not contain `host` or `present`; `all` is allowed only by itself. Unknown
+or unsupported masks fault `INVALID_ARGUMENT`. Cross-queue points become waits
+on their queue-owned timelines with the exact requested stage mask. Published
+points from the target queue are validated and then elided because queue order
+is inherent. Stale, unpublished, malformed, and foreign-device points fault
 `INVALID_HANDLE` before native submission and preserve every command token.
 If outstanding queue progress reaches the device's timeline-value-difference
 limit, submission faults retryable `DEVICE_BUSY` before reserving a sequence.
@@ -1550,19 +1559,22 @@ present(Device*, AcquiredImage*, CompletionPoint render_completion) -> void?
 get_present_mode_support(Device*, SwapchainHandle) -> PresentModeSupport?
 ```
 
-The rendering submission passes `acquired.readiness` in `SubmitDesc`. Successful
-submission consumes that readiness and returns the only completion point
-accepted by `present` for the acquisition. Validation and retryable native
-failure preserve readiness; device loss is terminal. Replays, stale
-acquisitions, foreign devices, non-graphics queues, and unrelated completion
-points fault before native mutation.
+The rendering submission passes `acquired.readiness` in `SubmitDesc` and names
+its first consuming stages with `readiness_before`. Readiness requires a
+graphics queue and a nonempty supported device stage; absent readiness requires
+a zero `readiness_before`. Successful submission consumes readiness and returns
+the only completion point accepted by `present` for the acquisition. Validation
+and retryable native failure preserve readiness; device loss is terminal.
+Replays, stale acquisitions, foreign devices, non-graphics queues, and unrelated
+completion points fault before native mutation.
 
 ```c3
 gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
 // Use acquired.attachment_view as the color target; it is borrowed.
 gpu::SubmitDesc submit = {
-    .command_lists = lists[..],
-    .readiness     = acquired.readiness,
+    .command_lists    = lists[..],
+    .readiness        = acquired.readiness,
+    .readiness_before = { .color_output },
 };
 gpu::CompletionPoint rendered = gpu::submit(graphics, &submit)!;
 gpu::present(&device, &acquired, rendered)!;

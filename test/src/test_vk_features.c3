@@ -568,6 +568,111 @@ fn void semantic_barrier_stage_masks_map_exactly() @test {
         "presentation maps to the broad execution scope");
 }
 
+fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
+    vk::QueueFlags transfer_only =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.TRANSFER_BIT;
+    vk::QueueFlags compute_only =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.COMPUTE_BIT;
+    vk::QueueFlags graphics_only =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.GRAPHICS_BIT;
+    gpu::StageMask combined = {
+        .fragment_shader = true,
+        .color_output    = true,
+    };
+    ulong expected =
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    assert((ulong)gpu::vk::submit_wait_stages_to_vk(
+            combined,
+            graphics_only,
+        )!! == expected,
+        "submission waits preserve combined destination stage bits");
+    assert(gpu::vk::submit_wait_stages_to_vk(
+            { .all },
+            transfer_only,
+        )!! == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        "the explicit all stage remains available on transfer queues");
+    assert(gpu::vk::submit_wait_stages_to_vk(
+            { .transfer },
+            compute_only,
+        )!! == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        "compute queues support transfer destinations");
+    assert(gpu::vk::submit_wait_stages_to_vk(
+            { .transfer },
+            graphics_only,
+        )!! == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        "graphics queues support transfer destinations");
+    assert(gpu::vk::submit_wait_stages_to_vk(
+            { .compute },
+            compute_only,
+        )!! == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+        "compute submission waits map exactly");
+    assert(gpu::vk::submit_wait_stages_to_vk(
+            { .vertex_shader },
+            graphics_only,
+        )!! == vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT,
+        "vertex submission waits map exactly");
+    assert(gpu::vk::submit_wait_stages_to_vk(
+            { .fragment_shader },
+            graphics_only,
+        )!! == vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT,
+        "fragment submission waits map exactly");
+    assert(gpu::vk::submit_wait_stages_to_vk(
+            { .color_output },
+            graphics_only,
+        )!! == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        "color-output submission waits map exactly");
+    ulong depth =
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    assert((ulong)gpu::vk::submit_wait_stages_to_vk(
+            { .depth_output },
+            graphics_only,
+        )!! == depth,
+        "depth-output submission waits map to both test stages");
+
+    assert(@catch(gpu::vk::submit_wait_stages_to_vk({}, graphics_only))
+            == gpu::INVALID_ARGUMENT,
+        "empty submission wait stages are invalid");
+    assert(@catch(gpu::vk::submit_wait_stages_to_vk(
+            { .all = true, .compute = true },
+            graphics_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "all cannot be combined with a specific submission wait stage");
+    assert(@catch(gpu::vk::submit_wait_stages_to_vk(
+            { .host },
+            graphics_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "host is not a submission wait destination stage");
+    assert(@catch(gpu::vk::submit_wait_stages_to_vk(
+            { .present },
+            graphics_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "present is not a submission wait destination stage");
+    assert(@catch(gpu::vk::submit_wait_stages_to_vk(
+            { .compute },
+            transfer_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "submission wait stages must be supported by the target queue");
+    assert(@catch(gpu::vk::submit_wait_stages_to_vk(
+            { .compute },
+            graphics_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "graphics-only queues reject compute destinations");
+    assert(@catch(gpu::vk::submit_wait_stages_to_vk(
+            { .vertex_shader },
+            compute_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "compute-only queues reject graphics destinations");
+    gpu::StageMask unknown = (gpu::StageMask)(1u << 9);
+    assert(@catch(gpu::vk::submit_wait_stages_to_vk(
+            unknown,
+            graphics_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "unknown submission wait stage bits are invalid");
+}
+
 fn void semantic_barrier_access_masks_map_exactly() @test {
     gpu::StageMask stages = {
         .host = true,
