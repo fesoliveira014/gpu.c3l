@@ -132,7 +132,7 @@ gpu::CompletionPoint sim_done = gpu::submit(compute, &sim_submit)!;
 
 gpu::CompletionWait[1] draw_waits = {{
     .point  = sim_done,
-    .before = { .fragment_shader },
+    .before = { .vertex_shader },
 }};
 gpu::SubmitDesc draw_submit = {
     .command_lists    = draw_lists[..],

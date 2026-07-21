@@ -16,18 +16,6 @@ bitstruct StageMask : uint {
     bool present         : 8;
 }
 
-fn bool stage_mask_valid(StageMask stages) @private {
-    uint raw = (uint)stages;
-    if (raw == 0 || (raw & STAGE_MASK_BITS) != raw) return false;
-    if (stages.all && raw != 1) return false;
-    if (stages.present && raw != 1u << 8) return false;
-    return true;
-}
-
-fn bool submit_wait_stage_mask_valid(StageMask stages) @private {
-    return stage_mask_valid(stages) && !stages.host && !stages.present;
-}
-
 <* Explicit invalidation for special non-coherent GPU data paths. *>
 bitstruct HazardFlags : uint {
     bool draw_arguments : 0;
@@ -81,6 +69,18 @@ fn bool CompletionPoint.is_valid(self) => self.device.is_valid()
     && completion_point_sequence(self) != 0;
 fn bool CompletionPoint.equals(self, CompletionPoint other) @operator(==) {
     return self.device == other.device && self.payload == other.payload;
+}
+
+fn bool stage_mask_valid(StageMask stages) @private {
+    uint raw = (uint)stages;
+    if (raw == 0 || (raw & STAGE_MASK_BITS) != raw) return false;
+    if (stages.all && raw != 1) return false;
+    if (stages.present && raw != 1u << 8) return false;
+    return true;
+}
+
+fn bool submit_wait_stage_mask_valid(StageMask stages) @private {
+    return stage_mask_valid(stages) && !stages.host && !stages.present;
 }
 
 fn bool texture_use_valid(TextureUse use) @private {
