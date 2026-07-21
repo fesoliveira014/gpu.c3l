@@ -132,6 +132,7 @@ offscreen render target clear/draw/readback
 dynamic viewport/scissor validation, clipping pixels, pass reset, and pipeline-alias persistence
 attachment-view capacity/generation/ownership, creation rollback, texture
 retention, in-flight destruction rejection, and allocation-free pass begin
+borrowed swapchain-view build/acquire/render guards and resize invalidation
 texture-view capacity, batch rollback, immediate index reuse, stale and
 cross-device release rejection, and concurrent publication/release
 sampler interning, stable strict publication, publication exhaustion, concurrent
@@ -383,8 +384,7 @@ ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
 generated dispatch. It measures five 64-record lists after an untimed 64-record
 warmup. Before warmup, the calling worker reserves 64 preprocess buffers sized
 for the declared generated workload. Each execute receives a distinct reserved
-address, and
-reuse occurs only after a list is discarded.
+address, and reuse occurs only after a list is discarded.
 The command target enables test-only resolution counters, resets them after
 begin/pipeline bind, reports measured native command count with every resolution
 count, and requires zero registry, retained-pin, lifecycle-vtable, command-table,

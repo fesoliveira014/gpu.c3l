@@ -275,13 +275,15 @@ Destroying a placed texture releases the image but not its `GpuAllocation`.
 Dedicated creation returns separate texture and allocation tokens; destroy the
 texture before releasing its allocation.
 
-A live attachment view retains its texture, so `destroy_texture` returns
-`RESOURCE_IN_USE` until every view is destroyed. A view referenced by a
-recording, executable, or submitted command list likewise returns
-`RESOURCE_IN_USE` from `destroy_attachment_view`. Wait for covering completion,
-then destroy the view before the texture. Non-default native subresource views
-are destroyed exactly once with their public child; pass recording never creates
-or caches them.
+A live user-created attachment view retains its texture, so `destroy_texture`
+returns `RESOURCE_IN_USE` until every view is destroyed. A borrowed swapchain
+view does not add a retain because the swapchain owns and invalidates its texture
+and view together. A view referenced by a recording, executable, or submitted
+command list returns `RESOURCE_IN_USE` from its owning lifecycle operation. Wait
+for covering completion before destroying a user-created view or resizing or
+destroying a swapchain. Non-default native subresource views are destroyed
+exactly once with their public child; pass recording never creates or caches
+them.
 
 ## 10. Caller-owned transient data
 

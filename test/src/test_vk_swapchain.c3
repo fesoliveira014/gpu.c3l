@@ -2,11 +2,123 @@ module gpu_test;
 
 import gpu;
 import gpu::vk @public;
+import std::core::mem;
+import vma;
 import vk;
 
 uint captured_present_calls;
 uint captured_fence_status_calls;
 uint captured_fence_reset_calls;
+vk::Image borrowed_view_backing_image;
+uint borrowed_view_swapchain_creates;
+uint borrowed_view_swapchain_destroys;
+uint borrowed_view_acquires;
+
+fn vk::Result borrowed_view_surface_capabilities(
+    vk::PhysicalDevice physical_device,
+    vk::SurfaceKHR surface,
+    vk::SurfaceCapabilitiesKHR* capabilities,
+) {
+    (void)physical_device;
+    (void)surface;
+    *capabilities = {
+        .min_image_count       = 1,
+        .max_image_count       = 1,
+        .current_extent        = { .width = uint::max, .height = uint::max },
+        .min_image_extent      = { .width = 1, .height = 1 },
+        .max_image_extent      = { .width = 64, .height = 64 },
+        .current_transform     = vk::SurfaceTransformFlagBitsKHR.IDENTITY_BIT_KHR,
+        .supported_usage_flags = vk::ImageUsageFlagBits.COLOR_ATTACHMENT_BIT,
+    };
+    return vk::Result.SUCCESS;
+}
+
+fn vk::Result borrowed_view_surface_formats(
+    vk::PhysicalDevice physical_device,
+    vk::SurfaceKHR surface,
+    uint* count,
+    vk::SurfaceFormatKHR* formats,
+) {
+    (void)physical_device;
+    (void)surface;
+    *count = 1;
+    if (formats != null) {
+        formats[0] = {
+            .format      = vk::Format.B8G8R8A8_UNORM,
+            .color_space = vk::ColorSpaceKHR.SRGB_NONLINEAR_KHR,
+        };
+    }
+    return vk::Result.SUCCESS;
+}
+
+fn vk::Result borrowed_view_present_modes(
+    vk::PhysicalDevice physical_device,
+    vk::SurfaceKHR surface,
+    uint* count,
+    vk::PresentModeKHR* modes,
+) {
+    (void)physical_device;
+    (void)surface;
+    *count = 1;
+    if (modes != null) modes[0] = vk::PresentModeKHR.FIFO_KHR;
+    return vk::Result.SUCCESS;
+}
+
+fn vk::Result borrowed_view_create_swapchain(
+    vk::Device device,
+    vk::SwapchainCreateInfoKHR* create_info,
+    vk::AllocationCallbacks* allocator,
+    vk::SwapchainKHR* swapchain,
+) {
+    (void)device;
+    (void)create_info;
+    (void)allocator;
+    borrowed_view_swapchain_creates++;
+    *swapchain = (vk::SwapchainKHR)(uptr)borrowed_view_swapchain_creates;
+    return vk::Result.SUCCESS;
+}
+
+fn void borrowed_view_destroy_swapchain(
+    vk::Device device,
+    vk::SwapchainKHR swapchain,
+    vk::AllocationCallbacks* allocator,
+) {
+    (void)device;
+    (void)swapchain;
+    (void)allocator;
+    borrowed_view_swapchain_destroys++;
+}
+
+fn vk::Result borrowed_view_get_swapchain_images(
+    vk::Device device,
+    vk::SwapchainKHR swapchain,
+    uint* count,
+    vk::Image* images,
+) {
+    (void)device;
+    (void)swapchain;
+    *count = 1;
+    if (images != null) images[0] = borrowed_view_backing_image;
+    return vk::Result.SUCCESS;
+}
+
+fn vk::Result borrowed_view_acquire(
+    vk::Device device,
+    vk::SwapchainKHR swapchain,
+    ulong timeout,
+    vk::Semaphore semaphore,
+    vk::Fence fence,
+    uint* image_index,
+) {
+    (void)device;
+    (void)swapchain;
+    (void)timeout;
+    (void)semaphore;
+    (void)fence;
+    borrowed_view_acquires++;
+    *image_index = 0;
+    return vk::Result.SUCCESS;
+}
 
 fn vk::Result capture_present(
     vk::Queue queue,
@@ -603,6 +715,204 @@ fn void swapchain_release_detects_shared_resource_references() @test {
         &state,
         &slot,
     )!!, "a shared texture descriptor blocks release");
+
+    descriptors[0].used = false;
+    state.strict_heap.descriptors.texture_next_new = 0;
+    state.attachment_views.free(attachment_view)!!;
+    assert(!gpu::vk::swapchain_images_referenced_locked(
+        &state,
+        &slot,
+    )!!, "a missing internal attachment-view slot is ignored defensively");
+}
+
+fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .application_name  = "borrowed_swapchain_view_lifecycle_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::vk::VkDeviceState* state =
+        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+
+    gpu::vk::VkInstanceSurfaceDispatch original_surface_dispatch =
+        state.instance_dispatch.surface;
+    gpu::vk::VkDevicePresentationDispatch original_presentation_dispatch =
+        state.device_dispatch.presentation;
+    gpu::vk::SwapchainTable original_swapchains =
+        state.presentation.swapchains;
+    defer {
+        state.instance_dispatch.surface = original_surface_dispatch;
+        state.device_dispatch.presentation = original_presentation_dispatch;
+        state.presentation.swapchains = original_swapchains;
+    }
+
+    gpu::TextureDesc backing_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics },
+        .width     = 4,
+        .height    = 4,
+        .format    = gpu::Format.BGRA8_UNORM,
+        .usage     = { .color_attach },
+    };
+    uint[1] queue_families = { state.graphics_family };
+    vk::ImageCreateInfo image_info = gpu::vk::make_texture_create_info(
+        desc:           &backing_desc,
+        queue_families: queue_families[..],
+    );
+    vma::AllocationCreateInfo allocation_info = {
+        .usage = vma::MemoryUsage.AUTO_PREFER_DEVICE,
+    };
+    vma::ImageAllocation backing = state.allocator.try_create_image(
+        &image_info,
+        &allocation_info,
+    )!!;
+    defer state.allocator.destroy_image(backing.image, backing.allocation);
+    borrowed_view_backing_image = backing.image;
+    borrowed_view_swapchain_creates = 0;
+    borrowed_view_swapchain_destroys = 0;
+    borrowed_view_acquires = 0;
+
+    state.instance_dispatch.surface.get_surface_capabilities =
+        &borrowed_view_surface_capabilities;
+    state.instance_dispatch.surface.get_surface_formats =
+        &borrowed_view_surface_formats;
+    state.instance_dispatch.surface.get_surface_present_modes =
+        &borrowed_view_present_modes;
+    state.device_dispatch.presentation = {
+        .create_swapchain     = &borrowed_view_create_swapchain,
+        .destroy_swapchain    = &borrowed_view_destroy_swapchain,
+        .get_swapchain_images = &borrowed_view_get_swapchain_images,
+        .acquire_next_image   = &borrowed_view_acquire,
+    };
+
+    gpu::vk::SwapchainCell[1] swapchain_cells;
+    state.presentation.swapchains = {
+        .slots = swapchain_cells[..],
+        .owner = gpu::resource_owner_tag(
+            state.resource_owner,
+            gpu::ResourceOwnerKind.SWAPCHAIN,
+        ),
+    };
+    gpu::vk::SwapchainSlot slot = {
+        .surface   = (vk::SurfaceKHR)1,
+        .requested = {
+            .width            = 4,
+            .height           = 4,
+            .preferred_format = gpu::Format.BGRA8_UNORM,
+            .present_mode     = gpu::PresentMode.FIFO,
+            .image_count      = 1,
+        },
+    };
+    slot.acquire_semaphores = mem::new_array(
+        vk::Semaphore,
+        gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT,
+    );
+    slot.acquire_retirements = mem::new_array(
+        gpu::CompletionPoint,
+        gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT,
+    );
+    for (uint i = 0; i < gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT; i++) {
+        vk::SemaphoreCreateInfo semaphore_info = vk::semaphore_create_info();
+        assert(vk::create_semaphore(
+            device:        state.device,
+            p_create_info: &semaphore_info,
+            p_allocator:   null,
+            p_semaphore:   &slot.acquire_semaphores[i],
+        ) == vk::Result.SUCCESS, "the acquire semaphore fixture is valid");
+    }
+    gpu::vk::WsiDiagnosticContext context = {
+        .state     = state,
+        .operation = "borrowed_view_lifecycle_test",
+    };
+    gpu::vk::build_swapchain(
+        state:   state,
+        slot:    &slot,
+        width:   4,
+        height:  4,
+        old:     (vk::SwapchainKHR)null,
+        context: &context,
+    )!!;
+    gpu::SwapchainHandle swapchain =
+        state.presentation.swapchains.alloc(slot)!!;
+    gpu::vk::SwapchainSlot* live_slot =
+        state.presentation.swapchains.get(swapchain)!!;
+
+    gpu::AcquiredImage acquired = gpu::vk::vk_acquire_next_image(
+        &device,
+        swapchain,
+    )!!;
+    gpu::TextureHandle old_texture = acquired.texture;
+    gpu::AttachmentViewHandle old_view = acquired.attachment_view;
+    gpu::vk::TextureSlot* texture = state.textures.get(old_texture)!!;
+    gpu::vk::AttachmentViewSlot* view =
+        state.attachment_views.get(old_view)!!;
+    assert(borrowed_view_swapchain_creates == 1
+        && borrowed_view_acquires == 1
+        && live_slot.image_count == 1,
+        "production build and acquire publish one wrapped image");
+    assert(texture.swapchain_owned && view.swapchain_owned
+        && view.texture == old_texture
+        && view.native == texture.default_view,
+        "acquire returns the jointly owned texture and borrowed native view");
+    assert(@catch(gpu::destroy_attachment_view(&device, old_view))
+        == gpu::INVALID_RESOURCE_STATE,
+        "the acquired borrowed view rejects caller destruction");
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    gpu::TextureBarrier to_color = {
+        .texture = old_texture,
+        .before  = acquired.prior_use,
+        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+    };
+    gpu::cmd_texture_barrier(&commands, &to_color)!!;
+    gpu::ColorTargetDesc[1] colors = {{ .view = old_view }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = 4,
+        .height = 4,
+    };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+    assert(view.validation_references.load(AtomicOrdering.RELAXED) == 1,
+        "recorded rendering retains the borrowed view");
+    gpu::vk::commit_present_result(live_slot, &acquired, vk::Result.SUCCESS);
+
+    assert(@catch(gpu::vk::vk_resize_swapchain(
+        &device,
+        swapchain,
+        8,
+        8,
+    )) == gpu::RESOURCE_IN_USE,
+        "resize rejects a recorded borrowed-view reference");
+    assert(@catch(gpu::vk::vk_destroy_swapchain(&device, swapchain))
+        == gpu::RESOURCE_IN_USE,
+        "destruction rejects a recorded borrowed-view reference");
+    assert(view.validation_references.load(AtomicOrdering.RELAXED) == 1
+        && state.textures.get(old_texture)!! == texture
+        && state.attachment_views.get(old_view)!! == view,
+        "failed release attempts preserve the command and borrowed handles");
+
+    gpu::discard_commands(&commands)!!;
+    assert(view.validation_references.load(AtomicOrdering.RELAXED) == 0,
+        "discard releases the recorded borrowed-view reference");
+    gpu::vk::vk_resize_swapchain(&device, swapchain, 8, 8)!!;
+    assert(@catch(state.textures.get(old_texture)) == gpu::INVALID_HANDLE
+        && @catch(state.attachment_views.get(old_view)) == gpu::INVALID_HANDLE,
+        "successful resize invalidates both handles from the old acquisition");
+    assert(borrowed_view_swapchain_creates == 2
+        && borrowed_view_swapchain_destroys == 1,
+        "resize rebuilds once and destroys the retired native swapchain once");
+
+    gpu::vk::vk_destroy_swapchain(&device, swapchain)!!;
+    assert(@catch(state.presentation.swapchains.get(swapchain))
+        == gpu::INVALID_HANDLE,
+        "destroy invalidates the rebuilt swapchain handle");
+    assert(borrowed_view_swapchain_destroys == 2,
+        "each fake native swapchain is destroyed exactly once");
 }
 
 fn void present_fences_retire_without_waiting() @test {

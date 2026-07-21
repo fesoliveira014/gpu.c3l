@@ -273,26 +273,26 @@ RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> c
 `begin_commands` creates a record in `RECORDING`. Render passes nest into
 `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes
 the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
-batch as `SUBMITTING`. Validation or native failure restores it without publishing
-queue progress. Success publishes one `CompletionPoint` and invalidates every
-submitted token and alias. Completion observation and discard retire native
-buffers to their recording context. The context owner resets compatible buffers
-before its next begin and reuses their host-side reference and generated-scratch
-arrays. Native command-buffer and host allocation are cold fallbacks only when
-the context has no reusable unit. A retained reference array may also grow on
-the cold path when a command list establishes a new high-water mark. Device
-teardown relies on command-pool destruction.
-Invalid transitions return faults,
-and render-pass command constraints remain enforced. A render pass records its
-attachment formats and sample count; a graphics pipeline must match them before
-begin or bind mutates native command state. Resolve and pass boundaries do not
-add implicit synchronization.
+batch as `SUBMITTING`. Validation or native failure restores it without
+publishing queue progress. Success publishes one `CompletionPoint` and
+invalidates every submitted token and alias. Completion observation and discard
+retire native buffers to their recording context. The context owner resets
+compatible buffers before its next begin and reuses their host-side reference
+and generated-scratch arrays. Native command-buffer and host allocation are
+cold fallbacks only when the context has no reusable unit. A retained reference
+array may also grow on the cold path when a command list establishes a new
+high-water mark. Device teardown relies on command-pool destruction. Invalid
+transitions return faults, and render-pass command constraints remain enforced.
+A render pass records its attachment formats and sample count; a graphics
+pipeline must match them before begin or bind mutates native command state.
+Resolve and pass boundaries do not add implicit synchronization.
 
 Render targets name explicit `AttachmentViewHandle` children created before
-recording. Each immutable view selects one texture mip and layer, retains the
-texture, and owns any non-default native image view. Render-pass begin resolves
-the fixed view table into fixed-size local arrays. It does not create image
-views, grow a cache, or allocate host storage.
+recording. Each immutable view selects one texture mip and layer. User-created
+views retain their texture and own any non-default native image view. Borrowed
+swapchain views do not retain their jointly owned texture. Render-pass begin
+resolves the fixed view table into fixed-size local arrays. It does not create
+image views, grow a cache, or allocate host storage.
 
 Generated commands consume preprocess buffers from explicit reservations on
 the calling thread's device recording context. Each reservation is keyed by
@@ -630,10 +630,9 @@ preserves the acquired image.
 `SwapchainInfo` reports the selected format, extent, image count, present mode,
 and dormant state. `AcquiredImage.prior_use` is `UNDEFINED` before first use
 and `PRESENT` after presentation. Resize stales borrowed texture and attachment
-view handles and never
-reuses acquisition identities. Resize and destruction reject a pending
-acquisition or live command/view/presentation use without waiting, preserving
-the swapchain for retry.
+view handles and never reuses acquisition identities. Resize and destruction
+reject a pending acquisition or live command/view/presentation use without
+waiting, preserving the swapchain for retry.
 
 Surface creation remains platform-specific. SDL helpers live outside `gpu`.
 
