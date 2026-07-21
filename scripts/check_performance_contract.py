@@ -125,7 +125,7 @@ SYNC_OWNERSHIP_DIGESTS = {
     "vk_wait_completion": "1152d19168b8fbf057ecea0b8cfc540adb169c1b7e3239aa56f8d95141ab0543",
 }
 QUEUE_OWNERSHIP_DIGESTS = {
-    "vk_submit_with_queries": "fa0720a0794b9507085728dc8e455f1aaee98b2d375a9e5cb462d3179097f2cc",
+    "vk_submit_with_queries": "1381785a9d38240b65bffd1c569ee8932f80514ba09c340d55b2ffbc6e2a182a",
     "vk_submit_with": "773cfe5518f228b74c72265329eeb46a1db722334cabe1f57b0f0f4a5e3dc9e1",
     "vk_submit": "383f58739300051514fa01012860a73d7b96601c6d8040ffcbf1f864d111196a",
 }

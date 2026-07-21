@@ -314,7 +314,7 @@ fn void cross_queue_timeline_chain_validates() @test {
         .before = { .all },
     }};
     gpu::SubmitDesc gfx_submit = {
-        .command_lists   = gfx_lists[..],
+        .command_lists    = gfx_lists[..],
         .completion_waits = completion_waits[..],
     };
     gpu::CompletionPoint graphics_done = submit_test_queue(&device, gpu::QueueKind.GRAPHICS,

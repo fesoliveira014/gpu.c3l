@@ -976,6 +976,9 @@ on their queue-owned timelines with the exact requested stage mask. Published
 points from the target queue are validated and then elided because queue order
 is inherent. Stale, unpublished, malformed, and foreign-device points fault
 `INVALID_HANDLE` before native submission and preserve every command token.
+Because the public wait mask has no draw-argument or command-preprocess bit,
+dependencies consumed as indirect or generated command arguments require
+`.all`; shader-stage bits begin too late to order those argument reads.
 If outstanding queue progress reaches the device's timeline-value-difference
 limit, submission faults retryable `DEVICE_BUSY` before reserving a sequence.
 

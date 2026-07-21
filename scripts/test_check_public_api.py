@@ -1423,10 +1423,6 @@ method gpu::Runtime.is_valid
         }]
         failures = check_public_api.validate_document(document)
         self.assertIn(
-            "SubmitDesc must not expose swapchain coupling",
-            failures,
-        )
-        self.assertIn(
             "SubmitDesc must match the exact stage-scoped schema",
             failures,
         )

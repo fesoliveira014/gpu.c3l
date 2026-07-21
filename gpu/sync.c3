@@ -1,6 +1,7 @@
 module gpu;
 
 const CompletionPoint COMPLETION_POINT_INVALID = {};
+const uint STAGE_MASK_BITS @private = 0x01FF;
 
 <* Execution scopes for a global barrier. `all` and `present` are exclusive. *>
 bitstruct StageMask : uint {
@@ -13,6 +14,18 @@ bitstruct StageMask : uint {
     bool color_output    : 6;
     bool depth_output    : 7;
     bool present         : 8;
+}
+
+fn bool stage_mask_valid(StageMask stages) @private {
+    uint raw = (uint)stages;
+    if (raw == 0 || (raw & STAGE_MASK_BITS) != raw) return false;
+    if (stages.all && raw != 1) return false;
+    if (stages.present && raw != 1u << 8) return false;
+    return true;
+}
+
+fn bool submit_wait_stage_mask_valid(StageMask stages) @private {
+    return stage_mask_valid(stages) && !stages.host && !stages.present;
 }
 
 <* Explicit invalidation for special non-coherent GPU data paths. *>

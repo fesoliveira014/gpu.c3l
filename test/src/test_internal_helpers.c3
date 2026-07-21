@@ -461,3 +461,13 @@ fn void queue_access_requires_the_recording_role() @test {
     assert(!queue_access_allows({}, QueueKind.GRAPHICS));
     assert(!queue_access_allows((QueueRoles)0x8, QueueKind.GRAPHICS));
 }
+
+fn void submit_wait_mask_shape_is_backend_independent() @test {
+    assert(submit_wait_stage_mask_valid({ .all }));
+    assert(submit_wait_stage_mask_valid({ .transfer, .compute }));
+    assert(!submit_wait_stage_mask_valid({}));
+    assert(!submit_wait_stage_mask_valid({ .host }));
+    assert(!submit_wait_stage_mask_valid({ .present }));
+    assert(!submit_wait_stage_mask_valid({ .all, .compute }));
+    assert(!submit_wait_stage_mask_valid((StageMask)(1u << 9)));
+}

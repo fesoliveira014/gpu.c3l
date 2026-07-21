@@ -1947,21 +1947,20 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
 ) {
     SubmitInputs inputs;
     gpu::Device device = queue.device;
-    bool has_readiness = desc.readiness
-        != gpu::SWAPCHAIN_READINESS_INVALID;
+    bool has_readiness = desc.readiness != gpu::SWAPCHAIN_READINESS_INVALID;
     if (has_readiness != ((uint)desc.readiness_before != 0)) {
         return gpu::INVALID_ARGUMENT~;
     }
 
     if (has_readiness) {
-        inputs.readiness_stages = submit_wait_stages_to_vk(
-            desc.readiness_before,
-            target.queue_flags,
-        )!;
         if (!desc.readiness.is_valid()
             || desc.readiness.device != device) {
             return gpu::INVALID_HANDLE~;
         }
+        inputs.readiness_stages = submit_wait_stages_to_vk(
+            desc.readiness_before,
+            target.queue_flags,
+        )!;
         gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
             state,
             desc.readiness,
@@ -1986,17 +1985,20 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
         foreach (i, wait : desc.completion_waits) {
             gpu::CompletionPoint point = wait.point;
             if (point.device != device) return gpu::INVALID_HANDLE~;
+            ulong sequence = gpu::completion_point_sequence(point);
+            QueueCompletionState* source = published_queue_completion_state(
+                state,
+                gpu::completion_point_queue_id(point),
+                sequence,
+            )!;
+            vk::PipelineStageFlags2 stages = submit_wait_stages_to_vk(
+                wait.before,
+                target.queue_flags,
+            )!;
             inputs.completion_waits[i] = {
-                .source = published_queue_completion_state(
-                    state,
-                    gpu::completion_point_queue_id(point),
-                    gpu::completion_point_sequence(point),
-                )!,
-                .stages = submit_wait_stages_to_vk(
-                    wait.before,
-                    target.queue_flags,
-                )!,
-                .sequence = gpu::completion_point_sequence(point),
+                .source   = source,
+                .stages   = stages,
+                .sequence = sequence,
             };
         }
     }
@@ -2072,10 +2074,10 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             queue.id,
         )!;
         SubmitInputs inputs = resolve_and_claim_submit_inputs(
-            state,
-            queue,
-            desc,
-            completion,
+            state:  state,
+            queue:  queue,
+            desc:   desc,
+            target: completion,
         )!;
         vk::SubmitInfo2 submit = vk::submit_info2();
         CommandRecord*[] records = inputs.records;
