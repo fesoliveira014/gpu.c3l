@@ -9,24 +9,48 @@ const char[*] COMMAND_BENCH_SHADER_SPIRV = $embed("shaders/root_pointer.comp.spv
 const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint GENERATED_RECORD_ITERATIONS = 1_000;
 const uint COMMAND_RECORD_REPETITIONS = 5;
+const uint MEASURED_COMMAND_PATH_COUNT = 3;
 
-fn double record_barriers(gpu::Device* device) {
+fn void accumulate_resolution_stats(
+    gpu::CommandResolutionStats* total,
+    gpu::CommandResolutionStats sample,
+) {
+    total.device_registry_resolutions += sample.device_registry_resolutions;
+    total.retained_pin_operations += sample.retained_pin_operations;
+    total.lifecycle_vtable_dispatches += sample.lifecycle_vtable_dispatches;
+    total.command_table_lookups += sample.command_table_lookups;
+    total.pipeline_table_lookups += sample.pipeline_table_lookups;
+    total.pipeline_cache_lookups += sample.pipeline_cache_lookups;
+    total.command_policy_selections += sample.command_policy_selections;
+    total.recording_commands += sample.recording_commands;
+    total.native_commands += sample.native_commands;
+}
+
+fn double record_barriers(
+    gpu::Device* device,
+    gpu::CommandResolutionStats* resolution,
+) {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::Barrier barrier = {
         .before = { .compute = true },
         .after = { .compute = true },
     };
+    gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
         gpu::cmd_barrier(&commands, &barrier)!!;
     }
     long elapsed_ns = (long)start.to_now();
+    accumulate_resolution_stats(resolution, gpu::command_resolution_stats());
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
 }
 
-fn double record_hazard_barriers(gpu::Device* device) {
+fn double record_hazard_barriers(
+    gpu::Device* device,
+    gpu::CommandResolutionStats* resolution,
+) {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::Barrier barrier = {
         .before = { .compute = true },
@@ -37,11 +61,13 @@ fn double record_hazard_barriers(gpu::Device* device) {
             .depth_stencil = true,
         },
     };
+    gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
         gpu::cmd_barrier(&commands, &barrier)!!;
     }
     long elapsed_ns = (long)start.to_now();
+    accumulate_resolution_stats(resolution, gpu::command_resolution_stats());
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
@@ -52,9 +78,11 @@ fn double record_indirect_dispatches(
     gpu::PipelineHandle pipeline,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
+    gpu::CommandResolutionStats* resolution,
 ) {
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
         gpu::cmd_dispatch_indirect(
@@ -64,6 +92,7 @@ fn double record_indirect_dispatches(
         )!!;
     }
     long elapsed_ns = (long)start.to_now();
+    accumulate_resolution_stats(resolution, gpu::command_resolution_stats());
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
@@ -74,11 +103,13 @@ fn double record_generated_dispatches(
     gpu::PipelineHandle pipeline,
     gpu::GpuSpan records,
     gpu::GpuSpan count,
+    gpu::CommandResolutionStats* resolution,
 ) {
     gpu::CommandList commands = gpu::begin_commands(
         gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!,
     )!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < GENERATED_RECORD_ITERATIONS; i++) {
         gpu::cmd_dispatch_generated(
@@ -89,6 +120,7 @@ fn double record_generated_dispatches(
         )!!;
     }
     long elapsed_ns = (long)start.to_now();
+    accumulate_resolution_stats(resolution, gpu::command_resolution_stats());
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&executable)!!;
     return (double)elapsed_ns / (double)GENERATED_RECORD_ITERATIONS;
@@ -185,15 +217,23 @@ fn int main() {
     )!!;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
 
-    (void)record_barriers(&device);
-    (void)record_hazard_barriers(&device);
-    (void)record_indirect_dispatches(&device, pipeline, gpu::get_span_address(&device, buffer_span)!!, args);
+    gpu::CommandResolutionStats warmup_resolution;
+    (void)record_barriers(&device, &warmup_resolution);
+    (void)record_hazard_barriers(&device, &warmup_resolution);
+    (void)record_indirect_dispatches(
+        &device,
+        pipeline,
+        gpu::get_span_address(&device, buffer_span)!!,
+        args,
+        &warmup_resolution,
+    );
     if (caps.generated_work) {
         (void)record_generated_dispatches(
             &device,
             pipeline,
             generated_records,
             generated_count,
+            &warmup_resolution,
         );
     }
 
@@ -208,18 +248,32 @@ fn int main() {
     double[COMMAND_RECORD_REPETITIONS] hazard_results;
     double[COMMAND_RECORD_REPETITIONS] indirect_results;
     double[COMMAND_RECORD_REPETITIONS] generated_results;
+    gpu::CommandResolutionStats resolution;
     for (uint i = 0; i < COMMAND_RECORD_REPETITIONS; i++) {
-        barrier_results[i] = record_barriers(&device);
-        hazard_results[i] = record_hazard_barriers(&device);
-        indirect_results[i] = record_indirect_dispatches(&device, pipeline, gpu::get_span_address(&device, buffer_span)!!, args);
+        barrier_results[i] = record_barriers(&device, &resolution);
+        hazard_results[i] = record_hazard_barriers(&device, &resolution);
+        indirect_results[i] = record_indirect_dispatches(
+            &device,
+            pipeline,
+            gpu::get_span_address(&device, buffer_span)!!,
+            args,
+            &resolution,
+        );
         if (caps.generated_work) {
             generated_results[i] = record_generated_dispatches(
                 &device,
                 pipeline,
                 generated_records,
                 generated_count,
+                &resolution,
             );
         }
+    }
+    ulong expected_recording_commands = COMMAND_RECORD_ITERATIONS
+        * COMMAND_RECORD_REPETITIONS * MEASURED_COMMAND_PATH_COUNT;
+    if (caps.generated_work) {
+        expected_recording_commands += GENERATED_RECORD_ITERATIONS
+            * COMMAND_RECORD_REPETITIONS;
     }
     ulong registry_locks =
         gpu::device_registry_lock_count() - registry_locks_before;
@@ -241,6 +295,24 @@ fn int main() {
         "generated recording uses distinct pooled preprocess storage");
     assert(draw_compilations == 0,
         "recording does not compile pipelines");
+    assert(resolution.device_registry_resolutions == 0,
+        "warm recording does not resolve the device registry");
+    assert(resolution.retained_pin_operations == 0,
+        "warm recording does not borrow retained pins");
+    assert(resolution.lifecycle_vtable_dispatches == 0,
+        "warm recording does not load the lifecycle vtable");
+    assert(resolution.command_table_lookups == 0,
+        "warm recording does not resolve the backend command table");
+    assert(resolution.pipeline_table_lookups == 0,
+        "warm recording does not resolve the pipeline table after bind");
+    assert(resolution.pipeline_cache_lookups == 0,
+        "warm recording does not resolve the pipeline cache after bind");
+    assert(resolution.command_policy_selections == 0,
+        "warm recording does not select a validation policy");
+    assert(resolution.recording_commands == expected_recording_commands,
+        "resolution evidence counts every measured recording call");
+    assert(resolution.native_commands >= resolution.recording_commands,
+        "measured recording calls emit native command work");
     if (caps.generated_work) {
         assert(preprocess_reuses
             >= GENERATED_RECORD_ITERATIONS * COMMAND_RECORD_REPETITIONS,
@@ -275,6 +347,18 @@ fn int main() {
         recording_allocations,
         draw_compilations,
         preprocess_allocations,
+    );
+    io::printfn(
+        "resolution: recording_commands=%d native_commands=%d device_registry=%d retained_pins=%d lifecycle_vtable=%d command_table=%d pipeline_table=%d pipeline_cache=%d policy=%d",
+        resolution.recording_commands,
+        resolution.native_commands,
+        resolution.device_registry_resolutions,
+        resolution.retained_pin_operations,
+        resolution.lifecycle_vtable_dispatches,
+        resolution.command_table_lookups,
+        resolution.pipeline_table_lookups,
+        resolution.pipeline_cache_lookups,
+        resolution.command_policy_selections,
     );
     io::printfn("generated preprocess: reuse_events=%d", preprocess_reuses);
     return 0;

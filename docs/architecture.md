@@ -195,8 +195,10 @@ get_device_caps(Device*)       -> DeviceCaps?
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
 Most public device operations pin the slot before reading backend state.
-`begin_commands` transfers its pin to the command token; hot recording calls
-borrow the retained pin without mutating the registry pin count.
+`begin_commands` transfers its pin to the command token and publishes one
+stable, backend-opaque encoder cell. Hot recording calls validate that cell and
+dispatch through its immutable command-operation table without resolving the
+device registry, borrowing another pin, or loading the lifecycle vtable.
 
 Destruction first rejects known live children, then closes the slot. Closing
 blocks new pins while active pins, a second child check, and queue completion
@@ -254,9 +256,13 @@ exclusive; multiple families use private concurrent sharing.
 ### Command lists
 
 A command list is a transient, owner-bearing token for a device-owned command
-record. The public token contains only a `Device` value and generation-checked
-handle; the Vulkan command buffer, pool, bind cache, context, queue, and
-lifecycle state remain backend-owned. Copies therefore alias one record.
+record. The public token contains a `Device` value, generation-checked handle,
+and one opaque encoder pointer; the Vulkan command buffer, pool, bind cache,
+context, queue, and lifecycle state remain backend-owned. The encoder pointer is
+part of the command-token ABI. Copies alias one encoder phase and record.
+Each device slot owns a fixed `MAX_DEVICE_COMMANDS` encoder array. Across all
+device slots this zero-initialized storage is capped at 16 MiB; operating-system
+pages commit as encoder cells are touched.
 
 State transitions:
 
@@ -277,6 +283,16 @@ and render-pass command constraints remain enforced. A render pass records its
 attachment formats and sample count; a graphics pipeline must match them before
 begin or bind mutates native command state. Resolve and pass boundaries do not
 add implicit synchronization.
+
+Pipeline bind resolves the stable pipeline cell and cache entry once, then
+publishes a complete bound snapshot: expected generation, native pipeline and
+layout, kind, render compatibility, cache identity, and generated-work layout.
+Later draw, dispatch, render-pass, indirect, and generated commands validate the
+cached cell generation and use the snapshot without reading pipeline tables or
+cache storage. Ending a render pass clears a graphics snapshot; a legal compute
+snapshot remains available. Command-policy variants are outside this mechanism:
+policy selection happens when the device or encoder is created, never in a warm
+recording call.
 
 ### Independent allocations
 

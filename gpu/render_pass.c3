@@ -108,15 +108,13 @@ fn bool render_pass_desc_valid(RenderPassDesc* desc) @private {
 <* Begin a pass without adding synchronization. Viewport and scissor default to
    the full render area. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     if (!render_pass_desc_valid(desc)) return INVALID_ARGUMENT~;
-    return operation.vtable.cmd_begin_render_pass(commands, desc);
+    return encoder.ops.begin_render_pass(encoder, desc);
 }
 
 <* End the active render pass without adding synchronization. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.cmd_end_render_pass(commands);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.end_render_pass(encoder);
 }

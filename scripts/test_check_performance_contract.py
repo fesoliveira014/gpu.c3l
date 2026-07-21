@@ -64,6 +64,100 @@ class PerformanceContractTests(unittest.TestCase):
             errors = check_performance_contract.check(root)
             self.assertTrue(any("lock_device_registry(" in error for error in errors))
 
+    def test_lifecycle_vtable_on_public_recording_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/command.c3",
+                "fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {",
+                (
+                    "fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {\n"
+                    "    command_operation(commands)!.vtable.cmd_barrier("
+                    "commands, barrier);"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any("command_operation(" in error for error in errors))
+
+    def test_public_recording_helper_relocation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/command.c3",
+                "fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {",
+                (
+                    "fn void forbidden_public_resolution(CommandList* commands) {\n"
+                    "    (void)command_operation(commands);\n"
+                    "}\n\n"
+                    "fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {\n"
+                    "    forbidden_public_resolution(commands);"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any("command_operation(" in error for error in errors))
+
+    def test_backend_state_helper_relocation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/render_pass.c3",
+                "fn void? vk_cmd_draw_generated(",
+                (
+                    "fn void forbidden_recording_state_lookup(gpu::Device* device) {\n"
+                    "    (void)gpu::device_backend_state_ptr(device);\n"
+                    "}\n\n"
+                    "fn void? vk_cmd_draw_generated("
+                ),
+            )
+            self.mutate(
+                root,
+                "gpu/vk/render_pass.c3",
+                "    CommandRecord* record = encoder_command(commands);",
+                (
+                    "    forbidden_recording_state_lookup(&commands.device);\n"
+                    "    CommandRecord* record = encoder_command(commands);"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any("device_backend_state_ptr(" in error for error in errors)
+            )
+
+    def test_post_bind_pipeline_helper_relocation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/render_pass.c3",
+                "fn void? vk_cmd_draw_generated(",
+                (
+                    "fn void forbidden_pipeline_lookup(VkDeviceState* state) {\n"
+                    "    (void)state.pipelines.get({});\n"
+                    "}\n\n"
+                    "fn void? vk_cmd_draw_generated("
+                ),
+            )
+            self.mutate(
+                root,
+                "gpu/vk/render_pass.c3",
+                "    CommandRecord* record = encoder_command(commands);",
+                (
+                    "    forbidden_pipeline_lookup(encoder_device_state(commands));\n"
+                    "    CommandRecord* record = encoder_command(commands);"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any("post-bind pipeline resolution" in error for error in errors)
+            )
+
     def test_compute_layout_cache_access_from_recording_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

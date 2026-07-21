@@ -6,8 +6,8 @@ import std::atomic::types;
 import std::thread;
 import std::core::mem;
 
-// Backend dispatch functions. Command recording entries take the owner-bearing
-// CommandList; all other entries take the validated device token.
+// Backend dispatch functions. Lifecycle entries take validated public tokens;
+// recording entries take the encoder resolved at begin.
 alias CheckDeviceDestroyFn @private  = fn void? (void*);
 alias DestroyDeviceFn @private       = fn void (void*);
 alias ReportContractFailureFn @private = fn fault (
@@ -29,18 +29,27 @@ alias GetSpanAddressFn @private      = fn GpuAddress? (Device*, GpuSpan);
 alias FlushSpanFn @private           = fn void? (Device*, GpuSpan);
 alias InvalidateSpanFn @private      = fn void? (Device*, GpuSpan);
 // Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
-alias BeginCommandsFn @private   = fn void? (Queue, CommandList* out_commands);
-alias EndCommandsFn @private     = fn void? (CommandList*);
-alias DiscardCommandsFn @private = fn void? (Device*, CommandListHandle, bool executable);
+alias BeginCommandsFn @private = fn void? (
+    Queue queue,
+    CommandList* out_commands,
+    CommandBackendContext* out_backend,
+);
+alias EndCommandsFn @private     = fn void? (CommandEncoderState*);
+alias DiscardCommandsFn @private = fn void? (
+    Device*,
+    CommandListHandle,
+    bool executable,
+    CommandEncoderState*,
+);
 alias SubmitFn @private          = fn CompletionPoint? (Queue, SubmitDesc*);
 alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
 alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
-alias CmdCopyBufferFn @private       = fn void? (CommandList*, BufferCopyDesc*);
-alias CmdFillBufferFn @private       = fn void? (CommandList*, GpuSpan, uint);
-alias CmdCopyBufferToTextureFn @private = fn void? (CommandList*, BufferTextureCopyDesc*);
-alias CmdCopyTextureToBufferFn @private = fn void? (CommandList*, TextureBufferCopyDesc*);
-alias CmdBarrierFn @private          = fn void? (CommandList*, Barrier*);
-alias CmdTextureBarrierFn @private   = fn void? (CommandList*, TextureBarrier*);
+alias CmdCopyBufferFn @private       = fn void? (CommandEncoderState*, BufferCopyDesc*);
+alias CmdFillBufferFn @private       = fn void? (CommandEncoderState*, GpuSpan, uint);
+alias CmdCopyBufferToTextureFn @private = fn void? (CommandEncoderState*, BufferTextureCopyDesc*);
+alias CmdCopyTextureToBufferFn @private = fn void? (CommandEncoderState*, TextureBufferCopyDesc*);
+alias CmdBarrierFn @private          = fn void? (CommandEncoderState*, Barrier*);
+alias CmdTextureBarrierFn @private   = fn void? (CommandEncoderState*, TextureBarrier*);
 alias GetTextureFormatSupportFn @private = fn TextureFormatSupport? (Device*, Format);
 alias SupportsTextureDescFn @private     = fn bool? (Device*, TextureDesc*);
 alias GetTextureRequirementsFn @private  = fn TextureRequirements? (Device*, TextureDesc*);
@@ -69,24 +78,78 @@ alias CreateGraphicsPipelinesFn @private = fn void? (Device*, GraphicsPipelineDe
 alias DestroyPipelineFn @private        = fn void? (Device*, PipelineHandle);
 alias GetPipelineCacheSizeFn @private   = fn usz? (Device*);
 alias GetPipelineCacheDataFn @private   = fn usz? (Device*, char[]);
-alias CmdBindPipelineFn @private             = fn void? (CommandList*, PipelineHandle);
-alias CmdSetDepthStateFn @private            = fn void? (CommandList*, DepthState*);
-alias CmdDispatchFn @private                 = fn void? (CommandList*, GpuAddress, Vec3u);
-alias CmdBeginRenderPassFn @private          = fn void? (CommandList*, RenderPassDesc*);
-alias CmdSetViewportFn @private              = fn void? (CommandList*, Viewport*);
-alias CmdSetScissorFn @private               = fn void? (CommandList*, ScissorRect*);
-alias CmdEndRenderPassFn @private            = fn void? (CommandList*);
-alias CmdDrawFn @private                     = fn void? (CommandList*, GpuAddress, GpuAddress, uint, uint);
-alias CmdDrawIndexedFn @private              = fn void? (CommandList*, GpuAddress, GpuAddress, GpuSpan, uint, uint, IndexType);
-alias CmdDrawIndirectFn @private             = fn void? (CommandList*, GpuAddress, GpuAddress, GpuSpan, uint);
-alias CmdDrawIndexedIndirectFn @private      = fn void? (CommandList*, GpuAddress, GpuAddress, GpuSpan, uint, GpuSpan, IndexType);
-alias CmdDrawIndexedIndirectCountFn @private = fn void? (CommandList*, GpuAddress, GpuAddress, GpuSpan, GpuSpan, uint, GpuSpan, IndexType);
-alias CmdDispatchIndirectFn @private         = fn void? (CommandList*, GpuAddress, GpuSpan);
-alias CmdDrawGeneratedFn @private            = fn void? (CommandList*, GpuSpan, GpuSpan, uint);
-alias CmdDrawIndexedGeneratedFn @private     = fn void? (CommandList*, GpuSpan, GpuSpan, uint, GpuSpan, IndexType);
-alias CmdDispatchGeneratedFn @private        = fn void? (CommandList*, GpuSpan, GpuSpan, uint);
-alias CmdBeginLabelFn @private               = fn void? (CommandList*, ZString, float[4]);
-alias CmdEndLabelFn @private                 = fn void? (CommandList*);
+alias CmdBindPipelineFn @private             = fn void? (CommandEncoderState*, PipelineHandle);
+alias CmdSetDepthStateFn @private            = fn void? (CommandEncoderState*, DepthState*);
+alias CmdDispatchFn @private                 = fn void? (CommandEncoderState*, GpuAddress, Vec3u);
+alias CmdBeginRenderPassFn @private          = fn void? (CommandEncoderState*, RenderPassDesc*);
+alias CmdSetViewportFn @private              = fn void? (CommandEncoderState*, Viewport*);
+alias CmdSetScissorFn @private               = fn void? (CommandEncoderState*, ScissorRect*);
+alias CmdEndRenderPassFn @private            = fn void? (CommandEncoderState*);
+alias CmdDrawFn @private = fn void? (
+    CommandEncoderState* encoder,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+);
+alias CmdDrawIndexedFn @private = fn void? (
+    CommandEncoderState* encoder,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    IndexType index_type,
+);
+alias CmdDrawIndirectFn @private = fn void? (
+    CommandEncoderState* encoder,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan args,
+    uint draw_count,
+);
+alias CmdDrawIndexedIndirectFn @private = fn void? (
+    CommandEncoderState* encoder,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan args,
+    uint draw_count,
+    GpuSpan index_span,
+    IndexType index_type,
+);
+alias CmdDrawIndexedIndirectCountFn @private = fn void? (
+    CommandEncoderState* encoder,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan args,
+    GpuSpan count_span,
+    uint max_draw_count,
+    GpuSpan index_span,
+    IndexType index_type,
+);
+alias CmdDispatchIndirectFn @private         = fn void? (CommandEncoderState*, GpuAddress, GpuSpan);
+alias CmdDrawGeneratedFn @private = fn void? (
+    CommandEncoderState* encoder,
+    GpuSpan records,
+    GpuSpan count_span,
+    uint max_draw_count,
+);
+alias CmdDrawIndexedGeneratedFn @private = fn void? (
+    CommandEncoderState* encoder,
+    GpuSpan records,
+    GpuSpan count_span,
+    uint max_draw_count,
+    GpuSpan index_span,
+    IndexType index_type,
+);
+alias CmdDispatchGeneratedFn @private = fn void? (
+    CommandEncoderState* encoder,
+    GpuSpan records,
+    GpuSpan count_span,
+    uint max_dispatch_count,
+);
+alias CmdBeginLabelFn @private               = fn void? (CommandEncoderState*, ZString, float[4]);
+alias CmdEndLabelFn @private                 = fn void? (CommandEncoderState*);
 alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
@@ -100,17 +163,86 @@ const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
 const uint MAX_DEVICE_OPERATION_PINS @private = 0x3FFF_FFFF;
 const uint MAX_DEVICE_OPERATION_PIN_ATTEMPTS @private = 64;
 const uint MAX_DEVICE_COMMANDS @private = 4096;
+const usz MAX_COMMAND_ENCODER_STORAGE_BYTES @private = 16 * 1024 * 1024;
 
 const uint DEVICE_SLOT_FREE @private = 0;
 const uint DEVICE_SLOT_LIVE @private = 1;
 const uint DEVICE_SLOT_CLOSING @private = 2;
 const uint DEVICE_SLOT_RETIRED @private = 3;
 
+enum CommandEncoderPhase @private {
+    INACTIVE,
+    RECORDING,
+    EXECUTABLE,
+}
+
+enum ResourceOwnerKind @private {
+    ALLOCATION,
+    BUFFER,
+    TEXTURE,
+    TEXTURE_VIEW,
+    SAMPLER,
+    PIPELINE,
+    SWAPCHAIN,
+    COMMAND,
+    COMPLETION_POINT,
+}
+
+const ulong RESOURCE_OWNER_KIND_COUNT =
+    (ulong)ResourceOwnerKind.COMPLETION_POINT + 1;
+const ulong MAX_DEVICE_RESOURCE_OWNER =
+    ulong::max / RESOURCE_OWNER_KIND_COUNT;
+
 bitstruct DeviceSlotControl : ulong @private {
     uint state      : 0..1;
     uint pins       : 2..31;
     uint generation : 32..55;
     uint reserved   : 56..63;
+}
+
+struct CommandBackendContext @private {
+    void* state;
+    void* command;
+}
+
+struct CommandEncoderState @private {
+    Device              device;
+    CommandListHandle   handle;
+    CommandOps*         ops;
+    void*               backend_state;
+    void*               backend_command;
+    Atomic{bool}*       device_lost;
+    CommandEncoderPhase phase;
+}
+$assert CommandEncoderState::size <= ulong::size * 8;
+$assert CommandEncoderState::size * MAX_DEVICES * MAX_DEVICE_COMMANDS
+    <= MAX_COMMAND_ENCODER_STORAGE_BYTES;
+
+struct CommandOps @private {
+    CmdCopyBufferFn               copy_buffer;
+    CmdFillBufferFn               fill_buffer;
+    CmdCopyBufferToTextureFn      copy_buffer_to_texture;
+    CmdCopyTextureToBufferFn      copy_texture_to_buffer;
+    CmdBarrierFn                  barrier;
+    CmdTextureBarrierFn           texture_barrier;
+    CmdBindPipelineFn             bind_pipeline;
+    CmdSetDepthStateFn            set_depth_state;
+    CmdDispatchFn                 dispatch;
+    CmdBeginRenderPassFn          begin_render_pass;
+    CmdSetViewportFn              set_viewport;
+    CmdSetScissorFn               set_scissor;
+    CmdEndRenderPassFn            end_render_pass;
+    CmdDrawFn                     draw;
+    CmdDrawIndexedFn              draw_indexed;
+    CmdDrawIndirectFn             draw_indirect;
+    CmdDrawIndexedIndirectFn      draw_indexed_indirect;
+    CmdDrawIndexedIndirectCountFn draw_indexed_indirect_count;
+    CmdDispatchIndirectFn         dispatch_indirect;
+    CmdDrawGeneratedFn            draw_generated;
+    CmdDrawIndexedGeneratedFn     draw_indexed_generated;
+    CmdDispatchGeneratedFn        dispatch_generated;
+    CmdBeginLabelFn               begin_label;
+    CmdEndLabelFn                 end_label;
 }
 
 // One immutable table per backend.
@@ -134,12 +266,7 @@ struct BackendVTable @private {
     SubmitFn                submit;
     PollCompletionFn        poll_completion;
     WaitCompletionFn        wait_completion;
-    CmdCopyBufferFn         cmd_copy_buffer;
-    CmdFillBufferFn         cmd_fill_buffer;
-    CmdCopyBufferToTextureFn cmd_copy_buffer_to_texture;
-    CmdCopyTextureToBufferFn cmd_copy_texture_to_buffer;
-    CmdBarrierFn            cmd_barrier;
-    CmdTextureBarrierFn     cmd_texture_barrier;
+    CommandOps*             command_ops;
     GetTextureFormatSupportFn get_texture_format_support;
     SupportsTextureDescFn     supports_texture_desc;
     GetTextureRequirementsFn  get_texture_requirements;
@@ -159,24 +286,6 @@ struct BackendVTable @private {
     DestroyPipelineFn         destroy_pipeline;
     GetPipelineCacheSizeFn    get_pipeline_cache_size;
     GetPipelineCacheDataFn    get_pipeline_cache_data;
-    CmdBindPipelineFn             cmd_bind_pipeline;
-    CmdSetDepthStateFn            cmd_set_depth_state;
-    CmdDispatchFn                 cmd_dispatch;
-    CmdBeginRenderPassFn          cmd_begin_render_pass;
-    CmdSetViewportFn              cmd_set_viewport;
-    CmdSetScissorFn               cmd_set_scissor;
-    CmdEndRenderPassFn            cmd_end_render_pass;
-    CmdDrawFn                     cmd_draw;
-    CmdDrawIndexedFn              cmd_draw_indexed;
-    CmdDrawIndirectFn             cmd_draw_indirect;
-    CmdDrawIndexedIndirectFn      cmd_draw_indexed_indirect;
-    CmdDrawIndexedIndirectCountFn cmd_draw_indexed_indirect_count;
-    CmdDispatchIndirectFn         cmd_dispatch_indirect;
-    CmdDrawGeneratedFn            cmd_draw_generated;
-    CmdDrawIndexedGeneratedFn     cmd_draw_indexed_generated;
-    CmdDispatchGeneratedFn        cmd_dispatch_generated;
-    CmdBeginLabelFn               cmd_begin_label;
-    CmdEndLabelFn                 cmd_end_label;
     CreateSwapchainFn       create_swapchain;
     DestroySwapchainFn      destroy_swapchain;
     ResizeSwapchainFn       resize_swapchain;
@@ -191,6 +300,7 @@ struct DeviceData @private {
     DeviceCaps     caps;
     QueueSelection queues;
     BackendVTable* vtable;
+    CommandOps*    command_ops;
     void*          backend_state;
     ulong          resource_owner;
     Runtime        runtime;
@@ -200,12 +310,13 @@ struct DeviceData @private {
 }
 
 struct DeviceSlot @private {
-    Atomic{ulong}                     control;
-    Atomic{ulong}                     live_children;
-    Atomic{ulong}                     command_owner;
-    Atomic{bool}                      lost;
-    Atomic{uint}[MAX_DEVICE_COMMANDS] command_leases;
-    DeviceData                        data;
+    Atomic{ulong}                            control;
+    Atomic{ulong}                            live_children;
+    Atomic{ulong}                            command_owner;
+    Atomic{bool}                             lost;
+    Atomic{uint}[MAX_DEVICE_COMMANDS]        command_leases;
+    CommandEncoderState[MAX_DEVICE_COMMANDS] command_encoders;
+    DeviceData                               data;
 }
 
 struct DeviceOperation @private {
@@ -216,20 +327,148 @@ struct DeviceOperation @private {
     bool           owns_pin;
 }
 
-enum ResourceOwnerKind @private {
-    ALLOCATION,
-    BUFFER,
-    TEXTURE,
-    TEXTURE_VIEW,
-    SAMPLER,
-    PIPELINE,
-    SWAPCHAIN,
-    COMMAND,
-    COMPLETION_POINT,
+<* Test and benchmark instrumentation for command resolution and native command
+   emission. Counters are process-wide relaxed atomics; compare snapshots only
+   after externally synchronizing the measured recording work. *>
+struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+    ulong device_registry_resolutions;
+    ulong retained_pin_operations;
+    ulong lifecycle_vtable_dispatches;
+    ulong command_table_lookups;
+    ulong pipeline_table_lookups;
+    ulong pipeline_cache_lookups;
+    ulong command_policy_selections;
+    ulong recording_commands;
+    ulong native_commands;
 }
 
-const ulong RESOURCE_OWNER_KIND_COUNT = (ulong)ResourceOwnerKind.COMPLETION_POINT + 1;
-const ulong MAX_DEVICE_RESOURCE_OWNER = ulong::max / RESOURCE_OWNER_KIND_COUNT;
+Atomic{ulong} command_device_registry_resolutions @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_retained_pin_operations @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_lifecycle_vtable_dispatches @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_policy_selections @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_recording_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_native_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+
+fn void note_command_device_registry_resolution() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_device_registry_resolutions.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_retained_pin_operation() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_retained_pin_operations.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_lifecycle_vtable_dispatch() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_lifecycle_vtable_dispatches.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_table_lookup() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_table_lookups.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_pipeline_table_lookup() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_pipeline_table_lookups.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_pipeline_cache_lookup() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_pipeline_cache_lookups.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_policy_selection() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_policy_selections.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_recording_call() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_recording_commands.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_native_call() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_native_commands.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+<* Reset process-wide command instrumentation before a synchronized test or
+   benchmark interval. Do not call while another thread records commands. *>
+fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+    command_device_registry_resolutions.store(0, AtomicOrdering.RELAXED);
+    command_retained_pin_operations.store(0, AtomicOrdering.RELAXED);
+    command_lifecycle_vtable_dispatches.store(0, AtomicOrdering.RELAXED);
+    command_table_lookups.store(0, AtomicOrdering.RELAXED);
+    command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
+    command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
+    command_policy_selections.store(0, AtomicOrdering.RELAXED);
+    command_recording_commands.store(0, AtomicOrdering.RELAXED);
+    command_native_commands.store(0, AtomicOrdering.RELAXED);
+}
+
+<* Snapshot process-wide command instrumentation with relaxed loads.
+   recording_commands counts live-encoder entry-point attempts;
+   native_commands counts every Vulkan command emitted by those paths. *>
+fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+    return {
+        .device_registry_resolutions = command_device_registry_resolutions.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .retained_pin_operations = command_retained_pin_operations.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .lifecycle_vtable_dispatches = command_lifecycle_vtable_dispatches.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .command_table_lookups = command_table_lookups.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .pipeline_table_lookups = command_pipeline_table_lookups.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .pipeline_cache_lookups = command_pipeline_cache_lookups.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .command_policy_selections = command_policy_selections.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .recording_commands = command_recording_commands.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .native_commands = command_native_commands.load(
+            AtomicOrdering.RELAXED,
+        ),
+    };
+}
 
 DeviceSlot[MAX_DEVICES] device_slots @private;
 Atomic{bool} device_registry_lock @private;
@@ -618,11 +857,13 @@ fn Device? register_device(
             AtomicOrdering.RELAXED,
         );
         slot.lost.store(false, AtomicOrdering.RELAXED);
+        slot.command_encoders = {};
         slot.data = {
             .backend              = backend,
             .caps                 = caps,
             .queues               = queues,
             .vtable               = vtable,
+            .command_ops          = vtable.command_ops,
             .backend_state        = backend_state,
             .resource_owner       = resource_owner,
             .runtime              = runtime,

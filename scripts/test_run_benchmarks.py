@@ -35,6 +35,12 @@ COMMAND_OUTPUT = "\n".join(
             "invariants: registry_locks=0 recording_allocations=0 "
             "draw_compilations=0 preprocess_allocations=0"
         ),
+        (
+            "resolution: recording_commands=305000 native_commands=405000 "
+            "device_registry=0 "
+            "retained_pins=0 lifecycle_vtable=0 command_table=0 "
+            "pipeline_table=0 pipeline_cache=0 policy=0"
+        ),
         "generated preprocess: reuse_events=5000",
     )
 )
@@ -196,6 +202,22 @@ class BenchmarkRunnerTests(unittest.TestCase):
             with self.subTest(field=field):
                 output = COMMAND_OUTPUT.replace(f"{field}=0", f"{field}=1")
                 with self.assertRaisesRegex(ValueError, "recording invariants"):
+                    runner.require_measurement(output, "command_record_bench")
+
+    def test_command_measurement_requires_zero_resolution_evidence(self):
+        runner = load_runner()
+        for field in (
+            "device_registry",
+            "retained_pins",
+            "lifecycle_vtable",
+            "command_table",
+            "pipeline_table",
+            "pipeline_cache",
+            "policy",
+        ):
+            with self.subTest(field=field):
+                output = COMMAND_OUTPUT.replace(f"{field}=0", f"{field}=1")
+                with self.assertRaisesRegex(ValueError, "resolution evidence"):
                     runner.require_measurement(output, "command_record_bench")
 
     def test_allocation_measurement_rejects_extra_fields(self):

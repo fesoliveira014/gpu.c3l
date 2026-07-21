@@ -721,12 +721,15 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     gpu::cmd_barrier(&commands, &generated_ready)!!;
 
     bind_test_compute_pipeline(&commands, dispatch_pipeline);
+    gpu::reset_command_resolution_stats();
     gpu::cmd_dispatch_generated(
         commands:           &commands,
         records:            dispatch_records.span,
         count_span:         count.span,
         max_dispatch_count: 1,
     )!!;
+
+    assert_warm_command_resolution(gpu::command_resolution_stats(), 1);
 
     record_target_to_attach(&commands, plain_target);
     gpu::ColorTargetDesc[1] plain_colors = {{

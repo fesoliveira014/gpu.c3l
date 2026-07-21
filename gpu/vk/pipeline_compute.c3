@@ -58,12 +58,17 @@ fn gpu::PipelineHandle? PipelineTable.alloc(&self, PipelineSlot value) {
     };
 }
 
-fn PipelineSlot*? PipelineTable.get(&self, gpu::PipelineHandle h) {
+fn PipelineCell*? PipelineTable.get_cell(&self, gpu::PipelineHandle h) {
+    gpu::note_command_pipeline_table_lookup();
     if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
-    return &self.slots[idx].value;
+    return &self.slots[idx];
+}
+
+fn PipelineSlot*? PipelineTable.get(&self, gpu::PipelineHandle h) {
+    return &self.get_cell(h)!.value;
 }
 
 fn void? PipelineTable.free(&self, gpu::PipelineHandle h) {

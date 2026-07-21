@@ -588,16 +588,28 @@ CommandList                recording
 ExecutableCommandList      ended, one-shot
 ```
 
-Both carry a device token and a `CommandListHandle`. The handle resolves to a
-device-owned `CommandRecord` with the native command buffer and pool, exact
-public queue, lifecycle state, binding cache, and pending texture transitions.
+Both carry a device token, `CommandListHandle`, and opaque encoder pointer.
+Begin resolves the handle once and publishes a stable root encoder containing
+the selected command-operation table, `VkDeviceState*`, and fixed
+`CommandRecord*`. Warm recording uses those cached pointers; only lifecycle
+operations continue through the device vtable. The record owns the native
+command buffer and pool, exact public queue, lifecycle state, bound-pipeline
+snapshot, and pending texture transitions.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
+
+`cmd_bind_pipeline` resolves the pipeline slot and cache entry once and stores
+the expected slot generation plus native pipeline/layout, kind, render
+compatibility, cache identity, and generated-command layout. Execution helpers
+validate the stable cell directly and never revisit pipeline table/cache storage.
+The checked command-operation table is immutable per device. Policy selection
+happens during device or encoder setup and remains outside warm recording.
 
 Submission preflights the batch under the command-table mutex. It rejects stale,
 duplicate, non-executable, or wrong-queue tokens before claiming records. A
 failure before native acceptance restores every claim; success commits pending
-texture state and invalidates all aliases.
+texture state and invalidates each encoder before its command-table index becomes
+reusable. No fallible token resolution occurs after native acceptance.
 
 Discard retires the native buffer to its recording context. `submit` transfers it
 to a completion-tracked batch; completion observation retires the buffer to the

@@ -750,6 +750,7 @@ fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pi
             dynamic_offset_count:  0,
             p_dynamic_offsets:     null,
         );
+        gpu::note_command_native_call();
         return;
     }
 
@@ -760,6 +761,7 @@ fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pi
     binding_info.address = state.strict_heap.descriptors.descriptor_buffer_gpu;
     binding_info.usage   = (vk::BufferUsageFlags)usage;
     state.device_dispatch.descriptor_buffer.cmd_bind_descriptor_buffers(cb, 1, &binding_info);
+    gpu::note_command_native_call();
 
     uint buffer_index = 0;
     vk::DeviceSize offset = 0;
@@ -772,6 +774,7 @@ fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pi
         &buffer_index,
         &offset,
     );
+    gpu::note_command_native_call();
 }
 
 fn TextureSlot*? resolve_descriptor_texture(

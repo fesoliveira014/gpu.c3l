@@ -274,7 +274,8 @@ transactionally by private composition helpers.
 Multiple live devices may coexist. `Device` is a compact slot and generation
 token. Most public operations take a short-lived atomic pin before reading
 backend state. `begin_commands` transfers its pin to the returned command token;
-recording calls borrow that pin without acquiring another one.
+recording calls validate the token's stable encoder and acquire no additional
+pin or device-registry operation.
 
 `destroy_device` never waits. Live resources, command lists,
 swapchains and descriptors return `RESOURCE_IN_USE`.
@@ -940,6 +941,12 @@ returns a one-shot `ExecutableCommandList`; failure leaves the recording token
 unchanged. Copies alias the same backend record. Recording and executable tokens
 retain the device until consumed.
 
+Both command token types contain an opaque encoder pointer in addition to the
+owning device and handle. The token layout, including that pointer, is part of
+the public ABI. Begin publishes the encoder only after backend and retained-pin
+setup succeeds; end transfers the same encoder to the executable token. A failed
+end, discard, or submit leaves the token and encoder phase retryable.
+
 `discard_commands` consumes unfinished recording. Use
 `discard_executable_commands` for an ended token that will not be submitted.
 Both remain available after device loss.
@@ -999,7 +1006,12 @@ cmd_dispatch(
 
 Pipeline binding selects the active compute or graphics pipeline without
 compiling or synthesizing a variant. A failed bind preserves the previous active
-pipeline. Dispatch requires an active compute pipeline and a nonzero root
+pipeline. A successful bind caches the pipeline's stable validation cell,
+expected generation, native pipeline/layout, kind, render compatibility,
+cache-entry identity, and generated-work layout. Later draws and dispatches use
+that snapshot and reject a destroyed or reused slot before native handle use;
+they do not resolve pipeline-table or cache state again. Dispatch requires an
+active compute pipeline and a nonzero root
 address. Graphics draws require an active graphics pipeline, nonzero vertex and
 fragment roots, and explicit depth state for the current render pass.
 `cmd_set_depth_state` is valid only inside a render pass; pass begin resets
@@ -1011,6 +1023,18 @@ defaults. Execution with no required state returns
 Each group count may be zero and must not exceed the corresponding component
 of `DeviceCaps.max_compute_work_group_count`. An over-limit call faults
 `INVALID_ARGUMENT` before a backend command is recorded.
+
+Warm recording dispatches through the immutable operation table selected for
+the encoder. There is currently one checked policy. Policy selection happens at
+device or encoder setup; a warm `cmd_*` call never branches on policy or reloads
+lifecycle dispatch.
+
+Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
+`CommandResolutionStats`, `reset_command_resolution_stats`, and
+`command_resolution_stats`. The process-wide relaxed counters measure
+live-encoder entry-point attempts, every emitted Vulkan command, and forbidden
+resolution paths. Reset and compare them only across an externally synchronized
+recording interval; they are absent from ordinary production builds.
 
 ### Render pass
 

@@ -41,10 +41,35 @@ fn void generated_preprocess_reuse_requires_compatible_memory() @test {
 
 
 fn void command_tokens_are_small_owner_values() @test {
-    assert(gpu::CommandList::size <= 24,
-        "recording token stays within three machine words");
-    assert(gpu::ExecutableCommandList::size <= 24,
-        "executable token stays within three machine words");
+    assert(gpu::CommandList::size <= 32,
+        "recording token stays within four machine words");
+    assert(gpu::ExecutableCommandList::size <= 32,
+        "executable token stays within four machine words");
+}
+
+fn void bound_pipeline_validation_rejects_destroyed_and_reused_slots() @test {
+    vk::PipelineCell cell = {
+        .generation = 7,
+        .used       = true,
+    };
+    vk::BoundPipeline pipeline = {
+        .validation_cell     = &cell,
+        .expected_generation = 7,
+    };
+
+    vk::validate_bound_pipeline_identity(&pipeline)!!;
+    cell.used = false;
+    fault destroyed_fault =
+        @catch(vk::validate_bound_pipeline_identity(&pipeline));
+    cell.used = true;
+    cell.generation = 8;
+    fault reused_fault =
+        @catch(vk::validate_bound_pipeline_identity(&pipeline));
+
+    assert(destroyed_fault == gpu::INVALID_HANDLE,
+        "a destroyed bound pipeline is rejected before native handle use");
+    assert(reused_fault == gpu::INVALID_HANDLE,
+        "a reused pipeline cell cannot satisfy the cached generation");
 }
 
 fn void discard_consumes_recording_and_executable_lists() @test {
@@ -110,12 +135,15 @@ fn void copy_upload_to_readback() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = { .src = up_span, .dst = rb_span };
+    gpu::reset_command_resolution_stats();
     gpu::cmd_copy_buffer(&cmd, &copy)!!;
     gpu::Barrier bar = {
         .before = { .transfer = true },
         .after = { .host = true },
     };
     gpu::cmd_barrier(&cmd, &bar)!!;
+
+    assert_warm_command_resolution(gpu::command_resolution_stats(), 2);
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
 
@@ -238,6 +266,8 @@ fn void command_generation_exhaustion_retires_slot() @test {
     state.commands.slots[final_generation_executable.handle.index].generation =
         vk::HANDLE_GENERATION_MAX - 1;
     final_generation_executable.handle.generation = vk::HANDLE_GENERATION_MAX - 1;
+    ((gpu::CommandEncoderState*)final_generation_executable.encoder).handle =
+        final_generation_executable.handle;
     gpu::device_slots[device.index].command_leases[
         final_generation_executable.handle.index
     ].store(

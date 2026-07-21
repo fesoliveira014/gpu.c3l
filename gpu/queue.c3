@@ -542,8 +542,12 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     defer end_device_operation(&operation);
     validate_queue(&operation, &device, queue)!;
     if (desc == null) return INVALID_ARGUMENT~;
+    if (desc.command_lists.len > MAX_DEVICE_COMMANDS) {
+        return INVALID_ARGUMENT~;
+    }
     foreach (&commands : desc.command_lists) {
         if (commands.device != device) return INVALID_HANDLE~;
+        executable_encoder(commands)!;
         validate_resource_owner(
             &operation,
             commands.handle.owner,
@@ -560,6 +564,7 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
         }
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
     }
+    note_command_lifecycle_vtable_dispatch();
     CompletionPoint point = operation.vtable.submit(queue, desc)!;
     foreach (&commands : desc.command_lists) {
         release_executable_command_pin_lease(&operation, commands);

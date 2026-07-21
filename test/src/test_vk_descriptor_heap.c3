@@ -147,9 +147,11 @@ fn void disabled_heap_preflights_pipeline_binds() @test {
     gpu::PipelineHandle cached = { .index = 7, .generation = 3 };
     gpu::PipelineHandle requested = { .index = 11, .generation = 5 };
     gpu::vk::CommandRecord record = {
-        .command_buffer  = (vk::CommandBuffer)null,
-        .active_pipeline = cached,
-        .active_entry    = 19,
+        .command_buffer = (vk::CommandBuffer)null,
+        .bound_pipeline = {
+            .handle      = cached,
+            .cache_entry = 19,
+        },
     };
 
     fault bind_fault = @catch(gpu::vk::bind_pipeline_state(
@@ -158,8 +160,10 @@ fn void disabled_heap_preflights_pipeline_binds() @test {
         pipeline: requested,
     ));
     assert(bind_fault == gpu::UNSUPPORTED_FEATURE, "pipeline binding preflights a disabled heap");
-    assert(record.active_pipeline == cached, "rejected binding preserves the active pipeline");
-    assert(record.active_entry == 19, "rejected binding preserves the active pipeline entry");
+    assert(record.bound_pipeline.handle == cached,
+        "rejected binding preserves the active pipeline");
+    assert(record.bound_pipeline.cache_entry == 19,
+        "rejected binding preserves the active pipeline entry");
 }
 
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {

@@ -59,15 +59,17 @@ $assert DispatchIndirectCommand::size == 12;
 struct CommandList {
     Device            device;
     CommandListHandle handle;
+    void*             encoder;
 }
-$assert CommandList::size <= ulong::size * 3;
+$assert CommandList::size <= ulong::size * 4;
 
 <* A one-shot executable command token. Submit or discard consumes it. *>
 struct ExecutableCommandList {
     Device            device;
     CommandListHandle handle;
+    void*             encoder;
 }
-$assert ExecutableCommandList::size <= ulong::size * 3;
+$assert ExecutableCommandList::size <= ulong::size * 4;
 
 <* Byte-range copy for cmd_copy_buffer; src and dst must have equal size and
    must not overlap. *>
@@ -132,10 +134,120 @@ fn usz? generated_work_bytes(
     return indirect_argument_bytes(record_size, count, max_count);
 }
 
+fn CommandEncoderState*? command_encoder(
+    Device device,
+    CommandListHandle handle,
+    void* opaque,
+    CommandEncoderPhase phase,
+    bool allow_lost = false,
+) @private {
+    if (opaque == null || !device.is_valid() || device.reserved != 0) {
+        return INVALID_HANDLE~;
+    }
+    if (device.index >= MAX_DEVICES || handle.index >= MAX_DEVICE_COMMANDS
+        || !handle.is_valid()) {
+        return INVALID_HANDLE~;
+    }
+    CommandEncoderState* encoder = (CommandEncoderState*)opaque;
+    if (encoder != &device_slots[device.index].command_encoders[handle.index]) {
+        return INVALID_HANDLE~;
+    }
+    if (encoder.device != device || encoder.handle != handle
+        || encoder.ops == null
+        || encoder.backend_state == null || encoder.backend_command == null
+        || encoder.device_lost == null) {
+        return INVALID_HANDLE~;
+    }
+    if (encoder.phase != phase) {
+        if ((phase == CommandEncoderPhase.RECORDING
+                && encoder.phase == CommandEncoderPhase.EXECUTABLE)
+            || (phase == CommandEncoderPhase.EXECUTABLE
+                && encoder.phase == CommandEncoderPhase.RECORDING)) {
+            return COMMAND_RECORDING_ERROR~;
+        }
+        return INVALID_HANDLE~;
+    }
+    if (!allow_lost
+        && encoder.device_lost.load(AtomicOrdering.ACQUIRE)) {
+        return DEVICE_LOST~;
+    }
+    return encoder;
+}
+
+fn CommandEncoderState*? recording_encoder(
+    CommandList* commands,
+    bool allow_lost = false,
+) @private {
+    if (commands == null) return INVALID_HANDLE~;
+    CommandEncoderState* encoder = command_encoder(
+        commands.device,
+        commands.handle,
+        commands.encoder,
+        CommandEncoderPhase.RECORDING,
+        allow_lost,
+    )!;
+    if (!allow_lost) note_command_recording_call();
+    return encoder;
+}
+
+fn CommandEncoderState*? executable_encoder(
+    ExecutableCommandList* commands,
+    bool allow_lost = false,
+) @private {
+    if (commands == null) return INVALID_HANDLE~;
+    return command_encoder(
+        commands.device,
+        commands.handle,
+        commands.encoder,
+        CommandEncoderPhase.EXECUTABLE,
+        allow_lost,
+    );
+}
+
+fn CommandEncoderState*? publish_command_encoder(
+    DeviceOperation* operation,
+    CommandList* commands,
+    CommandBackendContext* backend,
+) @private {
+    if (operation == null || operation.slot == null || operation.data == null
+        || commands == null || backend == null || backend.state == null
+        || backend.command == null || operation.data.command_ops == null) {
+        return BACKEND_ERROR~;
+    }
+    if (commands.handle.index >= MAX_DEVICE_COMMANDS) return BACKEND_ERROR~;
+    CommandEncoderState* encoder =
+        &operation.slot.command_encoders[commands.handle.index];
+    if (encoder.phase != CommandEncoderPhase.INACTIVE) return BACKEND_ERROR~;
+    *encoder = {
+        .device          = commands.device,
+        .handle          = commands.handle,
+        .ops             = operation.data.command_ops,
+        .backend_state   = backend.state,
+        .backend_command = backend.command,
+        .device_lost     = &operation.slot.lost,
+        .phase           = CommandEncoderPhase.RECORDING,
+    };
+    note_command_policy_selection();
+    commands.encoder = encoder;
+    return encoder;
+}
+
+fn void transfer_command_encoder_to_executable(
+    CommandEncoderState* encoder,
+) @private {
+    encoder.phase = CommandEncoderPhase.EXECUTABLE;
+}
+
+fn void invalidate_command_encoder(CommandEncoderState* encoder) @private {
+    *encoder = {};
+}
+
 fn DeviceOperation? command_operation(
     CommandList* commands,
     bool allow_lost = false,
 ) @private {
+    note_command_device_registry_resolution();
+    note_command_retained_pin_operation();
     if (commands == null) return INVALID_HANDLE~;
     DeviceOperation operation = has_retained_command_pin(commands)
         ? borrow_retained_device_operation(&commands.device, allow_lost)!
@@ -154,6 +266,8 @@ fn DeviceOperation? executable_command_operation(
     ExecutableCommandList* commands,
     bool allow_lost = false,
 ) @private {
+    note_command_device_registry_resolution();
+    note_command_retained_pin_operation();
     if (commands == null) return INVALID_HANDLE~;
     DeviceOperation operation = has_retained_executable_command_pin(commands)
         ? borrow_retained_device_operation(&commands.device, allow_lost)!
@@ -177,24 +291,50 @@ fn CommandList? begin_commands(Queue queue) {
     validate_queue(&operation, &device, queue)!;
     BackendVTable* vtable = operation.vtable;
     CommandList commands;
-    vtable.begin_commands(queue, &commands)!;
+    CommandBackendContext backend;
+    bool backend_created = false;
+    bool lease_retained = false;
+    defer catch {
+        if (lease_retained) {
+            (void)release_command_pin_lease(&operation, &commands);
+        }
+        if (backend_created) {
+            note_command_lifecycle_vtable_dispatch();
+            (void)vtable.discard_commands(
+                &commands.device,
+                commands.handle,
+                false,
+                null,
+            );
+        }
+    }
+    note_command_lifecycle_vtable_dispatch();
+    vtable.begin_commands(queue, &commands, &backend)!;
+    backend_created = true;
     if (!retain_command_pin_lease(&operation, &commands)) {
-        vtable.discard_commands(&commands.device, commands.handle, false)!;
         return INVALID_HANDLE~;
     }
+    lease_retained = true;
+    publish_command_encoder(&operation, &commands, &backend)!;
     retain_device_children(&operation);
     transfer_device_operation_pin(&operation);
+    backend_created = false;
+    lease_retained = false;
     return commands;
 }
 
 <* Finish and consume a recording token. Failure leaves it recording. *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     DeviceOperation operation = command_operation(commands)!;
     defer end_device_operation(&operation);
-    operation.vtable.end_commands(commands)!;
+    note_command_lifecycle_vtable_dispatch();
+    operation.vtable.end_commands(encoder)!;
+    transfer_command_encoder_to_executable(encoder);
     ExecutableCommandList executable = {
         .device = commands.device,
         .handle = commands.handle,
+        .encoder = commands.encoder,
     };
     *commands = {};
     return executable;
@@ -202,14 +342,17 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
 
 <* Consume an unfinished recording, including after device loss. *>
 fn void? discard_commands(CommandList* commands) {
+    CommandEncoderState* encoder = recording_encoder(commands, true)!;
     DeviceOperation operation = command_operation(commands, true)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     CommandList consumed = *commands;
+    note_command_lifecycle_vtable_dispatch();
     vtable.discard_commands(
         &consumed.device,
         consumed.handle,
         false,
+        encoder,
     )!;
     *commands = {};
     bool released_lease = release_command_pin_lease(&operation, &consumed);
@@ -221,14 +364,17 @@ fn void? discard_commands(CommandList* commands) {
 
 <* Consume an executable token without submitting it. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
+    CommandEncoderState* encoder = executable_encoder(commands, true)!;
     DeviceOperation operation = executable_command_operation(commands, true)!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     ExecutableCommandList consumed = *commands;
+    note_command_lifecycle_vtable_dispatch();
     vtable.discard_commands(
         &consumed.device,
         consumed.handle,
         true,
+        encoder,
     )!;
     *commands = {};
     bool released_lease = release_executable_command_pin_lease(
@@ -243,66 +389,52 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_copy_buffer(commands, desc);
+    return encoder.ops.copy_buffer(encoder, desc);
 }
 
 <* Record a 32-bit-pattern fill over dst; its offset and size must be 4-byte
    multiples. *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_fill_buffer(commands, dst, value);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.fill_buffer(encoder, dst, value);
 }
 
 <* The texture's effective layout must be TRANSFER_DST; the caller records
    the surrounding barriers. *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_copy_buffer_to_texture(commands, desc);
+    return encoder.ops.copy_buffer_to_texture(encoder, desc);
 }
 
 <* The texture's effective layout must be TRANSFER_SRC. *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_copy_texture_to_buffer(commands, desc);
+    return encoder.ops.copy_texture_to_buffer(encoder, desc);
 }
 
 <* Record a global semantic execution and memory barrier. *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_barrier(commands, barrier);
+    return encoder.ops.barrier(encoder, barrier);
 }
 
 <* Record an explicit semantic texture transition. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_texture_barrier(commands, barrier);
+    return encoder.ops.texture_barrier(encoder, barrier);
 }
 
 <* Bind the active compute or graphics pipeline for later execution commands.
    A failed bind leaves the previous active pipeline unchanged. *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_bind_pipeline(commands, pipeline);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.bind_pipeline(encoder, pipeline);
 }
 
 <* Dispatch the active compute pipeline with a single nonzero root GPU address
@@ -310,60 +442,62 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    recording queue's role. Counts may be zero and may not exceed
    DeviceCaps.max_compute_work_group_count on any axis. *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_dispatch(commands, root, groups);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.dispatch(encoder, root, groups);
 }
 
 <* Set separate dynamic depth state for subsequent draws in the active render
    pass. A failed update leaves the previous depth state unchanged. *>
 fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     if (depth == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_set_depth_state(commands, depth);
+    return encoder.ops.set_depth_state(encoder, depth);
 }
 
 <* Set one pass-bounded dynamic viewport for subsequent draws. Requires an
    active render pass; malformed values fault INVALID_ARGUMENT. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_set_viewport(commands, viewport);
+    return encoder.ops.set_viewport(encoder, viewport);
 }
 
 <* Set one pass-bounded dynamic scissor for subsequent draws. Requires an
    active render pass; malformed values fault INVALID_ARGUMENT. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    CommandEncoderState* encoder = recording_encoder(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
-    return vtable.cmd_set_scissor(commands, scissor);
+    return encoder.ops.set_scissor(encoder, scissor);
 }
 
 <* Draw inside a render pass, pushing the vertex and fragment root addresses.
    Every allocation reachable from either root must admit the recording queue's
    role. *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_draw(commands, vertex_root, fragment_root, vertex_count, instance_count);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.draw(
+        encoder:        encoder,
+        vertex_root:    vertex_root,
+        fragment_root:  fragment_root,
+        vertex_count:   vertex_count,
+        instance_count: instance_count,
+    );
 }
 
 <* Draw indexed geometry; indices are read from the start of index_span.
    Every allocation reachable from either root must admit the recording queue's
    role. *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_draw_indexed(commands, vertex_root, fragment_root, index_span, index_count, instance_count, index_type);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.draw_indexed(
+        encoder:        encoder,
+        vertex_root:    vertex_root,
+        fragment_root:  fragment_root,
+        index_span:     index_span,
+        index_count:    index_count,
+        instance_count: instance_count,
+        index_type:     index_type,
+    );
 }
 
 <* Draw from GPU-written DrawIndirectCommand arguments at the span's offset.
@@ -373,10 +507,14 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    from either root must admit the recording queue's role. draw_count may not
    exceed DeviceCaps.max_draw_indirect_count. *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_draw_indirect(commands, vertex_root, fragment_root, args, draw_count);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.draw_indirect(
+        encoder:       encoder,
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+        args:          args,
+        draw_count:    draw_count,
+    );
 }
 
 <* Indexed variant over DrawIndexedIndirectCommand arguments. Index-range
@@ -385,10 +523,16 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    DeviceCaps.max_draw_indirect_count. Every allocation reachable from either
    root must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_draw_indexed_indirect(commands, vertex_root, fragment_root, args, draw_count, index_span, index_type);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.draw_indexed_indirect(
+        encoder:       encoder,
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+        args:          args,
+        draw_count:    draw_count,
+        index_span:    index_span,
+        index_type:    index_type,
+    );
 }
 
 <* Count-buffer variant: the GPU-written uint at count_span limits execution
@@ -397,10 +541,17 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    DeviceCaps.draw_indirect_count. Every allocation reachable from either root
    must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_draw_indexed_indirect_count(commands, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.draw_indexed_indirect_count(
+        encoder:        encoder,
+        vertex_root:    vertex_root,
+        fragment_root:  fragment_root,
+        args:           args,
+        count_span:     count_span,
+        max_draw_count: max_draw_count,
+        index_span:     index_span,
+        index_type:     index_type,
+    );
 }
 
 <* Dispatch from GPU-written DispatchIndirectCommand arguments. Each group
@@ -408,34 +559,43 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    DeviceCaps.max_compute_work_group_count component. Every allocation
    reachable from the root must admit the recording queue's role. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_dispatch_indirect(commands, root, args);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.dispatch_indirect(encoder, root, args);
 }
 
 <* Execute up to max_draw_count GPU-written draw records. The GPU-written uint
    at count_span selects the actual count. Ordering against producer writes is
    the caller's barrier with hazards.draw_arguments set. *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_draw_generated(commands, records, count_span, max_draw_count);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.draw_generated(
+        encoder:        encoder,
+        records:        records,
+        count_span:     count_span,
+        max_draw_count: max_draw_count,
+    );
 }
 
 <* Indexed generated-work variant. Index bounds remain GPU execution-time data. *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_draw_indexed_generated(commands, records, count_span, max_draw_count, index_span, index_type);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.draw_indexed_generated(
+        encoder:        encoder,
+        records:        records,
+        count_span:     count_span,
+        max_draw_count: max_draw_count,
+        index_span:     index_span,
+        index_type:     index_type,
+    );
 }
 
 <* Execute up to max_dispatch_count GPU-written dispatch records. *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
-    return vtable.cmd_dispatch_generated(commands, records, count_span, max_dispatch_count);
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    return encoder.ops.dispatch_generated(
+        encoder:            encoder,
+        records:            records,
+        count_span:         count_span,
+        max_dispatch_count: max_dispatch_count,
+    );
 }
