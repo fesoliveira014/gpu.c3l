@@ -882,10 +882,10 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::vk::commit_present_result(live_slot, &acquired, vk::Result.SUCCESS);
 
     assert(@catch(gpu::vk::vk_resize_swapchain(
-        &device,
-        swapchain,
-        8,
-        8,
+        device: &device,
+        handle: swapchain,
+        width:  8,
+        height: 8,
     )) == gpu::RESOURCE_IN_USE,
         "resize rejects a recorded borrowed-view reference");
     assert(@catch(gpu::vk::vk_destroy_swapchain(&device, swapchain))
@@ -899,7 +899,12 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::discard_commands(&commands)!!;
     assert(view.validation_references.load(AtomicOrdering.RELAXED) == 0,
         "discard releases the recorded borrowed-view reference");
-    gpu::vk::vk_resize_swapchain(&device, swapchain, 8, 8)!!;
+    gpu::vk::vk_resize_swapchain(
+        device: &device,
+        handle: swapchain,
+        width:  8,
+        height: 8,
+    )!!;
     assert(@catch(state.textures.get(old_texture)) == gpu::INVALID_HANDLE
         && @catch(state.attachment_views.get(old_view)) == gpu::INVALID_HANDLE,
         "successful resize invalidates both handles from the old acquisition");

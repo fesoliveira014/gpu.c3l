@@ -848,6 +848,8 @@ fn bool? swapchain_images_referenced_locked(
         if (texture.validation_references.load(AtomicOrdering.RELAXED) > 0) {
             return true;
         }
+        // A missing borrowed slot carries no references; a missing texture
+        // is real inconsistency, so its lookup above still faults.
         if (try attachment_view = state.attachment_views.get(
             slot.attachment_views[i],
         )) {
