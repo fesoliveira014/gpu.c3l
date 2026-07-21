@@ -154,6 +154,68 @@ fn void incomplete_submitted_commands_retain_references() @test {
     dst.span = {};
 }
 
+fn void borrowed_attachment_view_reference_releases_after_completion_drain() @test {
+    gpu::Device device = make_lifetime_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+
+    vk::AttachmentViewSlot borrowed_view = { .swapchain_owned = true };
+    gpu::AttachmentViewHandle view =
+        state.attachment_views.alloc(borrowed_view)!!;
+    defer state.attachment_views.free(view)!!;
+    vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
+
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::track_command_reference(
+        state:      state,
+        record:     record,
+        owner:      view.owner,
+        index:      view.index,
+        generation: view.generation,
+    )!!;
+    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 1,
+        "recording retains the borrowed attachment view");
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 1
+        && state.submitted_command_count == 1,
+        "submission transfers the borrowed-view reference to the completion batch");
+
+    vk::QueueCompletionState* queue_completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    ulong sequence = gpu::completion_point_sequence(completion);
+    vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
+        .set_semaphore_count(1)
+        .set_semaphores((&queue_completion.timeline)[:1])
+        .set_values((&sequence)[:1]);
+    assert(vk::wait_semaphores(
+        device:        state.device,
+        p_wait_info:   &wait_info,
+        timeout:       ulong::max,
+    ) == vk::Result.SUCCESS, "the submitted command reaches completion");
+    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 1
+        && state.submitted_command_count == 1,
+        "completion alone preserves the borrowed-view reference until drain");
+
+    vk::drain_completed_submitted_commands(state)!!;
+    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 0
+        && state.submitted_command_count == 0,
+        "drain releases the completed borrowed-view reference");
+    vk::drain_completed_submitted_commands(state)!!;
+    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 0
+        && state.submitted_command_count == 0,
+        "a repeated drain cannot release the borrowed-view reference twice");
+}
+
 fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
     gpu::Device device = make_lifetime_test_device();
     defer destroy_test_device(&device)!!;
