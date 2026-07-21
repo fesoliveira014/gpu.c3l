@@ -41,9 +41,9 @@ struct SwapchainSlot {
     uint                     image_count;
     gpu::TextureHandle[MAX_SWAPCHAIN_IMAGES]        textures;
     gpu::AttachmentViewHandle[MAX_SWAPCHAIN_IMAGES] attachment_views;
-    vk::Semaphore[MAX_SWAPCHAIN_IMAGES]      present_semaphores;
-    vk::Fence[MAX_SWAPCHAIN_IMAGES]          present_fences;
-    bool[MAX_SWAPCHAIN_IMAGES]               present_fence_pending;
+    vk::Semaphore[MAX_SWAPCHAIN_IMAGES]             present_semaphores;
+    vk::Fence[MAX_SWAPCHAIN_IMAGES]                 present_fences;
+    bool[MAX_SWAPCHAIN_IMAGES]                      present_fence_pending;
     vk::Semaphore[]          acquire_semaphores;
     gpu::CompletionPoint[]   acquire_retirements;
     gpu::SwapchainDesc       requested;
@@ -848,13 +848,16 @@ fn bool? swapchain_images_referenced_locked(
         if (texture.validation_references.load(AtomicOrdering.RELAXED) > 0) {
             return true;
         }
-        AttachmentViewSlot* attachment_view = state.attachment_views.get(
+        // A missing borrowed slot carries no references; a missing texture
+        // is real inconsistency, so its lookup above still faults.
+        if (try attachment_view = state.attachment_views.get(
             slot.attachment_views[i],
-        )!;
-        if (attachment_view.validation_references.load(
-            AtomicOrdering.RELAXED,
-        ) > 0) {
-            return true;
+        )) {
+            if (attachment_view.validation_references.load(
+                AtomicOrdering.RELAXED,
+            ) > 0) {
+                return true;
+            }
         }
         foreach (&cell : heap.texture_cells[:heap.texture_next_new]) {
             if (cell.used && cell.owner == handle) return true;

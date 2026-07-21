@@ -1096,14 +1096,18 @@ required native image view on the cold path. Pass begin resolves only the fixed
 attachment-view table and records from fixed-size stack storage; it neither
 creates image views nor grows a cache.
 
-Each device has a fixed table of 4096 attachment views. Creation returns
-`SLOT_TABLE_FULL` when all slots are live or permanently retired by generation
-exhaustion.
+Each device has a fixed table of 4096 attachment views. User-created views and
+the borrowed view for every live swapchain image share this table. View or
+swapchain creation returns `SLOT_TABLE_FULL` when all slots are live or
+permanently retired by generation exhaustion.
 
-Attachment views are distinct from shader-visible `TextureView` values. They
-retain their texture, are not published in a descriptor heap, and cannot be
-destroyed while a command list holds an explicit reference. Zero, stale,
-foreign-device, and mismatched view handles fault before native recording.
+Attachment views are distinct from shader-visible `TextureView` values.
+User-created views retain their texture and must be destroyed by the caller.
+Borrowed swapchain views do not retain their texture because the swapchain owns
+and invalidates both handles together; callers cannot destroy those views. No
+attachment view is published in a descriptor heap or can be destroyed while a
+command list holds an explicit reference. Zero, stale, foreign-device, and
+mismatched view handles fault before native recording.
 
 Render-pass begin initializes one viewport and one scissor to the full pass
 extent. Callers may override either state for subsequent draws:
