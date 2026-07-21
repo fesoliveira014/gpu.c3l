@@ -309,9 +309,12 @@ fn void cross_queue_timeline_chain_validates() @test {
     gpu::ExecutableCommandList gfx_cmd_executable = gpu::end_commands(&gfx_cmd)!!;
     defer discard_test_executable(&gfx_cmd_executable)!!;
     gpu::ExecutableCommandList[1] gfx_lists = { gfx_cmd_executable };
-    gpu::CompletionPoint[1] completion_waits = { compute_done };
+    gpu::CompletionWait[1] completion_waits = {{
+        .point  = compute_done,
+        .before = { .all },
+    }};
     gpu::SubmitDesc gfx_submit = {
-        .command_lists   = gfx_lists[..],
+        .command_lists    = gfx_lists[..],
         .completion_waits = completion_waits[..],
     };
     gpu::CompletionPoint graphics_done = submit_test_queue(&device, gpu::QueueKind.GRAPHICS,
@@ -385,7 +388,10 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
         gpu::ExecutableCommandList compute_commands_executable = gpu::end_commands(&compute_commands)!!;
         defer discard_test_executable(&compute_commands_executable)!!;
         gpu::ExecutableCommandList[1] compute_lists = { compute_commands_executable };
-        gpu::CompletionPoint[1] compute_waits = { transfer_done };
+        gpu::CompletionWait[1] compute_waits = {{
+            .point  = transfer_done,
+            .before = { .compute },
+        }};
         gpu::SubmitDesc compute_submit = {
             .command_lists    = compute_lists[..],
             .completion_waits = compute_waits[..],
@@ -399,7 +405,10 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
         gpu::ExecutableCommandList graphics_commands_executable = gpu::end_commands(&graphics_commands)!!;
         defer discard_test_executable(&graphics_commands_executable)!!;
         gpu::ExecutableCommandList[1] graphics_lists = { graphics_commands_executable };
-        gpu::CompletionPoint[1] graphics_waits = { compute_done };
+        gpu::CompletionWait[1] graphics_waits = {{
+            .point  = compute_done,
+            .before = { .all },
+        }};
         gpu::SubmitDesc graphics_submit = {
             .command_lists    = graphics_lists[..],
             .completion_waits = graphics_waits[..],
@@ -408,7 +417,76 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
             &graphics_submit,
         )!!;
 
+        gpu::SubmitDesc empty;
+        gpu::CompletionPoint transfer_for_fragment = gpu::submit(
+            transfer,
+            &empty,
+        )!!;
+        gpu::CompletionWait[1] fragment_wait = {{
+            .point  = transfer_for_fragment,
+            .before = { .fragment_shader },
+        }};
+        gpu::SubmitDesc fragment_submit = {
+            .completion_waits = fragment_wait[..],
+        };
+        gpu::CompletionPoint fragment_done = gpu::submit(
+            graphics,
+            &fragment_submit,
+        )!!;
+
+        gpu::CompletionPoint transfer_for_vertex = gpu::submit(
+            transfer,
+            &empty,
+        )!!;
+        gpu::CompletionWait[1] vertex_wait = {{
+            .point  = transfer_for_vertex,
+            .before = { .vertex_shader },
+        }};
+        gpu::SubmitDesc vertex_submit = {
+            .completion_waits = vertex_wait[..],
+        };
+        gpu::CompletionPoint vertex_done = gpu::submit(
+            graphics,
+            &vertex_submit,
+        )!!;
+
+        gpu::CompletionWait[1] graphics_to_compute = {{
+            .point  = vertex_done,
+            .before = { .compute },
+        }};
+        gpu::SubmitDesc compute_after_graphics = {
+            .completion_waits = graphics_to_compute[..],
+        };
+        gpu::CompletionPoint compute_after_vertex = gpu::submit(
+            compute,
+            &compute_after_graphics,
+        )!!;
+
+        gpu::CompletionPoint transfer_for_multi = gpu::submit(
+            transfer,
+            &empty,
+        )!!;
+        gpu::CompletionWait[2] multi_waits = {
+            {
+                .point  = compute_after_vertex,
+                .before = { .all },
+            },
+            {
+                .point  = transfer_for_multi,
+                .before = { .fragment_shader },
+            },
+        };
+        gpu::SubmitDesc multi_submit = {
+            .completion_waits = multi_waits[..],
+        };
+        gpu::CompletionPoint multi_done = gpu::submit(
+            graphics,
+            &multi_submit,
+        )!!;
+
         gpu::wait_completion(graphics_done, 1_000_000_000)!!;
+        gpu::wait_completion(fragment_done, 1_000_000_000)!!;
+        gpu::wait_completion(multi_done, 1_000_000_000)!!;
         return;
     }
 }

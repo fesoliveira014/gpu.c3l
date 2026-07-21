@@ -7,7 +7,6 @@ import vk;
 // Vulkan 1.3 in the (variant<<29)|(major<<22)|(minor<<12)|patch layout. The
 // binding ships no API_VERSION_1_3 constant.
 const uint API_VERSION_1_3 = (1u << 22) | (3u << 12);
-const uint BARRIER_STAGE_BITS = 0x01FF;
 const uint BARRIER_HAZARD_BITS = 0x0007;
 
 enum WsiResultKind : int {
@@ -423,11 +422,7 @@ fn vk::MemoryBarrier2 barrier_to_vk(
 }
 
 fn bool barrier_stage_mask_valid(gpu::StageMask stages) @private {
-    uint raw = (uint)stages;
-    if (raw == 0 || (raw & BARRIER_STAGE_BITS) != raw) return false;
-    if (stages.all && raw != 1) return false;
-    if (stages.present && raw != 1u << 8) return false;
-    return true;
+    return gpu::stage_mask_valid(stages);
 }
 
 fn ZString barrier_masks_rejected_field(gpu::Barrier* barrier) {
@@ -476,6 +471,20 @@ fn bool barrier_stage_mask_supported(
         return false;
     }
     return true;
+}
+
+<* Validate and lower the first destination stages of a queue submission wait. *>
+fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
+    gpu::StageMask stages,
+    vk::QueueFlags flags,
+) {
+    if (!barrier_stage_mask_valid(stages)
+        || stages.host
+        || stages.present
+        || !barrier_stage_mask_supported(stages, flags)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return barrier_before_stages_to_vk(stages);
 }
 
 fn ZString barrier_queue_rejected_field(

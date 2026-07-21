@@ -12,6 +12,7 @@ uint accepted_swapchain_submit_calls;
 uint completion_counter_query_calls;
 ulong completion_counter_value;
 vk::Result completion_counter_result;
+uint same_queue_elision_submit_calls;
 
 fn gpu::Device make_submit_stats_test_device() {
     gpu::RuntimeDesc desc = {
@@ -96,6 +97,21 @@ fn vk::Result reject_counted_user_submit(
     return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 }
 
+fn vk::Result observe_same_queue_elision(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)fence;
+    assert(submit_count == 1, "same-queue test emits one native submit");
+    assert(submits[0].wait_semaphore_info_count == 0,
+        "the full submit path elides a same-queue timeline wait");
+    same_queue_elision_submit_calls++;
+    return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
+}
+
 fn vk::Result query_completion_counter(
     vk::Device device,
     vk::Semaphore semaphore,
@@ -165,8 +181,8 @@ fn vk::Result reject_swapchain_submit(
     assert(submit.wait_semaphore_info_count == 1,
         "readiness adds one private acquire wait");
     assert(submit.p_wait_semaphore_infos[0].stage_mask
-        == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
-        "acquire readiness covers the complete submission");
+        == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        "acquire readiness keeps the requested first destination stage");
     assert(submit.signal_semaphore_info_count == 2,
         "readiness adds one private present signal");
     assert(submit.p_signal_semaphore_infos[0].stage_mask
@@ -182,9 +198,14 @@ fn vk::Result accept_swapchain_submit(
     vk::Fence fence,
 ) {
     (void)queue;
-    (void)submit_count;
-    (void)submits;
     (void)fence;
+    assert(submit_count == 1, "readiness emits one native submit");
+    vk::SubmitInfo2* submit = &submits[0];
+    assert(submit.wait_semaphore_info_count == 1,
+        "readiness emits one acquire wait");
+    assert(submit.p_wait_semaphore_infos[0].stage_mask
+        == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        "readiness keeps the requested transfer destination stage");
     accepted_swapchain_submit_calls++;
     return vk::Result.SUCCESS;
 }
@@ -215,7 +236,10 @@ fn void native_submit_failure_preserves_swapchain_readiness() @test {
         handle,
         1,
     )!!;
-    gpu::SubmitDesc desc = { .readiness = readiness };
+    gpu::SubmitDesc desc = {
+        .readiness        = readiness,
+        .readiness_before = { .color_output },
+    };
 
     assert(@catch(vk::vk_submit_with(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
@@ -259,7 +283,10 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
         handle,
         7,
     )!!;
-    gpu::SubmitDesc desc = { .readiness = readiness };
+    gpu::SubmitDesc desc = {
+        .readiness        = readiness,
+        .readiness_before = { .transfer },
+    };
     gpu::Queue graphics = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
@@ -273,6 +300,45 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     );
     vk::SubmitStats stats_before = state.submit_stats;
     accepted_swapchain_submit_calls = 0;
+
+    gpu::SubmitDesc missing_stage = { .readiness = readiness };
+    assert(@catch(vk::vk_submit_with(
+        graphics,
+        &missing_stage,
+        &accept_swapchain_submit,
+    )) == gpu::INVALID_ARGUMENT,
+        "readiness requires a destination stage");
+    assert(accepted_swapchain_submit_calls == 0,
+        "missing readiness stage reaches no native submit");
+    assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
+        "missing readiness stage preserves the one-shot token");
+
+    gpu::SubmitDesc orphan_stage = {
+        .readiness_before = { .color_output },
+    };
+    assert(@catch(vk::vk_submit_with(
+        graphics,
+        &orphan_stage,
+        &accept_swapchain_submit,
+    )) == gpu::INVALID_ARGUMENT,
+        "a readiness stage without readiness is rejected");
+    assert(accepted_swapchain_submit_calls == 0,
+        "orphan readiness stage reaches no native submit");
+
+    gpu::SubmitDesc host_stage = {
+        .readiness        = readiness,
+        .readiness_before = { .host },
+    };
+    assert(@catch(vk::vk_submit_with(
+        graphics,
+        &host_stage,
+        &accept_swapchain_submit,
+    )) == gpu::INVALID_ARGUMENT,
+        "readiness rejects a host destination stage");
+    assert(accepted_swapchain_submit_calls == 0,
+        "invalid readiness stage reaches no native submit");
+    assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
+        "invalid readiness stage preserves the one-shot token");
 
     vk::vk_submit_with(graphics, &desc, &accept_swapchain_submit)!!;
     assert(accepted_swapchain_submit_calls == 1,
@@ -296,7 +362,10 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
         handle,
         6,
     )!!;
-    gpu::SubmitDesc stale_desc = { .readiness = stale };
+    gpu::SubmitDesc stale_desc = {
+        .readiness        = stale,
+        .readiness_before = { .color_output },
+    };
     fault stale_fault = @catch(vk::vk_submit_with(
         graphics,
         &stale_desc,
@@ -464,36 +533,35 @@ fn void native_device_loss_rolls_back_and_allows_discard() @test {
 }
 
 fn void completion_wait_infos_map_cross_queue_and_elide_same_queue() @test {
-    gpu::Device device = { .index = 1, .generation = 1 };
-    gpu::Queue source_queue = {
-        .device = device,
-        .id     = 1,
-        .roles  = { .compute },
-    };
-    gpu::Queue target_queue = {
-        .device = device,
-        .id     = 0,
-        .roles  = { .graphics },
-    };
-    gpu::CompletionPoint[2] points = {
-        gpu::make_completion_point(source_queue, 7)!!,
-        gpu::make_completion_point(target_queue, 3)!!,
-    };
     vk::QueueCompletionState source = {
         .timeline = (vk::Semaphore)(uptr)0x10,
     };
     vk::QueueCompletionState target = {
         .timeline = (vk::Semaphore)(uptr)0x20,
     };
-    vk::QueueCompletionState*[2] completions = { &source, &target };
+    vk::ResolvedCompletionWait[2] completion_waits = {
+        {
+            .source   = &source,
+            .stages   = (vk::PipelineStageFlags2)(
+                (ulong)vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT
+                    | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+            ),
+            .sequence = 7,
+        },
+        {
+            .source   = &target,
+            .stages   = (vk::PipelineStageFlags2)
+                vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+            .sequence = 3,
+        },
+    };
     vk::SemaphoreSubmitInfo[2] waits;
 
     usz count = vk::append_completion_wait_infos(
-        waits:       waits[..],
-        next_wait:   0,
-        points:      points[..],
-        completions: completions[..],
-        target:      &target,
+        waits:            waits[..],
+        next_wait:        0,
+        completion_waits: completion_waits[..],
+        target:           &target,
     );
     vk::SubmitInfo2 submit = vk::submit_info2()
         .set_wait_semaphore_infos(waits[:count]);
@@ -504,10 +572,207 @@ fn void completion_wait_infos_map_cross_queue_and_elide_same_queue() @test {
         "cross-queue waits map to the source timeline");
     assert(submit.p_wait_semaphore_infos[0].value == 7,
         "cross-queue waits keep the source sequence");
-    assert(submit.p_wait_semaphore_infos[0].stage_mask
-        == (vk::PipelineStageFlags2)
+    ulong expected =
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    assert((ulong)submit.p_wait_semaphore_infos[0].stage_mask == expected,
+        "cross-queue waits keep exact combined destination stages");
+}
+
+fn void completion_wait_infos_emit_every_exact_native_stage() @test {
+    vk::QueueCompletionState source = {
+        .timeline = (vk::Semaphore)(uptr)0x10,
+    };
+    vk::QueueCompletionState target = {
+        .timeline = (vk::Semaphore)(uptr)0x20,
+    };
+    vk::PipelineStageFlags2 depth = (vk::PipelineStageFlags2)(
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+            | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT
+    );
+    vk::PipelineStageFlags2 combined = (vk::PipelineStageFlags2)(
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT
+            | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+    );
+    vk::PipelineStageFlags2[8] expected = {
+        (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+        (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT,
+        (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT,
+        (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        depth,
+        (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
-        "cross-queue waits cover all commands");
+        combined,
+    };
+    vk::ResolvedCompletionWait[8] completion_waits;
+    foreach (i, stage : expected) {
+        completion_waits[i] = {
+            .source   = &source,
+            .stages   = stage,
+            .sequence = (ulong)i + 1,
+        };
+    }
+    vk::SemaphoreSubmitInfo[8] native_waits;
+
+    usz count = vk::append_completion_wait_infos(
+        waits:            native_waits[..],
+        next_wait:        0,
+        completion_waits: completion_waits[..],
+        target:           &target,
+    );
+
+    assert(count == expected.len,
+        "every cross-queue completion wait emits one native wait");
+    foreach (i, stage : expected) {
+        assert(native_waits[i].stage_mask == stage,
+            "native completion waits preserve every exact destination mask");
+    }
+}
+
+fn void invalid_completion_wait_stage_preserves_token() @test {
+    gpu::Device device = make_submit_stats_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::SubmitDesc empty;
+    gpu::CompletionPoint prior = gpu::submit(queue, &empty)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::CompletionWait[1] waits = {{ .point = prior }};
+    gpu::SubmitDesc desc = {
+        .command_lists    = lists[..],
+        .completion_waits = waits[..],
+    };
+    ulong submits_before = stats_of(&device).queue_submits;
+
+    assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
+        "an empty completion wait destination stage is rejected");
+    assert(stats_of(&device).queue_submits == submits_before,
+        "invalid wait stages reach no native submit");
+    assert(lists[0].handle.is_valid(),
+        "invalid wait stages preserve the executable token");
+
+    waits[0].before = { .all };
+    gpu::CompletionPoint completion = gpu::submit(queue, &desc)!!;
+    gpu::wait_completion(completion, 1_000_000_000)!!;
+}
+
+fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
+    gpu::Device device = make_submit_stats_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::SubmitDesc empty;
+    gpu::CompletionPoint prior = gpu::submit(queue, &empty)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::CompletionWait[1] waits = {{
+        .point  = prior,
+        .before = { .fragment_shader },
+    }};
+    gpu::SubmitDesc desc = {
+        .command_lists    = lists[..],
+        .completion_waits = waits[..],
+    };
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    vk::QueueFamilyFlags selected_flags = completion.queue_flags;
+    defer completion.queue_flags = selected_flags;
+    completion.queue_flags = (vk::QueueFamilyFlags)(uint)
+        vk::QueueFlagBits.TRANSFER_BIT;
+    ulong submits_before = stats_of(&device).queue_submits;
+
+    assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
+        "a real submit rejects stages unsupported by the target queue");
+    assert(stats_of(&device).queue_submits == submits_before,
+        "queue-stage rejection reaches no native submit");
+    assert(lists[0].handle.is_valid(),
+        "queue-stage rejection preserves the executable token");
+
+    completion.queue_flags = selected_flags;
+    waits[0].before = { .all };
+    gpu::CompletionPoint completed = gpu::submit(queue, &desc)!!;
+    gpu::wait_completion(completed, 1_000_000_000)!!;
+}
+
+fn void same_queue_wait_elides_through_full_submit_path() @test {
+    gpu::Device device = make_submit_stats_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::SubmitDesc empty;
+    gpu::CompletionPoint prior = gpu::submit(queue, &empty)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::CompletionWait[1] waits = {{
+        .point  = prior,
+        .before = { .fragment_shader },
+    }};
+    gpu::SubmitDesc desc = {
+        .command_lists    = lists[..],
+        .completion_waits = waits[..],
+    };
+    same_queue_elision_submit_calls = 0;
+
+    assert(@catch(vk::vk_submit_with(
+        queue,
+        &desc,
+        &observe_same_queue_elision,
+    )) == gpu::OUT_OF_HOST_MEMORY,
+        "the injected native failure remains retryable after elision");
+    assert(same_queue_elision_submit_calls == 1,
+        "the full backend submit seam observed same-queue elision");
+    assert(lists[0].handle.is_valid(),
+        "the injected failure preserves the executable token");
+
+    desc.completion_waits = {};
+    gpu::CompletionPoint completed = gpu::submit(queue, &desc)!!;
+    gpu::wait_completion(completed, 1_000_000_000)!!;
+}
+
+fn void invalid_readiness_handle_precedes_invalid_stage_mask() @test {
+    gpu::Device device = make_submit_stats_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::SubmitDesc desc = {
+        .readiness        = { .device = device },
+        .readiness_before = { .host },
+    };
+    ulong submits_before = stats_of(&device).queue_submits;
+
+    assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_HANDLE,
+        "invalid readiness identity precedes invalid stage shape");
+    assert(stats_of(&device).queue_submits == submits_before,
+        "readiness precedence is settled before native submission");
 }
 
 fn void empty_submit_returns_completion_point() @test {
@@ -556,7 +821,10 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
     gpu::ExecutableCommandList[1] lists = { commands_executable };
-    gpu::CompletionPoint[1] waits = { foreign };
+    gpu::CompletionWait[1] waits = {{
+        .point  = foreign,
+        .before = { .all },
+    }};
     gpu::SubmitDesc desc = {
         .command_lists    = lists[..],
         .completion_waits = waits[..],
@@ -594,7 +862,10 @@ fn void unpublished_same_queue_wait_preserves_token() @test {
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
     gpu::ExecutableCommandList[1] lists = { commands_executable };
-    gpu::CompletionPoint[1] waits = { future };
+    gpu::CompletionWait[1] waits = {{
+        .point  = future,
+        .before = { .all },
+    }};
     gpu::SubmitDesc desc = {
         .command_lists    = lists[..],
         .completion_waits = waits[..],

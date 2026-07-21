@@ -330,7 +330,10 @@ fn void readiness_only_submit_validates_stale_swapchain() @test {
         stale,
         1,
     )!!;
-    gpu::SubmitDesc submit = { .readiness = readiness };
+    gpu::SubmitDesc submit = {
+        .readiness        = readiness,
+        .readiness_before = { .color_output },
+    };
 
     ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit));
@@ -347,7 +350,10 @@ fn void readiness_only_submit_rejects_malformed_identity() @test {
         .device  = device,
         .payload = 1,
     };
-    gpu::SubmitDesc submit = { .readiness = malformed };
+    gpu::SubmitDesc submit = {
+        .readiness        = malformed,
+        .readiness_before = { .color_output },
+    };
 
     ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit));

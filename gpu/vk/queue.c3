@@ -82,11 +82,18 @@ struct QueueCompletionState {
     bool            bound;
 }
 
+struct ResolvedCompletionWait {
+    QueueCompletionState*   source;
+    vk::PipelineStageFlags2 stages;
+    ulong                   sequence;
+}
+
 struct SubmitInputs {
     CommandRecord*[]            records;
     gpu::CommandEncoderState*[] encoders;
-    QueueCompletionState*[]     completion_waits;
+    ResolvedCompletionWait[]    completion_waits;
     SwapchainSlot*              swapchain;
+    vk::PipelineStageFlags2     readiness_stages;
 }
 
 fn vk::Result real_queue_submit2(
@@ -1936,15 +1943,24 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
     VkDeviceState* state,
     gpu::Queue queue,
     gpu::SubmitDesc* desc,
+    QueueCompletionState* target,
 ) {
     SubmitInputs inputs;
     gpu::Device device = queue.device;
+    bool has_readiness = desc.readiness != gpu::SWAPCHAIN_READINESS_INVALID;
+    if (has_readiness != ((uint)desc.readiness_before != 0)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
 
-    if (desc.readiness != gpu::SWAPCHAIN_READINESS_INVALID) {
+    if (has_readiness) {
         if (!desc.readiness.is_valid()
             || desc.readiness.device != device) {
             return gpu::INVALID_HANDLE~;
         }
+        inputs.readiness_stages = submit_wait_stages_to_vk(
+            desc.readiness_before,
+            target.queue_flags,
+        )!;
         gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
             state,
             desc.readiness,
@@ -1961,19 +1977,29 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
         )!;
     }
 
-
     if (desc.completion_waits.len > 0) {
         inputs.completion_waits = mem::talloc_array(
-            QueueCompletionState*,
+            ResolvedCompletionWait,
             (sz)desc.completion_waits.len,
         );
-        foreach (i, point : desc.completion_waits) {
+        foreach (i, wait : desc.completion_waits) {
+            gpu::CompletionPoint point = wait.point;
             if (point.device != device) return gpu::INVALID_HANDLE~;
-            inputs.completion_waits[i] = published_queue_completion_state(
+            ulong sequence = gpu::completion_point_sequence(point);
+            QueueCompletionState* source = published_queue_completion_state(
                 state,
                 gpu::completion_point_queue_id(point),
-                gpu::completion_point_sequence(point),
+                sequence,
             )!;
+            vk::PipelineStageFlags2 stages = submit_wait_stages_to_vk(
+                wait.before,
+                target.queue_flags,
+            )!;
+            inputs.completion_waits[i] = {
+                .source   = source,
+                .stages   = stages,
+                .sequence = sequence,
+            };
         }
     }
 
@@ -2017,19 +2043,15 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
 fn usz append_completion_wait_infos(
     vk::SemaphoreSubmitInfo[] waits,
     usz next_wait,
-    gpu::CompletionPoint[] points,
-    QueueCompletionState*[] completions,
+    ResolvedCompletionWait[] completion_waits,
     QueueCompletionState* target,
 ) @private {
-    foreach (i, point : points) {
-        QueueCompletionState* source = completions[i];
-        if (source == target) continue;
+    foreach (&wait : completion_waits) {
+        if (wait.source == target) continue;
         waits[next_wait++] = vk::semaphore_submit_info()
-            .set_semaphore(source.timeline)
-            .set_value(gpu::completion_point_sequence(point))
-            .set_stage_mask(
-                vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
-            );
+            .set_semaphore(wait.source.timeline)
+            .set_value(wait.sequence)
+            .set_stage_mask(wait.stages);
     }
     return next_wait;
 }
@@ -2047,10 +2069,15 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     gpu::CompletionPoint submitted;
 
     @pool() {
-        SubmitInputs inputs = resolve_and_claim_submit_inputs(
+        QueueCompletionState* completion = queue_completion_state(
             state,
-            queue,
-            desc,
+            queue.id,
+        )!;
+        SubmitInputs inputs = resolve_and_claim_submit_inputs(
+            state:  state,
+            queue:  queue,
+            desc:   desc,
+            target: completion,
         )!;
         vk::SubmitInfo2 submit = vk::submit_info2();
         CommandRecord*[] records = inputs.records;
@@ -2080,11 +2107,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             }
         }
 
-        QueueCompletionState* completion = queue_completion_state(
-            state,
-            queue.id,
-        )!;
-
         SwapchainSlot* swapchain = inputs.swapchain;
         usz wait_count = desc.completion_waits.len
             + (swapchain != null ? 1 : 0);
@@ -2095,18 +2117,15 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             );
             usz next_wait;
             next_wait = append_completion_wait_infos(
-                waits:       waits,
-                next_wait:   next_wait,
-                points:      desc.completion_waits,
-                completions: inputs.completion_waits,
-                target:      completion,
+                waits:            waits,
+                next_wait:        next_wait,
+                completion_waits: inputs.completion_waits,
+                target:           completion,
             );
             if (swapchain != null) {
                 waits[next_wait++] = vk::semaphore_submit_info()
                     .set_semaphore(swapchain.pending_acquire_semaphore)
-                    .set_stage_mask(
-                        vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
-                    );
+                    .set_stage_mask(inputs.readiness_stages);
             }
             if (next_wait > 0) {
                 submit = submit.set_wait_semaphore_infos(waits[:next_wait]);

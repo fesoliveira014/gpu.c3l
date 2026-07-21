@@ -237,7 +237,7 @@ cache-create seam whose retryable first attempt and successful empty second
 attempt emit no terminal diagnostic. Pure range and lookup helpers remain
 fault-only; operation-aware result helpers own specialized backend mapping and
 emit exactly once with stable operation context.
-Queue tests cover compact completion packing, monotonicity, exhaustion, stale and foreign ownership, unpublished values, native poll/wait, timeout retry, and no public child allocation. Submission coverage includes deterministic empty-work targeting, contiguous publication, same-queue elision, distinct transfer/compute/graphics waits, foreign and later-sequence rejection, timeline-distance backpressure, sequence exhaustion, native failure rollback, device-loss discard, token consumption, and destruction readiness.
+Queue tests cover compact completion packing, monotonicity, exhaustion, stale and foreign ownership, unpublished values, native poll/wait, timeout retry, and no public child allocation. Submission coverage includes deterministic empty-work targeting, contiguous publication, exact completion/readiness destination masks, invalid and queue-unsupported stage rollback, same-queue validation and elision, distinct transfer/compute/graphics waits, foreign and later-sequence rejection, timeline-distance backpressure, sequence exhaustion, native failure rollback, device-loss discard, token consumption, and destruction readiness.
 
 Leak tests verify structured `resource_lifetime` delivery, including
 `GpuAllocation` identity/name metadata, stderr fallback without a callback,
