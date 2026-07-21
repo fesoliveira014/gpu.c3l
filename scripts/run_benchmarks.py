@@ -31,7 +31,7 @@ BENCHMARK_METHODS = {
         "uploads/s",
     ),
     "command_record_bench": (
-        "direct=20000/phase/repetition; generated=1000 prewarm+1000/repetition; repetitions=5",
+        "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; cold/warm work counters",
         "ns/record",
     ),
     "lifecycle_bench": (
@@ -100,6 +100,20 @@ COMMAND_RECORD_RESOLUTION = re.compile(
     r"pipeline_table=0 pipeline_cache=0 policy=0$",
     re.MULTILINE,
 )
+COMMAND_RECORD_COLD_WORK = re.compile(
+    r"^cold work: host_allocations=[0-9]+ "
+    r"command_buffer_allocations=[0-9]+ command_buffer_frees=[0-9]+ "
+    r"command_buffer_resets=[0-9]+ image_view_creations=[0-9]+ "
+    r"vma_allocations=[0-9]+ generated_scratch_misses=[0-9]+$",
+    re.MULTILINE,
+)
+COMMAND_RECORD_WARM_WORK = re.compile(
+    r"^warm work: host_allocations=0 command_buffer_allocations=0 "
+    r"command_buffer_frees=0 command_buffer_resets=[1-9][0-9]* "
+    r"image_view_creations=0 vma_allocations=0 "
+    r"generated_scratch_misses=0$",
+    re.MULTILINE,
+)
 
 REGRESSION_THRESHOLDS = {
     "allocation_bench": (
@@ -163,6 +177,10 @@ def require_measurement(output, target, enforce_thresholds=True):
         raise ValueError(
             f"{target} recording resolution evidence is missing or nonzero"
         )
+    if target == "command_record_bench" and not COMMAND_RECORD_COLD_WORK.search(output):
+        raise ValueError(f"{target} cold recording work evidence is missing")
+    if target == "command_record_bench" and not COMMAND_RECORD_WARM_WORK.search(output):
+        raise ValueError(f"{target} warm recording work is missing or nonzero")
     if enforce_thresholds:
         require_regression_thresholds(output, target)
 

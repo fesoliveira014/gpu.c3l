@@ -110,7 +110,7 @@
     },
     "vk_texture": {
       "type": "test",
-      "sources": [ "src/test_vk_texture.c3", "src/test_vk_dedicated_texture.c3" ]
+      "sources": [ "src/test_vk_texture.c3", "src/test_vk_dedicated_texture.c3", "src/test_attachment_view_table.c3" ]
     },
     "vk_descriptor_heap": {
       "type": "test",

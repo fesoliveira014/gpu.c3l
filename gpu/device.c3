@@ -34,6 +34,10 @@ alias BeginCommandsFn @private = fn void? (
     CommandList* out_commands,
     CommandBackendContext* out_backend,
 );
+alias ReserveGeneratedScratchFn @private = fn void? (
+    Queue,
+    GeneratedScratchDesc,
+);
 alias EndCommandsFn @private     = fn void? (CommandEncoderState*);
 alias DiscardCommandsFn @private = fn void? (
     Device*,
@@ -64,6 +68,14 @@ alias CreateDedicatedTextureFn @private = fn DedicatedTexture? (
     Device* device,
     TextureDesc* desc,
     AllocationDesc* allocation_desc,
+);
+alias CreateAttachmentViewFn @private = fn AttachmentViewHandle? (
+    Device*,
+    AttachmentViewDesc*,
+);
+alias DestroyAttachmentViewFn @private = fn void? (
+    Device*,
+    AttachmentViewHandle,
 );
 alias CreateTextureViewFn @private       = fn TextureView? (Device*, TextureHandle, TextureViewDesc*);
 alias DestroyTextureFn @private          = fn void? (Device*, TextureHandle);
@@ -180,6 +192,7 @@ enum ResourceOwnerKind @private {
     ALLOCATION,
     BUFFER,
     TEXTURE,
+    ATTACHMENT_VIEW,
     TEXTURE_VIEW,
     SAMPLER,
     PIPELINE,
@@ -257,12 +270,13 @@ struct BackendVTable @private {
     GetAllocationInfoFn     get_allocation_info;
     GetAllocationSpanFn     get_allocation_span;
     GetSpanMappingFn        get_span_mapping;
-    GetSpanAddressFn        get_span_address;
-    FlushSpanFn             flush_mapped_span;
-    InvalidateSpanFn        invalidate_mapped_span;
-    BeginCommandsFn         begin_commands;
-    EndCommandsFn           end_commands;
-    DiscardCommandsFn       discard_commands;
+    GetSpanAddressFn          get_span_address;
+    FlushSpanFn               flush_mapped_span;
+    InvalidateSpanFn          invalidate_mapped_span;
+    ReserveGeneratedScratchFn reserve_generated_scratch;
+    BeginCommandsFn           begin_commands;
+    EndCommandsFn             end_commands;
+    DiscardCommandsFn         discard_commands;
     SubmitFn                submit;
     PollCompletionFn        poll_completion;
     WaitCompletionFn        wait_completion;
@@ -274,6 +288,8 @@ struct BackendVTable @private {
     CreatePlacedTextureFn     create_placed_texture;
     CreateDedicatedTextureFn  create_dedicated_texture;
     DestroyTextureFn          destroy_texture;
+    CreateAttachmentViewFn    create_attachment_view;
+    DestroyAttachmentViewFn   destroy_attachment_view;
     CreateTextureViewFn       create_texture_view;
     DestroyTextureViewFn      destroy_texture_view;
     CreateTextureViewsFn      create_texture_views;
@@ -340,6 +356,18 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong command_policy_selections;
     ulong recording_commands;
     ulong native_commands;
+}
+
+<* Test and benchmark counters for allocation-capable recording seams. Compare
+   relaxed snapshots only around externally synchronized cold or warm work. *>
+struct RecordingWorkCounters @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+    ulong host_allocations;
+    ulong command_buffer_allocations;
+    ulong command_buffer_frees;
+    ulong command_buffer_resets;
+    ulong image_view_creations;
+    ulong vma_allocations;
+    ulong generated_scratch_misses;
 }
 
 Atomic{ulong} command_device_registry_resolutions @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));

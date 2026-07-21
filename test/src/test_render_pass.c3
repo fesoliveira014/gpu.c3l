@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu @public;
 
-fn gpu::TextureHandle render_test_texture(uint index) {
+fn gpu::AttachmentViewHandle render_test_view(uint index) {
     return {
         .owner      = 1,
         .index      = index,
@@ -19,14 +19,14 @@ fn gpu::RenderPassDesc valid_render_pass_desc(gpu::ColorTargetDesc[] colors) {
 }
 
 fn void render_pass_descriptor_accepts_zero_value_operations() @test {
-    gpu::ColorTargetDesc[1] colors = {{ .texture = render_test_texture(0) }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = render_test_view(0) }};
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);
     assert(gpu::render_pass_desc_valid(&desc),
         "zero-value load/store operations form a valid color pass");
 }
 
 fn void render_pass_descriptor_rejects_invalid_structure() @test {
-    gpu::ColorTargetDesc[1] colors = {{ .texture = render_test_texture(0) }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = render_test_view(0) }};
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);
 
     desc.width = 0;
@@ -37,7 +37,7 @@ fn void render_pass_descriptor_rejects_invalid_structure() @test {
 }
 
 fn void render_pass_descriptor_rejects_invalid_operations() @test {
-    gpu::ColorTargetDesc[1] colors = {{ .texture = render_test_texture(0) }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = render_test_view(0) }};
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);
 
     *((int*)&colors[0].load_op) = 99;
@@ -47,7 +47,7 @@ fn void render_pass_descriptor_rejects_invalid_operations() @test {
     assert(!gpu::render_pass_desc_valid(&desc), "invalid color store operation is rejected");
 
     gpu::DepthTargetDesc depth = {
-        .texture = render_test_texture(1),
+        .view = render_test_view(1),
     };
     *((int*)&depth.load_op) = 99;
     desc = {
@@ -59,20 +59,20 @@ fn void render_pass_descriptor_rejects_invalid_operations() @test {
 }
 
 fn void render_pass_descriptor_validates_resolve_identity() @test {
-    gpu::ColorTargetDesc[1] colors = {{ .texture = render_test_texture(0) }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = render_test_view(0) }};
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);
-    desc.colors[0].resolve_texture = render_test_texture(1);
+    desc.colors[0].resolve_view = render_test_view(1);
     assert(gpu::render_pass_desc_valid(&desc),
         "a distinct resolve attachment is structurally valid");
 
-    desc.colors[0].resolve_texture = desc.colors[0].texture;
+    desc.colors[0].resolve_view = desc.colors[0].view;
     assert(!gpu::render_pass_desc_valid(&desc),
         "an attachment cannot resolve into itself");
 }
 
 fn void render_pass_descriptor_validates_depth_clear_range() @test {
     gpu::DepthTargetDesc depth = {
-        .texture = render_test_texture(2),
+        .view    = render_test_view(2),
         .load_op = gpu::LoadOp.CLEAR,
         .clear   = { .depth = 1.0f },
     };

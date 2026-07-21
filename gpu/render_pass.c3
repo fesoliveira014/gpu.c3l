@@ -2,6 +2,8 @@ module gpu;
 
 import std::math;
 
+const uint DEFAULT_ATTACHMENT_VIEW_CAPACITY = 4096;
+
 <* What happens to an attachment's contents when a render pass begins. *>
 enum LoadOp : int {
     LOAD,
@@ -29,25 +31,29 @@ struct ClearDepthStencil {
     uint  stencil;
 }
 
-<* One color attachment and its optional single-sample resolve target. *>
-struct ColorTargetDesc {
+<* One texture subresource prepared for render-pass attachment use.
+   Ownership: release with destroy_attachment_view after GPU use completes. *>
+struct AttachmentViewDesc {
     TextureHandle texture;
     uint          mip_level;
     uint          array_layer;
-    TextureHandle resolve_texture;
-    uint          resolve_mip_level;
-    uint          resolve_array_layer;
-    LoadOp        load_op;
-    StoreOp       store_op;
-    ClearColor    clear;
+}
+
+<* One color attachment and its optional single-sample resolve target. *>
+struct ColorTargetDesc {
+    AttachmentViewHandle view;
+    AttachmentViewHandle resolve_view;
+    LoadOp                load_op;
+    StoreOp               store_op;
+    ClearColor            clear;
 }
 
 <* One depth attachment. `clear` applies only with LoadOp.CLEAR. *>
 struct DepthTargetDesc {
-    TextureHandle     texture;
-    LoadOp            load_op;
-    StoreOp           store_op;
-    ClearDepthStencil clear;
+    AttachmentViewHandle view;
+    LoadOp               load_op;
+    StoreOp              store_op;
+    ClearDepthStencil    clear;
 }
 
 <* A dynamic render pass. Every selected attachment must cover the render area. *>
@@ -88,14 +94,16 @@ fn bool render_pass_desc_valid(RenderPassDesc* desc) @private {
     if (desc.colors.len > 0 && desc.colors.ptr == null) return false;
 
     foreach (&target : desc.colors) {
-        if (!load_op_valid(target.load_op)
+        if (!target.view.is_valid()
+            || !load_op_valid(target.load_op)
             || !store_op_valid(target.store_op)) return false;
-        if (target.resolve_texture != TEXTURE_HANDLE_INVALID
-            && target.resolve_texture == target.texture) return false;
+        if (target.resolve_view.is_valid()
+            && target.resolve_view == target.view) return false;
     }
 
     if (desc.depth != null
-        && (!load_op_valid(desc.depth.load_op)
+        && (!desc.depth.view.is_valid()
+            || !load_op_valid(desc.depth.load_op)
             || !store_op_valid(desc.depth.store_op))) return false;
     if (desc.depth != null
         && desc.depth.load_op == LoadOp.CLEAR
@@ -103,6 +111,44 @@ fn bool render_pass_desc_valid(RenderPassDesc* desc) @private {
             || desc.depth.clear.depth < 0.0f
             || desc.depth.clear.depth > 1.0f)) return false;
     return true;
+}
+
+<* Create immutable attachment metadata and any required native subresource
+   view before recording. *>
+fn AttachmentViewHandle? create_attachment_view(
+    Device* device,
+    AttachmentViewDesc* desc,
+) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    validate_resource_owner(
+        &operation,
+        desc.texture.owner,
+        ResourceOwnerKind.TEXTURE,
+    )!;
+    AttachmentViewHandle view = operation.vtable.create_attachment_view(
+        device,
+        desc,
+    )!;
+    retain_device_children(&operation);
+    return view;
+}
+
+<* Destroy an attachment view after every recorded and submitted use completes. *>
+fn void? destroy_attachment_view(
+    Device* device,
+    AttachmentViewHandle view,
+) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    validate_resource_owner(
+        &operation,
+        view.owner,
+        ResourceOwnerKind.ATTACHMENT_VIEW,
+    )!;
+    operation.vtable.destroy_attachment_view(device, view)!;
+    release_device_children(&operation);
 }
 
 <* Begin a pass without adding synchronization. Viewport and scissor default to

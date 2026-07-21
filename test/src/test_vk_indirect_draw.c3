@@ -338,6 +338,11 @@ fn void compute_generated_indexed_indirect_draw() @test {
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_ind_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_sd)!!;
@@ -474,7 +479,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
 
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
@@ -535,8 +540,18 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     defer destroy_ind_draw_ctx(&device, &draw);
     gpu::TextureHandle plain_target = make_ind_target(&device);
     defer gpu::destroy_texture(&device, plain_target)!!;
+    gpu::AttachmentViewHandle plain_view = create_test_attachment_view(
+        &device,
+        plain_target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &plain_view)!!;
     gpu::TextureHandle indexed_target = make_ind_target(&device);
     defer gpu::destroy_texture(&device, indexed_target)!!;
+    gpu::AttachmentViewHandle indexed_view = create_test_attachment_view(
+        &device,
+        indexed_target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &indexed_view)!!;
 
     gpu::ShaderDesc build_shader_desc = {
         .stage       = gpu::ShaderStage.COMPUTE,
@@ -699,9 +714,17 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     )!!;
     defer free_owned_span(&device, &indexed_readback)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::GeneratedScratchDesc scratch = {
+        .max_commands_per_list   = 1,
+        .max_preprocess_bytes    = 1024 * 1024,
+        .preprocess_buffer_count = 3,
+    };
+    gpu::reserve_generated_scratch(queue, scratch)!!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, build_pipeline);
     gpu::cmd_dispatch(
@@ -733,7 +756,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
 
     record_target_to_attach(&commands, plain_target);
     gpu::ColorTargetDesc[1] plain_colors = {{
-        .texture  = plain_target,
+        .view     = plain_view,
         .load_op  = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
     }};
@@ -755,7 +778,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
 
     record_target_to_attach(&commands, indexed_target);
     gpu::ColorTargetDesc[1] indexed_colors = {{
-        .texture  = indexed_target,
+        .view     = indexed_view,
         .load_op  = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
     }};
@@ -819,6 +842,11 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_ind_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     OwnedSpan readback = allocate_owned_span(
         device:       &device,
@@ -872,7 +900,7 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
     defer discard_test_commands(&cmd)!!;
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
@@ -1031,8 +1059,18 @@ fn void count_buffer_limits_draws() @test {
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target_zero = make_ind_target(&device);
     defer gpu::destroy_texture(&device, target_zero)!!;
+    gpu::AttachmentViewHandle zero_view = create_test_attachment_view(
+        &device,
+        target_zero,
+    )!!;
+    defer destroy_test_attachment_view(&device, &zero_view)!!;
     gpu::TextureHandle target_one = make_ind_target(&device);
     defer gpu::destroy_texture(&device, target_one)!!;
+    gpu::AttachmentViewHandle one_view = create_test_attachment_view(
+        &device,
+        target_one,
+    )!!;
+    defer destroy_test_attachment_view(&device, &one_view)!!;
 
     OwnedSpan rb_zero = allocate_owned_span(
         device:       &device,
@@ -1121,12 +1159,13 @@ fn void count_buffer_limits_draws() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureHandle[2] targets = { target_zero, target_one };
+    gpu::AttachmentViewHandle[2] target_views = { zero_view, one_view };
     gpu::GpuSpan[2] count_spans = { count_zero, count_one };
     gpu::GpuSpan[2] rb_spans = { rb_zero_span, rb_one_span };
     for (uint i = 0; i < 2; i++) {
         record_target_to_attach(&cmd, targets[i]);
         gpu::ColorTargetDesc[1] colors = {{
-            .texture = targets[i], .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+            .view = target_views[i], .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
             .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
@@ -1167,11 +1206,15 @@ fn void count_buffer_limits_draws() @test {
 fn void discard_consumes_active_render_pass_recording() @test {
     gpu::Device device = make_ind_device();
     gpu::TextureHandle target = make_ind_target(&device);
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
 
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     record_target_to_attach(&commands, target);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture  = target,
+        .view     = target_view,
         .load_op  = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
     }};
@@ -1185,6 +1228,7 @@ fn void discard_consumes_active_render_pass_recording() @test {
     gpu::discard_commands(&commands)!!;
     assert(!commands.handle.is_valid(),
         "discard consumes a recording with an active render pass");
+    gpu::destroy_attachment_view(&device, target_view)!!;
     gpu::destroy_texture(&device, target)!!;
     destroy_test_device(&device)!!;
 }
@@ -1196,6 +1240,11 @@ fn void indirect_argument_validation() @test {
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_ind_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     vk::BufferDesc plain_desc = {
         .size        = 64,
@@ -1240,7 +1289,7 @@ fn void indirect_argument_validation() @test {
     defer discard_test_commands(&cmd)!!;
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;

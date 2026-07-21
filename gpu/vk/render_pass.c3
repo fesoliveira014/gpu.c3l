@@ -2,7 +2,6 @@ module gpu::vk @private;
 
 import gpu @public;
 import vk;
-import std::core::mem;
 import std::math;
 
 fn vk::AttachmentLoadOp load_op_to_vk(gpu::LoadOp op) @private {
@@ -49,9 +48,9 @@ fn vk::ClearColorValue clear_color_to_vk(
     return value;
 }
 
-<* Begin dynamic rendering. Attachments must sit in their attachment layouts,
-   have matching usage, and cover the pass dimensions. Color views honor the
-   target's mip/layer; the depth view uses mip zero. *>
+<* Begin dynamic rendering with precreated attachment views. Attachments must
+   sit in their attachment layouts, have matching usage, and cover the pass
+   dimensions. *>
 fn void? vk_cmd_begin_render_pass(
     gpu::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
@@ -77,284 +76,196 @@ fn void? vk_cmd_begin_render_pass(
         return gpu::INVALID_ARGUMENT~;
     }
     vk::CommandBuffer cb = record.command_buffer;
+    AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] color_slots;
+    AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] resolve_slots;
+    vk::RenderingAttachmentInfo[gpu::MAX_COLOR_ATTACHMENTS] attachments;
+    RenderCompatibility compatibility;
+    compatibility.color_count = (uint)desc.colors.len;
+    bool samples_initialized;
 
-    @pool() {
-        TextureSlot*[] color_slots = {};
-        TextureSlot*[] resolve_slots = {};
-        vk::RenderingAttachmentInfo[] attachments = {};
-        RenderCompatibility compatibility;
-        compatibility.color_count = (uint)desc.colors.len;
-        bool samples_initialized;
-        sz resolve_count;
-
-        if (desc.colors.len > 0) {
-            color_slots = mem::talloc_array(TextureSlot*, desc.colors.len);
-            resolve_slots = mem::talloc_array(
-                TextureSlot*,
-                desc.colors.len,
-            );
-            attachments = mem::talloc_array(
-                vk::RenderingAttachmentInfo,
-                desc.colors.len,
-            );
-            foreach (i, &target : desc.colors) {
-                resolve_slots[i] = null;
-                TextureSlot* slot = state.textures.get(target.texture)!;
-                validate_texture_recording_access(
-                    state:     state,
-                    record:    record,
-                    slot:      slot,
-                    handle:    target.texture,
-                    operation: "cmd_begin_render_pass",
-                )!;
-                color_slots[i] = slot;
-                if (!slot.usage.color_attach) {
-                    return report_contract_failure(
-                        state:               state,
-                        operation:           "cmd_begin_render_pass",
-                        public_fault:        gpu::INVALID_ARGUMENT,
-                        resource_kind:       gpu::DebugResourceKind.TEXTURE,
-                        has_public_identity: true,
-                        index:               target.texture.index,
-                        generation:          target.texture.generation,
-                        debug_name:          slot_name(&slot.debug_name[0]),
-                        rejected_field:      "TextureUsage.color_attach",
-                        invariant:           "color attachment must include color_attach usage",
-                        backend_text:        null,
-                    )~;
-                }
-                if (target.mip_level >= slot.mip_levels
-                    || target.array_layer >= slot.array_layers) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
-                MipExtent extent = texture_mip_extent(
-                    slot,
-                    target.mip_level,
-                );
-                if (desc.width > extent.width
-                    || desc.height > extent.height) {
-                    ZString rejected_field = desc.width > extent.width
-                        ? "RenderPassDesc.width"
-                        : "RenderPassDesc.height";
-                    return report_contract_failure(
-                        state:               state,
-                        operation:           "cmd_begin_render_pass",
-                        public_fault:        gpu::INVALID_ARGUMENT,
-                        resource_kind:       gpu::DebugResourceKind.TEXTURE,
-                        has_public_identity: true,
-                        index:               target.texture.index,
-                        generation:          target.texture.generation,
-                        debug_name:          slot_name(&slot.debug_name[0]),
-                        rejected_field:      rejected_field,
-                        invariant:           "render area must fit every color attachment mip",
-                        backend_text:        null,
-                    )~;
-                }
-                if (!samples_initialized) {
-                    compatibility.sample_count = slot.sample_count;
-                    samples_initialized = true;
-                } else if (slot.sample_count
-                    != compatibility.sample_count) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
-                compatibility.color_formats[i] = slot.format;
-
-                if (target.resolve_texture
-                    == gpu::TEXTURE_HANDLE_INVALID) {
-                    continue;
-                }
-                if (target.resolve_texture == target.texture
-                    || slot.sample_count == gpu::SampleCount.ONE) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
-                TextureSlot* resolve_slot =
-                    state.textures.get(target.resolve_texture)!;
-                validate_texture_recording_access(
-                    state:     state,
-                    record:    record,
-                    slot:      resolve_slot,
-                    handle:    target.resolve_texture,
-                    operation: "cmd_begin_render_pass",
-                )!;
-                if (!resolve_slot.usage.color_attach
-                    || resolve_slot.sample_count
-                        != gpu::SampleCount.ONE
-                    || resolve_slot.format != slot.format
-                    || target.resolve_mip_level
-                        >= resolve_slot.mip_levels
-                    || target.resolve_array_layer
-                        >= resolve_slot.array_layers) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
-                MipExtent resolve_extent = texture_mip_extent(
-                    resolve_slot,
-                    target.resolve_mip_level,
-                );
-                if (desc.width > resolve_extent.width
-                    || desc.height > resolve_extent.height) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
-                resolve_slots[i] = resolve_slot;
-                resolve_count++;
-            }
-        }
-
-        TextureSlot* depth_slot = null;
-        if (desc.depth != null) {
-            depth_slot = state.textures.get(desc.depth.texture)!;
-            validate_texture_recording_access(
-                state:     state,
-                record:    record,
-                slot:      depth_slot,
-                handle:    desc.depth.texture,
-                operation: "cmd_begin_render_pass",
-            )!;
-            if (!depth_slot.usage.depth_attach
-                || desc.width > depth_slot.width
-                || desc.height > depth_slot.height) {
-                return gpu::INVALID_ARGUMENT~;
-            }
-            if (samples_initialized
-                && depth_slot.sample_count
-                    != compatibility.sample_count) {
-                return gpu::INVALID_ARGUMENT~;
-            }
-            compatibility.depth_format = depth_slot.format;
-            if (!samples_initialized) {
-                compatibility.sample_count = depth_slot.sample_count;
-                samples_initialized = true;
-            }
-        }
-
-        validate_active_pipeline_render_compatibility(
+    foreach (i, &target : desc.colors) {
+        AttachmentViewSlot* view = state.attachment_views.get(target.view)!;
+        TextureSlot* texture = state.textures.get(view.texture)!;
+        validate_texture_queue_access(
+            state:       state,
+            queue_roles: record.queue.roles,
+            slot:        texture,
+            handle:      view.texture,
+            operation:   "cmd_begin_render_pass",
+        )!;
+        track_command_reference(
             state,
             record,
-            &compatibility,
+            target.view.owner,
+            target.view.index,
+            target.view.generation,
         )!;
+        if (!texture.usage.color_attach) {
+            return report_contract_failure(
+                state:               state,
+                operation:           "cmd_begin_render_pass",
+                public_fault:        gpu::INVALID_ARGUMENT,
+                resource_kind:       gpu::DebugResourceKind.TEXTURE,
+                has_public_identity: true,
+                index:               view.texture.index,
+                generation:          view.texture.generation,
+                debug_name:          slot_name(&texture.debug_name[0]),
+                rejected_field:      "TextureUsage.color_attach",
+                invariant:           "color attachment must include color_attach usage",
+                backend_text:        null,
+            )~;
+        }
+        if (desc.width > view.width || desc.height > view.height) {
+            ZString rejected_field = desc.width > view.width
+                ? "RenderPassDesc.width"
+                : "RenderPassDesc.height";
+            return report_contract_failure(
+                state:               state,
+                operation:           "cmd_begin_render_pass",
+                public_fault:        gpu::INVALID_ARGUMENT,
+                resource_kind:       gpu::DebugResourceKind.TEXTURE,
+                has_public_identity: true,
+                index:               view.texture.index,
+                generation:          view.texture.generation,
+                debug_name:          slot_name(&texture.debug_name[0]),
+                rejected_field:      rejected_field,
+                invariant:           "render area must fit every color attachment mip",
+                backend_text:        null,
+            )~;
+        }
+        if (!samples_initialized) {
+            compatibility.sample_count = view.sample_count;
+            samples_initialized = true;
+        } else if (view.sample_count != compatibility.sample_count) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+        compatibility.color_formats[i] = view.format;
+        color_slots[i] = view;
+        resolve_slots[i] = null;
 
-        sz max_created_views = desc.colors.len
-            + resolve_count
-            + (desc.depth != null ? 1 : 0);
-        CachedViewCreation[] creations = mem::talloc_array(
-            CachedViewCreation,
-            max_created_views,
-        );
-        uint creation_count;
-        state.texture_view_cache_mutex.lock()!!;
-        defer state.texture_view_cache_mutex.unlock();
-        defer catch rollback_texture_view_creations(
-            state,
-            creations[:creation_count],
-        );
-
-        foreach (i, &target : desc.colors) {
-            gpu::TextureViewDesc view_desc = {
-                .base_mip    = target.mip_level,
-                .mip_count   = 1,
-                .base_layer  = target.array_layer,
-                .layer_count = 1,
-            };
-            CachedViewCreation creation;
-            vk::ImageView view = resolve_texture_view_tracked(
-                state:     state,
-                slot:      color_slots[i],
-                texture:   target.texture,
-                view:      &view_desc,
-                operation: "cmd_begin_render_pass",
-                creation:  &creation,
-            )!;
-            if (creation.cache != null) {
-                creations[creation_count++] = creation;
+        if (target.resolve_view.is_valid()) {
+            if (view.sample_count == gpu::SampleCount.ONE) {
+                return gpu::INVALID_ARGUMENT~;
             }
+            AttachmentViewSlot* resolve = state.attachment_views.get(
+                target.resolve_view,
+            )!;
+            TextureSlot* resolve_texture = state.textures.get(
+                resolve.texture,
+            )!;
+            validate_texture_queue_access(
+                state:       state,
+                queue_roles: record.queue.roles,
+                slot:        resolve_texture,
+                handle:      resolve.texture,
+                operation:   "cmd_begin_render_pass",
+            )!;
+            track_command_reference(
+                state,
+                record,
+                target.resolve_view.owner,
+                target.resolve_view.index,
+                target.resolve_view.generation,
+            )!;
+            if (!resolve_texture.usage.color_attach
+                || resolve.sample_count != gpu::SampleCount.ONE
+                || resolve.format != view.format
+                || desc.width > resolve.width
+                || desc.height > resolve.height) {
+                return gpu::INVALID_ARGUMENT~;
+            }
+            resolve_slots[i] = resolve;
+        }
+    }
 
-            attachments[i] = vk::rendering_attachment_info();
-            attachments[i].image_view = view;
-            attachments[i].image_layout =
+    AttachmentViewSlot* depth_view = null;
+    if (desc.depth != null) {
+        depth_view = state.attachment_views.get(desc.depth.view)!;
+        TextureSlot* depth_texture = state.textures.get(depth_view.texture)!;
+        validate_texture_queue_access(
+            state:       state,
+            queue_roles: record.queue.roles,
+            slot:        depth_texture,
+            handle:      depth_view.texture,
+            operation:   "cmd_begin_render_pass",
+        )!;
+        track_command_reference(
+            state,
+            record,
+            desc.depth.view.owner,
+            desc.depth.view.index,
+            desc.depth.view.generation,
+        )!;
+        if (!depth_texture.usage.depth_attach
+            || desc.width > depth_view.width
+            || desc.height > depth_view.height) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+        if (samples_initialized
+            && depth_view.sample_count != compatibility.sample_count) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+        compatibility.depth_format = depth_view.format;
+        if (!samples_initialized) {
+            compatibility.sample_count = depth_view.sample_count;
+            samples_initialized = true;
+        }
+    }
+
+    validate_active_pipeline_render_compatibility(
+        state,
+        record,
+        &compatibility,
+    )!;
+
+    foreach (i, &target : desc.colors) {
+        AttachmentViewSlot* view = color_slots[i];
+        attachments[i] = vk::rendering_attachment_info();
+        attachments[i].image_view = view.native;
+        attachments[i].image_layout =
+            vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
+        attachments[i].load_op = load_op_to_vk(target.load_op);
+        attachments[i].store_op = store_op_to_vk(target.store_op);
+        attachments[i].clear_value.color = clear_color_to_vk(
+            view.format,
+            target.clear,
+        );
+        if (resolve_slots[i] != null) {
+            attachments[i].resolve_mode = color_resolve_mode(view.format);
+            attachments[i].resolve_image_view = resolve_slots[i].native;
+            attachments[i].resolve_image_layout =
                 vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
-            attachments[i].load_op = load_op_to_vk(target.load_op);
-            attachments[i].store_op = store_op_to_vk(target.store_op);
-            attachments[i].clear_value.color = clear_color_to_vk(
-                color_slots[i].format,
-                target.clear,
-            );
-
-            if (resolve_slots[i] != null) {
-                gpu::TextureViewDesc resolve_view_desc = {
-                    .base_mip    = target.resolve_mip_level,
-                    .mip_count   = 1,
-                    .base_layer  = target.resolve_array_layer,
-                    .layer_count = 1,
-                };
-                CachedViewCreation resolve_creation;
-                vk::ImageView resolve_view = resolve_texture_view_tracked(
-                    state:     state,
-                    slot:      resolve_slots[i],
-                    texture:   target.resolve_texture,
-                    view:      &resolve_view_desc,
-                    operation: "cmd_begin_render_pass",
-                    creation:  &resolve_creation,
-                )!;
-                if (resolve_creation.cache != null) {
-                    creations[creation_count++] = resolve_creation;
-                }
-                attachments[i].resolve_mode =
-                    color_resolve_mode(color_slots[i].format);
-                attachments[i].resolve_image_view = resolve_view;
-                attachments[i].resolve_image_layout =
-                    vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
-            }
         }
+    }
 
-        vk::RenderingAttachmentInfo depth_attach;
-        vk::RenderingInfo rendering = vk::rendering_info();
-        rendering.render_area = {
-            .offset = { .x = 0, .y = 0 },
-            .extent = {
-                .width  = desc.width,
-                .height = desc.height,
-            },
-        };
-        rendering.layer_count = 1;
-        rendering.color_attachment_count = (uint)attachments.len;
-        rendering.p_color_attachments = attachments.ptr;
-        if (desc.depth != null) {
-            gpu::TextureViewDesc depth_view_desc = {
-                .mip_count   = 1,
-                .layer_count = 1,
-            };
-            CachedViewCreation depth_creation;
-            vk::ImageView depth_view = resolve_texture_view_tracked(
-                state:     state,
-                slot:      depth_slot,
-                texture:   desc.depth.texture,
-                view:      &depth_view_desc,
-                operation: "cmd_begin_render_pass",
-                creation:  &depth_creation,
-            )!;
-            if (depth_creation.cache != null) {
-                creations[creation_count++] = depth_creation;
-            }
-            depth_attach = vk::rendering_attachment_info();
-            depth_attach.image_view = depth_view;
-            depth_attach.image_layout =
-                vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-            depth_attach.load_op = load_op_to_vk(desc.depth.load_op);
-            depth_attach.store_op =
-                store_op_to_vk(desc.depth.store_op);
-            depth_attach.clear_value.depth_stencil = {
-                .depth   = desc.depth.clear.depth,
-                .stencil = desc.depth.clear.stencil,
-            };
-            rendering.p_depth_attachment = &depth_attach;
-        }
-        vk::cmd_begin_rendering(cb, &rendering);
-        gpu::note_command_native_call();
-        commit_texture_view_creations(
-            state,
-            creations[:creation_count],
-        );
-        record.active_render = compatibility;
+    vk::RenderingAttachmentInfo depth_attachment;
+    vk::RenderingInfo rendering = vk::rendering_info();
+    rendering.render_area = {
+        .offset = { .x = 0, .y = 0 },
+        .extent = {
+            .width  = desc.width,
+            .height = desc.height,
+        },
     };
+    rendering.layer_count = 1;
+    rendering.color_attachment_count = (uint)desc.colors.len;
+    rendering.p_color_attachments = &attachments[0];
+    if (desc.depth != null) {
+        depth_attachment = vk::rendering_attachment_info();
+        depth_attachment.image_view = depth_view.native;
+        depth_attachment.image_layout =
+            vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depth_attachment.load_op = load_op_to_vk(desc.depth.load_op);
+        depth_attachment.store_op = store_op_to_vk(desc.depth.store_op);
+        depth_attachment.clear_value.depth_stencil = {
+            .depth   = desc.depth.clear.depth,
+            .stencil = desc.depth.clear.stencil,
+        };
+        rendering.p_depth_attachment = &depth_attachment;
+    }
+    vk::cmd_begin_rendering(cb, &rendering);
+    gpu::note_command_native_call();
+    record.active_render = compatibility;
 
     vk::Viewport viewport = {
         .x         = 0.0,

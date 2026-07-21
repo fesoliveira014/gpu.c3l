@@ -82,7 +82,7 @@ fn gpu::ExecutableCommandList record_compute(gpu::Device* device, gpu::PipelineH
 }
 
 <* Record the graphics workload and optional timestamps. *>
-fn gpu::ExecutableCommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::TextureHandle rt, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
+fn gpu::ExecutableCommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::AttachmentViewHandle view, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
     vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
@@ -90,7 +90,7 @@ fn gpu::ExecutableCommandList record_graphics(gpu::Device* device, gpu::Pipeline
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);
     }
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = rt,
+        .view = view,
         .load_op = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
@@ -256,6 +256,12 @@ fn int main() {
     };
     gpu::TextureHandle rt = gpu::create_texture(&device, &rt_desc)!!;
     defer gpu::destroy_texture(&device, rt)!!;
+    gpu::AttachmentViewDesc rt_view_desc = { .texture = rt };
+    gpu::AttachmentViewHandle rt_view = gpu::create_attachment_view(
+        &device,
+        &rt_view_desc,
+    )!!;
+    defer gpu::destroy_attachment_view(&device, rt_view)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = OVERLAP_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode comp_shader = gpu::prepare_shader_code(&comp_sd)!!;
@@ -365,7 +371,7 @@ fn int main() {
         gpu::ExecutableCommandList frag_cmd = record_graphics(
             device:        &device,
             pipeline:      gfx_pipeline,
-            rt:            rt,
+            view:          rt_view,
             vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
             fragment_root: gpu::get_span_address(&device, frag_span)!!,
             pool:          gfx_pool,
@@ -460,7 +466,7 @@ fn int main() {
         gpu::ExecutableCommandList a_graphics = record_graphics(
             device:        &device,
             pipeline:      gfx_pipeline,
-            rt:            rt,
+            view:          rt_view,
             vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
             fragment_root: gpu::get_span_address(&device, frag_span)!!,
             pool:          gfx_pool,
@@ -506,7 +512,7 @@ fn int main() {
         gpu::ExecutableCommandList b_graphics = record_graphics(
             device:        &device,
             pipeline:      gfx_pipeline,
-            rt:            rt,
+            view:          rt_view,
             vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
             fragment_root: gpu::get_span_address(&device, frag_span)!!,
             pool:          gfx_pool,

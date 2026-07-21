@@ -303,6 +303,11 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     };
     gpu::TextureHandle target = gpu::create_texture(&device, &target_desc)!!;
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
     OwnedSpan readback = allocate_owned_span(
         device:       &device,
         size:         TARGET_BYTES,
@@ -390,7 +395,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     };
     gpu::cmd_texture_barrier(&graphics_commands, &target_to_attachment)!!;
     gpu::ColorTargetDesc[1] colors = {{
-        .texture  = target,
+        .view     = target_view,
         .load_op  = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
         .clear    = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },

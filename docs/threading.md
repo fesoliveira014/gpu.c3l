@@ -36,12 +36,14 @@ token's retained device pin while another call can still be in flight.
 | `get_allocation_info` / `get_allocation_span` / `get_span_mapping` / `get_span_address` | S | lock-free slot resolution |
 | `flush_mapped_span` / `invalidate_mapped_span` | S | lock-free validation; coherent no-op; native calls are internally synchronized |
 | `create_texture` / `destroy_texture` | S | |
+| `create_attachment_view` / `destroy_attachment_view` | S | immutable render subresource; destroy happens-after every command reference |
 | `create_texture_view` / `create_texture_views` / `destroy_texture_view` | S | owner and generation are validated before heap mutation |
 | `intern_sampler` / `publish_sampler` | S | equal interning and repeated publication converge under the device resource lock |
 | `prepare_shader_code` | S | pure read of caller-owned immutable bytes and strings |
 | `create_compute_pipeline` / `create_graphics_pipeline` / `create_compute_pipelines` / `create_graphics_pipelines` / `destroy_pipeline` | S | single and batch creation serialize on a device-wide creation lock; a same-key request converges to one entry |
 | `get_memory_stats` / `build_memory_report` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
 | `begin_commands` / `end_commands` / command discard | C | recording storage is automatic per worker |
+| `reserve_generated_scratch` | C | cold replacement for the calling thread's exact device/queue context; requires that context to be quiescent |
 | every `cmd_*` recording call | C | confined to the list's thread |
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
@@ -58,6 +60,10 @@ state and preserves the token and generation.
 Each device can allocate 256 recording contexts over its lifetime. A further
 distinct recording thread receives
 `SLOT_TABLE_FULL`; contexts are released when the device is destroyed.
+Completed or discarded native command buffers return to the same context and
+are reset and reused only by its owner. A worker must reserve its own generated
+scratch before recording generated commands; reservations are not shared or
+stolen across worker contexts.
 
 Runtime creation and destruction must not overlap other runtime operations. After
 publication, enumeration and adapter queries may run concurrently; all such calls
@@ -97,9 +103,9 @@ destroy every swapchain and child resource.
 
 ## Lock order
 
-Resource creation and destruction use `resource_mutex`; texture-view cache
-publication and render-pass resolution use `texture_view_cache_mutex`;
-command-record allocation, submit claims, and reclamation use `command_mutex`.
+Resource creation and destruction use `resource_mutex`; shader-visible
+texture-view cache publication uses `texture_view_cache_mutex`; command-record
+allocation, submit claims, and reclamation use `command_mutex`.
 When both resource and view-cache locks are needed, resource comes first.
 Submission releases `command_mutex` before locking the selected queue, so
 command-record and queue locks are not nested.
@@ -130,6 +136,9 @@ ownership transfers.
   inspect that cache. Bind snapshots the stable slot identity and native state;
   later commands validate the cached generation without resolving the table.
 - Destruction must happen-after the last use of the handle on any thread.
+- Attachment-view slots live in a fixed table and retain their texture. Render
+  recording reads immutable view metadata without the shader-visible view-cache
+  lock and records a reference before the handle may be destroyed.
 
 ## Worker-thread setup (C3)
 

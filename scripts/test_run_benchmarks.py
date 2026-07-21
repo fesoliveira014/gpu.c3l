@@ -30,7 +30,7 @@ COMMAND_OUTPUT = "\n".join(
         "barrier: iterations=20000 repetitions=5 median=130.0 ns/record",
         "hazard barrier: iterations=20000 repetitions=5 median=135.0 ns/record",
         "indirect dispatch: iterations=20000 repetitions=5 median=180.0 ns/record",
-        "generated dispatch: iterations=1000 repetitions=5 median=900.0 ns/record",
+        "generated dispatch: iterations=64 repetitions=5 median=900.0 ns/record",
         (
             "invariants: registry_locks=0 recording_allocations=0 "
             "draw_compilations=0 preprocess_allocations=0"
@@ -41,7 +41,19 @@ COMMAND_OUTPUT = "\n".join(
             "retained_pins=0 lifecycle_vtable=0 command_table=0 "
             "pipeline_table=0 pipeline_cache=0 policy=0"
         ),
-        "generated preprocess: reuse_events=5000",
+        (
+            "cold work: host_allocations=5 command_buffer_allocations=1 "
+            "command_buffer_frees=0 command_buffer_resets=3 "
+            "image_view_creations=0 vma_allocations=64 "
+            "generated_scratch_misses=0"
+        ),
+        (
+            "warm work: host_allocations=0 command_buffer_allocations=0 "
+            "command_buffer_frees=0 command_buffer_resets=20 "
+            "image_view_creations=0 vma_allocations=0 "
+            "generated_scratch_misses=0"
+        ),
+        "generated preprocess: reuse_events=320",
     )
 )
 
@@ -84,7 +96,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         self.assertIn("repetitions=5", runner.BENCHMARK_METHODS["command_record_bench"][0])
         self.assertIn(
-            "generated=1000 prewarm+1000/repetition",
+            "generated=64 prewarm+64/repetition",
             runner.BENCHMARK_METHODS["command_record_bench"][0],
         )
         self.assertEqual(
@@ -218,6 +230,28 @@ class BenchmarkRunnerTests(unittest.TestCase):
             with self.subTest(field=field):
                 output = COMMAND_OUTPUT.replace(f"{field}=0", f"{field}=1")
                 with self.assertRaisesRegex(ValueError, "resolution evidence"):
+                    runner.require_measurement(output, "command_record_bench")
+
+    def test_command_measurement_requires_zero_warm_work(self):
+        runner = load_runner()
+        for field in (
+            "host_allocations",
+            "command_buffer_allocations",
+            "command_buffer_frees",
+            "image_view_creations",
+            "vma_allocations",
+            "generated_scratch_misses",
+        ):
+            with self.subTest(field=field):
+                warm_line = next(
+                    line for line in COMMAND_OUTPUT.splitlines()
+                    if line.startswith("warm work:")
+                )
+                output = COMMAND_OUTPUT.replace(
+                    warm_line,
+                    warm_line.replace(f"{field}=0", f"{field}=1"),
+                )
+                with self.assertRaisesRegex(ValueError, "warm recording work"):
                     runner.require_measurement(output, "command_record_bench")
 
     def test_allocation_measurement_rejects_extra_fields(self):

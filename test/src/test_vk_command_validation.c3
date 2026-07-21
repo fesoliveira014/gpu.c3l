@@ -201,24 +201,6 @@ fn void record_val_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle dep
     );
 }
 
-fn uint val_cached_view_count(gpu::Device* device, gpu::TextureHandle texture) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
-    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
-    uint count = 0;
-    foreach (&cached : slot.views) if (cached.used) count++;
-    return count;
-}
-
-fn bool val_has_cached_view(gpu::Device* device, gpu::TextureHandle texture, uint base_mip, uint mip_count) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
-    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
-    foreach (&cached : slot.views) {
-        if (cached.used && cached.base_mip == base_mip && cached.mip_count == mip_count
-            && cached.base_layer == 0 && cached.layer_count == 1) return true;
-    }
-    return false;
-}
-
 // Never actually dispatched, so the shader's ABI content is unused.
 struct ValComputeCtx {
     gpu::PipelineHandle pipeline;
@@ -549,7 +531,7 @@ fn void allocation_span_outside_recording_access_rejects_copy_and_fill() @test {
         "fill rejects a span outside the recording queue access domain");
 }
 
-fn void render_pass_access_preflight_precedes_view_creation() @test {
+fn void render_pass_access_preflight_preserves_precreated_views() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
 
@@ -564,33 +546,45 @@ fn void render_pass_access_preflight_precedes_view_creation() @test {
     };
     gpu::TextureHandle admitted = gpu::create_texture(&device, &admitted_desc)!!;
     defer gpu::destroy_texture(&device, admitted)!!;
+    gpu::AttachmentViewHandle admitted_view = create_test_attachment_view(
+        &device,
+        admitted,
+        1,
+    )!!;
+    defer destroy_test_attachment_view(&device, &admitted_view)!!;
 
     gpu::TextureDesc rejected_desc = admitted_desc;
     rejected_desc.access = { .compute };
     gpu::TextureHandle rejected = gpu::create_texture(&device, &rejected_desc)!!;
     defer gpu::destroy_texture(&device, rejected)!!;
+    gpu::AttachmentViewHandle rejected_view = create_test_attachment_view(
+        &device,
+        rejected,
+        1,
+    )!!;
+    defer destroy_test_attachment_view(&device, &rejected_view)!!;
     gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, admitted);
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics };
+    uint references_before = record.reference_count;
 
     gpu::ColorTargetDesc[2] colors = {
-        { .texture = admitted, .mip_level = 1 },
-        { .texture = rejected, .mip_level = 1 },
+        { .view = admitted_view },
+        { .view = rejected_view },
     };
     gpu::RenderPassDesc pass = {
         .colors = colors[..],
         .width  = 2,
         .height = 2,
     };
-    uint cached_before = val_cached_view_count(&device, admitted);
     assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
         == gpu::INVALID_ARGUMENT,
         "a later attachment outside the recording role rejects the whole pass");
-    assert(val_cached_view_count(&device, admitted) == cached_before,
-        "attachment access preflight precedes view-cache mutation");
+    assert(record.reference_count == references_before,
+        "attachment access failure rolls back precreated-view references");
     assert(record.state == vk::CommandState.RECORDING,
         "attachment access rejection leaves command state reusable");
 
@@ -677,6 +671,11 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
     OwnedSpan verts_owned = allocate_owned_span(
         device:       &device,
         size:         3 * 16,
@@ -713,7 +712,7 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
 
@@ -765,6 +764,11 @@ fn void draw_with_compute_pipeline_faults() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = VAL_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode comp_shader = gpu::prepare_shader_code(&comp_sd)!!;
@@ -774,7 +778,7 @@ fn void draw_with_compute_pipeline_faults() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
 
@@ -802,6 +806,11 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     defer destroy_val_draw_ctx(&device, &draw);
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
     OwnedSpan root_owned = allocate_owned_span(
         device:       &device,
         size:         16,
@@ -866,7 +875,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
 
     record_val_target_to_attach(&commands, target);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture  = target,
+        .view     = target_view,
         .load_op  = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
     }};
@@ -1020,6 +1029,11 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     OwnedSpan upload = allocate_owned_span(
         device:       &device,
@@ -1082,7 +1096,7 @@ fn void valid_copy_fill_and_draw_succeed() @test {
 
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
@@ -1176,6 +1190,11 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     OwnedSpan args_buffer = allocate_owned_span(
         device:       &device,
@@ -1200,7 +1219,7 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
 
@@ -1231,6 +1250,11 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     OwnedSpan args_buffer = allocate_owned_span(
         device:       &device,
@@ -1265,7 +1289,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture  = target,
+        .view     = target_view,
         .load_op  = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
     }};
@@ -1341,6 +1365,11 @@ fn void generated_work_commands_require_capability() @test {
     defer destroy_val_draw_ctx(&device, &draw);
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     OwnedSpan records = allocate_owned_span(
         device:       &device,
@@ -1388,7 +1417,7 @@ fn void generated_work_commands_require_capability() @test {
 
     record_val_target_to_attach(&commands, target);
     gpu::ColorTargetDesc[1] colors = {{
-        .texture  = target,
+        .view     = target_view,
         .load_op  = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
     }};
@@ -1562,6 +1591,11 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     OwnedSpan index_buffer = allocate_owned_span(
         device:       &device,
@@ -1576,7 +1610,7 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
 
@@ -1603,6 +1637,11 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     OwnedSpan index_buffer = allocate_owned_span(
         device:       &device,
@@ -1617,7 +1656,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{ .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
 
@@ -2015,6 +2054,50 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         mip_levels: 4,
     );
     defer gpu::destroy_texture(&device, mip_depth)!!;
+    gpu::AttachmentViewHandle large_view = create_test_attachment_view(
+        &device,
+        large,
+    )!!;
+    defer destroy_test_attachment_view(&device, &large_view)!!;
+    gpu::AttachmentViewHandle small_view = create_test_attachment_view(
+        &device,
+        small,
+    )!!;
+    defer destroy_test_attachment_view(&device, &small_view)!!;
+    gpu::AttachmentViewHandle large_mip_two = create_test_attachment_view(
+        &device,
+        large,
+        2,
+    )!!;
+    defer destroy_test_attachment_view(&device, &large_mip_two)!!;
+    gpu::AttachmentViewHandle large_mip_one = create_test_attachment_view(
+        &device,
+        large,
+        1,
+    )!!;
+    defer destroy_test_attachment_view(&device, &large_mip_one)!!;
+    gpu::AttachmentViewHandle stale_view = create_test_attachment_view(
+        &device,
+        invalid_range,
+    )!!;
+    gpu::destroy_attachment_view(&device, stale_view)!!;
+    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(
+        &device,
+        depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
+    gpu::AttachmentViewHandle mip_depth_view = create_test_attachment_view(
+        &device,
+        mip_depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &mip_depth_view)!!;
+    gpu::AttachmentViewDesc invalid_mip = {
+        .texture   = invalid_range,
+        .mip_level = 99,
+    };
+    assert(@catch(gpu::create_attachment_view(&device, &invalid_mip))
+        == gpu::INVALID_ARGUMENT,
+        "attachment creation rejects an out-of-range mip");
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, large);
@@ -2022,34 +2105,35 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     record_val_depth_to_attach(&cmd, depth);
     record_val_depth_to_attach(&cmd, mip_depth);
 
-    gpu::ColorTargetDesc[1] large_color = { { .texture = large } };
+    gpu::ColorTargetDesc[1] large_color = { { .view = large_view } };
     gpu::RenderPassDesc oversized = { .colors = large_color[..], .width = 17, .height = 16 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &oversized)) == gpu::INVALID_ARGUMENT,
         "render area wider than mip zero faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "oversized color target records no pass");
 
     gpu::ColorTargetDesc[2] mixed_colors = {
-        { .texture = large },
-        { .texture = small },
+        { .view = large_view },
+        { .view = small_view },
     };
     gpu::RenderPassDesc mixed = { .colors = mixed_colors[..], .width = 16, .height = 16 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &mixed)) == gpu::INVALID_ARGUMENT,
         "one mixed-size attachment that cannot cover the pass faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "mixed-size rejection records no pass");
 
-    uint cached_before = val_cached_view_count(&device, large);
+    vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
+    uint references_before = record.reference_count;
     gpu::ColorTargetDesc[2] invalid_later = {
-        { .texture = large, .mip_level = 2 },
-        { .texture = invalid_range, .mip_level = 99 },
+        { .view = large_mip_two },
+        { .view = stale_view },
     };
     gpu::RenderPassDesc invalid_later_pass = { .colors = invalid_later[..], .width = 4, .height = 4 };
-    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &invalid_later_pass)) == gpu::INVALID_ARGUMENT,
-        "invalid later mip range faults before recording");
-    assert(val_cached_view_count(&device, large) == cached_before,
-        "later validation failure creates no cached view for an earlier target");
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &invalid_later_pass)) == gpu::INVALID_HANDLE,
+        "a stale later attachment faults INVALID_HANDLE before recording");
+    assert(record.reference_count == references_before,
+        "later attachment lookup failure rolls back the earlier reference");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "later attachment rejection records no pass");
 
-    gpu::ColorTargetDesc[1] mip_color = { { .texture = large, .mip_level = 1 } };
+    gpu::ColorTargetDesc[1] mip_color = { { .view = large_mip_one } };
     gpu::RenderPassDesc mip_oversized = { .colors = mip_color[..], .width = 9, .height = 8 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &mip_oversized)) == gpu::INVALID_ARGUMENT,
         "render area wider than nonzero mip faults INVALID_ARGUMENT");
@@ -2058,25 +2142,16 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::cmd_begin_render_pass(&cmd, &mip_exact)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
-    gpu::DepthTargetDesc depth_target = { .texture = depth };
+    gpu::DepthTargetDesc depth_target = { .view = depth_view };
     gpu::RenderPassDesc depth_oversized = { .depth = &depth_target, .width = 9, .height = 8 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &depth_oversized)) == gpu::INVALID_ARGUMENT,
         "render area wider than depth mip zero faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "oversized depth target records no pass");
 
-    gpu::DepthTargetDesc mip_depth_target = { .texture = mip_depth };
-    uint mip_depth_cached_before = val_cached_view_count(&device, mip_depth);
+    gpu::DepthTargetDesc mip_depth_target = { .view = mip_depth_view };
     gpu::RenderPassDesc mip_depth_pass = { .depth = &mip_depth_target, .width = 8, .height = 8 };
     gpu::cmd_begin_render_pass(&cmd, &mip_depth_pass)!!;
-    assert(val_cached_view_count(&device, mip_depth) == mip_depth_cached_before + 1,
-        "multi-mip depth attachment resolves a single-mip cached view");
     gpu::cmd_end_render_pass(&cmd)!!;
-    assert(val_has_cached_view(
-        device:    &device,
-        texture:   mip_depth,
-        base_mip:  0,
-        mip_count: 1,
-    ), "multi-mip depth attachment view selects exactly mip zero and layer zero");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -2168,9 +2243,10 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
     defer discard_test_executable(&cmd_executable)!!;
 }
 
-fn void render_pass_view_cache_grows_past_initial_capacity() @test {
+fn void warm_render_pass_reuses_many_precreated_views() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
+    const uint VIEW_COUNT = vk::INITIAL_CACHED_VIEW_CAPACITY + 1;
     gpu::TextureHandle texture = make_val_color_target(
         device:     &device,
         width:      512,
@@ -2178,35 +2254,51 @@ fn void render_pass_view_cache_grows_past_initial_capacity() @test {
         mip_levels: 10,
     );
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::CommandList cmd = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::AttachmentViewHandle[VIEW_COUNT] views;
+    for (uint mip = 0; mip < VIEW_COUNT; mip++) {
+        views[mip] = create_test_attachment_view(
+            &device,
+            texture,
+            mip,
+        )!!;
+    }
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
     )!!;
-    defer discard_test_commands(&cmd)!!;
-    record_val_target_to_attach(&cmd, texture);
 
-    for (uint mip = 0; mip <= vk::INITIAL_CACHED_VIEW_CAPACITY; mip++) {
-        gpu::ColorTargetDesc[1] colors = {
-            { .texture = texture, .mip_level = mip },
-        };
-        gpu::RenderPassDesc pass = {
-            .colors = colors[..],
-            .width  = 1,
-            .height = 1,
-        };
-        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-        gpu::cmd_end_render_pass(&cmd)!!;
+    for (uint iteration = 0; iteration < 2; iteration++) {
+        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        if (iteration == 0) record_val_target_to_attach(&commands, texture);
+        vk::VkDeviceState* state =
+            (vk::VkDeviceState*)gpu::device_backend_state(device);
+        gpu::RecordingWorkCounters before =
+            vk::command_recording_work_counters(state);
+        foreach (view : views) {
+            gpu::ColorTargetDesc[1] colors = { { .view = view } };
+            gpu::RenderPassDesc pass = {
+                .colors = colors[..],
+                .width  = 1,
+                .height = 1,
+            };
+            gpu::cmd_begin_render_pass(&commands, &pass)!!;
+            gpu::cmd_end_render_pass(&commands)!!;
+        }
+        gpu::RecordingWorkCounters after =
+            vk::command_recording_work_counters(state);
+        if (iteration == 1) {
+            assert(after.host_allocations == before.host_allocations,
+                "warm recording reuses reference bookkeeping");
+            assert(after.image_view_creations == before.image_view_creations,
+                "recording many passes never creates attachment views");
+        }
+        gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+        gpu::discard_executable_commands(&executable)!!;
     }
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(val_cached_view_count(&device, texture)
-        == vk::INITIAL_CACHED_VIEW_CAPACITY + 1,
-        "render-pass subresource views grow past the initial cache capacity");
-    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
-    assert(slot.views.len > vk::INITIAL_CACHED_VIEW_CAPACITY,
-        "render-pass cache storage grows with distinct live native views");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
+    foreach (&view : views) {
+        destroy_test_attachment_view(&device, view)!!;
+    }
 }
 
 fn void barrier_mask_diagnostic_identifies_semantic_field() @test {
@@ -2521,10 +2613,15 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width = 8, .height = 8, .format = gpu::Format.RGBA8_UNORM,
-        .usage = { .sampled }, .debug_name = "usage_target",
+        .usage = { .sampled, .color_attach }, .debug_name = "usage_target",
     };
     gpu::TextureHandle usage_target = gpu::create_texture(&device, &usage_desc)!!;
     defer gpu::destroy_texture(&device, usage_target)!!;
+    gpu::AttachmentViewHandle usage_view = create_test_attachment_view(
+        &device,
+        usage_target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &usage_view)!!;
     gpu::TextureDesc color_desc = {
         .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
@@ -2533,6 +2630,11 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     };
     gpu::TextureHandle color_target = gpu::create_texture(&device, &color_desc)!!;
     defer gpu::destroy_texture(&device, color_target)!!;
+    gpu::AttachmentViewHandle color_view = create_test_attachment_view(
+        &device,
+        color_target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &color_view)!!;
     OwnedSpan root_owned = allocate_owned_span(
         device:       &device,
         size:         16,
@@ -2611,7 +2713,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         generation:          draw.graphics.generation,
     );
 
-    gpu::ColorTargetDesc[1] usage_colors = {{ .texture = usage_target }};
+    gpu::ColorTargetDesc[1] usage_colors = {{ .view = usage_view }};
     gpu::RenderPassDesc usage_pass = { .colors = usage_colors[..], .width = 8, .height = 8 };
     reset_sync_diagnostic(
         capture:        &capture,
@@ -2645,6 +2747,8 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     assert(span_without_callback == span_fault,
         "shared span fault is callback-independent");
     state.debug_callback = &capture_sync_diagnostic;
+    vk::TextureSlot* usage_slot = state.textures.get(usage_target)!!;
+    usage_slot.usage.color_attach = false;
     reset_sync_diagnostic(
         capture:        &capture,
         operation:      "cmd_begin_render_pass",
@@ -2663,7 +2767,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         generation:          usage_target.generation,
     );
 
-    gpu::ColorTargetDesc[1] colors = {{ .texture = color_target }};
+    gpu::ColorTargetDesc[1] colors = {{ .view = color_view }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = 8, .height = 8 };
 
     record_val_target_to_attach(&commands, color_target);

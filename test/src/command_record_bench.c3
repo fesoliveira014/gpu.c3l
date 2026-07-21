@@ -7,9 +7,30 @@ import std::time;
 
 const char[*] COMMAND_BENCH_SHADER_SPIRV = $embed("shaders/root_pointer.comp.spv");
 const uint COMMAND_RECORD_ITERATIONS = 20_000;
-const uint GENERATED_RECORD_ITERATIONS = 1_000;
+const uint GENERATED_RECORD_ITERATIONS = 64;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 const uint MEASURED_COMMAND_PATH_COUNT = 3;
+const usz GENERATED_PREPROCESS_BYTES = 256 * 1024;
+
+fn gpu::RecordingWorkCounters recording_work_delta(
+    gpu::RecordingWorkCounters after,
+    gpu::RecordingWorkCounters before,
+) {
+    return {
+        .host_allocations = after.host_allocations - before.host_allocations,
+        .command_buffer_allocations = after.command_buffer_allocations
+            - before.command_buffer_allocations,
+        .command_buffer_frees = after.command_buffer_frees
+            - before.command_buffer_frees,
+        .command_buffer_resets = after.command_buffer_resets
+            - before.command_buffer_resets,
+        .image_view_creations = after.image_view_creations
+            - before.image_view_creations,
+        .vma_allocations = after.vma_allocations - before.vma_allocations,
+        .generated_scratch_misses = after.generated_scratch_misses
+            - before.generated_scratch_misses,
+    };
+}
 
 fn void accumulate_resolution_stats(
     gpu::CommandResolutionStats* total,
@@ -216,6 +237,21 @@ fn int main() {
         generated_count_allocation,
     )!!;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::Queue graphics_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::RecordingWorkCounters cold_before =
+        vk::command_recording_work_counters(state);
+    if (caps.generated_work) {
+        gpu::reserve_generated_scratch(graphics_queue, {
+            .max_commands_per_list   = GENERATED_RECORD_ITERATIONS,
+            .max_preprocess_bytes    = GENERATED_PREPROCESS_BYTES,
+            .preprocess_buffer_count = GENERATED_RECORD_ITERATIONS,
+        })!!;
+    }
 
     gpu::CommandResolutionStats warmup_resolution;
     (void)record_barriers(&device, &warmup_resolution);
@@ -237,8 +273,12 @@ fn int main() {
         );
     }
 
-    vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::RecordingWorkCounters warm_before =
+        vk::command_recording_work_counters(state);
+    gpu::RecordingWorkCounters cold_work = recording_work_delta(
+        warm_before,
+        cold_before,
+    );
     ulong registry_locks_before = gpu::device_registry_lock_count();
     vk::CommandRecordingStats recording_before =
         vk::command_recording_stats(state);
@@ -279,6 +319,10 @@ fn int main() {
         gpu::device_registry_lock_count() - registry_locks_before;
     vk::CommandRecordingStats recording_after =
         vk::command_recording_stats(state);
+    gpu::RecordingWorkCounters warm_work = recording_work_delta(
+        vk::command_recording_work_counters(state),
+        warm_before,
+    );
     ulong recording_allocations = recording_after.recording_allocations
         - recording_before.recording_allocations;
     ulong preprocess_allocations = recording_after.preprocess_allocations
@@ -292,9 +336,21 @@ fn int main() {
     assert(recording_allocations == 0,
         "warmed recording performs no backend allocation");
     assert(preprocess_allocations == 0,
-        "generated recording uses distinct pooled preprocess storage");
+        "generated recording uses distinct reserved preprocess storage");
     assert(draw_compilations == 0,
         "recording does not compile pipelines");
+    assert(warm_work.host_allocations == 0,
+        "warmed recording performs no host allocation");
+    assert(warm_work.command_buffer_allocations == 0,
+        "warmed recording performs no command-buffer allocation");
+    assert(warm_work.command_buffer_frees == 0,
+        "warmed recording performs no command-buffer free");
+    assert(warm_work.image_view_creations == 0,
+        "warmed recording performs no image-view creation");
+    assert(warm_work.vma_allocations == 0,
+        "warmed recording performs no VMA allocation");
+    assert(warm_work.generated_scratch_misses == 0,
+        "sufficient generated reservation has no scratch miss");
     assert(resolution.device_registry_resolutions == 0,
         "warm recording does not resolve the device registry");
     assert(resolution.retained_pin_operations == 0,
@@ -316,7 +372,7 @@ fn int main() {
     if (caps.generated_work) {
         assert(preprocess_reuses
             >= GENERATED_RECORD_ITERATIONS * COMMAND_RECORD_REPETITIONS,
-            "each measured execute uses distinct pooled preprocess storage");
+            "each measured execute uses distinct reserved preprocess storage");
     }
 
     io::printfn(
@@ -359,6 +415,26 @@ fn int main() {
         resolution.pipeline_table_lookups,
         resolution.pipeline_cache_lookups,
         resolution.command_policy_selections,
+    );
+    io::printfn(
+        "cold work: host_allocations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",
+        cold_work.host_allocations,
+        cold_work.command_buffer_allocations,
+        cold_work.command_buffer_frees,
+        cold_work.command_buffer_resets,
+        cold_work.image_view_creations,
+        cold_work.vma_allocations,
+        cold_work.generated_scratch_misses,
+    );
+    io::printfn(
+        "warm work: host_allocations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",
+        warm_work.host_allocations,
+        warm_work.command_buffer_allocations,
+        warm_work.command_buffer_frees,
+        warm_work.command_buffer_resets,
+        warm_work.image_view_creations,
+        warm_work.vma_allocations,
+        warm_work.generated_scratch_misses,
     );
     io::printfn("generated preprocess: reuse_events=%d", preprocess_reuses);
     return 0;

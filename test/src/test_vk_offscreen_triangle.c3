@@ -1,6 +1,8 @@
 module gpu_test;
 
-import gpu;
+import gpu @public;
+import gpu::vk;
+import vk;
 
 // Headless (lavapipe): offscreen graphics. Clear, textured triangle through
 // both root pointers + the heap from the fragment stage, render-to-mip, and
@@ -46,6 +48,11 @@ fn void offscreen_clear_works() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     OwnedSpan readback = allocate_owned_span(
         device:       &device,
@@ -66,7 +73,7 @@ fn void offscreen_clear_works() @test {
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target,
+        .view = target_view,
         .load_op = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 64.0f / 255.0f, 128.0f / 255.0f, 192.0f / 255.0f, 1.0f } },
@@ -114,11 +121,68 @@ fn void offscreen_clear_works() @test {
     }
 }
 
+fn void warm_render_pass_uses_precreated_attachment_without_allocation() @test {
+    gpu::Device device = make_offscreen_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle target = make_render_target(&device);
+    defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::TextureBarrier to_attach = {
+        .texture = target,
+        .before  = gpu::TextureUse.UNDEFINED,
+        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+    };
+    gpu::cmd_texture_barrier(&commands, &to_attach)!!;
+    gpu::ColorTargetDesc[1] colors = {{
+        .view     = target_view,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = RT_SIZE,
+        .height = RT_SIZE,
+    };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    gpu::RecordingWorkCounters before =
+        vk::command_recording_work_counters(state);
+
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+    gpu::RecordingWorkCounters after =
+        vk::command_recording_work_counters(state);
+    assert(after.host_allocations == before.host_allocations,
+        "warm render-pass recording performs no host allocation");
+    assert(after.image_view_creations == before.image_view_creations,
+        "render-pass recording never creates an image view");
+    assert(@catch(gpu::destroy_attachment_view(&device, target_view))
+        == gpu::RESOURCE_IN_USE,
+        "a recorded attachment cannot be destroyed before command retirement");
+}
+
 fn void offscreen_textured_triangle() @test {
     gpu::Device device = make_offscreen_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     // Flat-color pattern texture, uploaded through the staging path.
     gpu::TextureDesc tex_desc = {
@@ -244,7 +308,7 @@ fn void offscreen_textured_triangle() @test {
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target,
+        .view = target_view,
         .load_op = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
@@ -328,6 +392,16 @@ fn void dynamic_viewport_scissor_pixels() @test {
     gpu::TextureHandle[3] targets;
     for (uint i = 0; i < targets.len; i++) targets[i] = make_render_target(&device);
     defer for (uint i = 0; i < targets.len; i++) gpu::destroy_texture(&device, targets[i])!!;
+    gpu::AttachmentViewHandle[3] target_views;
+    for (uint i = 0; i < target_views.len; i++) {
+        target_views[i] = create_test_attachment_view(
+            &device,
+            targets[i],
+        )!!;
+    }
+    defer for (uint i = 0; i < target_views.len; i++) {
+        destroy_test_attachment_view(&device, &target_views[i])!!;
+    }
 
     OwnedSpan readback = allocate_owned_span(
         device:       &device,
@@ -379,7 +453,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
         gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
         gpu::ColorTargetDesc[1] colors = {{
-            .texture = targets[i],
+            .view = target_views[i],
             .load_op = gpu::LoadOp.CLEAR,
             .store_op = gpu::StoreOp.STORE,
             .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
@@ -462,6 +536,12 @@ fn void offscreen_render_to_mip() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device, mips: 2);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        device:    &device,
+        texture:   target,
+        mip_level: 1,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     const uint MIP1 = RT_SIZE / 2;
     OwnedSpan readback = allocate_owned_span(
@@ -483,8 +563,7 @@ fn void offscreen_render_to_mip() @test {
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target,
-        .mip_level = 1,
+        .view = target_view,
         .load_op = gpu::LoadOp.CLEAR,
         .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 40.0f / 255.0f, 80.0f / 255.0f, 120.0f / 255.0f, 1.0f } },
@@ -570,6 +649,11 @@ fn void dynamic_viewport_scissor_validation() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
@@ -595,7 +679,7 @@ fn void dynamic_viewport_scissor_validation() @test {
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
@@ -664,6 +748,11 @@ fn void render_pass_state_machine() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
 
     OwnedSpan data = allocate_owned_span(
         device:       &device,
@@ -694,7 +783,7 @@ fn void render_pass_state_machine() @test {
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
     gpu::ColorTargetDesc[1] colors = {{
-        .texture = target, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;

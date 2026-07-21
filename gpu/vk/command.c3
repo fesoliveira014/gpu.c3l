@@ -33,6 +33,10 @@ struct GeneratedPreprocessBuffer {
     vk::DeviceAddress address;
     vk::DeviceSize    size;
     uint              memory_type;
+    RecordingContextHandle reservation_context;
+    uint              reservation_index;
+    bool              reservation_owned;
+    bool              reservation_in_use;
 }
 
 struct CommandRecordingStats {
@@ -42,20 +46,11 @@ struct CommandRecordingStats {
 }
 
 struct RetiredCommandBuffer {
-    vk::CommandPool   pool;
-    vk::CommandBuffer buffer;
+    vk::CommandPool             pool;
+    vk::CommandBuffer           buffer;
+    CommandResourceReference[]  references;
+    GeneratedPreprocessBuffer[] generated_preprocess;
 }
-
-fn bool RecordingContextHandle.is_valid(self) => self.generation != 0;
-fn bool RecordingContextHandle.equals(
-    self,
-    RecordingContextHandle other,
-) @operator(==) {
-    return self.index == other.index && self.generation == other.generation;
-}
-
-tlocal ThreadRecordingContext[MAX_THREAD_DEVICE_CONTEXTS]
-    thread_recording_contexts;
 
 struct ContextPoolOps @private {
     void*                user_data;
@@ -64,14 +59,16 @@ struct ContextPoolOps @private {
 }
 
 struct RecordingContextState {
-    vk::CommandPool[]      graphics_pools;
+    vk::CommandPool[]             graphics_pools;
     // Aliases graphics_pools when the compute queue shares the graphics
     // family; owned storage only when distinct (compute_pools_distinct).
-    vk::CommandPool[]      compute_pools;
-    vk::CommandPool[]      transfer_pools;
-    RetiredCommandBuffer[] retired_commands;
-    uint                   retired_command_count;
-    bool                   compute_pools_distinct;
+    vk::CommandPool[]             compute_pools;
+    vk::CommandPool[]             transfer_pools;
+    RetiredCommandBuffer[]        retired_commands;
+    uint                          retired_command_count;
+    gpu::GeneratedScratchDesc     generated_scratch;
+    GeneratedPreprocessBuffer[] reserved_preprocess;
+    bool                          compute_pools_distinct;
 }
 
 struct RecordingContextCell {
@@ -83,6 +80,17 @@ struct RecordingContextCell {
 struct RecordingContextTable {
     RecordingContextCell[] slots;
     uint                   next_new;
+}
+
+tlocal ThreadRecordingContext[MAX_THREAD_DEVICE_CONTEXTS]
+    thread_recording_contexts;
+
+fn bool RecordingContextHandle.is_valid(self) => self.generation != 0;
+fn bool RecordingContextHandle.equals(
+    self,
+    RecordingContextHandle other,
+) @operator(==) {
+    return self.index == other.index && self.generation == other.generation;
 }
 
 fn RecordingContextHandle? RecordingContextTable.alloc(&self, RecordingContextState value) {
@@ -110,11 +118,66 @@ fn RecordingContextState*? RecordingContextTable.get(
     return &cell.value;
 }
 
+fn void note_recording_host_allocation(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)state.recording_host_allocations.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_buffer_reset(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)state.command_buffer_resets.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_buffer_allocation(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)state.recording_command_buffer_allocations.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_buffer_free(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)state.recording_command_buffer_frees.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_recording_vma_allocation(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)state.recording_vma_allocations.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_generated_scratch_miss(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)state.generated_scratch_misses.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn vk::CommandPoolCreateFlags context_pool_create_flags() {
+    return (vk::CommandPoolCreateFlags)(
+        (uint)vk::CommandPoolCreateFlagBits.TRANSIENT_BIT
+        | (uint)vk::CommandPoolCreateFlagBits.RESET_COMMAND_BUFFER_BIT
+    );
+}
+
 fn vk::CommandPool? create_context_pool_real(void* user_data, vk::Device device, uint family) @private {
     VkDeviceState* state = (VkDeviceState*)user_data;
     vk::CommandPoolCreateInfo info = vk::command_pool_create_info()
         .set_queue_family_index(family)
-        .set_flags(vk::CommandPoolCreateFlagBits.TRANSIENT_BIT);
+        .set_flags(context_pool_create_flags());
     vk::CommandPool pool;
     check_device_result(state, vk::create_command_pool(
         device:        device,
@@ -143,10 +206,25 @@ fn void destroy_context_pools_with_ops(
     ContextPoolOps* ops
 ) @private {
     if (context.retired_commands.ptr != null) {
+        foreach (&unit : context.retired_commands[:context.retired_command_count]) {
+            if (unit.references.ptr != null) {
+                alloc::free(state.host_allocator, unit.references.ptr);
+            }
+            free_generated_preprocess_buffers(
+                state,
+                unit.generated_preprocess,
+            );
+        }
         alloc::free(state.host_allocator, context.retired_commands.ptr);
         context.retired_commands = {};
     }
     context.retired_command_count = 0;
+    free_reserved_generated_preprocess_buffers(
+        state,
+        context.reserved_preprocess,
+    );
+    context.reserved_preprocess = {};
+    context.generated_scratch = {};
     if (context.graphics_pools.ptr != null) {
         foreach (pool : context.graphics_pools) {
             if (pool != null) ops.destroy(ops.user_data, state.device, pool);
@@ -186,6 +264,7 @@ fn void? create_context_pools_with_ops(
             vk::CommandPool,
             1,
         );
+        note_recording_host_allocation(state);
     }
     context.compute_pools_distinct = state.selected_queue_roles.compute
         && (!state.selected_queue_roles.graphics
@@ -198,6 +277,9 @@ fn void? create_context_pools_with_ops(
                 1,
             )
             : context.graphics_pools;
+        if (context.compute_pools_distinct) {
+            note_recording_host_allocation(state);
+        }
     }
     if (state.selected_queue_roles.transfer) {
         context.transfer_pools = alloc::new_array(
@@ -205,6 +287,7 @@ fn void? create_context_pools_with_ops(
             vk::CommandPool,
             1,
         );
+        note_recording_host_allocation(state);
     }
     if (state.selected_queue_roles.graphics) {
         context.graphics_pools[0] = ops.create(ops.user_data, state.device, state.graphics_family)!;
@@ -267,11 +350,129 @@ fn vk::CommandPool pool_for(
     return context.transfer_pools[0];
 }
 
+fn bool recording_context_quiescent_locked(
+    VkDeviceState* state,
+    RecordingContextHandle context,
+) {
+    foreach (&cell : state.commands.slots[:state.commands.next_new]) {
+        if (cell.used && cell.value.context == context) return false;
+    }
+    foreach (&batch : state.submitted_commands[:state.submitted_command_count]) {
+        if (batch.context == context) return false;
+    }
+    return true;
+}
+
+fn uint preferred_generated_preprocess_memory_type_bits(
+    VkDeviceState* state,
+) {
+    vk::PhysicalDeviceMemoryProperties properties;
+    vk::get_physical_device_memory_properties(
+        state.physical_device,
+        &properties,
+    );
+    for (uint i = 0; i < properties.memory_type_count; i++) {
+        if (((uint)properties.memory_types[i].property_flags
+            & (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT) != 0) {
+            return 1 << i;
+        }
+    }
+    return uint::max;
+}
+
+fn void? vk_reserve_generated_scratch(
+    gpu::Queue queue,
+    gpu::GeneratedScratchDesc desc,
+) @private {
+    gpu::Device device = queue.device;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(
+        &device,
+    );
+    if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
+    RecordingContextHandle context_handle = thread_recording_context(
+        state,
+        device,
+    )!;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        if (!recording_context_quiescent_locked(state, context_handle)) {
+            return gpu::RESOURCE_IN_USE~;
+        }
+    }
+
+    GeneratedPreprocessBuffer[] reserved;
+    if (desc.preprocess_buffer_count > 0) {
+        reserved = alloc::new_array(
+            state.host_allocator,
+            GeneratedPreprocessBuffer,
+            desc.preprocess_buffer_count,
+        );
+        note_recording_host_allocation(state);
+    }
+    defer catch free_reserved_generated_preprocess_buffers(state, reserved);
+    for (uint i = 0; i < desc.preprocess_buffer_count; i++) {
+        reserved[i] = allocate_generated_preprocess_buffer(
+            state:            state,
+            size:             (vk::DeviceSize)desc.max_preprocess_bytes,
+            alignment:        256,
+            memory_type_bits: preferred_generated_preprocess_memory_type_bits(
+                state,
+            ),
+        )!;
+        reserved[i].reservation_context = context_handle;
+        reserved[i].reservation_index = i;
+        reserved[i].reservation_owned = true;
+    }
+
+    GeneratedPreprocessBuffer[] previous;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        if (!recording_context_quiescent_locked(state, context_handle)) {
+            return gpu::RESOURCE_IN_USE~;
+        }
+        RecordingContextState* context = state.recording_contexts.get(
+            context_handle,
+        )!;
+        foreach (&unit : context.retired_commands[
+            :context.retired_command_count
+        ]) {
+            if (unit.generated_preprocess.len
+                >= desc.preprocess_buffer_count) continue;
+            GeneratedPreprocessBuffer[] grown = alloc::new_array(
+                state.host_allocator,
+                GeneratedPreprocessBuffer,
+                desc.preprocess_buffer_count,
+            );
+            note_recording_host_allocation(state);
+            if (unit.generated_preprocess.ptr != null) {
+                alloc::free(
+                    state.host_allocator,
+                    unit.generated_preprocess.ptr,
+                );
+            }
+            unit.generated_preprocess = grown;
+        }
+        previous = context.reserved_preprocess;
+        context.generated_scratch = desc;
+        context.reserved_preprocess = reserved;
+        reserved = {};
+    }
+    free_reserved_generated_preprocess_buffers(state, previous);
+}
+
 fn void enqueue_retired_command_buffer_locked(
     VkDeviceState* state,
     RecordingContextHandle context_handle,
     vk::CommandPool pool,
     vk::CommandBuffer buffer,
+    CommandResourceReference[] references = {},
+    GeneratedPreprocessBuffer[] generated_preprocess = {},
 ) {
     if (buffer == null) return;
     RecordingContextState* context = state.recording_contexts.get(
@@ -286,6 +487,7 @@ fn void enqueue_retired_command_buffer_locked(
             RetiredCommandBuffer,
             (sz)capacity,
         );
+        note_recording_host_allocation(state);
         for (uint i = 0; i < context.retired_command_count; i++) {
             grown[i] = context.retired_commands[i];
         }
@@ -295,36 +497,40 @@ fn void enqueue_retired_command_buffer_locked(
         context.retired_commands = grown;
     }
     context.retired_commands[context.retired_command_count++] = {
-        .pool   = pool,
-        .buffer = buffer,
+        .pool                 = pool,
+        .buffer               = buffer,
+        .references           = references,
+        .generated_preprocess = generated_preprocess,
     };
 }
 
-fn void drain_retired_command_buffers(
+fn bool take_available_command_buffer(
     VkDeviceState* state,
     RecordingContextHandle context_handle,
+    vk::CommandPool pool,
+    vk::CommandBuffer* out_buffer,
+    CommandResourceReference[]* out_references,
+    GeneratedPreprocessBuffer[]* out_generated_preprocess,
 ) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     RecordingContextState* context = state.recording_contexts.get(
         context_handle,
     )!!;
-    if (context.retired_command_count == 0) return;
-
-    state.command_mutex.lock()!!;
-    defer state.command_mutex.unlock();
     for (uint i = 0; i < context.retired_command_count; i++) {
-        RetiredCommandBuffer* retired = &context.retired_commands[i];
-        vk::free_command_buffers(
-            device:               state.device,
-            command_pool:         retired.pool,
-            command_buffer_count: 1,
-            p_command_buffers:    &retired.buffer,
-        );
-        state.command_buffers_freed++;
-        *retired = {};
+        RetiredCommandBuffer* available = &context.retired_commands[i];
+        if (available.pool != pool) continue;
+        *out_buffer = available.buffer;
+        *out_references = available.references;
+        *out_generated_preprocess = available.generated_preprocess;
+        context.retired_command_count--;
+        *available = context.retired_commands[
+            context.retired_command_count
+        ];
+        context.retired_commands[context.retired_command_count] = {};
+        return true;
     }
-    context.retired_command_count = 0;
+    return false;
 }
 
 fn void? vk_begin_commands_with_context(
@@ -335,43 +541,82 @@ fn void? vk_begin_commands_with_context(
     gpu::CommandBackendContext* out_backend,
 ) @private {
     gpu::Device device = queue.device;
-    drain_retired_command_buffers(state, context_handle);
     RecordingContextState* context = state.recording_contexts.get(context_handle)!;
     vk::CommandPool pool = pool_for(context, queue);
-    vk::CommandBufferAllocateInfo alloc = vk::command_buffer_allocate_info()
-        .set_command_pool(pool)
-        .set_level(vk::CommandBufferLevel.PRIMARY)
-        .set_command_buffer_count(1);
     vk::CommandBuffer cmd;
-    {
+    CommandResourceReference[] references;
+    GeneratedPreprocessBuffer[] generated_preprocess;
+    bool newly_allocated;
+    if (take_available_command_buffer(
+        state,
+        context_handle,
+        pool,
+        &cmd,
+        &references,
+        &generated_preprocess,
+    )) {
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
-        check_device_result(state, vk::allocate_command_buffers(state.device, &alloc, &cmd))!;
+        check_device_result(state, vk::reset_command_buffer(cmd, {}))!;
+        note_command_buffer_reset(state);
+    } else {
+        vk::CommandBufferAllocateInfo alloc = vk::command_buffer_allocate_info()
+            .set_command_pool(pool)
+            .set_level(vk::CommandBufferLevel.PRIMARY)
+            .set_command_buffer_count(1);
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        check_device_result(
+            state,
+            vk::allocate_command_buffers(state.device, &alloc, &cmd),
+        )!;
         state.command_buffers_allocated++;
+        note_command_buffer_allocation(state);
+        newly_allocated = true;
     }
     defer catch {
-        state.command_mutex.lock()!!;
-        defer state.command_mutex.unlock();
-        vk::free_command_buffers(state.device, pool, 1, &cmd);
-        state.command_buffers_freed++;
+        if (newly_allocated) {
+            state.command_mutex.lock()!!;
+            defer state.command_mutex.unlock();
+            vk::free_command_buffers(state.device, pool, 1, &cmd);
+            state.command_buffers_freed++;
+            note_command_buffer_free(state);
+            if (references.ptr != null) {
+                alloc::free(state.host_allocator, references.ptr);
+            }
+            free_generated_preprocess_buffers(
+                state,
+                generated_preprocess,
+            );
+        } else {
+            state.resource_mutex.lock()!!;
+            defer state.resource_mutex.unlock();
+            enqueue_retired_command_buffer_locked(
+                state:          state,
+                context_handle: context_handle,
+                pool:           pool,
+                buffer:         cmd,
+                references:     references,
+                generated_preprocess: generated_preprocess,
+            );
+        }
     }
 
     vk::CommandBufferBeginInfo begin = vk::command_buffer_begin_info()
         .set_flags(vk::CommandBufferUsageFlagBits.ONE_TIME_SUBMIT_BIT);
     check_device_result(state, vk::begin_command_buffer(cmd, &begin))!;
 
-    GeneratedPreprocessBuffer[] generated_preprocess;
-    if (state.generated_work.enabled) {
+    if (state.generated_work.enabled && generated_preprocess.ptr == null) {
         usz capacity = GENERATED_PREPROCESS_INITIAL_CAPACITY;
-        state.resource_mutex.lock()!!;
-        usz pooled = (usz)state.generated_preprocess_pool_count;
-        state.resource_mutex.unlock();
-        if (pooled > capacity) capacity = pooled;
+        usz reserved_capacity = (usz)context.generated_scratch
+            .preprocess_buffer_count;
+        if (reserved_capacity > capacity) capacity = reserved_capacity;
         generated_preprocess = alloc::new_array(
             state.host_allocator,
             GeneratedPreprocessBuffer,
             (sz)capacity,
         );
+        note_recording_host_allocation(state);
     }
 
     CommandRecord record = {
@@ -380,6 +625,7 @@ fn void? vk_begin_commands_with_context(
         .context              = context_handle,
         .queue                = queue,
         .state                = CommandState.RECORDING,
+        .references           = references,
         .generated_preprocess = generated_preprocess,
     };
     {
@@ -396,9 +642,6 @@ fn void? vk_begin_commands_with_context(
             };
             return;
         }
-    }
-    if (generated_preprocess.ptr != null) {
-        alloc::free(state.host_allocator, generated_preprocess.ptr);
     }
     return gpu::SLOT_TABLE_FULL~;
 }
@@ -449,12 +692,31 @@ fn void? vk_discard_commands(
     vk::CommandBuffer command_buffer = record.command_buffer;
     vk::CommandPool command_pool = record.command_pool;
     if (encoder != null) gpu::invalidate_command_encoder(encoder);
-    release_command(state, handle);
+    release_validation_references(
+        state,
+        record.references,
+        record.reference_count,
+    );
+    recycle_generated_preprocess_buffers_locked(
+        state,
+        record.generated_preprocess,
+        record.generated_preprocess_count,
+    );
+    CommandResourceReference[] references = record.references;
+    GeneratedPreprocessBuffer[] generated_preprocess =
+        record.generated_preprocess;
+    record.references = {};
+    record.generated_preprocess = {};
+    record.reference_count = 0;
+    record.generated_preprocess_count = 0;
+    (void)state.commands.free(handle);
     enqueue_retired_command_buffer_locked(
         state:          state,
         context_handle: context,
         pool:           command_pool,
         buffer:         command_buffer,
+        references:     references,
+        generated_preprocess: generated_preprocess,
     );
 }
 
@@ -1265,6 +1527,7 @@ fn void? execute_generated_work(
             state,
             record,
             &requirements2.memory_requirements,
+            max_count,
         )!;
     }
     vk::GeneratedCommandsInfoEXT info = vk::generated_commands_info_ext()
@@ -1365,66 +1628,28 @@ fn bool generated_preprocess_compatible(
     return (requirements.memory_type_bits & (1 << buffer.memory_type)) != 0;
 }
 
-fn void ensure_generated_preprocess_pool_capacity_locked(
-    VkDeviceState* state,
-    uint additional,
-) {
-    usz needed = (usz)state.generated_preprocess_pool_count + additional;
-    if (needed <= state.generated_preprocess_pool.len) return;
-    usz capacity = state.generated_preprocess_pool.len == 0
-        ? 4
-        : state.generated_preprocess_pool.len * 2;
-    while (capacity < needed) capacity *= 2;
-    GeneratedPreprocessBuffer[] grown = alloc::new_array(
-        state.host_allocator,
-        GeneratedPreprocessBuffer,
-        (sz)capacity,
-    );
-    for (uint i = 0; i < state.generated_preprocess_pool_count; i++) {
-        grown[i] = state.generated_preprocess_pool[i];
-    }
-    if (state.generated_preprocess_pool.ptr != null) {
-        alloc::free(state.host_allocator, state.generated_preprocess_pool.ptr);
-    }
-    state.generated_preprocess_pool = grown;
-}
-
 fn void recycle_generated_preprocess_buffers_locked(
     VkDeviceState* state,
     GeneratedPreprocessBuffer[] buffers,
     uint count,
 ) {
-    if (count > 0) {
-        ensure_generated_preprocess_pool_capacity_locked(state, count);
-        for (uint i = 0; i < count; i++) {
-            state.generated_preprocess_pool[
-                state.generated_preprocess_pool_count++
-            ] = buffers[i];
+    for (uint i = 0; i < count; i++) {
+        GeneratedPreprocessBuffer* buffer = &buffers[i];
+        if (buffer.reservation_owned) {
+            RecordingContextState* context = state.recording_contexts.get(
+                buffer.reservation_context,
+            )!!;
+            GeneratedPreprocessBuffer* reserved =
+                &context.reserved_preprocess[buffer.reservation_index];
+            reserved.reservation_in_use = false;
+            *buffer = {};
+            continue;
         }
+        if (buffer.buffer != null) {
+            state.allocator.destroy_buffer(buffer.buffer, buffer.allocation);
+        }
+        *buffer = {};
     }
-    if (buffers.ptr != null) alloc::free(state.host_allocator, buffers.ptr);
-}
-
-fn bool take_generated_preprocess_buffer(
-    VkDeviceState* state,
-    vk::MemoryRequirements* requirements,
-    GeneratedPreprocessBuffer* out_buffer,
-) {
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    for (uint i = 0; i < state.generated_preprocess_pool_count; i++) {
-        GeneratedPreprocessBuffer* candidate = &state.generated_preprocess_pool[i];
-        if (!generated_preprocess_compatible(candidate, requirements)) continue;
-        *out_buffer = *candidate;
-        state.generated_preprocess_pool_count--;
-        *candidate = state.generated_preprocess_pool[
-            state.generated_preprocess_pool_count
-        ];
-        state.generated_preprocess_pool[state.generated_preprocess_pool_count] = {};
-        (void)state.generated_preprocess_reuses.add(1, AtomicOrdering.RELAXED);
-        return true;
-    }
-    return false;
 }
 
 fn CommandRecordingStats command_recording_stats(VkDeviceState* state) {
@@ -1446,6 +1671,18 @@ fn void free_generated_preprocess_buffers(
     GeneratedPreprocessBuffer[] buffers,
 ) {
     foreach (&buffer : buffers) {
+        if (buffer.buffer != null && !buffer.reservation_owned) {
+            state.allocator.destroy_buffer(buffer.buffer, buffer.allocation);
+        }
+    }
+    if (buffers.ptr != null) alloc::free(state.host_allocator, buffers.ptr);
+}
+
+fn void free_reserved_generated_preprocess_buffers(
+    VkDeviceState* state,
+    GeneratedPreprocessBuffer[] buffers,
+) {
+    foreach (&buffer : buffers) {
         if (buffer.buffer != null) {
             state.allocator.destroy_buffer(buffer.buffer, buffer.allocation);
         }
@@ -1453,42 +1690,12 @@ fn void free_generated_preprocess_buffers(
     if (buffers.ptr != null) alloc::free(state.host_allocator, buffers.ptr);
 }
 
-fn void ensure_generated_preprocess_capacity(
+fn GeneratedPreprocessBuffer? allocate_generated_preprocess_buffer(
     VkDeviceState* state,
-    CommandRecord* record,
+    vk::DeviceSize size,
+    vk::DeviceSize alignment,
+    uint memory_type_bits,
 ) {
-    if (record.generated_preprocess_count < record.generated_preprocess.len) return;
-    usz capacity = record.generated_preprocess.len == 0
-        ? 4
-        : record.generated_preprocess.len * 2;
-    GeneratedPreprocessBuffer[] grown = alloc::new_array(
-        state.host_allocator,
-        GeneratedPreprocessBuffer,
-        (sz)capacity,
-    );
-    for (uint i = 0; i < record.generated_preprocess_count; i++) {
-        grown[i] = record.generated_preprocess[i];
-    }
-    if (record.generated_preprocess.ptr != null) {
-        alloc::free(state.host_allocator, record.generated_preprocess.ptr);
-    }
-    record.generated_preprocess = grown;
-    (void)state.generated_recording_allocations.add(1, AtomicOrdering.RELAXED);
-}
-
-fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
-    VkDeviceState* state,
-    CommandRecord* record,
-    vk::MemoryRequirements* requirements,
-) {
-    GeneratedPreprocessBuffer pooled;
-    if (take_generated_preprocess_buffer(state, requirements, &pooled)) {
-        ensure_generated_preprocess_capacity(state, record);
-        uint index = record.generated_preprocess_count++;
-        record.generated_preprocess[index] = pooled;
-        return &record.generated_preprocess[index];
-    }
-
     vk::BufferUsageFlags2CreateInfoKHR usage2 = {
         .s_type = vk::StructureType.BUFFER_USAGE_FLAGS_2_CREATE_INFO_KHR,
         .usage = (vk::BufferUsageFlags2KHR)(
@@ -1498,11 +1705,11 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     };
     vk::BufferCreateInfo buffer_info = vk::buffer_create_info()
         .set_next(&usage2)
-        .set_size(requirements.size)
+        .set_size(size)
         .set_usage(vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT);
     vma::AllocationCreateInfo allocation_info = {
         .usage            = vma::MemoryUsage.AUTO_PREFER_DEVICE,
-        .memory_type_bits = requirements.memory_type_bits,
+        .memory_type_bits = memory_type_bits,
     };
     GeneratedPreprocessBuffer buffer;
     vma::AllocationInfo native_info;
@@ -1513,7 +1720,7 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     check_device_result(state, state.allocator.create_buffer_with_alignment(
         bi:            &buffer_info,
         ci:            &allocation_info,
-        min_alignment: requirements.alignment,
+        min_alignment: alignment,
         out_buffer:    &buffer.buffer,
         out_alloc:     &buffer.allocation,
         out_info:      &native_info,
@@ -1522,17 +1729,98 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     vk::BufferDeviceAddressInfo address_info =
         vk::buffer_device_address_info().set_buffer(buffer.buffer);
     buffer.address = vk::get_buffer_device_address(state.device, &address_info);
-    buffer.size = requirements.size;
+    buffer.size = size;
     buffer.memory_type = native_info.memory_type;
     if (buffer.address == 0) return gpu::BACKEND_ERROR~;
-
-    ensure_generated_preprocess_capacity(state, record);
-    uint index = record.generated_preprocess_count++;
-    record.generated_preprocess[index] = buffer;
     owns_pair = false;
     (void)state.generated_preprocess_allocations.add(1, AtomicOrdering.RELAXED);
-    (void)state.generated_recording_allocations.add(1, AtomicOrdering.RELAXED);
-    return &record.generated_preprocess[index];
+    note_recording_vma_allocation(state);
+    return buffer;
+}
+
+fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
+    VkDeviceState* state,
+    CommandRecord* record,
+    vk::MemoryRequirements* requirements,
+    uint max_count,
+) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    RecordingContextState* context = state.recording_contexts.get(
+        record.context,
+    )!;
+    if (max_count > context.generated_scratch.max_commands_per_list
+        || requirements.size
+            > context.generated_scratch.max_preprocess_bytes
+        || record.generated_preprocess_count
+            >= record.generated_preprocess.len) {
+        note_generated_scratch_miss(state);
+        return gpu::CAPACITY_EXCEEDED~;
+    }
+    foreach (&reserved : context.reserved_preprocess) {
+        if (reserved.reservation_in_use
+            || !generated_preprocess_compatible(
+                reserved,
+                requirements,
+            )) continue;
+        reserved.reservation_in_use = true;
+        uint index = record.generated_preprocess_count++;
+        record.generated_preprocess[index] = *reserved;
+        (void)state.generated_preprocess_reuses.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+        return &record.generated_preprocess[index];
+    }
+    note_generated_scratch_miss(state);
+    return gpu::CAPACITY_EXCEEDED~;
+}
+
+<* Snapshot test/benchmark recording work after externally synchronizing the
+   measured interval. *>
+fn gpu::RecordingWorkCounters command_recording_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+    return {
+        .host_allocations = state.recording_host_allocations.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .command_buffer_allocations = state
+            .recording_command_buffer_allocations.load(
+                AtomicOrdering.RELAXED,
+            ),
+        .command_buffer_frees = state.recording_command_buffer_frees.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .command_buffer_resets = state.command_buffer_resets.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .image_view_creations = state.recording_image_view_creations.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .vma_allocations = state.recording_vma_allocations.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .generated_scratch_misses = state.generated_scratch_misses.load(
+            AtomicOrdering.RELAXED,
+        ),
+    };
+}
+
+<* Reset test/benchmark recording-work counters while recording is quiescent. *>
+fn void reset_command_recording_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+    state.recording_host_allocations.store(0, AtomicOrdering.RELAXED);
+    state.recording_command_buffer_allocations.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
+    state.recording_command_buffer_frees.store(0, AtomicOrdering.RELAXED);
+    state.command_buffer_resets.store(0, AtomicOrdering.RELAXED);
+    state.recording_image_view_creations.store(0, AtomicOrdering.RELAXED);
+    state.recording_vma_allocations.store(0, AtomicOrdering.RELAXED);
+    state.generated_scratch_misses.store(0, AtomicOrdering.RELAXED);
 }
 
 fn vk::IndirectCommandsLayoutEXT? create_generated_work_layout(

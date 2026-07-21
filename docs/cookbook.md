@@ -198,10 +198,29 @@ Running example: `shadow_mapping` (3×3 PCF).
 Goal: G-buffer in one pass.
 
 ```c3
-gpu::ColorTargetDesc[3] colors = { {...albedo}, {...normal}, {...position} };
+gpu::AttachmentViewHandle albedo_view = gpu::create_attachment_view(
+    &device,
+    &{ .texture = albedo },
+)!;
+gpu::AttachmentViewHandle normal_view = gpu::create_attachment_view(
+    &device,
+    &{ .texture = normal },
+)!;
+gpu::AttachmentViewHandle position_view = gpu::create_attachment_view(
+    &device,
+    &{ .texture = position },
+)!;
+gpu::ColorTargetDesc[3] colors = {
+    { .view = albedo_view },
+    { .view = normal_view },
+    { .view = position_view },
+};
 gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, ... };
 // pipeline: .color_formats lists all three; frag writes location 0..2
 ```
+
+Create the depth attachment view the same way. After the covering completion
+point finishes, destroy every attachment view before destroying its texture.
 
 Running example: `deferred_shading` (plus the linear→display lessons:
 Reinhard + gamma encode when the swapchain is UNORM).

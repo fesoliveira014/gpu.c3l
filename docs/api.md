@@ -958,7 +958,8 @@ tokens for retry or discard. An empty batch signals the selected queue.
 Duplicate or non-executable tokens fault `COMMAND_RECORDING_ERROR`; a token for
 another queue faults `INVALID_ARGUMENT`. Discard consumes an unsubmitted token.
 Completed native command buffers return to their recording context. Only that
-context owner reclaims them, before its next allocation.
+context owner resets and reuses them after completion or discard; native
+allocation is a cold-path fallback only when no reusable buffer is available.
 
 `SubmitDesc.completion_waits` accepts published points from the same device.
 Cross-queue points become waits on their queue-owned timelines. Published points
@@ -1043,19 +1044,23 @@ ClearColor
     float[4] rgba
     uint[4] uint_rgba
 
-ColorTargetDesc
+AttachmentViewDesc
     TextureHandle texture
     uint mip_level
     uint array_layer
-    TextureHandle resolve_texture
-    uint resolve_mip_level
-    uint resolve_array_layer
+
+create_attachment_view(Device* device, AttachmentViewDesc* desc) -> AttachmentViewHandle?
+destroy_attachment_view(Device* device, AttachmentViewHandle view) -> void?
+
+ColorTargetDesc
+    AttachmentViewHandle view
+    AttachmentViewHandle resolve_view
     LoadOp load_op
     StoreOp store_op
     ClearColor clear
 
 DepthTargetDesc
-    TextureHandle texture
+    AttachmentViewHandle view
     LoadOp load_op
     StoreOp store_op
     ClearDepthStencil clear
@@ -1069,6 +1074,19 @@ RenderPassDesc
 cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) -> void?
 cmd_end_render_pass(CommandList* commands) -> void?
 ```
+
+An `AttachmentViewHandle` is an immutable device child for one texture mip and
+array layer. Create every color, resolve, and depth view before recording and
+destroy it only after every recorded or submitted reference has completed.
+Creation validates texture ownership and subresource bounds and creates any
+required native image view on the cold path. Pass begin resolves only the fixed
+attachment-view table and records from fixed-size stack storage; it neither
+creates image views nor grows a cache.
+
+Attachment views are distinct from shader-visible `TextureView` values. They
+retain their texture, are not published in a descriptor heap, and cannot be
+destroyed while a command list holds an explicit reference. Zero, stale,
+foreign-device, and mismatched view handles fault before native recording.
 
 Render-pass begin initializes one viewport and one scissor to the full pass
 extent. Callers may override either state for subsequent draws:
@@ -1125,17 +1143,17 @@ Use `ClearColor.rgba` for normalized and floating-point attachments, and
 member is ignored.
 
 A pass names at least one color target or a depth target; depth-only passes
-(the shadow-map shape) are valid. A depth target needs `depth_attach` usage
-and an explicit transition to `TextureUse.DEPTH_ATTACHMENT`. `D32_FLOAT` is
+(the shadow-map shape) are valid. A depth target's texture needs `depth_attach`
+usage and an explicit transition to `TextureUse.DEPTH_ATTACHMENT`. `D32_FLOAT` is
 the only supported depth format; pipelines name it in
-`GraphicsPipelineDesc.depth_format`. Every selected color mip and the depth
-texture's mip zero must cover the pass dimensions; smaller compatible render
+`GraphicsPipelineDesc.depth_format`. Every selected color and depth view must
+cover the pass dimensions; smaller compatible render
 areas are valid. All color and depth sources use the same sample count. The
 color count must not exceed `DeviceCaps.max_color_attachments`, which is the
 lesser of the library ceiling and the selected device's Vulkan limit.
 
 A color target may resolve a multisample source into a distinct, single-sample
-texture with the same format and sufficient selected-mip extent. Both textures
+view with the same format and sufficient selected-mip extent. Both textures
 need `color_attach` usage and explicit transitions to
 `TextureUse.COLOR_ATTACHMENT`. Normalized and floating-point formats average
 samples; integer formats select sample zero. Depth resolve is not exposed.
@@ -1193,6 +1211,13 @@ GeneratedDrawRecord        { vertex_root_gpu, fragment_root_gpu, arguments }
 GeneratedDrawIndexedRecord { vertex_root_gpu, fragment_root_gpu, arguments, _pad0 }
 GeneratedDispatchRecord    { root_gpu, arguments, _pad0 }
 
+GeneratedScratchDesc
+    uint max_commands_per_list
+    usz max_preprocess_bytes
+    uint preprocess_buffer_count
+
+reserve_generated_scratch(Queue queue, GeneratedScratchDesc desc) -> void?
+
 cmd_draw_indirect(commands, vertex_root, fragment_root, args, draw_count) -> void?
 cmd_draw_indexed_indirect(commands, vertex_root, fragment_root, args, draw_count, index_span, index_type) -> void?
 cmd_draw_indexed_indirect_count(commands, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type) -> void?
@@ -1208,6 +1233,23 @@ pair the roots and arguments written by a GPU producer without a parallel
 created device supports all three commands. Unsupported devices fault
 `UNSUPPORTED_FEATURE`; the shared-root indirect commands remain the portable
 execution path and the library never emulates generated work with a CPU loop.
+
+Generated commands require an explicit cold reservation on the calling
+thread's recording context for the exact queue. `max_commands_per_list` bounds
+the maximum generated count accepted by one call, `max_preprocess_bytes` bounds
+each reserved native preprocess buffer, and `preprocess_buffer_count` bounds
+simultaneously retained generated calls across incomplete command lists.
+Reservation creates or replaces context-local storage and may allocate host,
+Vulkan, and VMA objects; command recording never grows it. Passing an all-zero
+descriptor releases a quiescent reservation.
+
+Reservation replacement or release returns `RESOURCE_IN_USE` while the calling
+context has recording, executable, or submitted work. Nonzero descriptors must
+set every field and remain within `DeviceCaps.max_generated_work_count`, or the
+call returns `INVALID_ARGUMENT`. Generated recording returns deterministic
+`CAPACITY_EXCEEDED` when the declared count, required preprocess bytes, per-list
+slot count, or available compatible reserved buffers are insufficient. A failed
+recording call preserves the command list for retry or discard.
 
 Generated record spans are 8-byte aligned and must hold the declared maximum
 count. The count span is a 4-byte-aligned GPU-readable `uint`. Both spans must

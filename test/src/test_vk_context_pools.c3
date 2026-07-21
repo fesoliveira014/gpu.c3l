@@ -172,6 +172,19 @@ fn void graphics_only_context_pools_initialize_one_family() @test {
     run_single_role_context_pool_success({ .graphics }, FIXTURE_GRAPHICS_FAMILY);
 }
 
+fn void context_pools_allow_individual_command_buffer_reset() @test {
+    uint flags = (uint)gpu::vk::context_pool_create_flags();
+    assert(
+        (flags & (uint)vk::CommandPoolCreateFlagBits.TRANSIENT_BIT) != 0,
+        "recording context pools remain transient"
+    );
+    assert(
+        (flags & (uint)vk::CommandPoolCreateFlagBits.RESET_COMMAND_BUFFER_BIT)
+            != 0,
+        "reused command buffers may be reset individually"
+    );
+}
+
 fn void compute_only_context_pools_initialize_one_family() @test {
     run_single_role_context_pool_success({ .compute }, FIXTURE_COMPUTE_FAMILY);
 }
