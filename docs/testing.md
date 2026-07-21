@@ -367,7 +367,11 @@ thread, and verifies that recording observes the layout stored in the bound
 pipeline slot. This proves safe creation/recording overlap with the published
 slot state; it does not recreate the removed mid-scan interleaving. The
 platform-independent source contract is the regression guard and rejects
-compute-layout cache access outside its owning cache implementation.
+compute-layout cache access outside its owning cache implementation. It also
+walks every Vulkan recording root and reachable helper across backend files,
+rejecting device/backend re-resolution, command-table lookup, lifecycle-vtable
+dispatch, and post-bind pipeline resolution. Helper-relocation mutations prove
+that moving forbidden work to another source file does not evade the gate.
 
 The benchmark runner builds eight executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
@@ -377,6 +381,13 @@ ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
 generated dispatch. It prewarms one untimed 1,000-record command list, then
 measures five 1,000-record lists with a distinct preprocess address for each
 execute call and pool reuse only after a list is discarded.
+The command target enables test-only resolution counters, resets them after
+begin/pipeline bind, reports measured native command count with every resolution
+count, and requires zero registry, retained-pin, lifecycle-vtable, command-table,
+pipeline-table/cache, and policy selections during warm recording.
+These process-wide counters use relaxed atomics and are compared only across
+externally synchronized benchmark intervals. The native count covers every
+Vulkan command emitted by recording paths.
 Lifecycle measurements cover submission, completed-point polling, and
 immediate texture destruction.
 

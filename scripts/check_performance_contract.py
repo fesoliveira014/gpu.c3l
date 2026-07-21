@@ -34,6 +34,25 @@ RECORDING_FORBIDDEN = (
     "create_graphics_pipeline(",
     "prepare_shader_code(",
 )
+PUBLIC_RECORDING_FORBIDDEN = (
+    "command_operation(",
+    "executable_command_operation(",
+    ".vtable.",
+)
+BACKEND_RECORDING_FORBIDDEN = (
+    "device_backend_state_ptr(",
+    "resolve_command(",
+    ".commands.get(",
+)
+POST_BIND_PIPELINE_PATTERNS = (
+    re.compile(r"\.pipelines\s*\.\s*get(?:_cell)?\s*\("),
+    re.compile(r"\.pipeline_cache\s*\."),
+)
+RECORDING_PIPELINE_RESOLUTION_ALLOWLIST = frozenset((
+    "bind_pipeline_state",
+    "retain_validation_reference",
+    "release_validation_reference",
+))
 DESTRUCTION_FORBIDDEN = (
     "wait_completion(",
     "wait_queue_idle(",
@@ -58,14 +77,14 @@ OWNERSHIP_TRANSFER_CALLEES = (
     "vk_submit_with",
 )
 BACKEND_OWNERSHIP_DIGESTS = {
-    "vk_discard_commands": "c3ac801188a15ec816ae46f2d269fdd81a3a083f6e118a3cd6aacc61f282bc7a",
-    "vk_begin_commands_with_context": "3292d8a58303e0fc2992ffe89976ecc542e0712da03aecc0efdee0fc4deb37de",
+    "vk_discard_commands": "814545f684a3e5804d1c4458ad5433b7438192735fd32afa5355bdba6dc4a852",
+    "vk_begin_commands_with_context": "ee2065568712853ce457925927c76c7c27f1d1d1ecc68381bbc37403f9ab27df",
     "generated_preprocess_compatible": "df5842124c9c4e5427be4440e3a6ce3df20282e3d3b7d9d7557ac6bec007b5a0",
     "ensure_generated_preprocess_pool_capacity_locked": "8f07b4af72b8e015ec80aee966099e0a362323110017cff1c37172133ab00569",
     "command_recording_stats": "381e23f43057fb0882396bc074d75c196da6fc3fe2b74547f300223eced04a2e",
     "free_generated_preprocess_buffers": "a4e9fc1d9b5e6d1a010e634ceab4bfd7090707552f5d39abf84d736faa59c744",
     "ensure_generated_preprocess_capacity": "f95bc1998ad4440be1ce002753025c62638647437ae6d5af14a1237effa18b95",
-    "execute_generated_work": "2c7d0ee833035e94166a955d64f02ca8addbf9bc8050a343d62ccf15b9b90bf8",
+    "execute_generated_work": "48dc3a55756d0405016e0e7641a96ec29080e6479978bb26176fded87b36868e",
     "recycle_generated_preprocess_buffers_locked": "4710b2f580e8c148f0ae4e13a6454bbd270f5dc6b54ba8b82a218a91c57f40b1",
     "take_generated_preprocess_buffer": "7a0262396bf857c810ab5b08a384bcdb12d404b9da2f05133d0513dde605628e",
     "acquire_generated_preprocess_buffer": "41cdde328b77255c518829a196a22bd8091e12a3361e6d70486cf986fa43a754",
@@ -93,7 +112,7 @@ SYNC_OWNERSHIP_DIGESTS = {
     "vk_wait_completion": "1152d19168b8fbf057ecea0b8cfc540adb169c1b7e3239aa56f8d95141ab0543",
 }
 QUEUE_OWNERSHIP_DIGESTS = {
-    "vk_submit_with_queries": "7218775026af7c397b77c4f4f5b66f1f67cf9a709a8750dd2cd578b47b2768bf",
+    "vk_submit_with_queries": "b9043ec98c858f303fc62caf55c98f192b9cab67d3c9e6a0016325dbb2eeddc1",
     "vk_submit_with": "773cfe5518f228b74c72265329eeb46a1db722334cabe1f57b0f0f4a5e3dc9e1",
     "vk_submit": "383f58739300051514fa01012860a73d7b96601c6d8040ffcbf1f864d111196a",
 }
@@ -184,6 +203,46 @@ def read(root: Path, relative: str) -> str:
     return (root / relative).read_text(encoding="utf-8")
 
 
+def source_functions(
+    root: Path,
+    source_root: str,
+) -> dict[str, list[tuple[str, str]]]:
+    functions: dict[str, list[tuple[str, str]]] = {}
+    for path in sorted((root / source_root).glob("*.c3")):
+        relative = path.relative_to(root).as_posix()
+        source = path.read_text(encoding="utf-8")
+        for name in function_names(source):
+            functions.setdefault(name, []).append(
+                (relative, function_body(source, name))
+            )
+    return functions
+
+
+def reachable_recording_functions(
+    functions: dict[str, list[tuple[str, str]]],
+    root_prefix: str,
+) -> set[tuple[str, str]]:
+    candidates = tuple(functions)
+    pending = [name for name in candidates if name.startswith(root_prefix)]
+    visited_names: set[str] = set()
+    reachable: set[tuple[str, str]] = set()
+    while pending:
+        name = pending.pop()
+        if name in visited_names:
+            continue
+        visited_names.add(name)
+        for relative, body in functions.get(name, ()):
+            reachable.add((relative, name))
+            code = mask_c3_comments(body)
+            for candidate in candidates:
+                if candidate not in visited_names and re.search(
+                    rf"\b{re.escape(candidate)}\s*\(",
+                    code,
+                ):
+                    pending.append(candidate)
+    return reachable
+
+
 def reject_tokens(
     errors: list[str],
     relative: str,
@@ -209,6 +268,51 @@ def check(root: Path = ROOT) -> list[str]:
     lifetime_source = read(root, "gpu/vk/lifetime.c3")
     command_bench = read(root, "test/src/command_record_bench.c3")
     lifecycle_bench = read(root, "test/src/lifecycle_bench.c3")
+
+    public_functions = source_functions(root, "gpu")
+    public_reachable = reachable_recording_functions(
+        public_functions,
+        "cmd_",
+    )
+    for relative, name in sorted(public_reachable):
+        body = next(
+            body
+            for candidate_relative, body in public_functions[name]
+            if candidate_relative == relative
+        )
+        reject_tokens(
+            errors,
+            relative,
+            name,
+            mask_c3_comments(body),
+            PUBLIC_RECORDING_FORBIDDEN,
+        )
+
+    backend_functions = source_functions(root, "gpu/vk")
+    reachable = reachable_recording_functions(backend_functions, "vk_cmd_")
+    for relative, name in sorted(reachable):
+        body = mask_c3_comments(
+            next(
+                body
+                for candidate_relative, body in backend_functions[name]
+                if candidate_relative == relative
+            )
+        )
+        reject_tokens(
+            errors,
+            relative,
+            name,
+            body,
+            BACKEND_RECORDING_FORBIDDEN,
+        )
+        if name in RECORDING_PIPELINE_RESOLUTION_ALLOWLIST:
+            continue
+        for pattern in POST_BIND_PIPELINE_PATTERNS:
+            if pattern.search(body):
+                errors.append(
+                    f"{relative}:{name} performs forbidden post-bind "
+                    "pipeline resolution on a recording path"
+                )
 
     backend_root = root / "gpu/vk"
     for path in sorted(backend_root.glob("*.c3")):
@@ -464,6 +568,13 @@ def check(root: Path = ROOT) -> list[str]:
             "test/src/command_record_bench.c3",
             "invariants: registry_locks=%d recording_allocations=%d "
             "draw_compilations=%d preprocess_allocations=%d",
+        ),
+        (
+            command_bench,
+            "test/src/command_record_bench.c3",
+            "resolution: recording_commands=%d native_commands=%d device_registry=%d "
+            "retained_pins=%d lifecycle_vtable=%d command_table=%d "
+            "pipeline_table=%d pipeline_cache=%d policy=%d",
         ),
         (
             lifecycle_bench,

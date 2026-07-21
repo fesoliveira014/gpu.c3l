@@ -46,9 +46,11 @@ token's retained device pin while another call can still be in flight.
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
 Most public device operations take a short-lived atomic pin. `begin_commands`
-transfers its pin to the recording token. Recording calls and end/discard borrow
-that pin. Successful end transfers ownership to the executable token; successful
-`submit` or executable discard releases it.
+transfers its pin to the recording token and publishes a stable encoder cell.
+Recording calls validate that cell directly and do not borrow a registry pin.
+Successful end transfers the same cell and pin ownership to the executable
+token; successful `submit` or executable discard invalidates the cell before
+releasing the pin.
 Pin acquisition may return `DEVICE_BUSY`; failed destruction restores the live
 state and preserves the token and generation.
 
@@ -115,15 +117,18 @@ ownership transfers.
 - Resource slot reads (`get` paths), including allocation and span queries,
   are lock-free: tables never reallocate, and a token reaches another thread
   only through your synchronization. That hand-off is the happens-before edge.
-- Command records also live in a fixed table. The public `CommandList` is an
-  owner-bearing handle into that table; passing it from a recording thread to
-  the submitting thread is the required hand-off. Copies remain aliases and
-  must not be used concurrently. Its embedded `Device` value is independent of
-  the caller variable passed to `begin_commands`.
+- Command records and root encoder cells live in fixed tables. `CommandList`
+  carries the owner-bearing handle and an opaque pointer to its exact cell.
+  Publication, recording-to-executable transfer, and invalidation follow Tier C
+  confinement. Passing the token through caller synchronization is the required
+  hand-off and makes the published cell visible; copies remain aliases and must
+  not be used concurrently. Its embedded `Device` value is independent of the
+  caller variable passed to `begin_commands`.
 - Pipeline slots live in a fixed table and carry every native layout needed by
   recording. Pipeline creation may grow packed layout-cache storage while
   another thread records with an existing pipeline because recording does not
-  inspect that cache.
+  inspect that cache. Bind snapshots the stable slot identity and native state;
+  later commands validate the cached generation without resolving the table.
 - Destruction must happen-after the last use of the handle on any thread.
 
 ## Worker-thread setup (C3)

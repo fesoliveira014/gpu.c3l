@@ -255,3 +255,24 @@ fn void? readback_test_texture_data(
     char[] mapping = gpu::get_span_mapping(device, readback.span)!;
     out_data[..] = mapping[..];
 }
+fn void assert_warm_command_resolution(
+    gpu::CommandResolutionStats stats,
+    ulong expected_commands,
+) @if(env::TESTING) {
+    assert(stats.device_registry_resolutions == 0,
+        "warm commands do not resolve the device registry");
+    assert(stats.retained_pin_operations == 0,
+        "warm commands do not borrow retained pins");
+    assert(stats.lifecycle_vtable_dispatches == 0,
+        "warm commands do not load the lifecycle vtable");
+    assert(stats.command_table_lookups == 0,
+        "warm commands do not resolve the command table");
+    assert(stats.pipeline_table_lookups == 0,
+        "warm commands do not resolve the pipeline table after bind");
+    assert(stats.pipeline_cache_lookups == 0,
+        "warm commands do not resolve the pipeline cache after bind");
+    assert(stats.command_policy_selections == 0,
+        "warm commands do not select a command policy");
+    assert(stats.recording_commands == expected_commands,
+        "the command counter observes each warm recording call");
+}

@@ -837,6 +837,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         "dispatch rejects an active graphics pipeline");
 
     gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
+    gpu::reset_command_resolution_stats();
     fault missing_compute_root = @catch(gpu::cmd_dispatch(
         commands: &commands,
         root:     (gpu::GpuAddress)0,
@@ -849,6 +850,8 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         root:     root,
         groups:   { 0, 0, 0 },
     )!!;
+
+    assert_warm_command_resolution(gpu::command_resolution_stats(), 2);
 
     ValComputeCtx stale = make_val_compute_ctx(&device);
     gpu::PipelineHandle stale_handle = stale.pipeline;
@@ -874,6 +877,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     };
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+    gpu::reset_command_resolution_stats();
 
     fault missing_depth_state = @catch(gpu::cmd_draw(
         commands:      &commands,
@@ -922,6 +926,8 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         vertex_count:  0,
         instance_count: 0,
     )!!;
+
+    assert_warm_command_resolution(gpu::command_resolution_stats(), 6);
     gpu::cmd_end_render_pass(&commands)!!;
 
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
@@ -939,6 +945,42 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
         "pipeline bind and execution perform no native compilation");
 }
+
+fn void bound_pipeline_checked_dispatch_rejects_destroyed_and_reused_slots() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::PipelineCell* cell = record.bound_pipeline.validation_cell;
+    uint generation = cell.generation;
+
+    cell.used = false;
+    fault destroyed_fault = @catch(gpu::cmd_dispatch(
+        commands: &commands,
+        root:     (gpu::GpuAddress)1,
+        groups:   { 0, 0, 0 },
+    ));
+    cell.used = true;
+    cell.generation++;
+    fault reused_fault = @catch(gpu::cmd_dispatch(
+        commands: &commands,
+        root:     (gpu::GpuAddress)1,
+        groups:   { 0, 0, 0 },
+    ));
+    cell.generation = generation;
+
+    assert(destroyed_fault == gpu::INVALID_HANDLE,
+        "checked dispatch rejects a destroyed bound pipeline before native use");
+    assert(reused_fault == gpu::INVALID_HANDLE,
+        "checked dispatch rejects a reused bound pipeline before native use");
+}
+
 fn void compute_pipeline_from_vertex_shader_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;

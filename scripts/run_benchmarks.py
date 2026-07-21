@@ -93,6 +93,13 @@ COMMAND_RECORD_INVARIANTS = re.compile(
     r"draw_compilations=0 preprocess_allocations=0$",
     re.MULTILINE,
 )
+COMMAND_RECORD_RESOLUTION = re.compile(
+    r"^resolution: recording_commands=[1-9][0-9]* "
+    r"native_commands=[1-9][0-9]* device_registry=0 "
+    r"retained_pins=0 lifecycle_vtable=0 command_table=0 "
+    r"pipeline_table=0 pipeline_cache=0 policy=0$",
+    re.MULTILINE,
+)
 
 REGRESSION_THRESHOLDS = {
     "allocation_bench": (
@@ -152,6 +159,10 @@ def require_measurement(output, target, enforce_thresholds=True):
         raise ValueError(f"{target} output does not match the exact schema")
     if target == "command_record_bench" and not COMMAND_RECORD_INVARIANTS.search(output):
         raise ValueError(f"{target} recording invariants are missing or nonzero")
+    if target == "command_record_bench" and not COMMAND_RECORD_RESOLUTION.search(output):
+        raise ValueError(
+            f"{target} recording resolution evidence is missing or nonzero"
+        )
     if enforce_thresholds:
         require_regression_thresholds(output, target)
 

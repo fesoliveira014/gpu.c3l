@@ -321,15 +321,14 @@ fn vk::ImageMemoryBarrier2? texture_barrier_to_vk(
 }
 
 fn void? vk_cmd_barrier(
-    gpu::CommandList* commands,
+    gpu::CommandEncoderState* commands,
     gpu::Barrier* barrier,
 ) @private {
-    CommandRecord* record = resolve_command(commands)!;
+    CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state =
-        (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    VkDeviceState* state = encoder_device_state(commands);
     ZString rejected_field = barrier_masks_rejected_field(barrier);
     ZString invariant;
     if (rejected_field != null) {
@@ -381,18 +380,18 @@ fn void? vk_cmd_barrier(
     vk::DependencyInfo dependency =
         vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
     vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
+    gpu::note_command_native_call();
 }
 
 fn void? vk_cmd_texture_barrier(
-    gpu::CommandList* commands,
+    gpu::CommandEncoderState* commands,
     gpu::TextureBarrier* barrier,
 ) @private {
-    CommandRecord* record = resolve_command(commands)!;
+    CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state =
-        (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    VkDeviceState* state = encoder_device_state(commands);
     TextureBarrierRejection rejection = texture_barrier_rejection(
         barrier,
         null,
@@ -461,6 +460,7 @@ fn void? vk_cmd_texture_barrier(
     vk::DependencyInfo dependency = vk::dependency_info()
         .set_image_memory_barriers((&native_barrier)[:1]);
     vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
+    gpu::note_command_native_call();
 }
 
 fn vk::Semaphore? create_private_timeline(VkDeviceState* state) @private {

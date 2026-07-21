@@ -16,10 +16,22 @@ enum CommandState : int {
 }
 
 struct RenderCompatibility {
-    uint                                      color_count;
-    gpu::Format[gpu::MAX_COLOR_ATTACHMENTS]   color_formats;
-    gpu::Format                               depth_format;
-    gpu::SampleCount                          sample_count;
+    uint                                    color_count;
+    gpu::Format[gpu::MAX_COLOR_ATTACHMENTS] color_formats;
+    gpu::Format                             depth_format;
+    gpu::SampleCount                        sample_count;
+}
+
+struct BoundPipeline {
+    gpu::PipelineHandle               handle;
+    PipelineCell*                     validation_cell;
+    vk::Pipeline                      pipeline;
+    vk::PipelineLayout                layout;
+    vk::IndirectCommandsLayoutEXT     generated_dispatch_layout;
+    uint                              expected_generation;
+    uint                              cache_entry;
+    PipelineKind                      kind;
+    RenderCompatibility               render;
 }
 
 struct CommandRecord {
@@ -31,8 +43,7 @@ struct CommandRecord {
     uint                        active_render_width;
     uint                        active_render_height;
     RenderCompatibility         active_render;
-    gpu::PipelineHandle         active_pipeline;
-    uint                        active_entry;
+    BoundPipeline               bound_pipeline;
     bool                        depth_state_set;
     CommandResourceReference[]  references;
     uint                        reference_count;
@@ -82,6 +93,7 @@ fn gpu::CommandListHandle? CommandTable.alloc(&self, CommandRecord value) {
 }
 
 fn CommandRecord*? CommandTable.get(&self, gpu::CommandListHandle handle) {
+    gpu::note_command_table_lookup();
     if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = handle.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
@@ -109,6 +121,14 @@ fn CommandRecord*? resolve_command(gpu::CommandList* commands) {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
     if (state == null) return gpu::INVALID_HANDLE~;
     return state.commands.get(commands.handle);
+}
+
+fn VkDeviceState* encoder_device_state(gpu::CommandEncoderState* encoder) {
+    return (VkDeviceState*)encoder.backend_state;
+}
+
+fn CommandRecord* encoder_command(gpu::CommandEncoderState* encoder) {
+    return (CommandRecord*)encoder.backend_command;
 }
 
 fn void ensure_command_reference_capacity(

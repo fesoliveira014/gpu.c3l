@@ -298,9 +298,9 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     return count;
 }
 
-fn void? vk_cmd_begin_label(gpu::CommandList* commands, ZString label, float[4] color) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
-    CommandRecord* record = resolve_command(commands)!;
+fn void? vk_cmd_begin_label(gpu::CommandEncoderState* commands, ZString label, float[4] color) @private {
+    VkDeviceState* state = encoder_device_state(commands);
+    CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING
         && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
@@ -308,13 +308,15 @@ fn void? vk_cmd_begin_label(gpu::CommandList* commands, ZString label, float[4] 
     info.p_label_name = (char*)label;
     info.color = color;
     state.device_dispatch.debug.cmd_begin_label(record.command_buffer, &info);
+    gpu::note_command_native_call();
 }
 
-fn void? vk_cmd_end_label(gpu::CommandList* commands) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
-    CommandRecord* record = resolve_command(commands)!;
+fn void? vk_cmd_end_label(gpu::CommandEncoderState* commands) @private {
+    VkDeviceState* state = encoder_device_state(commands);
+    CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING
         && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     state.device_dispatch.debug.cmd_end_label(record.command_buffer);
+    gpu::note_command_native_call();
 }

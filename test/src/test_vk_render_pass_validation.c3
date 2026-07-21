@@ -281,7 +281,7 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     assert(@catch(gpu::cmd_bind_pipeline(&in_pass, draw.graphics))
         == gpu::INVALID_ARGUMENT,
         "binding rejects a pipeline incompatible with the active render pass");
-    assert(in_pass_record.active_pipeline == gpu::PIPELINE_HANDLE_INVALID,
+    assert(in_pass_record.bound_pipeline.handle == gpu::PIPELINE_HANDLE_INVALID,
         "in-pass incompatibility leaves the active pipeline unchanged");
     assert(in_pass_record.reference_count == in_pass_references,
         "in-pass incompatibility retains no pipeline reference");
@@ -326,7 +326,7 @@ fn void end_render_pass_scopes_graphics_binding_to_pass() @test {
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    assert(record.active_pipeline == gpu::PIPELINE_HANDLE_INVALID,
+    assert(record.bound_pipeline.handle == gpu::PIPELINE_HANDLE_INVALID,
         "ending a render pass releases the graphics pipeline binding");
     gpu::cmd_begin_render_pass(&commands, &second_pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
