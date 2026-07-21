@@ -109,9 +109,8 @@ Every run reported:
 invariants: point_allocations=0 destruction_waits=0 deferred_releases=0
 ```
 
-The generated-dispatch timing is omitted from this baseline because its former
-implicit-pool method is not comparable with the current explicit 64-buffer
-reservation method. A release run is accepted only when it also reports zero
+Generated-dispatch timing is reported only for runs using an explicit
+64-buffer reservation. A release run is accepted only when it also reports zero
 warm host allocations, command-buffer allocations/frees, image-view creations,
 VMA allocations, and generated-scratch misses. Command-buffer resets are
 expected reuse evidence. The runner publishes cold and warm work-counter lines
@@ -128,7 +127,7 @@ path for collecting debug cost with a matching layer.
 - Reuse caller-owned upload and destination allocations only after their
   covering completion point completes.
 - Cache pipelines; cold creation and cached lookup are different workloads.
-- Reserve generated scratch per worker and queue before timing. Generated
+- Reserve generated scratch per worker and pipeline before timing. Generated
   command recording assigns a unique reserved preprocess address to every
   execute call and returns it to the same context only after the owning command
   list is discarded or completed.

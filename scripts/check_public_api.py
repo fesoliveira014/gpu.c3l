@@ -646,7 +646,11 @@ def validate_document(document: dict) -> list[str]:
             "void?",
         ),
         "reserve_generated_scratch": (
-            ("Queue", "GeneratedScratchDesc"),
+            ("Queue", "GeneratedScratchDesc*"),
+            "void?",
+        ),
+        "release_generated_scratch": (
+            ("Queue", "PipelineHandle", "GeneratedWorkKind"),
             "void?",
         ),
         "get_texture_requirements": (
@@ -807,6 +811,7 @@ def validate_document(document: dict) -> list[str]:
         "create_attachment_view": ("device", "desc"),
         "destroy_attachment_view": ("device", "view"),
         "reserve_generated_scratch": ("queue", "desc"),
+        "release_generated_scratch": ("queue", "pipeline", "kind"),
         "get_texture_requirements": ("device", "desc"),
         "create_placed_texture": ("device", "desc", "allocation", "offset"),
         "create_dedicated_texture": (
@@ -907,6 +912,7 @@ def validate_document(document: dict) -> list[str]:
         ("TextureViewCreateDesc", "struct"),
         ("AttachmentViewHandle", "struct"),
         ("AttachmentViewDesc", "struct"),
+        ("GeneratedWorkKind", "enum"),
         ("GeneratedScratchDesc", "struct"),
         ("GpuSpan", "struct"),
         ("MemoryClass", "enum"),
@@ -968,8 +974,9 @@ def validate_document(document: dict) -> list[str]:
         ),
         "GeneratedScratchDesc": (
             (
+                ("pipeline", "PipelineHandle"),
+                ("kind", "GeneratedWorkKind"),
                 ("max_commands_per_list", "uint"),
-                ("max_preprocess_bytes", "usz"),
                 ("preprocess_buffer_count", "uint"),
             ),
             "GeneratedScratchDesc must match the exact public schema",

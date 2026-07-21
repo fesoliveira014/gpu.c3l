@@ -43,9 +43,9 @@ struct AttachmentViewDesc {
 struct ColorTargetDesc {
     AttachmentViewHandle view;
     AttachmentViewHandle resolve_view;
-    LoadOp                load_op;
-    StoreOp               store_op;
-    ClearColor            clear;
+    LoadOp               load_op;
+    StoreOp              store_op;
+    ClearColor           clear;
 }
 
 <* One depth attachment. `clear` applies only with LoadOp.CLEAR. *>

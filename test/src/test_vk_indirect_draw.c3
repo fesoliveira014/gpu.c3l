@@ -718,12 +718,27 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
-    gpu::GeneratedScratchDesc scratch = {
+    gpu::GeneratedScratchDesc dispatch_scratch = {
+        .pipeline                = dispatch_pipeline,
+        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
         .max_commands_per_list   = 1,
-        .max_preprocess_bytes    = 1024 * 1024,
-        .preprocess_buffer_count = 3,
+        .preprocess_buffer_count = 1,
     };
-    gpu::reserve_generated_scratch(queue, scratch)!!;
+    gpu::GeneratedScratchDesc draw_scratch = {
+        .pipeline                = draw.pipeline,
+        .kind                    = gpu::GeneratedWorkKind.DRAW,
+        .max_commands_per_list   = 1,
+        .preprocess_buffer_count = 1,
+    };
+    gpu::GeneratedScratchDesc indexed_scratch = {
+        .pipeline                = draw.pipeline,
+        .kind                    = gpu::GeneratedWorkKind.DRAW_INDEXED,
+        .max_commands_per_list   = 1,
+        .preprocess_buffer_count = 1,
+    };
+    gpu::reserve_generated_scratch(queue, &dispatch_scratch)!!;
+    gpu::reserve_generated_scratch(queue, &draw_scratch)!!;
+    gpu::reserve_generated_scratch(queue, &indexed_scratch)!!;
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, build_pipeline);
@@ -814,6 +829,21 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         &submit,
     )!!;
     gpu::wait_completion(completion)!!;
+    gpu::release_generated_scratch(
+        queue,
+        dispatch_pipeline,
+        gpu::GeneratedWorkKind.DISPATCH,
+    )!!;
+    gpu::release_generated_scratch(
+        queue,
+        draw.pipeline,
+        gpu::GeneratedWorkKind.DRAW,
+    )!!;
+    gpu::release_generated_scratch(
+        queue,
+        draw.pipeline,
+        gpu::GeneratedWorkKind.DRAW_INDEXED,
+    )!!;
 
     gpu::invalidate_mapped_span(&device, io_values.span)!!;
     float* doubled = &values[VALUE_COUNT];

@@ -43,7 +43,7 @@ token's retained device pin while another call can still be in flight.
 | `create_compute_pipeline` / `create_graphics_pipeline` / `create_compute_pipelines` / `create_graphics_pipelines` / `destroy_pipeline` | S | single and batch creation serialize on a device-wide creation lock; a same-key request converges to one entry |
 | `get_memory_stats` / `build_memory_report` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
 | `begin_commands` / `end_commands` / command discard | C | recording storage is automatic per worker |
-| `reserve_generated_scratch` | C | cold replacement for the calling thread's exact device/queue context; requires that context to be quiescent |
+| `reserve_generated_scratch` / `release_generated_scratch` | C | cold mutation of one pipeline/kind reservation in the calling thread's device context; the queue selects the device, and the context must be quiescent |
 | every `cmd_*` recording call | C | confined to the list's thread |
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 

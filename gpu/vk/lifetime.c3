@@ -258,11 +258,11 @@ fn void release_submitted_command_batch(
         batch.generated_preprocess_count,
     );
     enqueue_retired_command_buffer_locked(
-        state:          state,
-        context_handle: batch.context,
-        pool:           batch.command_pool,
-        buffer:         batch.command_buffer,
-        references:     batch.references,
+        state:                state,
+        context_handle:       batch.context,
+        pool:                 batch.command_pool,
+        buffer:               batch.command_buffer,
+        references:           batch.references,
         generated_preprocess: batch.generated_preprocess,
     );
     state.submitted_command_count--;

@@ -10,7 +10,6 @@ const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint GENERATED_RECORD_ITERATIONS = 64;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 const uint MEASURED_COMMAND_PATH_COUNT = 3;
-const usz GENERATED_PREPROCESS_BYTES = 256 * 1024;
 
 fn gpu::RecordingWorkCounters recording_work_delta(
     gpu::RecordingWorkCounters after,
@@ -246,11 +245,13 @@ fn int main() {
     gpu::RecordingWorkCounters cold_before =
         vk::command_recording_work_counters(state);
     if (caps.generated_work) {
-        gpu::reserve_generated_scratch(graphics_queue, {
+        gpu::GeneratedScratchDesc scratch = {
+            .pipeline                = pipeline,
+            .kind                    = gpu::GeneratedWorkKind.DISPATCH,
             .max_commands_per_list   = GENERATED_RECORD_ITERATIONS,
-            .max_preprocess_bytes    = GENERATED_PREPROCESS_BYTES,
             .preprocess_buffer_count = GENERATED_RECORD_ITERATIONS,
-        })!!;
+        };
+        gpu::reserve_generated_scratch(graphics_queue, &scratch)!!;
     }
 
     gpu::CommandResolutionStats warmup_resolution;
@@ -437,5 +438,12 @@ fn int main() {
         warm_work.generated_scratch_misses,
     );
     io::printfn("generated preprocess: reuse_events=%d", preprocess_reuses);
+    if (caps.generated_work) {
+        gpu::release_generated_scratch(
+            graphics_queue,
+            pipeline,
+            gpu::GeneratedWorkKind.DISPATCH,
+        )!!;
+    }
     return 0;
 }

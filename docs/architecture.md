@@ -279,8 +279,9 @@ submitted token and alias. Completion observation and discard retire native
 buffers to their recording context. The context owner resets compatible buffers
 before its next begin and reuses their host-side reference and generated-scratch
 arrays. Native command-buffer and host allocation are cold fallbacks only when
-the context has no reusable unit; device teardown relies on command-pool
-destruction.
+the context has no reusable unit. A retained reference array may also grow on
+the cold path when a command list establishes a new high-water mark. Device
+teardown relies on command-pool destruction.
 Invalid transitions return faults,
 and render-pass command constraints remain enforced. A render pass records its
 attachment formats and sample count; a graphics pipeline must match them before
@@ -293,13 +294,15 @@ texture, and owns any non-default native image view. Render-pass begin resolves
 the fixed view table into fixed-size local arrays. It does not create image
 views, grow a cache, or allocate host storage.
 
-Generated commands consume preprocess buffers from an explicit reservation on
-the calling thread's recording context and exact queue. The cold reservation
-sets per-list count and byte bounds plus the number of simultaneously retained
-buffers. Warm recording returns `CAPACITY_EXCEEDED` instead of allocating when
-any bound or compatible-buffer supply is exhausted. Discard and completion
-return reserved buffers to the same context; a different worker never acquires
-them implicitly.
+Generated commands consume preprocess buffers from explicit reservations on
+the calling thread's device recording context. Each reservation is keyed by
+pipeline and generated-work kind; its count bound is translated into exact
+driver-reported size, alignment, and memory-type requirements. The queue passed
+to reservation selects and validates the device rather than creating a
+queue-scoped pool. Warm recording returns `GENERATED_SCRATCH_EXHAUSTED` instead
+of allocating when the count or compatible-buffer supply is exhausted. Discard
+and completion return reserved buffers to the same context; a different worker
+never acquires them implicitly.
 
 Pipeline bind resolves the stable pipeline cell and cache entry once, then
 publishes a complete bound snapshot: expected generation, native pipeline and

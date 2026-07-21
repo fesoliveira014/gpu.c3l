@@ -136,10 +136,10 @@ fn gpu::AttachmentViewHandle? vk_create_attachment_view(
             texture:   desc.texture,
             slot:      texture,
             result:    vk::create_image_view(
-                state.device,
-                &info,
-                null,
-                &native,
+                device:        state.device,
+                p_create_info: &info,
+                p_allocator:   null,
+                p_view:        &native,
             ),
         )!;
         $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):

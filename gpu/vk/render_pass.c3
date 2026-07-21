@@ -94,11 +94,11 @@ fn void? vk_cmd_begin_render_pass(
             operation:   "cmd_begin_render_pass",
         )!;
         track_command_reference(
-            state,
-            record,
-            target.view.owner,
-            target.view.index,
-            target.view.generation,
+            state:      state,
+            record:     record,
+            owner:      target.view.owner,
+            index:      target.view.index,
+            generation: target.view.generation,
         )!;
         if (!texture.usage.color_attach) {
             return report_contract_failure(
@@ -161,11 +161,11 @@ fn void? vk_cmd_begin_render_pass(
                 operation:   "cmd_begin_render_pass",
             )!;
             track_command_reference(
-                state,
-                record,
-                target.resolve_view.owner,
-                target.resolve_view.index,
-                target.resolve_view.generation,
+                state:      state,
+                record:     record,
+                owner:      target.resolve_view.owner,
+                index:      target.resolve_view.index,
+                generation: target.resolve_view.generation,
             )!;
             if (!resolve_texture.usage.color_attach
                 || resolve.sample_count != gpu::SampleCount.ONE
@@ -190,11 +190,11 @@ fn void? vk_cmd_begin_render_pass(
             operation:   "cmd_begin_render_pass",
         )!;
         track_command_reference(
-            state,
-            record,
-            desc.depth.view.owner,
-            desc.depth.view.index,
-            desc.depth.view.generation,
+            state:      state,
+            record:     record,
+            owner:      desc.depth.view.owner,
+            index:      desc.depth.view.index,
+            generation: desc.depth.view.generation,
         )!;
         if (!depth_texture.usage.depth_attach
             || desc.width > depth_view.width
@@ -730,6 +730,7 @@ fn void? vk_cmd_draw_generated(
         state:         state,
         record:        record,
         pipeline:      pipeline,
+        kind:          gpu::GeneratedWorkKind.DRAW,
         layout:        state.generated_draw_layout,
         shader_stages: (vk::ShaderStageFlags)stages,
         records:       &resolved_records,
@@ -804,6 +805,7 @@ fn void? vk_cmd_draw_indexed_generated(
         state:         state,
         record:        record,
         pipeline:      pipeline,
+        kind:          gpu::GeneratedWorkKind.DRAW_INDEXED,
         layout:        state.generated_indexed_draw_layout,
         shader_stages: (vk::ShaderStageFlags)stages,
         records:       &resolved_records,

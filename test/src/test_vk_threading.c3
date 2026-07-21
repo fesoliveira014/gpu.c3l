@@ -34,9 +34,10 @@ struct ReuseWorkerArgs {
 }
 
 struct ScratchWorkerArgs {
-    gpu::Device* device;
-    Atomic{bool}* start;
-    bool         failed;
+    gpu::Device*        device;
+    gpu::PipelineHandle pipeline;
+    Atomic{bool}*       start;
+    bool                failed;
 }
 
 fn gpu::Device make_thr_device() {
@@ -361,11 +362,16 @@ fn int generated_scratch_worker(void* raw_args) {
             args.device,
             gpu::QueueKind.COMPUTE,
         )!!;
-        if (catch reserve_fault = gpu::reserve_generated_scratch(queue, {
+        gpu::GeneratedScratchDesc reservation = {
+            .pipeline                = args.pipeline,
+            .kind                    = gpu::GeneratedWorkKind.DISPATCH,
             .max_commands_per_list   = 1,
-            .max_preprocess_bytes    = 4096,
             .preprocess_buffer_count = 1,
-        })) {
+        };
+        if (catch reserve_fault = gpu::reserve_generated_scratch(
+            queue,
+            &reservation,
+        )) {
             (void)reserve_fault;
             args.failed = true;
             return 1;
@@ -380,21 +386,27 @@ fn int generated_scratch_worker(void* raw_args) {
         vk::GeneratedPreprocessBuffer* reserved =
             &context.reserved_preprocess[0];
         vk::MemoryRequirements requirements = {
-            .size             = 1024,
+            .size             = reserved.size,
             .alignment        = 1,
             .memory_type_bits = 1 << reserved.memory_type,
         };
         if (catch acquire_fault = vk::acquire_generated_preprocess_buffer(
-            state,
-            record,
-            &requirements,
-            1,
+            state:        state,
+            record:       record,
+            pipeline:     args.pipeline,
+            kind:         gpu::GeneratedWorkKind.DISPATCH,
+            requirements: &requirements,
+            max_count:    1,
         )) {
             (void)acquire_fault;
             args.failed = true;
         }
         gpu::discard_commands(&commands)!!;
-        gpu::reserve_generated_scratch(queue, {})!!;
+        gpu::release_generated_scratch(
+            queue,
+            args.pipeline,
+            gpu::GeneratedWorkKind.DISPATCH,
+        )!!;
     };
     return args.failed ? 1 : 0;
 }
@@ -437,12 +449,31 @@ fn void generated_scratch_reservations_are_thread_context_local() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
     if (!gpu::get_device_caps(&device)!!.generated_work) return;
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = THR_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ComputePipelineDesc pipeline_desc = {
+        .shader             = shader,
+        .push_constant_size = gpu::RootPush::size,
+    };
+    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(
+        &device,
+        &pipeline_desc,
+    )!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     Atomic{bool} start;
     ScratchWorkerArgs[2] args;
     Thread[2] workers;
     for (uint i = 0; i < 2; i++) {
-        args[i] = { .device = &device, .start = &start };
+        args[i] = {
+            .device   = &device,
+            .pipeline = pipeline,
+            .start    = &start,
+        };
         workers[i].create(&generated_scratch_worker, &args[i])!!;
     }
     start.store(true, AtomicOrdering.RELEASE);

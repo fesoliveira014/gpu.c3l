@@ -28,15 +28,18 @@ struct ThreadRecordingContext {
 }
 
 struct GeneratedPreprocessBuffer {
-    vk::Buffer        buffer;
-    vma::Allocation   allocation;
-    vk::DeviceAddress address;
-    vk::DeviceSize    size;
-    uint              memory_type;
+    vk::Buffer             buffer;
+    vma::Allocation        allocation;
+    vk::DeviceAddress      address;
+    vk::DeviceSize         size;
+    uint                   memory_type;
+    gpu::PipelineHandle    reservation_pipeline;
+    gpu::GeneratedWorkKind reservation_kind;
+    uint                   reservation_max_commands;
     RecordingContextHandle reservation_context;
-    uint              reservation_index;
-    bool              reservation_owned;
-    bool              reservation_in_use;
+    uint                   reservation_index;
+    bool                   reservation_owned;
+    bool                   reservation_in_use;
 }
 
 struct CommandRecordingStats {
@@ -66,8 +69,7 @@ struct RecordingContextState {
     vk::CommandPool[]             transfer_pools;
     RetiredCommandBuffer[]        retired_commands;
     uint                          retired_command_count;
-    gpu::GeneratedScratchDesc     generated_scratch;
-    GeneratedPreprocessBuffer[] reserved_preprocess;
+    GeneratedPreprocessBuffer[]   reserved_preprocess;
     bool                          compute_pools_distinct;
 }
 
@@ -224,7 +226,6 @@ fn void destroy_context_pools_with_ops(
         context.reserved_preprocess,
     );
     context.reserved_preprocess = {};
-    context.generated_scratch = {};
     if (context.graphics_pools.ptr != null) {
         foreach (pool : context.graphics_pools) {
             if (pool != null) ops.destroy(ops.user_data, state.device, pool);
@@ -363,26 +364,89 @@ fn bool recording_context_quiescent_locked(
     return true;
 }
 
-fn uint preferred_generated_preprocess_memory_type_bits(
+fn vk::MemoryRequirements? generated_scratch_requirements(
     VkDeviceState* state,
+    gpu::GeneratedScratchDesc* desc,
 ) {
-    vk::PhysicalDeviceMemoryProperties properties;
-    vk::get_physical_device_memory_properties(
-        state.physical_device,
-        &properties,
+    PipelineSlot* slot = state.pipelines.get(desc.pipeline)!;
+    if (slot.entry >= state.pipeline_cache.entries.len
+        || !state.pipeline_cache.entries[slot.entry].used) {
+        return gpu::INVALID_HANDLE~;
+    }
+    PipelineKind pipeline_kind = (PipelineKind)state.pipeline_cache
+        .entries[slot.entry].key.kind;
+    vk::IndirectCommandsLayoutEXT layout;
+    switch (desc.kind) {
+        case gpu::GeneratedWorkKind.DRAW:
+            if (pipeline_kind != PipelineKind.GRAPHICS) {
+                return gpu::INVALID_ARGUMENT~;
+            }
+            layout = state.generated_draw_layout;
+        case gpu::GeneratedWorkKind.DRAW_INDEXED:
+            if (pipeline_kind != PipelineKind.GRAPHICS) {
+                return gpu::INVALID_ARGUMENT~;
+            }
+            layout = state.generated_indexed_draw_layout;
+        case gpu::GeneratedWorkKind.DISPATCH:
+            if (pipeline_kind != PipelineKind.COMPUTE) {
+                return gpu::INVALID_ARGUMENT~;
+            }
+            layout = slot.generated_dispatch_layout;
+        default:
+            return gpu::INVALID_ARGUMENT~;
+    }
+    if (layout == null) return gpu::BACKEND_ERROR~;
+
+    vk::GeneratedCommandsPipelineInfoEXT pipeline_info =
+        vk::generated_commands_pipeline_info_ext()
+            .set_pipeline(slot.pipeline);
+    vk::GeneratedCommandsMemoryRequirementsInfoEXT requirements_info =
+        vk::generated_commands_memory_requirements_info_ext()
+            .set_next(&pipeline_info)
+            .set_indirect_commands_layout(layout)
+            .set_max_sequence_count(desc.max_commands_per_list);
+    vk::MemoryRequirements2 requirements2 = vk::memory_requirements2();
+    state.device_dispatch.generated_work.get_memory_requirements(
+        state.device,
+        &requirements_info,
+        &requirements2,
     );
-    for (uint i = 0; i < properties.memory_type_count; i++) {
-        if (((uint)properties.memory_types[i].property_flags
-            & (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT) != 0) {
-            return 1 << i;
+    vk::MemoryRequirements requirements = requirements2.memory_requirements;
+    if (requirements.size > 0
+        && (requirements.alignment == 0
+            || requirements.memory_type_bits == 0)) {
+        return gpu::BACKEND_ERROR~;
+    }
+    return requirements;
+}
+
+fn bool generated_reservation_matches(
+    GeneratedPreprocessBuffer* buffer,
+    gpu::PipelineHandle pipeline,
+    gpu::GeneratedWorkKind kind,
+) {
+    return buffer.reservation_pipeline == pipeline
+        && buffer.reservation_kind == kind;
+}
+
+fn bool generated_scratch_references_pipeline(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+) {
+    foreach (&cell : state.recording_contexts.slots[
+        :state.recording_contexts.next_new
+    ]) {
+        if (!cell.used) continue;
+        foreach (&buffer : cell.value.reserved_preprocess) {
+            if (buffer.reservation_pipeline == pipeline) return true;
         }
     }
-    return uint::max;
+    return false;
 }
 
 fn void? vk_reserve_generated_scratch(
     gpu::Queue queue,
-    gpu::GeneratedScratchDesc desc,
+    gpu::GeneratedScratchDesc* desc,
 ) @private {
     gpu::Device device = queue.device;
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(
@@ -393,6 +457,7 @@ fn void? vk_reserve_generated_scratch(
         state,
         device,
     )!;
+    vk::MemoryRequirements requirements;
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
@@ -401,6 +466,7 @@ fn void? vk_reserve_generated_scratch(
         if (!recording_context_quiescent_locked(state, context_handle)) {
             return gpu::RESOURCE_IN_USE~;
         }
+        requirements = generated_scratch_requirements(state, desc)!;
     }
 
     GeneratedPreprocessBuffer[] reserved;
@@ -414,16 +480,19 @@ fn void? vk_reserve_generated_scratch(
     }
     defer catch free_reserved_generated_preprocess_buffers(state, reserved);
     for (uint i = 0; i < desc.preprocess_buffer_count; i++) {
-        reserved[i] = allocate_generated_preprocess_buffer(
-            state:            state,
-            size:             (vk::DeviceSize)desc.max_preprocess_bytes,
-            alignment:        256,
-            memory_type_bits: preferred_generated_preprocess_memory_type_bits(
-                state,
-            ),
-        )!;
+        if (requirements.size > 0) {
+            reserved[i] = allocate_generated_preprocess_buffer(
+                state:            state,
+                size:             requirements.size,
+                alignment:        requirements.alignment,
+                memory_type_bits: requirements.memory_type_bits,
+            )!;
+        }
+        reserved[i].reservation_pipeline = desc.pipeline;
+        reserved[i].reservation_kind = desc.kind;
+        reserved[i].reservation_max_commands =
+            desc.max_commands_per_list;
         reserved[i].reservation_context = context_handle;
-        reserved[i].reservation_index = i;
         reserved[i].reservation_owned = true;
     }
 
@@ -436,18 +505,52 @@ fn void? vk_reserve_generated_scratch(
         if (!recording_context_quiescent_locked(state, context_handle)) {
             return gpu::RESOURCE_IN_USE~;
         }
+        (void)state.pipelines.get(desc.pipeline)!;
         RecordingContextState* context = state.recording_contexts.get(
             context_handle,
         )!;
+        previous = context.reserved_preprocess;
+        usz kept_count;
+        foreach (&buffer : previous) {
+            if (!generated_reservation_matches(
+                buffer,
+                desc.pipeline,
+                desc.kind,
+            )) kept_count++;
+        }
+        usz combined_count = kept_count
+            + (usz)desc.preprocess_buffer_count;
+        GeneratedPreprocessBuffer[] combined = alloc::new_array(
+            state.host_allocator,
+            GeneratedPreprocessBuffer,
+            (sz)combined_count,
+        );
+        note_recording_host_allocation(state);
+        usz next;
+        foreach (&buffer : previous) {
+            if (generated_reservation_matches(
+                buffer,
+                desc.pipeline,
+                desc.kind,
+            )) continue;
+            buffer.reservation_index = (uint)next;
+            combined[next++] = *buffer;
+            *buffer = {};
+        }
+        foreach (&buffer : reserved) {
+            buffer.reservation_index = (uint)next;
+            combined[next++] = *buffer;
+            *buffer = {};
+        }
         foreach (&unit : context.retired_commands[
             :context.retired_command_count
         ]) {
             if (unit.generated_preprocess.len
-                >= desc.preprocess_buffer_count) continue;
+                >= combined_count) continue;
             GeneratedPreprocessBuffer[] grown = alloc::new_array(
                 state.host_allocator,
                 GeneratedPreprocessBuffer,
-                desc.preprocess_buffer_count,
+                (sz)combined_count,
             );
             note_recording_host_allocation(state);
             if (unit.generated_preprocess.ptr != null) {
@@ -458,10 +561,71 @@ fn void? vk_reserve_generated_scratch(
             }
             unit.generated_preprocess = grown;
         }
+        context.reserved_preprocess = combined;
+    }
+    free_reserved_generated_preprocess_buffers(state, previous);
+    free_reserved_generated_preprocess_buffers(state, reserved);
+}
+
+fn void? vk_release_generated_scratch(
+    gpu::Queue queue,
+    gpu::PipelineHandle pipeline,
+    gpu::GeneratedWorkKind kind,
+) @private {
+    gpu::Device device = queue.device;
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(
+        &device,
+    );
+    if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
+    RecordingContextHandle context_handle = thread_recording_context(
+        state,
+        device,
+    )!;
+    GeneratedPreprocessBuffer[] previous;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        if (!recording_context_quiescent_locked(state, context_handle)) {
+            return gpu::RESOURCE_IN_USE~;
+        }
+        RecordingContextState* context = state.recording_contexts.get(
+            context_handle,
+        )!;
         previous = context.reserved_preprocess;
-        context.generated_scratch = desc;
-        context.reserved_preprocess = reserved;
-        reserved = {};
+        usz kept_count;
+        foreach (&buffer : previous) {
+            if (!generated_reservation_matches(
+                buffer,
+                pipeline,
+                kind,
+            )) kept_count++;
+        }
+        if (kept_count == previous.len) {
+            return gpu::INVALID_RESOURCE_STATE~;
+        }
+        GeneratedPreprocessBuffer[] kept;
+        if (kept_count > 0) {
+            kept = alloc::new_array(
+                state.host_allocator,
+                GeneratedPreprocessBuffer,
+                (sz)kept_count,
+            );
+            note_recording_host_allocation(state);
+        }
+        usz next;
+        foreach (&buffer : previous) {
+            if (generated_reservation_matches(
+                buffer,
+                pipeline,
+                kind,
+            )) continue;
+            buffer.reservation_index = (uint)next;
+            kept[next++] = *buffer;
+            *buffer = {};
+        }
+        context.reserved_preprocess = kept;
     }
     free_reserved_generated_preprocess_buffers(state, previous);
 }
@@ -548,12 +712,12 @@ fn void? vk_begin_commands_with_context(
     GeneratedPreprocessBuffer[] generated_preprocess;
     bool newly_allocated;
     if (take_available_command_buffer(
-        state,
-        context_handle,
-        pool,
-        &cmd,
-        &references,
-        &generated_preprocess,
+        state:                    state,
+        context_handle:           context_handle,
+        pool:                     pool,
+        out_buffer:               &cmd,
+        out_references:           &references,
+        out_generated_preprocess: &generated_preprocess,
     )) {
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
@@ -592,11 +756,11 @@ fn void? vk_begin_commands_with_context(
             state.resource_mutex.lock()!!;
             defer state.resource_mutex.unlock();
             enqueue_retired_command_buffer_locked(
-                state:          state,
-                context_handle: context_handle,
-                pool:           pool,
-                buffer:         cmd,
-                references:     references,
+                state:                state,
+                context_handle:       context_handle,
+                pool:                 pool,
+                buffer:               cmd,
+                references:           references,
                 generated_preprocess: generated_preprocess,
             );
         }
@@ -608,8 +772,7 @@ fn void? vk_begin_commands_with_context(
 
     if (state.generated_work.enabled && generated_preprocess.ptr == null) {
         usz capacity = GENERATED_PREPROCESS_INITIAL_CAPACITY;
-        usz reserved_capacity = (usz)context.generated_scratch
-            .preprocess_buffer_count;
+        usz reserved_capacity = context.reserved_preprocess.len;
         if (reserved_capacity > capacity) capacity = reserved_capacity;
         generated_preprocess = alloc::new_array(
             state.host_allocator,
@@ -711,11 +874,11 @@ fn void? vk_discard_commands(
     record.generated_preprocess_count = 0;
     (void)state.commands.free(handle);
     enqueue_retired_command_buffer_locked(
-        state:          state,
-        context_handle: context,
-        pool:           command_pool,
-        buffer:         command_buffer,
-        references:     references,
+        state:                state,
+        context_handle:       context,
+        pool:                 command_pool,
+        buffer:               command_buffer,
+        references:           references,
         generated_preprocess: generated_preprocess,
     );
 }
@@ -1500,6 +1663,7 @@ fn void? execute_generated_work(
     VkDeviceState* state,
     CommandRecord* record,
     BoundPipeline* pipeline,
+    gpu::GeneratedWorkKind kind,
     vk::IndirectCommandsLayoutEXT layout,
     vk::ShaderStageFlags shader_stages,
     ResolvedSpan* records,
@@ -1524,10 +1688,12 @@ fn void? execute_generated_work(
     GeneratedPreprocessBuffer* preprocess = null;
     if (requirements2.memory_requirements.size > 0) {
         preprocess = acquire_generated_preprocess_buffer(
-            state,
-            record,
-            &requirements2.memory_requirements,
-            max_count,
+            state:        state,
+            record:       record,
+            pipeline:     pipeline.handle,
+            kind:         kind,
+            requirements: &requirements2.memory_requirements,
+            max_count:    max_count,
         )!;
     }
     vk::GeneratedCommandsInfoEXT info = vk::generated_commands_info_ext()
@@ -1610,6 +1776,7 @@ fn void? vk_cmd_dispatch_generated(
         state:         state,
         record:        record,
         pipeline:      pipeline,
+        kind:          gpu::GeneratedWorkKind.DISPATCH,
         layout:        layout,
         shader_stages: vk::ShaderStageFlagBits.COMPUTE_BIT,
         records:       &resolved_records,
@@ -1741,6 +1908,8 @@ fn GeneratedPreprocessBuffer? allocate_generated_preprocess_buffer(
 fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     VkDeviceState* state,
     CommandRecord* record,
+    gpu::PipelineHandle pipeline,
+    gpu::GeneratedWorkKind kind,
     vk::MemoryRequirements* requirements,
     uint max_count,
 ) {
@@ -1749,16 +1918,15 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     RecordingContextState* context = state.recording_contexts.get(
         record.context,
     )!;
-    if (max_count > context.generated_scratch.max_commands_per_list
-        || requirements.size
-            > context.generated_scratch.max_preprocess_bytes
-        || record.generated_preprocess_count
+    if (record.generated_preprocess_count
             >= record.generated_preprocess.len) {
         note_generated_scratch_miss(state);
-        return gpu::CAPACITY_EXCEEDED~;
+        return gpu::GENERATED_SCRATCH_EXHAUSTED~;
     }
     foreach (&reserved : context.reserved_preprocess) {
-        if (reserved.reservation_in_use
+        if (!generated_reservation_matches(reserved, pipeline, kind)
+            || max_count > reserved.reservation_max_commands
+            || reserved.reservation_in_use
             || !generated_preprocess_compatible(
                 reserved,
                 requirements,
@@ -1773,7 +1941,7 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
         return &record.generated_preprocess[index];
     }
     note_generated_scratch_miss(state);
-    return gpu::CAPACITY_EXCEEDED~;
+    return gpu::GENERATED_SCRATCH_EXHAUSTED~;
 }
 
 <* Snapshot test/benchmark recording work after externally synchronizing the

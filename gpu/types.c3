@@ -92,15 +92,15 @@ struct CommandListHandle {
 }
 $assert CommandListHandle::size <= ulong::size * 2;
 
-const Device            DEVICE_INVALID              = {};
-const GpuAllocation     GPU_ALLOCATION_INVALID      = {};
-const TextureHandle     TEXTURE_HANDLE_INVALID      = {};
-const AttachmentViewHandle ATTACHMENT_VIEW_INVALID = {};
-const TextureView       TEXTURE_VIEW_INVALID        = {};
-const Sampler           SAMPLER_INVALID             = {};
-const PipelineHandle    PIPELINE_HANDLE_INVALID     = {};
-const SwapchainHandle   SWAPCHAIN_HANDLE_INVALID    = {};
-const CommandListHandle COMMAND_LIST_HANDLE_INVALID = {};
+const Device               DEVICE_INVALID                 = {};
+const GpuAllocation        GPU_ALLOCATION_INVALID         = {};
+const TextureHandle        TEXTURE_HANDLE_INVALID         = {};
+const AttachmentViewHandle ATTACHMENT_VIEW_HANDLE_INVALID = {};
+const TextureView          TEXTURE_VIEW_INVALID           = {};
+const Sampler              SAMPLER_INVALID                = {};
+const PipelineHandle       PIPELINE_HANDLE_INVALID        = {};
+const SwapchainHandle      SWAPCHAIN_HANDLE_INVALID       = {};
+const CommandListHandle    COMMAND_LIST_HANDLE_INVALID    = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
@@ -121,10 +121,7 @@ fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
         && self.generation == other.generation;
 }
 fn bool AttachmentViewHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
-fn bool AttachmentViewHandle.equals(
-    self,
-    AttachmentViewHandle other,
-) @operator(==) {
+fn bool AttachmentViewHandle.equals(self, AttachmentViewHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;

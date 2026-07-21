@@ -859,11 +859,12 @@ fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     gpu::GeneratedScratchDesc scratch = {
+        .pipeline                = pipeline,
+        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
         .max_commands_per_list   = 1,
-        .max_preprocess_bytes    = 1024 * 1024,
         .preprocess_buffer_count = 1,
     };
-    gpu::reserve_generated_scratch(queue, scratch)!!;
+    gpu::reserve_generated_scratch(queue, &scratch)!!;
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, pipeline);
@@ -919,6 +920,12 @@ fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
         args.failure);
     assert(state.generated_dispatch_layout_read_observed == expected_layout,
         "recording reads the original pipeline slot's generated layout");
+    gpu::discard_commands(&commands)!!;
+    gpu::release_generated_scratch(
+        queue,
+        pipeline,
+        gpu::GeneratedWorkKind.DISPATCH,
+    )!!;
 }
 
 fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test {

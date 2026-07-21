@@ -536,8 +536,8 @@ class PerformanceContractTests(unittest.TestCase):
             self.mutate(
                 root,
                 "gpu/vk/command.c3",
-                "context.generated_scratch.max_commands_per_list",
-                "context.generated_scratch.preprocess_buffer_count",
+                "max_count > reserved.reservation_max_commands",
+                "max_count > reservation_max_commands",
             )
             errors = check_performance_contract.check(root)
             self.assertTrue(any("bounded reservation step" in error for error in errors))

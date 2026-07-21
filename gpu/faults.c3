@@ -36,7 +36,7 @@ faultdef
     // A handle table hit its configured resource capacity.
     SLOT_TABLE_FULL,
     // Explicitly reserved recording storage cannot satisfy the requested work.
-    CAPACITY_EXCEEDED,
+    GENERATED_SCRATCH_EXHAUSTED,
     // No free descriptor slot: capacity is too small for live descriptors.
     DESCRIPTOR_HEAP_FULL,
     // The driver rejected pipeline creation (invalid state combination or

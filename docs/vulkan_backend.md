@@ -226,13 +226,17 @@ pipeline layout. Recording reads that stable slot value directly; it never
 searches layout-cache storage that pipeline creation may grow. The device-owned
 compute-layout cache remains the sole owner and destroys both handles at device
 teardown. Generated recording uses implicit preprocessing with buffers reserved
-explicitly by `reserve_generated_scratch` on the calling thread's exact
-recording context and queue. Reservation is a cold operation that allocates the
-declared number of addressable VMA buffers. Warm generated calls borrow a
-compatible reserved buffer, retain it through command completion, and return
-`CAPACITY_EXCEEDED` without allocating when the count, byte, per-list slot, or
-available-buffer bound is exhausted. Discard and completion return each buffer
-to its owning context. An all-zero descriptor releases a quiescent reservation.
+explicitly by `reserve_generated_scratch` on the calling thread's device
+recording context. The queue argument selects and validates the device. For
+each pipeline and generated-work kind, reservation queries
+`vkGetGeneratedCommandsMemoryRequirementsEXT` with the exact layout and maximum
+sequence count, then allocates the requested number of addressable VMA buffers
+using the returned size, alignment, and memory-type mask. Warm generated calls
+borrow a matching buffer, retain it through command completion, and return
+`GENERATED_SCRATCH_EXHAUSTED` without allocating when the count or available
+compatible-buffer bound is exhausted. Discard and completion return each
+buffer to its owning context. `release_generated_scratch` removes one quiescent
+pipeline/kind reservation.
 A barrier with
 `hazards.draw_arguments` includes both indirect-command and generated
 command-preprocess reads when this capability is enabled.

@@ -176,6 +176,7 @@ fn void pin_commands_and_completion() {
         .dst     = span,
     };
     gpu::PipelineHandle pipeline = {};
+    gpu::AttachmentViewHandle attachment_view = {};
     gpu::DepthState depth = {};
     gpu::Viewport viewport = {};
     gpu::ScissorRect scissor = {};
@@ -190,12 +191,18 @@ fn void pin_commands_and_completion() {
     gpu::SubmitDesc submit = {};
     gpu::CompletionPoint completion = {};
     gpu::GeneratedScratchDesc generated_scratch = {
+        .pipeline                = pipeline,
+        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
         .max_commands_per_list   = 1,
-        .max_preprocess_bytes    = 256,
         .preprocess_buffer_count = 1,
     };
 
-    (void)gpu::reserve_generated_scratch(queue, generated_scratch);
+    (void)gpu::reserve_generated_scratch(queue, &generated_scratch);
+    (void)gpu::release_generated_scratch(
+        queue,
+        pipeline,
+        gpu::GeneratedWorkKind.DISPATCH,
+    );
     (void)gpu::begin_commands(queue);
     (void)gpu::cmd_copy_buffer(&commands, &copy);
     (void)gpu::cmd_fill_buffer(&commands, span, 0);

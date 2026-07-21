@@ -149,7 +149,14 @@ def valid_document() -> dict:
                         "reserve_generated_scratch",
                         "void?",
                         ("queue", "Queue"),
-                        ("desc", "GeneratedScratchDesc"),
+                        ("desc", "GeneratedScratchDesc*"),
+                    ),
+                    api_function(
+                        "release_generated_scratch",
+                        "void?",
+                        ("queue", "Queue"),
+                        ("pipeline", "PipelineHandle"),
+                        ("kind", "GeneratedWorkKind"),
                     ),
                     api_function(
                         "get_texture_requirements",
@@ -546,11 +553,17 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "GeneratedWorkKind",
+                        "kind": "enum",
+                        "members": [],
+                    },
+                    {
                         "name": "GeneratedScratchDesc",
                         "kind": "struct",
                         "members": [
+                            {"name": "pipeline", "type": {"name": "PipelineHandle"}},
+                            {"name": "kind", "type": {"name": "GeneratedWorkKind"}},
                             {"name": "max_commands_per_list", "type": {"name": "uint"}},
-                            {"name": "max_preprocess_bytes", "type": {"name": "usz"}},
                             {"name": "preprocess_buffer_count", "type": {"name": "uint"}},
                         ],
                     },
@@ -2472,7 +2485,7 @@ method gpu::Runtime.is_valid
             if entry["name"] == "reserve_generated_scratch")
         create["return_type"]["name"] = "TextureView?"
         destroy["members"][1]["type"]["name"] = "TextureView"
-        reserve["members"][1]["type"]["name"] = "GeneratedScratchDesc*"
+        reserve["members"][1]["type"]["name"] = "GeneratedScratchDesc"
         failures = check_public_api.validate_document(document)
         self.assertIn("create_attachment_view has the wrong return type", failures)
         self.assertIn("destroy_attachment_view has the wrong parameters", failures)

@@ -86,20 +86,21 @@ OWNERSHIP_TRANSFER_CALLEES = (
     "vk_submit_with",
 )
 BACKEND_OWNERSHIP_DIGESTS = {
-    "destroy_context_pools_with_ops": "6cccaab6c4ab05d4d9fb6b284384eafe66513f4250ef836b287ef67c6a294e32",
-    "preferred_generated_preprocess_memory_type_bits": "614458bc7fa64be39554d1b44941566eefae04484ab26a65650bd2b92ff23254",
-    "vk_reserve_generated_scratch": "60a5beefa1563809568cf432d2b0b9dbec3cfc1a1c1b52dc2667c605740e0209",
+    "destroy_context_pools_with_ops": "3557e590bc22dc2c68fbce07a214ea56ffd136c1203b339cdac4db3c7edca975",
+    "generated_scratch_requirements": "0d2fc883196ed20b3592c3c8141668f7f43047858614e6592eb836a3d837fb29",
+    "vk_reserve_generated_scratch": "aa90c235e2fe339391bcf97831b6f0d325b9e2ae817393916e07a7e25af3ece6",
+    "vk_release_generated_scratch": "2daebee02d4d33e23ffc870a86b879243c735f55226b8a0254b337ad3e060104",
     "take_available_command_buffer": "862b1ca13ac29dd551057bdf41896f22fb57cffebaaf19bc63440cbc07eab238",
-    "vk_begin_commands_with_context": "eb3d25935562cf415d4fba6fab72a2c81f37db59c96f99cebbaa1c97dd41d0e8",
-    "vk_discard_commands": "e974f9d0f26cb9d4f32729bcdbcc484bfe67b2ec1ddb793558cc4cfe0eb06352",
-    "execute_generated_work": "65ac7af3b35eb5dbaf980dd9785c8b600b29c8fd6bcce1ec42c777fdb8bffcb3",
+    "vk_begin_commands_with_context": "993b27c291128abaf97f92195b0ec28cc15b7b6fd9c5b606a5bbb87f1f19911d",
+    "vk_discard_commands": "de31365009abdfaa8746e216c78f84a814626bdfc89b5d0e88336a37fb3a33e1",
+    "execute_generated_work": "0c1fb3884d112926a75f6cc5bee54722a74868f1ab7aae69bb69a4d8af0360be",
     "generated_preprocess_compatible": "df5842124c9c4e5427be4440e3a6ce3df20282e3d3b7d9d7557ac6bec007b5a0",
     "recycle_generated_preprocess_buffers_locked": "38b1c600ce0ea88ec08d5fa56b3e61eaf97007c10afc94aec6893d1dc9a5da8b",
     "command_recording_stats": "381e23f43057fb0882396bc074d75c196da6fc3fe2b74547f300223eced04a2e",
     "free_generated_preprocess_buffers": "ff81c290557da4ecc7722c172fc4a3904655642220de6056e8c9c3412eea0874",
     "free_reserved_generated_preprocess_buffers": "a4e9fc1d9b5e6d1a010e634ceab4bfd7090707552f5d39abf84d736faa59c744",
     "allocate_generated_preprocess_buffer": "5e726f32786526ffc3c674902100be1a15c430ec71a13c0e476e0b78dde97e48",
-    "acquire_generated_preprocess_buffer": "8cd6979287712ae3debd37941941f6b30fb4e656d3da8f0e00e1ea3ffbcae647",
+    "acquire_generated_preprocess_buffer": "d941f2be232aaaee3236a9a041104c793766c136640bbfd87627c3144357107d",
 }
 COMMAND_STATE_OWNERSHIP_DIGESTS = {
     "release_command": "052c7e5e284197a6d22729dc7045397c37535c0a9c50aaf3ec163211d0859157",
@@ -107,7 +108,7 @@ COMMAND_STATE_OWNERSHIP_DIGESTS = {
 }
 LIFETIME_OWNERSHIP_DIGESTS = {
     "publish_submitted_commands": "cdbc47b4f1b25be4fc79e04f6ae8ff410b219ab6854924df0edabd389376f066",
-    "release_submitted_command_batch": "e17a53ba7eefb6143fbbbf3920b1d81ed2719b9e90e86961c93b7e4797ccbabd",
+    "release_submitted_command_batch": "62e62aa38aadd18bf69a42b62d3851be0ce30b9007e948f9123261bcf091656e",
     "release_completed_submitted_commands_locked": "bd81cb2ab4514a5428d70fa75883594913b7e77d0c15f123593b008f7e0e50d4",
     "destroy_submitted_commands": "1858d0b6e5a0d7659b1ed6ca6a08abf7e13f5577cdcea9cdc48dfdcde0d95d60",
     "release_completed_submitted_commands": "55704517d5dbeb414da3f31d973f083bcd7f0cf6203d058bd70f84b466fa19bd",
@@ -452,12 +453,12 @@ def check(root: Path = ROOT) -> list[str]:
         ),
     )
     for token in (
-        "context.generated_scratch.max_commands_per_list",
-        "context.generated_scratch.max_preprocess_bytes",
+        "generated_reservation_matches(reserved, pipeline, kind)",
+        "max_count > reserved.reservation_max_commands",
         "reserved.reservation_in_use",
         "generated_preprocess_compatible(",
         "record.generated_preprocess_count++",
-        "return gpu::CAPACITY_EXCEEDED~;",
+        "return gpu::GENERATED_SCRATCH_EXHAUSTED~;",
     ):
         if token not in acquire:
             errors.append(
@@ -474,7 +475,7 @@ def check(root: Path = ROOT) -> list[str]:
     )
 
     allowed_execute_record_lines = (
-        "record,",
+        "record:       record,",
         "record.command_buffer,",
     )
     execute_record_lines = tuple(
