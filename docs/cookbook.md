@@ -226,7 +226,7 @@ gpu::ColorTargetDesc[3] colors = {
     { .view = position_view },
 };
 gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, ... };
-// pipeline: .colors lists all three target formats/blends/write masks;
+// pipeline: .colors lists each target's format, blend, and write mask;
 // frag writes locations 0..2.
 ```
 

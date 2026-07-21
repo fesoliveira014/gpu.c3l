@@ -99,8 +99,16 @@ fn int record_generated_dispatch(void* raw_args) {
 }
 
 fn CacheShaders make_cache_shaders() {
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = CACHE_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = CACHE_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert_sd = {
+        .stage       = gpu::ShaderStage.VERTEX,
+        .spirv       = CACHE_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderDesc frag_sd = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = CACHE_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
     return {
         .vert = gpu::prepare_shader_code(&vert_sd)!!,
         .frag = gpu::prepare_shader_code(&frag_sd)!!,
@@ -123,7 +131,10 @@ fn void identical_descs_alias_one_entry() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] pipeline_colors = {{ .format = gpu::Format.RGBA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, pipeline_colors[..]);
 
     gpu::PipelineHandle first = gpu::create_graphics_pipeline(&device, &desc)!!;
@@ -199,6 +210,32 @@ fn void per_target_state_and_blend_normalization_split_entries() @test {
     defer gpu::destroy_pipeline(&device, masked_second)!!;
     assert(cache_entry_count(&device) == 3,
         "zero write mask erases semantically unobservable blend identity");
+}
+
+fn void integer_color_targets_reject_blending_before_native_creation() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::ColorTargetState[1] colors = {{
+        .format = gpu::Format.R8_UINT,
+        .blend = {
+            .enable = true,
+        },
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc desc = base_graphics_desc(
+        &shaders,
+        colors[..],
+    );
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    ulong native_before = vk::pipeline_native_create_count(state);
+
+    assert(@catch(gpu::create_graphics_pipeline(&device, &desc))
+        == gpu::INVALID_ARGUMENT,
+        "integer color targets reject enabled blending");
+    assert(vk::pipeline_native_create_count(state) == native_before,
+        "integer blend validation precedes native pipeline creation");
 }
 
 fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
@@ -405,12 +442,18 @@ fn void formats_split_entries_and_limits_enforced() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] rgba_targets = {{ .format = gpu::Format.RGBA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] rgba_targets = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc desc_rgba = base_graphics_desc(&shaders, rgba_targets[..]);
     gpu::PipelineHandle first = gpu::create_graphics_pipeline(&device, &desc_rgba)!!;
     defer gpu::destroy_pipeline(&device, first)!!;
 
-    gpu::ColorTargetState[1] bgra_targets = {{ .format = gpu::Format.BGRA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] bgra_targets = {{
+        .format     = gpu::Format.BGRA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc desc_bgra = base_graphics_desc(&shaders, bgra_targets[..]);
     gpu::PipelineHandle second = gpu::create_graphics_pipeline(&device, &desc_bgra)!!;
     defer gpu::destroy_pipeline(&device, second)!!;
@@ -453,7 +496,11 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc comp_sd = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
     gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
 
     gpu::ComputePipelineDesc desc = { .shader = comp };
@@ -672,7 +719,10 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &lines_view)!!;
 
-    gpu::ColorTargetState[1] pipeline_colors = {{ .format = gpu::Format.RGBA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc pipeline_desc = base_graphics_desc(&shaders, pipeline_colors[..]);
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
@@ -885,7 +935,10 @@ fn void alias_survives_peer_destroy() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] pipeline_colors = {{ .format = gpu::Format.RGBA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, pipeline_colors[..]);
     gpu::PipelineHandle doomed = gpu::create_graphics_pipeline(&device, &desc)!!;
     gpu::PipelineHandle survivor = gpu::create_graphics_pipeline(&device, &desc)!!;
@@ -972,7 +1025,10 @@ fn void index_survives_create_alias_destroy_churn() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] pipeline_colors = {{ .format = gpu::Format.RGBA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     uint[CHURN_CAPACITY] teardown_order = { 3, 0, 7, 1, 6, 2, 5, 4 };
 
     for (uint round = 0; round < CHURN_ROUNDS; round++) {
@@ -988,7 +1044,8 @@ fn void index_survives_create_alias_destroy_churn() @test {
             handles[i] = gpu::create_graphics_pipeline(&device, &variant)!!;
         }
         assert(cache_index_consistent(&device), "index consistent once all distinct entries are inserted");
-        assert(cache_entry_count(&device) == CHURN_CAPACITY, "each round inserts exactly CHURN_CAPACITY distinct entries");
+        assert(cache_entry_count(&device) == CHURN_CAPACITY,
+            "each round inserts exactly CHURN_CAPACITY distinct entries");
 
         // Alias two live entries; the refcount>0 path must not touch the index.
         gpu::GraphicsPipelineDesc alias_desc = base_graphics_desc(&shaders, pipeline_colors[..]);
@@ -1020,7 +1077,10 @@ fn void small_pipeline_capacity_faults_at_limit() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] pipeline_colors = {{ .format = gpu::Format.RGBA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::PipelineHandle[CAPACITY] handles;
     for (uint i = 0; i < CAPACITY; i++) {
         pipeline_colors[0].write_mask = {
@@ -1045,7 +1105,10 @@ fn void line_polygon_mode_respects_optional_feature() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] pipeline_colors = {{ .format = gpu::Format.RGBA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     bool supported = state.caps.line_polygon_mode;
 
@@ -1082,7 +1145,11 @@ fn void compute_layout_exists_before_pipeline_creation() @test {
     vk::IndirectCommandsLayoutEXT generated_layout =
         state.generated_dispatch_layout;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc comp_sd = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
     gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
     gpu::ComputePipelineDesc desc = { .shader = comp };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &desc)!!;
@@ -1298,7 +1365,10 @@ fn void graphics_pipeline_batch_revalidates_shared_shader_roles() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] pipeline_colors = {{ .format = gpu::Format.RGBA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc[1] descs;
     descs[0] = base_graphics_desc(&shaders, pipeline_colors[..]);
     descs[0].fragment_shader = descs[0].vertex_shader;
@@ -1386,7 +1456,10 @@ fn void pipeline_batch_invalid_state_prevalidates_transactionally() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] pipeline_colors = {{ .format = gpu::Format.RGBA8_UNORM, .write_mask = gpu::COLOR_WRITE_ALL }};
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc[2] descs;
     descs[0] = base_graphics_desc(&shaders, pipeline_colors[..]);
     descs[1] = descs[0];

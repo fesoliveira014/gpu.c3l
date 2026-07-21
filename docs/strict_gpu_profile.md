@@ -82,9 +82,14 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 - Buffer and pointer-visible memory hazards use global execution and memory barriers.
 - Texture representation changes use explicit semantic transitions.
 - No barrier, transition, or render-pass dependency is inferred.
-- Render passes name attachments, load/store operations, and clear values directly.
-- Vulkan 1.2 render-pass and framebuffer objects may be synthesized privately without changing public semantics.
-- Swapchain acquisition uses one-shot readiness; presentation consumes the acquired image and accepts its render completion point. Native synchronization remains private.
+- Render passes name attachments, load/store operations, and clear values
+  directly.
+- The backend requires Vulkan 1.3 plus `VK_EXT_extended_dynamic_state3` and
+  `dynamicPrimitiveTopologyUnrestricted == VK_TRUE`; it does not synthesize a
+  lower-version render-pass fallback.
+- Swapchain acquisition uses one-shot readiness; presentation consumes the
+  acquired image and accepts its render completion point. Native
+  synchronization remains private.
 
 ## Compatibility extension
 
@@ -100,7 +105,8 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 
 Compatibility pipelines use the shared device, queues, command lists, memory, textures, samplers, completion points, lifetime rules, render passes, and presentation APIs. Strict and compatibility pipelines may alternate in one command list when both capability groups were requested.
 
-The library does not translate shaders, emulate root pointers through descriptors, or silently change binding models. Equivalent Vulkan 1.2 fallbacks remain private backend code.
+The library does not translate shaders, emulate root pointers through
+descriptors, silently change binding models, or provide a Vulkan 1.2 fallback.
 
 ## Required invariants
 

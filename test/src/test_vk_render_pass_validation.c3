@@ -184,11 +184,15 @@ fn void graphics_pipeline_key_zeroes_unobservable_and_unused_target_state() @tes
         vk::ColorTargetKey* unused = &first_key.color_targets[i];
         assert(unused.format == 0
                 && unused.blend_enable == 0
-                && unused.write_mask == 0,
+                && (uint)unused.write_mask == 0,
             "unused target key fields are zero");
-        foreach (field : unused.blend) {
-            assert(field == 0, "unused target blend fields are zero");
-        }
+        assert(unused.blend.src_color == 0
+                && unused.blend.dst_color == 0
+                && unused.blend.color_op == 0
+                && unused.blend.src_alpha == 0
+                && unused.blend.dst_alpha == 0
+                && unused.blend.alpha_op == 0,
+            "unused target blend fields are zero");
     }
 }
 

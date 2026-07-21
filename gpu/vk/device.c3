@@ -125,9 +125,7 @@ struct VkDeviceState {
     bool                       draw_indirect_count;
     GeneratedWorkSupport       generated_work;
     float                      max_sampler_anisotropy;
-    bool                       logical_independent_blend_enabled @if(env::TESTING);
     bool                       logical_depth_bias_clamp_enabled @if(env::TESTING);
-    bool                       logical_dynamic_state3_extension_enabled @if(env::TESTING);
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;
@@ -533,12 +531,10 @@ fn gpu::Device? create_vk_device_from_runtime(
     vk::PhysicalDeviceFeatures2 features2 =
         vk::physical_device_features2().set_next(&features11);
     vk::get_physical_device_features2(state.physical_device, &features2);
-    if (!device_supports_extension(
-            state.physical_device,
-            DYNAMIC_STATE_3_EXTENSION,
-        )) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
+    check_required_dynamic_state3_extension(
+        state.physical_device,
+        state,
+    )!;
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         query_dynamic_raster_properties(state.physical_device);
     check_required_features(
@@ -1071,6 +1067,30 @@ fn bool? query_device_extension_support_mapped(
     return supported;
 }
 
+fn void? check_required_dynamic_state3_extension_with_query(
+    vk::PhysicalDevice physical_device,
+    DeviceExtensionQueryFn extension_query,
+    VkDeviceState* state = null,
+) {
+    if (!query_device_extension_support_mapped(
+        state:           state,
+        physical_device: physical_device,
+        extension:       DYNAMIC_STATE_3_EXTENSION,
+        extension_query: extension_query,
+    )!) return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? check_required_dynamic_state3_extension(
+    vk::PhysicalDevice physical_device,
+    VkDeviceState* state = null,
+) @private {
+    return check_required_dynamic_state3_extension_with_query(
+        physical_device,
+        &query_device_extension_support,
+        state,
+    );
+}
+
 <* The feature struct is only chained once the extension is confirmed. *>
 fn bool? query_descriptor_buffer_support_with_query(
     vk::PhysicalDevice physical_device,
@@ -1181,9 +1201,7 @@ fn bool candidate_satisfies(
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(candidate, &props);
     if (props.api_version < API_VERSION_1_3) return false;
-    if (!device_supports_extension(candidate, DYNAMIC_STATE_3_EXTENSION)) {
-        return false;
-    }
+    if (catch check_required_dynamic_state3_extension(candidate)) return false;
 
     vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
@@ -1368,8 +1386,6 @@ fn void? create_logical_device_with_queue_infos(
     if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;
     $if env::TESTING:
-        state.logical_independent_blend_enabled =
-            features2.features.independent_blend != 0;
         state.logical_depth_bias_clamp_enabled =
             features2.features.depth_bias_clamp != 0;
     $endif
@@ -1381,16 +1397,7 @@ fn void? create_logical_device_with_queue_infos(
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
     ZString[7] extensions;
     uint extension_count = 0;
-    if (!device_supports_extension(
-            state.physical_device,
-            DYNAMIC_STATE_3_EXTENSION,
-        )) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
     extensions[extension_count++] = DYNAMIC_STATE_3_EXTENSION;
-    $if env::TESTING:
-        state.logical_dynamic_state3_extension_enabled = true;
-    $endif
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
     if (state.generated_work.enabled) {
         extensions[extension_count++] = GENERATED_WORK_EXTENSION;

@@ -56,7 +56,9 @@ gpu/vk/validate.c3             descriptor and command validation helpers
 
 ## 3. Required Vulkan features
 
-The backend should require:
+The minimum supported device profile is intentionally Vulkan 1.3 plus
+`VK_EXT_extended_dynamic_state3` and
+`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. The backend requires:
 
 ```text
 Vulkan 1.3
@@ -74,13 +76,14 @@ VK_EXT_extended_dynamic_state3
 ```
 
 `independentBlend` and `depthBiasClamp` are core physical-device features.
-`dynamicPrimitiveTopologyUnrestricted` is the
-`VkPhysicalDeviceExtendedDynamicState3PropertiesEXT` property; requiring it
+`dynamicPrimitiveTopologyUnrestricted` is reported by
+`VkPhysicalDeviceExtendedDynamicState3PropertiesEXT`. The backend requires it
+to be `VK_TRUE` but cannot enable it. Requiring it
 allows `cmd_set_raster_state` to switch topology classes without compiling
-pipeline variants. The backend requires and enables the extension that supplies
-that property so it remains active and visible to validation. Vulkan 1.3 still
-supplies the promoted topology, cull, front-face, and depth-bias core commands;
-no extended-dynamic-state feature structure is enabled.
+pipeline variants. The backend separately requires and enables the extension
+name. Vulkan 1.3 supplies the promoted topology, cull, front-face, and
+depth-bias core commands; no extended-dynamic-state feature structure is
+enabled.
 
 Shader heaps are selected automatically. Descriptor indexing is preferred when
 its features and limits satisfy the requested semantic capacities. Descriptor
@@ -205,8 +208,10 @@ independentBlend
 depthBiasClamp
 ```
 
-`VK_EXT_extended_dynamic_state3` is also always enabled to activate the required
-unrestricted-topology property; command dispatch remains Vulkan 1.3 core.
+`VK_EXT_extended_dynamic_state3` is also always enabled. Before device creation,
+the backend has already required the independently queried
+`dynamicPrimitiveTopologyUnrestricted` property; command dispatch remains
+Vulkan 1.3 core.
 
 `maintenance4` is always enabled. The strict request adds its heap features:
 
@@ -241,10 +246,12 @@ The backend owns one indirect-command layout for each draw shape and one
 generated-dispatch layout paired with the device's singleton compute pipeline
 layout. Each compute cache entry and live pipeline slot borrows that stable
 pair. Recording reads the slot value directly, and the device destroys both
-owned singleton handles at teardown. Generated recording uses implicit preprocessing with buffers reserved
-explicitly by `reserve_generated_scratch` on the calling thread's device
-recording context. The queue argument selects and validates the device. For
-each pipeline and generated-work kind, reservation queries
+owned singleton handles at teardown. Generated recording uses implicit
+preprocessing with buffers reserved explicitly by `reserve_generated_scratch`
+on the calling thread's device recording context. The queue argument selects
+and validates the device. Reservations are keyed by public pipeline handle and
+generated-work kind, not by native pipeline identity, so alias handles require
+separate reservations. For each key, reservation queries
 `vkGetGeneratedCommandsMemoryRequirementsEXT` with the exact layout and maximum
 sequence count, then allocates the requested number of addressable VMA buffers
 using the returned size, alignment, and memory-type mask. Warm generated calls
@@ -545,17 +552,19 @@ pass. The command list carries the active pass extent only while
 Topology, cull mode, front face, depth bias, viewport, scissor, and depth state
 are absent from `PipelineKey` and `PipelineSlot`. `PipelineKey` stores each
 color target's format, blend equation, and write mask, plus depth format,
-sample count, polygon mode, and shader identity. Explicit pipeline binding emits the native pipeline and heap
-binds when the active cache entry changes; rebinding the same entry or an alias
-emits neither. `cmd_set_raster_state` emits the promoted Vulkan 1.3 topology,
+sample count, polygon mode, and shader identity. Explicit pipeline binding
+emits the native pipeline and heap binds when the active cache entry changes;
+rebinding the same entry or an alias emits neither. `cmd_set_raster_state`
+emits the promoted Vulkan 1.3 topology,
 cull, front-face, depth-bias-enable, and depth-bias commands as one validated
-operation. `cmd_set_depth_state` emits the Vulkan 1.3 dynamic depth commands and
-marks depth state valid for the active pass. Draw and dispatch only validate
+operation and requires an active render pass. `cmd_set_depth_state` emits the
+Vulkan 1.3 dynamic depth commands and marks depth state valid for the active
+pass. Draw and dispatch only validate
 active state, push roots, and execute; they never create a native pipeline.
 Raster, viewport, and scissor survive pipeline switches, while pass begin
-resets them to zero/full-pass defaults and requires depth state again. Multi-viewport arrays,
-negative-height viewport flips, and off-pass overscan are outside the portable
-contract.
+resets them to zero/full-pass defaults and requires depth state again.
+Multi-viewport arrays, negative-height viewport flips, and off-pass overscan
+are outside the portable contract.
 
 ### Pipeline cache
 
@@ -578,9 +587,9 @@ device teardown destroys the singleton handles after cached pipelines.
 The context-free Vulkan result mapper handles success, host/device allocation
 failures, explicit device loss, and missing features, extensions, or layers.
 Operations with additional result semantics use dedicated mappers: backend
-bootstrap, surface and swapchain work, presentation-fence polling/reset, texture
-creation, shader-module creation,
-pipeline creation, descriptor allocation, and enumeration.
+bootstrap, surface and swapchain work, presentation-fence polling/reset,
+texture creation, shader-module creation, pipeline creation, descriptor
+allocation, and enumeration.
 Unclassified native failures are logged and surface as `BACKEND_ERROR`; they
 must never be inferred as device loss.
 
@@ -628,7 +637,8 @@ Successful end consumes the recording token and returns the executable token.
 `cmd_bind_pipeline` resolves the pipeline slot and cache entry once and stores
 the expected slot generation plus native pipeline/layout, kind, render
 compatibility, cache identity, and generated-command layout. Execution helpers
-validate the stable cell directly and never revisit pipeline table/cache storage.
+validate the stable cell directly and never revisit pipeline table/cache
+storage.
 The checked command-operation table is immutable per device. Policy selection
 happens during device or encoder setup and remains outside warm recording.
 

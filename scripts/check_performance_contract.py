@@ -338,12 +338,12 @@ def check(root: Path = ROOT) -> list[str]:
                 )
 
     backend_root = root / "gpu/vk"
-    legacy_layout_cache_references = 0
+    retired_layout_cache_references = 0
     for path in sorted(backend_root.glob("*.c3")):
-        legacy_layout_cache_references += mask_c3_comments(
+        retired_layout_cache_references += mask_c3_comments(
             path.read_text(encoding="utf-8")
         ).count("compute_layout_cache")
-    if legacy_layout_cache_references != 0:
+    if retired_layout_cache_references != 0:
         errors.append(
             "gpu/vk must use singleton compute layouts, not compute-layout "
             "cache storage"

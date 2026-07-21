@@ -6,7 +6,6 @@ import std::thread;
 import std::core::mem;
 
 const uint GRAPHICS_ROOT_PUSH_SIZE = gpu::GraphicsRootPush::size;
-const uint COLOR_WRITE_MASK_BITS = 0x0f;
 
 fn vk::PrimitiveTopology topology_to_vk(gpu::PrimitiveTopology topology) @private {
     switch (topology) {
@@ -170,16 +169,24 @@ fn bool blend_state_valid(gpu::BlendState* blend) {
 
 fn bool color_write_mask_valid(gpu::ColorWriteMask mask) @private {
     uint raw = (uint)mask;
-    return (raw & COLOR_WRITE_MASK_BITS) == raw;
+    return (raw & (uint)gpu::COLOR_WRITE_ALL) == raw;
 }
 
-fn vk::ColorComponentFlags color_write_mask_to_vk(uint mask) @private {
+fn vk::ColorComponentFlags color_write_mask_to_vk(
+    gpu::ColorWriteMask mask,
+) @private {
     uint flags = 0;
-    if ((mask & (1u << 0)) != 0) flags |= (uint)vk::ColorComponentFlagBits.R_BIT;
-    if ((mask & (1u << 1)) != 0) flags |= (uint)vk::ColorComponentFlagBits.G_BIT;
-    if ((mask & (1u << 2)) != 0) flags |= (uint)vk::ColorComponentFlagBits.B_BIT;
-    if ((mask & (1u << 3)) != 0) flags |= (uint)vk::ColorComponentFlagBits.A_BIT;
+    if (mask.red) flags |= (uint)vk::ColorComponentFlagBits.R_BIT;
+    if (mask.green) flags |= (uint)vk::ColorComponentFlagBits.G_BIT;
+    if (mask.blue) flags |= (uint)vk::ColorComponentFlagBits.B_BIT;
+    if (mask.alpha) flags |= (uint)vk::ColorComponentFlagBits.A_BIT;
     return (vk::ColorComponentFlags)flags;
+}
+
+fn bool color_format_is_integer(gpu::Format format) @private {
+    return format == gpu::Format.R8_UINT
+        || format == gpu::Format.R16_UINT
+        || format == gpu::Format.R32_UINT;
 }
 
 fn void? check_polygon_mode_support(gpu::PolygonMode mode, bool line_supported) {
@@ -201,6 +208,7 @@ fn void? validate_graphics_pipeline_desc(
     foreach (&target : desc.colors) {
         if (!blend_state_valid(&target.blend)
             || !color_write_mask_valid(target.write_mask)
+            || (target.blend.enable && color_format_is_integer(target.format))
             || target.format == gpu::Format.UNDEFINED
             || target.format == gpu::Format.D32_FLOAT
             || target.format == gpu::Format.D24_UNORM_S8_UINT
@@ -363,12 +371,24 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
                 ColorTargetKey* target = &key.color_targets[i];
                 *attachment = {
                     .blend_enable           = target.blend_enable != 0 ? vk::TRUE : vk::FALSE,
-                    .src_color_blend_factor = blend_factor_to_vk((gpu::BlendFactor)target.blend[0]),
-                    .dst_color_blend_factor = blend_factor_to_vk((gpu::BlendFactor)target.blend[1]),
-                    .color_blend_op         = blend_op_to_vk((gpu::BlendOp)target.blend[2]),
-                    .src_alpha_blend_factor = blend_factor_to_vk((gpu::BlendFactor)target.blend[3]),
-                    .dst_alpha_blend_factor = blend_factor_to_vk((gpu::BlendFactor)target.blend[4]),
-                    .alpha_blend_op         = blend_op_to_vk((gpu::BlendOp)target.blend[5]),
+                    .src_color_blend_factor = blend_factor_to_vk(
+                        (gpu::BlendFactor)target.blend.src_color,
+                    ),
+                    .dst_color_blend_factor = blend_factor_to_vk(
+                        (gpu::BlendFactor)target.blend.dst_color,
+                    ),
+                    .color_blend_op = blend_op_to_vk(
+                        (gpu::BlendOp)target.blend.color_op,
+                    ),
+                    .src_alpha_blend_factor = blend_factor_to_vk(
+                        (gpu::BlendFactor)target.blend.src_alpha,
+                    ),
+                    .dst_alpha_blend_factor = blend_factor_to_vk(
+                        (gpu::BlendFactor)target.blend.dst_alpha,
+                    ),
+                    .alpha_blend_op = blend_op_to_vk(
+                        (gpu::BlendOp)target.blend.alpha_op,
+                    ),
                     .color_write_mask       = color_write_mask_to_vk(target.write_mask),
                 };
             }

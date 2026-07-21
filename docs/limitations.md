@@ -42,15 +42,15 @@ page doesn't explain it, that's a bug in this page — file an issue.
   not valid wait destinations. Exclusive cross-family ownership transfers are
   unsupported.
 - **Wireframe polygon rasterization is optional.** `DeviceCaps.line_polygon_mode`
-  reports whether `PolygonMode.LINE` is enabled. Unsupported adapters reject
+  reports whether `PolygonMode.LINE` is supported. Unsupported adapters reject
   it with `UNSUPPORTED_FEATURE`; filled rasterization and
   `PrimitiveTopology.LINES` remain available.
-- **Dynamic raster state is part of the strict device profile.** Device
-  creation requires independent blending, depth-bias clamp, and unrestricted
-  dynamic topology classes plus the extension that supplies the topology
-  property. An adapter missing any of them is rejected with
-  `UNSUPPORTED_FEATURE`; the backend does not synthesize raster-specific
-  pipeline variants.
+- **Dynamic raster state raises the intentional minimum device profile.** The
+  minimum is Vulkan 1.3 plus `VK_EXT_extended_dynamic_state3` and requires
+  `dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. Device creation
+  also requires independent blending and depth-bias clamp. An adapter missing
+  any requirement is rejected with `UNSUPPORTED_FEATURE`; the backend does not
+  synthesize raster-specific pipeline variants.
 - **GPU-generated roots are optional.** `DeviceCaps.generated_work` requires
   one backend facility that supports the draw, indexed-draw, and dispatch
   record layouts together. Unsupported devices retain the shared-root indirect

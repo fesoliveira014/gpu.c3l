@@ -72,15 +72,21 @@ fn void emit_raster_state(
         raster.depth_bias_enable ? vk::TRUE : vk::FALSE,
     );
     gpu::note_command_native_call();
+    float depth_bias_constant = 0.0f;
+    float depth_bias_clamp = 0.0f;
+    float depth_bias_slope = 0.0f;
     if (raster.depth_bias_enable) {
-        vk::cmd_set_depth_bias(
-            command_buffer:            record.command_buffer,
-            depth_bias_constant_factor: raster.depth_bias_constant,
-            depth_bias_clamp:           raster.depth_bias_clamp,
-            depth_bias_slope_factor:    raster.depth_bias_slope,
-        );
-        gpu::note_command_native_call();
+        depth_bias_constant = raster.depth_bias_constant;
+        depth_bias_clamp = raster.depth_bias_clamp;
+        depth_bias_slope = raster.depth_bias_slope;
     }
+    vk::cmd_set_depth_bias(
+        command_buffer:             record.command_buffer,
+        depth_bias_constant_factor: depth_bias_constant,
+        depth_bias_clamp:           depth_bias_clamp,
+        depth_bias_slope_factor:    depth_bias_slope,
+    );
+    gpu::note_command_native_call();
 }
 
 <* Begin dynamic rendering with precreated attachment views. Attachments must

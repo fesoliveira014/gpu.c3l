@@ -54,6 +54,23 @@ fn void required_features_present_ok() @test {
     )), "all required features present must pass the gate");
 }
 
+fn bool? dynamic_state3_extension_absent(
+    vk::PhysicalDevice physical_device,
+    ZString extension,
+) {
+    return extension.str_view() != "VK_EXT_extended_dynamic_state3";
+}
+
+fn void required_dynamic_state3_extension_absence_is_mocked() @test {
+    vk::PhysicalDevice physical_device = (vk::PhysicalDevice)(uptr)0xA0;
+    assert(@catch(gpu::vk::check_required_dynamic_state3_extension_with_query(
+        physical_device,
+        &dynamic_state3_extension_absent,
+    ))
+        == gpu::UNSUPPORTED_FEATURE,
+        "mocked EDS3 absence deterministically rejects adapter admission");
+}
+
 fn void missing_feature_rejected() @test {
     // All-zero structs: no required feature set.
     vk::PhysicalDeviceFeatures base;

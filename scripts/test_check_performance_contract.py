@@ -160,7 +160,7 @@ class PerformanceContractTests(unittest.TestCase):
                 any("post-bind pipeline resolution" in error for error in errors)
             )
 
-    def test_legacy_compute_layout_cache_is_rejected(self):
+    def test_retired_compute_layout_cache_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.copied_tree(root)
@@ -169,7 +169,7 @@ class PerformanceContractTests(unittest.TestCase):
                 "gpu/vk/command.c3",
                 "fn void? vk_cmd_dispatch_generated(",
                 (
-                    "fn uint legacy_layout_cache_read(VkDeviceState* state) {\n"
+                    "fn uint retired_layout_cache_read(VkDeviceState* state) {\n"
                     "    return state.compute_layout_cache.count;\n"
                     "}\n\n"
                     "fn void? vk_cmd_dispatch_generated("

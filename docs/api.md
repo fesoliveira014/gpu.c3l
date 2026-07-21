@@ -240,11 +240,12 @@ get_device_caps(Device*)         -> DeviceCaps?
 ```
 
 `strict_enabled` reports whether strict semantics were requested and enabled.
-Query request support before creation. The strict profile requires independent
-per-target blending, depth-bias clamp, and unrestricted dynamic topology
-classes plus `VK_EXT_extended_dynamic_state3`, which supplies the topology
-property; creation returns `UNSUPPORTED_FEATURE` when an adapter cannot provide
-all three. `generated_work` is true only when the
+The minimum supported device profile is intentionally Vulkan 1.3 plus
+`VK_EXT_extended_dynamic_state3` and
+`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. The strict profile also
+requires independent per-target blending and depth-bias clamp. Query request
+support before creation; creation returns `UNSUPPORTED_FEATURE` when an adapter
+cannot provide every requirement. `generated_work` is true only when the
 created strict device enables GPU-written root and work records for graphics
 and compute. A supported device reports a nonzero `max_generated_work_count`;
 an unsupported device reports false and zero. Heap and generated-work
@@ -854,8 +855,10 @@ selected with `cmd_set_raster_state`.
 `colors` carries at most `MAX_COLOR_ATTACHMENTS` (8) entries. Format, blend,
 and write mask are specified independently for every target. The zero write
 mask disables all writes; use `COLOR_WRITE_ALL` for the conventional RGBA
-mask. A disabled blend equation, or any blend equation paired with a zero write
-mask, is normalized out of pipeline identity.
+mask. In particular, a zero-initialized `ColorTargetState` that sets only
+`.format` creates a valid target that renders no color. Enabled blending is
+invalid for integer color formats. A disabled blend equation, or any blend
+equation paired with a zero write mask, is normalized out of pipeline identity.
 
 ### Pipeline deduplication
 
@@ -1044,9 +1047,10 @@ they do not resolve pipeline-table or cache state again. Dispatch requires an
 active compute pipeline and a nonzero root
 address. Graphics draws require an active graphics pipeline, nonzero vertex and
 fragment roots, and explicit depth state for the current render pass.
-`cmd_set_raster_state` and `cmd_set_depth_state` are valid only inside a render
-pass. Raster validation is atomic: invalid enum values or non-finite enabled
-depth-bias factors return `INVALID_ARGUMENT` without emitting any native state.
+`cmd_set_raster_state` and `cmd_set_depth_state` require an active render pass;
+outside one they fault `COMMAND_RECORDING_ERROR`. Raster validation is atomic:
+invalid enum values or non-finite enabled depth-bias factors return
+`INVALID_ARGUMENT` without emitting any native state.
 Pass begin emits a zero `DynamicRasterState` and resets the explicit depth-state
 requirement, while viewport and scissor receive their full-pass defaults.
 Execution with no required state returns
@@ -1168,8 +1172,8 @@ gpu::Viewport viewport = {
 gpu::cmd_set_viewport(&commands, &viewport)!!;
 ```
 
-Both commands are valid only inside a render pass. Viewports require finite,
-nonnegative origins, positive extents, pass-local endpoints, and depth
+All three setters are valid only inside a render pass. Viewports require
+finite, nonnegative origins, positive extents, pass-local endpoints, and depth
 endpoints in `[0, 1]`; reversed depth ranges are valid. Scissors use signed
 inputs so negative origins/extents fault, while zero extent is a valid empty
 clip. Scissor endpoints must not overflow and both rectangles stay within the
@@ -1289,7 +1293,9 @@ execution path and the library never emulates generated work with a CPU loop.
 Generated commands require an explicit cold reservation on the calling
 thread's device recording context. The queue selects and validates the device;
 the reservation can be consumed by compatible selected queues on that device.
-Each reservation is keyed by its exact pipeline and `GeneratedWorkKind`.
+Each reservation is keyed by the exact public `PipelineHandle` and
+`GeneratedWorkKind`, not by the shared native pipeline. Two alias handles for
+one native pipeline therefore require separate reservations.
 `max_commands_per_list` bounds the maximum generated count accepted by one
 call, and `preprocess_buffer_count` bounds simultaneously retained calls for
 that key across incomplete command lists. The backend asks the driver for the

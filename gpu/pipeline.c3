@@ -135,7 +135,8 @@ struct BlendState {
     BlendOp     alpha_op;
 }
 
-<* Immutable format, blend equation, and write mask for one color target. *>
+<* Immutable format, blend equation, and write mask for one color target.
+   A zero write mask disables every channel; use COLOR_WRITE_ALL for RGBA. *>
 struct ColorTargetState {
     Format         format;
     BlendState     blend;

@@ -546,7 +546,8 @@ Pass begin records full-pass viewport/scissor defaults and the zero raster
 default: triangles, no culling, counter-clockwise front faces, and disabled
 depth bias. It requires a fresh depth-state command before drawing. Raster,
 viewport, and scissor state persist across pipeline binds until another setter
-or the next pass begin. They remain outside pipeline keys, so handle aliasing
+or the next pass begin. Their setters, including `cmd_set_raster_state`, require
+an active render pass. They remain outside pipeline keys, so handle aliasing
 cannot overwrite caller-selected command state. Draws require an active
 graphics pipeline and nonzero roots and perform no native pipeline creation.
 

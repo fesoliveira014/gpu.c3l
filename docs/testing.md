@@ -106,6 +106,8 @@ two independent Vulkan runtimes and borrowed-adapter invalidation
 exact-adapter request creation with runtime-instance reuse and retention
 surface-aware queue selection and presentation-request gating
 create/destroy Vulkan device
+required `VK_EXT_extended_dynamic_state3` absence and
+`dynamicPrimitiveTopologyUnrestricted` property rejection
 generated-work extension, feature, stage, layout-limit, and public-cap coherence
 create/destroy VMA allocator
 query memory budget and stats
@@ -368,7 +370,7 @@ short spans, zero work, index formats, and generated-preprocess barrier masks.
 generated-dispatch layout read, creates another compute pipeline on a second
 thread, and verifies that recording observes the device's unchanged singleton
 layout through the bound pipeline slot. The platform-independent source
-contract rejects legacy compute-layout-cache storage, per-pipeline compute
+contract rejects retired compute-layout-cache storage, per-pipeline compute
 layout creation, dynamic raster fields in `PipelineKey`, and loss of per-target
 immutable key state. It also
 walks every Vulkan recording root and reachable helper across backend files,
@@ -387,8 +389,10 @@ one immutable pipeline. Command recording covers
 ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
 generated dispatch. It measures five 64-record lists after an untimed 64-record
 warmup. Before warmup, the calling worker reserves 64 preprocess buffers sized
-for the declared generated workload. Each execute receives a distinct reserved
-address, and reuse occurs only after a list is discarded.
+for the declared generated workload and exact public pipeline handle. Alias
+handles for one native pipeline require independent reservations. Each execute
+receives a distinct reserved address, and reuse occurs only after a list is
+discarded.
 The command target enables test-only resolution counters, resets them after
 begin/pipeline bind, reports measured native command count with every resolution
 count, and requires zero registry, retained-pin, lifecycle-vtable, command-table,

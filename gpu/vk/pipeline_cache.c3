@@ -20,11 +20,21 @@ enum PipelineKind : int {
     GRAPHICS,
 }
 
+struct BlendKey {
+    int src_color;
+    int dst_color;
+    int color_op;
+    int src_alpha;
+    int dst_alpha;
+    int alpha_op;
+}
+$assert BlendKey::size == 24;
+
 struct ColorTargetKey {
-    int    format;
-    int    blend_enable;
-    int[6] blend;
-    uint   write_mask;
+    int                 format;
+    int                 blend_enable;
+    BlendKey            blend;
+    gpu::ColorWriteMask write_mask;
 }
 $assert ColorTargetKey::size == 36;
 
@@ -230,16 +240,16 @@ fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
     foreach (i, &target : desc.colors) {
         ColorTargetKey* color = &key.color_targets[i];
         color.format = (int)target.format;
-        color.write_mask = color_write_mask_bits(target.write_mask);
-        if (target.blend.enable && color.write_mask != 0) {
+        color.write_mask = target.write_mask;
+        if (target.blend.enable && (uint)color.write_mask != 0) {
             color.blend_enable = 1;
             color.blend = {
-                (int)target.blend.src_color,
-                (int)target.blend.dst_color,
-                (int)target.blend.color_op,
-                (int)target.blend.src_alpha,
-                (int)target.blend.dst_alpha,
-                (int)target.blend.alpha_op,
+                .src_color = (int)target.blend.src_color,
+                .dst_color = (int)target.blend.dst_color,
+                .color_op  = (int)target.blend.color_op,
+                .src_alpha = (int)target.blend.src_alpha,
+                .dst_alpha = (int)target.blend.dst_alpha,
+                .alpha_op  = (int)target.blend.alpha_op,
             };
         }
     }
@@ -251,15 +261,6 @@ fn PipelineKey build_compute_key(gpu::ComputePipelineDesc* desc) @private {
     key.kind                 = (int)PipelineKind.COMPUTE;
     key.vertex_shader_digest = desc.shader.digest;
     return key;
-}
-
-fn uint color_write_mask_bits(gpu::ColorWriteMask mask) @private {
-    uint bits = 0;
-    if (mask.red) bits |= 1u << 0;
-    if (mask.green) bits |= 1u << 1;
-    if (mask.blue) bits |= 1u << 2;
-    if (mask.alpha) bits |= 1u << 3;
-    return bits;
 }
 
 fn ulong hash_key(PipelineKey* key) @private {

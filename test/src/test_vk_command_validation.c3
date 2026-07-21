@@ -1064,8 +1064,8 @@ fn void dynamic_raster_state_validation_is_atomic_and_pass_scoped() @test {
     invalid.depth_bias_enable = false;
     gpu::reset_command_resolution_stats();
     gpu::cmd_set_raster_state(&commands, &invalid)!!;
-    assert(gpu::command_resolution_stats().native_commands == 4,
-        "disabled depth bias ignores dormant factors and emits no bias command");
+    assert(gpu::command_resolution_stats().native_commands == 5,
+        "disabled depth bias emits zero bias factors with the four raster commands");
 
     gpu::cmd_end_render_pass(&commands)!!;
 }

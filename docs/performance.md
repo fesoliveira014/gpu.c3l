@@ -52,11 +52,11 @@ The runner rejects nonzero hot-path invariants. The CPU-only
 `scripts/check_performance_contract.py` gate also rejects registry locking or
 pipeline construction in recording entry points, per-point allocation,
 destruction waits or deferred releases, allocation-before-reuse in the
-generated preprocess path, legacy compute-layout caches, and dynamic raster
-fields in immutable pipeline keys. It walks the reachable Vulkan recording graph and
-rejects host allocation, native command-buffer allocation/free, image-view
-creation, and VMA allocation outside named cold seams. Its mutation tests run
-without a Vulkan ICD.
+generated preprocess path, retired compute-layout caches, and dynamic raster
+fields in immutable pipeline keys. It walks the reachable Vulkan recording
+graph and rejects host allocation, native command-buffer allocation/free,
+image-view creation, and VMA allocation outside named cold seams. Its mutation
+tests run without a Vulkan ICD.
 
 Release runs use deliberately broad order-of-magnitude thresholds:
 
@@ -75,22 +75,20 @@ Release runs use deliberately broad order-of-magnitude thresholds:
 These thresholds catch accidental algorithmic or lifecycle regressions. They
 are not cross-machine performance rankings.
 
-### Pipeline identity transition
+### Pipeline identity snapshot
 
-Advisory lavapipe runs on 2026-07-21 used 200 requested depth-bias/raster
-permutations on llvmpipe (Mesa 25.0.7, LLVM 15.0.7). The before run encoded
-depth bias into immutable descriptors; the after run pairs one immutable
-descriptor with 200 `cmd_set_raster_state` values:
+An advisory llvmpipe run on 2026-07-21 (Mesa 25.0.7, LLVM 15.0.7) requested
+200 dynamic raster states for one immutable graphics descriptor:
 
-| Measurement | Before | After |
-|---|---:|---:|
-| Requested permutations | 200 | 200 |
-| Native graphics pipeline creates | 200 | 1 |
-| Live cache entries / aliases | 200 / 200 | 1 / 200 |
-| Matrix create time | 255,508.5 ns/create | 5,351.7 ns/create |
-| Dynamic raster recording | not exposed | 99.7 ns/state |
-| Duplicate lookup | 3,031.9 ns/create | 3,438.5 ns/create |
-| Cached batch | 5,997.7 ns/create | 6,838.8 ns/create |
+| Measurement | Current result |
+|---|---:|
+| Requested dynamic raster states | 200 |
+| Native graphics pipeline creates | 1 |
+| Live cache entries / aliases | 1 / 200 |
+| Matrix create time | 5,351.7 ns/create |
+| Dynamic raster recording | 99.7 ns/state |
+| Duplicate lookup | 3,438.5 ns/create |
+| Cached batch | 6,838.8 ns/create |
 
 The timings are observations, not acceptance thresholds. The stable contract
 is the one-native-pipeline accounting, which the benchmark asserts and the
@@ -151,10 +149,11 @@ path for collecting debug cost with a matching layer.
 - Cache pipelines; command-time topology, cull, front-face, and depth-bias
   permutations should reuse one immutable pipeline and change state with
   `cmd_set_raster_state`.
-- Reserve generated scratch per worker and pipeline before timing. Generated
-  command recording assigns a unique reserved preprocess address to every
-  execute call and returns it to the same context only after the owning command
-  list is discarded or completed.
+- Reserve generated scratch per worker and public pipeline handle before
+  timing. Aliases of one native pipeline have distinct reservation keys.
+  Generated command recording assigns a unique reserved preprocess address to
+  every execute call and returns it to the same context only after the owning
+  command list is discarded or completed.
 - Queue overlap depends on topology, driver scheduling, and workload balance;
   treat it as an observation, not a guarantee. For cross-queue dependencies,
   choose the earliest real consumer in `CompletionWait.before`; an unnecessarily
