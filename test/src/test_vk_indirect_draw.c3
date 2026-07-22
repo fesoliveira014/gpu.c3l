@@ -25,6 +25,27 @@ struct IndDrawCtx {
     gpu::SamplerIndex   smp_index;
 }
 
+struct GeneratedRequirementsCapture {
+    vk::PFN_vkGetGeneratedCommandsMemoryRequirementsEXT original;
+    uint calls;
+    uint[3] max_sequence_counts;
+}
+
+GeneratedRequirementsCapture* generated_requirements_capture;
+
+fn void capture_generated_requirements(
+    vk::Device device,
+    vk::GeneratedCommandsMemoryRequirementsInfoEXT* info,
+    vk::MemoryRequirements2* requirements,
+) {
+    GeneratedRequirementsCapture* capture = generated_requirements_capture;
+    uint call = capture.calls++;
+    if (call < capture.max_sequence_counts.len) {
+        capture.max_sequence_counts[call] = info.max_sequence_count;
+    }
+    capture.original(device, info, requirements);
+}
+
 fn gpu::Device make_ind_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -831,19 +852,19 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     gpu::GeneratedScratchDesc dispatch_scratch = {
         .pipeline                = dispatch_pipeline,
         .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-        .max_commands_per_list   = 1,
+        .max_commands_per_list   = 2,
         .preprocess_buffer_count = 2,
     };
     gpu::GeneratedScratchDesc draw_scratch = {
         .pipeline                = draw.pipeline,
         .kind                    = gpu::GeneratedWorkKind.DRAW,
-        .max_commands_per_list   = 1,
+        .max_commands_per_list   = 2,
         .preprocess_buffer_count = 2,
     };
     gpu::GeneratedScratchDesc indexed_scratch = {
         .pipeline                = draw.pipeline,
         .kind                    = gpu::GeneratedWorkKind.DRAW_INDEXED,
-        .max_commands_per_list   = 1,
+        .max_commands_per_list   = 2,
         .preprocess_buffer_count = 2,
     };
     vk::VkDeviceState* state = (vk::VkDeviceState*)
@@ -866,9 +887,25 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
+    GeneratedRequirementsCapture requirements_capture = {
+        .original = state.device_dispatch.generated_work.get_memory_requirements,
+    };
+    generated_requirements_capture = &requirements_capture;
+    state.device_dispatch.generated_work.get_memory_requirements =
+        &capture_generated_requirements;
+    defer {
+        state.device_dispatch.generated_work.get_memory_requirements =
+            requirements_capture.original;
+        generated_requirements_capture = null;
+    }
     gpu::reserve_generated_scratch(&allocator, &dispatch_scratch)!!;
     gpu::reserve_generated_scratch(&allocator, &draw_scratch)!!;
     gpu::reserve_generated_scratch(&allocator, &indexed_scratch)!!;
+    assert(requirements_capture.calls == 3
+            && requirements_capture.max_sequence_counts[0] == 2
+            && requirements_capture.max_sequence_counts[1] == 2
+            && requirements_capture.max_sequence_counts[2] == 2,
+        "each reservation queries its declared maximum sequence count");
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, build_pipeline);
@@ -1191,6 +1228,8 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         "generated indexed-draw exhaustion performs no allocation, emission, or partial recording");
     gpu::cmd_end_render_pass(&commands)!!;
     record_target_readback(&commands, indexed_target, &indexed_readback.span);
+    assert(requirements_capture.calls == 3,
+        "smaller generated recordings perform no native requirements query");
 
     gpu::Barrier dispatch_host_read = {
         .before = { .compute = true },

@@ -427,7 +427,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `RESOURCE_IN_USE` | resource or swapchain destruction/resize, `free_allocation`, allocator destruction, generated-scratch reservation/release, `destroy_device`, `destroy_runtime`, `destroy_surface` | an allocator still owns recording, executable, or incomplete submitted work; the allocator is not quiescent for reservation mutation; another command, texture view, generated-scratch reservation, or unfinished presentation still references a resource; a placed or dedicated texture depends on an allocation; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
 | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` | generated-scratch reservation; generated command recording; tracked command recording | the allocator's fixed reference slice, generated-index slice, reservation table, or preprocess-byte budget cannot represent the request; recreate a quiescent allocator with a larger capacity |
 | `SLOT_TABLE_FULL` | runtime, device, allocator, allocation, and resource creates; `intern_sampler`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
-| `GENERATED_SCRATCH_EXHAUSTED` | generated draw/dispatch recording | the originating allocator has no compatible reserved preprocess buffer for the pipeline, generated-work kind, command count, or concurrent retained-list demand |
+| `GENERATED_SCRATCH_EXHAUSTED` | generated draw/dispatch recording | the originating allocator has no free reserved preprocess slot for the pipeline, generated-work kind, command count, or concurrent retained-list demand |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `intern_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler interning leave existing entries untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V, a missing or stage-mismatched selected entry point, a selected-entry descriptor convention violation, a non-exact root push-constant block, or backend shader-module rejection |
@@ -1402,7 +1402,10 @@ one native pipeline therefore require separate reservations.
 call, and `preprocess_buffer_count` bounds simultaneously retained calls for
 that key across incomplete command lists. The backend asks the driver for the
 exact size, alignment, and memory-type requirements for the pipeline, layout,
-and count before allocating. Reserving the same key replaces it; other keys in
+and declared maximum count before allocating. Vulkan defines that queried count
+as the maximum the returned preprocess memory supports, so every recording at
+or below it uses the reservation without another requirements query. Reserving
+the same key replaces it; other keys in
 the allocator remain live. The allocator descriptor's preprocess count
 multiplied by command-buffer capacity bounds reservation slots, while
 `generated_preprocess_bytes` bounds their total native bytes. A live reservation
@@ -1415,10 +1418,13 @@ submitted work. Descriptors must set every field and remain within
 `INVALID_ARGUMENT`. A reservation-table or byte-budget overflow returns
 `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`. Releasing a key that is not reserved
 returns `INVALID_RESOURCE_STATE`. Generated recording returns deterministic
-`GENERATED_SCRATCH_EXHAUSTED` when the count or compatible-buffer supply is
+`GENERATED_SCRATCH_EXHAUSTED` when the count or matching-slot supply is
 insufficient, and returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` when its fixed
 per-list reservation-index slice is insufficient. Either failure preserves the
-command list and native state for retry or discard.
+command list and native state for retry or discard. A driver-reported zero-byte
+preprocess requirement still consumes one explicit reservation slot per
+retained generated command; zero storage does not bypass caller-selected
+capacity.
 
 Generated record spans are 8-byte aligned and must hold the declared maximum
 count. The count span is a 4-byte-aligned GPU-readable `uint`. Both spans must

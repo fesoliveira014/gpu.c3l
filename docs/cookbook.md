@@ -246,10 +246,12 @@ gpu::reserve_generated_scratch(&allocator, &scratch_desc)!;
 ```
 
 Reserve and release only while the allocator is quiescent. The backend queries
-the exact pipeline/layout/count requirements; the descriptor's byte value is a
-hard budget, not a substitute for compatibility. Reservation-table or byte-
-budget exhaustion returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`; no compatible
-free reservation during recording returns `GENERATED_SCRATCH_EXHAUSTED`.
+the exact pipeline/layout/maximum-count requirements once; every smaller
+recording uses that reservation without another native query. The descriptor's
+byte value is a hard budget, not a substitute for compatibility. Reservation-
+table or byte-budget exhaustion returns
+`COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`; no matching free reservation during
+recording returns `GENERATED_SCRATCH_EXHAUSTED`.
 Release the pipeline/kind reservation, then destroy the allocator after its last
 completion. Running example: `gpu_driven_draw_sdl`.
 

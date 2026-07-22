@@ -405,23 +405,11 @@ fn int generated_scratch_worker(void* raw_args) {
         vk::VkDeviceState* state =
             (vk::VkDeviceState*)gpu::device_backend_state(*args.device);
         vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-        vk::CommandAllocatorSlot* allocator_slot =
-            state.command_allocators.get(
-            record.allocator,
-        )!!;
-        vk::GeneratedPreprocessBuffer* reserved =
-            &allocator_slot.reservations[0];
-        vk::MemoryRequirements requirements = {
-            .size             = reserved.size,
-            .alignment        = 1,
-            .memory_type_bits = 1 << reserved.memory_type,
-        };
         if (catch acquire_fault = vk::acquire_generated_preprocess_buffer(
             state:        state,
             record:       record,
             pipeline:     args.pipeline,
             kind:         gpu::GeneratedWorkKind.DISPATCH,
-            requirements: &requirements,
             max_count:    1,
         )) {
             (void)acquire_fault;

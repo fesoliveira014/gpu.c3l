@@ -442,7 +442,11 @@ transitions, exact nonzero mip/layer isolation, depth testing, and pixel readbac
 a native generated-work workload when the adapter exposes the semantic
 capability: a compute producer writes draw, indexed-draw, dispatch, and count
 records; all three generated commands then verify observable output and safe
-zero-root execution. Command
+zero-root execution. The reservation query seam proves each maximum-count
+reservation performs one native requirements query and smaller generated
+recordings perform none. `vk_command` also injects a zero-byte preprocess
+requirement and proves the command still consumes explicit reservation capacity.
+Command
 validation separately covers unsupported capability, count bounds, alignment,
 short spans, zero work, index formats, and generated-preprocess barrier masks.
 `vk_pipeline_cache` covers collision-safe device-owned shader interning,
