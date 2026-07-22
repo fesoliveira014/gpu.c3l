@@ -170,7 +170,7 @@ fn void? upload_test_texture_data(
     gpu::TextureHandle dst,
     uint mip,
     char[] data,
-    gpu::TextureUse next_use,
+    gpu::TextureState next_use,
 ) {
     OwnedSpan upload = allocate_owned_span(
         device:       device,
@@ -194,8 +194,12 @@ fn void? upload_test_texture_data(
     gpu::TextureBarrier to_transfer = gpu::texture_view_transition(
         texture: dst,
         view:    view,
-        before:  gpu::TextureUse.UNDEFINED,
-        after:   gpu::TextureUse.TRANSFER_DESTINATION,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
     )!;
     gpu::cmd_texture_barrier(&commands, &to_transfer)!;
     gpu::BufferTextureCopyDesc copy = {
@@ -207,7 +211,11 @@ fn void? upload_test_texture_data(
     gpu::TextureBarrier transition = gpu::texture_view_transition(
         texture: dst,
         view:    view,
-        before:  gpu::TextureUse.TRANSFER_DESTINATION,
+        before:  {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
         after:   next_use,
     )!;
     gpu::cmd_texture_barrier(&commands, &transition)!;
@@ -224,7 +232,7 @@ fn void? readback_test_texture_data(
     gpu::TextureHandle src,
     uint mip,
     char[] out_data,
-    gpu::TextureUse from_use,
+    gpu::TextureState from_use,
 ) {
     OwnedSpan readback = allocate_owned_span(
         device:       device,
@@ -246,7 +254,11 @@ fn void? readback_test_texture_data(
         texture: src,
         view:    view,
         before:  from_use,
-        after:   gpu::TextureUse.TRANSFER_SOURCE,
+        after:   {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     )!;
     gpu::cmd_texture_barrier(&commands, &to_transfer)!;
     gpu::TextureBufferCopyDesc copy = {
@@ -263,7 +275,11 @@ fn void? readback_test_texture_data(
     gpu::TextureBarrier restore = gpu::texture_view_transition(
         texture: src,
         view:    view,
-        before:  gpu::TextureUse.TRANSFER_SOURCE,
+        before:  {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
         after:   from_use,
     )!;
     gpu::cmd_texture_barrier(&commands, &restore)!;

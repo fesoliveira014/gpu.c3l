@@ -89,7 +89,7 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
         dst:      ctx.pattern,
         mip:      0,
         data:     white[..],
-        next_use: gpu::TextureUse.SAMPLED_FRAGMENT,
+        next_use: gpu::sampled_at({ .fragment_shader }),
     )!!;
     return ctx;
 }
@@ -125,8 +125,12 @@ fn void write_triangle_verts(gpu::Device* device, gpu::GpuSpan* span) {
 fn void record_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target) {
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
@@ -138,8 +142,16 @@ fn void record_target_readback(
 ) {
     gpu::TextureBarrier to_src = {
         .texture = target,
-        .before  = gpu::TextureUse.COLOR_ATTACHMENT,
-        .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        .before  = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     };
     gpu::cmd_texture_barrier(cmd, &to_src)!!;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };

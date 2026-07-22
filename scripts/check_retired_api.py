@@ -31,7 +31,8 @@ FIXTURES = {
     "global_barrier": "GlobalBarrier",
     "stage": "Stage",
     "hazard": "Hazard",
-    "texture_layout": "TextureLayout",
+    "texture_use": "TextureUse",
+    "prior_use": "prior_use",
     "cmd_buffer_barrier": "cmd_buffer_barrier",
     "cmd_global_barrier": "cmd_global_barrier",
     "shader_handle": "ShaderHandle",
@@ -107,6 +108,7 @@ INVALID_MEMBER_TYPES = {
     "retired_graphics_pipeline_blend": "GraphicsPipelineDesc",
     "retired_pipeline_color_formats": "GraphicsPipelineDesc",
     "retired_compute_push_constant": "ComputePipelineDesc",
+    "prior_use": "AcquiredImage",
 }
 
 ENUM_VALUES = {

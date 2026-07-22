@@ -33,6 +33,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
 - **Dynamic rendering only.** No `VkRenderPass`/framebuffer objects, no
   subpasses, no tile-based subpass dependencies. Render targets are
   described per pass begin (`RenderPassDesc`) and that is the whole model.
+- **Texture history is caller-owned.** `TextureBarrier.before` asserts the
+  layout, stages, and access established by earlier ordering. The backend
+  validates and lowers that state once, but stores no global or per-subresource
+  layout history and inserts no repair transition. Applications must retain
+  separate history for independently transitioned mip/layer ranges.
 - **Async compute is capability-gated.** A distinct compute queue is used
   when available and reported by `DeviceCaps.async_compute`. Resources declare
   their semantic access roles; distinct admitted families use private concurrent
@@ -108,10 +113,10 @@ Two sizing rules that bite:
 - **Transient data is caller-owned.** Applications choose allocation reuse and
   concurrency policy. Flush CPU writes before submission, retain the covering
   completion point, and wait or poll before rewriting or freeing storage.
-- **Pending texture transitions grow with the command record.** There is no
-  16-texture recording cap; the backend starts at 16 entries and doubles the
-  host allocation as distinct textures are added. Call `submit` or discard the
-  token to release that state.
+- **Referenced textures grow with the command record.** There is no 16-texture
+  recording cap; the backend starts at 16 entries and doubles the host
+  allocation as distinct textures are retained. Call `submit` or discard the
+  token to release those references.
 
 ## 3. Driver and environment quirks
 

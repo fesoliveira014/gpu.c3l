@@ -865,8 +865,12 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     )!!;
     gpu::TextureBarrier to_color = {
         .texture = old_texture,
-        .before  = acquired.prior_use,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = acquired.prior_state,
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&commands, &to_color)!!;
     gpu::ColorTargetDesc[1] colors = {{ .view = old_view }};
@@ -877,6 +881,26 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     };
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
+    gpu::TextureBarrier to_present = {
+        .texture = old_texture,
+        .before = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        .after = { .layout = gpu::TextureLayout.PRESENT },
+    };
+    gpu::cmd_texture_barrier(&commands, &to_present)!!;
+    gpu::TextureBarrier invalid_present = to_present;
+    invalid_present.after.stages = { .color_output };
+    assert(@catch(gpu::cmd_texture_barrier(&commands, &invalid_present))
+        == gpu::INVALID_ARGUMENT,
+        "public PRESENT state rejects nonempty stages");
+    invalid_present.after = { .layout = gpu::TextureLayout.PRESENT };
+    invalid_present.after.access = { .read };
+    assert(@catch(gpu::cmd_texture_barrier(&commands, &invalid_present))
+        == gpu::INVALID_ARGUMENT,
+        "public PRESENT state rejects nonempty access");
     assert(view.validation_references.load(AtomicOrdering.RELAXED) == 1,
         "recorded rendering retains the borrowed view");
     gpu::vk::commit_present_result(live_slot, &acquired, vk::Result.SUCCESS);
@@ -1086,7 +1110,7 @@ fn void swapchain_info_snapshots_are_coherent() @test {
     assert(slot.acquisition == 9, "dormancy does not reuse acquisition identities");
 }
 
-fn void acquired_image_reports_prior_semantic_use() @test {
+fn void acquired_image_reports_prior_state() @test {
     gpu::vk::TextureSlot texture;
     gpu::Device device = { .generation = 1 };
     gpu::SwapchainHandle swapchain = { .index = 1, .generation = 1 };
@@ -1108,8 +1132,10 @@ fn void acquired_image_reports_prior_semantic_use() @test {
         index:           1,
         suboptimal:      false,
     );
-    assert(first.prior_use == gpu::TextureUse.UNDEFINED,
-        "newly wrapped image reports undefined prior use");
+    assert(first.prior_state.layout == gpu::TextureLayout.UNDEFINED
+        && (uint)first.prior_state.stages == 0
+        && (uint)first.prior_state.access == 0,
+        "newly wrapped image reports the exact undefined prior state");
     assert(first.texture == handle && first.attachment_view == attachment_view
         && first.index == 1 && !first.suboptimal,
         "acquired-image construction preserves existing fields");
@@ -1124,8 +1150,10 @@ fn void acquired_image_reports_prior_semantic_use() @test {
         index:           1,
         suboptimal:      true,
     );
-    assert(presented.prior_use == gpu::TextureUse.PRESENT,
-        "presented image reports prior presentation use");
+    assert(presented.prior_state.layout == gpu::TextureLayout.PRESENT
+        && (uint)presented.prior_state.stages == 0
+        && (uint)presented.prior_state.access == 0,
+        "presented image reports the exact presentation state");
     assert(presented.suboptimal, "acquired-image construction preserves suboptimal state");
 }
 

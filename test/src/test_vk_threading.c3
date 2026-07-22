@@ -734,8 +734,12 @@ fn int transition_record_worker(void* arg) {
         )!!;
         gpu::TextureBarrier to_dst = {
             .texture = args.texture,
-            .before  = gpu::TextureUse.UNDEFINED,
-            .after   = gpu::TextureUse.TRANSFER_DESTINATION,
+            .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+            .after   = {
+                .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+                .stages = { .transfer },
+                .access = { .write },
+            },
         };
         gpu::cmd_texture_barrier(&commands, &to_dst)!!;
         args.list = gpu::end_commands(&commands)!!;

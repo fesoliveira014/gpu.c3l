@@ -49,6 +49,8 @@ FORBIDDEN_TEXT = {
     "bufferusage": "retired BufferUsage",
     "bufferbarrier": "retired resource-scoped BufferBarrier",
     "globalbarrier": "retired Vulkan-shaped GlobalBarrier",
+    "textureuse": "retired TextureUse cross-product",
+    '"name":"prior_use"': "retired AcquiredImage.prior_use",
     '"name":"cmd_buffer_barrier"': "retired cmd_buffer_barrier",
     '"name":"cmd_global_barrier"': "retired cmd_global_barrier",
     "texturedescriptordesc": "retired TextureDescriptorDesc",
@@ -116,7 +118,6 @@ FORBIDDEN_SYMBOLS = {
     "CmdDrawFn",
     "Stage",
     "Hazard",
-    "TextureLayout",
     "CmdReadbackBufferFn",
     "ResolveReadbackFn",
     "create_wayland_surface",
@@ -164,7 +165,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "BufferUsage",
     "BufferBarrier",
     "GlobalBarrier",
-    "TextureLayout",
+    "TextureUse",
+    "prior_use",
     "before_stage",
     "after_stage",
     "before_hazard",
@@ -238,6 +240,12 @@ RETIRED_SOURCE_SYMBOLS = (
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "StandaloneDeviceConfig",
     "create_standalone_device_with_probe",
+    "TextureUseScope",
+    "texture_use_",
+    "fn TextureBarrierRejection texture_barrier_rejection(",
+    "fn TextureBarrierRejection texture_barrier_queue_rejection(",
+    "texture_transition_range(",
+    "texture_barrier_to_vk(",
 )
 
 RETIRED_SOURCE_PATTERNS = {
@@ -819,12 +827,20 @@ def validate_document(document: dict) -> list[str]:
             ("CommandList*", "TextureBarrier*"),
             "void?",
         ),
+        "sampled_at": (
+            ("StageMask",),
+            "TextureState",
+        ),
+        "storage_at": (
+            ("StageMask", "TextureAccess"),
+            "TextureState",
+        ),
         "texture_transition": (
-            ("TextureHandle", "TextureUse", "TextureUse"),
+            ("TextureHandle", "TextureState", "TextureState"),
             "TextureBarrier?",
         ),
         "texture_view_transition": (
-            ("TextureHandle", "TextureViewDesc", "TextureUse", "TextureUse"),
+            ("TextureHandle", "TextureViewDesc", "TextureState", "TextureState"),
             "TextureBarrier?",
         ),
         "cmd_copy_buffer_to_texture": (
@@ -928,6 +944,8 @@ def validate_document(document: dict) -> list[str]:
         "cmd_fill_buffer": ("commands", "dst", "value"),
         "cmd_barrier": ("commands", "barrier"),
         "cmd_texture_barrier": ("commands", "barrier"),
+        "sampled_at": ("stages",),
+        "storage_at": ("stages", "access"),
         "texture_transition": ("texture", "before", "after"),
         "texture_view_transition": ("texture", "view", "before", "after"),
         "cmd_copy_buffer_to_texture": ("commands", "desc"),
@@ -1024,7 +1042,9 @@ def validate_document(document: dict) -> list[str]:
         ("StageMask", "bitstruct"),
         ("HazardFlags", "bitstruct"),
         ("Barrier", "struct"),
-        ("TextureUse", "enum"),
+        ("TextureLayout", "enum"),
+        ("TextureAccess", "bitstruct"),
+        ("TextureState", "struct"),
         ("TextureBarrier", "struct"),
         ("GeneratedDrawRecord", "struct"),
         ("GeneratedDrawIndexedRecord", "struct"),
@@ -1208,28 +1228,42 @@ def validate_document(document: dict) -> list[str]:
             ),
             "Barrier must contain only semantic stage masks and hazard flags",
         ),
-        "TextureUse": (
+        "TextureLayout": (
             (
-                ("UNDEFINED", "TextureUse"),
-                ("TRANSFER_SOURCE", "TextureUse"),
-                ("TRANSFER_DESTINATION", "TextureUse"),
-                ("SAMPLED_COMPUTE", "TextureUse"),
-                ("SAMPLED_FRAGMENT", "TextureUse"),
-                ("STORAGE_COMPUTE", "TextureUse"),
-                ("COLOR_ATTACHMENT", "TextureUse"),
-                ("DEPTH_ATTACHMENT", "TextureUse"),
-                ("PRESENT", "TextureUse"),
+                ("UNDEFINED", "TextureLayout"),
+                ("TRANSFER_SOURCE", "TextureLayout"),
+                ("TRANSFER_DESTINATION", "TextureLayout"),
+                ("SAMPLED", "TextureLayout"),
+                ("STORAGE", "TextureLayout"),
+                ("COLOR_ATTACHMENT", "TextureLayout"),
+                ("DEPTH_ATTACHMENT", "TextureLayout"),
+                ("PRESENT", "TextureLayout"),
             ),
-            "TextureUse must match the exact semantic use schema",
+            "TextureLayout must match the exact semantic layout schema",
+        ),
+        "TextureAccess": (
+            (
+                ("read", "bool"),
+                ("write", "bool"),
+            ),
+            "TextureAccess must match the exact semantic access schema",
+        ),
+        "TextureState": (
+            (
+                ("layout", "TextureLayout"),
+                ("stages", "StageMask"),
+                ("access", "TextureAccess"),
+            ),
+            "TextureState must contain exactly layout, stages, and access",
         ),
         "TextureBarrier": (
             (
                 ("texture", "TextureHandle"),
                 ("view", "TextureViewDesc"),
-                ("before", "TextureUse"),
-                ("after", "TextureUse"),
+                ("before", "TextureState"),
+                ("after", "TextureState"),
             ),
-            "TextureBarrier must contain only a texture range and semantic uses",
+            "TextureBarrier must contain only a texture range and compositional states",
         ),
         "MemoryStats": (
             (
@@ -1260,6 +1294,10 @@ def validate_document(document: dict) -> list[str]:
     for name, (expected_schema, failure) in public_type_schemas.items():
         if member_schema(types.get(name)) != expected_schema:
             failures.append(failure)
+
+    texture_layout = types.get("TextureLayout", {})
+    if texture_layout.get("base_type", {}).get("name") != "int":
+        failures.append("TextureLayout must use int as its base type")
 
     for name in ("TextureIndex", "SamplerIndex"):
         definition = types.get(name, {})
@@ -1293,6 +1331,10 @@ def validate_document(document: dict) -> list[str]:
             "draw_arguments",
             "descriptors",
             "depth_stencil",
+        ),
+        "TextureAccess": (
+            "read",
+            "write",
         ),
     }
     for name, expected_names in expected_flag_schemas.items():
@@ -1359,10 +1401,10 @@ def validate_document(document: dict) -> list[str]:
         ("readiness", "SwapchainReadiness"),
         ("index", "uint"),
         ("suboptimal", "bool"),
-        ("prior_use", "TextureUse"),
+        ("prior_state", "TextureState"),
     ):
         failures.append(
-            "AcquiredImage must carry borrowed render handles, readiness, and semantic prior use"
+            "AcquiredImage must carry borrowed render handles, readiness, and compositional prior state"
         )
 
     for module_name, handle_names in PLATFORM_HANDLE_TYPES.items():

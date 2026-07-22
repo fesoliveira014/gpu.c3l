@@ -118,8 +118,12 @@ fn OwnedSpan write_color(gpu::Device* device, float[4] rgba) {
 fn void record_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle depth) {
     gpu::TextureBarrier to_attach = gpu::texture_transition(
         texture: depth,
-        before:  gpu::TextureUse.UNDEFINED,
-        after:   gpu::TextureUse.DEPTH_ATTACHMENT,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   {
+            .layout = gpu::TextureLayout.DEPTH_ATTACHMENT,
+            .stages = { .depth_output },
+            .access = { .read, .write },
+        },
     )!!;
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
@@ -127,8 +131,12 @@ fn void record_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle depth) 
 fn void record_color_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target) {
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
@@ -136,8 +144,16 @@ fn void record_color_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target)
 fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, gpu::GpuSpan* rb_span) {
     gpu::TextureBarrier to_src = {
         .texture = target,
-        .before  = gpu::TextureUse.COLOR_ATTACHMENT,
-        .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        .before  = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     };
     gpu::cmd_texture_barrier(cmd, &to_src)!!;
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
@@ -152,8 +168,16 @@ fn void record_color_readback(gpu::CommandList* cmd, gpu::TextureHandle target, 
 fn void record_depth_readback(gpu::CommandList* cmd, gpu::TextureHandle depth, gpu::GpuSpan* rb_span) {
     gpu::TextureBarrier to_src = {
         .texture = depth,
-        .before  = gpu::TextureUse.DEPTH_ATTACHMENT,
-        .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        .before  = {
+            .layout = gpu::TextureLayout.DEPTH_ATTACHMENT,
+            .stages = { .depth_output },
+            .access = { .read, .write },
+        },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     };
     gpu::cmd_texture_barrier(cmd, &to_src)!!;
     gpu::TextureBufferCopyDesc copy = { .texture = depth, .dst = *rb_span };
@@ -609,8 +633,12 @@ fn void sampled_depth_matches_readback() @test {
 
     gpu::TextureBarrier to_read = {
         .texture = depth,
-        .before  = gpu::TextureUse.DEPTH_ATTACHMENT,
-        .after   = gpu::TextureUse.SAMPLED_COMPUTE,
+        .before  = {
+            .layout = gpu::TextureLayout.DEPTH_ATTACHMENT,
+            .stages = { .depth_output },
+            .access = { .read, .write },
+        },
+        .after   = gpu::sampled_at({ .compute }),
     };
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
     bind_test_compute_pipeline(&cmd, sample_pipeline);
@@ -759,8 +787,12 @@ fn void compare_sampler_exact_results() @test {
 
     gpu::TextureBarrier to_read = {
         .texture = depth,
-        .before  = gpu::TextureUse.DEPTH_ATTACHMENT,
-        .after   = gpu::TextureUse.SAMPLED_COMPUTE,
+        .before  = {
+            .layout = gpu::TextureLayout.DEPTH_ATTACHMENT,
+            .stages = { .depth_output },
+            .access = { .read, .write },
+        },
+        .after   = gpu::sampled_at({ .compute }),
     };
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
     bind_test_compute_pipeline(&cmd, probe_pipeline);

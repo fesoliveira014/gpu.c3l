@@ -23,17 +23,23 @@ bitstruct HazardFlags : uint {
     bool depth_stencil  : 2;
 }
 
-<* Semantic texture use for explicit transitions. *>
-enum TextureUse : int {
+<* Texture layout for explicit transitions. *>
+enum TextureLayout : int {
     UNDEFINED,
     TRANSFER_SOURCE,
     TRANSFER_DESTINATION,
-    SAMPLED_COMPUTE,
-    SAMPLED_FRAGMENT,
-    STORAGE_COMPUTE,
+    SAMPLED,
+    STORAGE,
     COLOR_ATTACHMENT,
     DEPTH_ATTACHMENT,
     PRESENT,
+}
+
+<* Read/write intent for a texture state. The zero value means no access and is
+   valid only for `UNDEFINED` and `PRESENT` states. *>
+bitstruct TextureAccess : uint {
+    bool read  : 0;
+    bool write : 1;
 }
 
 <* Queue-owned submission progress. Copy and reuse until its device is destroyed. *>
@@ -56,13 +62,21 @@ struct Barrier {
     HazardFlags hazards;
 }
 
+<* Layout, execution stages, and access intent for one texture use. The zero
+   value is the exact empty `UNDEFINED` source state. *>
+struct TextureState {
+    TextureLayout layout;
+    StageMask     stages;
+    TextureAccess access;
+}
+
 <* Explicit semantic transition for a texture subresource range. A zero `view`
    selects the full texture. *>
 struct TextureBarrier {
     TextureHandle   texture;
     TextureViewDesc view;
-    TextureUse      before;
-    TextureUse      after;
+    TextureState    before;
+    TextureState    after;
 }
 
 fn bool CompletionPoint.is_valid(self) => self.device.is_valid()
@@ -83,21 +97,40 @@ fn bool submit_wait_stage_mask_valid(StageMask stages) @private {
     return stage_mask_valid(stages) && !stages.host && !stages.present;
 }
 
-fn bool texture_use_valid(TextureUse use) @private {
-    switch (use) {
-        case TextureUse.UNDEFINED:
-        case TextureUse.TRANSFER_SOURCE:
-        case TextureUse.TRANSFER_DESTINATION:
-        case TextureUse.SAMPLED_COMPUTE:
-        case TextureUse.SAMPLED_FRAGMENT:
-        case TextureUse.STORAGE_COMPUTE:
-        case TextureUse.COLOR_ATTACHMENT:
-        case TextureUse.DEPTH_ATTACHMENT:
-        case TextureUse.PRESENT:
+fn bool texture_layout_valid(TextureLayout layout) @private {
+    switch (layout) {
+        case TextureLayout.UNDEFINED:
+        case TextureLayout.TRANSFER_SOURCE:
+        case TextureLayout.TRANSFER_DESTINATION:
+        case TextureLayout.SAMPLED:
+        case TextureLayout.STORAGE:
+        case TextureLayout.COLOR_ATTACHMENT:
+        case TextureLayout.DEPTH_ATTACHMENT:
+        case TextureLayout.PRESENT:
             return true;
         default:
             return false;
     }
+}
+
+<* Construct a sampled, read-only texture state at `stages`. This inserts no
+   synchronization; pass the result to a texture barrier. *>
+fn TextureState sampled_at(StageMask stages) {
+    return {
+        .layout = TextureLayout.SAMPLED,
+        .stages = stages,
+        .access = { .read },
+    };
+}
+
+<* Construct a storage texture state at `stages`, preserving `access`. This
+   inserts no synchronization; pass the result to a texture barrier. *>
+fn TextureState storage_at(StageMask stages, TextureAccess access) {
+    return {
+        .layout = TextureLayout.STORAGE,
+        .stages = stages,
+        .access = access,
+    };
 }
 
 <* Construct a semantic transition for a selected texture range.
@@ -105,12 +138,12 @@ fn bool texture_use_valid(TextureUse use) @private {
 fn TextureBarrier? texture_view_transition(
     TextureHandle texture,
     TextureViewDesc view,
-    TextureUse before,
-    TextureUse after,
+    TextureState before,
+    TextureState after,
 ) {
-    if (!texture_use_valid(before)
-        || !texture_use_valid(after)
-        || after == TextureUse.UNDEFINED) {
+    if (!texture_layout_valid(before.layout)
+        || !texture_layout_valid(after.layout)
+        || after.layout == TextureLayout.UNDEFINED) {
         return INVALID_ARGUMENT~;
     }
     return {
@@ -125,8 +158,8 @@ fn TextureBarrier? texture_view_transition(
    `UNDEFINED` is source-only. *>
 fn TextureBarrier? texture_transition(
     TextureHandle texture,
-    TextureUse before,
-    TextureUse after,
+    TextureState before,
+    TextureState after,
 ) {
     return texture_view_transition(
         texture: texture,

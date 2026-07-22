@@ -110,6 +110,7 @@ struct TextureTable {
     ulong         owner;
     uint          free_head;
     uint          next_new;
+    Atomic{ulong} get_calls @if(env::TESTING);
 }
 
 fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {
@@ -140,6 +141,9 @@ fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {
 }
 
 fn TextureSlot*? TextureTable.get(&self, gpu::TextureHandle h) {
+    $if env::TESTING:
+        (void)self.get_calls.add(1, AtomicOrdering.RELAXED);
+    $endif
     if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
@@ -434,10 +438,12 @@ fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     }
 }
 
-fn gpu::TextureUse swapchain_prior_use(TextureSlot* slot) {
-    return slot.presented.load(AtomicOrdering.RELAXED)
-        ? gpu::TextureUse.PRESENT
-        : gpu::TextureUse.UNDEFINED;
+fn gpu::TextureState swapchain_prior_state(TextureSlot* slot) {
+    return {
+        .layout = slot.presented.load(AtomicOrdering.RELAXED)
+            ? gpu::TextureLayout.PRESENT
+            : gpu::TextureLayout.UNDEFINED,
+    };
 }
 
 fn void mark_texture_presented(TextureSlot* slot) {

@@ -270,19 +270,30 @@ def valid_document() -> dict:
                         ("barrier", "TextureBarrier*"),
                     ),
                     api_function(
+                        "sampled_at",
+                        "TextureState",
+                        ("stages", "StageMask"),
+                    ),
+                    api_function(
+                        "storage_at",
+                        "TextureState",
+                        ("stages", "StageMask"),
+                        ("access", "TextureAccess"),
+                    ),
+                    api_function(
                         "texture_transition",
                         "TextureBarrier?",
                         ("texture", "TextureHandle"),
-                        ("before", "TextureUse"),
-                        ("after", "TextureUse"),
+                        ("before", "TextureState"),
+                        ("after", "TextureState"),
                     ),
                     api_function(
                         "texture_view_transition",
                         "TextureBarrier?",
                         ("texture", "TextureHandle"),
                         ("view", "TextureViewDesc"),
-                        ("before", "TextureUse"),
-                        ("after", "TextureUse"),
+                        ("before", "TextureState"),
+                        ("after", "TextureState"),
                     ),
                     api_function(
                         "cmd_copy_buffer_to_texture",
@@ -1069,21 +1080,43 @@ def valid_document() -> dict:
                         ],
                     },
                     {
-                        "name": "TextureUse",
+                        "name": "TextureLayout",
                         "kind": "enum",
+                        "base_type": {"name": "int"},
                         "members": [
-                            {"name": name, "type": {"name": "TextureUse"}}
+                            {"name": name, "type": {"name": "TextureLayout"}}
                             for name in (
                                 "UNDEFINED",
                                 "TRANSFER_SOURCE",
                                 "TRANSFER_DESTINATION",
-                                "SAMPLED_COMPUTE",
-                                "SAMPLED_FRAGMENT",
-                                "STORAGE_COMPUTE",
+                                "SAMPLED",
+                                "STORAGE",
                                 "COLOR_ATTACHMENT",
                                 "DEPTH_ATTACHMENT",
                                 "PRESENT",
                             )
+                        ],
+                    },
+                    {
+                        "name": "TextureAccess",
+                        "kind": "bitstruct",
+                        "base_type": {"name": "uint"},
+                        "members": [
+                            {
+                                "name": name,
+                                "type": {"name": "bool"},
+                                "bit_range": [bit, bit],
+                            }
+                            for bit, name in enumerate(("read", "write"))
+                        ],
+                    },
+                    {
+                        "name": "TextureState",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "layout", "type": {"name": "TextureLayout"}},
+                            {"name": "stages", "type": {"name": "StageMask"}},
+                            {"name": "access", "type": {"name": "TextureAccess"}},
                         ],
                     },
                     {
@@ -1092,8 +1125,8 @@ def valid_document() -> dict:
                         "members": [
                             {"name": "texture", "type": {"name": "TextureHandle"}},
                             {"name": "view", "type": {"name": "TextureViewDesc"}},
-                            {"name": "before", "type": {"name": "TextureUse"}},
-                            {"name": "after", "type": {"name": "TextureUse"}},
+                            {"name": "before", "type": {"name": "TextureState"}},
+                            {"name": "after", "type": {"name": "TextureState"}},
                         ],
                     },                    {
                         "name": "GeneratedDrawRecord",
@@ -1202,7 +1235,7 @@ def valid_document() -> dict:
                             },
                             {"name": "index", "type": {"name": "uint"}},
                             {"name": "suboptimal", "type": {"name": "bool"}},
-                            {"name": "prior_use", "type": {"name": "TextureUse"}},
+                            {"name": "prior_state", "type": {"name": "TextureState"}},
                         ],
                     },
                 ],
@@ -2000,6 +2033,25 @@ method gpu::Runtime.is_valid
             check_public_api.validate_document(valid_document()),
         )
 
+    def test_requires_compositional_texture_helper_signatures(self) -> None:
+        for name in (
+            "sampled_at",
+            "storage_at",
+            "texture_transition",
+            "texture_view_transition",
+        ):
+            with self.subTest(name=name):
+                document = valid_document()
+                function = next(
+                    entry for entry in document["modules"]["gpu"]["functions"]
+                    if entry["name"] == name
+                )
+                function["members"][-1]["type"]["name"] = "TextureUse"
+                self.assertIn(
+                    f"{name} has the wrong parameters",
+                    check_public_api.validate_document(document),
+                )
+
     def test_rejects_global_barrier_flag_schema_drift(self) -> None:
         for name in ("StageMask", "HazardFlags"):
             with self.subTest(name=name):
@@ -2039,7 +2091,11 @@ method gpu::Runtime.is_valid
                 )
 
     def test_rejects_retired_texture_transition_types(self) -> None:
-        for name in ("Stage", "Hazard", "TextureLayout"):
+        for name, failure in (
+            ("Stage", "Stage"),
+            ("Hazard", "Hazard"),
+            ("TextureUse", "retired TextureUse cross-product"),
+        ):
             with self.subTest(name=name):
                 document = valid_document()
                 document["modules"]["gpu"]["types"].append({
@@ -2047,7 +2103,7 @@ method gpu::Runtime.is_valid
                     "kind": "enum",
                 })
                 self.assertIn(
-                    name,
+                    failure,
                     check_public_api.validate_document(document),
                 )
 
@@ -2063,9 +2119,70 @@ method gpu::Runtime.is_valid
             {"name": "new_layout", "type": {"name": "TextureLayout"}},
         ]
         self.assertIn(
-            "TextureBarrier must contain only a texture range and semantic uses",
+            "TextureBarrier must contain only a texture range and compositional states",
             check_public_api.validate_document(document),
         )
+
+    def test_rejects_texture_state_schema_drift(self) -> None:
+        for name, expected_failure in (
+            ("TextureLayout", "TextureLayout must match the exact semantic layout schema"),
+            ("TextureAccess", "TextureAccess must match the exact semantic access schema"),
+            ("TextureState", "TextureState must contain exactly layout, stages, and access"),
+        ):
+            with self.subTest(name=name):
+                document = valid_document()
+                definition = next(
+                    entry for entry in document["modules"]["gpu"]["types"]
+                    if entry["name"] == name
+                )
+                definition["members"].pop()
+                self.assertIn(
+                    expected_failure,
+                    check_public_api.validate_document(document),
+                )
+
+    def test_rejects_texture_access_bit_drift(self) -> None:
+        document = valid_document()
+        access = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "TextureAccess"
+        )
+        access["members"][1]["bit_range"] = [2, 2]
+        self.assertIn(
+            "TextureAccess must match the exact semantic flag schema",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_texture_layout_base_type_drift(self) -> None:
+        document = valid_document()
+        layout = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "TextureLayout"
+        )
+        layout["base_type"]["name"] = "uint"
+        self.assertIn(
+            "TextureLayout must use int as its base type",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_retired_acquired_prior_use(self) -> None:
+        document = valid_document()
+        acquired = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "AcquiredImage"
+        )
+        acquired["members"][-1] = {
+            "name": "prior_use",
+            "type": {"name": "TextureUse"},
+        }
+        failures = check_public_api.validate_document(document)
+        self.assertIn("retired TextureUse cross-product", failures)
+        self.assertIn("retired AcquiredImage.prior_use", failures)
+        self.assertIn(
+            "AcquiredImage must carry borrowed render handles, readiness, and compositional prior state",
+            failures,
+        )
+
     def test_rejects_resource_shaped_barrier_schema(self) -> None:
         document = valid_document()
         barrier = next(
@@ -2260,6 +2377,49 @@ method gpu::Runtime.is_valid
                     "in gpu/vk/device.c3"
                 ),
             ],
+        )
+
+    def test_rejects_retired_texture_lowering_paths(self) -> None:
+        relative = Path("gpu/vk/sync.c3")
+        source = (
+            "module gpu::vk @private;\n"
+            "struct TextureUseScope {}\n"
+            "fn void texture_use_to_vk() {}\n"
+            "fn TextureBarrierRejection texture_barrier_rejection() {}\n"
+            "fn TextureBarrierRejection texture_barrier_queue_rejection() {}\n"
+            "fn void texture_transition_range() {}\n"
+            "fn void texture_barrier_to_vk() {}\n"
+        )
+
+        failures = check_public_api.validate_private_backend_source(
+            relative,
+            source,
+        )
+        self.assertIn(
+            "retired backend TextureUseScope in gpu/vk/sync.c3",
+            failures,
+        )
+        self.assertIn(
+            "retired backend texture_use_ in gpu/vk/sync.c3",
+            failures,
+        )
+        self.assertIn(
+            "retired backend fn TextureBarrierRejection "
+            "texture_barrier_rejection( in gpu/vk/sync.c3",
+            failures,
+        )
+        self.assertIn(
+            "retired backend fn TextureBarrierRejection "
+            "texture_barrier_queue_rejection( in gpu/vk/sync.c3",
+            failures,
+        )
+        self.assertIn(
+            "retired backend texture_transition_range( in gpu/vk/sync.c3",
+            failures,
+        )
+        self.assertIn(
+            "retired backend texture_barrier_to_vk( in gpu/vk/sync.c3",
+            failures,
         )
 
     def test_rejects_sibling_modules_in_public_sources(self) -> None:

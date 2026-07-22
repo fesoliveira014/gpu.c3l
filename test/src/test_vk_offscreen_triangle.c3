@@ -67,8 +67,12 @@ fn void offscreen_clear_works() @test {
 
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
@@ -84,8 +88,16 @@ fn void offscreen_clear_works() @test {
 
     gpu::TextureBarrier to_src = {
         .texture = target,
-        .before  = gpu::TextureUse.COLOR_ATTACHMENT,
-        .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        .before  = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -139,8 +151,12 @@ fn void warm_render_pass_uses_precreated_attachment_without_allocation() @test {
     defer discard_test_commands(&commands)!!;
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&commands, &to_attach)!!;
     gpu::ColorTargetDesc[1] colors = {{
@@ -289,23 +305,35 @@ fn void offscreen_textured_triangle() @test {
 
     gpu::TextureBarrier pattern_to_dst = {
         .texture = pattern,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.TRANSFER_DESTINATION,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &pattern_to_dst)!!;
     gpu::BufferTextureCopyDesc upload = { .src = staging_span, .texture = pattern };
     gpu::cmd_copy_buffer_to_texture(&cmd, &upload)!!;
     gpu::TextureBarrier pattern_to_read = {
         .texture = pattern,
-        .before  = gpu::TextureUse.TRANSFER_DESTINATION,
-        .after   = gpu::TextureUse.SAMPLED_FRAGMENT,
+        .before  = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+        .after   = gpu::sampled_at({ .fragment_shader }),
     };
     gpu::cmd_texture_barrier(&cmd, &pattern_to_read)!!;
 
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
@@ -329,8 +357,16 @@ fn void offscreen_textured_triangle() @test {
 
     gpu::TextureBarrier to_src = {
         .texture = target,
-        .before  = gpu::TextureUse.COLOR_ATTACHMENT,
-        .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        .before  = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -451,8 +487,12 @@ fn void dynamic_viewport_scissor_pixels() @test {
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
             .texture = targets[i],
-            .before  = gpu::TextureUse.UNDEFINED,
-            .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+            .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+            .after   = {
+                .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
         };
         gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
@@ -495,8 +535,16 @@ fn void dynamic_viewport_scissor_pixels() @test {
 
         gpu::TextureBarrier to_src = {
             .texture = targets[i],
-            .before  = gpu::TextureUse.COLOR_ATTACHMENT,
-            .after   = gpu::TextureUse.TRANSFER_SOURCE,
+            .before  = {
+                .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
+            .after   = {
+                .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+                .stages = { .transfer },
+                .access = { .read },
+            },
         };
         gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -561,8 +609,12 @@ fn void offscreen_render_to_mip() @test {
 
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
@@ -578,8 +630,16 @@ fn void offscreen_render_to_mip() @test {
 
     gpu::TextureBarrier to_src = {
         .texture = target,
-        .before  = gpu::TextureUse.COLOR_ATTACHMENT,
-        .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        .before  = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -681,8 +741,12 @@ fn void dynamic_viewport_scissor_validation() @test {
 
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
     gpu::ColorTargetDesc[1] colors = {{
@@ -784,8 +848,12 @@ fn void render_pass_state_machine() @test {
 
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 

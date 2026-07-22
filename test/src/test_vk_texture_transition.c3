@@ -32,8 +32,8 @@ fn void record_transition(
     gpu::CommandList* commands,
     gpu::TextureHandle texture,
     gpu::TextureViewDesc view,
-    gpu::TextureUse before,
-    gpu::TextureUse after,
+    gpu::TextureState before,
+    gpu::TextureState after,
 ) {
     gpu::TextureBarrier barrier = gpu::texture_view_transition(
         texture: texture,
@@ -57,8 +57,12 @@ fn void mismatched_previous_use_remains_explicit_at_recording() @test {
         commands: &commands,
         texture:  texture,
         view:     {},
-        before:   gpu::TextureUse.SAMPLED_FRAGMENT,
-        after:    gpu::TextureUse.TRANSFER_SOURCE,
+        before:   gpu::sampled_at({ .fragment_shader }),
+        after:    {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     );
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     discard_test_executable(&executable)!!;
@@ -88,8 +92,12 @@ fn void explicit_transition_copy_and_sample_submit() @test {
         commands: &commands,
         texture:  texture,
         view:     {},
-        before:   gpu::TextureUse.UNDEFINED,
-        after:    gpu::TextureUse.TRANSFER_DESTINATION,
+        before:   { .layout = gpu::TextureLayout.UNDEFINED },
+        after:    {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
     );
     gpu::BufferTextureCopyDesc copy = {
         .src     = upload.span,
@@ -102,8 +110,12 @@ fn void explicit_transition_copy_and_sample_submit() @test {
         commands: &commands,
         texture:  texture,
         view:     {},
-        before:   gpu::TextureUse.TRANSFER_DESTINATION,
-        after:    gpu::TextureUse.SAMPLED_FRAGMENT,
+        before: {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+        after: gpu::sampled_at({ .fragment_shader }),
     );
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
@@ -140,8 +152,12 @@ fn void partial_mip_transition_copy_submits() @test {
         commands: &commands,
         texture:  texture,
         view:     view,
-        before:   gpu::TextureUse.UNDEFINED,
-        after:    gpu::TextureUse.TRANSFER_DESTINATION,
+        before:   { .layout = gpu::TextureLayout.UNDEFINED },
+        after:    {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
     );
     gpu::BufferTextureCopyDesc copy = {
         .src     = upload.span,
@@ -155,8 +171,12 @@ fn void partial_mip_transition_copy_submits() @test {
         commands: &commands,
         texture:  texture,
         view:     view,
-        before:   gpu::TextureUse.TRANSFER_DESTINATION,
-        after:    gpu::TextureUse.SAMPLED_COMPUTE,
+        before: {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+        after: gpu::sampled_at({ .compute }),
     );
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
@@ -190,8 +210,12 @@ fn void many_explicit_texture_transitions_submit() @test {
             commands: &commands,
             texture:  texture,
             view:     {},
-            before:   gpu::TextureUse.UNDEFINED,
-            after:    gpu::TextureUse.TRANSFER_DESTINATION,
+            before:   { .layout = gpu::TextureLayout.UNDEFINED },
+            after:    {
+                .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+                .stages = { .transfer },
+                .access = { .write },
+            },
         );
     }
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;

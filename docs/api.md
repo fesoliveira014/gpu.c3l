@@ -1192,7 +1192,7 @@ member is ignored.
 
 A pass names at least one color target or a depth target; depth-only passes
 (the shadow-map shape) are valid. A depth target's texture needs `depth_attach`
-usage and an explicit transition to `TextureUse.DEPTH_ATTACHMENT`. `D32_FLOAT` is
+usage and an explicit transition to a `DEPTH_ATTACHMENT` state. `D32_FLOAT` is
 the only supported depth format; pipelines name it in
 `GraphicsPipelineDesc.depth_format`. Every selected color and depth view must
 cover the pass dimensions; smaller compatible render
@@ -1203,7 +1203,7 @@ lesser of the library ceiling and the selected device's Vulkan limit.
 A color target may resolve a multisample source into a distinct, single-sample
 view with the same format and sufficient selected-mip extent. Both textures
 need `color_attach` usage and explicit transitions to
-`TextureUse.COLOR_ATTACHMENT`. Normalized and floating-point formats average
+a `COLOR_ATTACHMENT` state. Normalized and floating-point formats average
 samples; integer formats select sample zero. Depth resolve is not exposed.
 
 A bound graphics pipeline must exactly match the pass color count and formats,
@@ -1427,51 +1427,93 @@ dependencies use `SubmitDesc.completion_waits`, not `cmd_barrier`.
 Texture transitions remain explicit and semantic:
 
 ```text
-TextureUse
+TextureLayout
     UNDEFINED
     TRANSFER_SOURCE
     TRANSFER_DESTINATION
-    SAMPLED_COMPUTE
-    SAMPLED_FRAGMENT
-    STORAGE_COMPUTE
+    SAMPLED
+    STORAGE
     COLOR_ATTACHMENT
     DEPTH_ATTACHMENT
     PRESENT
 
+TextureAccess
+    read
+    write
+
+TextureState
+    TextureLayout layout
+    StageMask stages
+    TextureAccess access
+
 TextureBarrier
     TextureHandle texture
     TextureViewDesc view
-    TextureUse before
-    TextureUse after
+    TextureState before
+    TextureState after
 
-texture_transition(TextureHandle texture, TextureUse before, TextureUse after)
+sampled_at(StageMask stages) -> TextureState
+storage_at(StageMask stages, TextureAccess access) -> TextureState
+texture_transition(TextureHandle texture, TextureState before,
+    TextureState after)
     -> TextureBarrier?
 texture_view_transition(TextureHandle texture, TextureViewDesc view,
-    TextureUse before, TextureUse after) -> TextureBarrier?
+    TextureState before, TextureState after) -> TextureBarrier?
 cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) -> void?
 ```
 
-`before` declares the prior use; `after` declares the next use. The backend maps
-both uses to private execution, access, and layout scopes. `UNDEFINED` is
-source-only and faults `INVALID_ARGUMENT` as `after`. Same-use transitions are
-valid explicit memory dependencies. Sampled depth/stencil textures use the
-appropriate read-only depth/stencil state.
+`before` asserts the caller-established prior state; `after` declares the next
+state. Layout, execution stages, and read/write access are independent.
+`sampled_at` selects `SAMPLED` with read access, while `storage_at` selects
+`STORAGE` and preserves the caller's access. Both constructors only compose a
+value and insert no synchronization.
+
+The semantic matrix is exact:
+
+| Layout | Public stages | Access | Required texture/queue |
+|---|---|---|---|
+| `UNDEFINED` | empty | empty | source only |
+| `TRANSFER_SOURCE` | transfer, or exclusive `all` | read | `transfer_src`; transfer-capable queue |
+| `TRANSFER_DESTINATION` | transfer, or exclusive `all` | write | `transfer_dst`; transfer-capable queue |
+| `SAMPLED` | nonempty vertex/fragment/compute combination, or exclusive `all` | read | `sampled`; shader-capable queue |
+| `STORAGE` | nonempty vertex/fragment/compute combination, or exclusive `all` | read, write, or both | `storage`; shader-capable queue |
+| `COLOR_ATTACHMENT` | color output, or exclusive `all` | read, write, or both | `color_attach`; non-depth format; graphics queue |
+| `DEPTH_ATTACHMENT` | depth output, or exclusive `all` | read, write, or both | `depth_attach`; depth format; graphics queue |
+| `PRESENT` | empty | empty | swapchain-owned non-depth texture; graphics queue |
+
+Unknown bits and layouts fault `INVALID_ARGUMENT`. Texture states cannot name
+the global-only `host` or `present` stage bits. Same-state transitions remain
+valid explicit memory dependencies. Sampled depth/stencil textures lower to the
+appropriate read-only depth/stencil layout.
 
 A zero `view` selects the full texture. Zero mip or layer counts select the
 remaining range from their respective base. Format reinterpretation and
 out-of-range subresources fault `INVALID_ARGUMENT`.
 
-The constructors are pure and insert no synchronization. Recording validates
-the texture handle, queue access, semantic values, stage support on the
-recording queue, texture usage and format, presentation ownership, and the
-subresource range. It does not infer, track, or repair prior use; a wrong
-`before` declaration is a caller synchronization error and does not change
-release behavior.
+Recording resolves the texture handle once, validates recording access,
+normalizes the range once, validates and lowers both states once, assembles one
+native barrier, and emits it once. Validation covers queue access, semantic
+values, stage support, immutable texture usage and format, presentation
+ownership, and the selected subresource range. Rejection emits nothing and
+rolls back any retained command reference.
 
-At the presentation boundary, `AcquiredImage.prior_use` supplies the first
-transition's `before` value. `PRESENT` maps to presentation state with no access
-scope; transitions to and from color attachment state provide the rendering
-access scopes.
+The backend does not infer, track, compare, or repair prior state. A wrong
+`before` declaration is a caller synchronization error; applications own their
+layout history, including history for separate subresource ranges.
+
+At the presentation boundary, `AcquiredImage.prior_state` is directly usable as
+the first transition's `before` value. The fixed public `PRESENT` state has
+empty stages and access because the presentation engine is external to the
+pipeline. The Vulkan backend preserves the validated WSI policy by lowering
+the presentation-facing side to color-attachment-output with no access; the
+concrete rendering side still comes from the caller's state.
+
+`SubmitDesc.readiness_before` names the destination stages of the first
+command that consumes the acquired image. When the first recorded transition
+leaves `PRESENT`, the mask must also include `color_output`: the transition's
+fixed color-attachment-output source scope is ordered against the acquire wait
+only through that stage, so a mask without it leaves the layout change
+unordered relative to acquisition.
 
 `UNDEFINED` supplies no source dependency and discards prior contents. Use it
 only for first use or after earlier access has been ordered separately.
@@ -1584,7 +1626,7 @@ AcquiredImage
     SwapchainReadiness readiness
     uint index
     bool suboptimal
-    TextureUse prior_use
+    TextureState prior_state
 
 create_swapchain(Device*, Surface*, SwapchainDesc*) -> SwapchainHandle?
 destroy_swapchain(Device*, SwapchainHandle) -> void?
@@ -1644,8 +1686,9 @@ mode, and dormant state. Re-query after resize and rebuild format-dependent
 pipelines when the format changes. A dormant swapchain reports `UNDEFINED`,
 zero extent/count, and FIFO until resize succeeds.
 
-`AcquiredImage.prior_use` is `UNDEFINED` for a newly wrapped image and `PRESENT`
-after the normal presentation cycle. `AcquiredImage.attachment_view` is the
+`AcquiredImage.prior_state` is the exact empty `UNDEFINED` state for a newly
+wrapped image and the exact empty `PRESENT` state after the normal presentation
+cycle. `AcquiredImage.attachment_view` is the
 borrowed, swapchain-owned color target for the texture; callers must not destroy
 it. Resize stales both borrowed handles. Destroy descriptors that reference
 swapchain textures, and discard or complete commands that name either handle,

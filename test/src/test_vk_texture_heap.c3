@@ -9,8 +9,15 @@ import gpu @public;
 
 const char[*] HEAP_WRITE_SPIRV  = $embed("shaders/heap_write.comp.spv");
 const char[*] HEAP_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");
+const char[*] HEAP_OFFSCREEN_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
+const char[*] HEAP_OFFSCREEN_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 
 const uint TEX_SIZE = 16;
+const uint STORAGE_SAMPLE_X = 5;
+const uint STORAGE_SAMPLE_Y = 3;
+const uint STORAGE_GRAPHICS_TARGET_SIZE = 32;
+const usz STORAGE_GRAPHICS_TARGET_BYTES =
+    STORAGE_GRAPHICS_TARGET_SIZE * STORAGE_GRAPHICS_TARGET_SIZE * 4;
 
 fn void bindless_texture_write_then_sample() @test {
     gpu::RuntimeDesc device_desc = {
@@ -106,8 +113,8 @@ fn void bindless_texture_write_then_sample() @test {
 
     gpu::TextureBarrier to_general = gpu::texture_transition(
         texture: texture,
-        before:  gpu::TextureUse.UNDEFINED,
-        after:   gpu::TextureUse.STORAGE_COMPUTE,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   gpu::storage_at({ .compute }, { .write }),
     )!!;
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
@@ -121,8 +128,8 @@ fn void bindless_texture_write_then_sample() @test {
 
     gpu::TextureBarrier write_to_sample = gpu::texture_transition(
         texture: texture,
-        before:  gpu::TextureUse.STORAGE_COMPUTE,
-        after:   gpu::TextureUse.STORAGE_COMPUTE,
+        before:  gpu::storage_at({ .compute }, { .write }),
+        after:   gpu::storage_at({ .compute }, { .read }),
     )!!;
     gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
 
@@ -182,8 +189,8 @@ fn void bindless_texture_write_then_sample() @test {
     defer discard_test_commands(&reused_cmd)!!;
     gpu::TextureBarrier reused_to_general = gpu::texture_transition(
         texture: reused_texture,
-        before:  gpu::TextureUse.UNDEFINED,
-        after:   gpu::TextureUse.STORAGE_COMPUTE,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   gpu::storage_at({ .compute }, { .write }),
     )!!;
     gpu::cmd_texture_barrier(&reused_cmd, &reused_to_general)!!;
     const uint REUSED_GROUPS = (REUSED_TEX_SIZE + 7) / 8;
@@ -195,8 +202,8 @@ fn void bindless_texture_write_then_sample() @test {
     )!!;
     gpu::TextureBarrier reused_write_to_sample = gpu::texture_transition(
         texture: reused_texture,
-        before:  gpu::TextureUse.STORAGE_COMPUTE,
-        after:   gpu::TextureUse.STORAGE_COMPUTE,
+        before:  gpu::storage_at({ .compute }, { .write }),
+        after:   gpu::storage_at({ .compute }, { .read }),
     )!!;
     gpu::cmd_texture_barrier(&reused_cmd, &reused_write_to_sample)!!;
     bind_test_compute_pipeline(&reused_cmd, sample_pipe);
@@ -219,6 +226,258 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::wait_completion(reused_completion)!!;
     assert_heap_pattern(&device, output.span, REUSED_TEX_SIZE);
     gpu::destroy_texture_view(&device, reused_view)!!;
+}
+
+fn void storage_write_then_fragment_sample() @test {
+    gpu::RuntimeDesc device_desc = {
+        .backend           = gpu::BackendKind.VULKAN,
+        .enable_validation = true,
+        .application_name  = "gpu_storage_fragment_test",
+    };
+    gpu::Device device = create_test_device(&device_desc)!!;
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureDesc sampled_desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics, .compute },
+        .width      = TEX_SIZE,
+        .height     = TEX_SIZE,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .storage },
+        .debug_name = "storage_fragment_source",
+    };
+    gpu::TextureHandle sampled_texture = gpu::create_texture(&device, &sampled_desc)!!;
+    defer gpu::destroy_texture(&device, sampled_texture)!!;
+    gpu::TextureView sampled_view = gpu::create_texture_view(&device, sampled_texture, null)!!;
+    defer gpu::destroy_texture_view(&device, sampled_view)!!;
+
+    gpu::TextureDesc target_desc = {
+        .dimension  = gpu::TextureDimension.TEX_2D,
+        .access     = { .graphics, .transfer },
+        .width      = STORAGE_GRAPHICS_TARGET_SIZE,
+        .height     = STORAGE_GRAPHICS_TARGET_SIZE,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .color_attach, .transfer_src },
+        .debug_name = "storage_fragment_target",
+    };
+    gpu::TextureHandle target = gpu::create_texture(&device, &target_desc)!!;
+    defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(&device, target)!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
+
+    gpu::SamplerDesc sampler_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
+
+    gpu::ShaderDesc write_shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = HEAP_WRITE_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode write_shader = gpu::prepare_shader_code(&write_shader_desc)!!;
+    gpu::ComputePipelineDesc write_pipeline_desc = { .shader = write_shader };
+    gpu::PipelineHandle write_pipeline =
+        gpu::create_compute_pipeline(&device, &write_pipeline_desc)!!;
+    defer gpu::destroy_pipeline(&device, write_pipeline)!!;
+
+    gpu::ShaderDesc vertex_shader_desc = {
+        .stage       = gpu::ShaderStage.VERTEX,
+        .spirv       = HEAP_OFFSCREEN_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode vertex_shader = gpu::prepare_shader_code(&vertex_shader_desc)!!;
+    gpu::ShaderDesc fragment_shader_desc = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = HEAP_OFFSCREEN_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode fragment_shader = gpu::prepare_shader_code(&fragment_shader_desc)!!;
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc graphics_pipeline_desc = {
+        .vertex_shader   = vertex_shader,
+        .fragment_shader = fragment_shader,
+        .colors          = pipeline_colors[..],
+        .debug_name      = "storage_fragment_sample",
+    };
+    gpu::PipelineHandle graphics_pipeline =
+        gpu::create_graphics_pipeline(&device, &graphics_pipeline_desc)!!;
+    defer gpu::destroy_pipeline(&device, graphics_pipeline)!!;
+
+    OwnedSpan write_root_owned = allocate_owned_span(
+        device:       &device,
+        size:         WriteRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "storage_fragment_write_root",
+    )!!;
+    defer free_owned_span(&device, &write_root_owned)!!;
+    gpu::GpuSpan write_root_span = write_root_owned.span;
+    WriteRoot* write_root = (WriteRoot*)test_span_mapping(&device, write_root_span).ptr;
+    write_root.texture_index = sampled_view.index;
+    write_root.width = TEX_SIZE;
+    write_root.height = TEX_SIZE;
+    gpu::flush_mapped_span(&device, write_root_span)!!;
+
+    OwnedSpan vertices_owned = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "storage_fragment_vertices",
+    )!!;
+    defer free_owned_span(&device, &vertices_owned)!!;
+    gpu::GpuSpan vertices_span = vertices_owned.span;
+    float sample_u = ((float)STORAGE_SAMPLE_X + 0.5f) / (float)TEX_SIZE;
+    float sample_v = ((float)STORAGE_SAMPLE_Y + 0.5f) / (float)TEX_SIZE;
+    float[12] vertex_data = {
+        -0.8f, -0.8f, sample_u, sample_v,
+         0.8f, -0.8f, sample_u, sample_v,
+         0.0f,  0.8f, sample_u, sample_v,
+    };
+    float* vertices = (float*)test_span_mapping(&device, vertices_span).ptr;
+    for (uint i = 0; i < vertex_data.len; i++) vertices[i] = vertex_data[i];
+    gpu::flush_mapped_span(&device, vertices_span)!!;
+
+    OwnedSpan fragment_root_owned = allocate_owned_span(
+        device:       &device,
+        size:         FragRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "storage_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &fragment_root_owned)!!;
+    gpu::GpuSpan fragment_root_span = fragment_root_owned.span;
+    FragRoot* fragment_root =
+        (FragRoot*)test_span_mapping(&device, fragment_root_span).ptr;
+    fragment_root.texture_index = sampled_view.index;
+    fragment_root.sampler_index = sampler_index;
+    gpu::flush_mapped_span(&device, fragment_root_span)!!;
+
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         STORAGE_GRAPHICS_TARGET_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .transfer },
+        debug_name:   "storage_fragment_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::TextureBarrier to_storage = gpu::texture_transition(
+        texture: sampled_texture,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   gpu::storage_at({ .compute }, { .write }),
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &to_storage)!!;
+    bind_test_compute_pipeline(&commands, write_pipeline);
+    const uint GROUPS = (TEX_SIZE + HEAP_TILE - 1) / HEAP_TILE;
+    gpu::cmd_dispatch(
+        commands: &commands,
+        root:     test_span_address(&device, write_root_span),
+        groups:   { GROUPS, GROUPS, 1 },
+    )!!;
+
+    gpu::TextureBarrier write_to_fragment = gpu::texture_transition(
+        texture: sampled_texture,
+        before:  gpu::storage_at({ .compute }, { .write }),
+        after:   gpu::sampled_at({ .fragment_shader }),
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &write_to_fragment)!!;
+
+    gpu::TextureBarrier target_to_attachment = gpu::texture_transition(
+        texture: target,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &target_to_attachment)!!;
+    gpu::ColorTargetDesc[1] colors = {{
+        .view     = target_view,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+        .clear    = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
+    }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = STORAGE_GRAPHICS_TARGET_SIZE,
+        .height = STORAGE_GRAPHICS_TARGET_SIZE,
+    };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    bind_test_graphics_pipeline(&commands, graphics_pipeline);
+    gpu::cmd_draw(
+        commands:       &commands,
+        vertex_root:    test_span_address(&device, vertices_span),
+        fragment_root:  test_span_address(&device, fragment_root_span),
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    gpu::TextureBarrier target_to_transfer = gpu::texture_transition(
+        texture: target,
+        before:  {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        after:   {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &target_to_transfer)!!;
+    gpu::GpuSpan readback_span = readback.span;
+    gpu::TextureBufferCopyDesc copy = {
+        .texture = target,
+        .dst     = readback_span,
+    };
+    gpu::cmd_copy_texture_to_buffer(&commands, &copy)!!;
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after  = { .host = true },
+    };
+    gpu::cmd_barrier(&commands, &host_read)!!;
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+    gpu::invalidate_mapped_span(&device, readback_span)!!;
+
+    char* pixels = (char*)test_span_mapping(&device, readback_span).ptr;
+    uint center_pixel =
+        (STORAGE_GRAPHICS_TARGET_SIZE / 2 * STORAGE_GRAPHICS_TARGET_SIZE
+            + STORAGE_GRAPHICS_TARGET_SIZE / 2) * 4;
+    assert(pixels[center_pixel] == (char)STORAGE_SAMPLE_X,
+        "fragment read sees the compute-written red channel");
+    assert(pixels[center_pixel + 1] == (char)STORAGE_SAMPLE_Y,
+        "fragment read sees the compute-written green channel");
+    assert(pixels[center_pixel + 2] == (char)(STORAGE_SAMPLE_X ^ STORAGE_SAMPLE_Y),
+        "fragment read sees the compute-written blue channel");
+    assert(pixels[center_pixel + 3] == (char)255,
+        "fragment read sees the compute-written alpha channel");
 }
 
 fn void assert_heap_pattern(

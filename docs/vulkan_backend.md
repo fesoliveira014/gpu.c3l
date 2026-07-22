@@ -394,10 +394,10 @@ Any fault before publication destroys the temporary view, image, and allocation.
 Textures use the same one-family `EXCLUSIVE` or multi-family `CONCURRENT`
 rule as buffers, based only on `TextureDesc.access`.
 
-Texture transitions map the caller-declared semantic uses and subresource
-range directly to one native image barrier. The backend does not infer or track
-general texture layouts. Swapchain slots retain only whether an image completed
-a presentation cycle so acquisition can report `prior_use`.
+Texture transitions map caller-declared compositional states and a normalized
+subresource range directly to one native image barrier. The backend does not
+infer or track general texture layouts. Swapchain slots retain only whether an
+image completed a presentation cycle so acquisition can report `prior_state`.
 
 ## 10. Descriptor heap implementation
 
@@ -665,8 +665,8 @@ command-pool destruction.
 
 Use synchronization2 for barriers.
 
-Translation helpers map semantic global stage/hazard masks and explicit texture
-transition tuples to synchronization2 scopes.
+Translation helpers map semantic global stage/hazard masks and compositional
+texture layout/stage/access states to synchronization2 scopes.
 
 Barrier commands:
 
@@ -685,10 +685,31 @@ The backend must not insert hidden barriers for user-visible resource
 transitions except for unavoidable swapchain acquire/present transitions
 inside WSI helpers.
 
-For texture transitions, each semantic use must map to a stage supported by
-the recording queue. `TextureUse.UNDEFINED` maps to empty execution and access
-scopes. `TextureUse.PRESENT` uses the color-attachment-output stage with an
-empty access scope on its WSI-facing side.
+Texture-state validation uses one layout-specific matrix:
+
+| Layout | Accepted public stages | Accepted access | Native layout/access |
+|---|---|---|---|
+| `UNDEFINED` | empty | empty; source only | `UNDEFINED`, none |
+| `TRANSFER_SOURCE` | transfer or exclusive `all` | read | transfer source, transfer read |
+| `TRANSFER_DESTINATION` | transfer or exclusive `all` | write | transfer destination, transfer write |
+| `SAMPLED` | nonempty vertex/fragment/compute combination or exclusive `all` | read | color or depth/stencil read-only, sampled read |
+| `STORAGE` | nonempty vertex/fragment/compute combination or exclusive `all` | read, write, or both | general, selected storage access |
+| `COLOR_ATTACHMENT` | color output or exclusive `all` | read, write, or both | color attachment, selected color access |
+| `DEPTH_ATTACHMENT` | depth output or exclusive `all` | read, write, or both | depth/stencil attachment, selected depth access |
+| `PRESENT` | empty | empty | present source, fixed native presentation scope |
+
+The layout also enforces immutable texture usage, format class, WSI ownership,
+and a compatible recording queue. `host` and `present` stage bits are invalid
+inside `TextureState`; unknown layout, stage, or access bits fault before
+recording. View format must be undefined or exactly match the texture. Zero
+mip/layer counts mean the remaining range and are normalized once.
+
+`validate_and_lower_texture_barrier` is the only texture-barrier command path.
+It performs one handle resolution, one recording-access validation and retain,
+one range normalization, two state validations/lowerings, one native assembly,
+and one native emission. A later validation fault rolls references back to the
+pre-call checkpoint and emits nothing. No second semantic pass or shared
+layout-history update follows successful lowering.
 
 Presentation transitions use these exact synchronization2 scopes:
 
@@ -697,11 +718,15 @@ Presentation transitions use these exact synchronization2 scopes:
 | `PRESENT -> COLOR_ATTACHMENT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_NONE` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT \| VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT` |
 | `COLOR_ATTACHMENT -> PRESENT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT \| VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_NONE` |
 
-The presentation-facing access scope is empty because the presentation engine
-is external to the Vulkan pipeline. The texture transitions keep their narrow
-color-attachment scopes. The private acquire semaphore uses the exact
-`SubmitDesc.readiness_before` destination mask. The private present signal keeps
-the backend's full-submission scope.
+The public `PRESENT` state has empty stages and access because the presentation
+engine is external to the Vulkan pipeline. Native lowering retains the fixed
+color-attachment-output/no-access WSI scope in both directions. The texture
+transitions keep their narrow caller-declared scopes. The private acquire
+semaphore uses the exact `SubmitDesc.readiness_before` destination mask for the
+first actual consumer of the acquired image; because that wait scope is not
+derived from the fixed `PRESENT` barrier source, a transition leaving `PRESENT`
+is ordered after acquisition only when the mask includes color output. The private present signal
+keeps the backend's full-submission scope.
 
 ## 14. Timeline semaphores
 
@@ -803,8 +828,8 @@ A readiness-consuming graphics submit:
 Present requires that exact completion point and image identity, then attaches a
 private `VkSwapchainPresentFenceInfoEXT` fence and waits the private present
 semaphore in `vkQueuePresentKHR`. The caller records the explicit transition to
-`TextureUse.PRESENT` in the submitted command list. Successful and enqueued WSI
-outcomes retire the acquisition. Host or device allocation failure preserves
+the fixed empty `PRESENT` state in the submitted command list. Successful and
+enqueued WSI outcomes retire the acquisition. Host or device allocation failure preserves
 it for retry. Reuse polls the image's previous fence; `NOT_READY` becomes
 `WAIT_TIMEOUT` without calling native present.
 
@@ -863,13 +888,14 @@ Releasing an allocation with a live placement returns `RESOURCE_IN_USE`.
 ## 19. Translation helpers
 
 Centralize enum and flag conversion in `gpu/vk/helpers.c3` or the backend file
-that owns the complete semantic operation. Texture-use conversion stays in
-`gpu/vk/sync.c3` beside barrier construction because layouts are private to
-that operation.
+that owns the complete semantic operation. Texture-state validation and
+lowering stay in one path in `gpu/vk/sync.c3` beside barrier construction
+because the layout-specific access mapping belongs to that operation.
 
 Shared helpers include format, usage, sampler, blend, topology, and global
-barrier conversion. Do not duplicate translation switches in command or
-resource files.
+barrier conversion. Texture-state validation, lowering, native barrier
+assembly, and emission form one path owned by `gpu/vk/sync.c3`; command and
+resource files do not duplicate that translation.
 
 ## 20. Backend acceptance criteria
 
