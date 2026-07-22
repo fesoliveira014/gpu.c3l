@@ -144,10 +144,12 @@ Two sizing rules that bite:
   and `generated_preprocess_bytes` limits their total exact driver-reported
   bytes. Reservation occurs only while the allocator is quiescent. Recreate a
   quiescent allocator with larger values after a capacity fault.
-- **Infinite swapchain acquisition is platform-conditional.**
-  `TIMEOUT_INFINITE` maps to the native infinite timeout. Use it only when the
-  surface platform guarantees presentation forward progress; otherwise use the
-  nonblocking default or a finite nanosecond budget.
+- **Omitted swapchain acquisition is now nonblocking.** Earlier releases used a
+  hidden one-second backend wait when `acquire_next_image` omitted its timeout;
+  the current default is zero. Migrating callers must handle retryable
+  `WAIT_TIMEOUT` or pass an explicit finite budget. Pass `TIMEOUT_INFINITE` only
+  when the surface platform guarantees presentation forward progress; otherwise
+  an unbounded acquire can stall event handling and shutdown.
 
 ## 3. Driver and environment quirks
 
