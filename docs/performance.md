@@ -96,6 +96,13 @@ are not cross-machine performance rankings.
 
 ### Pipeline identity snapshot
 
+Pipeline bind performs the only generation-checked pipeline-table lookup and
+the only pipeline-cache resolution for a command interval. Validation mode
+retains the pipeline through discard or completion; later direct, indirect,
+generated, and render-pass commands read only the cached native snapshot and
+kind/render metadata. The source contract rejects post-bind table/cache
+resolution and retained cell-generation validation seams.
+
 An advisory llvmpipe run on 2026-07-21 (Mesa 25.0.7, LLVM 15.0.7) requested
 200 dynamic raster states for one immutable graphics descriptor:
 

@@ -24,11 +24,9 @@ struct RenderCompatibility {
 
 struct BoundPipeline {
     gpu::PipelineHandle               handle;
-    PipelineCell*                     validation_cell;
     vk::Pipeline                      pipeline;
     vk::PipelineLayout                layout;
     vk::IndirectCommandsLayoutEXT     generated_dispatch_layout;
-    uint                              expected_generation;
     uint                              cache_entry;
     PipelineKind                      kind;
     RenderCompatibility               render;

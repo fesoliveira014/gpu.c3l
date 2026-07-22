@@ -1083,41 +1083,6 @@ fn void dynamic_raster_state_validation_is_atomic_and_pass_scoped() @test {
     gpu::cmd_end_render_pass(&commands)!!;
 }
 
-fn void bound_pipeline_checked_dispatch_rejects_destroyed_and_reused_slots() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    ValComputeCtx compute = make_val_compute_ctx(&device);
-    defer destroy_val_compute_ctx(&device, &compute);
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
-    defer discard_test_commands(&commands)!!;
-    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    vk::PipelineCell* cell = record.bound_pipeline.validation_cell;
-    uint generation = cell.generation;
-
-    cell.used = false;
-    fault destroyed_fault = @catch(gpu::cmd_dispatch(
-        commands: &commands,
-        root:     (gpu::GpuAddress)1,
-        groups:   { 0, 0, 0 },
-    ));
-    cell.used = true;
-    cell.generation++;
-    fault reused_fault = @catch(gpu::cmd_dispatch(
-        commands: &commands,
-        root:     (gpu::GpuAddress)1,
-        groups:   { 0, 0, 0 },
-    ));
-    cell.generation = generation;
-
-    assert(destroyed_fault == gpu::INVALID_HANDLE,
-        "checked dispatch rejects a destroyed bound pipeline before native use");
-    assert(reused_fault == gpu::INVALID_HANDLE,
-        "checked dispatch rejects a reused bound pipeline before native use");
-}
-
 fn void compute_pipeline_from_vertex_shader_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;

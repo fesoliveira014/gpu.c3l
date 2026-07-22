@@ -639,11 +639,13 @@ snapshot, and pending texture transitions.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
 
-`cmd_bind_pipeline` resolves the pipeline slot and cache entry once and stores
-the expected slot generation plus native pipeline/layout, kind, render
-compatibility, cache identity, and generated-command layout. Execution helpers
-validate the stable cell directly and never revisit pipeline table/cache
-storage.
+`cmd_bind_pipeline` generation-checks the pipeline slot, resolves its cache
+entry, retains validation ownership, and stores native pipeline/layout, kind,
+render compatibility, cache identity, generated-command layout, and public
+diagnostic identity. Execution helpers consume only that snapshot; they do not
+retain or reread a pipeline cell and never revisit pipeline table/cache storage.
+Without runtime validation, the caller-owned lifetime contract requires the
+pipeline to remain live through command completion.
 The checked command-operation table is immutable per device. Policy selection
 happens during device or encoder setup and remains outside warm recording.
 

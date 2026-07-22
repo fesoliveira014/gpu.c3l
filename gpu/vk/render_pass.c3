@@ -405,11 +405,9 @@ fn void? vk_cmd_end_render_pass(gpu::CommandEncoderState* commands) @private {
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     vk::cmd_end_rendering(record.command_buffer);
     gpu::note_command_native_call();
-    if (record.bound_pipeline.handle.is_valid()) {
-        validate_bound_pipeline_identity(&record.bound_pipeline)!;
-        if (record.bound_pipeline.kind == PipelineKind.GRAPHICS) {
-            record.bound_pipeline = {};
-        }
+    if (record.bound_pipeline.handle.is_valid()
+        && record.bound_pipeline.kind == PipelineKind.GRAPHICS) {
+        record.bound_pipeline = {};
     }
     record.active_render_width = 0;
     record.active_render_height = 0;

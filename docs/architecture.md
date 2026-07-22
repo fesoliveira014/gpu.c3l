@@ -307,15 +307,15 @@ of allocating when the count or compatible-buffer supply is exhausted. Discard
 and completion return reserved buffers to the same context; a different worker
 never acquires them implicitly.
 
-Pipeline bind resolves the stable pipeline cell and cache entry once, then
-publishes a complete bound snapshot: expected generation, native pipeline and
-layout, kind, render compatibility, cache identity, and generated-work layout.
-Later draw, dispatch, render-pass, indirect, and generated commands validate the
-cached cell generation and use the snapshot without reading pipeline tables or
-cache storage. Ending a render pass clears a graphics snapshot; a legal compute
-snapshot remains available. Command-policy variants are outside this mechanism:
-policy selection happens when the device or encoder is created, never in a warm
-recording call.
+Pipeline bind generation-checks the public handle, resolves the cache entry,
+retains validation ownership, and publishes a complete bound snapshot: native
+pipeline and layout, kind, render compatibility, cache identity, generated-work
+layout, and public diagnostic identity. Later draw, dispatch, render-pass,
+indirect, and generated commands use that snapshot without reading a pipeline
+cell, pipeline table, or cache. Ending a render pass clears a graphics snapshot;
+a legal compute snapshot remains available. Command-policy variants are outside
+this mechanism: policy selection happens when the device or encoder is created,
+never in a warm recording call.
 
 ### Independent allocations
 
