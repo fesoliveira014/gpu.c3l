@@ -232,6 +232,11 @@ COMMAND_PATH_VK_EQUIVALENCE = re.compile(
     r"direct_checksum=(?P<direct>[0-9]+) public_checksum=(?P<public>[0-9]+) "
     r"pairwise=true status=pass$"
 )
+COMMAND_PATH_EQUIVALENCE_ELEMENTS = 64
+COMMAND_PATH_EQUIVALENCE_CHECKSUMS = {
+    "dispatch": 2 * sum(range(1, COMMAND_PATH_EQUIVALENCE_ELEMENTS + 1)),
+    "copy_buffer": sum(range(1, COMMAND_PATH_EQUIVALENCE_ELEMENTS + 1)),
+}
 COMMAND_PATH_LIFECYCLE_CASES = (0, 1, 16, 256)
 COMMAND_PATH_VK_LIFECYCLE = re.compile(
     r"^command_path_vk_lifecycle commands=(?P<commands>[0-9]+) "
@@ -462,14 +467,15 @@ def require_command_path_vulkan_evidence(output):
             raise ValueError(
                 "command_path_baseline_bench equivalence order or identity mismatch"
             )
-        if int(match.group("elements")) != 64:
+        if int(match.group("elements")) != COMMAND_PATH_EQUIVALENCE_ELEMENTS:
             raise ValueError(
                 "command_path_baseline_bench equivalence element count mismatch"
             )
         expected = int(match.group("expected"))
         direct = int(match.group("direct"))
         public = int(match.group("public"))
-        if expected == 0 or direct != expected or public != expected:
+        exact = COMMAND_PATH_EQUIVALENCE_CHECKSUMS[expected_operation]
+        if expected != exact or direct != exact or public != exact:
             raise ValueError(
                 "command_path_baseline_bench equivalence checksum mismatch"
             )

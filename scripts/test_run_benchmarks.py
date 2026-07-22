@@ -178,8 +178,8 @@ COMMAND_PATH_VK_OUTPUT = "\n".join(
                 "copy_buffer",
             )
         ),
-        "command_path_vk_equivalence operation=dispatch elements=64 expected_checksum=2080 direct_checksum=2080 public_checksum=2080 pairwise=true status=pass",
-        "command_path_vk_equivalence operation=copy_buffer elements=64 expected_checksum=6112 direct_checksum=6112 public_checksum=6112 pairwise=true status=pass",
+        "command_path_vk_equivalence operation=dispatch elements=64 expected_checksum=4160 direct_checksum=4160 public_checksum=4160 pairwise=true status=pass",
+        "command_path_vk_equivalence operation=copy_buffer elements=64 expected_checksum=2080 direct_checksum=2080 public_checksum=2080 pairwise=true status=pass",
         "command_path_vk_lifecycle commands=0 repetitions=5 min_ns=100.000 median_ns=110.000 max_ns=120.000 paired_delta_median_ns=0.000 incremental_ns_per_command=0.000",
         "command_path_vk_lifecycle commands=1 repetitions=5 min_ns=190.000 median_ns=210.000 max_ns=230.000 paired_delta_median_ns=100.000 incremental_ns_per_command=100.000",
         "command_path_vk_lifecycle commands=16 repetitions=5 min_ns=250.000 median_ns=270.000 max_ns=290.000 paired_delta_median_ns=160.000 incremental_ns_per_command=10.000",
@@ -516,20 +516,36 @@ class BenchmarkRunnerTests(unittest.TestCase):
             ),
             (
                 COMMAND_PATH_VK_OUTPUT.replace(
-                    "operation=copy_buffer elements=64 expected_checksum=6112",
-                    "operation=dispatch elements=64 expected_checksum=6112",
+                    "operation=copy_buffer elements=64 expected_checksum=2080",
+                    "operation=dispatch elements=64 expected_checksum=2080",
                     1,
                 ),
                 "equivalence order",
             ),
             (
-                COMMAND_PATH_VK_OUTPUT.replace("direct_checksum=2080", "direct_checksum=2079", 1),
+                COMMAND_PATH_VK_OUTPUT.replace("direct_checksum=4160", "direct_checksum=4159", 1),
+                "checksum",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "expected_checksum=4160 direct_checksum=4160 public_checksum=4160",
+                    "expected_checksum=0 direct_checksum=0 public_checksum=0",
+                    1,
+                ),
+                "checksum",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "expected_checksum=4160 direct_checksum=4160 public_checksum=4160",
+                    "expected_checksum=4159 direct_checksum=4159 public_checksum=4159",
+                    1,
+                ),
                 "checksum",
             ),
             (
                 COMMAND_PATH_VK_OUTPUT.replace(
                     "expected_checksum=2080 direct_checksum=2080 public_checksum=2080",
-                    "expected_checksum=0 direct_checksum=0 public_checksum=0",
+                    "expected_checksum=2079 direct_checksum=2079 public_checksum=2079",
                     1,
                 ),
                 "checksum",
