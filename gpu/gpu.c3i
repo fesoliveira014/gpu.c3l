@@ -232,3 +232,259 @@ $assert GeneratedDispatchRecord::size == 24;
 $assert $reflect(GeneratedDispatchRecord.root_gpu).offset == 0;
 $assert $reflect(GeneratedDispatchRecord.arguments).offset == 8;
 $assert $reflect(GeneratedDispatchRecord._pad0).offset == 20;
+
+<* Graphics API a device is created against. *>
+enum BackendKind : int {
+    VULKAN,
+}
+
+<* Queue a command list records for and submits on. *>
+enum QueueKind : int {
+    GRAPHICS,
+    // Its own queue only when caps.async_compute; otherwise aliases GRAPHICS.
+    COMPUTE,
+    // May map to a dedicated transfer family.
+    TRANSFER,
+}
+
+<* Capabilities of the created device. Query with get_device_caps instead of
+   hardcoding limits. *>
+struct DeviceCaps {
+    bool strict_enabled;
+    bool presentation_enabled;
+    bool buffer_device_address;
+    bool synchronization2;
+    bool dynamic_rendering;
+    bool shader_int64;
+    bool draw_indirect_count;
+    // GPU-written root records and work arguments can execute without host
+    // readback or CPU-loop emulation.
+    bool generated_work;
+    bool async_compute;
+    QueueCounts queues;
+    // Optional non-solid triangle rasterization through PolygonMode.LINE.
+    bool line_polygon_mode;
+    // Configured semantic heap capacity, not the hardware maximum.
+    uint texture_heap_capacity;
+    // Configured semantic heap capacity, not the hardware maximum.
+    uint sampler_heap_capacity;
+    // Effective MRT limit: the lesser of the library and selected device caps.
+    uint max_color_attachments;
+    // Raw selected-device limit for one Vulkan push-constant range.
+    uint max_push_constant_size;
+    // Selected-device direct-dispatch work-group count limit per axis.
+    Vec3u max_compute_work_group_count;
+    // Selected-device limit for one multi-draw indirect command.
+    uint max_draw_indirect_count;
+    // Selected-device limit for one generated-work execution.
+    uint max_generated_work_count;
+    usz  min_uniform_alignment;
+    usz  min_storage_alignment;
+    usz  min_texel_buffer_alignment;
+    // Maximum absolute SamplerDesc.mip_lod_bias.
+    float max_sampler_lod_bias;
+    // 0 means anisotropic filtering is unsupported.
+    float max_sampler_anisotropy;
+}
+
+alias DebugMessageCallback = fn void (DebugMessage*, void*);
+
+enum DebugMessageSeverity : int {
+    VERBOSE,
+    INFO,
+    WARNING,
+    ERROR,
+}
+
+enum DebugResourceKind : int {
+    NONE,
+    DEVICE,
+    GPU_SPAN,
+    TEXTURE,
+    PIPELINE,
+    SWAPCHAIN,
+    SHADER,
+    COMMAND_ALLOCATOR,
+    COMMAND_LIST,
+    TEXTURE_DESCRIPTOR,
+    SAMPLER,
+    ALLOCATION,
+    ATTACHMENT_VIEW,
+}
+
+bitstruct DebugMessageCategory : uint {
+    bool public_contract   : 0;
+    bool backend           : 1;
+    bool validation        : 2;
+    bool performance       : 3;
+    bool resource_lifetime : 4;
+    bool general           : 5;
+}
+
+<* Public resource identity when a diagnostic originates from a tracked slot.
+   Strings remain valid only for the duration of the callback. *>
+struct DebugResourceRef {
+    DebugResourceKind kind;
+    bool              has_public_identity;
+    uint              index;
+    uint              generation;
+    ZString           debug_name;
+}
+
+<* Structured diagnostic delivered synchronously to the configured callback.
+   All strings remain valid only for the duration of the callback. *>
+struct DebugMessage {
+    DebugMessageSeverity severity;
+    DebugMessageCategory category;
+    ZString              operation;
+    bool                 has_fault;
+    fault                public_fault;
+    DebugResourceRef     resource;
+    ZString              rejected_field;
+    ZString              invariant;
+    ZString              backend_text;
+    ZString              validation_id_name;
+    int                  validation_id_number;
+}
+
+<* Public contract checking applied by the library. *>
+enum ContractValidation : int {
+    TRUSTED,
+    OBJECT_BOUNDARIES,
+    FULL,
+}
+
+bitstruct Runtime : ulong {
+    uint index      : 0..31;
+    uint generation : 32..55;
+    uint reserved   : 56..63;
+}
+
+const Runtime RUNTIME_INVALID = {};
+
+<* Runtime discovery configuration; zero-initialized fields select defaults. *>
+struct RuntimeDesc {
+    BackendKind           backend;
+    ContractValidation   contract_validation;
+    bool                 track_resource_lifetimes;
+    bool                 enable_vulkan_validation;
+    bool                 enable_debug_names;
+    uint                 texture_heap_capacity;
+    uint                 sampler_heap_capacity;
+    uint                 texture_capacity;
+    uint                 pipeline_capacity;
+    // Borrowed input copied by create_runtime for later device creation.
+    char[]                pipeline_cache_data;
+    ZString               application_name;
+    DebugMessageCallback  debug_callback;
+    void*                 debug_user_data;
+}
+
+enum AdapterClass : int {
+    OTHER,
+    INTEGRATED,
+    DISCRETE,
+    VIRTUAL,
+    SOFTWARE,
+}
+
+bitstruct Adapter : ulong {
+    ushort adapter_index      : 0..15;
+    ushort runtime_index      : 16..31;
+    uint   runtime_generation : 32..55;
+    uint   reserved           : 56..63;
+}
+
+const Adapter ADAPTER_INVALID = {};
+
+struct AdapterMemoryInfo {
+    ulong device_local_bytes;
+    ulong host_visible_bytes;
+}
+
+struct AdapterQueueInfo {
+    uint graphics_count;
+    uint compute_count;
+    uint transfer_count;
+}
+
+struct AdapterLimits {
+    uint  max_texture_dimension_2d;
+    uint  max_texture_array_layers;
+    uint  max_color_attachments;
+    uint  max_push_constant_size;
+    Vec3u max_compute_work_group_count;
+    uint  max_draw_indirect_count;
+}
+
+<* Cached semantic data. name is a borrowed read-only view until runtime destruction. *>
+struct AdapterInfo {
+    String            name;
+    uint              vendor_id;
+    uint              device_id;
+    AdapterClass      device_class;
+    AdapterMemoryInfo memory;
+    AdapterQueueInfo  queues;
+    bool              strict_supported;
+    AdapterLimits     limits;
+}
+
+struct BackendVersion {
+    uint major;
+    uint minor;
+    uint patch;
+}
+
+<* Backend diagnostics. Strings are borrowed read-only views until runtime destruction. *>
+struct AdapterDiagnostics {
+    String         backend_name;
+    BackendVersion backend_version;
+    String         driver_name;
+    String         driver_info;
+    uint           driver_version;
+}
+
+<* Allocation-free view of one runtime's borrowed adapters. *>
+struct AdapterList {
+    Runtime runtime;
+    uint    count;
+}
+
+<* Runtime-owned platform surface token. *>
+bitstruct Surface : ulong {
+    uint index      : 0..31;
+    uint generation : 32..55;
+    uint reserved   : 56..63;
+}
+
+const Surface SURFACE_INVALID = {};
+
+<* Immutable semantic requirements for device creation. *>
+typedef DeviceRequest = uint128;
+
+<* Result of a read-only semantic support query. unmet_requirement is a
+   borrowed static label when supported is false. *>
+struct DeviceRequestSupport {
+    bool   supported;
+    String unmet_requirement;
+}
+
+const ulong RESOURCE_OWNER_KIND_COUNT =
+    (ulong)ResourceOwnerKind.COMPLETION_POINT + 1;
+const ulong MAX_DEVICE_RESOURCE_OWNER =
+    ulong::max / RESOURCE_OWNER_KIND_COUNT;
+
+<* Test and benchmark instrumentation for command resolution and native command
+   emission. Counters are process-wide relaxed atomics; compare snapshots only
+   after externally synchronizing the measured recording work. *>
+struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+    ulong device_registry_resolutions;
+    ulong retained_pin_operations;
+    ulong lifecycle_vtable_dispatches;
+    ulong command_table_lookups;
+    ulong pipeline_table_lookups;
+    ulong pipeline_cache_lookups;
+    ulong command_policy_selections;
+    ulong recording_commands;
+    ulong native_commands;
+}

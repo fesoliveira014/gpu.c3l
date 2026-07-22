@@ -215,10 +215,6 @@ enum ResourceOwnerKind @private {
     COMPLETION_POINT,
 }
 
-const ulong RESOURCE_OWNER_KIND_COUNT =
-    (ulong)ResourceOwnerKind.COMPLETION_POINT + 1;
-const ulong MAX_DEVICE_RESOURCE_OWNER =
-    ulong::max / RESOURCE_OWNER_KIND_COUNT;
 
 bitstruct DeviceSlotControl : ulong @private {
     uint state      : 0..1;
@@ -360,20 +356,6 @@ struct DeviceOperation @private {
     bool           owns_pin;
 }
 
-<* Test and benchmark instrumentation for command resolution and native command
-   emission. Counters are process-wide relaxed atomics; compare snapshots only
-   after externally synchronizing the measured recording work. *>
-struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
-    ulong device_registry_resolutions;
-    ulong retained_pin_operations;
-    ulong lifecycle_vtable_dispatches;
-    ulong command_table_lookups;
-    ulong pipeline_table_lookups;
-    ulong pipeline_cache_lookups;
-    ulong command_policy_selections;
-    ulong recording_commands;
-    ulong native_commands;
-}
 
 <* Private test and benchmark counters for structural recording work. Compare
    relaxed snapshots only around externally synchronized cold or warm work. *>
@@ -475,54 +457,6 @@ fn void note_command_native_call() @private {
     $endif
 }
 
-<* Reset process-wide command instrumentation before a synchronized test or
-   benchmark interval. Do not call while another thread records commands. *>
-fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
-    command_device_registry_resolutions.store(0, AtomicOrdering.RELAXED);
-    command_retained_pin_operations.store(0, AtomicOrdering.RELAXED);
-    command_lifecycle_vtable_dispatches.store(0, AtomicOrdering.RELAXED);
-    command_table_lookups.store(0, AtomicOrdering.RELAXED);
-    command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
-    command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
-    command_policy_selections.store(0, AtomicOrdering.RELAXED);
-    command_recording_commands.store(0, AtomicOrdering.RELAXED);
-    command_native_commands.store(0, AtomicOrdering.RELAXED);
-}
-
-<* Snapshot process-wide command instrumentation with relaxed loads.
-   recording_commands counts live-encoder entry-point attempts;
-   native_commands counts every Vulkan command emitted by those paths. *>
-fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
-    return {
-        .device_registry_resolutions = command_device_registry_resolutions.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .retained_pin_operations = command_retained_pin_operations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .lifecycle_vtable_dispatches = command_lifecycle_vtable_dispatches.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .command_table_lookups = command_table_lookups.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .pipeline_table_lookups = command_pipeline_table_lookups.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .pipeline_cache_lookups = command_pipeline_cache_lookups.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .command_policy_selections = command_policy_selections.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .recording_commands = command_recording_commands.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .native_commands = command_native_commands.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
-}
 
 DeviceSlot[MAX_DEVICES] device_slots @private;
 Atomic{bool} device_registry_lock @private;
@@ -951,145 +885,4 @@ fn void* device_backend_state_ptr(Device* device) @private {
 
 fn void* device_backend_state(Device device) @private {
     return device_backend_state_ptr(&device);
-}
-
-<* Return the backend selected for the live device. *>
-fn BackendKind? get_device_backend(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return operation.data.backend;
-}
-
-<* Snapshot the selected device's capabilities. *>
-fn DeviceCaps? get_device_caps(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return operation.data.caps;
-}
-
-<* Create a strict device from one exact borrowed adapter.
-   Ownership: the caller must release the returned device with destroy_device. *>
-fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
-    validate_device_request(request)!;
-    RuntimeData* runtime_data = resolve_adapter(adapter);
-    if (runtime_data == null) return INVALID_HANDLE~;
-    if (!device_slot_available()) return SLOT_TABLE_FULL~;
-
-    DeviceRequestSupport support = supports_device_request(adapter, request)!;
-    if (!support.supported) return UNSUPPORTED_FEATURE~;
-
-    Runtime runtime = {
-        .index      = adapter.runtime_index,
-        .generation = adapter.runtime_generation,
-    };
-    runtime_retain_device(&runtime)!;
-
-    Device device;
-    bool retain_transferred = false;
-    defer catch {
-        if ((ulong)device != 0) {
-            (void)destroy_device(&device);
-        }
-        if (!retain_transferred) {
-            (void)runtime_release_device(&runtime);
-        }
-    }
-
-    switch (runtime_data.backend) {
-        case BackendKind.VULKAN:
-            device = gpu::vk::create_vk_device(adapter, request, &runtime)!;
-        default:
-            return UNSUPPORTED_BACKEND~;
-    }
-    retain_transferred = true;
-    return device;
-}
-
-<* Destroy a quiescent device. Live children fault RESOURCE_IN_USE; active
-   host or queue work faults DEVICE_BUSY without consuming the token. *>
-fn void? destroy_device(Device* device) {
-    if (device == null || !device.is_valid()) return INVALID_HANDLE~;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return INVALID_HANDLE~;
-
-    DeviceSlot* slot = &device_slots[device.index];
-    DeviceSlotControl closing;
-    DeviceData data;
-    {
-        lock_device_registry();
-        defer unlock_device_registry();
-        DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-        if (control.generation != device.generation) return INVALID_HANDLE~;
-        if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
-        if (control.state != DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
-        bool lost = slot.lost.load(AtomicOrdering.ACQUIRE);
-        if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
-            return RESOURCE_IN_USE~;
-        }
-
-        DeviceSlotControl state_step = { .state = 1 };
-        ulong previous = slot.control.add((ulong)state_step, AtomicOrdering.ACQUIRE_RELEASE);
-        closing = (DeviceSlotControl)previous;
-        closing.state = DEVICE_SLOT_CLOSING;
-
-        if (closing.pins > 0) {
-            (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
-            return DEVICE_BUSY~;
-        }
-        if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
-            (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
-            return RESOURCE_IN_USE~;
-        }
-        if (!lost && slot.data.vtable.check_device_destroy != null) {
-            if (catch readiness_fault = slot.data.vtable.check_device_destroy(
-                slot.data.backend_state,
-            )) {
-                (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
-                return readiness_fault~;
-            }
-            lost = slot.lost.load(AtomicOrdering.ACQUIRE);
-            if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
-                (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
-                return RESOURCE_IN_USE~;
-            }
-        }
-
-        data = slot.data;
-    }
-
-    data.vtable.destroy_device(data.backend_state);
-
-    {
-        lock_device_registry();
-        defer unlock_device_registry();
-        slot.data = {};
-        slot.live_children.store(0, AtomicOrdering.RELAXED);
-        slot.lost.store(false, AtomicOrdering.RELAXED);
-        closing.pins = 0;
-        if (closing.generation == MAX_DEVICE_GENERATION) {
-            closing.state = DEVICE_SLOT_RETIRED;
-        } else {
-            closing.generation++;
-            closing.state = DEVICE_SLOT_FREE;
-        }
-        closing.reserved = 0;
-        slot.control.store((ulong)closing, AtomicOrdering.RELEASE);
-    }
-
-    *device = DEVICE_INVALID;
-    if (data.runtime_retained) runtime_release_device(&data.runtime)!;
-}
-
-<* Snapshot per-heap memory usage and live allocation counts. *>
-fn MemoryStats? get_memory_stats(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.get_memory_stats(device);
-}
-
-<* Build a human-readable memory report. Ownership: the caller frees the
-   returned String. *>
-fn String? build_memory_report(Device* device, bool detailed) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return operation.vtable.build_memory_report(device, detailed);
 }

@@ -19,38 +19,6 @@ const uint MAX_RUNTIMES @private = 16;
 const uint MAX_ADAPTERS_PER_RUNTIME @private = (uint)ushort::max + 1;
 const uint MAX_RUNTIME_GENERATION @private = 0x00FF_FFFF;
 
-<* Public contract checking applied by the library. *>
-enum ContractValidation : int {
-    TRUSTED,
-    OBJECT_BOUNDARIES,
-    FULL,
-}
-
-bitstruct Runtime : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
-}
-
-const Runtime RUNTIME_INVALID = {};
-
-<* Runtime discovery configuration; zero-initialized fields select defaults. *>
-struct RuntimeDesc {
-    BackendKind           backend;
-    ContractValidation   contract_validation;
-    bool                 track_resource_lifetimes;
-    bool                 enable_vulkan_validation;
-    bool                 enable_debug_names;
-    uint                 texture_heap_capacity;
-    uint                 sampler_heap_capacity;
-    uint                 texture_capacity;
-    uint                 pipeline_capacity;
-    // Borrowed input copied by create_runtime for later device creation.
-    char[]                pipeline_cache_data;
-    ZString               application_name;
-    DebugMessageCallback  debug_callback;
-    void*                 debug_user_data;
-}
 
 struct RuntimeBackendVTable @private {
     DestroyRuntimeBackendFn        destroy_runtime;
@@ -77,16 +45,6 @@ struct RuntimeData @private {
 
 RuntimeData[MAX_RUNTIMES] runtime_slots @private;
 
-<* True when the token is not the invalid zero value. *>
-fn bool Runtime.is_valid(self) => (ulong)self != 0;
-
-<* Return the former all-validation-enabled runtime configuration. *>
-fn RuntimeDesc full_validation_runtime_desc() => {
-    .backend                  = BackendKind.VULKAN,
-    .contract_validation      = ContractValidation.FULL,
-    .track_resource_lifetimes = true,
-    .enable_vulkan_validation = true,
-};
 
 fn bool contract_validation_is_known(ContractValidation policy) @private {
     switch (policy) {
@@ -205,44 +163,4 @@ fn void? validate_runtime_desc(RuntimeDesc* desc) @private {
     }
     if (desc.pipeline_cache_data.len > 0
         && desc.pipeline_cache_data.ptr == null) return INVALID_ARGUMENT~;
-}
-
-<* Initialize backend discovery. Importing gpu performs no initialization. *>
-fn Runtime? create_runtime(RuntimeDesc* desc) {
-    validate_runtime_desc(desc)!;
-    switch (desc.backend) {
-        case BackendKind.VULKAN:
-            return gpu::vk::create_vk_runtime(desc);
-        default:
-            DebugMessage message = {
-                .severity       = DebugMessageSeverity.ERROR,
-                .category       = { .public_contract },
-                .operation      = "create_runtime",
-                .has_fault      = true,
-                .public_fault   = UNSUPPORTED_BACKEND,
-                .rejected_field = "RuntimeDesc.backend",
-                .invariant      = "backend must be supported",
-                .backend_text   = "unsupported GPU backend",
-            };
-            dispatch_debug_message(desc.debug_callback, desc.debug_user_data, &message);
-            return UNSUPPORTED_BACKEND~;
-    }
-}
-
-<* Destroy a runtime after its surfaces and devices have been destroyed. *>
-fn void? destroy_runtime(Runtime* runtime) {
-    RuntimeData* data = resolve_runtime(runtime);
-    if (data == null) return INVALID_HANDLE~;
-    if (data.live_surface_count > 0 || data.live_device_count.load(AtomicOrdering.ACQUIRE) > 0) {
-        return RESOURCE_IN_USE~;
-    }
-
-    DestroyRuntimeBackendFn destroy_backend = data.vtable.destroy_runtime;
-    void* backend_state = data.backend_state;
-    data.vtable = null;
-    data.backend_state = null;
-    data.adapter_count = 0;
-    data.used = false;
-    *runtime = RUNTIME_INVALID;
-    destroy_backend(backend_state);
 }

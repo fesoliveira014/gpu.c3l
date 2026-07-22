@@ -1,7 +1,5 @@
 module gpu;
 
-<* Immutable semantic requirements for device creation. *>
-typedef DeviceRequest = uint128;
 
 const uint MAX_REQUESTED_QUEUES_PER_ROLE @private = 255;
 
@@ -167,44 +165,4 @@ fn void? validate_device_request(DeviceRequest* request) @private {
     if (surface.is_valid() && resolve_surface(&surface) == null) {
         return INVALID_HANDLE~;
     }
-}
-
-<* Create a strict semantic device request. *>
-fn DeviceRequest strict_device_request() {
-    return compose_device_request(
-        empty_device_request(),
-        DeviceCapability.STRICT,
-    )!!;
-}
-
-<* Return a new request that requires presentation to the given surface. *>
-fn DeviceRequest? request_presentation(
-    DeviceRequest request,
-    Surface* surface,
-) {
-    return compose_device_request(
-        request,
-        DeviceCapability.PRESENTATION,
-        surface,
-    );
-}
-
-<* Return a new request with one explicit semantic queue group. *>
-fn DeviceRequest? request_queues(
-    DeviceRequest request,
-    QueueRequirements requirements,
-) {
-    if (!device_request_is_well_formed(request)
-        || !queue_requirements_are_valid(requirements)) {
-        return INVALID_ARGUMENT~;
-    }
-    if (((ulong)(uint128)request & DEVICE_REQUEST_QUEUES_BIT) != 0) {
-        return INVALID_ARGUMENT~;
-    }
-    if (requested_surface(request).is_valid()
-        && requirements.counts.graphics == 0) {
-        return INVALID_ARGUMENT~;
-    }
-    return (DeviceRequest)((uint128)request
-        | (uint128)(DEVICE_REQUEST_QUEUES_BIT | encode_queue_requirements(requirements)));
 }
