@@ -2,6 +2,7 @@ module gpu_bench;
 
 import gpu @public;
 import gpu::vk @public;
+import vk;
 import std::io;
 import std::os::env;
 import std::time;
@@ -57,6 +58,8 @@ fn gpu::RecordingWorkCounters recording_work_delta(
 ) {
     return {
         .host_allocations = after.host_allocations - before.host_allocations,
+        .command_pool_creations = after.command_pool_creations
+            - before.command_pool_creations,
         .command_buffer_allocations = after.command_buffer_allocations
             - before.command_buffer_allocations,
         .command_buffer_frees = after.command_buffer_frees
@@ -87,10 +90,10 @@ fn void accumulate_resolution_stats(
 }
 
 fn double record_barriers(
-    gpu::Device* device,
+    gpu::CommandAllocator* allocator,
     gpu::CommandResolutionStats* resolution,
 ) {
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::Barrier barrier = {
         .before = { .compute = true },
         .after = { .compute = true },
@@ -108,10 +111,10 @@ fn double record_barriers(
 }
 
 fn double record_hazard_barriers(
-    gpu::Device* device,
+    gpu::CommandAllocator* allocator,
     gpu::CommandResolutionStats* resolution,
 ) {
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::Barrier barrier = {
         .before = { .compute = true },
         .after = { .compute = true },
@@ -134,13 +137,13 @@ fn double record_hazard_barriers(
 }
 
 fn double record_indirect_dispatches(
-    gpu::Device* device,
+    gpu::CommandAllocator* allocator,
     gpu::PipelineHandle pipeline,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
     gpu::CommandResolutionStats* resolution,
 ) {
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
@@ -159,15 +162,13 @@ fn double record_indirect_dispatches(
 }
 
 fn double record_generated_dispatches(
-    gpu::Device* device,
+    gpu::CommandAllocator* allocator,
     gpu::PipelineHandle pipeline,
     gpu::GpuSpan records,
     gpu::GpuSpan count,
     gpu::CommandResolutionStats* resolution,
 ) {
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
@@ -285,23 +286,41 @@ fn int main() {
     )!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
-    gpu::RecordingWorkCounters cold_before =
-        vk::command_recording_work_counters(state);
+    gpu::CommandAllocatorDesc allocator_desc;
+    gpu::GeneratedScratchDesc scratch;
     if (caps.generated_work) {
-        gpu::GeneratedScratchDesc scratch = {
+        scratch = {
             .pipeline                = pipeline,
             .kind                    = gpu::GeneratedWorkKind.DISPATCH,
             .max_commands_per_list   = GENERATED_RECORD_ITERATIONS,
             .preprocess_buffer_count = GENERATED_RECORD_ITERATIONS,
         };
-        gpu::reserve_generated_scratch(graphics_queue, &scratch)!!;
+        vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
+            state,
+            &scratch,
+        )!!;
+        allocator_desc.max_generated_preprocess_buffers_per_list =
+            GENERATED_RECORD_ITERATIONS;
+        allocator_desc.generated_preprocess_bytes =
+            (usz)requirements.size * GENERATED_RECORD_ITERATIONS;
+    }
+    gpu::RecordingWorkCounters cold_before =
+        vk::command_recording_work_counters(state);
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        graphics_queue,
+        &allocator_desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    if (caps.generated_work) {
+        gpu::reserve_generated_scratch(&allocator, &scratch)!!;
     }
 
     gpu::CommandResolutionStats warmup_resolution;
-    (void)record_barriers(&device, &warmup_resolution);
-    (void)record_hazard_barriers(&device, &warmup_resolution);
+    (void)record_barriers(&allocator, &warmup_resolution);
+    (void)record_hazard_barriers(&allocator, &warmup_resolution);
     (void)record_indirect_dispatches(
-        &device,
+        &allocator,
         pipeline,
         gpu::get_span_address(&device, buffer_span)!!,
         args,
@@ -309,7 +328,7 @@ fn int main() {
     );
     if (caps.generated_work) {
         (void)record_generated_dispatches(
-            &device,
+            &allocator,
             pipeline,
             generated_records,
             generated_count,
@@ -335,10 +354,10 @@ fn int main() {
     gpu::CommandResolutionStats resolution;
     vk::reset_command_policy_counters(state);
     for (uint i = 0; i < COMMAND_RECORD_REPETITIONS; i++) {
-        barrier_results[i] = record_barriers(&device, &resolution);
-        hazard_results[i] = record_hazard_barriers(&device, &resolution);
+        barrier_results[i] = record_barriers(&allocator, &resolution);
+        hazard_results[i] = record_hazard_barriers(&allocator, &resolution);
         indirect_results[i] = record_indirect_dispatches(
-            &device,
+            &allocator,
             pipeline,
             gpu::get_span_address(&device, buffer_span)!!,
             args,
@@ -346,7 +365,7 @@ fn int main() {
         );
         if (caps.generated_work) {
             generated_results[i] = record_generated_dispatches(
-                &device,
+                &allocator,
                 pipeline,
                 generated_records,
                 generated_count,
@@ -396,6 +415,8 @@ fn int main() {
     }
     assert(warm_work.command_buffer_allocations == 0,
         "warmed recording performs no command-buffer allocation");
+    assert(warm_work.command_pool_creations == 0,
+        "warmed recording performs no command-pool creation");
     assert(warm_work.command_buffer_frees == 0,
         "warmed recording performs no command-buffer free");
     assert(warm_work.image_view_creations == 0,
@@ -503,8 +524,9 @@ fn int main() {
         policy_counters.reference_releases,
     );
     io::printfn(
-        "cold work: host_allocations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",
+        "cold work: host_allocations=%d command_pool_creations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",
         cold_work.host_allocations,
+        cold_work.command_pool_creations,
         cold_work.command_buffer_allocations,
         cold_work.command_buffer_frees,
         cold_work.command_buffer_resets,
@@ -513,8 +535,9 @@ fn int main() {
         cold_work.generated_scratch_misses,
     );
     io::printfn(
-        "warm work: host_allocations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",
+        "warm work: host_allocations=%d command_pool_creations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",
         warm_work.host_allocations,
+        warm_work.command_pool_creations,
         warm_work.command_buffer_allocations,
         warm_work.command_buffer_frees,
         warm_work.command_buffer_resets,
@@ -525,7 +548,7 @@ fn int main() {
     io::printfn("generated preprocess: reuse_events=%d", preprocess_reuses);
     if (caps.generated_work) {
         gpu::release_generated_scratch(
-            graphics_queue,
+            &allocator,
             pipeline,
             gpu::GeneratedWorkKind.DISPATCH,
         )!!;

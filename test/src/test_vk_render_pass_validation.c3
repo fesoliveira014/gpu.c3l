@@ -236,14 +236,18 @@ fn void render_pass_rejects_mixed_samples_before_mutation() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &second_view)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
     )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, first);
     record_val_target_to_attach(&commands, second);
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    uint references_before = record.reference_count;
+    uint references_before = record.scratch.reference_count;
     gpu::ColorTargetDesc[2] colors = {
         { .view = first_view },
         { .view = second_view },
@@ -259,7 +263,7 @@ fn void render_pass_rejects_mixed_samples_before_mutation() @test {
         "all render attachments must use the same sample count");
     assert(record.state == vk::CommandState.RECORDING,
         "sample mismatch records no native render pass");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "sample mismatch retains no attachment references");
 }
 
@@ -286,14 +290,18 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
         resolve,
     )!!;
     defer destroy_test_attachment_view(&device, &resolve_view)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
     )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, source);
     record_val_target_to_attach(&commands, resolve);
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    uint references_before = record.reference_count;
+    uint references_before = record.scratch.reference_count;
     gpu::ColorTargetDesc[1] colors = {{
         .view         = source_view,
         .resolve_view = resolve_view,
@@ -309,7 +317,7 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
         "a single-sample color attachment cannot have a resolve target");
     assert(record.state == vk::CommandState.RECORDING,
         "invalid resolve records no native render pass");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "invalid resolve retains no attachment references");
 
     vk::AttachmentViewSlot* source_slot = render_validation_view_slot(
@@ -325,7 +333,7 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
     assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
         == gpu::INVALID_ARGUMENT,
         "resolve source and destination formats must match");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "resolve format mismatch retains no attachment references");
 
     resolve_slot.format = gpu::Format.RGBA8_UNORM;
@@ -333,7 +341,7 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
     assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
         == gpu::INVALID_ARGUMENT,
         "resolve destinations must be single-sampled");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "resolve sample mismatch retains no attachment references");
 }
 
@@ -359,36 +367,38 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
         .height = VAL_RT,
     };
 
-    gpu::CommandList prebound = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
     )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList prebound = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&prebound)!!;
     record_val_target_to_attach(&prebound, target);
     gpu::cmd_bind_pipeline(&prebound, draw.graphics)!!;
     vk::CommandRecord* prebound_record = vk::resolve_command(&prebound)!!;
-    uint prebound_references = prebound_record.reference_count;
+    uint prebound_references = prebound_record.scratch.reference_count;
     assert(@catch(gpu::cmd_begin_render_pass(&prebound, &pass))
         == gpu::INVALID_ARGUMENT,
         "begin rejects a prebound pipeline with incompatible color formats");
     assert(prebound_record.state == vk::CommandState.RECORDING,
         "prebound incompatibility records no native render pass");
-    assert(prebound_record.reference_count == prebound_references,
+    assert(prebound_record.scratch.reference_count == prebound_references,
         "prebound incompatibility retains no attachment references");
 
-    gpu::CommandList in_pass = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::CommandList in_pass = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&in_pass)!!;
     record_val_target_to_attach(&in_pass, target);
     gpu::cmd_begin_render_pass(&in_pass, &pass)!!;
     vk::CommandRecord* in_pass_record = vk::resolve_command(&in_pass)!!;
-    uint in_pass_references = in_pass_record.reference_count;
+    uint in_pass_references = in_pass_record.scratch.reference_count;
     assert(@catch(gpu::cmd_bind_pipeline(&in_pass, draw.graphics))
         == gpu::INVALID_ARGUMENT,
         "binding rejects a pipeline incompatible with the active render pass");
     assert(in_pass_record.bound_pipeline.handle == gpu::PIPELINE_HANDLE_INVALID,
         "in-pass incompatibility leaves the active pipeline unchanged");
-    assert(in_pass_record.reference_count == in_pass_references,
+    assert(in_pass_record.scratch.reference_count == in_pass_references,
         "in-pass incompatibility retains no pipeline reference");
     gpu::cmd_end_render_pass(&in_pass)!!;
 }
@@ -431,9 +441,13 @@ fn void end_render_pass_scopes_graphics_binding_to_pass() @test {
         .height = VAL_RT,
     };
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
     )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, first);
     record_val_target_to_attach(&commands, second);
@@ -470,20 +484,24 @@ fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
     )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, target);
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    uint references_before = record.reference_count;
+    uint references_before = record.scratch.reference_count;
 
     assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
         == gpu::INVALID_ARGUMENT,
         "pipeline and render attachments must use the same sample count");
     assert(record.state == vk::CommandState.RECORDING,
         "pipeline sample mismatch records no native render pass");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "pipeline sample mismatch retains no attachment references");
 }

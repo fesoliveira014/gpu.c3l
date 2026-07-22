@@ -141,7 +141,10 @@ fn void run_cache_io_dispatch(gpu::Device* device, gpu::PipelineHandle pipeline)
     root.count      = COUNT;
     gpu::flush_mapped_span(device, root_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.COMPUTE)!!)!!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     bind_test_compute_pipeline(&cmd, pipeline);
     gpu::cmd_dispatch(

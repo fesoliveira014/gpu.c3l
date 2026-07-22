@@ -417,9 +417,10 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     }
     gpu::flush_mapped_span(&device, vertices.span)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
     foreach (target : targets) {
         gpu::TextureBarrier to_attach = {
@@ -1172,7 +1173,10 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     gpu::flush_mapped_span(&device, verts_span)!!;
     gpu::flush_mapped_span(&device, frag_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureHandle[4] targets = {
@@ -1366,7 +1370,10 @@ fn void alias_survives_peer_destroy() @test {
     defer free_owned_span(&device, &frag_owned)!!;
     gpu::GpuSpan frag_span = frag_owned.span;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_attach = {
         .texture = target,
@@ -1604,13 +1611,28 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
         .max_commands_per_list   = 1,
         .preprocess_buffer_count = 1,
     };
-    gpu::reserve_generated_scratch(queue, &scratch)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
+        state,
+        &scratch,
+    )!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = 1,
+        .max_generated_preprocess_buffers_per_list = 1,
+        .generated_preprocess_bytes = (usz)requirements.size,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &allocator_desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::reserve_generated_scratch(&allocator, &scratch)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, pipeline);
 
-    vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::IndirectCommandsLayoutEXT expected_layout =
         state.pipelines.slots[pipeline.index].value.generated_dispatch_layout;
     GeneratedLayoutGate gate;
@@ -1659,7 +1681,7 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
         "recording reads the original pipeline slot's generated layout");
     gpu::discard_commands(&commands)!!;
     gpu::release_generated_scratch(
-        queue,
+        &allocator,
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
     )!!;

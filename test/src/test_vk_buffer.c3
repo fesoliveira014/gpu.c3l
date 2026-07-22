@@ -107,7 +107,12 @@ fn void span_range_and_alignment_validation() @test {
         "oversized invalidate range faults");
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
     gpu::GpuSpan misaligned_offset = mapped.span.checked_subspan(2, 4)!!;

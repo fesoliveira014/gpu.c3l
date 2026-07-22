@@ -126,9 +126,16 @@ fn void multisample_color_depth_resolves_to_readback() @test {
     OwnedSpan readback = make_readback(&device, DP_COLOR_BYTES);
     defer free_owned_span(&device, &readback)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue command_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_color_to_attach(&commands, color);
     record_color_to_attach(&commands, resolve);

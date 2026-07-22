@@ -14,7 +14,8 @@ token's retained device pin while another call can still be in flight.
 - **S — thread-safe.** Any thread while the owning runtime or device is live;
   internally synchronized (see the lock map).
 - **C — confined.** A recording or executable command token and its aliases
-  are used by one thread at a time. Different tokens may be recorded in
+  are used by one thread at a time. One allocator has one recording owner while
+  any recording through it is live; different allocators may record in
   parallel.
 
 ## Per-entry-point table
@@ -42,8 +43,11 @@ token's retained device pin while another call can still be in flight.
 | `prepare_shader_code` | S | pure read of caller-owned immutable bytes and strings |
 | `create_compute_pipeline` / `create_graphics_pipeline` / `create_compute_pipelines` / `create_graphics_pipelines` / `destroy_pipeline` | S | single and batch creation serialize on a device-wide creation lock; a same-key request converges to one entry |
 | `get_memory_stats` / `build_memory_report` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
-| `begin_commands` / `end_commands` / command discard | C | recording storage is automatic per worker |
-| `reserve_generated_scratch` / `release_generated_scratch` | C | cold mutation of one pipeline/kind reservation in the calling thread's device context; the queue selects the device, and the context must be quiescent |
+| `CommandAllocatorHandle.is_valid` / `CommandAllocatorHandle.equals` | S | pure value operations |
+| `create_command_allocator` | S | internally synchronized; distinct allocators may be created concurrently, and each result is bound to the exact supplied queue |
+| `destroy_command_allocator` | C | externally synchronize the allocator; it never waits and returns `RESOURCE_IN_USE` until every unit is discarded or retired |
+| `begin_commands` / `end_commands` / command discard | C | one allocator recording owner while any recording is live; different allocators may record concurrently |
+| `reserve_generated_scratch` / `release_generated_scratch` | C | cold mutation of one allocator-owned pipeline/kind reservation; externally synchronize the allocator and require it to be quiescent |
 | every `cmd_*` recording call | C | confined to the list's thread |
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
@@ -56,18 +60,21 @@ releasing the pin.
 Pin acquisition may return `DEVICE_BUSY`; failed destruction restores the live
 state and preserves the token and generation.
 
-`begin_commands` lazily allocates one recording context per thread/device pair.
-Each device can allocate 256 recording contexts over its lifetime. A further
-distinct recording thread receives
-`SLOT_TABLE_FULL`; contexts are released when the device is destroyed.
-Completed or discarded native command buffers return to the same context and
-are reset and reused only by its owner. A worker must reserve its own generated
-scratch before recording generated commands; reservations are not shared or
-stolen across worker contexts. Each reservation is also specific to the public
-pipeline handle, so aliases of one native pipeline do not share it. Release
-every reservation before a worker
-exits: an exited worker's reservations stay held by its context, and the
-reserved pipelines remain retained until the device is destroyed.
+`create_command_allocator` allocates one exact-queue command pool, every native
+command buffer, fixed per-list scratch, and recycling metadata before returning.
+There is no permanent thread/device cache. Destroyed generational allocator
+slots are recycled, so historical worker churn consumes no device-lifetime
+context capacity.
+
+The first live recording sets the allocator's owner thread. Under `FULL`, a
+different thread attempting to begin through that allocator receives
+`RESOURCE_IN_USE` before its pool is touched. The owner clears after the last
+recording ends or is discarded; application synchronization can then hand the
+allocator to another worker. Executable tokens no longer hold recording
+ownership and may be handed to a synchronized submit thread. Completion or
+discard returns each fixed buffer and scratch index to its exact originating
+allocator. Generated reservations are also exact-allocator and exact-public-
+pipeline-handle state; another allocator on the same queue cannot borrow them.
 
 Runtime creation and destruction must not overlap other runtime operations. After
 publication, enumeration and adapter queries may run concurrently; all such calls
@@ -94,8 +101,9 @@ destroyed.
 
 There is no global application work phase in the root module. Calls may overlap
 only according to their entry-point tiers and token ownership rules. A Tier C
-command token and all its aliases stay confined to one thread at a time;
-different command tokens may be recorded in parallel. Tier S allocation and
+command token and all its aliases stay confined to one thread at a time. An
+allocator and its live recordings share one recording owner; different
+allocators may be recorded in parallel. Tier S allocation and
 span operations may overlap, but callers synchronize writes to mapped storage
 and keep every allocation live through its last submitted use.
 
@@ -110,13 +118,21 @@ destroy every swapchain and child resource.
 Resource creation and destruction use `resource_mutex`; shader-visible
 texture-view cache publication uses `texture_view_cache_mutex`; command-record
 allocation, submit claims, and reclamation use `command_mutex`.
+Allocator-table resolution pins a stable allocator slot under `resource_mutex`,
+releases that mutex, and only then acquires the allocator mutex. Begin, end, and
+discard therefore perform native and allocator-local work without a shared
+recording lock, so distinct allocators do not convoy. Cold resource operations
+may acquire `resource_mutex` before an allocator mutex when they must protect
+allocator-table, pipeline, or VMA lifetime together.
 When both resource and view-cache locks are needed, resource comes first.
-Submission releases `command_mutex` before locking the selected queue, so
-command-record and queue locks are not nested.
-Queue submission may acquire `resource_mutex` while holding its
-`submit_mutex` to publish or retire submitted-command metadata. This is the
-only queue/resource nesting order: `submit_mutex` precedes `resource_mutex`,
-and resource-locked paths never acquire a queue submission mutex.
+Submission first owns the selected queue identity's submit-scratch mutex while
+it fills fixed, queue-owned preparation storage. It may transiently acquire
+resource and command locks during preparation, releases `command_mutex` before
+locking `submit_mutex`, and never acquires the scratch mutex from another lock.
+Queue submission may acquire `resource_mutex` while holding `submit_mutex` to
+publish or retire submitted-command metadata. The nested order is therefore
+submit scratch before `submit_mutex` before `resource_mutex`; resource-locked
+paths never acquire either queue submission mutex.
 
 ## Texture-transition discipline
 
@@ -137,7 +153,11 @@ ownership transfers.
   confinement. Passing the token through caller synchronization is the required
   hand-off and makes the published cell visible; copies remain aliases and must
   not be used concurrently. Its embedded `Device` value is independent of the
-  caller variable passed to `begin_commands`.
+  caller variable stored in its originating allocator.
+- Allocator slots and all fixed scratch live in a nonmoving generational table.
+  The allocator mutex publishes returned buffer indices and recording-owner
+  changes. Application synchronization is the happens-before edge for allocator
+  migration and executable-token handoff.
 - Pipeline slots live in a fixed table and carry every native layout needed by
   recording. Pipeline creation may grow packed layout-cache storage while
   another thread records with an existing pipeline because recording does not
@@ -150,10 +170,12 @@ ownership transfers.
 
 ## Worker-thread setup (C3)
 
-C3 only creates the implicit temp allocator on the main thread. Library
-paths allocate temporaries internally, so worker threads calling into the
-library must wrap their body in `@pool_init(...)` (see `std::core::mem`) or
-they abort on first temp allocation.
+Core command work requires no ambient C3 temporary pool. A fresh worker may
+create or receive an allocator, begin/record/end/discard commands, submit and
+observe completion, and reserve/release generated scratch without initializing
+an implicit temporary allocator. Allocator creation and generated reservation
+are explicit cold allocation points; warm command paths use fixed allocator-
+owned or stack storage and no ambient per-thread recording cache.
 
 ## Debug callback discipline
 
@@ -178,7 +200,8 @@ through the matching destroy return; no callback occurs afterward.
 
 ## Miscellany
 
-- A command token is confined, not locked.
+- A command token and its originating allocator are confined, not implicitly
+  serialized for the caller.
 - Executable tokens recorded for the same queue may share one `SubmitDesc`.
 
 ## Completion across queues
@@ -192,8 +215,12 @@ still stage-validated before the redundant native wait is elided.
 
 Each queue release-publishes one retired prefix. Sequence N is retired
 only after native completion and after every published submitted-command batch
-through N has released any tracked command references, recycled generated scratch, and
-retired its command buffer. Poll and wait acquire-load that prefix after point
+through N has released any tracked command references, returned generated
+scratch, and returned every buffer/scratch index to its originating allocator.
+Every first successful native observation also queries and drains all queue
+identities represented by pending batches before publishing any retired prefix.
+An already-retired point can therefore use the zero-work cached path safely.
+Poll and wait acquire-load that prefix after point
 validation; an already-retired point performs no native call and acquires
 neither the queue nor resource mutex.
 
@@ -221,5 +248,9 @@ destruction returns `RESOURCE_IN_USE`. With tracking disabled, records allocate
 and update no reference storage and retirement performs no reference-release
 work; observing completion before destruction is solely the caller's contract.
 GPU addresses and shader-visible indices remain caller-managed in both modes.
+Allocator destruction follows the same non-waiting rule: it returns
+`RESOURCE_IN_USE` until every recording/executable token is consumed and every
+submitted unit has retired, then consumes the allocator without querying or
+waiting for queue progress.
 `destroy_device` queries every published queue sequence without blocking and
 returns `DEVICE_BUSY` while any is incomplete.

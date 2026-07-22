@@ -898,7 +898,7 @@ fn void? trusted_tracking_texture_barrier(
         barrier,
     )!;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -943,7 +943,7 @@ fn void? checked_tracking_texture_barrier(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     note_command_semantic_check(state);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(state, record, checkpoint);
     LoweredTextureBarrier lowered = validate_track_and_lower_texture_barrier(
         state:     state,
@@ -1019,19 +1019,13 @@ fn vk::Semaphore? create_private_timeline(VkDeviceState* state) @private {
     return semaphore;
 }
 
-fn bool? vk_poll_completion_with_query(
-    gpu::Device* device,
+fn bool? poll_queue_completion_with_query(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
     uint queue_id,
     ulong sequence,
     SemaphoreCounterQueryFn query_fn,
 ) @private {
-    VkDeviceState* state =
-        (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    QueueCompletionState* completion = published_queue_completion_state(
-        state,
-        queue_id,
-        sequence,
-    )!;
     if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
         note_completion_cached_poll_hit(state);
         return true;
@@ -1048,13 +1042,35 @@ fn bool? vk_poll_completion_with_query(
         ),
     )!;
     if (current < sequence) return false;
-    retire_queue_through(
-        state:            state,
-        completion:       completion,
-        queue_id:         queue_id,
-        native_completed: current,
-    );
+    retire_observed_completion_and_drain_with_query(
+        state:             state,
+        observed_queue_id: queue_id,
+        observed_completed: current,
+        query_fn:          query_fn,
+    )!;
     return completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence;
+}
+
+fn bool? vk_poll_completion_with_query(
+    gpu::Device* device,
+    uint queue_id,
+    ulong sequence,
+    SemaphoreCounterQueryFn query_fn,
+) @private {
+    VkDeviceState* state =
+        (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    QueueCompletionState* completion = published_queue_completion_state(
+        state,
+        queue_id,
+        sequence,
+    )!;
+    return poll_queue_completion_with_query(
+        state:      state,
+        completion: completion,
+        queue_id:   queue_id,
+        sequence:   sequence,
+        query_fn:   query_fn,
+    );
 }
 
 fn bool? vk_poll_completion(
@@ -1111,12 +1127,12 @@ fn void? vk_wait_completion_with_wait(
             timeout_ns,
         ),
     )!;
-    retire_queue_through(
-        state:            state,
-        completion:       completion,
-        queue_id:         queue_id,
-        native_completed: sequence,
-    );
+    retire_observed_completion_and_drain_with_query(
+        state:              state,
+        observed_queue_id:  queue_id,
+        observed_completed: sequence,
+        query_fn:           &real_semaphore_counter_query,
+    )!;
 }
 
 fn void? vk_wait_completion(

@@ -59,7 +59,16 @@ fn void u16v_draw(
     )!!;
     defer destroy_test_attachment_view(device, &target_view)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(
+        device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_attach = {
         .texture = target,

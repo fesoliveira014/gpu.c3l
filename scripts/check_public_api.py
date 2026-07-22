@@ -147,6 +147,7 @@ DEBUG_RESOURCE_KINDS = (
     "PIPELINE",
     "SWAPCHAIN",
     "SHADER",
+    "COMMAND_ALLOCATOR",
     "COMMAND_LIST",
     "TEXTURE_DESCRIPTOR",
     "SAMPLER",
@@ -251,6 +252,13 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "fn TextureBarrierRejection texture_barrier_queue_rejection(",
     "texture_transition_range(",
     "texture_barrier_to_vk(",
+    "ThreadRecordingContext",
+    "thread_recording_contexts",
+    "RecordingContextTable",
+    "RECORDING_CONTEXTS",
+    "MAX_RECORDING_CONTEXTS",
+    "MAX_THREAD_DEVICE_CONTEXTS",
+    "RetiredCommandBuffer",
 )
 
 RETIRED_SOURCE_PATTERNS = {
@@ -739,8 +747,10 @@ def validate_document(document: dict) -> list[str]:
             member.get("type", {}).get("name")
             for member in begin_commands.get("members", [])
         )
-        if parameter_types != ("Queue",):
-            failures.append("begin_commands must take one Queue token")
+        if parameter_types != ("CommandAllocator*",):
+            failures.append(
+                "begin_commands must take one CommandAllocator*"
+            )
         if begin_commands.get("return_type", {}).get("name") != "CommandList?":
             failures.append("begin_commands must return CommandList?")
 
@@ -804,6 +814,14 @@ def validate_document(document: dict) -> list[str]:
             failures.append("submit must take Queue and SubmitDesc*")
 
     required_functions = {
+        "create_command_allocator": (
+            ("Device*", "Queue", "CommandAllocatorDesc*"),
+            "CommandAllocator?",
+        ),
+        "destroy_command_allocator": (
+            ("CommandAllocator*",),
+            "void?",
+        ),
         "allocate_memory": (
             ("Device*", "AllocationDesc*"),
             "GpuAllocation?",
@@ -833,11 +851,15 @@ def validate_document(document: dict) -> list[str]:
             "void?",
         ),
         "reserve_generated_scratch": (
-            ("Queue", "GeneratedScratchDesc*"),
+            ("CommandAllocator*", "GeneratedScratchDesc*"),
             "void?",
         ),
         "release_generated_scratch": (
-            ("Queue", "PipelineHandle", "GeneratedWorkKind"),
+            (
+                "CommandAllocator*",
+                "PipelineHandle",
+                "GeneratedWorkKind",
+            ),
             "void?",
         ),
         "get_texture_requirements": (
@@ -1008,8 +1030,8 @@ def validate_document(document: dict) -> list[str]:
         "create_texture_views": ("device", "descs", "out_views"),
         "create_attachment_view": ("device", "desc"),
         "destroy_attachment_view": ("device", "view"),
-        "reserve_generated_scratch": ("queue", "desc"),
-        "release_generated_scratch": ("queue", "pipeline", "kind"),
+        "reserve_generated_scratch": ("allocator", "desc"),
+        "release_generated_scratch": ("allocator", "pipeline", "kind"),
         "get_texture_requirements": ("device", "desc"),
         "create_placed_texture": ("device", "desc", "allocation", "offset"),
         "create_dedicated_texture": (
@@ -1114,6 +1136,9 @@ def validate_document(document: dict) -> list[str]:
         ("AttachmentViewDesc", "struct"),
         ("GeneratedWorkKind", "enum"),
         ("GeneratedScratchDesc", "struct"),
+        ("CommandAllocatorHandle", "struct"),
+        ("CommandAllocator", "struct"),
+        ("CommandAllocatorDesc", "struct"),
         ("GpuSpan", "struct"),
         ("MemoryClass", "enum"),
         ("MemoryStats", "struct"),
@@ -1182,6 +1207,35 @@ def validate_document(document: dict) -> list[str]:
                 ("preprocess_buffer_count", "uint"),
             ),
             "GeneratedScratchDesc must match the exact public schema",
+        ),
+        "CommandAllocatorHandle": (
+            (
+                ("owner", "ulong"),
+                ("index", "uint"),
+                ("generation", "uint"),
+            ),
+            "CommandAllocatorHandle must match the exact identity schema",
+        ),
+        "CommandAllocator": (
+            (
+                ("device", "Device"),
+                ("queue", "Queue"),
+                ("handle", "CommandAllocatorHandle"),
+            ),
+            "CommandAllocator must match the exact public schema",
+        ),
+        "CommandAllocatorDesc": (
+            (
+                ("command_buffer_capacity", "uint"),
+                ("max_resource_references_per_list", "uint"),
+                (
+                    "max_generated_preprocess_buffers_per_list",
+                    "uint",
+                ),
+                ("generated_preprocess_bytes", "usz"),
+                ("debug_name", "ZString"),
+            ),
+            "CommandAllocatorDesc must match the exact public schema",
         ),
         "TextureView": (
             (

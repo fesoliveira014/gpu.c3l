@@ -136,8 +136,13 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     gpu::SamplerIndex sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
     (void)sampler;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
 
-    gpu::CommandList warmup = gpu::begin_commands(queue)!!;
+    gpu::CommandList warmup = gpu::begin_commands(&allocator)!!;
     bind_test_compute_pipeline(&warmup, pipeline);
     gpu::cmd_dispatch(
         commands: &warmup,
@@ -156,7 +161,7 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
         state,
     );
     ulong pipelines_before = vk::pipeline_native_create_count(state);
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::reset_command_resolution_stats();
     bind_test_compute_pipeline(&commands, pipeline);
     gpu::CommandResolutionStats after_bind =
@@ -309,7 +314,12 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         .height = 8,
     };
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandList warmup = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList warmup = gpu::begin_commands(&allocator)!!;
     gpu::TextureBarrier transition = {
         .texture = target,
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -342,7 +352,7 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         state,
     );
     ulong pipelines_before = vk::pipeline_native_create_count(state);
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::reset_command_resolution_stats();
     bind_test_graphics_pipeline(&commands, pipeline);

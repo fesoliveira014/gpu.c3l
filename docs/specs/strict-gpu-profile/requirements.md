@@ -66,8 +66,8 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 
 - Device requests describe queue roles and counts without backend family indices.
 - Applications retrieve explicit queue handles from the created device.
-- Command recording begins from a queue and is safe across worker threads.
-- Recording storage and native command pools remain private.
+- Command recording begins from an explicit allocator bound to one exact queue.
+- Allocator-owned recording storage and native command pools remain backend-opaque; different allocators may record concurrently.
 - Command lists are one-shot.
 - Successful submission consumes submitted command tokens and returns one queue-owned `CompletionPoint`.
 - Submission failure publishes no completion point and preserves retryable command tokens.
@@ -156,7 +156,7 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - Stale and cross-device handle tests fail before backend mutation.
 - Concurrent device-use and destruction tests prove that active backend state is never reclaimed.
 - Device-destruction tests cover live children, incomplete work, active operations, closing-state rejection, retry, and generation change only after success.
-- Hot command recording performs no registry lock or hidden allocation per command.
+- Hot command recording uses preallocated allocator storage and performs no registry lock, host/native/VMA allocation, or temporary-pool access per command.
 - Allocation and placed-texture ownership tests cover every destruction order.
 - Dedicated-texture tests prove transactional failure and publication of separate texture and allocation tokens.
 - Resource-release tests prove that non-WSI core destruction never waits or defers and rejects live placements; strict presentation tests prove the same for swapchain destruction and resize.

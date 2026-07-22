@@ -33,21 +33,18 @@ struct BoundPipeline {
 }
 
 struct CommandRecord {
-    vk::CommandBuffer           command_buffer;
-    vk::CommandPool             command_pool;
-    RecordingContextHandle      context;
-    gpu::Queue                  queue;
-    CommandState                state;
-    ulong                       submit_visit_epoch;
-    uint                        active_render_width;
-    uint                        active_render_height;
-    RenderCompatibility         active_render;
-    BoundPipeline               bound_pipeline;
-    bool                        depth_state_set;
-    CommandResourceReference[]  references;
-    uint                        reference_count;
-    GeneratedPreprocessBuffer[] generated_preprocess;
-    uint                        generated_preprocess_count;
+    vk::CommandBuffer            command_buffer;
+    gpu::CommandAllocatorHandle  allocator;
+    uint                         allocator_buffer;
+    gpu::Queue                   queue;
+    CommandState                 state;
+    ulong                        submit_visit_epoch;
+    uint                         active_render_width;
+    uint                         active_render_height;
+    RenderCompatibility          active_render;
+    BoundPipeline                bound_pipeline;
+    bool                         depth_state_set;
+    CommandScratch*              scratch;
 }
 
 struct CommandCell {
@@ -130,28 +127,39 @@ fn CommandRecord* encoder_command(gpu::CommandEncoderState* encoder) {
     return (CommandRecord*)encoder.backend_command;
 }
 
-fn void ensure_command_reference_capacity(
-    VkDeviceState* state,
+fn void? ensure_command_reference_capacity(
     CommandRecord* record,
+    uint additional,
 ) {
-    if (record.reference_count < record.references.len) return;
-    usz capacity = record.references.len == 0
-        ? COMMAND_REFERENCE_INITIAL_CAPACITY
-        : record.references.len * 2;
-    CommandResourceReference[] grown = alloc::new_array(
-        state.host_allocator,
-        CommandResourceReference,
-        (sz)capacity,
-    );
-    note_command_reference_allocation(state);
-    note_recording_host_allocation(state);
-    for (uint i = 0; i < record.reference_count; i++) {
-        grown[i] = record.references[i];
+    if (additional
+            <= record.scratch.references.len
+                - record.scratch.reference_count) return;
+    return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
+}
+
+fn void? preflight_command_references(
+    CommandRecord* record,
+    CommandResourceReference[] candidates,
+) {
+    uint additional = 0;
+    foreach (i, &candidate : candidates) {
+        bool duplicate = false;
+        foreach (&existing : record.scratch.references[
+            :record.scratch.reference_count
+        ]) {
+            if (!same_resource_reference(existing, candidate)) continue;
+            duplicate = true;
+            break;
+        }
+        if (duplicate) continue;
+        for (uint j = 0; j < i; j++) {
+            if (!same_resource_reference(&candidates[j], candidate)) continue;
+            duplicate = true;
+            break;
+        }
+        if (!duplicate) additional++;
     }
-    if (record.references.ptr != null) {
-        alloc::free(state.host_allocator, record.references.ptr);
-    }
-    record.references = grown;
+    ensure_command_reference_capacity(record, additional)!;
 }
 
 fn void? track_command_reference(
@@ -167,15 +175,16 @@ fn void? track_command_reference(
         .index      = index,
         .generation = generation,
     };
-    for (uint i = 0; i < record.reference_count; i++) {
-        if (same_resource_reference(&record.references[i], &reference)) return;
+    CommandScratch* scratch = record.scratch;
+    for (uint i = 0; i < scratch.reference_count; i++) {
+        if (same_resource_reference(&scratch.references[i], &reference)) return;
     }
-    ensure_command_reference_capacity(state, record);
+    ensure_command_reference_capacity(record, 1)!;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     retain_tracked_command_reference(state, reference)!;
     note_command_reference_increment(state);
-    record.references[record.reference_count++] = reference;
+    scratch.references[scratch.reference_count++] = reference;
 }
 
 fn TextureSlot*? resolve_tracked_texture_command_reference(
@@ -189,39 +198,34 @@ fn TextureSlot*? resolve_tracked_texture_command_reference(
         .index      = handle.index,
         .generation = handle.generation,
     };
-    for (uint i = 0; i < record.reference_count; i++) {
-        if (same_resource_reference(&record.references[i], &reference)) {
+    CommandScratch* scratch = record.scratch;
+    for (uint i = 0; i < scratch.reference_count; i++) {
+        if (same_resource_reference(&scratch.references[i], &reference)) {
             return state.textures.get(handle);
         }
     }
 
-    ensure_command_reference_capacity(state, record);
+    ensure_command_reference_capacity(record, 1)!;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;
     reference.tracked_command_references = &slot.tracked_command_references;
     reference.tracked_command_references.add(1, AtomicOrdering.RELAXED);
     note_command_reference_increment(state);
-    record.references[record.reference_count++] = reference;
+    scratch.references[scratch.reference_count++] = reference;
     return slot;
 }
 
-fn void free_command_references(
+fn void clear_command_references(
     VkDeviceState* state,
     CommandRecord* record,
 ) {
-    if (record.references.ptr == null) {
-        record.reference_count = 0;
-        return;
-    }
     release_tracked_command_references(
         state,
-        record.references,
-        record.reference_count,
+        record.scratch.references,
+        record.scratch.reference_count,
     );
-    alloc::free(state.host_allocator, record.references.ptr);
-    record.references = {};
-    record.reference_count = 0;
+    record.scratch.reference_count = 0;
 }
 
 fn void rollback_command_references(
@@ -229,25 +233,17 @@ fn void rollback_command_references(
     CommandRecord* record,
     uint checkpoint,
 ) {
-    while (record.reference_count > checkpoint) {
-        record.reference_count--;
+    while (record.scratch.reference_count > checkpoint) {
+        record.scratch.reference_count--;
         release_tracked_command_reference(
             state,
-            record.references[record.reference_count],
+            record.scratch.references[record.scratch.reference_count],
         );
     }
 }
 
 fn void release_command(VkDeviceState* state, gpu::CommandListHandle handle) {
     if (try record = state.commands.get(handle)) {
-        free_command_references(state, record);
-        recycle_generated_preprocess_buffers_locked(
-            state,
-            record.generated_preprocess,
-            record.generated_preprocess_count,
-        );
-        record.generated_preprocess = {};
-        record.generated_preprocess_count = 0;
         (void)state.commands.free(handle);
     }
 }
@@ -256,8 +252,7 @@ fn void destroy_command_table(VkDeviceState* state) {
     if (state.commands.slots.ptr == null) return;
     foreach (&cell : state.commands.slots[:state.commands.next_new]) {
         if (cell.used) {
-            free_command_references(state, &cell.value);
-            free_generated_preprocess_buffers(state, cell.value.generated_preprocess);
+            clear_command_references(state, &cell.value);
         }
     }
     mem::free(state.commands.slots.ptr);

@@ -656,7 +656,7 @@ fn void device_creation_checkpoint_ordinals_match_exact_schema() @test {
     assert(gpu::vk::DeviceCreationCheckpoint.NONE.ordinal == 0);
     assert(gpu::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal == 1);
     assert(gpu::vk::DeviceCreationCheckpoint.ALLOCATOR.ordinal == 2);
-    assert(gpu::vk::DeviceCreationCheckpoint.RECORDING_CONTEXTS.ordinal == 3);
+    assert(gpu::vk::DeviceCreationCheckpoint.COMMAND_STORAGE.ordinal == 3);
     assert(gpu::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP.ordinal == 4);
     assert(gpu::vk::DeviceCreationCheckpoint.PIPELINE_SHARED.ordinal == 5);
     assert(gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal == 6);

@@ -163,7 +163,10 @@ fn void pin_shaders_and_pipelines() {
 }
 
 fn void pin_commands_and_completion() {
+    gpu::Device device = {};
     gpu::Queue queue = {};
+    gpu::CommandAllocator allocator = {};
+    gpu::CommandAllocatorDesc command_allocator_desc = {};
     gpu::CommandList commands = {};
     gpu::ExecutableCommandList executable = {};
     gpu::GpuSpan span = {};
@@ -222,13 +225,19 @@ fn void pin_commands_and_completion() {
         .preprocess_buffer_count = 1,
     };
 
-    (void)gpu::reserve_generated_scratch(queue, &generated_scratch);
-    (void)gpu::release_generated_scratch(
+    (void)gpu::create_command_allocator(
+        &device,
         queue,
+        &command_allocator_desc,
+    );
+    (void)gpu::destroy_command_allocator(&allocator);
+    (void)gpu::reserve_generated_scratch(&allocator, &generated_scratch);
+    (void)gpu::release_generated_scratch(
+        &allocator,
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
     );
-    (void)gpu::begin_commands(queue);
+    (void)gpu::begin_commands(&allocator);
     (void)gpu::cmd_copy_buffer(&commands, &copy);
     (void)gpu::cmd_fill_buffer(&commands, span, 0);
     (void)gpu::cmd_copy_buffer_to_texture(&commands, &buffer_texture_copy);

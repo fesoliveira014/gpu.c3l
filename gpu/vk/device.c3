@@ -40,7 +40,7 @@ enum DeviceCreationCheckpoint : uint {
     NONE,
     LOGICAL_DEVICE,
     ALLOCATOR,
-    RECORDING_CONTEXTS,
+    COMMAND_STORAGE,
     DESCRIPTOR_HEAP,
     PIPELINE_SHARED,
     BEFORE_PUBLICATION,
@@ -160,7 +160,7 @@ struct VkDeviceState {
     Mutex                      command_mutex;
     ulong                      next_submit_visit_epoch;
     bool                       compute_queue_distinct;
-    RecordingContextTable      recording_contexts;
+    CommandAllocatorTable      command_allocators;
     CommandTable               commands;
     PipelineTable              pipelines;
     ShaderStore                shader_store;
@@ -185,6 +185,7 @@ struct VkDeviceState {
     ulong                      command_buffers_allocated;
     ulong                      command_buffers_freed;
     Atomic{ulong}              recording_host_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              recording_command_pool_creations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              recording_command_buffer_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              recording_command_buffer_frees @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              command_buffer_resets @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
@@ -601,6 +602,8 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .get_span_address            = &vk_get_span_address,
     .flush_mapped_span           = &vk_flush_mapped_span,
     .invalidate_mapped_span      = &vk_invalidate_mapped_span,
+    .create_command_allocator    = &vk_create_command_allocator,
+    .destroy_command_allocator   = &vk_destroy_command_allocator,
     .reserve_generated_scratch   = &vk_reserve_generated_scratch,
     .release_generated_scratch   = &vk_release_generated_scratch,
     .begin_commands              = &vk_begin_commands,
@@ -962,16 +965,24 @@ fn gpu::Device? create_vk_device_from_runtime(
         ALLOCATION_CAPACITY,
     );
 
-    state.recording_contexts.slots = mem::new_array(
-        RecordingContextCell,
-        MAX_RECORDING_CONTEXTS,
+    state.command_allocators.owner = gpu::resource_owner_tag(
+        state.resource_owner,
+        gpu::ResourceOwnerKind.COMMAND_ALLOCATOR,
+    );
+    state.command_allocators.slots = mem::new_array(
+        CommandAllocatorCell,
+        MAX_COMMAND_ALLOCATORS,
     );
     state.commands.owner = gpu::resource_owner_tag(
         state.resource_owner,
         gpu::ResourceOwnerKind.COMMAND,
     );
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
-    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.RECORDING_CONTEXTS)!;
+    state.submitted_commands = mem::new_array(
+        SubmittedCommandBatch,
+        MAX_COMMAND_LISTS,
+    );
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.COMMAND_STORAGE)!;
     uint pipeline_capacity;
     if (state.strict_heap.enabled) {
         pipeline_capacity = resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
@@ -1125,6 +1136,18 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
         destroy_submitted_commands(state);
         // Report before cleanup clears the diagnostic tables.
         if (report_teardown_leaks(state)) (void)report_resource_leaks(state);
+        destroy_command_table(state);
+        if (state.command_allocators.slots.ptr != null) {
+            foreach (&cell : state.command_allocators.slots[
+                :state.command_allocators.next_new
+            ]) {
+                if (cell.used) {
+                    destroy_command_allocator_slot(state, &cell.value);
+                }
+            }
+            mem::free(state.command_allocators.slots.ptr);
+            state.command_allocators.slots = {};
+        }
         // Internal buffers and device-loss leftovers remain backend-owned.
         if (state.allocator != null && state.buffers.slots.ptr != null) {
             foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {
@@ -1177,14 +1200,6 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
             state.pipelines.slots = {};
         }
         destroy_pipeline_shared(state);
-        destroy_command_table(state);
-        if (state.recording_contexts.slots.ptr != null) {
-            foreach (&cell : state.recording_contexts.slots[:state.recording_contexts.next_new]) {
-                if (cell.used) destroy_context_pools(state, &cell.value);
-            }
-            mem::free(state.recording_contexts.slots.ptr);
-            state.recording_contexts.slots = {};
-        }
         destroy_queue_completions(state);
         if (state.allocator != null) {
             state.allocator.destroy();

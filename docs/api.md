@@ -37,6 +37,7 @@ Use:
 
 ```text
 create_device
+create_command_allocator
 allocate_memory
 free_allocation
 begin_commands
@@ -322,7 +323,7 @@ backend state. `begin_commands` transfers its pin to the returned command token;
 recording calls validate the token's stable encoder and acquire no additional
 pin or device-registry operation.
 
-`destroy_device` never waits. Live resources, command lists,
+`destroy_device` never waits. Live resources, command allocators, command lists,
 swapchains and descriptors return `RESOURCE_IN_USE`.
 Active operations, incomplete queue work, or
 a closing slot return retryable `DEVICE_BUSY`. Every failed attempt preserves
@@ -348,16 +349,17 @@ TextureHandle
 TextureView
 PipelineHandle
 SwapchainHandle
+CommandAllocatorHandle
 ```
 
 Owning tokens have zero-valued invalid constants such as
 `GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`, `TEXTURE_VIEW_INVALID`,
-and their peers.
+`COMMAND_ALLOCATOR_HANDLE_INVALID`, and their peers.
 `token.is_valid()` checks the owner and generation; operations also validate
 the local slot generation. Public code should not inspect or construct the
 representation.
 
-Handles, `TextureView`, `Queue`, `GpuSpan`, command tokens, and
+Handles, `TextureView`, `Queue`, `CommandAllocator`, `GpuSpan`, command tokens, and
 synchronization values are runtime-only owner-bearing tokens scoped to one
 device. `TextureIndex`, `SamplerIndex`, and `GpuAddress` are raw device-local
 shader values without owner or generation metadata. Do not persist, serialize,
@@ -415,16 +417,17 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime` | the selected backend is unavailable |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler`; generated-scratch reservation | null or malformed input, allocator capacity above a hard ceiling, capacity-product overflow, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, a borrowed swapchain attachment view was passed for destruction, or the requested generated-scratch key is not reserved |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
-| `OUT_OF_DEVICE_MEMORY` | allocation and texture creates; mapped visibility | backend device-memory exhaustion |
+| `OUT_OF_DEVICE_MEMORY` | allocator, allocation, and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
-| `DEVICE_BUSY` | public device operations; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
-| `RESOURCE_IN_USE` | resource or swapchain destruction/resize, `free_allocation`, generated-scratch reservation/release, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, incomplete submitted work, a texture view, generated-scratch reservation, or unfinished presentation still references the resource; a placed or dedicated texture depends on an allocation; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
-| `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `intern_sampler`; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
-| `GENERATED_SCRATCH_EXHAUSTED` | generated draw/dispatch recording | the calling thread has no compatible reserved preprocess buffer for the pipeline, generated-work kind, command count, or concurrent retained-list demand |
+| `DEVICE_BUSY` | public device operations; `begin_commands`; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, every command buffer in the selected allocator is recording/executable/in flight, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
+| `RESOURCE_IN_USE` | resource or swapchain destruction/resize, `free_allocation`, allocator destruction, generated-scratch reservation/release, `destroy_device`, `destroy_runtime`, `destroy_surface` | an allocator still owns recording, executable, or incomplete submitted work; the allocator is not quiescent for reservation mutation; another command, texture view, generated-scratch reservation, or unfinished presentation still references a resource; a placed or dedicated texture depends on an allocation; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
+| `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` | generated-scratch reservation; generated command recording; tracked command recording | the allocator's fixed reference slice, generated-index slice, reservation table, or preprocess-byte budget cannot represent the request; recreate a quiescent allocator with a larger capacity |
+| `SLOT_TABLE_FULL` | runtime, device, allocator, allocation, and resource creates; `intern_sampler`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
+| `GENERATED_SCRATCH_EXHAUSTED` | generated draw/dispatch recording | the originating allocator has no compatible reserved preprocess buffer for the pipeline, generated-work kind, command count, or concurrent retained-list demand |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `intern_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler interning leave existing entries untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V structure or backend reflection/module rejection |
@@ -936,10 +939,13 @@ Export must not race pipeline creation; blob usefulness is driver-dependent
 
 ### Threading
 
-Command tokens are thread-confined. Different threads may call
-`begin_commands` for the same device concurrently; the backend owns and caches
-recording storage per worker. A recording or executable token and its aliases
-must not be used concurrently. See `docs/threading.md`.
+Command tokens and allocator recording are thread-confined. While an allocator
+has any recording list, one thread owns all recording through that allocator.
+The owner clears when the last list ends or is discarded, so an
+application-synchronized handoff can move the allocator to another worker.
+Different allocators may record concurrently. An executable token may be handed
+to a submit thread after `end_commands`; a token and its aliases must never be
+used concurrently. See `docs/threading.md`.
 
 ### Command lifecycle
 
@@ -947,7 +953,13 @@ must not be used concurrently. See `docs/threading.md`.
 get_queue_counts(Device* device) -> QueueCounts?
 get_queue(Device* device, QueueKind kind, uint index = 0) -> Queue?
 get_queue_info(Device* device, Queue queue) -> QueueInfo?
-begin_commands(Queue queue) -> CommandList?
+create_command_allocator(
+    Device* device,
+    Queue queue,
+    CommandAllocatorDesc* desc = null,
+) -> CommandAllocator?
+destroy_command_allocator(CommandAllocator* allocator) -> void?
+begin_commands(CommandAllocator* allocator) -> CommandList?
 end_commands(CommandList* commands) -> ExecutableCommandList?
 discard_commands(CommandList* commands) -> void?
 discard_executable_commands(ExecutableCommandList* commands) -> void?
@@ -982,6 +994,18 @@ QueueInfo
     uint id
     QueueRoles roles
 
+CommandAllocator
+    Device device
+    Queue queue
+    CommandAllocatorHandle handle
+
+CommandAllocatorDesc
+    uint command_buffer_capacity
+    uint max_resource_references_per_list
+    uint max_generated_preprocess_buffers_per_list
+    usz generated_preprocess_bytes
+    ZString debug_name
+
 SubmitDesc
     ExecutableCommandList[] command_lists
     CompletionWait[] completion_waits
@@ -1000,6 +1024,36 @@ returns a one-shot `ExecutableCommandList`; failure leaves the recording token
 unchanged. Copies alias the same backend record. Recording and executable tokens
 retain the device until consumed.
 
+`CommandAllocator` is a caller-owned child of one exact selected queue. Create
+one before recording and destroy it before its device. Creation allocates one
+native command pool for that queue family, every configured command buffer,
+and all fixed host bookkeeping. Zero fields select these public defaults:
+
+| Capacity | Default | Maximum | Scaling |
+|---|---:|---:|---|
+| `command_buffer_capacity` | `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` = 8 | `MAX_COMMAND_ALLOCATOR_CAPACITY` = 4096 | native command buffers, scratch records, and available-index storage |
+| `max_resource_references_per_list` | `DEFAULT_COMMAND_REFERENCES_PER_LIST` = 64 | `MAX_COMMAND_REFERENCES_PER_LIST` = 4096 | references per command buffer when lifetime tracking is enabled; zero storage when tracking is disabled |
+| `max_generated_preprocess_buffers_per_list` | `DEFAULT_COMMAND_PREPROCESS_PER_LIST` = 4 | `MAX_COMMAND_PREPROCESS_PER_LIST` = 64 | generated-reservation indices per command buffer and reservation-table entries multiplied by command-buffer capacity |
+
+`generated_preprocess_bytes` has no nonzero default: zero disables generated
+scratch reservations on that allocator. It is a byte budget for exact
+descriptor-driven reservations, not an untyped allocation. Invalid ceilings
+or capacity-product overflow return `INVALID_ARGUMENT` before backend work.
+
+Warm `begin_commands`, recording, end, discard, submit, completion retirement,
+and reuse allocate no host memory, native command buffer, command pool, VMA
+memory, or C3 temporary-pool storage. If every allocator buffer is live,
+`begin_commands` returns retryable `DEVICE_BUSY`. Fixed per-list or reservation
+capacity exhaustion returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`; enlarge a
+quiescent allocator rather than waiting.
+
+`destroy_command_allocator` never waits, polls completion, or queries a
+semaphore. Recording, executable, or incomplete submitted work returns
+`RESOURCE_IN_USE` and leaves the value unchanged for retry. After every list is
+discarded or retired, destruction releases idle generated reservations and all
+native/host allocator storage, consumes the value, and releases its device
+child. Even an empty live allocator prevents `destroy_device`.
+
 Both command token types contain an opaque encoder pointer in addition to the
 owning device and handle. The token layout, including that pointer, is part of
 the public ABI. Begin publishes the encoder only after backend and retained-pin
@@ -1016,9 +1070,10 @@ one queue-owned `CompletionPoint`; failure publishes no point and preserves the
 tokens for retry or discard. An empty batch signals the selected queue.
 Duplicate or non-executable tokens fault `COMMAND_RECORDING_ERROR`; a token for
 another queue faults `INVALID_ARGUMENT`. Discard consumes an unsubmitted token.
-Completed native command buffers return to their recording context. Only that
-context owner resets and reuses them after completion or discard; native
-allocation is a cold-path fallback only when no reusable buffer is available.
+One batch may mix executable tokens from different allocators only when every
+allocator is bound to the exact target queue. Each completed native command
+buffer and scratch index returns to its originating allocator; reset happens on
+the next reuse after completion or discard.
 
 `SubmitDesc.completion_waits` accepts published points from the same device.
 Each `CompletionWait.before` names the first destination stages that consume
@@ -1304,9 +1359,12 @@ GeneratedScratchDesc
     uint max_commands_per_list
     uint preprocess_buffer_count
 
-reserve_generated_scratch(Queue queue, GeneratedScratchDesc* desc) -> void?
+reserve_generated_scratch(
+    CommandAllocator* allocator,
+    GeneratedScratchDesc* desc,
+) -> void?
 release_generated_scratch(
-    Queue queue,
+    CommandAllocator* allocator,
     PipelineHandle pipeline,
     GeneratedWorkKind kind,
 ) -> void?
@@ -1327,9 +1385,9 @@ created device supports all three commands. Unsupported devices fault
 `UNSUPPORTED_FEATURE`; the shared-root indirect commands remain the portable
 execution path and the library never emulates generated work with a CPU loop.
 
-Generated commands require an explicit cold reservation on the calling
-thread's device recording context. The queue selects and validates the device;
-the reservation can be consumed by compatible selected queues on that device.
+Generated commands require an explicit cold reservation on their originating
+command allocator. Reservations cannot be borrowed by another allocator, even
+when it is bound to the same queue.
 Each reservation is keyed by the exact public `PipelineHandle` and
 `GeneratedWorkKind`, not by the shared native pipeline. Two alias handles for
 one native pipeline therefore require separate reservations.
@@ -1338,18 +1396,22 @@ call, and `preprocess_buffer_count` bounds simultaneously retained calls for
 that key across incomplete command lists. The backend asks the driver for the
 exact size, alignment, and memory-type requirements for the pipeline, layout,
 and count before allocating. Reserving the same key replaces it; other keys in
-the context remain live. A live reservation retains its pipeline; release every
-key before destroying the pipeline.
+the allocator remain live. The allocator descriptor's preprocess count
+multiplied by command-buffer capacity bounds reservation slots, while
+`generated_preprocess_bytes` bounds their total native bytes. A live reservation
+retains its pipeline; release every key before destroying the pipeline.
 
 Reservation replacement or `release_generated_scratch` returns
-`RESOURCE_IN_USE` while the calling context has recording, executable, or
+`RESOURCE_IN_USE` while the allocator has recording, executable, or
 submitted work. Descriptors must set every field and remain within
 `DeviceCaps.max_generated_work_count`, or reservation returns
-`INVALID_ARGUMENT`. Releasing a key that is not reserved returns
-`INVALID_RESOURCE_STATE`. Generated recording returns deterministic
+`INVALID_ARGUMENT`. A reservation-table or byte-budget overflow returns
+`COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`. Releasing a key that is not reserved
+returns `INVALID_RESOURCE_STATE`. Generated recording returns deterministic
 `GENERATED_SCRATCH_EXHAUSTED` when the count or compatible-buffer supply is
-insufficient. A failed recording call preserves the command list for retry or
-discard.
+insufficient, and returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` when its fixed
+per-list reservation-index slice is insufficient. Either failure preserves the
+command list and native state for retry or discard.
 
 Generated record spans are 8-byte aligned and must hold the declared maximum
 count. The count span is a 4-byte-aligned GPU-readable `uint`. Both spans must
@@ -1793,7 +1855,10 @@ fn void? run_compute(gpu::Device* device, gpu::PipelineHandle pipeline) {
     gpu::flush_mapped_span(device, root_span)!;
 
     gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(device, queue)!;
+    defer (void)gpu::destroy_command_allocator(&allocator);
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!;
     defer (void)gpu::discard_commands(&commands);
     gpu::cmd_bind_pipeline(&commands, pipeline)!;
     gpu::cmd_dispatch(

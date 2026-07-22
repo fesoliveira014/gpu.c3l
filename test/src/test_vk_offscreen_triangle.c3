@@ -63,7 +63,10 @@ fn void offscreen_clear_works() @test {
         debug_name:   "offscreen_readback",
     )!!;
     defer free_owned_span(&device, &readback)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_attach = {
@@ -148,7 +151,9 @@ fn void warm_render_pass_uses_precreated_attachment_without_allocation() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::TextureBarrier to_attach = {
         .texture = target,
@@ -299,7 +304,10 @@ fn void offscreen_textured_triangle() @test {
     gpu::flush_mapped_span(&device, verts_span)!!;
     gpu::flush_mapped_span(&device, frag_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier pattern_to_dst = {
@@ -495,7 +503,10 @@ fn void dynamic_viewport_scissor_pixels() @test {
     gpu::flush_mapped_span(&device, vertices)!!;
     gpu::flush_mapped_span(&device, color)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
@@ -617,7 +628,10 @@ fn void offscreen_render_to_mip() @test {
         debug_name:   "mip_readback",
     )!!;
     defer free_owned_span(&device, &readback)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_attach = {
@@ -734,7 +748,10 @@ fn void dynamic_viewport_scissor_validation() @test {
         target,
     )!!;
     defer destroy_test_attachment_view(&device, &target_view)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::Viewport full_viewport = {
@@ -846,7 +863,10 @@ fn void render_pass_state_machine() @test {
         debug_name:   "render_pass_data",
     )!!;
     defer free_owned_span(&device, &data)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     // Draw outside a pass.

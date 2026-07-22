@@ -102,6 +102,9 @@ FIXTURES = {
     "retired_pipeline_color_formats": "color_formats",
     "retired_compute_push_constant": "push_constant_size",
     "retired_raster_state": "RasterState",
+    "retired_begin_commands_queue": "queue",
+    "retired_reserve_generated_scratch_queue": "queue",
+    "retired_release_generated_scratch_queue": "queue",
 }
 
 ERROR_DIAGNOSTIC = re.compile(
@@ -154,6 +157,12 @@ RETIRED_PIPELINE_SIGNATURES = {
     "retired_cmd_draw_indexed_indirect_count_pipeline",
 }
 
+RETIRED_ALLOCATOR_SIGNATURES = {
+    "retired_begin_commands_queue",
+    "retired_reserve_generated_scratch_queue",
+    "retired_release_generated_scratch_queue",
+}
+
 LIVE_SCAN_ROOTS = (
     ROOT / "gpu",
     ROOT / "test" / "cpu",
@@ -171,6 +180,11 @@ LIVE_RETIRED_PATTERNS = {
     ),
     "SAMPLER_INVALID": re.compile(r"\bSAMPLER_INVALID\b"),
     "publish_sampler": re.compile(r"\bpublish_sampler\b"),
+}
+README_RETIRED_PATTERNS = {
+    "automatic per-worker command pools": re.compile(
+        r"\bautomatic per-worker command pools\b"
+    ),
 }
 RETIRED_DESC_FIELDS = {
     "RuntimeDesc.enable_validation": re.compile(
@@ -190,6 +204,111 @@ RETIRED_DESC_FIELDS = {
         re.DOTALL,
     ),
 }
+MARKDOWN_C3_FENCE = re.compile(
+    r"(?ms)^```(?:c3|c3c)\s*\n(?P<code>.*?)^```\s*$",
+)
+QUEUE_DECLARATION = re.compile(
+    r"\b(?:gpu::)?Queue\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+)
+RETIRED_ALLOCATOR_CALLS = {
+    "begin_commands(Queue)": (
+        "begin_commands",
+        re.compile(r"\b(?:gpu::)?begin_commands\s*\(\s*{queue}\s*\)"),
+    ),
+    "reserve_generated_scratch(Queue, ...)": (
+        "reserve_generated_scratch",
+        re.compile(
+            r"\b(?:gpu::)?reserve_generated_scratch\s*\(\s*{queue}\s*,"
+        ),
+    ),
+    "release_generated_scratch(Queue, ...)": (
+        "release_generated_scratch",
+        re.compile(
+            r"\b(?:gpu::)?release_generated_scratch\s*\(\s*{queue}\s*,"
+        ),
+    ),
+}
+
+
+def mask_c3_non_code(source: str) -> str:
+    masked = list(source)
+    index = 0
+    quote = None
+    block_end = None
+    block_depth = 0
+    while index < len(source):
+        if quote is not None:
+            if source[index] == "\\":
+                masked[index] = " "
+                if index + 1 < len(source):
+                    masked[index + 1] = " "
+                index += 2
+            elif source[index] == quote:
+                masked[index] = " "
+                quote = None
+                index += 1
+            else:
+                if source[index] not in "\r\n":
+                    masked[index] = " "
+                index += 1
+            continue
+        if block_end is not None:
+            block_start = "/*" if block_end == "*/" else "<*"
+            if source.startswith(block_start, index):
+                masked[index:index + 2] = "  "
+                block_depth += 1
+                index += 2
+            elif source.startswith(block_end, index):
+                masked[index:index + 2] = "  "
+                block_depth -= 1
+                index += 2
+                if block_depth == 0:
+                    block_end = None
+            else:
+                if source[index] not in "\r\n":
+                    masked[index] = " "
+                index += 1
+            continue
+        if source.startswith("//", index):
+            while index < len(source) and source[index] not in "\r\n":
+                masked[index] = " "
+                index += 1
+        elif source.startswith("/*", index):
+            masked[index:index + 2] = "  "
+            block_end = "*/"
+            block_depth = 1
+            index += 2
+        elif source.startswith("<*", index):
+            masked[index:index + 2] = "  "
+            block_end = "*>"
+            block_depth = 1
+            index += 2
+        elif source[index] in "\"'":
+            masked[index] = " "
+            quote = source[index]
+            index += 1
+        else:
+            index += 1
+    return "".join(masked)
+
+
+def c3_regions(path: Path, source: str):
+    if path.suffix == ".c3":
+        yield 0, mask_c3_non_code(source)
+    elif path.suffix == ".md":
+        for fence in MARKDOWN_C3_FENCE.finditer(source):
+            yield fence.start("code"), mask_c3_non_code(fence.group("code"))
+
+
+def retired_allocator_signature_usages(path: Path, source: str):
+    for offset, code in c3_regions(path, source):
+        queue_names = set(QUEUE_DECLARATION.findall(code))
+        for queue_name in queue_names:
+            escaped = re.escape(queue_name)
+            for marker, (_, pattern) in RETIRED_ALLOCATOR_CALLS.items():
+                concrete = re.compile(pattern.pattern.format(queue=escaped))
+                for match in concrete.finditer(code):
+                    yield offset + match.start(), marker
 
 
 def live_scan_files(roots: tuple[Path, ...] = LIVE_SCAN_ROOTS):
@@ -212,10 +331,18 @@ def find_live_retired_usages(
             for match in pattern.finditer(source):
                 line = source.count("\n", 0, match.start()) + 1
                 failures.append(f"{relative_path}:{line}: {marker}")
+        if path.name == "README.md":
+            for marker, pattern in README_RETIRED_PATTERNS.items():
+                for match in pattern.finditer(source):
+                    line = source.count("\n", 0, match.start()) + 1
+                    failures.append(f"{relative_path}:{line}: {marker}")
         for marker, pattern in RETIRED_DESC_FIELDS.items():
             for match in pattern.finditer(source):
                 line = source.count("\n", 0, match.start()) + 1
                 failures.append(f"{relative_path}:{line}: {marker}")
+        for position, marker in retired_allocator_signature_usages(path, source):
+            line = source.count("\n", 0, position) + 1
+            failures.append(f"{relative_path}:{line}: {marker}")
     return failures
 
 
@@ -283,6 +410,17 @@ def has_expected_diagnostic(
             message == (
                 "It is not possible to cast 'PipelineHandle' to "
                 "'GpuAddress'."
+            )
+            and diagnostic_points_to_retired_member(
+                target,
+                retired_symbol,
+                diagnostic,
+            )
+        )
+    if target in RETIRED_ALLOCATOR_SIGNATURES:
+        return (
+            message == (
+                "It is not possible to cast 'Queue' to 'CommandAllocator*'."
             )
             and diagnostic_points_to_retired_member(
                 target,

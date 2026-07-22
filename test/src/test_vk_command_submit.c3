@@ -12,11 +12,11 @@ fn ulong command_submit_count(gpu::Device* device) {
 }
 
 fn void record_empty_executables(
-    gpu::Queue queue,
+    gpu::CommandAllocator* allocator,
     gpu::ExecutableCommandList[] out_lists,
 ) {
     foreach (&out_list : out_lists) {
-        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        gpu::CommandList commands = gpu::begin_commands(allocator)!!;
         *out_list = gpu::end_commands(&commands)!!;
     }
 }
@@ -60,17 +60,17 @@ fn void command_tokens_are_small_owner_values() @test {
 fn void discard_consumes_recording_and_executable_lists() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = create_test_device(&desc)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
 
-    gpu::CommandList recording = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList recording = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&recording)!!;
     assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
         "a recording command list blocks device destruction");
     gpu::discard_commands(&recording)!!;
     assert(!recording.handle.is_valid(), "discard consumes a recording list");
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
@@ -82,6 +82,7 @@ fn void discard_consumes_recording_and_executable_lists() @test {
     assert(@catch(gpu::discard_executable_commands(&stale)) == gpu::INVALID_HANDLE,
         "a consumed executable-list alias is stale");
 
+    gpu::destroy_command_allocator(&allocator)!!;
     destroy_test_device(&device)!!;
 }
 
@@ -95,6 +96,9 @@ fn void copy_upload_to_readback() @test {
     };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
 
     OwnedSpan upload = allocate_owned_span(
         device:       &device,
@@ -119,7 +123,7 @@ fn void copy_upload_to_readback() @test {
     char* src = up_mapping.ptr;
     for (uint i = 0; i < 256; i++) src[i] = (char)i;
     gpu::flush_mapped_span(&device, upload.span)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = { .src = up_span, .dst = rb_span };
     gpu::reset_command_resolution_stats();
@@ -153,7 +157,10 @@ fn void empty_command_list_submits() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
@@ -170,7 +177,10 @@ fn void command_list_owns_its_device_token_value() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::Device temporary = device;
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&temporary, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&temporary, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&temporary, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     temporary = {};
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
@@ -187,7 +197,10 @@ fn void stale_command_owner_faults_invalid_handle() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
@@ -210,14 +223,17 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::CommandList original = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList original = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&original)!!;
     gpu::ExecutableCommandList original_executable = gpu::end_commands(&original)!!;
     defer discard_test_executable(&original_executable)!!;
     gpu::ExecutableCommandList[1] copied = { original_executable };
     gpu::SubmitDesc first = { .command_lists = copied[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &first)!!;
-    gpu::CommandList replacement = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList replacement = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&replacement)!!;
     gpu::ExecutableCommandList replacement_executable = gpu::end_commands(&replacement)!!;
     defer discard_test_executable(&replacement_executable)!!;
@@ -245,7 +261,10 @@ fn void command_generation_exhaustion_retires_slot() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::CommandList final_generation = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList final_generation = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&final_generation)!!;
     gpu::ExecutableCommandList final_generation_executable = gpu::end_commands(&final_generation)!!;
     defer discard_test_executable(&final_generation_executable)!!;
@@ -266,7 +285,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &first_submit)!!;
 
-    gpu::CommandList next = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
     assert(next.handle.index != final_generation_executable.handle.index,
         "exhausted command slot is retired");
@@ -285,7 +304,10 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
@@ -319,8 +341,17 @@ fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = BATCH_SIZE,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &allocator_desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::ExecutableCommandList[BATCH_SIZE] unique;
-    record_empty_executables(queue, unique[..]);
+    record_empty_executables(&allocator, unique[..]);
     bool consumed;
     defer {
         if (!consumed) {
@@ -388,8 +419,10 @@ fn void duplicate_fault_allows_subset_retry_and_remaining_discards() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::ExecutableCommandList[3] lists;
-    record_empty_executables(queue, lists[..]);
+    record_empty_executables(&allocator, lists[..]);
     gpu::ExecutableCommandList[4] duplicate = {
         lists[0],
         lists[1],
@@ -421,12 +454,21 @@ fn void submit_valid_batch_sizes_visit_each_record_once() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = MAX_BATCH_SIZE,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &allocator_desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     foreach (batch_size : batch_sizes) {
         gpu::ExecutableCommandList[MAX_BATCH_SIZE] lists;
-        record_empty_executables(queue, lists[:batch_size]);
+        record_empty_executables(&allocator, lists[:batch_size]);
         vk::reset_submit_duplicate_work_counters(state);
         ulong submits_before = command_submit_count(&device);
         gpu::SubmitDesc submit = {
@@ -454,8 +496,10 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::ExecutableCommandList[3] lists;
-    record_empty_executables(queue, lists[..]);
+    record_empty_executables(&allocator, lists[..]);
     gpu::CommandListHandle discarded_handle = lists[2].handle;
     gpu::discard_executable_commands(&lists[2])!!;
     vk::VkDeviceState* state =
@@ -589,7 +633,9 @@ fn void simultaneous_devices_submit_independently() @test {
     gpu::Device second = create_test_device(&desc)!!;
     defer destroy_test_device(&second)!!;
 
-    gpu::CommandList first_cmd = gpu::begin_commands(gpu::get_queue(&first, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue first_queue = gpu::get_queue(&first, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator first_allocator = gpu::create_command_allocator(&first, first_queue)!!;
+    gpu::CommandList first_cmd = gpu::begin_commands(&first_allocator)!!;
     defer discard_test_commands(&first_cmd)!!;
     gpu::ExecutableCommandList first_cmd_executable = gpu::end_commands(&first_cmd)!!;
     defer discard_test_executable(&first_cmd_executable)!!;
@@ -597,10 +643,14 @@ fn void simultaneous_devices_submit_independently() @test {
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
     submit_test_queue(&first, gpu::QueueKind.GRAPHICS, &first_submit)!!;
     wait_test_queue(&first, gpu::QueueKind.GRAPHICS)!!;
+    gpu::destroy_command_allocator(&first_allocator)!!;
     destroy_test_device(&first)!!;
 
     assert(gpu::get_device_caps(&second)!!.strict_enabled, "destroying one device leaves the other live");
-    gpu::CommandList second_cmd = gpu::begin_commands(gpu::get_queue(&second, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue second_queue = gpu::get_queue(&second, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator second_allocator = gpu::create_command_allocator(&second, second_queue)!!;
+    defer gpu::destroy_command_allocator(&second_allocator)!!;
+    gpu::CommandList second_cmd = gpu::begin_commands(&second_allocator)!!;
     defer discard_test_commands(&second_cmd)!!;
     gpu::ExecutableCommandList second_cmd_executable = gpu::end_commands(&second_cmd)!!;
     defer discard_test_executable(&second_cmd_executable)!!;
@@ -616,23 +666,25 @@ fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
     defer destroy_test_device(&device)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
     vk::CommandBufferStats before = vk::command_buffer_stats(state);
-    gpu::CommandList abandoned = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList abandoned = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&abandoned)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&abandoned)!!;
     defer discard_test_executable(&executable)!!;
     gpu::discard_executable_commands(&executable)!!;
 
     vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
-    assert(discarded.allocated == before.allocated + 1, "one native command buffer was allocated");
+    assert(discarded.allocated == before.allocated,
+        "recording uses a command buffer preallocated by its allocator");
     assert(discarded.freed == before.freed, "discard leaves reclamation to the recording owner");
     assert(discarded.pending == before.pending, "discard does not create completion-tracked work");
     fault stale = @catch(gpu::discard_executable_commands(&executable));
     assert(stale == gpu::INVALID_HANDLE, "discard invalidates the executable token");
 
-    gpu::CommandList next = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
     vk::CommandBufferStats reused = vk::command_buffer_stats(state);
     assert(reused.allocated == discarded.allocated,
@@ -647,9 +699,10 @@ fn void bad_command_state_rejected() @test {
     };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::CommandList stale_recording = commands;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
@@ -670,7 +723,10 @@ fn void texture_barrier_faults() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier bar = {
         .texture = gpu::TEXTURE_HANDLE_INVALID,
@@ -693,10 +749,11 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
     defer destroy_test_device(&device)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
     vk::CommandBufferStats before = vk::command_buffer_stats(state);
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -707,7 +764,8 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
     )!!;
 
     vk::CommandBufferStats submitted = vk::command_buffer_stats(state);
-    assert(submitted.allocated == before.allocated + 1, "submit allocated one native command buffer");
+    assert(submitted.allocated == before.allocated,
+        "submit uses a command buffer preallocated by its allocator");
     assert(submitted.freed == before.freed, "submit retains the native command buffer");
     assert(submitted.pending == before.pending + 1, "submit tracks one pending native command buffer");
 
@@ -716,9 +774,7 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
     assert(completed.freed == before.freed, "wait leaves native reclamation to the recording owner");
     assert(completed.pending == before.pending, "wait retires the completion-tracked command buffer");
 
-    gpu::CommandList next = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
     vk::CommandBufferStats reused = vk::command_buffer_stats(state);
     assert(reused.allocated == completed.allocated,
@@ -731,11 +787,12 @@ fn void command_recording_requires_no_lifecycle_boundary() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
 
     for (uint i = 0; i < 4; i++) {
-        gpu::CommandList commands = gpu::begin_commands(
-            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-        )!!;
+        gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
         gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
         gpu::ExecutableCommandList[1] lists = { executable };
         gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -749,7 +806,7 @@ fn void command_recording_requires_no_lifecycle_boundary() @test {
 }
 
 
-fn void warm_command_begin_reuses_context_owned_storage() @test {
+fn void warm_command_begin_reuses_allocator_owned_storage() @test {
     gpu::RuntimeDesc desc = {
         .backend          = gpu::BackendKind.VULKAN,
         .application_name = "warm_command_reuse_test",
@@ -760,11 +817,13 @@ fn void warm_command_begin_reuses_context_owned_storage() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
         &device,
     );
 
-    gpu::CommandList first = gpu::begin_commands(queue)!!;
+    gpu::CommandList first = gpu::begin_commands(&allocator)!!;
     gpu::ExecutableCommandList first_executable = gpu::end_commands(&first)!!;
     gpu::discard_executable_commands(&first_executable)!!;
     vk::reset_command_recording_work_counters(state);
@@ -772,7 +831,7 @@ fn void warm_command_begin_reuses_context_owned_storage() @test {
         state,
     );
 
-    gpu::CommandList second = gpu::begin_commands(queue)!!;
+    gpu::CommandList second = gpu::begin_commands(&allocator)!!;
     gpu::ExecutableCommandList second_executable = gpu::end_commands(&second)!!;
     gpu::discard_executable_commands(&second_executable)!!;
     gpu::RecordingWorkCounters after = vk::command_recording_work_counters(
@@ -781,11 +840,198 @@ fn void warm_command_begin_reuses_context_owned_storage() @test {
 
     assert(after.command_buffer_allocations
         == before.command_buffer_allocations,
-        "warm begin reuses the context-owned native command buffer");
+        "warm begin reuses the allocator-owned native command buffer");
     assert(after.command_buffer_frees == before.command_buffer_frees,
         "normal discard never frees a reusable command buffer");
     assert(after.command_buffer_resets == before.command_buffer_resets + 1,
         "warm begin individually resets the completed command buffer");
     assert(after.host_allocations == before.host_allocations,
         "warm begin/discard retains reusable host bookkeeping");
+}
+
+fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = 1,
+    };
+    gpu::CommandAllocator first = gpu::create_command_allocator(
+        &device,
+        queue,
+        &allocator_desc,
+    )!!;
+    gpu::CommandAllocator second = gpu::create_command_allocator(
+        &device,
+        queue,
+        &allocator_desc,
+    )!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::device_backend_state_ptr(&device);
+
+    gpu::CommandList first_commands = gpu::begin_commands(&first)!!;
+    gpu::CommandList second_commands = gpu::begin_commands(&second)!!;
+    uint first_buffer =
+        vk::resolve_command(&first_commands)!!.allocator_buffer;
+    uint second_buffer =
+        vk::resolve_command(&second_commands)!!.allocator_buffer;
+    gpu::ExecutableCommandList[2] lists = {
+        gpu::end_commands(&first_commands)!!,
+        gpu::end_commands(&second_commands)!!,
+    };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+    vk::CommandAllocatorSlot* first_slot =
+        state.command_allocators.get(first.handle)!!;
+    vk::CommandAllocatorSlot* second_slot =
+        state.command_allocators.get(second.handle)!!;
+
+    assert(@catch(gpu::destroy_command_allocator(&first))
+            == gpu::RESOURCE_IN_USE
+        && @catch(gpu::destroy_command_allocator(&second))
+            == gpu::RESOURCE_IN_USE,
+        "each submitted unit keeps its originating allocator live");
+    assert(first_slot.available_count == 0
+            && second_slot.available_count == 0
+            && first_slot.live_executables == 0
+            && second_slot.live_executables == 0
+            && first_slot.in_flight_buffers == 1
+            && second_slot.in_flight_buffers == 1
+            && first_slot.scratch[first_buffer].in_use
+            && second_slot.scratch[second_buffer].in_use,
+        "successful publication transfers both units without an ownership gap");
+    gpu::wait_completion(completion, ulong::max)!!;
+    assert(gpu::poll_completion(completion)!!,
+        "polling an already-retired mixed completion is idempotent");
+    gpu::wait_completion(completion, ulong::max)!!;
+    assert(first_slot.available_count == 1
+            && second_slot.available_count == 1
+            && first_slot.in_flight_buffers == 0
+            && second_slot.in_flight_buffers == 0
+            && !first_slot.scratch[first_buffer].in_use
+            && !second_slot.scratch[second_buffer].in_use,
+        "repeated completion observation returns each exact allocator unit once");
+    gpu::CommandList first_reuse = gpu::begin_commands(&first)!!;
+    gpu::CommandList second_reuse = gpu::begin_commands(&second)!!;
+    assert(vk::resolve_command(&first_reuse)!!.allocator_buffer == first_buffer
+            && vk::resolve_command(&second_reuse)!!.allocator_buffer
+                == second_buffer,
+        "mixed retirement makes each exact preallocated buffer reusable");
+    gpu::discard_commands(&first_reuse)!!;
+    gpu::discard_commands(&second_reuse)!!;
+    gpu::destroy_command_allocator(&first)!!;
+    gpu::destroy_command_allocator(&second)!!;
+    destroy_test_device(&device)!!;
+}
+
+fn void later_completion_observation_retires_multi_allocator_prefix_once() @test {
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = 1,
+    };
+    gpu::CommandAllocator first = gpu::create_command_allocator(
+        &device,
+        queue,
+        &allocator_desc,
+    )!!;
+    gpu::CommandAllocator second = gpu::create_command_allocator(
+        &device,
+        queue,
+        &allocator_desc,
+    )!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::device_backend_state_ptr(&device);
+
+    gpu::CommandList first_commands = gpu::begin_commands(&first)!!;
+    uint first_buffer =
+        vk::resolve_command(&first_commands)!!.allocator_buffer;
+    gpu::ExecutableCommandList[1] first_lists = {
+        gpu::end_commands(&first_commands)!!,
+    };
+    gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
+    gpu::CompletionPoint first_completion = gpu::submit(
+        queue,
+        &first_submit,
+    )!!;
+
+    gpu::CommandList second_commands = gpu::begin_commands(&second)!!;
+    uint second_buffer =
+        vk::resolve_command(&second_commands)!!.allocator_buffer;
+    gpu::ExecutableCommandList[1] second_lists = {
+        gpu::end_commands(&second_commands)!!,
+    };
+    gpu::SubmitDesc second_submit = { .command_lists = second_lists[..] };
+    gpu::CompletionPoint second_completion = gpu::submit(
+        queue,
+        &second_submit,
+    )!!;
+    vk::CommandAllocatorSlot* first_slot =
+        state.command_allocators.get(first.handle)!!;
+    vk::CommandAllocatorSlot* second_slot =
+        state.command_allocators.get(second.handle)!!;
+    assert(first_slot.in_flight_buffers == 1
+            && second_slot.in_flight_buffers == 1,
+        "separate submissions keep both allocator units in flight");
+
+    gpu::wait_completion(second_completion, ulong::max)!!;
+    assert(first_slot.in_flight_buffers == 0
+            && second_slot.in_flight_buffers == 0
+            && first_slot.available_count == 1
+            && second_slot.available_count == 1
+            && !first_slot.scratch[first_buffer].in_use
+            && !second_slot.scratch[second_buffer].in_use,
+        "observing the later point retires the multi-allocator queue prefix");
+    assert(gpu::poll_completion(first_completion)!!,
+        "the earlier point stays observable after later-prefix retirement");
+    gpu::wait_completion(first_completion, ulong::max)!!;
+    assert(first_slot.available_count == 1
+            && second_slot.available_count == 1,
+        "out-of-order and repeated observation cannot return either unit twice");
+
+    gpu::destroy_command_allocator(&first)!!;
+    gpu::destroy_command_allocator(&second)!!;
+    destroy_test_device(&device)!!;
+}
+
+fn void submit_rejects_stale_allocator_generation_before_claim() @test {
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::device_backend_state_ptr(&device);
+    vk::CommandRecord* record = state.commands.get(executable.handle)!!;
+    gpu::CommandAllocatorHandle original = record.allocator;
+    record.allocator.generation++;
+
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    assert(@catch(gpu::submit(queue, &submit)) == gpu::INVALID_HANDLE,
+        "submit rejects a stale allocator generation before claiming tokens");
+    assert(lists[0].handle.is_valid()
+        && record.state == vk::CommandState.EXECUTABLE,
+        "allocator validation failure preserves executable state");
+
+    record.allocator = original;
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+    gpu::wait_completion(completion, ulong::max)!!;
 }

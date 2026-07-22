@@ -317,12 +317,42 @@ fn uint report_pipeline_leaks(VkDeviceState* state) {
     return count;
 }
 
+fn uint report_command_allocator_leaks(VkDeviceState* state) {
+    uint count;
+    if (state.command_allocators.slots.ptr == null) return 0;
+    foreach (i, &cell : state.command_allocators.slots[
+        :state.command_allocators.next_new
+    ]) {
+        if (!cell.used) continue;
+        ZString name = slot_name(&cell.value.debug_name[0]);
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.COMMAND_ALLOCATOR,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          name,
+            backend_text:        "command allocator remains live",
+        )) {
+            io::eprintfn(
+                "gpu: leaked command allocator '%s' (index %d, generation %d)",
+                name,
+                i,
+                cell.generation,
+            );
+        }
+        count++;
+    }
+    return count;
+}
+
 fn uint report_resource_leaks(VkDeviceState* state) {
     uint count = report_allocation_leaks(state);
     count += report_buffer_leaks(state);
     count += report_texture_leaks(state);
     count += report_attachment_view_leaks(state);
     count += report_pipeline_leaks(state);
+    count += report_command_allocator_leaks(state);
     return count;
 }
 

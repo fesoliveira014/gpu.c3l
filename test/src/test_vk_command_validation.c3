@@ -82,6 +82,103 @@ fn gpu::Device make_val_device() {
     return create_test_device(&desc)!!;
 }
 
+fn void reference_capacity_preflight_counts_unique_identities() @test {
+    vk::CommandResourceReference[1] storage;
+    vk::CommandScratch scratch = {
+        .references = storage[..],
+    };
+    vk::CommandRecord record = {
+        .scratch = &scratch,
+    };
+    vk::CommandResourceReference first = {
+        .owner      = 1,
+        .index      = 2,
+        .generation = 3,
+    };
+    vk::CommandResourceReference second = {
+        .owner      = 1,
+        .index      = 3,
+        .generation = 3,
+    };
+    vk::CommandResourceReference[2] duplicates = { first, first };
+    vk::CommandResourceReference[2] distinct = { first, second };
+
+    vk::preflight_command_references(&record, duplicates[..])!!;
+    assert(@catch(vk::preflight_command_references(&record, distinct[..]))
+        == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
+        "preflight counts identities independently of queue topology");
+
+    storage[0] = first;
+    scratch.reference_count = 1;
+    vk::CommandResourceReference[1] existing = { first };
+    vk::preflight_command_references(&record, existing[..])!!;
+    vk::CommandResourceReference[1] additional = { second };
+    assert(@catch(vk::preflight_command_references(&record, additional[..]))
+        == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
+        "preflight excludes existing identities and counts new identities");
+}
+
+fn void reference_capacity_preflights_all_copy_resources() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    OwnedSpan source = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "capacity_source",
+    )!!;
+    OwnedSpan destination = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "capacity_destination",
+    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity          = 1,
+        .max_resource_references_per_list = 1,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        device: &device,
+        queue:  queue,
+        desc:   &allocator_desc,
+    )!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::device_backend_state(device);
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandAllocatorSlot* slot = state.command_allocators.get(
+        allocator.handle,
+    )!!;
+    vk::reset_command_policy_counters(state);
+    gpu::reset_command_resolution_stats();
+    gpu::BufferCopyDesc copy = {
+        .src = source.span,
+        .dst = destination.span,
+    };
+
+    assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
+        == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
+        "two unique references fault before a one-reference scratch unit mutates");
+    vk::CommandPolicyCounters counters = vk::command_policy_counters(state);
+    assert(record.scratch.reference_count == 0
+        && counters.reference_increments == 0
+        && counters.reference_releases == 0,
+        "capacity preflight retains and rolls back no partial reference");
+    assert(gpu::command_resolution_stats().native_commands == 0,
+        "capacity preflight rejects before the native copy command");
+    assert(commands.handle.is_valid() && slot.live_recordings == 1
+        && slot.available_count == 0 && record.scratch.in_use,
+        "capacity failure preserves the recording token and allocator unit");
+
+    free_owned_span(&device, &source)!!;
+    free_owned_span(&device, &destination)!!;
+    gpu::discard_commands(&commands)!!;
+    gpu::destroy_command_allocator(&allocator)!!;
+}
+
 <* Textured draw context, same shape as the indirect-draw tests: offscreen
    vertex/fragment code, one graphics pipeline, and a 1x1 white pattern feeding the
    fragment heap path. *>
@@ -268,7 +365,9 @@ fn void submit_requires_exact_recording_queue_token() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
@@ -380,7 +479,10 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     };
     gpu::TextureHandle copy_texture = gpu::create_texture(&device, &copy_texture_desc)!!;
     defer gpu::destroy_texture(&device, copy_texture)!!;
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::ResolvedSpan buffer_span = vk::resolve_span(state, &span)!!;
@@ -415,11 +517,11 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
             .access = { .write },
         },
     };
-    uint references_before = record.reference_count;
+    uint references_before = record.scratch.reference_count;
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,
         "compute-only texture rejects a disjoint recording-role token");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "access rejection precedes validation-reference mutation");
 
     gpu::BufferTextureCopyDesc copy = {
@@ -515,9 +617,10 @@ fn void allocation_span_outside_recording_access_rejects_copy_and_fill() @test {
     )!!;
     defer free_owned_span(&device, &restricted_owned)!!;
     gpu::GpuSpan restricted_span = restricted_owned.span;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
     gpu::BufferCopyDesc restricted_source = {
@@ -572,13 +675,16 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
         1,
     )!!;
     defer destroy_test_attachment_view(&device, &rejected_view)!!;
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, admitted);
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics };
-    uint references_before = record.reference_count;
+    uint references_before = record.scratch.reference_count;
 
     gpu::ColorTargetDesc[2] colors = {
         { .view = admitted_view },
@@ -592,7 +698,7 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
     assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
         == gpu::INVALID_ARGUMENT,
         "a later attachment outside the recording role rejects the whole pass");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "attachment access failure rolls back precreated-view references");
     assert(record.state == vk::CommandState.RECORDING,
         "attachment access rejection leaves command state reusable");
@@ -616,9 +722,10 @@ fn void fill_alignment_faults_report_the_rejected_component() @test {
         debug_name:   "fill_alignment_buffer",
     )!!;
     defer free_owned_span(&device, &buffer)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
     reset_sync_diagnostic(
@@ -718,7 +825,10 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     gpu::GpuSpan index_span = index_owned.span;
     gpu::GpuSpan misaligned = index_span.checked_subspan(2, 8)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -755,7 +865,10 @@ fn void dispatch_with_graphics_pipeline_faults() @test {
     )!!;
     defer free_owned_span(&device, &root_owned)!!;
     gpu::GpuSpan root_span = root_owned.span;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     bind_test_compute_pipeline(&cmd, ctx.graphics);
     fault wrong_kind = @catch(gpu::cmd_dispatch(
@@ -784,7 +897,10 @@ fn void draw_with_compute_pipeline_faults() @test {
     gpu::ComputePipelineDesc comp_desc = { .shader = comp_shader };
     gpu::PipelineHandle compute = gpu::create_compute_pipeline(&device, &comp_desc)!!;
     defer gpu::destroy_pipeline(&device, compute)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -832,9 +948,10 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
     fault missing_pipeline = @catch(gpu::cmd_dispatch(
@@ -985,9 +1102,10 @@ fn void dynamic_raster_state_validation_is_atomic_and_pass_scoped() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &target_view)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::DynamicRasterState raster = {};
 
@@ -1184,7 +1302,10 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     frag_root.sampler_index = ctx.smp_index;
     gpu::flush_mapped_span(&device, frag_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::BufferCopyDesc copy = {
         .src = upload.span,
@@ -1236,7 +1357,10 @@ fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
     defer free_owned_span(&device, &args_buffer)!!;
     gpu::GpuSpan full_span = args_buffer.span;
     gpu::GpuSpan escaped = full_span.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     bind_test_compute_pipeline(&cmd, ctx.pipeline);
     fault beyond = @catch(gpu::cmd_dispatch_indirect(
@@ -1267,7 +1391,10 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     defer free_owned_span(&device, &args_buffer)!!;
     gpu::GpuSpan full_span = args_buffer.span;
     gpu::GpuSpan boundary = full_span.checked_subspan(4, gpu::DispatchIndirectCommand::size)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     bind_test_compute_pipeline(&cmd, ctx.pipeline);
     gpu::cmd_dispatch_indirect(
@@ -1315,7 +1442,10 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     defer free_owned_span(&device, &count_buffer)!!;
     gpu::GpuSpan full_count_span = count_buffer.span;
     gpu::GpuSpan escaped_count = full_count_span.unchecked_subspan(8, 4);
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -1384,7 +1514,10 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     )!!;
     defer free_owned_span(&device, &index_buffer)!!;
     gpu::GpuSpan index_span = index_buffer.span;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -1500,9 +1633,10 @@ fn void generated_work_commands_require_capability() @test {
     state.generated_work.enabled = false;
     defer state.generated_work.enabled = original_enabled;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, compute.pipeline);
     fault dispatch_unsupported = @catch(gpu::cmd_dispatch_generated(
@@ -1626,9 +1760,10 @@ fn void generated_dispatch_validates_zero_count_bounds_and_alignment() @test {
     gpu::GpuSpan misaligned_count = count.span.checked_subspan(2, 4)!!;
     gpu::GpuSpan short_count = count.span.checked_subspan(0, 2)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, compute.pipeline);
 
@@ -1706,7 +1841,10 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     defer free_owned_span(&device, &index_buffer)!!;
     gpu::GpuSpan full_index_span = index_buffer.span;
     gpu::GpuSpan escaped = full_index_span.unchecked_subspan(16, 4);
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -1752,7 +1890,10 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     defer free_owned_span(&device, &index_buffer)!!;
     gpu::GpuSpan full_index_span = index_buffer.span;
     gpu::GpuSpan boundary = full_index_span.checked_subspan(12, 4)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
@@ -1798,7 +1939,10 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     defer free_owned_span(&device, &src_buffer)!!;
     gpu::GpuSpan full_span = src_buffer.span;
     gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_texture_transition(
         commands: &cmd,
@@ -1843,7 +1987,10 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     defer free_owned_span(&device, &dst_buffer)!!;
     gpu::GpuSpan full_span = dst_buffer.span;
     gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_texture_transition(
         commands: &cmd,
@@ -1888,7 +2035,10 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     defer free_owned_span(&device, &src_buffer)!!;
     gpu::GpuSpan full_span = src_buffer.span;
     gpu::GpuSpan boundary = full_span.checked_subspan(32, 64)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_texture_transition(
         commands: &cmd,
@@ -1911,9 +2061,10 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
 fn void barrier_empty_before_faults_without_poisoning_recording() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
         .after = { .compute = true },
@@ -1932,9 +2083,10 @@ fn void barrier_empty_before_faults_without_poisoning_recording() @test {
 fn void barrier_combined_stage_masks_succeed() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
         .before = {
@@ -1955,9 +2107,10 @@ fn void barrier_combined_stage_masks_succeed() @test {
 fn void barrier_contradictory_mask_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
         .before = {
@@ -1978,9 +2131,10 @@ fn void barrier_contradictory_mask_faults() @test {
 fn void barrier_descriptor_hazard_requires_shader_consumer() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
         .before = { .transfer = true },
@@ -2001,9 +2155,10 @@ fn void barrier_descriptor_hazard_requires_shader_consumer() @test {
 fn void barrier_queue_stage_mismatch_faults_without_poisoning_recording() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::VkDeviceState* state =
@@ -2041,9 +2196,10 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::VkDeviceState* state =
@@ -2066,12 +2222,12 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
             .access = { .write },
         },
     )!!;
-    uint references_before = record.reference_count;
+    uint references_before = record.scratch.reference_count;
 
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,
         "queue-incompatible before use faults INVALID_ARGUMENT");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "before-use rejection retains no texture reference");
 
     barrier.before = { .layout = gpu::TextureLayout.UNDEFINED };
@@ -2083,7 +2239,7 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,
         "queue-incompatible after use faults INVALID_ARGUMENT");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "after-use rejection retains no texture reference");
 
     completion.queue_flags = selected_flags;
@@ -2100,9 +2256,10 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
 fn void barrier_hazard_matrix_submits() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier[] barriers = {
         {
@@ -2233,7 +2390,10 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     assert(@catch(gpu::create_attachment_view(&device, &invalid_mip))
         == gpu::INVALID_ARGUMENT,
         "attachment creation rejects an out-of-range mip");
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_val_target_to_attach(&cmd, large);
     record_val_target_to_attach(&cmd, small);
@@ -2256,7 +2416,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "mixed-size rejection records no pass");
 
     vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
-    uint references_before = record.reference_count;
+    uint references_before = record.scratch.reference_count;
     gpu::ColorTargetDesc[2] invalid_later = {
         { .view = large_mip_two },
         { .view = stale_view },
@@ -2264,7 +2424,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::RenderPassDesc invalid_later_pass = { .colors = invalid_later[..], .width = 4, .height = 4 };
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &invalid_later_pass)) == gpu::INVALID_HANDLE,
         "a stale later attachment faults INVALID_HANDLE before recording");
-    assert(record.reference_count == references_before,
+    assert(record.scratch.reference_count == references_before,
         "later attachment lookup failure rolls back the earlier reference");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "later attachment rejection records no pass");
 
@@ -2297,7 +2457,10 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::ColorTargetDesc[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
@@ -2333,7 +2496,10 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
     limited_caps.max_compute_work_group_count = { .x = 1, .y = 1, .z = 1 };
     state.caps = limited_caps;
     defer state.caps = original_caps;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     bind_test_compute_pipeline(&cmd, ctx.pipeline);
@@ -2401,9 +2567,11 @@ fn void warm_render_pass_reuses_many_precreated_views() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
 
     for (uint iteration = 0; iteration < 2; iteration++) {
-        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
         if (iteration == 0) record_val_target_to_attach(&commands, texture);
         vk::VkDeviceState* state =
             (vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -2444,9 +2612,10 @@ fn void barrier_mask_diagnostic_identifies_semantic_field() @test {
     };
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
         .before = {
@@ -2568,9 +2737,10 @@ fn void buffer_to_texture_access_diagnostic_precedes_recording() @test {
     )!!;
     defer free_owned_span(&device, &buffer)!!;
     gpu::GpuSpan span = buffer.span;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::BufferTextureCopyDesc copy = {
         .src     = span,
@@ -2652,9 +2822,10 @@ fn void texture_copy_span_usage_diagnostics_are_semantic() @test {
         resolved.slot.usage.transfer_src = transfer_src;
         resolved.slot.usage.transfer_dst = transfer_dst;
     }
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
     reset_sync_diagnostic(
@@ -2779,7 +2950,10 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     )!!;
     defer free_owned_span(&device, &root_owned)!!;
     gpu::GpuSpan root = root_owned.span;
-    gpu::CommandList commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
     reset_sync_diagnostic(

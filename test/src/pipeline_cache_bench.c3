@@ -80,10 +80,11 @@ fn gpu::DynamicRasterState raster_permutation(uint index) {
 }
 
 fn double record_raster_matrix(
-    gpu::Device* device,
+    gpu::CommandAllocator* allocator,
     gpu::PipelineHandle pipeline,
     gpu::DynamicRasterState[] rasters,
 ) {
+    gpu::Device* device = &allocator.device;
     gpu::TextureDesc target_desc = {
         .access     = { .graphics },
         .width      = 1,
@@ -101,8 +102,7 @@ fn double record_raster_matrix(
     )!!;
     defer gpu::destroy_attachment_view(device, view)!!;
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::TextureBarrier to_attachment = {
         .texture = target,
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -145,6 +145,15 @@ fn int main() {
     };
     gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
+    gpu::Queue graphics_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        graphics_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
 
     gpu::ShaderDesc vert_sd = {
         .stage       = gpu::ShaderStage.VERTEX,
@@ -196,7 +205,7 @@ fn int main() {
     );
 
     double raster_ns_per_state = record_raster_matrix(
-        device:   &device,
+        allocator: &allocator,
         pipeline: aliases[0],
         rasters:  rasters[..],
     );

@@ -10,16 +10,17 @@ const uint SUBMIT_BATCH_ITERATIONS = 5;
 const uint[5] SUBMIT_BATCH_SIZES = { 1, 8, 32, 128, 1_024 };
 
 fn void record_submit_batch(
-    gpu::Queue queue,
+    gpu::CommandAllocator* allocator,
     gpu::ExecutableCommandList[] out_lists,
 ) {
     foreach (&out_list : out_lists) {
-        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        gpu::CommandList commands = gpu::begin_commands(allocator)!!;
         *out_list = gpu::end_commands(&commands)!!;
     }
 }
 
 fn void measure_submit_batch(
+    gpu::CommandAllocator* allocator,
     gpu::Queue queue,
     vk::VkDeviceState* state,
     uint batch_size,
@@ -29,7 +30,7 @@ fn void measure_submit_batch(
     ulong total_epoch_reset_cells = 0;
     for (uint i = 0; i < SUBMIT_BATCH_ITERATIONS; i++) {
         gpu::ExecutableCommandList[MAX_SUBMIT_BATCH_SIZE] lists;
-        record_submit_batch(queue, lists[:batch_size]);
+        record_submit_batch(allocator, lists[:batch_size]);
         vk::reset_submit_duplicate_work_counters(state);
         gpu::SubmitDesc submit = {
             .command_lists = lists[:batch_size],
@@ -74,6 +75,15 @@ fn int main() {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = MAX_SUBMIT_BATCH_SIZE,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &allocator_desc,
+    )!!;
+    defer (void)gpu::destroy_command_allocator(&allocator);
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
 
@@ -82,8 +92,14 @@ fn int main() {
         SUBMIT_BATCH_ITERATIONS,
     );
     foreach (batch_size : SUBMIT_BATCH_SIZES) {
-        measure_submit_batch(queue, state, batch_size);
+        measure_submit_batch(
+            &allocator,
+            queue,
+            state,
+            batch_size,
+        );
     }
+    gpu::destroy_command_allocator(&allocator)!!;
     io::printfn("submit batch leaks=%d", vk::report_resource_leaks(state));
     return 0;
 }
