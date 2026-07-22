@@ -249,8 +249,12 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
     )!!;
     gpu::TextureBarrier barrier = {
         .texture = texture,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.TRANSFER_DESTINATION,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
     };
     gpu::cmd_texture_barrier(&commands, &barrier)!!;
     bind_test_compute_pipeline(&commands, pipeline);
@@ -287,8 +291,8 @@ fn void failed_command_validation_retains_no_resource_reference() @test {
     )!!;
     gpu::TextureBarrier barrier = {
         .texture = texture,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.UNDEFINED,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = { .layout = gpu::TextureLayout.UNDEFINED },
     };
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,

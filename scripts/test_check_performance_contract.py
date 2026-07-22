@@ -50,6 +50,65 @@ class PerformanceContractTests(unittest.TestCase):
     def test_current_sources_satisfy_contract(self):
         self.assertEqual(check_performance_contract.check(), [])
 
+    def test_texture_barrier_duplicate_authoritative_call_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sync.c3",
+                (
+                    "LoweredTextureBarrier lowered = "
+                    "validate_and_lower_texture_barrier("
+                ),
+                (
+                    "LoweredTextureBarrier duplicate = "
+                    "validate_and_lower_texture_barrier(\n"
+                    "        state, record, barrier, "
+                    '"cmd_texture_barrier",\n'
+                    "    )!!;\n"
+                    "    LoweredTextureBarrier lowered = "
+                    "validate_and_lower_texture_barrier("
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "validate_and_lower_texture_barrier(" in error
+                for error in errors
+            ))
+
+    def test_texture_barrier_missing_work_counter_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sync.c3",
+                "note_texture_barrier_range_resolution(state);",
+                "note_texture_barrier_native_assembly(state);",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "note_texture_barrier_range_resolution(state);" in error
+                for error in errors
+            ))
+
+    def test_retired_texture_barrier_lowering_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sync.c3",
+                "struct TextureStateScope {",
+                "struct TextureUseScope {",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "retired texture-barrier path TextureUseScope" in error
+                for error in errors
+            ))
+
     def test_registry_lock_on_public_recording_path_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

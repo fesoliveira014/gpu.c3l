@@ -9,9 +9,10 @@ const usz SUBMITTED_COMMAND_INITIAL_CAPACITY = 16;
 const uint SUBMITTED_COMMAND_DRAIN_THRESHOLD = 64;
 
 struct CommandResourceReference {
-    ulong owner;
-    uint  index;
-    uint  generation;
+    ulong         owner;
+    uint          index;
+    uint          generation;
+    Atomic{uint}* validation_references;
 }
 
 struct SubmittedCommandBatch {
@@ -106,6 +107,10 @@ fn void release_validation_reference(
     VkDeviceState* state,
     CommandResourceReference reference,
 ) {
+    if (reference.validation_references != null) {
+        reference.validation_references.sub(1, AtomicOrdering.RELAXED);
+        return;
+    }
     if (reference.owner == state.buffers.owner) {
         BufferHandle handle = {
             .owner = reference.owner, .index = reference.index,

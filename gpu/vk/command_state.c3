@@ -175,6 +175,34 @@ fn void? track_command_reference(
     record.references[record.reference_count++] = reference;
 }
 
+fn TextureSlot*? resolve_texture_command_reference(
+    VkDeviceState* state,
+    CommandRecord* record,
+    gpu::TextureHandle handle,
+) {
+    if (!state.validation) return state.textures.get(handle);
+
+    CommandResourceReference reference = {
+        .owner      = handle.owner,
+        .index      = handle.index,
+        .generation = handle.generation,
+    };
+    for (uint i = 0; i < record.reference_count; i++) {
+        if (same_resource_reference(&record.references[i], &reference)) {
+            return state.textures.get(handle);
+        }
+    }
+
+    ensure_command_reference_capacity(state, record);
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    TextureSlot* slot = state.textures.get(handle)!;
+    reference.validation_references = &slot.validation_references;
+    reference.validation_references.add(1, AtomicOrdering.RELAXED);
+    record.references[record.reference_count++] = reference;
+    return slot;
+}
+
 fn void free_command_references(
     VkDeviceState* state,
     CommandRecord* record,

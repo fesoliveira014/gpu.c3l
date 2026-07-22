@@ -63,7 +63,7 @@ struct AcquiredImage {
     SwapchainReadiness   readiness;
     uint                 index;
     bool                 suboptimal;
-    TextureUse           prior_use;
+    TextureState         prior_state;
 }
 
 fn bool SwapchainReadiness.is_valid(self) => self.device.is_valid()

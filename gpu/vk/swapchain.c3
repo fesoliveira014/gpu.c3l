@@ -504,7 +504,7 @@ fn gpu::AcquiredImage make_acquired_image(
         .readiness       = readiness,
         .index           = index,
         .suboptimal      = suboptimal,
-        .prior_use       = swapchain_prior_use(texture),
+        .prior_state     = swapchain_prior_state(texture),
     };
 }
 

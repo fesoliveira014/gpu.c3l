@@ -348,8 +348,12 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     foreach (target : targets) {
         gpu::TextureBarrier to_attach = {
             .texture = target,
-            .before  = gpu::TextureUse.UNDEFINED,
-            .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+            .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+            .after   = {
+                .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
         };
         gpu::cmd_texture_barrier(&commands, &to_attach)!!;
     }
@@ -387,8 +391,16 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_source = {
             .texture = targets[i],
-            .before  = gpu::TextureUse.COLOR_ATTACHMENT,
-            .after   = gpu::TextureUse.TRANSFER_SOURCE,
+            .before  = {
+                .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
+            .after   = {
+                .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+                .stages = { .transfer },
+                .access = { .read },
+            },
         };
         gpu::cmd_texture_barrier(&commands, &to_source)!!;
         gpu::TextureBufferCopyDesc copy = {
@@ -679,7 +691,7 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
         dst:      pattern,
         mip:      0,
         data:     white[..],
-        next_use: gpu::TextureUse.SAMPLED_FRAGMENT,
+        next_use: gpu::sampled_at({ .fragment_shader }),
     )!!;
 
     gpu::TextureDesc rt_desc = {
@@ -819,8 +831,12 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
             .texture = targets[i],
-            .before  = gpu::TextureUse.UNDEFINED,
-            .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+            .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+            .after   = {
+                .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
         };
         gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
@@ -869,8 +885,16 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
 
         gpu::TextureBarrier to_src = {
             .texture = targets[i],
-            .before  = gpu::TextureUse.COLOR_ATTACHMENT,
-            .after   = gpu::TextureUse.TRANSFER_SOURCE,
+            .before  = {
+                .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
+            .after   = {
+                .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+                .stages = { .transfer },
+                .access = { .read },
+            },
         };
         gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -982,8 +1006,12 @@ fn void alias_survives_peer_destroy() @test {
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
     gpu::ColorTargetDesc[1] colors = {{

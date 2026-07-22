@@ -70,6 +70,14 @@ DESTRUCTION_FORBIDDEN = (
     "enqueue_deferred",
     "deferred_release",
 )
+RETIRED_TEXTURE_BARRIER_PATHS = (
+    "TextureUseScope",
+    "texture_use_",
+    "fn TextureBarrierRejection texture_barrier_rejection(",
+    "fn TextureBarrierRejection texture_barrier_queue_rejection(",
+    "texture_transition_range(",
+    "texture_barrier_to_vk(",
+)
 POINT_ALLOCATION_FORBIDDEN = (
     "alloc::new",
     "mem::new",
@@ -285,6 +293,67 @@ def check(root: Path = ROOT) -> list[str]:
     lifetime_source = read(root, "gpu/vk/lifetime.c3")
     command_bench = read(root, "test/src/command_record_bench.c3")
     lifecycle_bench = read(root, "test/src/lifecycle_bench.c3")
+
+    masked_sync = mask_c3_comments(sync_source)
+    for token in RETIRED_TEXTURE_BARRIER_PATHS:
+        if token in masked_sync:
+            errors.append(
+                "gpu/vk/sync.c3 contains retired texture-barrier path "
+                f"{token}"
+            )
+
+    lower_texture_barrier = function_body(
+        sync_source,
+        "validate_and_lower_texture_barrier",
+    )
+    expected_lowering_work = (
+        ("note_texture_barrier_helper(state);", 1),
+        ("resolve_texture_command_reference(", 1),
+        ("note_texture_barrier_access_validation(state);", 1),
+        ("validate_texture_queue_access(", 1),
+        ("note_texture_barrier_range_resolution(state);", 1),
+        ("resolve_texture_barrier_range(", 1),
+        ("note_texture_barrier_state_lowering(state);", 2),
+        ("texture_state_rejection(", 2),
+        ("texture_state_to_vk(", 2),
+        ("note_texture_barrier_native_assembly(state);", 1),
+        ("vk::image_memory_barrier2()", 1),
+    )
+    for token, expected_count in expected_lowering_work:
+        if lower_texture_barrier.count(token) != expected_count:
+            errors.append(
+                "gpu/vk/sync.c3:validate_and_lower_texture_barrier must "
+                f"perform {token} exactly {expected_count} time(s)"
+            )
+
+    texture_barrier_command = function_body(
+        sync_source,
+        "vk_cmd_texture_barrier",
+    )
+    expected_command_work = (
+        ("validate_and_lower_texture_barrier(", 1),
+        ("set_image_memory_barriers((&lowered.native)[:1])", 1),
+        ("note_texture_barrier_native_emission(state);", 1),
+    )
+    for token, expected_count in expected_command_work:
+        if texture_barrier_command.count(token) != expected_count:
+            errors.append(
+                "gpu/vk/sync.c3:vk_cmd_texture_barrier must perform "
+                f"{token} exactly {expected_count} time(s)"
+            )
+    reject_tokens(
+        errors,
+        "gpu/vk/sync.c3",
+        "vk_cmd_texture_barrier",
+        texture_barrier_command,
+        (
+            "state.textures.get(",
+            "validate_texture_recording_access(",
+            "resolve_texture_barrier_range(",
+            "texture_state_rejection(",
+            "texture_state_to_vk(",
+        ),
+    )
 
     public_functions = source_functions(root, "gpu")
     public_reachable = reachable_recording_functions(

@@ -36,10 +36,15 @@ Running example: every sample's `abi/` directory; flow documented in
 Goal: pixels from CPU to a sampled texture.
 
 ```c3
+gpu::TextureState transfer_destination = {
+    .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+    .stages = { .transfer = true },
+    .access = { .write = true },
+};
 gpu::TextureBarrier to_dst = gpu::texture_transition(
     texture: tex,
-    before:  gpu::TextureUse.UNDEFINED,
-    after:   gpu::TextureUse.TRANSFER_DESTINATION,
+    before:  { .layout = gpu::TextureLayout.UNDEFINED },
+    after:   transfer_destination,
 )!;
 gpu::cmd_texture_barrier(&cmd, &to_dst)!;
 
@@ -48,8 +53,8 @@ gpu::cmd_copy_buffer_to_texture(&cmd, &upload)!;
 
 gpu::TextureBarrier to_sample = gpu::texture_transition(
     texture: tex,
-    before:  gpu::TextureUse.TRANSFER_DESTINATION,
-    after:   gpu::TextureUse.SAMPLED_FRAGMENT,
+    before:  transfer_destination,
+    after:   gpu::sampled_at({ .fragment_shader = true }),
 )!;
 gpu::cmd_texture_barrier(&cmd, &to_sample)!;
 ```
@@ -259,7 +264,7 @@ Running example: `pipeline_cache_timing`.
 ## 12. Query swapchain runtime state
 
 Goal: build against the selected format and transition acquired images from
-their reported prior semantic use.
+their reported prior state.
 
 ```c3
 gpu::PresentModeSupport support = gpu::get_present_mode_support(&device, swapchain)!;
@@ -274,21 +279,40 @@ gpu::ColorTargetState[1] pipeline_colors = {{
 }};
 
 gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
-// Render with acquired.attachment_view; the swapchain owns it.
+gpu::TextureState color_attachment = {
+    .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+    .stages = { .color_output = true },
+    .access = { .read = true, .write = true },
+};
 gpu::TextureBarrier to_color = gpu::texture_transition(
-    acquired.texture,
-    acquired.prior_use,
-    gpu::TextureUse.COLOR_ATTACHMENT,
+    texture: acquired.texture,
+    before:  acquired.prior_state,
+    after:   color_attachment,
 )!;
+gpu::cmd_texture_barrier(&cmd, &to_color)!;
+```
+
+Record the render pass, then return the image to the fixed external state:
+
+```c3
+gpu::TextureBarrier to_present = gpu::texture_transition(
+    texture: acquired.texture,
+    before:  color_attachment,
+    after:   { .layout = gpu::TextureLayout.PRESENT },
+)!;
+gpu::cmd_texture_barrier(&cmd, &to_present)!;
 ```
 
 Re-query `SwapchainInfo` after resize, rebuild pipelines if `format` changed,
-and size any per-image data from `image_count`. `prior_use` distinguishes a
-newly wrapped image from one returned by a previous presentation cycle. FIFO
-is always available; other modes remain a support query away. The graphics
-submission consumes `acquired.readiness`; presentation accepts
-its returned completion point. `TextureUse.PRESENT` uses color-attachment
-output without presentation-facing access.
+and size any per-image data from `image_count`. `prior_state` is directly usable
+and distinguishes a newly wrapped image from one returned by a previous
+presentation cycle. The caller owns this history; the backend does not infer
+the next barrier's `before`. FIFO is always available; other modes remain a
+support query away. The graphics submission consumes `acquired.readiness` with
+the first concrete consumer stage, such as `{ .color_output = true }`, and
+presentation accepts its returned completion point. The public `PRESENT` state
+has empty stages/access; Vulkan lowering keeps the fixed
+color-attachment-output/no-access presentation scope.
 Running example: `present_mode_explorer`.
 
 ## 13. Choose a memory class

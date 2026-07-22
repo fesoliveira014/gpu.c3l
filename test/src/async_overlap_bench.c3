@@ -291,8 +291,12 @@ fn int main() {
     gpu::CommandList transition_cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     gpu::TextureBarrier to_attach = {
         .texture = rt,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&transition_cmd, &to_attach)!!;
     gpu::ExecutableCommandList transition_cmd_executable = gpu::end_commands(&transition_cmd)!!;

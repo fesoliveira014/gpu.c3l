@@ -120,8 +120,12 @@ fn void sampled_texture_upload_and_mip_readback() @test {
 
     gpu::TextureBarrier to_dst = gpu::texture_transition(
         texture: texture,
-        before:  gpu::TextureUse.UNDEFINED,
-        after:   gpu::TextureUse.TRANSFER_DESTINATION,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
     )!!;
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
 
@@ -140,8 +144,12 @@ fn void sampled_texture_upload_and_mip_readback() @test {
 
     gpu::TextureBarrier to_read = gpu::texture_transition(
         texture: texture,
-        before:  gpu::TextureUse.TRANSFER_DESTINATION,
-        after:   gpu::TextureUse.SAMPLED_COMPUTE,
+        before:  {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+        after:   gpu::sampled_at({ .compute }),
     )!!;
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
 
@@ -161,8 +169,12 @@ fn void sampled_texture_upload_and_mip_readback() @test {
 
     gpu::TextureBarrier to_src = {
         .texture = texture,
-        .before  = gpu::TextureUse.SAMPLED_COMPUTE,
-        .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        .before  = gpu::sampled_at({ .compute }),
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -269,8 +281,8 @@ fn void storage_write_direct_readback() @test {
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture = texture,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.STORAGE_COMPUTE,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = gpu::storage_at({ .compute }, { .write }),
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
@@ -284,8 +296,12 @@ fn void storage_write_direct_readback() @test {
 
     gpu::TextureBarrier to_src = {
         .texture = texture,
-        .before  = gpu::TextureUse.STORAGE_COMPUTE,
-        .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        .before  = gpu::storage_at({ .compute }, { .write }),
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
@@ -352,8 +368,12 @@ fn void copy_validation_faults() @test {
 
     gpu::TextureBarrier to_dst = {
         .texture = texture,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.TRANSFER_DESTINATION,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
 
@@ -473,8 +493,12 @@ fn void mip_subset_view_sampled() @test {
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_dst = {
         .texture = texture,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.TRANSFER_DESTINATION,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
     gpu::GpuSpan mip0_span = staging_span.checked_subspan(0, MIP0_BYTES)!!;
@@ -485,8 +509,12 @@ fn void mip_subset_view_sampled() @test {
     gpu::cmd_copy_buffer_to_texture(&cmd, &mip1_copy)!!;
     gpu::TextureBarrier to_read = {
         .texture = texture,
-        .before  = gpu::TextureUse.TRANSFER_DESTINATION,
-        .after   = gpu::TextureUse.SAMPLED_COMPUTE,
+        .before  = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+        .after   = gpu::sampled_at({ .compute }),
     };
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
     bind_test_compute_pipeline(&cmd, sample_pipe);

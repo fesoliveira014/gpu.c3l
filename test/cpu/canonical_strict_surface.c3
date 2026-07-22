@@ -179,6 +179,19 @@ fn void pin_commands_and_completion() {
     };
     gpu::TextureHandle texture = {};
     gpu::TextureViewDesc view = {};
+    gpu::TextureState transfer_destination = {
+        .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+        .stages = { .transfer = true },
+        .access = { .write = true },
+    };
+    gpu::TextureState sampled = gpu::sampled_at({
+        .vertex_shader   = true,
+        .fragment_shader = true,
+    });
+    gpu::TextureState storage = gpu::storage_at(
+        { .compute = true },
+        { .read = true, .write = true },
+    );
     gpu::TextureBarrier texture_barrier = {};
     gpu::BufferTextureCopyDesc buffer_texture_copy = {
         .src     = span,
@@ -225,15 +238,16 @@ fn void pin_commands_and_completion() {
     (void)gpu::cmd_barrier(&commands, &barrier);
     (void)gpu::texture_transition(
         texture,
-        gpu::TextureUse.UNDEFINED,
-        gpu::TextureUse.TRANSFER_DESTINATION,
+        {},
+        transfer_destination,
     );
     (void)gpu::texture_view_transition(
         texture: texture,
         view:    view,
-        before:  gpu::TextureUse.TRANSFER_DESTINATION,
-        after:   gpu::TextureUse.SAMPLED_COMPUTE,
+        before:  transfer_destination,
+        after:   sampled,
     );
+    (void)storage;
     (void)gpu::cmd_texture_barrier(&commands, &texture_barrier);
     (void)gpu::cmd_bind_pipeline(&commands, pipeline);
     (void)gpu::cmd_dispatch(
@@ -331,6 +345,7 @@ fn void pin_presentation() {
     };
     gpu::SwapchainHandle swapchain = {};
     gpu::AcquiredImage image = {};
+    gpu::TextureState prior_state = image.prior_state;
     gpu::CompletionPoint completion = {};
 
     (void)gpu::request_presentation(request, &surface);
@@ -340,6 +355,7 @@ fn void pin_presentation() {
     (void)gpu::get_present_mode_support(&device, swapchain);
     (void)gpu::acquire_next_image(&device, swapchain);
     (void)gpu::present(&device, &image, completion);
+    (void)prior_state;
     (void)gpu::resize_swapchain(
         device:    &device,
         swapchain: swapchain,

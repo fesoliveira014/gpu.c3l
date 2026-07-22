@@ -353,8 +353,8 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     defer discard_test_commands(&compute_commands)!!;
     gpu::TextureBarrier to_general = {
         .texture = shared_texture,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.STORAGE_COMPUTE,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = gpu::storage_at({ .compute }, { .write }),
     };
     gpu::cmd_texture_barrier(&compute_commands, &to_general)!!;
     const uint GROUPS = (TEX_SIZE + 7) / 8;
@@ -366,8 +366,8 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     )!!;
     gpu::TextureBarrier write_to_sample = {
         .texture = shared_texture,
-        .before  = gpu::TextureUse.STORAGE_COMPUTE,
-        .after   = gpu::TextureUse.STORAGE_COMPUTE,
+        .before  = gpu::storage_at({ .compute }, { .write }),
+        .after   = gpu::storage_at({ .compute }, { .read }),
     };
     gpu::cmd_texture_barrier(&compute_commands, &write_to_sample)!!;
     bind_test_compute_pipeline(&compute_commands, sample_pipeline);
@@ -391,8 +391,12 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     defer discard_test_commands(&graphics_commands)!!;
     gpu::TextureBarrier target_to_attachment = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&graphics_commands, &target_to_attachment)!!;
     gpu::ColorTargetDesc[1] colors = {{
@@ -415,8 +419,16 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::cmd_end_render_pass(&graphics_commands)!!;
     gpu::TextureBarrier target_to_source = {
         .texture = target,
-        .before  = gpu::TextureUse.COLOR_ATTACHMENT,
-        .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        .before  = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
     };
     gpu::cmd_texture_barrier(&graphics_commands, &target_to_source)!!;
     gpu::GpuSpan readback_span = readback.span;
@@ -582,8 +594,8 @@ fn void descriptor_buffer_write_then_sample() @test {
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture = texture,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.STORAGE_COMPUTE,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = gpu::storage_at({ .compute }, { .write }),
     };
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
@@ -597,8 +609,8 @@ fn void descriptor_buffer_write_then_sample() @test {
 
     gpu::TextureBarrier write_to_sample = {
         .texture = texture,
-        .before  = gpu::TextureUse.STORAGE_COMPUTE,
-        .after   = gpu::TextureUse.STORAGE_COMPUTE,
+        .before  = gpu::storage_at({ .compute }, { .write }),
+        .after   = gpu::storage_at({ .compute }, { .read }),
     };
     gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
     bind_test_compute_pipeline(&cmd, sample_pipe);

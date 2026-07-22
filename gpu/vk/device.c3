@@ -162,6 +162,12 @@ struct VkDeviceState {
     Atomic{ulong}              recording_image_view_creations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              recording_vma_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_scratch_misses @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
+    Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
+    Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);
+    Atomic{ulong}              texture_barrier_state_lowerings @if(env::TESTING);
+    Atomic{ulong}              texture_barrier_native_assemblies @if(env::TESTING);
+    Atomic{ulong}              texture_barrier_native_emissions @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
     ulong                      pipelines_created;
     bool                       pipeline_creation_failure_enabled;
@@ -169,6 +175,8 @@ struct VkDeviceState {
     GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);
     void*                       generated_dispatch_layout_read_user_data @if(env::TESTING);
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);
+    TextureBarrierEmitHook       texture_barrier_emit_hook @if(env::TESTING);
+    void*                        texture_barrier_emit_user_data @if(env::TESTING);
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;

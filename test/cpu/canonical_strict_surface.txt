@@ -14,6 +14,7 @@ bitstruct gpu::Runtime
 bitstruct gpu::SamplerIndex
 bitstruct gpu::StageMask
 bitstruct gpu::Surface
+bitstruct gpu::TextureAccess
 bitstruct gpu::TextureDimensionSupport
 bitstruct gpu::TextureFormatFeatures
 bitstruct gpu::TextureIndex
@@ -75,7 +76,7 @@ enum gpu::SampleCount
 enum gpu::ShaderStage
 enum gpu::StoreOp
 enum gpu::TextureDimension
-enum gpu::TextureUse
+enum gpu::TextureLayout
 fault gpu::BACKEND_ERROR
 fault gpu::COMMAND_RECORDING_ERROR
 fault gpu::DESCRIPTOR_HEAP_FULL
@@ -181,6 +182,8 @@ function gpu::request_presentation
 function gpu::request_queues
 function gpu::reserve_generated_scratch
 function gpu::resize_swapchain
+function gpu::sampled_at
+function gpu::storage_at
 function gpu::strict_device_request
 function gpu::submit
 function gpu::supports_device_request
@@ -293,6 +296,7 @@ struct gpu::TextureDesc
 struct gpu::TextureFormatSupport
 struct gpu::TextureHandle
 struct gpu::TextureRequirements
+struct gpu::TextureState
 struct gpu::TextureView
 struct gpu::TextureViewCreateDesc
 struct gpu::TextureViewDesc

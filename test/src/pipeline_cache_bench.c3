@@ -59,8 +59,12 @@ fn double record_raster_matrix(
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
     gpu::TextureBarrier to_attachment = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&commands, &to_attachment)!!;
     gpu::ColorTargetDesc[1] pass_colors = {{ .view = view }};

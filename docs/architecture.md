@@ -579,8 +579,16 @@ cmd_texture_barrier(command_list, TextureBarrier)
 `Barrier` declares a global semantic dependency between nonempty stage masks.
 It carries no resource identity, address, range, layout, or queue family;
 special draw-argument, descriptor, and depth/stencil hazards are explicit.
-`TextureBarrier` declares a texture, subresource range, and semantic previous
-and next uses. Cross-queue dependencies use completion waits.
+`TextureBarrier` declares a texture, subresource range, and compositional
+previous and next states. A `TextureState` carries an independent
+`TextureLayout`, `StageMask`, and read/write `TextureAccess`; sampled and
+storage helpers construct common states without recording work. Cross-queue
+dependencies use completion waits.
+
+The caller owns texture history. `before` asserts the state established by
+earlier ordering; the backend validates and lowers it but never consults or
+updates a shared layout table. Each accepted barrier resolves its texture and
+range once, lowers its two states once, and emits one native barrier.
 
 Render pass boundaries do not imply shader-read or transfer-read readiness.
 
@@ -636,9 +644,10 @@ presentation fence is not yet reusable, `present` returns `WAIT_TIMEOUT` and
 preserves the acquired image.
 
 `SwapchainInfo` reports the selected format, extent, image count, present mode,
-and dormant state. `AcquiredImage.prior_use` is `UNDEFINED` before first use
-and `PRESENT` after presentation. Resize stales borrowed texture and attachment
-view handles and never reuses acquisition identities. Resize and destruction
+and dormant state. `AcquiredImage.prior_state` is the empty `UNDEFINED` state
+before first use and the empty `PRESENT` state after presentation. Callers pass
+it directly as the first barrier's source. Resize stales borrowed texture and
+attachment view handles and never reuses acquisition identities. Resize and destruction
 reject a pending acquisition or live command/view/presentation use without
 waiting, preserving the swapchain for retry.
 

@@ -168,7 +168,7 @@ runtime info: selected format/mode, clamped extent, actual image count
 image acquire/present
 resize and out-of-date recovery
 coherent info refresh and dormant sentinel after zero/failed resize
-UNDEFINED/PRESENT acquired-image prior use without a seen table
+exact empty UNDEFINED/PRESENT acquired-image prior state without a layout table
 present mode selection
 application render-loop pacing sanity
 ```
@@ -180,6 +180,17 @@ texture-reference detection, diagnostics, and dormant publication. `vk_queue`
 covers native submit rollback, full-submission bridge scopes, and all selected
 graphics families. Surface loss and acquire starvation remain manual recovery
 cases in the windowed samples.
+
+Texture synchronization coverage pins the compositional matrix: vertex,
+fragment, compute, and combined sampled stages; storage read, write, and
+read-write access; transfer and attachment requirements; swapchain-only
+presentation; exact partial mip/layer ranges; and color/depth native masks.
+The injected native-emission seam also proves one accepted barrier performs one
+helper call, handle resolution, recording-access validation, range resolution,
+native assembly, and emission, plus exactly two state validations/lowerings.
+Post-retain failures must emit nothing, preserve reference counts, and report
+the exact nested `TextureBarrier` field. No test assumes backend-tracked layout
+history.
 
 Windowed tests may be manual at first. Automated windowed tests can be added only when CI/window-system support is stable.
 
@@ -280,7 +291,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Compute | root pointer shader read/write, readback, active-pipeline kind and root validation. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline, raster, and depth state; nonzero stage roots; per-target blend/write masks; dynamic raster/viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
-| Swapchain | Runtime-info selection, dormant sentinel, acquired prior use; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
+| Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, per-target immutable identity, and singleton compute/generated-dispatch layouts. |
 | Threading | automatic per-worker recording contexts, private command-buffer and generated-scratch reuse, parallel record, identical submit. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |

@@ -718,8 +718,12 @@ fn void labels_record_validation_clean() @test {
     gpu::cmd_begin_label(&cmd, "resource_setup")!!;
     gpu::TextureBarrier to_attach = {
         .texture = target,
-        .before  = gpu::TextureUse.UNDEFINED,
-        .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
     gpu::cmd_end_label(&cmd)!!;
