@@ -1,10 +1,11 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu;
 import gpu::vk @public;
 import vk;
 
-const gpu::BackendVTable DEVICE_LOSS_VTABLE = {
+const gpu::internal::BackendVTable DEVICE_LOSS_VTABLE = {
     .destroy_device = &destroy_device_loss_fixture,
 };
 
@@ -18,7 +19,7 @@ fn void destroy_device_loss_fixture(void* backend_state) {
 }
 
 fn gpu::Device device_loss_fixture(gpu::vk::VkDeviceState* state) {
-    return gpu::register_device(
+    return gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          { .strict_enabled = true },
         vtable:        &DEVICE_LOSS_VTABLE,

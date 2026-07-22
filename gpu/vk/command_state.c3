@@ -1,10 +1,11 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::core::mem;
 
-const uint MAX_COMMAND_LISTS = gpu::MAX_DEVICE_COMMANDS;
+const uint MAX_COMMAND_LISTS = gpu::internal::MAX_DEVICE_COMMANDS;
 const uint COMMAND_FREE_NONE = 0;
 
 enum CommandState : int {
@@ -89,7 +90,7 @@ fn gpu::CommandListHandle? CommandTable.alloc(&self, CommandRecord value) {
 }
 
 fn CommandRecord*? CommandTable.get(&self, gpu::CommandListHandle handle) {
-    gpu::note_command_table_lookup();
+    gpu::internal::note_command_table_lookup();
     if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = handle.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
@@ -114,16 +115,16 @@ fn void? CommandTable.free(&self, gpu::CommandListHandle handle) {
 
 fn CommandRecord*? resolve_command(gpu::CommandList* commands) {
     if (commands == null || !commands.handle.is_valid()) return gpu::INVALID_HANDLE~;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&commands.device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(&commands.device);
     if (state == null) return gpu::INVALID_HANDLE~;
     return state.commands.get(commands.handle);
 }
 
-fn VkDeviceState* encoder_device_state(gpu::CommandEncoderState* encoder) {
+fn VkDeviceState* encoder_device_state(gpu::internal::CommandEncoderState* encoder) {
     return (VkDeviceState*)encoder.backend_state;
 }
 
-fn CommandRecord* encoder_command(gpu::CommandEncoderState* encoder) {
+fn CommandRecord* encoder_command(gpu::internal::CommandEncoderState* encoder) {
     return (CommandRecord*)encoder.backend_command;
 }
 

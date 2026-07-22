@@ -1,6 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
-import gpu::vk @public;
+import gpu @public;
 import std::atomic;
 import std::atomic::types;
 import std::thread;
@@ -214,6 +214,9 @@ enum ResourceOwnerKind @private {
     COMMAND,
     COMPLETION_POINT,
 }
+
+$assert (ulong)ResourceOwnerKind.COMPLETION_POINT + 1
+    == gpu::RESOURCE_OWNER_KIND_COUNT;
 
 
 bitstruct DeviceSlotControl : ulong @private {
@@ -489,7 +492,7 @@ fn void reset_device_registry_lock_count() @private @if(
 fn ulong? allocate_device_resource_owner() @private {
     ulong current = device_resource_owner_counter.load(AtomicOrdering.RELAXED);
     while (true) {
-        if (current == MAX_DEVICE_RESOURCE_OWNER) return SLOT_TABLE_FULL~;
+        if (current == gpu::MAX_DEVICE_RESOURCE_OWNER) return gpu::SLOT_TABLE_FULL~;
         ulong seen = mem::compare_exchange(
             &device_resource_owner_counter.data,
             current,
@@ -506,17 +509,17 @@ fn DeviceOperation? begin_device_operation(
     Device* device,
     bool allow_lost = false,
 ) @private {
-    if (device == null || !device.is_valid()) return INVALID_HANDLE~;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return INVALID_HANDLE~;
+    if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES) return gpu::INVALID_HANDLE~;
 
     DeviceSlot* slot = &device_slots[device.index];
     ulong packed = slot.control.load(AtomicOrdering.ACQUIRE);
     for (uint attempt = 0; attempt < MAX_DEVICE_OPERATION_PIN_ATTEMPTS; attempt++) {
         DeviceSlotControl control = (DeviceSlotControl)packed;
-        if (control.generation != device.generation) return INVALID_HANDLE~;
-        if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
-        if (control.state != DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
-        if (control.pins == MAX_DEVICE_OPERATION_PINS) return DEVICE_BUSY~;
+        if (control.generation != device.generation) return gpu::INVALID_HANDLE~;
+        if (control.state == DEVICE_SLOT_CLOSING) return gpu::DEVICE_BUSY~;
+        if (control.state != DEVICE_SLOT_LIVE) return gpu::INVALID_HANDLE~;
+        if (control.pins == MAX_DEVICE_OPERATION_PINS) return gpu::DEVICE_BUSY~;
 
         DeviceSlotControl pinned = control;
         pinned.pins++;
@@ -534,7 +537,7 @@ fn DeviceOperation? begin_device_operation(
         if (!allow_lost && slot.lost.load(AtomicOrdering.ACQUIRE)) {
             DeviceSlotControl pin = { .pins = 1 };
             (void)slot.control.sub((ulong)pin, AtomicOrdering.RELEASE);
-            return DEVICE_LOST~;
+            return gpu::DEVICE_LOST~;
         }
         return {
             .slot     = slot,
@@ -544,7 +547,7 @@ fn DeviceOperation? begin_device_operation(
             .owns_pin = true,
         };
     }
-    return DEVICE_BUSY~;
+    return gpu::DEVICE_BUSY~;
 }
 
 fn bool has_retained_command_pin_fields(
@@ -581,19 +584,19 @@ fn DeviceOperation? borrow_retained_device_operation(
     Device* device,
     bool allow_lost = false,
 ) @private {
-    if (device == null || !device.is_valid()) return INVALID_HANDLE~;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return INVALID_HANDLE~;
+    if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES) return gpu::INVALID_HANDLE~;
 
     DeviceSlot* slot = &device_slots[device.index];
     DeviceSlotControl control =
         (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-    if (control.generation != device.generation) return INVALID_HANDLE~;
-    if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
+    if (control.generation != device.generation) return gpu::INVALID_HANDLE~;
+    if (control.state == DEVICE_SLOT_CLOSING) return gpu::DEVICE_BUSY~;
     if (control.state != DEVICE_SLOT_LIVE || control.pins == 0) {
-        return INVALID_HANDLE~;
+        return gpu::INVALID_HANDLE~;
     }
     if (!allow_lost && slot.lost.load(AtomicOrdering.ACQUIRE)) {
-        return DEVICE_LOST~;
+        return gpu::DEVICE_LOST~;
     }
     return {
         .slot   = slot,
@@ -712,7 +715,7 @@ fn void release_device_children(DeviceOperation* operation, ulong count = 1) @pr
 }
 
 fn ulong resource_owner_tag(ulong device_owner, ResourceOwnerKind kind) @private {
-    return (device_owner - 1) * RESOURCE_OWNER_KIND_COUNT + (ulong)kind + 1;
+    return (device_owner - 1) * gpu::RESOURCE_OWNER_KIND_COUNT + (ulong)kind + 1;
 }
 
 fn fault report_device_contract_failure(
@@ -742,9 +745,9 @@ fn void? validate_resource_owner(
     ulong owner,
     ResourceOwnerKind kind,
 ) @private {
-    if (operation == null || !operation.active) return INVALID_HANDLE~;
+    if (operation == null || !operation.active) return gpu::INVALID_HANDLE~;
     if (owner != resource_owner_tag(operation.data.resource_owner, kind)) {
-        return INVALID_HANDLE~;
+        return gpu::INVALID_HANDLE~;
     }
 }
 
@@ -796,44 +799,44 @@ fn Device? register_device(
     QueueSelection queues = {},
     Device* owner = null,
 ) @private {
-    if (vtable == null || backend_state == null || vtable.destroy_device == null) return INVALID_ARGUMENT~;
+    if (vtable == null || backend_state == null || vtable.destroy_device == null) return gpu::INVALID_ARGUMENT~;
     CommandOps* selected_ops = command_ops == null
         ? vtable.command_ops
         : command_ops;
     if (resource_owner == 0) resource_owner = allocate_device_resource_owner()!;
     bool has_runtime = retained_runtime != null;
-    if (has_runtime != (adapter != null)) return INVALID_ARGUMENT~;
+    if (has_runtime != (adapter != null)) return gpu::INVALID_ARGUMENT~;
 
     Runtime runtime;
     Adapter registered_adapter;
     RuntimeData* runtime_data;
     if (has_runtime) {
-        runtime_data = resolve_runtime(retained_runtime);
+        runtime_data = gpu::resolve_runtime(retained_runtime);
         RuntimeData* adapter_data = resolve_adapter(adapter);
         if (runtime_data == null || adapter_data != runtime_data) {
-            return INVALID_HANDLE~;
+            return gpu::INVALID_HANDLE~;
         }
-        if (runtime_data.live_device_count.load(AtomicOrdering.ACQUIRE) == 0) return INVALID_RESOURCE_STATE~;
+        if (runtime_data.live_device_count.load(AtomicOrdering.ACQUIRE) == 0) return gpu::INVALID_RESOURCE_STATE~;
         runtime = *retained_runtime;
         registered_adapter = *adapter;
     }
 
     Surface registered_surface;
     if (presentation_surface != null) {
-        if (!has_runtime) return INVALID_ARGUMENT~;
+        if (!has_runtime) return gpu::INVALID_ARGUMENT~;
         SurfaceData* surface_data = resolve_surface(presentation_surface);
-        if (surface_data == null) return INVALID_HANDLE~;
-        RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
-        if (surface_runtime != runtime_data) return INVALID_HANDLE~;
+        if (surface_data == null) return gpu::INVALID_HANDLE~;
+        RuntimeData* surface_runtime = gpu::resolve_runtime(&surface_data.runtime);
+        if (surface_runtime != runtime_data) return gpu::INVALID_HANDLE~;
         registered_surface = *presentation_surface;
     }
     caps.presentation_enabled = registered_surface.is_valid();
     if (queues.counts.graphics == 0
         && queues.counts.compute == 0
         && queues.counts.transfer == 0) {
-        queues = default_queue_selection(&caps);
+        queues = gpu::default_queue_selection(&caps);
     }
-    if (!queue_selection_is_well_formed(&queues)) return INVALID_ARGUMENT~;
+    if (!gpu::queue_selection_is_well_formed(&queues)) return gpu::INVALID_ARGUMENT~;
     caps.queues = queues.counts;
 
     lock_device_registry();
@@ -875,7 +878,7 @@ fn Device? register_device(
         slot.control.store((ulong)control, AtomicOrdering.RELEASE);
         return handle;
     }
-    return SLOT_TABLE_FULL~;
+    return gpu::SLOT_TABLE_FULL~;
 }
 
 fn void* device_backend_state_ptr(Device* device) @private {

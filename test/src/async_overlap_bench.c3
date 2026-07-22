@@ -1,5 +1,6 @@
 module gpu_bench;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import gpu_test;
@@ -168,7 +169,7 @@ fn int main() {
         graphics_queue,
     )!!;
     defer gpu::destroy_command_allocator(&graphics_allocator)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     bool families_distinct = state.graphics_family != state.compute_family;
     io::printfn(

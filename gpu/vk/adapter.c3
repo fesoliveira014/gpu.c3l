@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::core::mem;
@@ -156,7 +157,7 @@ fn void? enumerate_vk_adapters(VkRuntimeState* state) {
         vk::enumerate_physical_devices(state.instance, &count, null),
     )!;
     if (count == 0) return;
-    if (count > gpu::MAX_ADAPTERS_PER_RUNTIME) return gpu::SLOT_TABLE_FULL~;
+    if (count > gpu::internal::MAX_ADAPTERS_PER_RUNTIME) return gpu::SLOT_TABLE_FULL~;
 
     vk::PhysicalDevice[] physical_devices =
         mem::new_array(vk::PhysicalDevice, (usz)count);

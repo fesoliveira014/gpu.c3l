@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
@@ -147,7 +148,7 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
     )!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state(device);
+        gpu::internal::device_backend_state(device);
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
@@ -373,7 +374,7 @@ fn void submit_requires_exact_recording_queue_token() @test {
     defer discard_test_executable(&executable)!!;
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandRecord* record = state.commands.get(executable.handle)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.id++;
@@ -484,7 +485,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::ResolvedSpan buffer_span = vk::resolve_span(state, &span)!!;
     vk::ResolvedSpan compute_only_span = vk::resolve_span(state, &compute_only)!!;
     gpu::GpuSpan compute_only_tail = compute_only.checked_subspan(4, 4)!!;
@@ -589,7 +590,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
 }
 
 fn bool val_distinct_graphics_compute_families(gpu::Device* device) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
     if (state.graphics_family != state.compute_family) return true;
     io::eprintfn("access-domain rejection not applicable: graphics and compute share family %d", state.graphics_family);
     return false;
@@ -945,7 +946,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     )!!;
     defer free_owned_span(&device, &root_owned)!!;
     gpu::GpuAddress root = val_span_address(&device, root_owned.span);
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -1532,7 +1533,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     uint original_limit = state.caps.max_draw_indirect_count;
     state.caps.max_draw_indirect_count = 1;
     defer state.caps.max_draw_indirect_count = original_limit;
@@ -1628,7 +1629,7 @@ fn void generated_work_commands_require_capability() @test {
     )!!;
     defer free_owned_span(&device, &indices)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     bool original_enabled = state.generated_work.enabled;
     state.generated_work.enabled = false;
     defer state.generated_work.enabled = original_enabled;
@@ -1734,7 +1735,7 @@ fn void generated_dispatch_validates_zero_count_bounds_and_alignment() @test {
     )!!;
     defer free_owned_span(&device, &count)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     bool original_enabled = state.generated_work.enabled;
     uint original_limit = state.caps.max_generated_work_count;
     state.generated_work.enabled = true;
@@ -2162,7 +2163,7 @@ fn void barrier_queue_stage_mismatch_faults_without_poisoning_recording() @test 
     defer discard_test_commands(&commands)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, record.queue.id)!!;
     vk::QueueFamilyFlags selected_flags = completion.queue_flags;
@@ -2203,7 +2204,7 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
     defer discard_test_commands(&commands)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, record.queue.id)!!;
     vk::QueueFamilyFlags selected_flags = completion.queue_flags;
@@ -2456,7 +2457,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
 fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -2490,7 +2491,7 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
     ValComputeCtx ctx = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &ctx);
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     gpu::DeviceCaps original_caps = state.caps;
     gpu::DeviceCaps limited_caps = state.caps;
     limited_caps.max_compute_work_group_count = { .x = 1, .y = 1, .z = 1 };
@@ -2574,8 +2575,8 @@ fn void warm_render_pass_reuses_many_precreated_views() @test {
         gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
         if (iteration == 0) record_val_target_to_attach(&commands, texture);
         vk::VkDeviceState* state =
-            (vk::VkDeviceState*)gpu::device_backend_state(device);
-        gpu::RecordingWorkCounters before =
+            (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::RecordingWorkCounters before =
             vk::command_recording_work_counters(state);
         foreach (view : views) {
             gpu::ColorTargetDesc[1] colors = { { .view = view } };
@@ -2587,7 +2588,7 @@ fn void warm_render_pass_reuses_many_precreated_views() @test {
             gpu::cmd_begin_render_pass(&commands, &pass)!!;
             gpu::cmd_end_render_pass(&commands)!!;
         }
-        gpu::RecordingWorkCounters after =
+        gpu::internal::RecordingWorkCounters after =
             vk::command_recording_work_counters(state);
         if (iteration == 1) {
             assert(after.host_allocations == before.host_allocations,
@@ -2647,7 +2648,7 @@ fn void barrier_mask_diagnostic_identifies_semantic_field() @test {
         "the semantic stage-mask invariant is identified");
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     state.debug_callback = null;
     fault without_callback = @catch(gpu::cmd_barrier(&commands, &barrier));
     assert(without_callback == with_callback,
@@ -2748,7 +2749,7 @@ fn void buffer_to_texture_access_diagnostic_precedes_recording() @test {
         .width   = 1,
         .height  = 1,
     };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandRecord* record = state.commands.get(commands.handle)!!;
     gpu::QueueRoles selected_roles = record.queue.roles;
     // Keep diagnostic precedence independent of physical queue aliasing.
@@ -2814,7 +2815,7 @@ fn void texture_copy_span_usage_diagnostics_are_semantic() @test {
     defer free_owned_span(&device, &owned)!!;
     gpu::GpuSpan span = owned.span;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::ResolvedSpan resolved = vk::resolve_span(state, &span)!!;
     bool transfer_src = resolved.slot.usage.transfer_src;
     bool transfer_dst = resolved.slot.usage.transfer_dst;
@@ -2891,7 +2892,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     OwnedSpan dst = allocate_owned_span(
         device:       &device,

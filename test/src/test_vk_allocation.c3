@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
@@ -111,9 +112,9 @@ fn gpu::GpuSpan init_mapped_visibility_fixture(
 ) {
     fixture.state.resource_owner = ALLOCATION_TEST_OWNER;
     fixture.state.non_coherent_atom_size = 64;
-    fixture.state.allocations.owner = gpu::resource_owner_tag(
+    fixture.state.allocations.owner = gpu::internal::resource_owner_tag(
         ALLOCATION_TEST_OWNER,
-        gpu::ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
     fixture.state.allocations.slots = fixture.cells[..];
     fixture.state.allocations.next_new = 1;
@@ -160,9 +161,9 @@ fn vk::AllocationSlot allocation_slot(uint live_placements = 0) {
 fn vk::AllocationTable allocation_table(vk::AllocationCell[] cells) {
     return {
         .slots = cells,
-        .owner = gpu::resource_owner_tag(
+        .owner = gpu::internal::resource_owner_tag(
             ALLOCATION_TEST_OWNER,
-            gpu::ResourceOwnerKind.ALLOCATION,
+            gpu::internal::ResourceOwnerKind.ALLOCATION,
         ),
     };
 }
@@ -343,9 +344,9 @@ fn void mapped_visibility_rejects_invalid_spans_before_native_work() @test {
     )) == gpu::INVALID_HANDLE);
 
     gpu::GpuSpan foreign = span;
-    foreign.owner = gpu::resource_owner_tag(
+    foreign.owner = gpu::internal::resource_owner_tag(
         ALLOCATION_TEST_OWNER,
-        gpu::ResourceOwnerKind.BUFFER,
+        gpu::internal::ResourceOwnerKind.BUFFER,
     );
     assert(@catch(vk::invalidate_mapped_span_for_state_with_ops(
         &fixture.state,
@@ -595,9 +596,9 @@ fn void init_allocation_transaction_fixture(
     fixture.state.resource_owner = ALLOCATION_TEST_OWNER;
     fixture.state.compute_family = 3;
     fixture.state.transfer_family = 5;
-    fixture.state.allocations.owner = gpu::resource_owner_tag(
+    fixture.state.allocations.owner = gpu::internal::resource_owner_tag(
         ALLOCATION_TEST_OWNER,
-        gpu::ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
     fixture.state.allocations.slots = fixture.cells[..];
     fixture.state.resource_mutex.init()!!;
@@ -938,13 +939,13 @@ fn void texture_memory_uses_raw_non_addressable_allocation() @test {
 fn void allocation_table_pins_capacity_and_owner_domain() @test {
     assert(vk::ALLOCATION_CAPACITY == 4096,
         "independent allocation capacity is fixed at 4096");
-    ulong allocation_owner = gpu::resource_owner_tag(
+    ulong allocation_owner = gpu::internal::resource_owner_tag(
         ALLOCATION_TEST_OWNER,
-        gpu::ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
-    ulong buffer_owner = gpu::resource_owner_tag(
+    ulong buffer_owner = gpu::internal::resource_owner_tag(
         ALLOCATION_TEST_OWNER,
-        gpu::ResourceOwnerKind.BUFFER,
+        gpu::internal::ResourceOwnerKind.BUFFER,
     );
     assert(allocation_owner != buffer_owner,
         "allocation identities occupy a distinct owner domain");
@@ -970,9 +971,9 @@ fn void allocation_table_rejects_invalid_identities() @test {
     gpu::GpuAllocation live = table.alloc(allocation_slot())!!;
 
     gpu::GpuAllocation wrong_owner = live;
-    wrong_owner.owner = gpu::resource_owner_tag(
+    wrong_owner.owner = gpu::internal::resource_owner_tag(
         ALLOCATION_TEST_OWNER + 1,
-        gpu::ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
     assert(@catch(table.get(wrong_owner)) == gpu::INVALID_HANDLE,
         "wrong-owner allocation identities are rejected");
@@ -1154,7 +1155,7 @@ fn void native_allocation_classes_map_and_release() @test {
             "every memory class exposes a nonzero GPU address");
 
         vk::VkDeviceState* state = (vk::VkDeviceState*)
-            gpu::device_backend_state_ptr(&device);
+            gpu::internal::device_backend_state_ptr(&device);
         vk::AllocationSlot* slot = state.allocations.get(allocation)!!;
         vk::MemoryRequirements native_requirements;
         vk::get_buffer_memory_requirements(
@@ -1478,7 +1479,7 @@ fn void lost_device_releases_live_allocation_backing() @test {
     gpu::GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
     assert(allocation.is_valid());
 
-    gpu::mark_device_lost(&device);
+    gpu::internal::mark_device_lost(&device);
     destroy_test_device(&device)!!;
 
     assert(!device.is_valid(),

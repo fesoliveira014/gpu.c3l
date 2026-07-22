@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 
@@ -56,7 +57,7 @@ fn fault report_wsi_backend_failure(
         .backend_text         = backend_text,
         .validation_id_number = raw_result,
     };
-    gpu::dispatch_debug_message(context.state.debug_callback, context.state.debug_user_data, &message);
+    gpu::internal::dispatch_debug_message(context.state.debug_callback, context.state.debug_user_data, &message);
     return public_fault;
 }
 

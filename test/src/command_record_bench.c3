@@ -1,5 +1,6 @@
 module gpu_bench;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
@@ -52,9 +53,9 @@ fn CommandBenchPolicy? command_bench_policy() {
     };
 }
 
-fn gpu::RecordingWorkCounters recording_work_delta(
-    gpu::RecordingWorkCounters after,
-    gpu::RecordingWorkCounters before,
+fn gpu::internal::RecordingWorkCounters recording_work_delta(
+    gpu::internal::RecordingWorkCounters after,
+    gpu::internal::RecordingWorkCounters before,
 ) {
     return {
         .host_allocations = after.host_allocations - before.host_allocations,
@@ -285,7 +286,7 @@ fn int main() {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     gpu::CommandAllocatorDesc allocator_desc;
     gpu::GeneratedScratchDesc scratch;
     if (caps.generated_work) {
@@ -304,7 +305,7 @@ fn int main() {
         allocator_desc.generated_preprocess_bytes =
             (usz)requirements.size * GENERATED_RECORD_ITERATIONS;
     }
-    gpu::RecordingWorkCounters cold_before =
+    gpu::internal::RecordingWorkCounters cold_before =
         vk::command_recording_work_counters(state);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -336,13 +337,13 @@ fn int main() {
         );
     }
 
-    gpu::RecordingWorkCounters warm_before =
+    gpu::internal::RecordingWorkCounters warm_before =
         vk::command_recording_work_counters(state);
-    gpu::RecordingWorkCounters cold_work = recording_work_delta(
+    gpu::internal::RecordingWorkCounters cold_work = recording_work_delta(
         warm_before,
         cold_before,
     );
-    ulong registry_locks_before = gpu::device_registry_lock_count();
+    ulong registry_locks_before = gpu::internal::device_registry_lock_count();
     vk::CommandRecordingStats recording_before =
         vk::command_recording_stats(state);
     ulong pipelines_before = vk::pipeline_native_create_count(state);
@@ -380,10 +381,10 @@ fn int main() {
             * COMMAND_RECORD_REPETITIONS;
     }
     ulong registry_locks =
-        gpu::device_registry_lock_count() - registry_locks_before;
+        gpu::internal::device_registry_lock_count() - registry_locks_before;
     vk::CommandRecordingStats recording_after =
         vk::command_recording_stats(state);
-    gpu::RecordingWorkCounters warm_work = recording_work_delta(
+    gpu::internal::RecordingWorkCounters warm_work = recording_work_delta(
         vk::command_recording_work_counters(state),
         warm_before,
     );

@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
@@ -67,7 +68,7 @@ fn void device_create_destroy() @test {
     gpu::Device device = create_test_device(&desc)!!;
 
     assert(gpu::get_device_backend(&device)!! == gpu::BackendKind.VULKAN, "backend recorded");
-    assert(gpu::device_backend_state(device) != null, "backend state allocated");
+    assert(gpu::internal::device_backend_state(device) != null, "backend state allocated");
     assert(gpu::get_device_caps(&device)!!.buffer_device_address, "buffer_device_address cap true");
     assert(gpu::get_device_caps(&device)!!.synchronization2, "synchronization2 cap true");
     assert(gpu::get_device_caps(&device)!!.dynamic_rendering, "dynamic_rendering cap true");
@@ -76,7 +77,7 @@ fn void device_create_destroy() @test {
         caps.generated_work == (caps.max_generated_work_count > 0),
         "generated-work support and its device limit are coherent"
     );
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::PhysicalDeviceFeatures features;
     vk::get_physical_device_features(state.physical_device, &features);
     assert(features.independent_blend != 0,
@@ -123,7 +124,7 @@ fn void device_create_destroy() @test {
     );
     assert(gpu::get_device_caps(&device)!!.max_push_constant_size >= gpu::RootPush::size, "push-constant limit contains RootPush");
     destroy_test_device(&device)!!;
-    assert(gpu::device_backend_state(device) == null, "backend state cleared on destroy");
+    assert(gpu::internal::device_backend_state(device) == null, "backend state cleared on destroy");
     assert((ulong)device == 0, "destroy consumes the device token");
 
     fault destroyed_fault = @catch(gpu::get_memory_stats(&device));

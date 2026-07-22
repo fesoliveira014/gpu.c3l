@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import vma;
@@ -573,7 +574,7 @@ fn gpu::CommandAllocatorHandle? vk_create_command_allocator(
     gpu::Queue queue,
     gpu::CommandAllocatorDesc* desc,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     CommandAllocatorSlot slot;
     initialize_command_allocator_slot(
         state: state,
@@ -608,7 +609,7 @@ fn void? vk_destroy_command_allocator(
     gpu::Device* device,
     gpu::CommandAllocatorHandle handle,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     CommandAllocatorSlot removed;
     {
         state.resource_mutex.lock()!!;
@@ -851,7 +852,7 @@ fn void? vk_reserve_generated_scratch(
     gpu::CommandAllocator* allocator,
     gpu::GeneratedScratchDesc* desc,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(
         &allocator.device,
     );
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
@@ -966,7 +967,7 @@ fn void? vk_release_generated_scratch(
     gpu::PipelineHandle pipeline,
     gpu::GeneratedWorkKind kind,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(
         &allocator.device,
     );
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
@@ -1040,10 +1041,10 @@ fn CommandRecordingOps command_recording_ops_real() @private {
 fn void? vk_begin_commands_with_ops(
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
-    gpu::CommandBackendContext* out_backend,
+    gpu::internal::CommandBackendContext* out_backend,
     CommandRecordingOps* ops,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(
         &allocator.device,
     );
     CommandAllocatorSlot* slot = lock_command_allocator(
@@ -1121,7 +1122,7 @@ fn void? vk_begin_commands_with_ops(
 fn void? vk_begin_commands(
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
-    gpu::CommandBackendContext* out_backend,
+    gpu::internal::CommandBackendContext* out_backend,
 ) @private {
     CommandRecordingOps ops = command_recording_ops_real();
     return vk_begin_commands_with_ops(
@@ -1133,7 +1134,7 @@ fn void? vk_begin_commands(
 }
 
 fn void? vk_end_commands_with_ops(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     CommandRecordingOps* ops,
 ) @private {
     CommandRecord* record = encoder_command(commands);
@@ -1154,7 +1155,7 @@ fn void? vk_end_commands_with_ops(
     if (slot.live_recordings == 0) slot.recording_thread_set = false;
 }
 
-fn void? vk_end_commands(gpu::CommandEncoderState* commands) @private {
+fn void? vk_end_commands(gpu::internal::CommandEncoderState* commands) @private {
     CommandRecordingOps ops = command_recording_ops_real();
     return vk_end_commands_with_ops(commands, &ops);
 }
@@ -1164,7 +1165,7 @@ fn CommandRecord*? begin_commands_with_injected_ops(
     gpu::CommandList* out_commands,
     CommandRecordingOps* ops,
 ) @if(env::TESTING) {
-    gpu::CommandBackendContext backend;
+    gpu::internal::CommandBackendContext backend;
     vk_begin_commands_with_ops(
         allocator:    allocator,
         out_commands: out_commands,
@@ -1179,7 +1180,7 @@ fn void? end_commands_with_injected_ops(
     CommandRecord* record,
     CommandRecordingOps* ops,
 ) @if(env::TESTING) {
-    gpu::CommandEncoderState encoder = {
+    gpu::internal::CommandEncoderState encoder = {
         .backend_state   = state,
         .backend_command = record,
     };
@@ -1190,9 +1191,9 @@ fn void? vk_discard_commands(
     gpu::Device* device,
     gpu::CommandListHandle handle,
     bool executable,
-    gpu::CommandEncoderState* encoder,
+    gpu::internal::CommandEncoderState* encoder,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     gpu::CommandAllocatorHandle allocator_handle;
     {
         state.command_mutex.lock()!!;
@@ -1243,7 +1244,7 @@ fn void? vk_discard_commands(
 }
 
 fn PreparedBufferCopy? lower_buffer_copy(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     if (commands == null || desc == null) return gpu::INVALID_ARGUMENT~;
@@ -1280,7 +1281,7 @@ fn bool buffer_copy_is_safe(PreparedBufferCopy* copy) {
 }
 
 fn PreparedBufferCopy? validate_and_lower_buffer_copy(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     if (commands != null) {
@@ -1369,7 +1370,7 @@ fn PreparedBufferCopy? validate_and_lower_buffer_copy(
 }
 
 fn void? track_buffer_copy_references(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedBufferCopy* copy,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -1392,7 +1393,7 @@ fn void? track_buffer_copy_references(
 }
 
 fn void record_buffer_copy(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedBufferCopy* copy,
 ) {
     CommandRecord* record = encoder_command(commands);
@@ -1408,11 +1409,11 @@ fn void record_buffer_copy(
         region_count:   1,
         p_regions:      &region,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_copy_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
@@ -1421,7 +1422,7 @@ fn void? trusted_copy_buffer(
 }
 
 fn void? trusted_tracking_copy_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
@@ -1438,7 +1439,7 @@ fn void? trusted_tracking_copy_buffer(
 }
 
 fn void? checked_copy_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = validate_and_lower_buffer_copy(commands, desc)!;
@@ -1446,7 +1447,7 @@ fn void? checked_copy_buffer(
 }
 
 fn void? checked_tracking_copy_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = validate_and_lower_buffer_copy(commands, desc)!;
@@ -1462,7 +1463,7 @@ fn void? checked_tracking_copy_buffer(
 }
 
 fn PreparedBufferFill? lower_buffer_fill(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1487,7 +1488,7 @@ fn PreparedBufferFill? lower_buffer_fill(
 }
 
 fn PreparedBufferFill? validate_and_lower_buffer_fill(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1533,7 +1534,7 @@ fn PreparedBufferFill? validate_and_lower_buffer_fill(
 }
 
 fn void record_buffer_fill(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedBufferFill* fill,
 ) {
     vk::cmd_fill_buffer(
@@ -1543,11 +1544,11 @@ fn void record_buffer_fill(
         size:           (vk::DeviceSize)fill.span.size,
         data:           fill.value,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_fill_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1559,7 +1560,7 @@ fn void? trusted_fill_buffer(
 }
 
 fn void? trusted_tracking_fill_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1583,7 +1584,7 @@ fn void? trusted_tracking_fill_buffer(
 }
 
 fn void? checked_fill_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1596,7 +1597,7 @@ fn void? checked_fill_buffer(
 }
 
 fn void? checked_tracking_fill_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1682,7 +1683,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
 }
 
 fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     if (commands == null || desc == null) return gpu::INVALID_ARGUMENT~;
@@ -1720,7 +1721,7 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
 }
 
 fn PreparedBufferTextureCopy? validate_and_lower_buffer_to_texture_copy(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
@@ -1753,7 +1754,7 @@ fn PreparedBufferTextureCopy? validate_and_lower_buffer_to_texture_copy(
 }
 
 fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     if (commands == null || desc == null) return gpu::INVALID_ARGUMENT~;
@@ -1791,7 +1792,7 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
 }
 
 fn PreparedBufferTextureCopy? validate_and_lower_texture_to_buffer_copy(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
@@ -1824,7 +1825,7 @@ fn PreparedBufferTextureCopy? validate_and_lower_texture_to_buffer_copy(
 }
 
 fn void? track_buffer_texture_copy_references(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedBufferTextureCopy* copy,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -1847,7 +1848,7 @@ fn void? track_buffer_texture_copy_references(
 }
 
 fn void record_buffer_to_texture_copy(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedBufferTextureCopy* copy,
 ) {
     vk::cmd_copy_buffer_to_image(
@@ -1858,11 +1859,11 @@ fn void record_buffer_to_texture_copy(
         region_count:    1,
         p_regions:       &copy.region,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void record_texture_to_buffer_copy(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedBufferTextureCopy* copy,
 ) {
     vk::cmd_copy_image_to_buffer(
@@ -1873,11 +1874,11 @@ fn void record_texture_to_buffer_copy(
         region_count:    1,
         p_regions:       &copy.region,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_copy_buffer_to_texture(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
@@ -1885,7 +1886,7 @@ fn void? trusted_copy_buffer_to_texture(
 }
 
 fn void? trusted_tracking_copy_buffer_to_texture(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
@@ -1897,7 +1898,7 @@ fn void? trusted_tracking_copy_buffer_to_texture(
 }
 
 fn void? checked_copy_buffer_to_texture(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy =
@@ -1906,7 +1907,7 @@ fn void? checked_copy_buffer_to_texture(
 }
 
 fn void? checked_tracking_copy_buffer_to_texture(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy =
@@ -1919,7 +1920,7 @@ fn void? checked_tracking_copy_buffer_to_texture(
 }
 
 fn void? trusted_copy_texture_to_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
@@ -1927,7 +1928,7 @@ fn void? trusted_copy_texture_to_buffer(
 }
 
 fn void? trusted_tracking_copy_texture_to_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
@@ -1939,7 +1940,7 @@ fn void? trusted_tracking_copy_texture_to_buffer(
 }
 
 fn void? checked_copy_texture_to_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy =
@@ -1948,7 +1949,7 @@ fn void? checked_copy_texture_to_buffer(
 }
 
 fn void? checked_tracking_copy_texture_to_buffer(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy =
@@ -2125,7 +2126,7 @@ fn RenderCompatibility pipeline_render_compatibility(
 }
 
 fn BoundPipeline? lower_bound_pipeline(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::PipelineHandle pipeline,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
@@ -2139,7 +2140,7 @@ fn BoundPipeline? lower_bound_pipeline(
     validate_descriptor_heap_binding(state)!;
     PipelineCell* cell = state.pipelines.get_cell(pipeline)!;
     PipelineSlot* slot = &cell.value;
-    gpu::note_command_pipeline_cache_lookup();
+    gpu::internal::note_command_pipeline_cache_lookup();
     if (slot.entry >= state.pipeline_cache.entries.len
         || !state.pipeline_cache.entries[slot.entry].used) {
         return gpu::INVALID_HANDLE~;
@@ -2157,7 +2158,7 @@ fn BoundPipeline? lower_bound_pipeline(
 }
 
 fn BoundPipeline? validate_and_lower_bound_pipeline(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
@@ -2174,7 +2175,7 @@ fn BoundPipeline? validate_and_lower_bound_pipeline(
 }
 
 fn void? track_bound_pipeline(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     BoundPipeline* pipeline,
 ) {
     CommandRecord* record = encoder_command(commands);
@@ -2188,7 +2189,7 @@ fn void? track_bound_pipeline(
 }
 
 fn void? record_bound_pipeline(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     BoundPipeline* bound,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -2200,7 +2201,7 @@ fn void? record_bound_pipeline(
             ? vk::PipelineBindPoint.COMPUTE
             : vk::PipelineBindPoint.GRAPHICS;
         vk::cmd_bind_pipeline(record.command_buffer, bind_point, bound.pipeline);
-        gpu::note_command_native_call();
+        gpu::internal::note_command_native_call();
         bind_descriptor_heap(
             state:      state,
             cb:         record.command_buffer,
@@ -2212,7 +2213,7 @@ fn void? record_bound_pipeline(
 }
 
 fn void? trusted_bind_pipeline(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
@@ -2220,7 +2221,7 @@ fn void? trusted_bind_pipeline(
 }
 
 fn void? trusted_tracking_bind_pipeline(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
@@ -2236,7 +2237,7 @@ fn void? trusted_tracking_bind_pipeline(
 }
 
 fn void? checked_bind_pipeline(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
@@ -2244,7 +2245,7 @@ fn void? checked_bind_pipeline(
 }
 
 fn void? checked_tracking_bind_pipeline(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
@@ -2277,11 +2278,11 @@ fn void push_compute_root(
         size:           gpu::RootPush::size,
         p_values:       &push,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? vk_cmd_dispatch(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) @private {
@@ -2316,11 +2317,11 @@ fn void? vk_cmd_dispatch(
         group_count_y:  groups.y,
         group_count_z:  groups.z,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_dispatch(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) {
@@ -2337,11 +2338,11 @@ fn void? trusted_dispatch(
         group_count_y:  groups.y,
         group_count_z:  groups.z,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? checked_dispatch(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) {
@@ -2351,7 +2352,7 @@ fn void? checked_dispatch(
 }
 
 fn PreparedDispatchIndirect? lower_dispatch_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2375,7 +2376,7 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
 }
 
 fn PreparedDispatchIndirect? validate_and_lower_dispatch_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2409,7 +2410,7 @@ fn PreparedDispatchIndirect? validate_and_lower_dispatch_indirect(
 }
 
 fn void? track_dispatch_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedDispatchIndirect* dispatch,
 ) {
     return track_span_command_reference(
@@ -2420,7 +2421,7 @@ fn void? track_dispatch_indirect(
 }
 
 fn void record_dispatch_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedDispatchIndirect* dispatch,
 ) {
     CommandRecord* record = encoder_command(commands);
@@ -2430,11 +2431,11 @@ fn void record_dispatch_indirect(
         dispatch.args.slot.buffer,
         (vk::DeviceSize)dispatch.args.offset,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_dispatch_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2447,7 +2448,7 @@ fn void? trusted_dispatch_indirect(
 }
 
 fn void? trusted_tracking_dispatch_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2461,7 +2462,7 @@ fn void? trusted_tracking_dispatch_indirect(
 }
 
 fn void? checked_dispatch_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2474,7 +2475,7 @@ fn void? checked_dispatch_indirect(
 }
 
 fn void? checked_tracking_dispatch_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2621,7 +2622,7 @@ fn void? execute_generated_work(
         &info,
     );
     note_generated_native_emission(state, kind);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
@@ -2645,7 +2646,7 @@ fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
 }
 
 fn PreparedGeneratedDispatch? lower_generated_dispatch(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2685,7 +2686,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
 }
 
 fn PreparedGeneratedDispatch? validate_and_lower_generated_dispatch(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2736,7 +2737,7 @@ fn PreparedGeneratedDispatch? validate_and_lower_generated_dispatch(
 }
 
 fn void? track_generated_dispatch(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedGeneratedDispatch* dispatch,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -2759,7 +2760,7 @@ fn void? track_generated_dispatch(
 }
 
 fn void? record_generated_dispatch(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedGeneratedDispatch* dispatch,
 ) {
     if (dispatch.max_count == 0) return;
@@ -2779,7 +2780,7 @@ fn void? record_generated_dispatch(
 }
 
 fn void? trusted_dispatch_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2794,7 +2795,7 @@ fn void? trusted_dispatch_generated(
 }
 
 fn void? trusted_tracking_dispatch_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2818,7 +2819,7 @@ fn void? trusted_tracking_dispatch_generated(
 }
 
 fn void? checked_dispatch_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2833,7 +2834,7 @@ fn void? checked_dispatch_generated(
 }
 
 fn void? checked_tracking_dispatch_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2997,14 +2998,14 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
 
 <* Snapshot test/benchmark recording work after externally synchronizing the
    measured interval. *>
-fn gpu::RecordingWorkCounters command_recording_work_counters(
+fn gpu::internal::RecordingWorkCounters command_recording_work_counters(
     VkDeviceState* state,
 ) @if(
     env::TESTING
     || $feature(COMMAND_RESOLUTION_STATS)
     || $feature(COMMAND_RECORDING_WORK_STATS)
 ) {
-    gpu::RecordingWorkCounters counters = {
+    gpu::internal::RecordingWorkCounters counters = {
         .host_allocations = state.recording_host_allocations.load(
             AtomicOrdering.RELAXED,
         ),
@@ -3027,7 +3028,7 @@ fn gpu::RecordingWorkCounters command_recording_work_counters(
         .vma_allocations = state.recording_vma_allocations.load(
             AtomicOrdering.RELAXED,
         ),
-        .registry_lock_acquisitions = gpu::device_registry_lock_count(),
+        .registry_lock_acquisitions = gpu::internal::device_registry_lock_count(),
     };
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         counters.generated_scratch_misses = state.generated_scratch_misses.load(
@@ -3064,7 +3065,7 @@ fn void reset_command_recording_work_counters(
     state.command_buffer_resets.store(0, AtomicOrdering.RELAXED);
     state.recording_image_view_creations.store(0, AtomicOrdering.RELAXED);
     state.recording_vma_allocations.store(0, AtomicOrdering.RELAXED);
-    gpu::reset_device_registry_lock_count();
+    gpu::internal::reset_device_registry_lock_count();
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         state.generated_scratch_misses.store(0, AtomicOrdering.RELAXED);
         state.generated_dispatch_emissions.store(0, AtomicOrdering.RELAXED);
@@ -3076,9 +3077,9 @@ fn void reset_command_recording_work_counters(
     $endif
 }
 
-fn gpu::RecordingWorkCounters command_recording_work_delta(
-    gpu::RecordingWorkCounters after,
-    gpu::RecordingWorkCounters before,
+fn gpu::internal::RecordingWorkCounters command_recording_work_delta(
+    gpu::internal::RecordingWorkCounters after,
+    gpu::internal::RecordingWorkCounters before,
 ) @if(
     env::TESTING
     || $feature(COMMAND_RESOLUTION_STATS)

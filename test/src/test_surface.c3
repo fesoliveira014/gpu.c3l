@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::surface::wayland;
 import gpu::surface::win32;
@@ -19,8 +20,8 @@ fn void assert_device_ownership(
     Adapter expected_adapter,
     Surface expected_surface,
 ) {
-    gpu::DeviceOperation operation = gpu::begin_device_operation(device)!!;
-    defer gpu::end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!!;
+    defer gpu::internal::end_device_operation(&operation);
     assert(
         (ulong)operation.data.adapter == (ulong)expected_adapter,
         "the device retains its exact adapter"
@@ -45,7 +46,7 @@ fn void forged_surface_tokens_are_rejected() @test {
     Surface reserved = surface;
     reserved.reserved = 1;
     Surface out_of_range = surface;
-    out_of_range.index = gpu::MAX_SURFACES;
+    out_of_range.index = gpu::internal::MAX_SURFACES;
     Surface wrong_generation = surface;
     wrong_generation.generation--;
 
@@ -234,10 +235,10 @@ fn void live_swapchains_block_surface_destruction() @test {
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
 
-    gpu::surface_retain_swapchain(&surface)!!;
+    gpu::internal::surface_retain_swapchain(&surface)!!;
     assert(@catch(gpu::destroy_surface(&surface)) == gpu::RESOURCE_IN_USE);
     assert(surface.is_valid());
-    gpu::surface_release_swapchain(&surface)!!;
+    gpu::internal::surface_release_swapchain(&surface)!!;
     gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;
 }

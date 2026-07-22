@@ -1,5 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
+import gpu;
 
 
 fn RuntimeData* resolve_adapter(Adapter* adapter) @private {

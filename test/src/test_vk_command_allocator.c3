@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu;
 import gpu::vk @public;
 import vk;
@@ -458,7 +459,7 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     gpu::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -521,7 +522,7 @@ fn void command_allocator_capacity_and_destroy_are_non_waiting() @test {
     gpu::discard_executable_commands(&executable)!!;
 
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     gpu::vk::reset_completion_work_counters(state);
     gpu::vk::CompletionWorkCounters before =
         gpu::vk::completion_work_counters(state);
@@ -552,7 +553,7 @@ fn void command_allocator_destroy_never_waits_for_an_active_operation() @test {
     )!!;
     gpu::CommandAllocator original = allocator;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     gpu::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -593,7 +594,7 @@ fn void command_table_exhaustion_restores_allocator_claim() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     gpu::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -648,7 +649,7 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     gpu::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -731,7 +732,7 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     gpu::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -814,7 +815,7 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     gpu::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -904,7 +905,7 @@ fn void tracking_allocator_wires_non_overlapping_reference_slices() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::vk::VkDeviceState* state = (gpu::vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     gpu::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;

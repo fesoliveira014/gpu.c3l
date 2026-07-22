@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::thread;
@@ -105,7 +106,7 @@ fn void? report_descriptor_backend_failure(
             .backend_text         = backend_text,
             .validation_id_number = backend_result,
         };
-        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+        gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     }
     return public_fault~;
 }
@@ -365,9 +366,9 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
         }
     }
 
-    heap.texture_view_owner     = gpu::resource_owner_tag(
+    heap.texture_view_owner     = gpu::internal::resource_owner_tag(
         state.resource_owner,
-        gpu::ResourceOwnerKind.TEXTURE_VIEW,
+        gpu::internal::ResourceOwnerKind.TEXTURE_VIEW,
     );
     heap.texture_cells          = mem::new_array(TextureDescriptorCell, tex_capacity);
     heap.texture_free           = mem::new_array(uint, tex_capacity);
@@ -848,7 +849,7 @@ fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pi
             dynamic_offset_count:  0,
             p_dynamic_offsets:     null,
         );
-        gpu::note_command_native_call();
+        gpu::internal::note_command_native_call();
         return;
     }
 
@@ -859,7 +860,7 @@ fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pi
     binding_info.address = state.strict_heap.descriptors.descriptor_buffer_gpu;
     binding_info.usage   = (vk::BufferUsageFlags)usage;
     state.device_dispatch.descriptor_buffer.cmd_bind_descriptor_buffers(cb, 1, &binding_info);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 
     uint buffer_index = 0;
     vk::DeviceSize offset = 0;
@@ -872,7 +873,7 @@ fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pi
         &buffer_index,
         &offset,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn TextureSlot*? resolve_descriptor_texture(
@@ -954,7 +955,7 @@ fn vk::ImageView? resolve_descriptor_texture_view(
 }
 
 fn gpu::TextureView? vk_create_texture_view(gpu::Device* device, gpu::TextureHandle texture, gpu::TextureViewDesc* view) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     state.texture_view_cache_mutex.lock()!!;
@@ -1121,7 +1122,7 @@ fn uint accumulate_texture_descriptor_write(DescriptorHeapState* heap, uint slot
 <* All validation and fallible view creation precedes descriptor mutation.
    A preparation fault restores only views created by this transaction. *>
 fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc[] descs, gpu::TextureView[] out_views) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (out_views.len != descs.len) {
         return report_contract_failure(
             state:               state,
@@ -1232,7 +1233,7 @@ fn void? vk_destroy_texture_view(
     gpu::Device* device,
     gpu::TextureView view,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureDescriptorCell*? resolved = texture_cell_get(state, view);

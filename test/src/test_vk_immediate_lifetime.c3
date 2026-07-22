@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
@@ -120,7 +121,7 @@ fn void unreferenced_destroy_is_immediate() @test {
     OwnedSpan owned = make_lifetime_span(&device, "immediate_unreferenced");
     gpu::GpuAllocation stale = owned.allocation;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state(device);
+        gpu::internal::device_backend_state(device);
     vk::reset_completion_work_counters(state);
 
     gpu::free_allocation(&device, &owned.allocation)!!;
@@ -146,7 +147,7 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         }
     }
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state(device);
+        gpu::internal::device_backend_state(device);
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
@@ -380,7 +381,7 @@ fn void incomplete_submitted_commands_retain_references() @test {
     }
     gpu::wait_completion(completion)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(state.submitted_command_count == 0,
         "waiting releases completed validation-reference batches");
     gpu::free_allocation(&device, &src.allocation)!!;
@@ -395,7 +396,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     gpu::Device device = make_lifetime_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     vk::AttachmentViewSlot borrowed_view = { .swapchain_owned = true };
     gpu::AttachmentViewHandle view =

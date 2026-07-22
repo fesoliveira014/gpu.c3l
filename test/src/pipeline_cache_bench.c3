@@ -1,5 +1,6 @@
 module gpu_bench;
 
+import gpu::internal @public;
 import gpu;
 import gpu::vk @public;
 import std::io;
@@ -181,7 +182,7 @@ fn int main() {
     foreach (i, &raster : rasters) *raster = raster_permutation((uint)i);
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     ulong native_before = vk::pipeline_native_create_count(state);
     gpu::PipelineHandle[BENCH_RASTER_PERMUTATION_COUNT] aliases;
     std::time::Clock cold_start = std::time::clock::now();

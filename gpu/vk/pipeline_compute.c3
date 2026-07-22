@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::thread;
@@ -59,7 +60,7 @@ fn gpu::PipelineHandle? PipelineTable.alloc(&self, PipelineSlot value) {
 }
 
 fn PipelineCell*? PipelineTable.get_cell(&self, gpu::PipelineHandle h) {
-    gpu::note_command_pipeline_table_lookup();
+    gpu::internal::note_command_pipeline_table_lookup();
     if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
@@ -139,7 +140,7 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     PreparedShaderIdentity* prepared_shader,
     PipelineShaderModule* batch_shader,
 ) {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     PipelineKey key = build_compute_key(prepared_shader.id);
     ulong hash = hash_key(&key);
     {
@@ -249,7 +250,7 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(
     gpu::Device* device,
     gpu::ComputePipelineDesc* desc,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
     validate_pipeline_shader_code(
@@ -283,7 +284,7 @@ fn void? vk_create_compute_pipelines(
 ) @private {
     if (out_pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
 
@@ -363,7 +364,7 @@ fn void? vk_create_compute_pipelines(
     };
 }
 fn void? vk_destroy_pipeline(gpu::Device* device, gpu::PipelineHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     PipelineSlot* slot = state.pipelines.get(handle)!;

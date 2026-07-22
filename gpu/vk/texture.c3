@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::thread;
@@ -247,7 +248,7 @@ fn gpu::TextureFormatSupport? vk_get_texture_format_support(
     gpu::Device* device,
     gpu::Format format,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
 
     gpu::TextureFormatSupport support;
     if (format_to_vk(format) == vk::Format.UNDEFINED) return support;
@@ -381,7 +382,7 @@ fn bool? vk_supports_texture_desc(
     gpu::TextureDesc* desc,
 ) @private {
     if (!gpu::texture_desc_valid(desc)) return false;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     return texture_desc_supported(state, desc);
 }
 
@@ -471,7 +472,7 @@ fn void? check_texture_view_backend_result(
             .backend_text         = backend_result_text(result),
             .validation_id_number = (int)result,
         };
-        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+        gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     }
     return public_fault~;
 }
@@ -722,12 +723,12 @@ fn gpu::TextureRequirements? vk_get_texture_requirements(
     gpu::Device* device,
     gpu::TextureDesc* desc,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     return texture_requirements_for_state(state, desc);
 }
 
 fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (!gpu::texture_desc_valid(desc)) {
         return report_contract_failure(
             state:               state,
@@ -1304,7 +1305,7 @@ fn gpu::TextureHandle? vk_create_placed_texture(
     gpu::GpuAllocation placement,
     usz offset,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     gpu::TextureRequirements requirements =
         texture_requirements_for_state(state, desc)!;
     TexturePlacementNativeOps ops = texture_placement_native_ops_real();
@@ -1324,7 +1325,7 @@ fn gpu::DedicatedTexture? vk_create_dedicated_texture(
     gpu::AllocationDesc* allocation_desc,
 ) @private {
     VkDeviceState* state =
-        (VkDeviceState*)gpu::device_backend_state_ptr(device);
+        (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     gpu::TextureRequirements requirements =
         texture_requirements_for_state(state, desc)!;
     DedicatedTextureNativeOps ops = dedicated_texture_native_ops_real();
@@ -1338,7 +1339,7 @@ fn gpu::DedicatedTexture? vk_create_dedicated_texture(
 }
 
 fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;

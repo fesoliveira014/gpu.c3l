@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::core::mem;
@@ -404,7 +405,7 @@ fn void set_sampler_create_result(
     gpu::Device* device,
     vk::Result result,
 ) @if(env::TESTING) {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.sampler_create_result = result;
 }
 
@@ -412,7 +413,7 @@ fn gpu::SamplerIndex? vk_intern_sampler(
     gpu::Device* device,
     gpu::SamplerDesc* desc,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     SamplerKey key = sampler_key_from_desc(state, desc)!;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();

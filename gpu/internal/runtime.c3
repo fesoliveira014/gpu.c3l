@@ -1,6 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
-import gpu::vk @public;
+import gpu;
 import std::atomic;
 import std::atomic::types;
 import std::core::mem;
@@ -58,7 +58,7 @@ fn bool contract_validation_is_known(ContractValidation policy) @private {
 }
 
 fn void? validate_contract_validation(ContractValidation policy) @private {
-    if (!contract_validation_is_known(policy)) return INVALID_ARGUMENT~;
+    if (!contract_validation_is_known(policy)) return gpu::INVALID_ARGUMENT~;
 }
 
 fn RuntimeData* resolve_runtime(Runtime* runtime) @private {
@@ -76,8 +76,8 @@ fn Runtime? register_runtime(
     void* backend_state,
     uint adapter_count,
 ) @private {
-    if (vtable == null || backend_state == null) return INVALID_ARGUMENT~;
-    if (adapter_count > MAX_ADAPTERS_PER_RUNTIME) return SLOT_TABLE_FULL~;
+    if (vtable == null || backend_state == null) return gpu::INVALID_ARGUMENT~;
+    if (adapter_count > MAX_ADAPTERS_PER_RUNTIME) return gpu::SLOT_TABLE_FULL~;
     for (uint i = 0; i < MAX_RUNTIMES; i++) {
         RuntimeData* data = &runtime_slots[i];
         if (data.used || data.generation == MAX_RUNTIME_GENERATION) continue;
@@ -94,7 +94,7 @@ fn Runtime? register_runtime(
             .generation = data.generation,
         };
     }
-    return SLOT_TABLE_FULL~;
+    return gpu::SLOT_TABLE_FULL~;
 }
 
 fn void* runtime_backend_state(Runtime* runtime) @private {
@@ -104,24 +104,24 @@ fn void* runtime_backend_state(Runtime* runtime) @private {
 
 fn void? runtime_retain_surface(Runtime* runtime) @private {
     RuntimeData* data = resolve_runtime(runtime);
-    if (data == null) return INVALID_HANDLE~;
-    if (data.live_surface_count == uint::max) return INVALID_RESOURCE_STATE~;
+    if (data == null) return gpu::INVALID_HANDLE~;
+    if (data.live_surface_count == uint::max) return gpu::INVALID_RESOURCE_STATE~;
     data.live_surface_count++;
 }
 
 fn void? runtime_release_surface(Runtime* runtime) @private {
     RuntimeData* data = resolve_runtime(runtime);
-    if (data == null) return INVALID_HANDLE~;
-    if (data.live_surface_count == 0) return INVALID_RESOURCE_STATE~;
+    if (data == null) return gpu::INVALID_HANDLE~;
+    if (data.live_surface_count == 0) return gpu::INVALID_RESOURCE_STATE~;
     data.live_surface_count--;
 }
 
 fn void? runtime_retain_device(Runtime* runtime) @private {
     RuntimeData* data = resolve_runtime(runtime);
-    if (data == null) return INVALID_HANDLE~;
+    if (data == null) return gpu::INVALID_HANDLE~;
     uint count = data.live_device_count.load(AtomicOrdering.RELAXED);
     while (true) {
-        if (count == uint::max) return INVALID_RESOURCE_STATE~;
+        if (count == uint::max) return gpu::INVALID_RESOURCE_STATE~;
         uint seen = mem::compare_exchange(
             &data.live_device_count.data,
             count,
@@ -136,10 +136,10 @@ fn void? runtime_retain_device(Runtime* runtime) @private {
 
 fn void? runtime_release_device(Runtime* runtime) @private {
     RuntimeData* data = resolve_runtime(runtime);
-    if (data == null) return INVALID_HANDLE~;
+    if (data == null) return gpu::INVALID_HANDLE~;
     uint count = data.live_device_count.load(AtomicOrdering.RELAXED);
     while (true) {
-        if (count == 0) return INVALID_RESOURCE_STATE~;
+        if (count == 0) return gpu::INVALID_RESOURCE_STATE~;
         uint seen = mem::compare_exchange(
             &data.live_device_count.data,
             count,
@@ -153,14 +153,14 @@ fn void? runtime_release_device(Runtime* runtime) @private {
 }
 
 fn void? validate_runtime_desc(RuntimeDesc* desc) @private {
-    if (desc == null) return INVALID_ARGUMENT~;
+    if (desc == null) return gpu::INVALID_ARGUMENT~;
     validate_contract_validation(desc.contract_validation)!;
-    if (desc.texture_heap_capacity > MAX_SHADER_HEAP_CAPACITY
-        || desc.sampler_heap_capacity > MAX_SHADER_HEAP_CAPACITY
-        || desc.texture_capacity > MAX_SHADER_HEAP_CAPACITY
-        || desc.pipeline_capacity > MAX_SHADER_HEAP_CAPACITY) {
-        return INVALID_ARGUMENT~;
+    if (desc.texture_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
+        || desc.sampler_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
+        || desc.texture_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
+        || desc.pipeline_capacity > gpu::MAX_SHADER_HEAP_CAPACITY) {
+        return gpu::INVALID_ARGUMENT~;
     }
     if (desc.pipeline_cache_data.len > 0
-        && desc.pipeline_cache_data.ptr == null) return INVALID_ARGUMENT~;
+        && desc.pipeline_cache_data.ptr == null) return gpu::INVALID_ARGUMENT~;
 }

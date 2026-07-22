@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import std::atomic;
@@ -66,7 +67,7 @@ fn void sampler_interning_pins_public_contract() @test {
     Device device = sampler_test_device(&runtime);
     uint destroys_before = gpu::vk::stub_sampler_native_destroy_count();
     ulong children_before =
-        gpu::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
+        gpu::internal::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
 
     assert(@catch(gpu::intern_sampler(&device, null)) == gpu::INVALID_ARGUMENT);
     assert(gpu::vk::stub_sampler_intern_attempt_count(&device) == 0,
@@ -107,7 +108,7 @@ fn void sampler_interning_pins_public_contract() @test {
 
     assert(first.is_valid(), "interning returns a live shader index");
     ulong children_after =
-        gpu::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
+        gpu::internal::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
     assert(children_after == children_before,
         "interning retains no device child");
 

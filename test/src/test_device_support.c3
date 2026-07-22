@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 
@@ -27,7 +28,7 @@ fn void request_support_is_semantic_and_does_not_enable_state() @test {
     DeviceRequestSupport support = gpu::supports_device_request(&adapter, &request)!!;
     assert(support.supported, "strict semantics are supported");
     assert(support.unmet_requirement.len == 0, "a supported request has no unmet label");
-    assert(gpu::device_slot_available(), "support detection enables no device state");
+    assert(gpu::internal::device_slot_available(), "support detection enables no device state");
     assert(gpu::vk::stub_device_support_query_count() == 1, "support is queried once");
 }
 
@@ -56,7 +57,7 @@ fn void invalid_requests_and_stale_adapters_fault_before_backend_work() @test {
     RuntimeDesc desc = device_support_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = first_support_adapter(&runtime);
-    DeviceRequest empty = gpu::empty_device_request();
+    DeviceRequest empty = gpu::internal::empty_device_request();
     DeviceRequest malformed;
     DeviceRequest reserved = (DeviceRequest)((uint128)gpu::strict_device_request() | ((uint128)1 << 63));
 

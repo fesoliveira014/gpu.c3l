@@ -1,9 +1,18 @@
 module gpu;
 
+import gpu::internal @public;
 import gpu::vk @public;
 import std::atomic;
 import std::atomic::types;
 import std::core::mem;
+
+alias RuntimeData @private = gpu::internal::RuntimeData;
+
+fn RuntimeData* resolve_runtime(Runtime* runtime) @private =>
+    gpu::internal::resolve_runtime(runtime);
+
+fn Surface? register_surface(Runtime* runtime, void* backend_surface) @private =>
+    gpu::internal::register_surface(runtime, backend_surface);
 
 <* True when the device handle is not the invalid zero sentinel. *>
 fn bool Device.is_valid(self)          => (ulong)self != 0;
@@ -81,7 +90,7 @@ fn RuntimeDesc full_validation_runtime_desc() => {
 
 <* Initialize backend discovery. Importing gpu performs no initialization. *>
 fn Runtime? create_runtime(RuntimeDesc* desc) {
-    validate_runtime_desc(desc)!;
+    gpu::internal::validate_runtime_desc(desc)!;
     switch (desc.backend) {
         case BackendKind.VULKAN:
             return gpu::vk::create_vk_runtime(desc);
@@ -96,20 +105,20 @@ fn Runtime? create_runtime(RuntimeDesc* desc) {
                 .invariant      = "backend must be supported",
                 .backend_text   = "unsupported GPU backend",
             };
-            dispatch_debug_message(desc.debug_callback, desc.debug_user_data, &message);
+            gpu::internal::dispatch_debug_message(desc.debug_callback, desc.debug_user_data, &message);
             return UNSUPPORTED_BACKEND~;
     }
 }
 
 <* Destroy a runtime after its surfaces and devices have been destroyed. *>
 fn void? destroy_runtime(Runtime* runtime) {
-    RuntimeData* data = resolve_runtime(runtime);
+    gpu::internal::RuntimeData* data = gpu::internal::resolve_runtime(runtime);
     if (data == null) return INVALID_HANDLE~;
     if (data.live_surface_count > 0 || data.live_device_count.load(AtomicOrdering.ACQUIRE) > 0) {
         return RESOURCE_IN_USE~;
     }
 
-    DestroyRuntimeBackendFn destroy_backend = data.vtable.destroy_runtime;
+    gpu::internal::DestroyRuntimeBackendFn destroy_backend = data.vtable.destroy_runtime;
     void* backend_state = data.backend_state;
     data.vtable = null;
     data.backend_state = null;
@@ -124,7 +133,7 @@ fn bool Adapter.is_valid(self) => (ulong)self != 0;
 
 <* Return one borrowed adapter from this runtime-owned view. *>
 fn Adapter? AdapterList.get(&self, uint index) {
-    RuntimeData* data = resolve_runtime(&self.runtime);
+    gpu::internal::RuntimeData* data = gpu::internal::resolve_runtime(&self.runtime);
     if (data == null) return INVALID_HANDLE~;
     if (index >= self.count || index >= data.adapter_count || index > ushort::max) {
         return INVALID_ARGUMENT~;
@@ -138,7 +147,7 @@ fn Adapter? AdapterList.get(&self, uint index) {
 
 <* Return an allocation-free view of the runtime's borrowed adapters. *>
 fn AdapterList? enumerate_adapters(Runtime* runtime) {
-    RuntimeData* data = resolve_runtime(runtime);
+    gpu::internal::RuntimeData* data = gpu::internal::resolve_runtime(runtime);
     if (data == null) return INVALID_HANDLE~;
     return {
         .runtime = *runtime,
@@ -148,7 +157,7 @@ fn AdapterList? enumerate_adapters(Runtime* runtime) {
 
 <* Query backend-neutral information for a borrowed adapter. *>
 fn AdapterInfo? get_adapter_info(Adapter* adapter) {
-    RuntimeData* data = resolve_adapter(adapter);
+    gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
     return data.vtable.get_adapter_info(
         data.backend_state,
@@ -158,7 +167,7 @@ fn AdapterInfo? get_adapter_info(Adapter* adapter) {
 
 <* Query backend and driver identity for diagnostics and logging. *>
 fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
-    RuntimeData* data = resolve_adapter(adapter);
+    gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
     return data.vtable.get_adapter_diagnostics(
         data.backend_state,
@@ -168,9 +177,9 @@ fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
 
 <* Create a strict semantic device request. *>
 fn DeviceRequest strict_device_request() {
-    return compose_device_request(
-        empty_device_request(),
-        DeviceCapability.STRICT,
+    return gpu::internal::compose_device_request(
+        gpu::internal::empty_device_request(),
+        gpu::internal::DeviceCapability.STRICT,
     )!!;
 }
 
@@ -179,9 +188,9 @@ fn DeviceRequest? request_presentation(
     DeviceRequest request,
     Surface* surface,
 ) {
-    return compose_device_request(
+    return gpu::internal::compose_device_request(
         request,
-        DeviceCapability.PRESENTATION,
+        gpu::internal::DeviceCapability.PRESENTATION,
         surface,
     );
 }
@@ -191,19 +200,19 @@ fn DeviceRequest? request_queues(
     DeviceRequest request,
     QueueRequirements requirements,
 ) {
-    if (!device_request_is_well_formed(request)
-        || !queue_requirements_are_valid(requirements)) {
+    if (!gpu::internal::device_request_is_well_formed(request)
+        || !gpu::internal::queue_requirements_are_valid(requirements)) {
         return INVALID_ARGUMENT~;
     }
-    if (((ulong)(uint128)request & DEVICE_REQUEST_QUEUES_BIT) != 0) {
+    if (((ulong)(uint128)request & gpu::internal::DEVICE_REQUEST_QUEUES_BIT) != 0) {
         return INVALID_ARGUMENT~;
     }
-    if (requested_surface(request).is_valid()
+    if (gpu::internal::requested_surface(request).is_valid()
         && requirements.counts.graphics == 0) {
         return INVALID_ARGUMENT~;
     }
     return (DeviceRequest)((uint128)request
-        | (uint128)(DEVICE_REQUEST_QUEUES_BIT | encode_queue_requirements(requirements)));
+        | (uint128)(gpu::internal::DEVICE_REQUEST_QUEUES_BIT | gpu::internal::encode_queue_requirements(requirements)));
 }
 
 <* Query semantic request support without enabling device state.
@@ -212,8 +221,8 @@ fn DeviceRequestSupport? supports_device_request(
     Adapter* adapter,
     DeviceRequest* request,
 ) {
-    validate_device_request(request)!;
-    RuntimeData* data = resolve_adapter(adapter);
+    gpu::internal::validate_device_request(request)!;
+    gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
 
     AdapterInfo info = data.vtable.get_adapter_info(
@@ -227,7 +236,7 @@ fn DeviceRequestSupport? supports_device_request(
         };
     }
 
-    QueueRequirements queues = requested_queue_requirements(*request);
+    QueueRequirements queues = gpu::internal::requested_queue_requirements(*request);
     if (queues.counts.graphics > info.queues.graphics_count) {
         return {
             .supported         = false,
@@ -247,7 +256,7 @@ fn DeviceRequestSupport? supports_device_request(
         };
     }
 
-    Surface surface = requested_surface(*request);
+    Surface surface = gpu::internal::requested_surface(*request);
     void* backend_surface = null;
     if (surface.is_valid() && !supports_presentation(adapter, &surface)!) {
         return {
@@ -256,7 +265,7 @@ fn DeviceRequestSupport? supports_device_request(
         };
     }
     if (surface.is_valid()) {
-        backend_surface = surface_backend_handle(&surface)!;
+        backend_surface = gpu::internal::surface_backend_handle(&surface)!;
     }
 
     if (data.vtable.supports_queue_requirements == null
@@ -279,11 +288,11 @@ fn bool Surface.is_valid(self) => (ulong)self != 0;
 
 <* Return whether an adapter can present to a surface from the same runtime. *>
 fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
-    RuntimeData* adapter_runtime = resolve_adapter(adapter);
-    SurfaceData* surface_data = resolve_surface(surface);
+    gpu::internal::RuntimeData* adapter_runtime = gpu::internal::resolve_adapter(adapter);
+    gpu::internal::SurfaceData* surface_data = gpu::internal::resolve_surface(surface);
     if (adapter_runtime == null || surface_data == null) return INVALID_HANDLE~;
 
-    RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
+    gpu::internal::RuntimeData* surface_runtime = gpu::internal::resolve_runtime(&surface_data.runtime);
     if (surface_runtime != adapter_runtime) return INVALID_HANDLE~;
     if (adapter_runtime.vtable.supports_presentation == null) return false;
     return adapter_runtime.vtable.supports_presentation(
@@ -295,12 +304,12 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
 
 <* Destroy a surface after all swapchains that borrow it. *>
 fn void? destroy_surface(Surface* surface) {
-    SurfaceData* data = resolve_surface(surface);
+    gpu::internal::SurfaceData* data = gpu::internal::resolve_surface(surface);
     if (data == null) return INVALID_HANDLE~;
     if (data.live_swapchain_count > 0) return RESOURCE_IN_USE~;
 
     Runtime runtime = data.runtime;
-    RuntimeData* runtime_data = resolve_runtime(&runtime);
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(&runtime);
     if (runtime_data == null) return INVALID_HANDLE~;
     void* backend_surface = data.backend_surface;
 
@@ -314,21 +323,21 @@ fn void? destroy_surface(Surface* surface) {
         runtime_data.backend_state,
         backend_surface,
     );
-    runtime_release_surface(&runtime)!!;
+    gpu::internal::runtime_release_surface(&runtime)!!;
 }
 
 <* Reset process-wide command instrumentation before a synchronized test or
    benchmark interval. Do not call while another thread records commands. *>
 fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
-    command_device_registry_resolutions.store(0, AtomicOrdering.RELAXED);
-    command_retained_pin_operations.store(0, AtomicOrdering.RELAXED);
-    command_lifecycle_vtable_dispatches.store(0, AtomicOrdering.RELAXED);
-    command_table_lookups.store(0, AtomicOrdering.RELAXED);
-    command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
-    command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
-    command_policy_selections.store(0, AtomicOrdering.RELAXED);
-    command_recording_commands.store(0, AtomicOrdering.RELAXED);
-    command_native_commands.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_device_registry_resolutions.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_retained_pin_operations.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_lifecycle_vtable_dispatches.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_table_lookups.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_policy_selections.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_recording_commands.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_native_commands.store(0, AtomicOrdering.RELAXED);
 }
 
 <* Snapshot process-wide command instrumentation with relaxed loads.
@@ -336,31 +345,31 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
    native_commands counts every Vulkan command emitted by those paths. *>
 fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
     return {
-        .device_registry_resolutions = command_device_registry_resolutions.load(
+        .device_registry_resolutions = gpu::internal::command_device_registry_resolutions.load(
             AtomicOrdering.RELAXED,
         ),
-        .retained_pin_operations = command_retained_pin_operations.load(
+        .retained_pin_operations = gpu::internal::command_retained_pin_operations.load(
             AtomicOrdering.RELAXED,
         ),
-        .lifecycle_vtable_dispatches = command_lifecycle_vtable_dispatches.load(
+        .lifecycle_vtable_dispatches = gpu::internal::command_lifecycle_vtable_dispatches.load(
             AtomicOrdering.RELAXED,
         ),
-        .command_table_lookups = command_table_lookups.load(
+        .command_table_lookups = gpu::internal::command_table_lookups.load(
             AtomicOrdering.RELAXED,
         ),
-        .pipeline_table_lookups = command_pipeline_table_lookups.load(
+        .pipeline_table_lookups = gpu::internal::command_pipeline_table_lookups.load(
             AtomicOrdering.RELAXED,
         ),
-        .pipeline_cache_lookups = command_pipeline_cache_lookups.load(
+        .pipeline_cache_lookups = gpu::internal::command_pipeline_cache_lookups.load(
             AtomicOrdering.RELAXED,
         ),
-        .command_policy_selections = command_policy_selections.load(
+        .command_policy_selections = gpu::internal::command_policy_selections.load(
             AtomicOrdering.RELAXED,
         ),
-        .recording_commands = command_recording_commands.load(
+        .recording_commands = gpu::internal::command_recording_commands.load(
             AtomicOrdering.RELAXED,
         ),
-        .native_commands = command_native_commands.load(
+        .native_commands = gpu::internal::command_native_commands.load(
             AtomicOrdering.RELAXED,
         ),
     };
@@ -368,25 +377,25 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
 
 <* Return the backend selected for the live device. *>
 fn BackendKind? get_device_backend(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.data.backend;
 }
 
 <* Snapshot the selected device's capabilities. *>
 fn DeviceCaps? get_device_caps(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.data.caps;
 }
 
 <* Create a strict device from one exact borrowed adapter.
    Ownership: the caller must release the returned device with destroy_device. *>
 fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
-    validate_device_request(request)!;
-    RuntimeData* runtime_data = resolve_adapter(adapter);
+    gpu::internal::validate_device_request(request)!;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(adapter);
     if (runtime_data == null) return INVALID_HANDLE~;
-    if (!device_slot_available()) return SLOT_TABLE_FULL~;
+    if (!gpu::internal::device_slot_available()) return SLOT_TABLE_FULL~;
 
     DeviceRequestSupport support = supports_device_request(adapter, request)!;
     if (!support.supported) return UNSUPPORTED_FEATURE~;
@@ -395,7 +404,7 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
         .index      = adapter.runtime_index,
         .generation = adapter.runtime_generation,
     };
-    runtime_retain_device(&runtime)!;
+    gpu::internal::runtime_retain_device(&runtime)!;
 
     Device device;
     bool retain_transferred = false;
@@ -404,7 +413,7 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
             (void)destroy_device(&device);
         }
         if (!retain_transferred) {
-            (void)runtime_release_device(&runtime);
+            (void)gpu::internal::runtime_release_device(&runtime);
         }
     }
 
@@ -422,27 +431,27 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
    host or queue work faults DEVICE_BUSY without consuming the token. *>
 fn void? destroy_device(Device* device) {
     if (device == null || !device.is_valid()) return INVALID_HANDLE~;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return INVALID_HANDLE~;
+    if (device.reserved != 0 || device.index >= gpu::internal::MAX_DEVICES) return INVALID_HANDLE~;
 
-    DeviceSlot* slot = &device_slots[device.index];
-    DeviceSlotControl closing;
-    DeviceData data;
+    gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
+    gpu::internal::DeviceSlotControl closing;
+    gpu::internal::DeviceData data;
     {
-        lock_device_registry();
-        defer unlock_device_registry();
-        DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+        gpu::internal::lock_device_registry();
+        defer gpu::internal::unlock_device_registry();
+        gpu::internal::DeviceSlotControl control = (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
         if (control.generation != device.generation) return INVALID_HANDLE~;
-        if (control.state == DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
-        if (control.state != DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
+        if (control.state == gpu::internal::DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
+        if (control.state != gpu::internal::DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
         bool lost = slot.lost.load(AtomicOrdering.ACQUIRE);
         if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
             return RESOURCE_IN_USE~;
         }
 
-        DeviceSlotControl state_step = { .state = 1 };
+        gpu::internal::DeviceSlotControl state_step = { .state = 1 };
         ulong previous = slot.control.add((ulong)state_step, AtomicOrdering.ACQUIRE_RELEASE);
-        closing = (DeviceSlotControl)previous;
-        closing.state = DEVICE_SLOT_CLOSING;
+        closing = (gpu::internal::DeviceSlotControl)previous;
+        closing.state = gpu::internal::DEVICE_SLOT_CLOSING;
 
         if (closing.pins > 0) {
             (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
@@ -472,38 +481,38 @@ fn void? destroy_device(Device* device) {
     data.vtable.destroy_device(data.backend_state);
 
     {
-        lock_device_registry();
-        defer unlock_device_registry();
+        gpu::internal::lock_device_registry();
+        defer gpu::internal::unlock_device_registry();
         slot.data = {};
         slot.live_children.store(0, AtomicOrdering.RELAXED);
         slot.lost.store(false, AtomicOrdering.RELAXED);
         closing.pins = 0;
-        if (closing.generation == MAX_DEVICE_GENERATION) {
-            closing.state = DEVICE_SLOT_RETIRED;
+        if (closing.generation == gpu::internal::MAX_DEVICE_GENERATION) {
+            closing.state = gpu::internal::DEVICE_SLOT_RETIRED;
         } else {
             closing.generation++;
-            closing.state = DEVICE_SLOT_FREE;
+            closing.state = gpu::internal::DEVICE_SLOT_FREE;
         }
         closing.reserved = 0;
         slot.control.store((ulong)closing, AtomicOrdering.RELEASE);
     }
 
     *device = DEVICE_INVALID;
-    if (data.runtime_retained) runtime_release_device(&data.runtime)!;
+    if (data.runtime_retained) gpu::internal::runtime_release_device(&data.runtime)!;
 }
 
 <* Snapshot per-heap memory usage and live allocation counts. *>
 fn MemoryStats? get_memory_stats(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.get_memory_stats(device);
 }
 
 <* Build a human-readable memory report. Ownership: the caller frees the
    returned String. *>
 fn String? build_memory_report(Device* device, bool detailed) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.build_memory_report(device, detailed);
 }
 
@@ -511,21 +520,21 @@ fn String? build_memory_report(Device* device, bool detailed) {
    Valid while recording, including inside render passes; balance is the
    caller's responsibility. *>
 fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (label == null) return INVALID_ARGUMENT~;
     return encoder.ops.begin_label(encoder, label, color);
 }
 
 <* Counterpart of cmd_begin_label. *>
 fn void? cmd_end_label(CommandList* commands) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.end_label(encoder);
 }
 
 <* Allocate caller-managed GPU storage. Free with `free_allocation`. *>
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null || desc.size == 0) return INVALID_ARGUMENT~;
     if (!memory_class_is_known(desc.memory_class)) return INVALID_ARGUMENT~;
     validate_queue_access(&operation, desc.access)!;
@@ -537,22 +546,22 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
         device,
         &normalized,
     )!;
-    retain_device_children(&operation);
+    gpu::internal::retain_device_children(&operation);
     return allocation;
 }
 
 <* Free quiescent storage; faults preserve the owning token. *>
 fn void? free_allocation(Device* device, GpuAllocation* allocation) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (allocation == null || !allocation.is_valid()) return INVALID_HANDLE~;
-    validate_resource_owner(
+    gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
-        ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
     operation.vtable.free_allocation(device, *allocation)!;
-    release_device_children(&operation);
+    gpu::internal::release_device_children(&operation);
     *allocation = GPU_ALLOCATION_INVALID;
 }
 
@@ -561,51 +570,51 @@ fn AllocationInfo? get_allocation_info(
     Device* device,
     GpuAllocation allocation,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
-        ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
     return operation.vtable.get_allocation_info(device, allocation);
 }
 
 <* Borrow the allocation's complete range. *>
 fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
-        ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
     return operation.vtable.get_allocation_span(device, allocation);
 }
 
 <* Borrow the CPU mapping for a live host-visible span. *>
 fn char[]? get_span_mapping(Device* device, GpuSpan span) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.get_span_mapping(device, span);
 }
 
 <* Return the stable nonzero address of a live span. *>
 fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.get_span_address(device, span);
 }
 
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
    Coherent ranges are no-ops. *>
 fn void? flush_mapped_span(Device* device, GpuSpan span) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
         &operation,
         span.owner,
-        ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
     return operation.vtable.flush_mapped_span(device, span);
 }
@@ -613,12 +622,12 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
 <* After the relevant GPU completion point, make its writes visible to CPU
    reads. This call does not wait; coherent ranges are no-ops. *>
 fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
         &operation,
         span.owner,
-        ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
     return operation.vtable.invalidate_mapped_span(device, span);
 }
@@ -656,16 +665,16 @@ fn bool TextureCompatibility.is_valid(self) {
 <* Query library-creatable features for a format. Individual feature bits do
    not guarantee that a combination is supported. *>
 fn TextureFormatSupport? get_texture_format_support(Device* device, Format format) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.get_texture_format_support(device, format);
 }
 
 <* Return whether an exact descriptor is creatable by the backend and adapter.
    This checks capabilities only; allocation can still fail for lack of memory. *>
 fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     if (!queue_access_is_valid(&operation, desc.access)) return false;
     return operation.vtable.supports_texture_desc(device, desc);
@@ -673,8 +682,8 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
 
 <* Return exact storage requirements for a texture descriptor. *>
 fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     validate_queue_access(&operation, desc.access)!;
     return operation.vtable.get_texture_requirements(device, desc);
@@ -683,12 +692,12 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
 <* The handle owns the image; shader access goes through a TextureIndex.
    Ownership: release with destroy_texture. *>
 fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     validate_queue_access(&operation, desc.access)!;
     TextureHandle texture = operation.vtable.create_texture(device, desc)!;
-    retain_device_children(&operation);
+    gpu::internal::retain_device_children(&operation);
     return texture;
 }
 
@@ -699,14 +708,14 @@ fn TextureHandle? create_placed_texture(
     GpuAllocation allocation,
     usz offset,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     validate_queue_access(&operation, desc.access)!;
-    validate_resource_owner(
+    gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
-        ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
     TextureHandle texture = operation.vtable.create_placed_texture(
         device:     device,
@@ -714,7 +723,7 @@ fn TextureHandle? create_placed_texture(
         allocation: allocation,
         offset:     offset,
     )!;
-    retain_device_children(&operation);
+    gpu::internal::retain_device_children(&operation);
     return texture;
 }
 
@@ -724,8 +733,8 @@ fn DedicatedTexture? create_dedicated_texture(
     TextureDesc* desc,
     AllocationDesc* allocation_desc,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null || allocation_desc == null
         || allocation_desc.size == 0
         || allocation_desc.memory_class != MemoryClass.TEXTURE) {
@@ -752,24 +761,24 @@ fn DedicatedTexture? create_dedicated_texture(
         desc,
         &normalized,
     )!;
-    retain_device_children(&operation, 2);
+    gpu::internal::retain_device_children(&operation, 2);
     return created;
 }
 
 <* Destroy a texture after its descriptors. Placed storage remains caller-owned. *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(&operation, texture.owner, ResourceOwnerKind.TEXTURE)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
     operation.vtable.destroy_texture(device, texture)!;
-    release_device_children(&operation);
+    gpu::internal::release_device_children(&operation);
 }
 
 <* Intern and publish an immutable device-lifetime sampler index. Identical
    semantic descriptions return the same value; debug_name is not semantic. *>
 fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     return operation.vtable.intern_sampler(device, desc);
@@ -783,23 +792,23 @@ fn TextureView? create_texture_view(
     TextureHandle texture,
     TextureViewDesc* desc,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(&operation, texture.owner, ResourceOwnerKind.TEXTURE)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     TextureView view = operation.vtable.create_texture_view(device, texture, desc)!;
-    retain_device_children(&operation);
+    gpu::internal::retain_device_children(&operation);
     return view;
 }
 
 <* Release one texture view and recycle its shader-visible index immediately.
    GPU references to the index must already be complete. *>
 fn void? destroy_texture_view(Device* device, TextureView view) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(&operation, view.owner, ResourceOwnerKind.TEXTURE_VIEW)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(&operation, view.owner, gpu::internal::ResourceOwnerKind.TEXTURE_VIEW)!;
     operation.vtable.destroy_texture_view(device, view)!;
-    release_device_children(&operation);
+    gpu::internal::release_device_children(&operation);
 }
 
 <* Batch-publish texture views. Requires strict capability.
@@ -810,10 +819,10 @@ fn void? create_texture_views(
     TextureViewCreateDesc[] descs,
     TextureView[] out_views,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (out_views.len != descs.len) {
-        return report_device_contract_failure(
+        return gpu::internal::report_device_contract_failure(
             operation:      &operation,
             operation_name: "create_texture_views",
             public_fault:   INVALID_ARGUMENT,
@@ -824,11 +833,11 @@ fn void? create_texture_views(
     }
     if (descs.len == 0) return;
     foreach (&desc : descs) {
-        validate_resource_owner(&operation, desc.texture.owner, ResourceOwnerKind.TEXTURE)!;
+        gpu::internal::validate_resource_owner(&operation, desc.texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
     }
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     operation.vtable.create_texture_views(device, descs, out_views)!;
-    retain_device_children(&operation, (ulong)descs.len);
+    gpu::internal::retain_device_children(&operation, (ulong)descs.len);
 }
 
 fn bool ShaderCode.is_valid(self) {
@@ -891,11 +900,11 @@ fn ShaderCode? prepare_shader_code(ShaderDesc* desc) {
    pipeline under distinct handles. Ownership: release with destroy_pipeline,
    once per create. *>
 fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline = operation.vtable.create_compute_pipeline(device, desc)!;
-    retain_device_children(&operation);
+    gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
 
@@ -906,11 +915,11 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
    At most MAX_COLOR_ATTACHMENTS color targets. Ownership:
    release with destroy_pipeline, once per create. *>
 fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline = operation.vtable.create_graphics_pipeline(device, desc)!;
-    retain_device_children(&operation);
+    gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
 
@@ -921,12 +930,12 @@ fn void? create_compute_pipelines(
     ComputePipelineDesc[] descs,
     PipelineHandle[] out_pipelines,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
     if (descs.len == 0) return;
     operation.vtable.create_compute_pipelines(device, descs, out_pipelines)!;
-    for (usz i = 0; i < descs.len; i++) retain_device_children(&operation);
+    for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
 }
 
 <* Create graphics pipelines transactionally. Output count must match descriptor
@@ -936,30 +945,30 @@ fn void? create_graphics_pipelines(
     GraphicsPipelineDesc[] descs,
     PipelineHandle[] out_pipelines,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
     if (descs.len == 0) return;
     operation.vtable.create_graphics_pipelines(device, descs, out_pipelines)!;
-    for (usz i = 0; i < descs.len; i++) retain_device_children(&operation);
+    for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
 }
 
 <* Release one returned handle. Descriptions sharing one backend pipeline are
    refcounted. *>
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(&operation, pipeline.owner, ResourceOwnerKind.PIPELINE)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(&operation, pipeline.owner, gpu::internal::ResourceOwnerKind.PIPELINE)!;
     operation.vtable.destroy_pipeline(device, pipeline)!;
-    release_device_children(&operation);
+    gpu::internal::release_device_children(&operation);
 }
 
 <* Byte size of the driver pipeline cache blob. The cache grows as pipelines
    are built — re-query before each export. Must not be called concurrently
    with pipeline creation. *>
 fn usz? get_pipeline_cache_size(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.get_pipeline_cache_size(device);
 }
 
@@ -969,8 +978,8 @@ fn usz? get_pipeline_cache_size(Device* device) {
    later runtime and device. Must not be called concurrently with pipeline
    creation. *>
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.get_pipeline_cache_data(device, out);
 }
 
@@ -984,8 +993,8 @@ fn CommandAllocator? create_command_allocator(
     Queue queue,
     CommandAllocatorDesc* desc = null,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_queue(&operation, device, queue)!;
 
     CommandAllocatorDesc normalized = desc == null ? {} : *desc;
@@ -1025,9 +1034,9 @@ fn CommandAllocator? create_command_allocator(
         queue,
         &normalized,
     )!;
-    ulong expected_owner = resource_owner_tag(
+    ulong expected_owner = gpu::internal::resource_owner_tag(
         operation.data.resource_owner,
-        ResourceOwnerKind.COMMAND_ALLOCATOR,
+        gpu::internal::ResourceOwnerKind.COMMAND_ALLOCATOR,
     );
     if (!allocator.handle.is_valid()
         || allocator.handle.owner != expected_owner) {
@@ -1039,7 +1048,7 @@ fn CommandAllocator? create_command_allocator(
         }
         return BACKEND_ERROR~;
     }
-    retain_device_children(&operation);
+    gpu::internal::retain_device_children(&operation);
     return allocator;
 }
 
@@ -1049,8 +1058,8 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
     if (allocator == null || !allocator.handle.is_valid()) {
         return INVALID_HANDLE~;
     }
-    DeviceOperation operation = begin_device_operation(&allocator.device, true)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device, true)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_command_allocator(&operation, allocator)!;
     if (operation.vtable.destroy_command_allocator == null) {
         return BACKEND_ERROR~;
@@ -1060,7 +1069,7 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
         allocator.handle,
     )!;
     *allocator = {};
-    release_device_children(&operation);
+    gpu::internal::release_device_children(&operation);
 }
 
 <* Reserve compatible generated-command preprocess storage on a quiescent
@@ -1070,14 +1079,14 @@ fn void? reserve_generated_scratch(
     GeneratedScratchDesc* desc,
 ) {
     if (allocator == null) return INVALID_HANDLE~;
-    DeviceOperation operation = begin_device_operation(&allocator.device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_command_allocator(&operation, allocator)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(
+    gpu::internal::validate_resource_owner(
         &operation,
         desc.pipeline.owner,
-        ResourceOwnerKind.PIPELINE,
+        gpu::internal::ResourceOwnerKind.PIPELINE,
     )!;
     if (!generated_work_kind_valid(desc.kind)
         || desc.max_commands_per_list == 0
@@ -1099,13 +1108,13 @@ fn void? release_generated_scratch(
     GeneratedWorkKind kind,
 ) {
     if (allocator == null) return INVALID_HANDLE~;
-    DeviceOperation operation = begin_device_operation(&allocator.device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_command_allocator(&operation, allocator)!;
-    validate_resource_owner(
+    gpu::internal::validate_resource_owner(
         &operation,
         pipeline.owner,
-        ResourceOwnerKind.PIPELINE,
+        gpu::internal::ResourceOwnerKind.PIPELINE,
     )!;
     if (!generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
     if (operation.vtable.release_generated_scratch == null) {
@@ -1123,21 +1132,21 @@ fn void? release_generated_scratch(
    allocator unchanged when every preallocated command buffer is unavailable. *>
 fn CommandList? begin_commands(CommandAllocator* allocator) {
     if (allocator == null) return INVALID_HANDLE~;
-    DeviceOperation operation = begin_device_operation(&allocator.device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_command_allocator(&operation, allocator)!;
-    BackendVTable* vtable = operation.vtable;
+    gpu::internal::BackendVTable* vtable = operation.vtable;
     if (vtable.begin_commands == null) return BACKEND_ERROR~;
     CommandList commands;
-    CommandBackendContext backend;
+    gpu::internal::CommandBackendContext backend;
     bool backend_created = false;
     bool lease_retained = false;
     defer catch {
         if (lease_retained) {
-            (void)release_command_pin_lease(&operation, &commands);
+            (void)gpu::internal::release_command_pin_lease(&operation, &commands);
         }
         if (backend_created) {
-            note_command_lifecycle_vtable_dispatch();
+            gpu::internal::note_command_lifecycle_vtable_dispatch();
             (void)vtable.discard_commands(
                 &commands.device,
                 commands.handle,
@@ -1146,16 +1155,16 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
             );
         }
     }
-    note_command_lifecycle_vtable_dispatch();
+    gpu::internal::note_command_lifecycle_vtable_dispatch();
     vtable.begin_commands(allocator, &commands, &backend)!;
     backend_created = true;
-    if (!retain_command_pin_lease(&operation, &commands)) {
+    if (!gpu::internal::retain_command_pin_lease(&operation, &commands)) {
         return INVALID_HANDLE~;
     }
     lease_retained = true;
     publish_command_encoder(&operation, &commands, &backend)!;
-    retain_device_children(&operation);
-    transfer_device_operation_pin(&operation);
+    gpu::internal::retain_device_children(&operation);
+    gpu::internal::transfer_device_operation_pin(&operation);
     backend_created = false;
     lease_retained = false;
     return commands;
@@ -1163,10 +1172,10 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
 
 <* Finish and consume a recording token. Failure leaves it recording. *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
-    DeviceOperation operation = command_operation(commands)!;
-    defer end_device_operation(&operation);
-    note_command_lifecycle_vtable_dispatch();
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::DeviceOperation operation = command_operation(commands)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::note_command_lifecycle_vtable_dispatch();
     operation.vtable.end_commands(encoder)!;
     transfer_command_encoder_to_executable(encoder);
     ExecutableCommandList executable = {
@@ -1180,18 +1189,18 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
 
 <* Consume an unfinished recording, including after device loss. *>
 fn void? discard_commands(CommandList* commands) {
-    CommandEncoderState* encoder = recording_encoder(
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(
         commands,
         allow_lost: true,
     )!;
-    DeviceOperation operation = command_operation(
+    gpu::internal::DeviceOperation operation = command_operation(
         commands,
         allow_lost: true,
     )!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::BackendVTable* vtable = operation.vtable;
     CommandList consumed = *commands;
-    note_command_lifecycle_vtable_dispatch();
+    gpu::internal::note_command_lifecycle_vtable_dispatch();
     vtable.discard_commands(
         &consumed.device,
         consumed.handle,
@@ -1199,27 +1208,27 @@ fn void? discard_commands(CommandList* commands) {
         encoder,
     )!;
     *commands = {};
-    bool released_lease = release_command_pin_lease(&operation, &consumed);
+    bool released_lease = gpu::internal::release_command_pin_lease(&operation, &consumed);
     if (released_lease || !operation.owns_pin) {
-        release_device_children(&operation);
-        (void)release_retained_device_pins(&operation);
+        gpu::internal::release_device_children(&operation);
+        (void)gpu::internal::release_retained_device_pins(&operation);
     }
 }
 
 <* Consume an executable token without submitting it. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
-    CommandEncoderState* encoder = executable_encoder(
+    gpu::internal::CommandEncoderState* encoder = executable_encoder(
         commands,
         allow_lost: true,
     )!;
-    DeviceOperation operation = executable_command_operation(
+    gpu::internal::DeviceOperation operation = executable_command_operation(
         commands,
         allow_lost: true,
     )!;
-    defer end_device_operation(&operation);
-    BackendVTable* vtable = operation.vtable;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::BackendVTable* vtable = operation.vtable;
     ExecutableCommandList consumed = *commands;
-    note_command_lifecycle_vtable_dispatch();
+    gpu::internal::note_command_lifecycle_vtable_dispatch();
     vtable.discard_commands(
         &consumed.device,
         consumed.handle,
@@ -1227,19 +1236,19 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
         encoder,
     )!;
     *commands = {};
-    bool released_lease = release_executable_command_pin_lease(
+    bool released_lease = gpu::internal::release_executable_command_pin_lease(
         &operation,
         &consumed,
     );
     if (released_lease || !operation.owns_pin) {
-        release_device_children(&operation);
-        (void)release_retained_device_pins(&operation);
+        gpu::internal::release_device_children(&operation);
+        (void)gpu::internal::release_retained_device_pins(&operation);
     }
 }
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return encoder.ops.copy_buffer(encoder, desc);
 }
@@ -1247,35 +1256,35 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
 <* Record a 32-bit-pattern fill over dst; its offset and size must be 4-byte
    multiples. *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.fill_buffer(encoder, dst, value);
 }
 
 <* The texture's effective layout must be TRANSFER_DST; the caller records
    the surrounding barriers. *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return encoder.ops.copy_buffer_to_texture(encoder, desc);
 }
 
 <* The texture's effective layout must be TRANSFER_SRC. *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return encoder.ops.copy_texture_to_buffer(encoder, desc);
 }
 
 <* Record a global semantic execution and memory barrier. *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return encoder.ops.barrier(encoder, barrier);
 }
 
 <* Record an explicit semantic texture transition. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return encoder.ops.texture_barrier(encoder, barrier);
 }
@@ -1283,7 +1292,7 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
 <* Bind the active compute or graphics pipeline for later execution commands.
    A failed bind leaves the previous active pipeline unchanged. *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.bind_pipeline(encoder, pipeline);
 }
 
@@ -1292,14 +1301,14 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    recording queue's role. Counts may be zero and may not exceed
    DeviceCaps.max_compute_work_group_count on any axis. *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.dispatch(encoder, root, groups);
 }
 
 <* Set separate dynamic depth state for subsequent draws in the active render
    pass. A failed update leaves the previous depth state unchanged. *>
 fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (depth == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_depth_state(encoder, depth);
 }
@@ -1308,7 +1317,7 @@ fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
    subsequent draws. Requires an active render pass. A failed update leaves
    the previous state unchanged. *>
 fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (raster == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_raster_state(encoder, raster);
 }
@@ -1316,7 +1325,7 @@ fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster)
 <* Set one pass-bounded dynamic viewport for subsequent draws. Requires an
    active render pass; malformed values fault INVALID_ARGUMENT. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_viewport(encoder, viewport);
 }
@@ -1324,7 +1333,7 @@ fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
 <* Set one pass-bounded dynamic scissor for subsequent draws. Requires an
    active render pass; malformed values fault INVALID_ARGUMENT. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_scissor(encoder, scissor);
 }
@@ -1333,7 +1342,7 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    Every allocation reachable from either root must admit the recording queue's
    role. *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.draw(
         encoder:        encoder,
         vertex_root:    vertex_root,
@@ -1347,7 +1356,7 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    Every allocation reachable from either root must admit the recording queue's
    role. *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.draw_indexed(
         encoder:        encoder,
         vertex_root:    vertex_root,
@@ -1366,7 +1375,7 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    from either root must admit the recording queue's role. draw_count may not
    exceed DeviceCaps.max_draw_indirect_count. *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.draw_indirect(
         encoder:       encoder,
         vertex_root:   vertex_root,
@@ -1382,7 +1391,7 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    DeviceCaps.max_draw_indirect_count. Every allocation reachable from either
    root must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.draw_indexed_indirect(
         encoder:       encoder,
         vertex_root:   vertex_root,
@@ -1400,7 +1409,7 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    DeviceCaps.draw_indirect_count. Every allocation reachable from either root
    must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.draw_indexed_indirect_count(
         encoder:        encoder,
         vertex_root:    vertex_root,
@@ -1418,7 +1427,7 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    DeviceCaps.max_compute_work_group_count component. Every allocation
    reachable from the root must admit the recording queue's role. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.dispatch_indirect(encoder, root, args);
 }
 
@@ -1426,7 +1435,7 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    at count_span selects the actual count. Ordering against producer writes is
    the caller's barrier with hazards.draw_arguments set. *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.draw_generated(
         encoder:        encoder,
         records:        records,
@@ -1437,7 +1446,7 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
 
 <* Indexed generated-work variant. Index bounds remain GPU execution-time data. *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.draw_indexed_generated(
         encoder:        encoder,
         records:        records,
@@ -1450,7 +1459,7 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
 
 <* Execute up to max_dispatch_count GPU-written dispatch records. *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.dispatch_generated(
         encoder:            encoder,
         records:            records,
@@ -1465,19 +1474,19 @@ fn AttachmentViewHandle? create_attachment_view(
     Device* device,
     AttachmentViewDesc* desc,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_resource_owner(
+    gpu::internal::validate_resource_owner(
         &operation,
         desc.texture.owner,
-        ResourceOwnerKind.TEXTURE,
+        gpu::internal::ResourceOwnerKind.TEXTURE,
     )!;
     AttachmentViewHandle view = operation.vtable.create_attachment_view(
         device,
         desc,
     )!;
-    retain_device_children(&operation);
+    gpu::internal::retain_device_children(&operation);
     return view;
 }
 
@@ -1486,28 +1495,28 @@ fn void? destroy_attachment_view(
     Device* device,
     AttachmentViewHandle view,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
         &operation,
         view.owner,
-        ResourceOwnerKind.ATTACHMENT_VIEW,
+        gpu::internal::ResourceOwnerKind.ATTACHMENT_VIEW,
     )!;
     operation.vtable.destroy_attachment_view(device, view)!;
-    release_device_children(&operation);
+    gpu::internal::release_device_children(&operation);
 }
 
 <* Begin a pass without adding synchronization. Viewport and scissor default to
    the full render area. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     if (!render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
     return encoder.ops.begin_render_pass(encoder, desc);
 }
 
 <* End the active render pass without adding synchronization. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
-    CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
     return encoder.ops.end_render_pass(encoder);
 }
 
@@ -1576,8 +1585,8 @@ fn TextureBarrier? texture_transition(
 <* Return whether the queue has completed this point. *>
 fn bool? poll_completion(CompletionPoint point) {
     Device device = point.device;
-    DeviceOperation operation = begin_device_operation(&device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_completion_point(&operation, &device, point)!;
     if (operation.vtable.poll_completion == null) return UNSUPPORTED_FEATURE~;
     return operation.vtable.poll_completion(
@@ -1594,8 +1603,8 @@ fn void? wait_completion(
     ulong timeout_ns = TIMEOUT_INFINITE,
 ) {
     Device device = point.device;
-    DeviceOperation operation = begin_device_operation(&device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_completion_point(&operation, &device, point)!;
     if (operation.vtable.wait_completion == null) return UNSUPPORTED_FEATURE~;
     return operation.vtable.wait_completion(
@@ -1616,8 +1625,8 @@ fn bool Queue.equals(self, Queue other) @operator(==) {
 <* Return selected queue counts by semantic role; aliased roles count the same
    queue. INVALID_HANDLE if the device is not live. *>
 fn QueueCounts? get_queue_counts(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return selected_queue_counts(&operation);
 }
 
@@ -1625,8 +1634,8 @@ fn QueueCounts? get_queue_counts(Device* device) {
    roles return the same token. A dead device faults INVALID_HANDLE; an
    unavailable index faults INVALID_ARGUMENT. *>
 fn Queue? get_queue(Device* device, QueueKind kind, uint index = 0) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     if (index >= selected_queue_count(&operation, kind)) return INVALID_ARGUMENT~;
     return {
         .device = *device,
@@ -1638,8 +1647,8 @@ fn Queue? get_queue(Device* device, QueueKind kind, uint index = 0) {
 <* Return a live queue's device-local identity and supported roles.
    INVALID_HANDLE if the token is stale, foreign, or malformed. *>
 fn QueueInfo? get_queue_info(Device* device, Queue queue) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_queue(&operation, device, queue)!;
     return {
         .id    = queue.id,
@@ -1651,8 +1660,8 @@ fn QueueInfo? get_queue_info(Device* device, Queue queue) {
    Successful submission consumes every list. *>
 fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     Device device = queue.device;
-    DeviceOperation operation = begin_device_operation(&device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_queue(&operation, &device, queue)!;
     if (desc == null) return INVALID_ARGUMENT~;
     if (desc.command_lists.len > MAX_SUBMIT_COMMAND_LISTS) {
@@ -1664,10 +1673,10 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     foreach (&commands : desc.command_lists) {
         if (commands.device != device) return INVALID_HANDLE~;
         executable_encoder(commands)!;
-        validate_resource_owner(
+        gpu::internal::validate_resource_owner(
             &operation,
             commands.handle.owner,
-            ResourceOwnerKind.COMMAND,
+            gpu::internal::ResourceOwnerKind.COMMAND,
         )!;
     }
     foreach (wait : desc.completion_waits) {
@@ -1688,14 +1697,14 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     } else if ((uint)desc.readiness_before != 0) {
         return INVALID_ARGUMENT~;
     }
-    note_command_lifecycle_vtable_dispatch();
+    gpu::internal::note_command_lifecycle_vtable_dispatch();
     CompletionPoint point = operation.vtable.submit(queue, desc)!;
     foreach (&commands : desc.command_lists) {
-        release_executable_command_pin_lease(&operation, commands);
+        gpu::internal::release_executable_command_pin_lease(&operation, commands);
         *commands = {};
     }
-    release_device_children(&operation, (ulong)desc.command_lists.len);
-    (void)release_retained_device_pins(
+    gpu::internal::release_device_children(&operation, (ulong)desc.command_lists.len);
+    (void)gpu::internal::release_retained_device_pins(
         &operation,
         (uint)desc.command_lists.len,
     );
@@ -1714,10 +1723,10 @@ fn bool SwapchainReadiness.equals(
 <* The surface remains owned by its runtime and must outlive the swapchain. *>
 fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, SwapchainDesc* desc) {
     if (surface == null || desc == null) return INVALID_ARGUMENT~;
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    DeviceData* device_data = operation.data;
-    SurfaceData* surface_data = resolve_surface(surface);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::DeviceData* device_data = operation.data;
+    gpu::internal::SurfaceData* surface_data = gpu::internal::resolve_surface(surface);
     if (surface_data == null) return INVALID_HANDLE~;
     if (!device_data.runtime_retained) return INVALID_RESOURCE_STATE~;
     if (!device_data.presentation_surface.is_valid()) return UNSUPPORTED_FEATURE~;
@@ -1725,23 +1734,23 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
         return INVALID_HANDLE~;
     }
 
-    RuntimeData* device_runtime = resolve_runtime(&device_data.runtime);
-    RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
+    gpu::internal::RuntimeData* device_runtime = gpu::internal::resolve_runtime(&device_data.runtime);
+    gpu::internal::RuntimeData* surface_runtime = gpu::internal::resolve_runtime(&surface_data.runtime);
     if (device_runtime == null || surface_runtime != device_runtime) {
         return INVALID_HANDLE~;
     }
     SwapchainHandle swapchain = device_data.vtable.create_swapchain(device, surface, desc)!;
-    retain_device_children(&operation);
+    gpu::internal::retain_device_children(&operation);
     return swapchain;
 }
 
 <* Counterpart of create_swapchain. Immediate: pending acquisition,
    presentation, command, or view use faults without consuming the handle. *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     operation.vtable.destroy_swapchain(device, swapchain)!;
-    release_device_children(&operation);
+    gpu::internal::release_device_children(&operation);
 }
 
 <* Recreate under the same handle at a new extent. A zero clamped extent or
@@ -1750,16 +1759,16 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
    handles become stale. Pending acquisition, presentation, command, or view
    use faults immediately and leaves the swapchain unchanged. *>
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.resize_swapchain(device, swapchain, width, height);
 }
 
 <* Actual format, extent, image count, and present mode selected for a
    swapchain. Dormant swapchains return the dormant sentinel snapshot. *>
 fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.get_swapchain_info(device, swapchain);
 }
 
@@ -1771,8 +1780,8 @@ fn AcquiredImage? acquire_next_image(
     SwapchainHandle swapchain,
     ulong timeout_ns = 0,
 ) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.acquire_next_image(device, swapchain, timeout_ns);
 }
 
@@ -1785,8 +1794,8 @@ fn void? present(
     CompletionPoint render_completion,
 ) {
     if (image == null) return INVALID_ARGUMENT~;
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     validate_completion_point(&operation, device, render_completion)!;
     operation.vtable.present(device, image, render_completion)!;
     *image = {};
@@ -1795,7 +1804,7 @@ fn void? present(
 <* Present modes the swapchain's surface supports. Unsupported requested
    modes fall back to FIFO at creation; query this to pick deliberately. *>
 fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle swapchain) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
     return operation.vtable.get_present_mode_support(device, swapchain);
 }

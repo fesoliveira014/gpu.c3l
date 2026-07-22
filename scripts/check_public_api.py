@@ -350,7 +350,9 @@ def validate_generated_backend_privacy(document: dict) -> list[str]:
     failures = []
     for module_name, module in document.get("modules", {}).items():
         if not (
-            module_name == "gpu::vk"
+            module_name == "gpu::internal"
+            or module_name.startswith("gpu::internal::")
+            or module_name == "gpu::vk"
             or module_name.startswith("gpu::vk::")
         ):
             continue
@@ -1680,6 +1682,42 @@ def validate_private_backend_source(relative: Path, source: str) -> list[str]:
     return failures
 
 
+def validate_private_internal_source(relative: Path, source: str) -> list[str]:
+    failures = []
+    normalized = source.lstrip("﻿")
+    module_declarations = list(MODULE_DECLARATION.finditer(normalized))
+    if not module_declarations:
+        failures.append(
+            f"{relative.as_posix()} must declare private module gpu::internal"
+        )
+    for declaration in module_declarations:
+        name = declaration.group("name")
+        line_number = normalized.count("\n", 0, declaration.start()) + 1
+        if name != "gpu::internal":
+            failures.append(
+                f"{relative.as_posix()}:{line_number} internal file may only "
+                f"declare gpu::internal, found {name}"
+            )
+            continue
+        if "@private" not in declaration.group("attributes").split():
+            failures.append(
+                f"{relative.as_posix()} must declare private module gpu::internal"
+            )
+
+    for line_number, line in enumerate(normalized.splitlines(), start=1):
+        stripped = line.strip()
+        if (
+            "@public" in stripped
+            and not stripped.startswith("import ")
+            and not stripped.startswith("module ")
+        ):
+            failures.append(
+                f"{relative.as_posix()}:{line_number} "
+                "internal declaration may not use @public"
+            )
+    return failures
+
+
 def expected_public_module(relative: Path) -> str:
     parts = relative.parts
     if (
@@ -1723,6 +1761,10 @@ def is_private_backend_source(relative: Path) -> bool:
     return relative.parts[:2] == ("gpu", "vk")
 
 
+def is_private_internal_source(relative: Path) -> bool:
+    return relative.parts[:2] == ("gpu", "internal")
+
+
 def scan_public_module_sources() -> list[str]:
     failures = []
     for path in sorted((ROOT / "gpu").rglob("*")):
@@ -1731,6 +1773,7 @@ def scan_public_module_sources() -> list[str]:
             path.is_file()
             and path.suffix in {".c3", ".c3i"}
             and not is_private_backend_source(relative)
+            and not is_private_internal_source(relative)
         ):
             failures.extend(
                 validate_public_module_source(
@@ -1748,6 +1791,20 @@ def scan_private_backend_modules() -> list[str]:
             continue
         failures.extend(
             validate_private_backend_source(
+                path.relative_to(ROOT),
+                path.read_text(encoding="utf-8"),
+            )
+        )
+    return failures
+
+
+def scan_private_internal_modules() -> list[str]:
+    failures = []
+    for path in sorted((ROOT / "gpu" / "internal").glob("*")):
+        if not path.is_file() or path.suffix not in {".c3", ".c3i"}:
+            continue
+        failures.extend(
+            validate_private_internal_source(
                 path.relative_to(ROOT),
                 path.read_text(encoding="utf-8"),
             )
@@ -1783,6 +1840,7 @@ def main() -> int:
     )
     failures.extend(scan_retired_source_symbols())
     failures.extend(scan_public_module_sources())
+    failures.extend(scan_private_internal_modules())
     failures.extend(scan_private_backend_modules())
     if failures:
         print("public GPU API contract violations:", file=sys.stderr)

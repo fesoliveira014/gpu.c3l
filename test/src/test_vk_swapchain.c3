@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu;
 import gpu::vk @public;
 import std::core::mem;
@@ -86,7 +87,7 @@ fn gpu::AcquiredImage? capture_public_acquire(
     return gpu::WAIT_TIMEOUT~;
 }
 
-gpu::BackendVTable capture_public_acquire_vtable = {
+gpu::internal::BackendVTable capture_public_acquire_vtable = {
     .destroy_device     = &capture_public_acquire_destroy,
     .acquire_next_image = &capture_public_acquire,
 };
@@ -628,13 +629,13 @@ fn void present_path_guards_precede_native_mutation() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+        (gpu::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     state.presentation.queue_mutex.init()!!;
 
     gpu::vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
-    state.presentation.swapchains.owner = gpu::resource_owner_tag(
+    state.presentation.swapchains.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
-        gpu::ResourceOwnerKind.SWAPCHAIN,
+        gpu::internal::ResourceOwnerKind.SWAPCHAIN,
     );
     state.presentation.swapchains.slots = cells[..];
     defer state.presentation.swapchains.slots = {};
@@ -822,7 +823,7 @@ fn void acquire_timeout_values_reach_native_unchanged() @test {
 
 fn void public_acquire_default_reaches_backend_as_zero() @test {
     uint backend_state;
-    gpu::Device device = gpu::register_device(
+    gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          {},
         vtable:        &capture_public_acquire_vtable,
@@ -1235,7 +1236,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+        (gpu::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     gpu::vk::VkInstanceSurfaceDispatch original_surface_dispatch =
         state.instance_dispatch.surface;
@@ -1290,9 +1291,9 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::vk::SwapchainCell[1] swapchain_cells;
     state.presentation.swapchains = {
         .slots = swapchain_cells[..],
-        .owner = gpu::resource_owner_tag(
+        .owner = gpu::internal::resource_owner_tag(
             state.resource_owner,
-            gpu::ResourceOwnerKind.SWAPCHAIN,
+            gpu::internal::ResourceOwnerKind.SWAPCHAIN,
         ),
     };
     gpu::vk::SwapchainSlot slot = {

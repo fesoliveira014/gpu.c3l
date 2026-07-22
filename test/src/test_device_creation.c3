@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 
@@ -243,7 +244,7 @@ fn void device_creation_failure_rolls_back_runtime_and_backend_state() @test {
         @catch(gpu::create_device(&adapter, &request)) == gpu::BACKEND_ERROR,
         "failure after temporary allocation publishes no device"
     );
-    assert(gpu::device_slot_available(), "failed creation leaves the device slot available");
+    assert(gpu::internal::device_slot_available(), "failed creation leaves the device slot available");
     assert(
         gpu::vk::stub_device_temporary_create_count()
             == gpu::vk::stub_device_temporary_destroy_count(),
@@ -264,8 +265,8 @@ fn void invalid_retained_runtime_metadata_is_rejected_before_publication() @test
     DeviceFixture fixture;
     Device owner;
 
-    gpu::runtime_retain_device(&runtime)!!;
-    Device? result = gpu::register_device(
+    gpu::internal::runtime_retain_device(&runtime)!!;
+    Device? result = gpu::internal::register_device(
         backend:          BackendKind.VULKAN,
         caps:             {},
         vtable:           &device_fixture_vtable,
@@ -276,8 +277,8 @@ fn void invalid_retained_runtime_metadata_is_rejected_before_publication() @test
     );
 
     assert(@catch(result) == gpu::INVALID_HANDLE);
-    assert(gpu::device_slot_available(), "invalid ownership metadata publishes no device");
+    assert(gpu::internal::device_slot_available(), "invalid ownership metadata publishes no device");
     assert((ulong)owner == 0, "invalid ownership metadata writes no backend owner");
-    gpu::runtime_release_device(&runtime)!!;
+    gpu::internal::runtime_release_device(&runtime)!!;
     gpu::destroy_runtime(&runtime)!!;
 }

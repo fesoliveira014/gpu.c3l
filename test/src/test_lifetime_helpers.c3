@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 
 struct OwnedSpan {
@@ -95,15 +96,15 @@ fn void? discard_test_executable(gpu::ExecutableCommandList* commands) {
 }
 
 fn void release_submitted_executables(
-    gpu::DeviceOperation* operation,
+    gpu::internal::DeviceOperation* operation,
     gpu::ExecutableCommandList[] commands,
 ) {
     foreach (&command : commands) {
-        gpu::release_executable_command_pin_lease(operation, command);
+        gpu::internal::release_executable_command_pin_lease(operation, command);
         *command = {};
     }
-    gpu::release_device_children(operation, (ulong)commands.len);
-    (void)gpu::release_retained_device_pins(operation, (uint)commands.len);
+    gpu::internal::release_device_children(operation, (ulong)commands.len);
+    (void)gpu::internal::release_retained_device_pins(operation, (uint)commands.len);
 }
 
 fn gpu::AttachmentViewHandle? create_test_attachment_view(
@@ -156,9 +157,9 @@ fn void? wait_test_queue(gpu::Device* device, gpu::QueueKind queue) {
 fn void? destroy_test_device(gpu::Device* device) {
     if (device == null || !device.is_valid()) return;
     gpu::Runtime runtime;
-    gpu::DeviceOperation operation = gpu::begin_device_operation(device, true)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device, true)!;
     if (operation.data.runtime_retained) runtime = operation.data.runtime;
-    gpu::end_device_operation(&operation);
+    gpu::internal::end_device_operation(&operation);
     gpu::QueueCounts? counts_result = gpu::get_queue_counts(device);
     if (catch err = counts_result) {
         if (err == gpu::DEVICE_LOST) {

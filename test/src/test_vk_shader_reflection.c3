@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import spvreflect;
@@ -147,7 +148,7 @@ fn void assert_shader_interface_rejected(
     ZString message,
 ) {
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(*device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
     ulong reflections_before = vk::shader_reflection_validation_count(state);
     ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
     gpu::ShaderDesc desc = {
@@ -264,7 +265,7 @@ fn void assert_reflected_shader_rejected(
     };
     gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(*device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
     ulong reflections_before = vk::shader_reflection_validation_count(state);
     ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
 
@@ -415,7 +416,7 @@ fn void selected_entry_interfaces_are_isolated() @test {
     gpu::Device device = make_reflection_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     ulong reflections_before = vk::shader_reflection_validation_count(state);
     ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
 
@@ -465,7 +466,7 @@ fn void invalid_deduplicated_shader_is_reflected_once_transactionally() @test {
     };
     gpu::PipelineHandle[2] before = outputs;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     ulong reflections_before = vk::shader_reflection_validation_count(state);
     ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
     uint cache_entries_before = vk::pipeline_cache_entry_count(state);
@@ -594,7 +595,7 @@ fn void reflected_stage_mismatch_rejected_before_native_creation() @test {
     gpu::Device device = make_reflection_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
 
     gpu::ShaderDesc desc = {

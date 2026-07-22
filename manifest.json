@@ -5,17 +5,13 @@
   "provides": "gpu",
   // Native libs for this library's own targets live here.
   "linklib-dir": "linked-libs",
-  // gpu/ module files plus the gpu::vk backend subdir. Without listing gpu/vk/**,
-  // the backend module is not compiled into the library.
+  // Public facade, platform surfaces, shared internals, and the Vulkan backend.
   "sources": [
-    "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/types.c3", "gpu/faults.c3",
-    "gpu/runtime.c3", "gpu/adapter.c3", "gpu/device.c3",
-    "gpu/device_request.c3",
-    "gpu/device_support.c3",
-    "gpu/surface.c3", "gpu/surface/**",
-    "gpu/caps.c3", "gpu/memory.c3", "gpu/texture.c3",
+    "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/internal/**",
+    "gpu/surface/**",
+    "gpu/memory.c3", "gpu/texture.c3",
     "gpu/descriptor_heap.c3", "gpu/pipeline.c3", "gpu/command.c3", "gpu/render_pass.c3", "gpu/sync.c3", "gpu/queue.c3",
-    "gpu/swapchain.c3", "gpu/debug.c3", "gpu/shader_abi.c3", "gpu/vk/**"
+    "gpu/swapchain.c3", "gpu/vk/**"
   ],
   "targets": {
     "linux-x64": {

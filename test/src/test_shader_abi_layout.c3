@@ -3,8 +3,8 @@ module gpu_test;
 import gpu;
 
 // Hand-computed std430 layouts for the generated ABI structs. The generated
-// gpu/shader_abi.c3 already carries compile-time asserts; these runtime checks
-// pin the same values as an executable acceptance record.
+// gpu/internal/shader_abi.c3 already carries compile-time asserts; these
+// runtime checks pin the same values as an executable acceptance record.
 
 fn void shader_visible_scalar_widths() @test {
     assert(GpuAddress::size == ulong::size);

@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk;
 import vk;
@@ -178,13 +179,13 @@ fn void warm_render_pass_uses_precreated_attachment_without_allocation() @test {
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
-    gpu::RecordingWorkCounters before =
+        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+    gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
 
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    gpu::RecordingWorkCounters after =
+    gpu::internal::RecordingWorkCounters after =
         vk::command_recording_work_counters(state);
     assert(after.host_allocations == before.host_allocations,
         "warm render-pass recording performs no host allocation");

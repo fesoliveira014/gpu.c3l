@@ -469,8 +469,7 @@ struct DeviceRequestSupport {
     String unmet_requirement;
 }
 
-const ulong RESOURCE_OWNER_KIND_COUNT =
-    (ulong)ResourceOwnerKind.COMPLETION_POINT + 1;
+const ulong RESOURCE_OWNER_KIND_COUNT = 10;
 const ulong MAX_DEVICE_RESOURCE_OWNER =
     ulong::max / RESOURCE_OWNER_KIND_COUNT;
 

@@ -1,5 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
+import gpu;
 
 const uint MAX_REQUESTED_QUEUES_PER_ROLE @private = 255;
 
@@ -127,25 +128,25 @@ fn DeviceRequest? compose_device_request(
     DeviceCapability capability,
     Surface* surface = null,
 ) @private {
-    if (!device_request_is_well_formed(request)) return INVALID_ARGUMENT~;
+    if (!device_request_is_well_formed(request)) return gpu::INVALID_ARGUMENT~;
 
     ulong contribution;
     ulong surface_bits;
     switch (capability) {
         case DeviceCapability.STRICT:
-            if (surface != null) return INVALID_ARGUMENT~;
+            if (surface != null) return gpu::INVALID_ARGUMENT~;
             contribution = DEVICE_REQUEST_STRICT_BIT;
         case DeviceCapability.PRESENTATION:
-            if (surface == null) return INVALID_ARGUMENT~;
-            if (resolve_surface(surface) == null) return INVALID_HANDLE~;
+            if (surface == null) return gpu::INVALID_ARGUMENT~;
+            if (resolve_surface(surface) == null) return gpu::INVALID_HANDLE~;
             if (requested_queue_requirements(request).counts.graphics == 0) {
-                return INVALID_ARGUMENT~;
+                return gpu::INVALID_ARGUMENT~;
             }
             contribution = DEVICE_REQUEST_PRESENTATION_BIT;
             surface_bits = (ulong)*surface;
     }
     if (((ulong)(uint128)request & contribution) != 0) {
-        return INVALID_ARGUMENT~;
+        return gpu::INVALID_ARGUMENT~;
     }
 
     uint128 result = (uint128)request | (uint128)contribution;
@@ -157,12 +158,12 @@ fn DeviceRequest? compose_device_request(
 
 fn void? validate_device_request(DeviceRequest* request) @private {
     if (request == null || !device_request_is_well_formed(*request)) {
-        return INVALID_ARGUMENT~;
+        return gpu::INVALID_ARGUMENT~;
     }
-    if (!requests_strict(*request)) return INVALID_ARGUMENT~;
+    if (!requests_strict(*request)) return gpu::INVALID_ARGUMENT~;
 
     Surface surface = requested_surface(*request);
     if (surface.is_valid() && resolve_surface(&surface) == null) {
-        return INVALID_HANDLE~;
+        return gpu::INVALID_HANDLE~;
     }
 }

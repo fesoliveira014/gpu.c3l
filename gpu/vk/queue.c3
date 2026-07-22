@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::thread;
@@ -41,9 +42,9 @@ struct QueueFamilies {
     bool async_compute;
     gpu::QueueCounts counts;
     gpu::QueueRoles distinct;
-    ulong[gpu::MAX_REQUESTED_QUEUES_PER_ROLE] graphics_ids;
-    ulong[gpu::MAX_REQUESTED_QUEUES_PER_ROLE] compute_ids;
-    ulong[gpu::MAX_REQUESTED_QUEUES_PER_ROLE] transfer_ids;
+    ulong[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] graphics_ids;
+    ulong[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] compute_ids;
+    ulong[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] transfer_ids;
 }
 struct QueueChoice {
     gpu::QueueRoles selected;
@@ -119,7 +120,7 @@ struct QueueSubmitScratch {
     ResolvedCompletionWait[gpu::MAX_SUBMIT_COMPLETION_WAITS]
         completion_waits;
     CommandRecord*[gpu::MAX_SUBMIT_COMMAND_LISTS] records;
-    gpu::CommandEncoderState*[gpu::MAX_SUBMIT_COMMAND_LISTS] encoders;
+    gpu::internal::CommandEncoderState*[gpu::MAX_SUBMIT_COMMAND_LISTS] encoders;
     vk::CommandBufferSubmitInfo[gpu::MAX_SUBMIT_COMMAND_LISTS]
         command_buffer_infos;
     vk::SemaphoreSubmitInfo[gpu::MAX_SUBMIT_COMPLETION_WAITS + 1]
@@ -128,7 +129,7 @@ struct QueueSubmitScratch {
 
 struct SubmitInputs {
     CommandRecord*[]            records;
-    gpu::CommandEncoderState*[] encoders;
+    gpu::internal::CommandEncoderState*[] encoders;
     ResolvedCompletionWait[]    completion_waits;
     SwapchainSlot*              swapchain;
     vk::PipelineStageFlags2     readiness_stages;
@@ -217,11 +218,11 @@ fn uint available_queue_count(
                 supported = queue_family_supports_transfer(properties);
         }
         if (!supported) continue;
-        uint remaining = gpu::MAX_REQUESTED_QUEUES_PER_ROLE - count;
+        uint remaining = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE - count;
         count += properties.queue_count < remaining
             ? properties.queue_count
             : remaining;
-        if (count == gpu::MAX_REQUESTED_QUEUES_PER_ROLE) break;
+        if (count == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE) break;
     }
     return count;
 }
@@ -1136,7 +1137,7 @@ fn QueueFamilies? pick_queue_families_impl(
     bool require_presentation,
     gpu::QueueRequirements requirements,
 ) @private {
-    if (!gpu::queue_requirements_are_valid(requirements)) {
+    if (!gpu::internal::queue_requirements_are_valid(requirements)) {
         return gpu::INVALID_ARGUMENT~;
     }
     if (require_presentation && requirements.counts.graphics == 0) {
@@ -1296,7 +1297,7 @@ fn QueueFamilies? pick_queue_families_for_surface_requirements(
 fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
     return pick_queue_families_for_requirements(
         families,
-        gpu::default_queue_requirements(),
+        gpu::internal::default_queue_requirements(),
     );
 }
 
@@ -1307,7 +1308,7 @@ fn QueueFamilies? pick_queue_families_for_surface(
     return pick_queue_families_for_surface_requirements(
         families,
         presentation_support,
-        gpu::default_queue_requirements(),
+        gpu::internal::default_queue_requirements(),
     );
 }
 
@@ -2061,7 +2062,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
     QueueCompletionState* target,
     ResolvedCompletionWait[] completion_wait_storage,
     CommandRecord*[] record_storage,
-    gpu::CommandEncoderState*[] encoder_storage,
+    gpu::internal::CommandEncoderState*[] encoder_storage,
 ) {
     SubmitInputs inputs;
     gpu::Device device = queue.device;
@@ -2128,7 +2129,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             defer state.command_mutex.unlock();
             foreach (i, &token : desc.command_lists) {
                 if (token.device != device) return gpu::INVALID_HANDLE~;
-                gpu::CommandEncoderState* encoder =
+                gpu::internal::CommandEncoderState* encoder =
                     gpu::executable_encoder(token)!;
                 if (encoder.backend_state != state) {
                     return gpu::INVALID_HANDLE~;
@@ -2157,7 +2158,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             defer state.command_mutex.unlock();
             ulong epoch = next_submit_visit_epoch_locked(state);
             foreach (i, &token : desc.command_lists) {
-                gpu::CommandEncoderState* encoder =
+                gpu::internal::CommandEncoderState* encoder =
                     gpu::executable_encoder(token)!;
                 CommandRecord* record = encoder_command(encoder);
                 if (encoder != inputs.encoders[i]
@@ -2206,7 +2207,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     SemaphoreCounterQueryFn counter_query_fn,
 ) @private {
     gpu::Device device = queue.device;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     gpu::CompletionPoint submitted;
     vk::SemaphoreSubmitInfo[2] signal_infos;
 

@@ -1,5 +1,6 @@
 module gpu;
 
+import gpu::internal @public;
 
 <* Overflow-safe bounds check: offset + size must fit in limit. A zero size
    only checks the offset; each caller defines what zero means. *>
@@ -28,7 +29,7 @@ fn usz? normalized_allocation_alignment(usz alignment) @private {
 }
 
 fn void? validate_texture_allocation(
-    DeviceOperation* operation,
+    gpu::internal::DeviceOperation* operation,
     AllocationDesc* desc,
     usz* alignment,
     bool allow_dedicated = false,
@@ -49,10 +50,10 @@ fn void? validate_texture_allocation(
             || !requirements.compatibility.is_valid()) {
             return INVALID_ARGUMENT~;
         }
-        validate_resource_owner(
+        gpu::internal::validate_resource_owner(
             operation,
             texture_compatibility_owner(requirements.compatibility),
-            ResourceOwnerKind.ALLOCATION,
+            gpu::internal::ResourceOwnerKind.ALLOCATION,
         )!;
         if (requirements.dedicated_only && !allow_dedicated) {
             return UNSUPPORTED_FEATURE~;

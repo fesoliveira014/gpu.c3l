@@ -1,5 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
+import gpu;
 const uint MAX_SURFACES @private = 64;
 const uint MAX_SURFACE_GENERATION @private = 0x00FF_FFFF;
 
@@ -25,8 +26,8 @@ fn SurfaceData* resolve_surface(Surface* surface) @private {
 }
 
 fn Surface? register_surface(Runtime* runtime, void* backend_surface) @private {
-    if (resolve_runtime(runtime) == null) return INVALID_HANDLE~;
-    if (backend_surface == null) return INVALID_ARGUMENT~;
+    if (resolve_runtime(runtime) == null) return gpu::INVALID_HANDLE~;
+    if (backend_surface == null) return gpu::INVALID_ARGUMENT~;
 
     for (uint i = 0; i < MAX_SURFACES; i++) {
         SurfaceData* data = &surface_slots[i];
@@ -43,25 +44,25 @@ fn Surface? register_surface(Runtime* runtime, void* backend_surface) @private {
             .generation = data.generation,
         };
     }
-    return SLOT_TABLE_FULL~;
+    return gpu::SLOT_TABLE_FULL~;
 }
 
 fn void*? surface_backend_handle(Surface* surface) @private {
     SurfaceData* data = resolve_surface(surface);
-    if (data == null) return INVALID_HANDLE~;
+    if (data == null) return gpu::INVALID_HANDLE~;
     return data.backend_surface;
 }
 
 fn void? surface_retain_swapchain(Surface* surface) @private {
     SurfaceData* data = resolve_surface(surface);
-    if (data == null) return INVALID_HANDLE~;
-    if (data.live_swapchain_count == uint::max) return INVALID_RESOURCE_STATE~;
+    if (data == null) return gpu::INVALID_HANDLE~;
+    if (data.live_swapchain_count == uint::max) return gpu::INVALID_RESOURCE_STATE~;
     data.live_swapchain_count++;
 }
 
 fn void? surface_release_swapchain(Surface* surface) @private {
     SurfaceData* data = resolve_surface(surface);
-    if (data == null) return INVALID_HANDLE~;
-    if (data.live_swapchain_count == 0) return INVALID_RESOURCE_STATE~;
+    if (data == null) return gpu::INVALID_HANDLE~;
+    if (data.live_swapchain_count == 0) return gpu::INVALID_RESOURCE_STATE~;
     data.live_swapchain_count--;
 }

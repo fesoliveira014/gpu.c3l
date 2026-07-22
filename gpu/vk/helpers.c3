@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import std::io;
 import gpu @public;
 import vk;
@@ -49,7 +50,7 @@ fn void? check(vk::Result result) @private {
 
 fn void observe_device_result(VkDeviceState* state, vk::Result result) @private {
     if (state != null && result == vk::Result.ERROR_DEVICE_LOST) {
-        gpu::mark_device_lost(&state.owner);
+        gpu::internal::mark_device_lost(&state.owner);
     }
 }
 
@@ -86,7 +87,7 @@ fn void? check_backend_result(VkDeviceState* state, ZString operation, vk::Resul
             .backend_text         = backend_result_text(result),
             .validation_id_number = (int)result,
         };
-        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+        gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     }
     return public_fault~;
 }

@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
@@ -467,7 +468,7 @@ fn void debug_names_do_not_require_validation() @test {
     };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     assert(state.debug_names, "backend retains the debug-name opt-in without validation");
 
@@ -490,7 +491,7 @@ fn void interned_sampler_keeps_first_debug_name() @test {
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     SamplerNameCapture capture;
     sampler_name_capture = &capture;
     vk::PFN_vkSetDebugUtilsObjectNameEXT original =
@@ -528,7 +529,7 @@ fn gpu::Device make_dbg_device() {
 
 fn void leak_reporters_count_leaks() @test {
     gpu::Device device = make_dbg_device();
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     vk::BufferDesc buf_desc = {
         .size        = 256,
@@ -650,7 +651,7 @@ fn void leak_reporters_count_leaks() @test {
 fn void debug_name_copy_is_independent() @test {
     gpu::Device device = make_dbg_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     char[16] volatile_name;
     char[7] source = { 'v', 'o', 'l', 'a', 't', 'i', 'l' };
@@ -799,7 +800,7 @@ fn void live_backend_resource_is_reported_before_device_teardown() @test {
     };
     vk::BufferHandle buffer = vk::vk_create_buffer(&device, &desc)!!;
     assert(buffer.is_valid(), "private backend storage is live");
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 1, "the live private backing is reported");
     destroy_test_device(&device)!!;
 }
@@ -824,7 +825,7 @@ fn void callback_reports_leaks_without_validation() @test {
         .debug_name  = "leaky_gpu_span_storage",
     };
     vk::BufferHandle buffer = vk::vk_create_buffer(&device, &buffer_desc)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     capture = {
         .metadata_valid        = true,
         .named_resources_valid = true,

@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 
@@ -41,7 +42,7 @@ fn gpu::TextureHandle? create_resource_access_texture(
     return gpu::OUT_OF_DEVICE_MEMORY~;
 }
 
-gpu::BackendVTable resource_access_vtable = {
+gpu::internal::BackendVTable resource_access_vtable = {
     .destroy_device        = &destroy_resource_access_device,
     .allocate_memory       = &allocate_resource_access_memory,
     .supports_texture_desc = &supports_resource_access_texture,
@@ -57,7 +58,7 @@ fn gpu::Device create_compute_only_resource_access_device(int* state) {
         transfer_aliases_graphics: false,
         transfer_aliases_compute:  false,
     )!!;
-    return gpu::register_device(
+    return gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          {},
         vtable:        &resource_access_vtable,

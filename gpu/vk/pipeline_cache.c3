@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import vma;
@@ -96,7 +97,7 @@ fn fault report_pipeline_cache_backend_failure(
             .backend_text         = backend_text,
             .validation_id_number = backend_result,
         };
-        gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+        gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     }
     return public_fault;
 }
@@ -537,7 +538,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
 }
 
 fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     sz size = 0;
     check_backend_result(
         state:     state,
@@ -548,7 +549,7 @@ fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
 }
 
 fn usz? vk_get_pipeline_cache_data(gpu::Device* device, char[] out) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     sz required = 0;
     check_backend_result(
         state:     state,

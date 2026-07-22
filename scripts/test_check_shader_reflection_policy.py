@@ -88,7 +88,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_rejects_public_generated_metadata(self) -> None:
         errors = self.mutate(
-            "gpu/shader_abi.c3",
+            "gpu/internal/shader_abi.c3",
             "const RootAbiSpec ROOT_PUSH_ABI @private",
             "const RootAbiSpec ROOT_PUSH_ABI",
         )
@@ -96,7 +96,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_generated_metadata_in_comment_does_not_satisfy_contract(self) -> None:
         errors = self.mutate(
-            "gpu/shader_abi.c3",
+            "gpu/internal/shader_abi.c3",
             "struct RootAbiMemberSpec @private",
             "struct RootAbiMemberSpec\n// struct RootAbiMemberSpec @private",
         )
@@ -104,7 +104,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_generated_metadata_in_string_does_not_satisfy_contract(self) -> None:
         errors = self.mutate(
-            "gpu/shader_abi.c3",
+            "gpu/internal/shader_abi.c3",
             "struct RootAbiSpec @private",
             'struct RootAbiSpec\nconst String ROOT_ABI_POLICY = "struct RootAbiSpec @private";',
         )

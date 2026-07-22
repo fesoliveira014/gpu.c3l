@@ -2479,6 +2479,51 @@ method gpu::Runtime.is_valid
             ],
         )
 
+    def test_requires_private_internal_module(self) -> None:
+        relative = Path("gpu/internal/device.c3")
+        self.assertEqual(
+            check_public_api.validate_private_internal_source(
+                relative,
+                "module gpu::internal @private;\nimport gpu @public;\n",
+            ),
+            [],
+        )
+        self.assertEqual(
+            check_public_api.validate_private_internal_source(
+                relative,
+                "module gpu::internal;\n",
+            ),
+            [
+                "gpu/internal/device.c3 must declare private module "
+                "gpu::internal"
+            ],
+        )
+        self.assertEqual(
+            check_public_api.validate_private_internal_source(
+                relative,
+                "module gpu::probe @private;\n",
+            ),
+            [
+                "gpu/internal/device.c3:1 internal file may only declare "
+                "gpu::internal, found gpu::probe"
+            ],
+        )
+
+    def test_rejects_internal_source_visibility_escape(self) -> None:
+        relative = Path("gpu/internal/helpers.c3")
+        source = (
+            "module gpu::internal @private;\n"
+            "import gpu @public;\n"
+            "fn void leaked_helper() @public {}\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_private_internal_source(relative, source),
+            [
+                "gpu/internal/helpers.c3:3 internal declaration may not use "
+                "@public"
+            ],
+        )
+
     def test_rejects_backend_source_visibility_escapes(self) -> None:
         relative = Path("gpu/vk/helpers.c3")
         nested_source = (

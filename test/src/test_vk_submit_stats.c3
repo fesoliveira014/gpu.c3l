@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
@@ -84,12 +85,12 @@ fn int submission_checkpoint_worker(void* raw_args) {
         &accept_injected_publication_submit,
     )!!;
     gpu::Device device = args.queue.device;
-    gpu::DeviceOperation operation = gpu::begin_device_operation(
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(
         &device,
     )!!;
     release_submitted_executables(&operation, lists[..]);
     args.executable = lists[0];
-    gpu::end_device_operation(&operation);
+    gpu::internal::end_device_operation(&operation);
     return 0;
 }
 
@@ -180,7 +181,7 @@ fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
     }
     while (ready.load(AtomicOrdering.ACQUIRE) < WORKER_COUNT) thread::yield();
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::reset_submit_duplicate_work_counters(state);
     ulong submits_before = stats_of(&device).queue_submits;
     release.store(true, AtomicOrdering.RELEASE);
@@ -205,7 +206,7 @@ fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
 }
 
 fn vk::SubmitStats stats_of(gpu::Device* device) {
-    return vk::submit_stats((vk::VkDeviceState*)gpu::device_backend_state(*device));
+    return vk::submit_stats((vk::VkDeviceState*)gpu::internal::device_backend_state(*device));
 }
 
 <* A submit rejected before reaching the driver records no queue submit. *>
@@ -219,7 +220,7 @@ fn void failed_submit_records_nothing() @test {
     gpu::CommandList unfinished = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&unfinished)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandRecord* record = vk::resolve_command(&unfinished)!!;
     vk::CommandAllocatorSlot* allocator_slot =
         state.command_allocators.get(command_allocator.handle)!!;
@@ -312,7 +313,7 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
         gpu::ExecutableCommandList[1] lists = { executable };
         gpu::SubmitDesc desc = { .command_lists = lists[..] };
         vk::VkDeviceState* state =
-            (vk::VkDeviceState*)gpu::device_backend_state(device);
+            (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
         ulong submits_before = stats_of(&device).queue_submits;
 
         assert(@catch(gpu::submit(graphics, &desc)) == gpu::INVALID_ARGUMENT,
@@ -429,7 +430,7 @@ fn void prove_submission_publication_gap(
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, queue.id)!!;
     gpu::CompletionPoint prior = vk::reserve_queue_completion(state, queue)!!;
@@ -594,13 +595,13 @@ fn void prove_submission_publication_gap(
     );
     gpu::free_allocation(&device, &retained.allocation)!!;
     retained.span = {};
-    gpu::DeviceOperation operation = gpu::begin_device_operation(
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(
         &device,
         true,
     )!!;
     assert(operation.slot.live_children.load(AtomicOrdering.ACQUIRE) == 1,
         "publication regression leaves only the explicit command allocator live");
-    gpu::end_device_operation(&operation);
+    gpu::internal::end_device_operation(&operation);
 }
 
 fn void native_acceptance_remains_capped_before_batch_publication() @test {
@@ -625,7 +626,7 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
@@ -737,11 +738,11 @@ fn void native_submit_failure_preserves_swapchain_readiness() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
-    state.presentation.swapchains.owner = gpu::resource_owner_tag(
+    state.presentation.swapchains.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
-        gpu::ResourceOwnerKind.SWAPCHAIN,
+        gpu::internal::ResourceOwnerKind.SWAPCHAIN,
     );
     state.presentation.swapchains.slots = cells[..];
     defer state.presentation.swapchains.slots = {};
@@ -782,11 +783,11 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
-    state.presentation.swapchains.owner = gpu::resource_owner_tag(
+    state.presentation.swapchains.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
-        gpu::ResourceOwnerKind.SWAPCHAIN,
+        gpu::internal::ResourceOwnerKind.SWAPCHAIN,
     );
     state.presentation.swapchains.slots = cells[..];
     defer state.presentation.swapchains.slots = {};
@@ -926,7 +927,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
@@ -1030,7 +1031,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
@@ -1077,7 +1078,7 @@ fn void native_device_loss_rolls_back_and_allows_discard() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
@@ -1302,7 +1303,7 @@ fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
         .completion_waits = waits[..],
     };
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, queue.id)!!;
     vk::QueueFamilyFlags selected_flags = completion.queue_flags;
@@ -1395,7 +1396,7 @@ fn void empty_submit_returns_completion_point() @test {
     gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(point.is_valid(), "an empty submit still returns queue progress");
     assert(gpu::completion_point_queue_id(point)
         == state.graphics_completion_id,
@@ -1461,7 +1462,7 @@ fn void unpublished_same_queue_wait_preserves_token() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,

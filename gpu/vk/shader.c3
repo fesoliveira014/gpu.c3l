@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import spvreflect;
@@ -444,13 +445,13 @@ fn gpu::ShaderStage? gpu_stage_from_spv(spvreflect::ShaderStage stage) @private 
     }
 }
 
-fn gpu::RootAbiSpec root_abi_for_stage(gpu::ShaderStage stage) @private {
+fn gpu::internal::RootAbiSpec root_abi_for_stage(gpu::ShaderStage stage) @private {
     switch (stage) {
         case gpu::ShaderStage.COMPUTE:
-            return gpu::ROOT_PUSH_ABI;
+            return gpu::internal::ROOT_PUSH_ABI;
         case gpu::ShaderStage.VERTEX:
         case gpu::ShaderStage.FRAGMENT:
-            return gpu::GRAPHICS_ROOT_PUSH_ABI;
+            return gpu::internal::GRAPHICS_ROOT_PUSH_ABI;
     }
 }
 
@@ -463,7 +464,7 @@ fn bool has_type_flag(
 
 fn bool root_member_shape_matches(
     spvreflect::BlockVariable* member,
-    gpu::RootAbiMemberSpec* expected,
+    gpu::internal::RootAbiMemberSpec* expected,
 ) @private {
     if (member == null
         || member.byte_offset() != expected.offset
@@ -499,7 +500,7 @@ fn void? check_root_push_abi(
     ZString entry_point,
     gpu::ShaderStage stage,
 ) @private {
-    gpu::RootAbiSpec expected = root_abi_for_stage(stage);
+    gpu::internal::RootAbiSpec expected = root_abi_for_stage(stage);
     uint count = 0;
     if (reflect_module.enumerate_entry_point_push_constant_blocks(
         entry_point,

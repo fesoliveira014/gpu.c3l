@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 
@@ -729,7 +730,7 @@ fn LoweredTextureBarrier? validate_track_and_lower_texture_barrier(
 }
 
 fn void? vk_cmd_barrier(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::Barrier* barrier,
 ) @private {
     CommandRecord* record = encoder_command(commands);
@@ -788,11 +789,11 @@ fn void? vk_cmd_barrier(
     vk::DependencyInfo dependency =
         vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
     vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_barrier(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::Barrier* barrier,
 ) {
     if (commands == null || barrier == null) return gpu::INVALID_ARGUMENT~;
@@ -811,11 +812,11 @@ fn void? trusted_barrier(
     vk::DependencyInfo dependency =
         vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
     vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? checked_barrier(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::Barrier* barrier,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
@@ -824,7 +825,7 @@ fn void? checked_barrier(
 }
 
 fn LoweredTextureBarrier? lower_texture_barrier_trusted(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBarrier* barrier,
 ) {
     if (commands == null || barrier == null) return gpu::INVALID_ARGUMENT~;
@@ -855,7 +856,7 @@ fn LoweredTextureBarrier? lower_texture_barrier_trusted(
 }
 
 fn void emit_texture_barrier(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     LoweredTextureBarrier* lowered,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -875,11 +876,11 @@ fn void emit_texture_barrier(
     $else
         vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
     $endif
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_texture_barrier(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBarrier* barrier,
 ) {
     LoweredTextureBarrier lowered = lower_texture_barrier_trusted(
@@ -890,7 +891,7 @@ fn void? trusted_texture_barrier(
 }
 
 fn void? trusted_tracking_texture_barrier(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBarrier* barrier,
 ) {
     LoweredTextureBarrier lowered = lower_texture_barrier_trusted(
@@ -913,7 +914,7 @@ fn void? trusted_tracking_texture_barrier(
 }
 
 fn void? checked_texture_barrier(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBarrier* barrier,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
@@ -933,7 +934,7 @@ fn void? checked_texture_barrier(
 }
 
 fn void? checked_tracking_texture_barrier(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::TextureBarrier* barrier,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
@@ -1058,7 +1059,7 @@ fn bool? vk_poll_completion_with_query(
     SemaphoreCounterQueryFn query_fn,
 ) @private {
     VkDeviceState* state =
-        (VkDeviceState*)gpu::device_backend_state_ptr(device);
+        (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     QueueCompletionState* completion = published_queue_completion_state(
         state,
         queue_id,
@@ -1102,7 +1103,7 @@ fn void? vk_wait_completion_with_wait(
     SemaphoreWaitFn wait_fn,
 ) @private {
     VkDeviceState* state =
-        (VkDeviceState*)gpu::device_backend_state_ptr(device);
+        (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     (void)state.submit_completion_wait_calls.add(1, AtomicOrdering.RELAXED);
     QueueCompletionState* completion = published_queue_completion_state(
         state,

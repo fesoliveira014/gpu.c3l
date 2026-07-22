@@ -1,25 +1,26 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
 import std::atomic;
 import std::io;
 
-const gpu::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
+const gpu::internal::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
     .destroy_device = &destroy_registry_blocker,
 };
-const gpu::RuntimeBackendVTable PRESENTATION_INSTANCE_GATE_VTABLE @private = {
+const gpu::internal::RuntimeBackendVTable PRESENTATION_INSTANCE_GATE_VTABLE @private = {
     .destroy_runtime = &destroy_presentation_instance_gate_runtime,
     .destroy_surface = &destroy_presentation_instance_gate_surface,
 };
 fn uint live_device_slot_count() @private {
     uint live_count;
-    for (uint i = 0; i < gpu::MAX_DEVICES; i++) {
-        gpu::DeviceSlot* slot = &gpu::device_slots[i];
-        gpu::DeviceSlotControl control =
-            (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
-        if (control.state == gpu::DEVICE_SLOT_LIVE) live_count++;
+    for (uint i = 0; i < gpu::internal::MAX_DEVICES; i++) {
+        gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[i];
+        gpu::internal::DeviceSlotControl control =
+            (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
+        if (control.state == gpu::internal::DEVICE_SLOT_LIVE) live_count++;
     }
     return live_count;
 }
@@ -57,10 +58,10 @@ fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
 }
 
 fn uptr device_physical_adapter(gpu::Device* device) @private {
-    gpu::DeviceOperation operation = gpu::begin_device_operation(device)!!;
-    defer gpu::end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!!;
+    defer gpu::internal::end_device_operation(&operation);
     gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state_ptr(device);
+        (gpu::vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     return (uptr)state.physical_device;
 }
 
@@ -358,7 +359,7 @@ fn void runtime_copies_device_creation_defaults() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::vk::VkRuntimeState* state =
-        (gpu::vk::VkRuntimeState*)gpu::runtime_backend_state(&runtime);
+        (gpu::vk::VkRuntimeState*)gpu::internal::runtime_backend_state(&runtime);
 
     assert(state != null, "the runtime publishes its Vulkan state");
     assert(state.debug_names, "the runtime retains the debug-name default");
@@ -409,7 +410,7 @@ fn void adapter_support_inherits_runtime_device_config() @test {
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     assert(adapters.count > 0, "the controlled target exposes an adapter");
     gpu::DeviceRequest request = gpu::strict_device_request();
-    gpu::RuntimeData* runtime_data = gpu::resolve_runtime(&runtime);
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(&runtime);
     gpu::vk::VkRuntimeState* runtime_state =
         (gpu::vk::VkRuntimeState*)runtime_data.backend_state;
     gpu::vk::VkDeviceConfig config = gpu::vk::runtime_device_config(runtime_state);
@@ -480,12 +481,12 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             gpu::supports_device_request(&adapter, &request)!!;
         if (!support.supported) continue;
 
-        gpu::RuntimeData* runtime_data = gpu::resolve_adapter(&adapter);
+        gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
         gpu::vk::VkRuntimeState* runtime_state =
             (gpu::vk::VkRuntimeState*)runtime_data.backend_state;
         gpu::Device device = gpu::create_device(&adapter, &request)!!;
         gpu::vk::VkDeviceState* device_state =
-            (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+            (gpu::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
         assert(device_state.instance == runtime_state.instance, "the device reuses the runtime instance");
         assert(
@@ -602,7 +603,7 @@ fn void malformed_native_request_preserves_runtime_state() @test {
     }
 
     gpu::Adapter adapter = adapters.get(0)!!;
-    gpu::DeviceRequest empty = gpu::empty_device_request();
+    gpu::DeviceRequest empty = gpu::internal::empty_device_request();
     assert(
         @catch(gpu::create_device(&adapter, &empty)) == gpu::INVALID_ARGUMENT,
         "an empty request is rejected before native creation"
@@ -619,14 +620,14 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
     gpu::vk::VkRuntimeState runtime_state = {
         .adapters = adapter_states[..],
     };
-    gpu::Runtime runtime = gpu::register_runtime(
+    gpu::Runtime runtime = gpu::internal::register_runtime(
         backend:       gpu::BackendKind.VULKAN,
         vtable:        &PRESENTATION_INSTANCE_GATE_VTABLE,
         backend_state: &runtime_state,
         adapter_count: 1,
     )!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::Surface surface = gpu::register_surface(&runtime, (void*)1)!!;
+    gpu::Surface surface = gpu::internal::register_surface(&runtime, (void*)1)!!;
     defer gpu::destroy_surface(&surface)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::Adapter adapter = adapters.get(0)!!;
@@ -776,7 +777,7 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
             gpu::vk::DeviceCreationCheckpoint checkpoint =
                 (gpu::vk::DeviceCreationCheckpoint)checkpoint_ordinal;
             gpu::Runtime retained_runtime = runtime;
-            gpu::runtime_retain_device(&retained_runtime)!!;
+            gpu::internal::runtime_retain_device(&retained_runtime)!!;
             gpu::vk::DeviceCreationProbe probe = { .fail_at = checkpoint };
             uint live_slots_before = live_device_slot_count();
 
@@ -789,7 +790,7 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
                 )) == gpu::BACKEND_ERROR,
                 "a checkpoint failure returns the backend fault"
             );
-            gpu::runtime_release_device(&retained_runtime)!!;
+            gpu::internal::runtime_release_device(&retained_runtime)!!;
             assert(probe.reached == checkpoint, "creation reaches the requested checkpoint");
             assert(probe.rollback_count == 1, "creation rolls back exactly once");
             assert(
@@ -833,10 +834,10 @@ fn void publication_failure_rolls_back_native_state() @test {
         exercised = true;
 
         uint blocker_state;
-        gpu::Device[gpu::MAX_DEVICES] blockers;
+        gpu::Device[gpu::internal::MAX_DEVICES] blockers;
         defer destroy_registry_blockers(blockers[..]);
         foreach (&blocker : blockers) {
-            *blocker = gpu::register_device(
+            *blocker = gpu::internal::register_device(
                 backend:       gpu::BackendKind.VULKAN,
                 caps:          {},
                 vtable:        &REGISTRY_BLOCKER_VTABLE,
@@ -845,10 +846,10 @@ fn void publication_failure_rolls_back_native_state() @test {
         }
 
         gpu::Runtime retained_runtime = runtime;
-        gpu::runtime_retain_device(&retained_runtime)!!;
+        gpu::internal::runtime_retain_device(&retained_runtime)!!;
         bool retain_live = true;
         defer {
-            if (retain_live) (void)gpu::runtime_release_device(&retained_runtime);
+            if (retain_live) (void)gpu::internal::runtime_release_device(&retained_runtime);
         }
         gpu::vk::DeviceCreationProbe probe;
         uint live_slots_before = live_device_slot_count();
@@ -862,7 +863,7 @@ fn void publication_failure_rolls_back_native_state() @test {
             )) == gpu::SLOT_TABLE_FULL,
             "registration reports a full device registry"
         );
-        gpu::runtime_release_device(&retained_runtime)!!;
+        gpu::internal::runtime_release_device(&retained_runtime)!!;
         retain_live = false;
         assert(
             probe.reached == gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
@@ -923,7 +924,7 @@ fn void runtime_devices_destroy_independently() @test {
             io::eprintfn("runtime_devices: distinct-adapter=N/A (one strict-compatible adapter)");
         }
 
-        gpu::RuntimeData* runtime_data = gpu::resolve_adapter(&adapter);
+        gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
         gpu::vk::VkRuntimeState* runtime_state =
             (gpu::vk::VkRuntimeState*)runtime_data.backend_state;
         gpu::Device first = gpu::create_device(&adapter, &request)!!;

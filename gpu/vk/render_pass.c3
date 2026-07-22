@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::math;
@@ -140,22 +141,22 @@ fn void emit_raster_state(
         record.command_buffer,
         topology_to_vk(raster.topology),
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     vk::cmd_set_cull_mode(
         record.command_buffer,
         (vk::CullModeFlags)cull_mode_to_vk(raster.cull_mode),
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     vk::cmd_set_front_face(
         record.command_buffer,
         front_face_to_vk(raster.front_face),
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     vk::cmd_set_depth_bias_enable(
         record.command_buffer,
         raster.depth_bias_enable ? vk::TRUE : vk::FALSE,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     float depth_bias_constant = 0.0f;
     float depth_bias_clamp = 0.0f;
     float depth_bias_slope = 0.0f;
@@ -170,11 +171,11 @@ fn void emit_raster_state(
         depth_bias_clamp:           depth_bias_clamp,
         depth_bias_slope_factor:    depth_bias_slope,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn PreparedRenderPass? lower_render_pass(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
     if (commands == null || desc == null
@@ -266,7 +267,7 @@ fn void? validate_render_pass_desc_fields(
 }
 
 fn PreparedRenderPass? validate_and_lower_render_pass(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
     if (commands == null || desc == null) return gpu::INVALID_ARGUMENT~;
@@ -379,7 +380,7 @@ fn PreparedRenderPass? validate_and_lower_render_pass(
 }
 
 fn void? track_render_pass(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedRenderPass* pass,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -444,7 +445,7 @@ fn void? track_render_pass(
 }
 
 fn void record_render_pass(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedRenderPass* pass,
 ) {
     CommandRecord* record = encoder_command(commands);
@@ -463,7 +464,7 @@ fn void record_render_pass(
         rendering.p_depth_attachment = &pass.depth_attachment;
     }
     vk::cmd_begin_rendering(cb, &rendering);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     record.active_render = pass.compatibility;
 
     vk::Viewport viewport = {
@@ -475,13 +476,13 @@ fn void record_render_pass(
         .max_depth = 1.0,
     };
     vk::cmd_set_viewport(cb, 0, 1, &viewport);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     vk::Rect2D scissor = {
         .offset = { .x = 0, .y = 0 },
         .extent = { .width = pass.width, .height = pass.height },
     };
     vk::cmd_set_scissor(cb, 0, 1, &scissor);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     gpu::DynamicRasterState raster;
     emit_raster_state(record, &raster);
 
@@ -492,7 +493,7 @@ fn void record_render_pass(
 }
 
 fn void? trusted_begin_render_pass(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
@@ -500,7 +501,7 @@ fn void? trusted_begin_render_pass(
 }
 
 fn void? trusted_tracking_begin_render_pass(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
@@ -516,7 +517,7 @@ fn void? trusted_tracking_begin_render_pass(
 }
 
 fn void? checked_begin_render_pass(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
     PreparedRenderPass pass = validate_and_lower_render_pass(
@@ -527,7 +528,7 @@ fn void? checked_begin_render_pass(
 }
 
 fn void? checked_tracking_begin_render_pass(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
     PreparedRenderPass pass = validate_and_lower_render_pass(
@@ -545,7 +546,7 @@ fn void? checked_tracking_begin_render_pass(
     record_render_pass(commands, &pass);
 }
 
-fn void? vk_cmd_set_viewport(gpu::CommandEncoderState* commands, gpu::Viewport* viewport) @private {
+fn void? vk_cmd_set_viewport(gpu::internal::CommandEncoderState* commands, gpu::Viewport* viewport) @private {
     CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (viewport == null) return gpu::INVALID_ARGUMENT~;
@@ -582,11 +583,11 @@ fn void? vk_cmd_set_viewport(gpu::CommandEncoderState* commands, gpu::Viewport* 
         .max_depth = viewport.max_depth,
     };
     vk::cmd_set_viewport(record.command_buffer, 0, 1, &vk_viewport);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_set_viewport(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::Viewport* viewport,
 ) {
     if (commands == null || viewport == null) return gpu::INVALID_ARGUMENT~;
@@ -603,11 +604,11 @@ fn void? trusted_set_viewport(
         .max_depth = viewport.max_depth,
     };
     vk::cmd_set_viewport(record.command_buffer, 0, 1, &vk_viewport);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? checked_set_viewport(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::Viewport* viewport,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
@@ -615,7 +616,7 @@ fn void? checked_set_viewport(
     return vk_cmd_set_viewport(commands, viewport);
 }
 
-fn void? vk_cmd_set_scissor(gpu::CommandEncoderState* commands, gpu::ScissorRect* scissor) @private {
+fn void? vk_cmd_set_scissor(gpu::internal::CommandEncoderState* commands, gpu::ScissorRect* scissor) @private {
     CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (scissor == null) return gpu::INVALID_ARGUMENT~;
@@ -635,11 +636,11 @@ fn void? vk_cmd_set_scissor(gpu::CommandEncoderState* commands, gpu::ScissorRect
         .extent = { .width = (uint)scissor.width, .height = (uint)scissor.height },
     };
     vk::cmd_set_scissor(record.command_buffer, 0, 1, &vk_scissor);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_set_scissor(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::ScissorRect* scissor,
 ) {
     if (commands == null || scissor == null) return gpu::INVALID_ARGUMENT~;
@@ -655,11 +656,11 @@ fn void? trusted_set_scissor(
         },
     };
     vk::cmd_set_scissor(record.command_buffer, 0, 1, &vk_scissor);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? checked_set_scissor(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::ScissorRect* scissor,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
@@ -667,11 +668,11 @@ fn void? checked_set_scissor(
     return vk_cmd_set_scissor(commands, scissor);
 }
 
-fn void? vk_cmd_end_render_pass(gpu::CommandEncoderState* commands) @private {
+fn void? vk_cmd_end_render_pass(gpu::internal::CommandEncoderState* commands) @private {
     CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     vk::cmd_end_rendering(record.command_buffer);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     if (record.bound_pipeline.handle.is_valid()
         && record.bound_pipeline.kind == PipelineKind.GRAPHICS) {
         record.bound_pipeline = {};
@@ -684,7 +685,7 @@ fn void? vk_cmd_end_render_pass(gpu::CommandEncoderState* commands) @private {
 }
 
 fn void? vk_cmd_set_depth_state(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::DepthState* depth,
 ) @private {
     CommandRecord* record = encoder_command(commands);
@@ -698,22 +699,22 @@ fn void? vk_cmd_set_depth_state(
         record.command_buffer,
         depth.test_enable ? vk::TRUE : vk::FALSE,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     vk::cmd_set_depth_write_enable(
         record.command_buffer,
         depth.write_enable ? vk::TRUE : vk::FALSE,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     vk::cmd_set_depth_compare_op(
         record.command_buffer,
         compare_op_to_vk(depth.compare),
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     record.depth_state_set = true;
 }
 
 fn void? trusted_set_depth_state(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::DepthState* depth,
 ) {
     if (commands == null || depth == null) return gpu::INVALID_ARGUMENT~;
@@ -725,22 +726,22 @@ fn void? trusted_set_depth_state(
         record.command_buffer,
         depth.test_enable ? vk::TRUE : vk::FALSE,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     vk::cmd_set_depth_write_enable(
         record.command_buffer,
         depth.write_enable ? vk::TRUE : vk::FALSE,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     vk::cmd_set_depth_compare_op(
         record.command_buffer,
         compare_op_to_vk(depth.compare),
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
     record.depth_state_set = true;
 }
 
 fn void? checked_set_depth_state(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::DepthState* depth,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
@@ -749,7 +750,7 @@ fn void? checked_set_depth_state(
 }
 
 fn void? vk_cmd_set_raster_state(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::DynamicRasterState* raster,
 ) @private {
     CommandRecord* record = encoder_command(commands);
@@ -772,7 +773,7 @@ fn void? vk_cmd_set_raster_state(
 }
 
 fn void? trusted_set_raster_state(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::DynamicRasterState* raster,
 ) {
     if (commands == null || raster == null) return gpu::INVALID_ARGUMENT~;
@@ -784,7 +785,7 @@ fn void? trusted_set_raster_state(
 }
 
 fn void? checked_set_raster_state(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::DynamicRasterState* raster,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
@@ -833,7 +834,7 @@ fn void push_graphics_roots(
         size:           GRAPHICS_ROOT_PUSH_SIZE,
         p_values:       &push,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn BoundPipeline? graphics_pipeline_snapshot(CommandRecord* record) {
@@ -842,7 +843,7 @@ fn BoundPipeline? graphics_pipeline_snapshot(CommandRecord* record) {
 }
 
 fn void record_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     BoundPipeline* pipeline,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -858,11 +859,11 @@ fn void record_draw(
         first_vertex:   0,
         first_instance: 0,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     uint vertex_count,
@@ -885,7 +886,7 @@ fn void? trusted_draw(
 }
 
 fn void? checked_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     uint vertex_count,
@@ -916,7 +917,7 @@ fn void? checked_draw(
 }
 
 fn PreparedIndexedDraw? lower_indexed_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan index_span,
@@ -953,7 +954,7 @@ fn PreparedIndexedDraw? lower_indexed_draw(
 }
 
 fn PreparedIndexedDraw? validate_and_lower_indexed_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan index_span,
@@ -995,7 +996,7 @@ fn PreparedIndexedDraw? validate_and_lower_indexed_draw(
 }
 
 fn void? track_indexed_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedIndexedDraw* draw,
 ) {
     return track_span_command_reference(
@@ -1006,7 +1007,7 @@ fn void? track_indexed_draw(
 }
 
 fn void record_indexed_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedIndexedDraw* draw,
 ) {
     CommandRecord* record = encoder_command(commands);
@@ -1029,11 +1030,11 @@ fn void record_indexed_draw(
         vertex_offset:  0,
         first_instance: 0,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw_indexed(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan index_span,
@@ -1054,7 +1055,7 @@ fn void? trusted_draw_indexed(
 }
 
 fn void? trusted_tracking_draw_indexed(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan index_span,
@@ -1076,7 +1077,7 @@ fn void? trusted_tracking_draw_indexed(
 }
 
 fn void? checked_draw_indexed(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan index_span,
@@ -1097,7 +1098,7 @@ fn void? checked_draw_indexed(
 }
 
 fn void? checked_tracking_draw_indexed(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan index_span,
@@ -1119,7 +1120,7 @@ fn void? checked_tracking_draw_indexed(
 }
 
 fn PreparedIndirectDraw? lower_indirect_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1147,7 +1148,7 @@ fn PreparedIndirectDraw? lower_indirect_draw(
 }
 
 fn PreparedIndirectDraw? validate_and_lower_indirect_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1186,7 +1187,7 @@ fn PreparedIndirectDraw? validate_and_lower_indirect_draw(
 }
 
 fn void? track_indirect_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedIndirectDraw* draw,
 ) {
     return track_span_command_reference(
@@ -1197,7 +1198,7 @@ fn void? track_indirect_draw(
 }
 
 fn void record_indirect_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedIndirectDraw* draw,
 ) {
     CommandRecord* record = encoder_command(commands);
@@ -1214,11 +1215,11 @@ fn void record_indirect_draw(
         draw_count:     draw.draw_count,
         stride:         gpu::DrawIndirectCommand::size,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1235,7 +1236,7 @@ fn void? trusted_draw_indirect(
 }
 
 fn void? trusted_tracking_draw_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1253,7 +1254,7 @@ fn void? trusted_tracking_draw_indirect(
 }
 
 fn void? checked_draw_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1270,7 +1271,7 @@ fn void? checked_draw_indirect(
 }
 
 fn void? checked_tracking_draw_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1300,11 +1301,11 @@ fn void bind_index_buffer(
             ? vk::IndexType.UINT16
             : vk::IndexType.UINT32,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1342,7 +1343,7 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
 }
 
 fn PreparedIndexedIndirectDraw? validate_and_lower_indexed_indirect_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1393,7 +1394,7 @@ fn PreparedIndexedIndirectDraw? validate_and_lower_indexed_indirect_draw(
 }
 
 fn void? track_indexed_indirect_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedIndexedIndirectDraw* draw,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -1416,7 +1417,7 @@ fn void? track_indexed_indirect_draw(
 }
 
 fn void record_indexed_indirect_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedIndexedIndirectDraw* draw,
 ) {
     CommandRecord* record = encoder_command(commands);
@@ -1438,11 +1439,11 @@ fn void record_indexed_indirect_draw(
         draw_count:     draw.draw_count,
         stride:         gpu::DrawIndexedIndirectCommand::size,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw_indexed_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1463,7 +1464,7 @@ fn void? trusted_draw_indexed_indirect(
 }
 
 fn void? trusted_tracking_draw_indexed_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1492,7 +1493,7 @@ fn void? trusted_tracking_draw_indexed_indirect(
 }
 
 fn void? checked_draw_indexed_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1514,7 +1515,7 @@ fn void? checked_draw_indexed_indirect(
 }
 
 fn void? checked_tracking_draw_indexed_indirect(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1546,7 +1547,7 @@ fn void? checked_tracking_draw_indexed_indirect(
 <* Index-range bounds live in the GPU-written arguments and are not validated
    here; out-of-bounds indices follow device robustness. *>
 fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1593,7 +1594,7 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
 }
 
 fn PreparedIndexedIndirectCountDraw? validate_and_lower_indexed_indirect_count_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1655,7 +1656,7 @@ fn PreparedIndexedIndirectCountDraw? validate_and_lower_indexed_indirect_count_d
 }
 
 fn void? track_indexed_indirect_count_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedIndexedIndirectCountDraw* draw,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -1684,7 +1685,7 @@ fn void? track_indexed_indirect_count_draw(
 }
 
 fn void record_indexed_indirect_count_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedIndexedIndirectCountDraw* draw,
 ) {
     CommandRecord* record = encoder_command(commands);
@@ -1708,11 +1709,11 @@ fn void record_indexed_indirect_count_draw(
         max_draw_count:      draw.max_draw_count,
         stride:              gpu::DrawIndexedIndirectCommand::size,
     );
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw_indexed_indirect_count(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1736,7 +1737,7 @@ fn void? trusted_draw_indexed_indirect_count(
 }
 
 fn void? trusted_tracking_draw_indexed_indirect_count(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1768,7 +1769,7 @@ fn void? trusted_tracking_draw_indexed_indirect_count(
 }
 
 fn void? checked_draw_indexed_indirect_count(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1792,7 +1793,7 @@ fn void? checked_draw_indexed_indirect_count(
 }
 
 fn void? checked_tracking_draw_indexed_indirect_count(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -1843,7 +1844,7 @@ fn vk::ShaderStageFlags generated_graphics_shader_stages() =>
         | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT);
 
 fn PreparedGeneratedDraw? lower_generated_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -1880,7 +1881,7 @@ fn PreparedGeneratedDraw? lower_generated_draw(
 }
 
 fn PreparedGeneratedDraw? validate_and_lower_generated_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -1927,7 +1928,7 @@ fn PreparedGeneratedDraw? validate_and_lower_generated_draw(
 }
 
 fn void? track_generated_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedGeneratedDraw* draw,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -1950,7 +1951,7 @@ fn void? track_generated_draw(
 }
 
 fn void? record_generated_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedGeneratedDraw* draw,
 ) {
     if (draw.max_count == 0) return;
@@ -1968,7 +1969,7 @@ fn void? record_generated_draw(
 }
 
 fn void? trusted_draw_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -1983,7 +1984,7 @@ fn void? trusted_draw_generated(
 }
 
 fn void? trusted_tracking_draw_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -2007,7 +2008,7 @@ fn void? trusted_tracking_draw_generated(
 }
 
 fn void? checked_draw_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -2022,7 +2023,7 @@ fn void? checked_draw_generated(
 }
 
 fn void? checked_tracking_draw_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -2046,7 +2047,7 @@ fn void? checked_tracking_draw_generated(
 }
 
 fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -2093,7 +2094,7 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
 }
 
 fn PreparedGeneratedIndexedDraw? validate_and_lower_generated_indexed_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -2153,7 +2154,7 @@ fn PreparedGeneratedIndexedDraw? validate_and_lower_generated_indexed_draw(
 }
 
 fn void? track_generated_indexed_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedGeneratedIndexedDraw* draw,
 ) {
     VkDeviceState* state = encoder_device_state(commands);
@@ -2182,7 +2183,7 @@ fn void? track_generated_indexed_draw(
 }
 
 fn void? record_generated_indexed_draw(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     PreparedGeneratedIndexedDraw* draw,
 ) {
     if (draw.max_count == 0) return;
@@ -2203,7 +2204,7 @@ fn void? record_generated_indexed_draw(
 }
 
 fn void? trusted_draw_indexed_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -2222,7 +2223,7 @@ fn void? trusted_draw_indexed_generated(
 }
 
 fn void? trusted_tracking_draw_indexed_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -2250,7 +2251,7 @@ fn void? trusted_tracking_draw_indexed_generated(
 }
 
 fn void? checked_draw_indexed_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -2270,7 +2271,7 @@ fn void? checked_draw_indexed_generated(
 }
 
 fn void? checked_tracking_draw_indexed_generated(
-    gpu::CommandEncoderState* commands,
+    gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,

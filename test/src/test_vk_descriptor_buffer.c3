@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import std::os::env;
@@ -82,7 +83,7 @@ fn gpu::Device? create_descriptor_buffer_test_device(
         if (!gpu::supports_device_request(&adapter, &request)!.supported) continue;
 
         gpu::Runtime retained_runtime = runtime;
-        gpu::runtime_retain_device(&retained_runtime)!;
+        gpu::internal::runtime_retain_device(&retained_runtime)!;
         gpu::Device? device = gpu::vk::create_vk_device_with_probe(
             adapter:          &adapter,
             request:          &request,
@@ -90,7 +91,7 @@ fn gpu::Device? create_descriptor_buffer_test_device(
             probe:            probe,
         );
         if (catch err = device) {
-            gpu::runtime_release_device(&retained_runtime)!;
+            gpu::internal::runtime_release_device(&retained_runtime)!;
             if (err == gpu::UNSUPPORTED_FEATURE) continue;
             return err~;
         }
@@ -126,7 +127,7 @@ fn void descriptor_buffer_device_and_heap() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+        (gpu::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(
         gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"
@@ -191,7 +192,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+        (gpu::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(
         gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"
@@ -532,7 +533,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+        (gpu::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(
         gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"

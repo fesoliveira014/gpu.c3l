@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import vma;
@@ -699,7 +700,7 @@ fn void? vk_flush_mapped_span(
     gpu::Device* device,
     gpu::GpuSpan span,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     AllocationNativeOps ops = allocation_native_ops_real();
     return flush_mapped_span_for_state_with_ops(state, span, &ops);
 }
@@ -708,7 +709,7 @@ fn void? vk_invalidate_mapped_span(
     gpu::Device* device,
     gpu::GpuSpan span,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     AllocationNativeOps ops = allocation_native_ops_real();
     return invalidate_mapped_span_for_state_with_ops(state, span, &ops);
 }
@@ -717,7 +718,7 @@ fn gpu::GpuAllocation? vk_allocate_memory(
     gpu::Device* device,
     gpu::AllocationDesc* desc,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     AllocationNativeOps ops = allocation_native_ops_real();
     return allocate_memory_for_state_with_ops(state, desc, &ops);
 }
@@ -726,7 +727,7 @@ fn void? vk_free_allocation(
     gpu::Device* device,
     gpu::GpuAllocation allocation,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     AllocationNativeOps ops = allocation_native_ops_real();
     return free_allocation_for_state_with_ops(state, allocation, &ops);
 }
@@ -735,7 +736,7 @@ fn gpu::AllocationInfo? vk_get_allocation_info(
     gpu::Device* device,
     gpu::GpuAllocation allocation,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     return allocation_info_for_state(state, allocation);
 }
 
@@ -743,7 +744,7 @@ fn gpu::GpuSpan? vk_get_allocation_span(
     gpu::Device* device,
     gpu::GpuAllocation allocation,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     return allocation_span_for_state(state, allocation);
 }
 

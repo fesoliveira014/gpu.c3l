@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::thread;
@@ -281,7 +282,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     PipelineShaderModule* batch_vertex_shader,
     PipelineShaderModule* batch_fragment_shader,
 ) {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     PipelineKey key = build_graphics_key(
         desc,
         prepared_vertex_shader.id,
@@ -537,7 +538,7 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
     gpu::Device* device,
     gpu::GraphicsPipelineDesc* desc,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
     validate_graphics_pipeline_desc(state, desc)!;
@@ -590,7 +591,7 @@ fn void? vk_create_graphics_pipelines(
 ) @private {
     if (out_pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
 

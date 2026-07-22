@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
@@ -7,7 +8,7 @@ import std::atomic;
 
 
 fn ulong command_submit_count(gpu::Device* device) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
     return vk::submit_stats(state).queue_submits;
 }
 
@@ -240,13 +241,13 @@ fn void command_generation_exhaustion_retires_slot() @test {
     defer discard_test_commands(&final_generation)!!;
     gpu::ExecutableCommandList final_generation_executable = gpu::end_commands(&final_generation)!!;
     defer discard_test_executable(&final_generation_executable)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     state.commands.slots[final_generation_executable.handle.index].generation =
         vk::HANDLE_GENERATION_MAX - 1;
     final_generation_executable.handle.generation = vk::HANDLE_GENERATION_MAX - 1;
-    ((gpu::CommandEncoderState*)final_generation_executable.encoder).handle =
+    ((gpu::internal::CommandEncoderState*)final_generation_executable.encoder).handle =
         final_generation_executable.handle;
-    gpu::device_slots[device.index].command_leases[
+    gpu::internal::device_slots[device.index].command_leases[
         final_generation_executable.handle.index
     ].store(
         final_generation_executable.handle.generation,
@@ -286,7 +287,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::ExecutableCommandList[2] duplicates = { cmd_executable, cmd_executable };
     gpu::SubmitDesc bad = { .command_lists = duplicates[..] };
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::reset_submit_duplicate_work_counters(state);
     ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &bad));
@@ -331,7 +332,7 @@ fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
         }
     }
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     ulong submits_before = command_submit_count(&device);
 
     gpu::ExecutableCommandList[BATCH_SIZE] beginning = unique;
@@ -436,7 +437,7 @@ fn void submit_valid_batch_sizes_visit_each_record_once() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     foreach (batch_size : batch_sizes) {
         gpu::ExecutableCommandList[MAX_BATCH_SIZE] lists;
@@ -475,7 +476,7 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
     gpu::CommandListHandle discarded_handle = lists[2].handle;
     gpu::discard_executable_commands(&lists[2])!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandCell* unused =
         &state.commands.slots[discarded_handle.index];
     uint unused_generation = unused.generation;
@@ -537,7 +538,7 @@ fn void empty_submit_preserves_duplicate_epoch_and_work() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     state.next_submit_visit_epoch = 73;
     vk::reset_submit_duplicate_work_counters(state);
     gpu::SubmitDesc submit = {};
@@ -558,9 +559,9 @@ fn void readiness_only_submit_validates_stale_swapchain() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     gpu::SwapchainHandle stale = {
-        .owner      = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN),
+        .owner      = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.SWAPCHAIN),
         .generation = 1,
     };
     gpu::SwapchainReadiness readiness = gpu::vk::make_swapchain_readiness(
@@ -637,7 +638,7 @@ fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -720,7 +721,7 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -791,7 +792,7 @@ fn void warm_command_begin_reuses_allocator_owned_storage() @test {
     )!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(
         &device,
     );
 
@@ -799,14 +800,14 @@ fn void warm_command_begin_reuses_allocator_owned_storage() @test {
     gpu::ExecutableCommandList first_executable = gpu::end_commands(&first)!!;
     gpu::discard_executable_commands(&first_executable)!!;
     vk::reset_command_recording_work_counters(state);
-    gpu::RecordingWorkCounters before = vk::command_recording_work_counters(
+    gpu::internal::RecordingWorkCounters before = vk::command_recording_work_counters(
         state,
     );
 
     gpu::CommandList second = gpu::begin_commands(&allocator)!!;
     gpu::ExecutableCommandList second_executable = gpu::end_commands(&second)!!;
     gpu::discard_executable_commands(&second_executable)!!;
-    gpu::RecordingWorkCounters after = vk::command_recording_work_counters(
+    gpu::internal::RecordingWorkCounters after = vk::command_recording_work_counters(
         state,
     );
 
@@ -837,7 +838,7 @@ fn void recording_work_reset_snapshot_and_delta_are_exact() @test {
         queue,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(
         &device,
     );
 
@@ -845,7 +846,7 @@ fn void recording_work_reset_snapshot_and_delta_are_exact() @test {
     gpu::ExecutableCommandList warm_executable = gpu::end_commands(&warm)!!;
     gpu::discard_executable_commands(&warm_executable)!!;
     vk::reset_command_recording_work_counters(state);
-    gpu::RecordingWorkCounters zero = vk::command_recording_work_counters(state);
+    gpu::internal::RecordingWorkCounters zero = vk::command_recording_work_counters(state);
     assert(zero.host_allocations == 0
             && zero.command_pool_creations == 0
             && zero.command_buffer_allocations == 0
@@ -863,8 +864,8 @@ fn void recording_work_reset_snapshot_and_delta_are_exact() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::discard_executable_commands(&executable)!!;
-    gpu::RecordingWorkCounters after = vk::command_recording_work_counters(state);
-    gpu::RecordingWorkCounters work = vk::command_recording_work_delta(after, zero);
+    gpu::internal::RecordingWorkCounters after = vk::command_recording_work_counters(state);
+    gpu::internal::RecordingWorkCounters work = vk::command_recording_work_delta(after, zero);
     assert(work.command_buffer_resets == 1,
         "one warmed command-list lifecycle records one reset");
     assert(work.host_allocations == 0
@@ -880,11 +881,11 @@ fn void recording_work_reset_snapshot_and_delta_are_exact() @test {
             && work.generated_indexed_draw_emissions == 0,
         "the warmed lifecycle delta contains no unrelated structural work");
 
-    assert(gpu::device_slot_available(),
+    assert(gpu::internal::device_slot_available(),
         "the registry probe finds an available device slot");
-    gpu::RecordingWorkCounters registry_after =
+    gpu::internal::RecordingWorkCounters registry_after =
         vk::command_recording_work_counters(state);
-    gpu::RecordingWorkCounters registry_work =
+    gpu::internal::RecordingWorkCounters registry_work =
         vk::command_recording_work_delta(registry_after, after);
     assert(registry_work.registry_lock_acquisitions == 1,
         "the structural delta includes one exact registry-lock acquisition");
@@ -919,7 +920,7 @@ fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
         &allocator_desc,
     )!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
 
     gpu::CommandList first_commands = gpu::begin_commands(&first)!!;
     gpu::CommandList second_commands = gpu::begin_commands(&second)!!;
@@ -997,7 +998,7 @@ fn void later_completion_observation_retires_multi_allocator_prefix_once() @test
         &allocator_desc,
     )!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
 
     gpu::CommandList first_commands = gpu::begin_commands(&first)!!;
     uint first_buffer =
@@ -1067,7 +1068,7 @@ fn void submit_rejects_stale_allocator_generation_before_claim() @test {
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     vk::CommandRecord* record = state.commands.get(executable.handle)!!;
     gpu::CommandAllocatorHandle original = record.allocator;
     record.allocator.generation++;

@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::vk @public;
 import vk;
@@ -42,7 +43,7 @@ fn gpu::RuntimeDesc policy_runtime_desc(
 }
 
 fn vk::VkDeviceState* policy_device_state(gpu::Device* device) {
-    return (vk::VkDeviceState*)gpu::device_backend_state(*device);
+    return (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
 }
 
 fn gpu::CommandList record_policy_fill(
@@ -584,10 +585,10 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
 
 fn uint policy_live_device_count() {
     uint count;
-    for (uint i = 0; i < gpu::MAX_DEVICES; i++) {
-        gpu::DeviceSlotControl control = (gpu::DeviceSlotControl)
-            gpu::device_slots[i].control.load(AtomicOrdering.RELAXED);
-        if (control.state == gpu::DEVICE_SLOT_LIVE) count++;
+    for (uint i = 0; i < gpu::internal::MAX_DEVICES; i++) {
+        gpu::internal::DeviceSlotControl control = (gpu::internal::DeviceSlotControl)
+            gpu::internal::device_slots[i].control.load(AtomicOrdering.RELAXED);
+        if (control.state == gpu::internal::DEVICE_SLOT_LIVE) count++;
     }
     return count;
 }
@@ -621,7 +622,7 @@ fn void partial_creation_rolls_back_across_contract_and_tracking_policies() @tes
                     .supported) continue;
                 exercised = true;
                 gpu::Runtime retained_runtime = runtime;
-                gpu::runtime_retain_device(&retained_runtime)!!;
+                gpu::internal::runtime_retain_device(&retained_runtime)!!;
                 vk::DeviceCreationProbe probe = {
                     .fail_at = vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
                 };
@@ -633,7 +634,7 @@ fn void partial_creation_rolls_back_across_contract_and_tracking_policies() @tes
                     probe:            &probe,
                 )) == gpu::BACKEND_ERROR,
                     "partial creation returns its injected backend fault");
-                gpu::runtime_release_device(&retained_runtime)!!;
+                gpu::internal::runtime_release_device(&retained_runtime)!!;
                 assert(probe.reached
                         == vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION
                     && probe.rollback_count == 1,
@@ -802,7 +803,7 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
             vk::command_policy_counters(state);
         assert(counters.reference_allocations == 0,
             "device-loss setup uses its allocator's fixed reference storage");
-        gpu::mark_device_lost(&device);
+        gpu::internal::mark_device_lost(&device);
         gpu::discard_commands(&commands)!!;
         vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
         counters = vk::command_policy_counters(state);

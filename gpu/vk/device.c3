@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import vma;
@@ -140,7 +141,7 @@ struct VkDeviceState {
     ulong                      max_timeline_semaphore_value_difference;
     usz                        non_coherent_atom_size;
     DeviceValidationPolicy     validation_policy;
-    gpu::CommandOps*           command_ops;
+    gpu::internal::CommandOps*           command_ops;
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;
@@ -353,7 +354,7 @@ fn void? reach_device_creation_checkpoint(
     if (probe.fail_at == checkpoint) return gpu::BACKEND_ERROR~;
 }
 
-const gpu::CommandOps TRUSTED_COMMAND_OPS @private = {
+const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
     .copy_buffer                 = &trusted_copy_buffer,
     .fill_buffer                 = &trusted_fill_buffer,
     .copy_buffer_to_texture      = &trusted_copy_buffer_to_texture,
@@ -381,7 +382,7 @@ const gpu::CommandOps TRUSTED_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
+const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .copy_buffer                 = &trusted_tracking_copy_buffer,
     .fill_buffer                 = &trusted_tracking_fill_buffer,
     .copy_buffer_to_texture      = &trusted_tracking_copy_buffer_to_texture,
@@ -409,7 +410,7 @@ const gpu::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::CommandOps CHECKED_COMMAND_OPS @private = {
+const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
     .copy_buffer                 = &checked_copy_buffer,
     .fill_buffer                 = &checked_fill_buffer,
     .copy_buffer_to_texture      = &checked_copy_buffer_to_texture,
@@ -437,7 +438,7 @@ const gpu::CommandOps CHECKED_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
+const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .copy_buffer                 = &checked_tracking_copy_buffer,
     .fill_buffer                 = &checked_tracking_fill_buffer,
     .copy_buffer_to_texture      = &checked_tracking_copy_buffer_to_texture,
@@ -465,7 +466,7 @@ const gpu::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-fn gpu::CommandOps* select_command_ops(DeviceValidationPolicy policy) {
+fn gpu::internal::CommandOps* select_command_ops(DeviceValidationPolicy policy) {
     switch (policy.contract) {
         case gpu::ContractValidation.TRUSTED:
         case gpu::ContractValidation.OBJECT_BOUNDARIES:
@@ -483,7 +484,7 @@ fn gpu::CommandOps* select_command_ops(DeviceValidationPolicy policy) {
     }
 }
 
-fn bool command_ops_are_complete(gpu::CommandOps* ops) {
+fn bool command_ops_are_complete(gpu::internal::CommandOps* ops) {
     return ops != null
         && ops.copy_buffer != null
         && ops.fill_buffer != null
@@ -590,7 +591,7 @@ fn CommandPolicyCounters command_policy_counters(
 }
 
 // One static lifecycle table shared by every Vulkan device.
-const gpu::BackendVTable VK_VTABLE @private = {
+const gpu::internal::BackendVTable VK_VTABLE @private = {
     .check_device_destroy        = &vk_check_device_destroy,
     .destroy_device              = &vk_destroy_device,
     .report_contract_failure     = &vk_report_root_contract_failure,
@@ -677,29 +678,29 @@ fn gpu::Device? create_vk_device_with_probe(
     gpu::Runtime* retained_runtime,
     DeviceCreationProbe* probe,
 ) {
-    gpu::validate_device_request(request)!;
-    gpu::RuntimeData* runtime_data = gpu::resolve_adapter(adapter);
+    gpu::internal::validate_device_request(request)!;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(adapter);
     if (runtime_data == null) return gpu::INVALID_HANDLE~;
     VkRuntimeState* runtime_state = (VkRuntimeState*)runtime_data.backend_state;
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
 
     VkDeviceConfig desc = runtime_device_config(runtime_state);
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
-    gpu::Surface requested_surface = gpu::requested_surface(*request);
+    gpu::Surface requested_surface = gpu::internal::requested_surface(*request);
     if (requested_surface.is_valid()
         && !runtime_state.instance_capabilities.surface_maintenance) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     gpu::QueueRequirements queue_requirements =
-        gpu::requested_queue_requirements(*request);
+        gpu::internal::requested_queue_requirements(*request);
     vk::SurfaceKHR presentation_surface = requested_surface.is_valid()
-        ? (vk::SurfaceKHR)gpu::surface_backend_handle(&requested_surface)!
+        ? (vk::SurfaceKHR)gpu::internal::surface_backend_handle(&requested_surface)!
         : (vk::SurfaceKHR)null;
     return create_vk_device_from_runtime(
         desc:                       &desc,
         instance:                   runtime_state.instance,
         physical_device:            adapter_state.physical_device,
-        strict_requested:           gpu::requests_strict(*request),
+        strict_requested:           gpu::internal::requests_strict(*request),
         retained_runtime:           retained_runtime,
         adapter:                    adapter,
         runtime_state:              runtime_state,
@@ -726,7 +727,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     DeviceCreationProbe* probe = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
-    state.resource_owner = gpu::allocate_device_resource_owner()!;
+    state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     defer catch {
         destroy_state(state, probe);
         if (probe != null) probe.rollback_count++;
@@ -956,28 +957,28 @@ fn gpu::Device? create_vk_device_from_runtime(
 
     create_vk_allocator(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.ALLOCATOR)!;
-    state.buffers.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.BUFFER);
+    state.buffers.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.BUFFER);
     state.buffers.slots = mem::new_array(BufferCell, MAX_BUFFERS);
-    state.allocations.owner = gpu::resource_owner_tag(
+    state.allocations.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
-        gpu::ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
     state.allocations.slots = mem::new_array(
         AllocationCell,
         ALLOCATION_CAPACITY,
     );
 
-    state.command_allocators.owner = gpu::resource_owner_tag(
+    state.command_allocators.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
-        gpu::ResourceOwnerKind.COMMAND_ALLOCATOR,
+        gpu::internal::ResourceOwnerKind.COMMAND_ALLOCATOR,
     );
     state.command_allocators.slots = mem::new_array(
         CommandAllocatorCell,
         MAX_COMMAND_ALLOCATORS,
     );
-    state.commands.owner = gpu::resource_owner_tag(
+    state.commands.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
-        gpu::ResourceOwnerKind.COMMAND,
+        gpu::internal::ResourceOwnerKind.COMMAND,
     );
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
     state.submitted_commands = mem::new_array(
@@ -988,21 +989,21 @@ fn gpu::Device? create_vk_device_from_runtime(
     uint pipeline_capacity;
     if (state.strict_heap.enabled) {
         pipeline_capacity = resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
-        state.pipelines.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.PIPELINE);
+        state.pipelines.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.PIPELINE);
         state.pipelines.slots = mem::new_array(PipelineCell, pipeline_capacity);
     }
-    state.textures.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.TEXTURE);
+    state.textures.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.TEXTURE);
     state.textures.slots = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
-    state.attachment_views.owner = gpu::resource_owner_tag(
+    state.attachment_views.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
-        gpu::ResourceOwnerKind.ATTACHMENT_VIEW,
+        gpu::internal::ResourceOwnerKind.ATTACHMENT_VIEW,
     );
     state.attachment_views.slots = mem::new_array(
         AttachmentViewCell,
         gpu::DEFAULT_ATTACHMENT_VIEW_CAPACITY,
     );
     if (state.presentation.enabled) {
-        state.presentation.swapchains.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN);
+        state.presentation.swapchains.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.SWAPCHAIN);
         state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     }
     if (state.strict_heap.enabled) {
@@ -1032,7 +1033,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     );
 
     gpu::QueueRequirements requirements = queue_requirements == null
-        ? gpu::default_queue_requirements()
+        ? gpu::internal::default_queue_requirements()
         : *queue_requirements;
     gpu::QueueSelection queue_selection =
         gpu::queue_selection_from_native_ids(
@@ -1045,7 +1046,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     create_queue_completions(state, &queue_selection)!;
 
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
-    return gpu::register_device(
+    return gpu::internal::register_device(
         backend:              gpu::BackendKind.VULKAN,
         caps:                 state.caps,
         vtable:               &VK_VTABLE,

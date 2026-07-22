@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::core::mem;
@@ -41,7 +42,7 @@ fn uint route_runtime_debug_message(
         .validation_id_name   = data != null ? (ZString)data.p_message_id_name : null,
         .validation_id_number = data != null ? data.message_id_number : 0,
     };
-    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     return vk::FALSE;
 }
 
@@ -110,7 +111,7 @@ fn void report_runtime_debug_messenger_failure(VkRuntimeState* state) {
         .operation    = "create_runtime",
         .backend_text = "debug-utils messenger unavailable",
     };
-    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
 }
 
 fn void destroy_vk_runtime_state(VkRuntimeState* state) {
@@ -135,7 +136,7 @@ fn void vk_destroy_runtime(void* backend_state) {
     destroy_vk_runtime_state((VkRuntimeState*)backend_state);
 }
 
-const gpu::RuntimeBackendVTable VK_RUNTIME_VTABLE @private = {
+const gpu::internal::RuntimeBackendVTable VK_RUNTIME_VTABLE @private = {
     .destroy_runtime         = &vk_destroy_runtime,
     .get_adapter_info        = &vk_get_adapter_info,
     .get_adapter_diagnostics = &vk_get_adapter_diagnostics,
@@ -228,7 +229,7 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     }
 
     enumerate_vk_adapters(state)!;
-    return gpu::register_runtime(
+    return gpu::internal::register_runtime(
         backend:       gpu::BackendKind.VULKAN,
         vtable:        &VK_RUNTIME_VTABLE,
         backend_state: state,

@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import vma;
@@ -100,7 +101,7 @@ fn uint route_debug_message(
         .validation_id_name   = data != null ? (ZString)data.p_message_id_name : null,
         .validation_id_number = data != null ? data.message_id_number : 0,
     };
-    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     return vk::FALSE;
 }
 
@@ -137,7 +138,7 @@ fn fault report_contract_failure(
         .invariant      = invariant,
         .backend_text   = backend_text,
     };
-    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     return public_fault;
 }
 
@@ -165,7 +166,7 @@ fn bool report_resource_lifetime(
         .invariant    = "resource remains live at device destruction",
         .backend_text = backend_text,
     };
-    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     return true;
 }
 
@@ -356,7 +357,7 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     return count;
 }
 
-fn void? vk_cmd_begin_label(gpu::CommandEncoderState* commands, ZString label, float[4] color) @private {
+fn void? vk_cmd_begin_label(gpu::internal::CommandEncoderState* commands, ZString label, float[4] color) @private {
     if (commands == null || commands.backend_state == null
         || commands.backend_command == null) return gpu::COMMAND_RECORDING_ERROR~;
     if (label == null) return gpu::INVALID_ARGUMENT~;
@@ -369,10 +370,10 @@ fn void? vk_cmd_begin_label(gpu::CommandEncoderState* commands, ZString label, f
     info.p_label_name = (char*)label;
     info.color = color;
     state.device_dispatch.debug.cmd_begin_label(record.command_buffer, &info);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }
 
-fn void? vk_cmd_end_label(gpu::CommandEncoderState* commands) @private {
+fn void? vk_cmd_end_label(gpu::internal::CommandEncoderState* commands) @private {
     if (commands == null || commands.backend_state == null
         || commands.backend_command == null) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = encoder_device_state(commands);
@@ -381,5 +382,5 @@ fn void? vk_cmd_end_label(gpu::CommandEncoderState* commands) @private {
         && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     state.device_dispatch.debug.cmd_end_label(record.command_buffer);
-    gpu::note_command_native_call();
+    gpu::internal::note_command_native_call();
 }

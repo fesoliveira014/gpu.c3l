@@ -1,5 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
+import gpu;
 
 <* Internal synchronous callback dispatch; null callbacks are ignored. *>
 fn void dispatch_debug_message(DebugMessageCallback callback, void* user_data, DebugMessage* message) @private {
