@@ -325,6 +325,41 @@ class PerformanceContractTests(unittest.TestCase):
                 )
             )
 
+    def test_pipeline_cell_moved_to_command_record_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command_state.c3",
+                "    CommandState                state;",
+                (
+                    "    CommandState                state;\n"
+                    "    PipelineCell*               retained_pipeline_slot;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "CommandRecord must not retain a PipelineCell pointer" in error
+                for error in errors
+            ))
+
+    def test_missing_bound_pipeline_reports_contract_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command_state.c3",
+                "struct BoundPipeline {",
+                "struct RemovedBoundPipeline {",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "missing struct BoundPipeline" in error
+                for error in errors
+            ))
+
     def test_retired_compute_layout_cache_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

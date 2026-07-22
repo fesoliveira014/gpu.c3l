@@ -1414,8 +1414,7 @@ fn void? bind_pipeline_state(
     gpu::PipelineHandle pipeline,
 ) @private {
     validate_descriptor_heap_binding(state)!;
-    PipelineCell* cell = state.pipelines.get_cell(pipeline)!;
-    PipelineSlot* slot = &cell.value;
+    PipelineSlot* slot = state.pipelines.get(pipeline)!;
     gpu::note_command_pipeline_cache_lookup();
     if (slot.entry >= state.pipeline_cache.entries.len
         || !state.pipeline_cache.entries[slot.entry].used) {

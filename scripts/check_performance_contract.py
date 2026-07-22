@@ -238,7 +238,7 @@ def function_names(source: str) -> tuple[str, ...]:
     )
 
 
-def struct_field_names(source: str, name: str) -> tuple[str, ...]:
+def struct_body(source: str, name: str) -> str:
     masked_source = mask_c3_comments(source)
     declaration = re.search(
         rf"(?m)^struct\s+{re.escape(name)}\s*\{{",
@@ -254,12 +254,15 @@ def struct_field_names(source: str, name: str) -> tuple[str, ...]:
         elif masked_source[index] == "}":
             depth -= 1
             if depth == 0:
-                body = masked_source[start + 1:index]
-                return tuple(re.findall(
-                    r"(?m)^\s*[^\n;{}]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*;",
-                    body,
-                ))
+                return masked_source[start + 1:index]
     raise ValueError(f"unterminated struct {name}")
+
+
+def struct_field_names(source: str, name: str) -> tuple[str, ...]:
+    return tuple(re.findall(
+        r"(?m)^\s*[^\n;{}]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*;",
+        struct_body(source, name),
+    ))
 
 
 def read(root: Path, relative: str) -> str:
@@ -547,15 +550,33 @@ def check(root: Path = ROOT) -> list[str]:
                 "Vulkan command recording retains forbidden bound-pipeline "
                 f"revalidation token {token}"
             )
-    bound_pipeline_fields = struct_field_names(
-        command_state_source,
-        "BoundPipeline",
-    )
-    if bound_pipeline_fields != BOUND_PIPELINE_SNAPSHOT_FIELDS:
-        errors.append(
-            "gpu/vk/command_state.c3:BoundPipeline must contain only the "
-            "reviewed native snapshot fields"
+    try:
+        bound_pipeline_fields = struct_field_names(
+            command_state_source,
+            "BoundPipeline",
         )
+    except ValueError as error:
+        errors.append(f"gpu/vk/command_state.c3:{error}")
+    else:
+        if bound_pipeline_fields != BOUND_PIPELINE_SNAPSHOT_FIELDS:
+            errors.append(
+                "gpu/vk/command_state.c3:BoundPipeline must contain only the "
+                "reviewed native snapshot fields"
+            )
+
+    try:
+        command_record_body = struct_body(command_state_source, "CommandRecord")
+    except ValueError as error:
+        errors.append(f"gpu/vk/command_state.c3:{error}")
+    else:
+        if re.search(
+            r"(?m)^\s*PipelineCell\s*\*\s*[A-Za-z_][A-Za-z0-9_]*\s*;",
+            command_record_body,
+        ):
+            errors.append(
+                "gpu/vk/command_state.c3:CommandRecord must not retain a "
+                "PipelineCell pointer"
+            )
 
     backend_root = root / "gpu/vk"
     retired_layout_cache_references = 0

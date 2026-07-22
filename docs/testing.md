@@ -408,9 +408,10 @@ immutable key state. It also
 walks every Vulkan recording root and reachable helper across backend files,
 rejecting device/backend re-resolution, command-table lookup, lifecycle-vtable
 dispatch, post-bind pipeline resolution, and bound-cell generation validation.
-Mutation tests restore each retired cell pointer, expected generation, and
-identity-validator seam, while helper-relocation mutations prove that moving
-forbidden work to another source file does not evade the gate. Validation-mode
+Mutation tests restore each retired `BoundPipeline` cell pointer, expected
+generation, and identity-validator seam; move a renamed `PipelineCell*` onto
+`CommandRecord`; and prove through helper relocation that moving forbidden work
+to another source file does not evade the gate. Validation-mode
 lifetime coverage also proves a recording command blocks public pipeline
 destruction, then continues execution from its cached native snapshot before
 discard releases ownership.

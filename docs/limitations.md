@@ -110,6 +110,11 @@ Two sizing rules that bite:
   `TextureView` recycles its raw index immediately. Wait or discard every use
   before releasing the view, and do not leave stale indices in GPU-visible
   data. Sampler indices remain stable until device destruction.
+- **Validation-off pipeline lifetime is caller-owned.** Runtime validation
+  retains bound pipelines and rejects early destruction with `RESOURCE_IN_USE`.
+  Without validation, keep every bound pipeline live through command completion;
+  destroying one earlier violates the caller contract and does not guarantee an
+  `INVALID_HANDLE` fault on later recording calls.
 - **Transient data is caller-owned.** Applications choose allocation reuse and
   concurrency policy. Flush CPU writes before submission, retain the covering
   completion point, and wait or poll before rewriting or freeing storage.
