@@ -176,13 +176,16 @@ present mode selection
 application render-loop pacing sanity
 ```
 
-The local `vk_swapchain` target covers result mapping, readiness identity and
-replay guards, acquire-semaphore retirement, present OOM retry, per-image
+The local `vk_swapchain` target covers exact zero/finite/infinite timeout
+propagation, timeout and error rollback, same-semaphore retry, invalid native
+image indices, readiness identity and replay guards, acquire-semaphore
+retirement, present OOM retry, per-image
 presentation-fence attachment/reuse, immediate destroy/resize rejection, shared
-texture-reference detection, diagnostics, and dormant publication. `vk_queue`
+texture-reference detection, diagnostics, and dormant publication. A busy
+acquire ring is proven to skip the native acquisition call. `vk_queue`
 covers native submit rollback, full-submission bridge scopes, and all selected
-graphics families. Surface loss and acquire starvation remain manual recovery
-cases in the windowed samples.
+graphics families. Windowed samples remain the manual WSI recovery and pacing
+coverage.
 
 Texture synchronization coverage pins the compositional matrix: vertex,
 fragment, compute, and combined sampled stages; storage read, write, and
@@ -396,10 +399,11 @@ c3c build sampler_operations --path test/cpu
 c3c build texture_view_operations --path test/cpu
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
-python -m unittest scripts.test_check_docs scripts.test_check_public_api scripts.test_check_backend_dispatch
+python -m unittest scripts.test_check_docs scripts.test_check_public_api scripts.test_check_backend_dispatch scripts.test_check_swapchain_acquire_policy
 python scripts/check_docs.py
 python scripts/check_public_api.py
 python scripts/check_backend_dispatch.py
+python scripts/check_swapchain_acquire_policy.py
 python scripts/check_retired_api.py
 python -B -m unittest scripts.test_run_benchmarks
 ```

@@ -965,7 +965,7 @@ discard_commands(CommandList* commands) -> void?
 discard_executable_commands(ExecutableCommandList* commands) -> void?
 submit(Queue queue, SubmitDesc* desc) -> CompletionPoint?
 poll_completion(CompletionPoint point) -> bool?
-wait_completion(CompletionPoint point, ulong timeout_ns = ulong::max) -> void?
+wait_completion(CompletionPoint point, ulong timeout_ns = TIMEOUT_INFINITE) -> void?
 
 CompletionPoint
     Device device
@@ -1018,6 +1018,8 @@ words and allocates no public synchronization object. `poll_completion` returns
 false while work is incomplete. `wait_completion` returns `WAIT_TIMEOUT` when
 the bound expires; either operation leaves the point unchanged. Zero, stale,
 foreign-device, malformed, and unpublished points fault `INVALID_HANDLE`.
+`TIMEOUT_INFINITE` is `ulong::max` and is shared by explicit waits and
+swapchain acquisition.
 
 `CommandList` is a recording token. Successful `end_commands` consumes it and
 returns a one-shot `ExecutableCommandList`; failure leaves the recording token
@@ -1737,7 +1739,11 @@ create_swapchain(Device*, Surface*, SwapchainDesc*) -> SwapchainHandle?
 destroy_swapchain(Device*, SwapchainHandle) -> void?
 resize_swapchain(Device*, SwapchainHandle, uint width, uint height) -> void?
 get_swapchain_info(Device*, SwapchainHandle) -> SwapchainInfo?
-acquire_next_image(Device*, SwapchainHandle) -> AcquiredImage?
+acquire_next_image(
+    Device*,
+    SwapchainHandle,
+    ulong timeout_ns = 0,
+) -> AcquiredImage?
 present(Device*, AcquiredImage*, CompletionPoint render_completion) -> void?
 get_present_mode_support(Device*, SwapchainHandle) -> PresentModeSupport?
 ```
@@ -1751,8 +1757,24 @@ and retryable native failure preserve readiness; device loss is terminal.
 Replays, stale acquisitions, foreign devices, non-graphics queues, and unrelated
 completion points fault before native mutation.
 
+Acquisition passes `timeout_ns` to the backend unchanged. Zero, the default,
+is nonblocking. A finite value bounds native image acquisition in nanoseconds.
+`TIMEOUT_INFINITE` requests an unbounded native wait and is valid only when the
+surface platform guarantees presentation forward progress. Shipped render
+loops should normally use zero or a small finite budget so event handling and
+shutdown remain responsive.
+
+`WAIT_TIMEOUT`, out-of-date, surface loss, allocation failure, and device loss
+do not advance the acquisition sequence or semaphore ring and do not publish a
+pending image. The caller may retry a timeout with the same swapchain; the
+backend reuses the same eligible semaphore until an acquisition succeeds.
+
 ```c3
-gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
+gpu::AcquiredImage acquired = gpu::acquire_next_image(
+    &device,
+    swapchain,
+    2_000_000,
+)!;
 // Use acquired.attachment_view as the color target; it is borrowed.
 gpu::SubmitDesc submit = {
     .command_lists    = lists[..],

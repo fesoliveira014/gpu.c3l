@@ -244,6 +244,7 @@ RETIRED_SOURCE_SYMBOLS = (
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
+    "ACQUIRE_TIMEOUT_NS",
     "StandaloneDeviceConfig",
     "create_standalone_device_with_probe",
     "TextureUseScope",
@@ -576,6 +577,14 @@ def validate_document(document: dict) -> list[str]:
     ):
         failures.append("COLOR_WRITE_ALL must enable every color channel")
 
+    timeout_infinite = variables.get("TIMEOUT_INFINITE", {})
+    if (
+        timeout_infinite.get("kind") != "constant"
+        or timeout_infinite.get("type", {}).get("name") != "ulong"
+        or timeout_infinite.get("value") != "18446744073709551615"
+    ):
+        failures.append("TIMEOUT_INFINITE must equal ulong::max")
+
     texture_schemas = (
         (
             "TextureDesc",
@@ -753,6 +762,31 @@ def validate_document(document: dict) -> list[str]:
             )
         if begin_commands.get("return_type", {}).get("name") != "CommandList?":
             failures.append("begin_commands must return CommandList?")
+
+    acquire_next_image = functions.get("acquire_next_image")
+    if acquire_next_image is None:
+        failures.append("missing acquire_next_image")
+    else:
+        members = acquire_next_image.get("members", [])
+        if tuple(
+            (
+                member.get("name"),
+                member.get("type", {}).get("name"),
+            )
+            for member in members
+        ) != (
+            ("device", "Device*"),
+            ("swapchain", "SwapchainHandle"),
+            ("timeout_ns", "ulong"),
+        ):
+            failures.append("acquire_next_image has the wrong parameters")
+        elif members[2].get("default_value") != "0":
+            failures.append("acquire_next_image must default timeout_ns to zero")
+        if (
+            acquire_next_image.get("return_type", {}).get("name")
+            != "AcquiredImage?"
+        ):
+            failures.append("acquire_next_image has the wrong return type")
 
     end_commands = functions.get("end_commands")
     if end_commands is None:

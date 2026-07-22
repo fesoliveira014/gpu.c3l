@@ -361,6 +361,12 @@ fn void pin_presentation() {
     (void)gpu::get_swapchain_info(&device, swapchain);
     (void)gpu::get_present_mode_support(&device, swapchain);
     (void)gpu::acquire_next_image(&device, swapchain);
+    (void)gpu::acquire_next_image(&device, swapchain, 2_000_000);
+    (void)gpu::acquire_next_image(
+        device:     &device,
+        swapchain:  swapchain,
+        timeout_ns: gpu::TIMEOUT_INFINITE,
+    );
     (void)gpu::present(&device, &image, completion);
     (void)prior_state;
     (void)gpu::resize_swapchain(

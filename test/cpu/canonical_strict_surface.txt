@@ -103,6 +103,7 @@ fault gpu::SWAPCHAIN_OUT_OF_DATE
 fault gpu::UNSUPPORTED_BACKEND
 fault gpu::UNSUPPORTED_FEATURE
 fault gpu::WAIT_TIMEOUT
+constant gpu::TIMEOUT_INFINITE
 function gpu::acquire_next_image
 function gpu::allocate_memory
 function gpu::begin_commands
