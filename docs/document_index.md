@@ -32,6 +32,11 @@ Start with:
 ## Maintenance
 
 - Source doc comments define public contracts; `docs/api.md` explains usage.
+- Keep root public non-callables in `gpu/gpu.c3i` and root public callables in
+  `gpu/gpu.c3`. Keep each native surface's typedefs/callable in its local
+  `.c3i`/`.c3` pair.
+- Keep backend-independent implementation in private `gpu::internal` and the
+  Vulkan backend in private `gpu::internal::vk`.
 - Keep Vulkan and VMA implementation details out of public signatures and consumer examples.
 - Update the relevant topic document with every contract or behavior change.
 - Describe current behavior, not project-management history.

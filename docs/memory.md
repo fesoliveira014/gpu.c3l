@@ -36,11 +36,11 @@ Only the Vulkan backend imports `vma`.
 Backend files that may import `vma`:
 
 ```text
-gpu/vk/allocator.c3
-gpu/vk/allocation.c3
-gpu/vk/buffer.c3
-gpu/vk/texture.c3
-gpu/vk/debug.c3
+gpu/internal/vk/allocator.c3
+gpu/internal/vk/allocation.c3
+gpu/internal/vk/buffer.c3
+gpu/internal/vk/texture.c3
+gpu/internal/vk/debug.c3
 ```
 
 Public files must not import `vma`.

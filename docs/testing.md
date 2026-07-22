@@ -27,6 +27,13 @@ test/cpu/import_gpu.c3
 test/src/test_*.c3
 ```
 
+The library source inventory is intentional: `gpu/gpu.c3i` supplies public
+non-callables, `gpu/gpu.c3` supplies public callables, each platform surface is
+a local `.c3i`/`.c3` pair, `gpu/internal/*.c3` is backend-independent private
+code, and `gpu/internal/vk/*.c3` is the private Vulkan backend. CPU projects
+list private files explicitly so their `gpu::internal::vk` stub never compiles
+the real backend.
+
 Examples:
 
 ```text
@@ -657,9 +664,10 @@ C3 0.8.0 constraints:
 - Library `manifest.json` does **not** accept `dependency-search-paths` (that is
   a `project.json` key); dependencies are declared per-target and resolved by
   the consumer's search path.
-- `manifest.json` `sources` must cover every public source file under
-  `gpu/` plus `gpu/vk/**`; a glob like `*.c3` is rejected and the
-  default does not recurse into `gpu/vk/`.
+- `manifest.json` `sources` use the complete final layout:
+  `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/surface/**`, and `gpu/internal/**`.
+  A glob like `*.c3` is rejected, and the default does not recurse into either
+  the surface or internal trees.
 
 ## 10. CI matrix
 
@@ -814,6 +822,7 @@ explicit command allocators are balanced and retired queue-based begin/reservati
 warm command recording/submission paths allocate no host/native/VMA/temp-pool storage
 no public API signature exposes vk::, vma::, or sdl:: types
 public sources declare only gpu and the three platform surface modules
+private sources declare only gpu::internal and gpu::internal::vk
 documentation links resolve
 manifest sources cover every shipped C3 source
 ```
