@@ -320,6 +320,14 @@ fn ulong pipeline_shader_module_create_count(VkDeviceState* state) {
     return state.pipeline_shader_modules_created;
 }
 
+fn ulong shader_reflection_validation_count(VkDeviceState* state) @if(env::TESTING) {
+    return state.shader_reflection_validations;
+}
+
+fn ulong pipeline_shader_create_attempt_count(VkDeviceState* state) @if(env::TESTING) {
+    return state.pipeline_shader_create_attempts;
+}
+
 fn ulong pipeline_native_create_count(VkDeviceState* state) {
     return state.pipelines_created;
 }

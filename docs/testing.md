@@ -570,6 +570,21 @@ preserving every other blocking assertion. A pinned lane sets
 `generated-work` and `generated-scratch-reservation`; Linux distro Mesa may
 report either as unavailable.
 
+`vk_shader_reflection` covers selected-entry isolation, absent blocks, exact
+compute and graphics roots, wrong stage and entry, and malformed block/member
+shapes. Test-only counters prove a rejected deduplicated `ShaderId` is reflected
+once and reaches neither native shader creation nor cache/output publication;
+`vk_pipeline_cache` proves the same once-per-identity behavior for successful
+batches. `scripts/build_shaders.py` compiles sorted `.glsl` fixtures with
+`glslc` and assembles sorted `.spvasm` fixtures with `spirv-as`. The latter make
+multi-entry, offset, member-order, and multiple-block reflection shapes
+deterministic. Run the policy and mutation gate with:
+
+```sh
+python3 -B -m unittest scripts.test_check_shader_reflection_policy
+python3 -B scripts/check_shader_reflection_policy.py
+```
+
 Distinct-adapter ownership is gated deterministically by the CPU stub suite.
 `vk_device_request` also uses two physical adapters when both support the strict
 profile and reports `distinct-adapter=N/A` otherwise.

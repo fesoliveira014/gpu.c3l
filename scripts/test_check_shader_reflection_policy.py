@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from scripts import check_shader_reflection_policy
+
+
+class ShaderReflectionPolicyCheckTests(unittest.TestCase):
+    def copy_policy_sources(self, root: Path) -> None:
+        for relative in check_shader_reflection_policy.POLICY_FILES:
+            source = check_shader_reflection_policy.ROOT / relative
+            destination = root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        shader_source = check_shader_reflection_policy.ROOT / "test/shaders/root_pointer.comp.glsl"
+        shader_destination = root / "test/shaders/root_pointer.comp.glsl"
+        shader_destination.parent.mkdir(parents=True, exist_ok=True)
+        shader_destination.write_text(
+            shader_source.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+    def mutate(self, relative: str, old: str, new: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_policy_sources(root)
+            path = root / relative
+            source = path.read_text(encoding="utf-8")
+            self.assertIn(old, source)
+            path.write_text(source.replace(old, new, 1), encoding="utf-8")
+            return check_shader_reflection_policy.check(root)
+
+    def test_current_sources_satisfy_contract(self) -> None:
+        self.assertEqual(check_shader_reflection_policy.check(), [])
+
+    def test_rejects_module_wide_descriptor_reflection(self) -> None:
+        errors = self.mutate(
+            "gpu/vk/shader.c3",
+            ".enumerate_entry_point_descriptor_bindings(",
+            ".enumerate_descriptor_bindings(",
+        )
+        self.assertTrue(any("module-wide reflection call" in error for error in errors))
+
+    def test_rejects_native_creation_before_exact_root_check(self) -> None:
+        errors = self.mutate(
+            "gpu/vk/shader.c3",
+            "if (catch push_fault = check_root_push_abi(",
+            "create_pipeline_shader_module_native(state, null, null);\n"
+            "    if (catch push_fault = check_root_push_abi(",
+        )
+        self.assertTrue(any("before native creation" in error for error in errors))
+
+    def test_requires_no_push_block_acceptance(self) -> None:
+        errors = self.mutate(
+            "gpu/vk/shader.c3",
+            "if (count == 0) return;\n"
+            "    if (count != 1) return gpu::SHADER_INVALID~;",
+            "if (count == 0) return gpu::SHADER_INVALID~;\n"
+            "    if (count != 1) return gpu::SHADER_INVALID~;",
+        )
+        self.assertTrue(any("count == 0" in error for error in errors))
+
+    def test_requires_integer_numeric_kind(self) -> None:
+        errors = self.mutate(
+            "gpu/vk/shader.c3",
+            "integer == expected.integer",
+            "integer == integer",
+        )
+        self.assertTrue(any("integer == expected.integer" in error for error in errors))
+
+    def test_requires_float_numeric_kind(self) -> None:
+        errors = self.mutate(
+            "gpu/vk/shader.c3",
+            "float_scalar != expected.integer",
+            "float_scalar == float_scalar",
+        )
+        self.assertTrue(any("float_scalar != expected.integer" in error for error in errors))
+
+    def test_requires_reflection_fault_mapping(self) -> None:
+        errors = self.mutate(
+            "gpu/vk/shader.c3",
+            "public_fault:   gpu::SHADER_INVALID",
+            "public_fault:   gpu::INVALID_ARGUMENT",
+        )
+        self.assertTrue(any("map to SHADER_INVALID" in error for error in errors))
+
+    def test_rejects_public_generated_metadata(self) -> None:
+        errors = self.mutate(
+            "gpu/shader_abi.c3",
+            "const RootAbiSpec ROOT_PUSH_ABI @private",
+            "const RootAbiSpec ROOT_PUSH_ABI",
+        )
+        self.assertTrue(any("ROOT_PUSH_ABI @private" in error for error in errors))
+
+    def test_rejects_backend_foreign_redeclaration(self) -> None:
+        errors = self.mutate(
+            "gpu/vk/shader.c3",
+            "module gpu::vk @private;",
+            "module gpu::vk @private;\nextern fn void local_reflect() @cname(\"spvReflectLocal\");",
+        )
+        self.assertTrue(any("redeclares a foreign" in error for error in errors))
+
+    def test_rejects_nested_generated_push_struct(self) -> None:
+        errors = self.mutate(
+            "test/shaders/root_pointer.comp.glsl",
+            "uint64_t root_gpu;",
+            "RootPush pc;",
+        )
+        self.assertTrue(any("nests a generated root struct" in error for error in errors))
+
+    def test_ignores_policy_markers_in_comments_and_strings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_policy_sources(root)
+            path = root / "gpu/vk/shader.c3"
+            source = path.read_text(encoding="utf-8")
+            source += (
+                '\n// extern fn void fake() @cname("spvReflectFake");\n'
+                'const ZString POLICY_EXAMPLE = ".enumerate_descriptor_bindings(";\n'
+            )
+            path.write_text(source, encoding="utf-8")
+            self.assertEqual(check_shader_reflection_policy.check(root), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

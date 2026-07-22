@@ -8,6 +8,22 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
     out.appendf("module %s;\n", module_name);
     if (module_name != "gpu") out.append("\nimport gpu;\n");
 
+    uint max_push_members = max_push_member_count(schema);
+    if (max_push_members > 0) {
+        out.append("\nstruct RootAbiMemberSpec @private {\n");
+        out.append("    uint offset;\n");
+        out.append("    uint size;\n");
+        out.append("    uint scalar_width;\n");
+        out.append("    bool scalar_signed;\n");
+        out.append("    bool integer;\n");
+        out.append("}\n\n");
+        out.append("struct RootAbiSpec @private {\n");
+        out.append("    uint block_size;\n");
+        out.append("    uint member_count;\n");
+        out.appendf("    RootAbiMemberSpec[%d] members;\n", max_push_members);
+        out.append("}\n");
+    }
+
     foreach (&decl : schema.types) {
         TypeInfo base = types.entries.get(decl.base_name)!!;
         out.appendf("\ntypedef %s = %s;\n", decl.name, base.c3_name);
@@ -37,6 +53,53 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
             out.appendf("$assert $reflect(%s.%s).offset == %d;\n", decl.name, field.name, field.offset);
         }
     }
+
+    foreach (&decl : schema.structs) {
+        if (decl.kind == DeclKind.PUSH) {
+            emit_root_abi_spec(decl, types, max_push_members, out);
+        }
+    }
+}
+
+fn uint max_push_member_count(Schema* schema) {
+    uint max_members = 0;
+    foreach (&decl : schema.structs) {
+        if (decl.kind == DeclKind.PUSH && decl.fields.len() > max_members) {
+            max_members = (uint)decl.fields.len();
+        }
+    }
+    return max_members;
+}
+
+fn void emit_root_abi_spec(
+    StructDecl* decl,
+    TypeTable* types,
+    uint max_push_members,
+    DString* out,
+) {
+    String constant_name = decl.name.pascal_to_snake_copy(mem);
+    defer free(constant_name.ptr);
+    constant_name.convert_to_upper();
+
+    out.appendf("\nconst RootAbiSpec %s_ABI @private = {\n", constant_name);
+    out.appendf("    .block_size   = %d,\n", decl.size);
+    out.appendf("    .member_count = %d,\n", decl.fields.len());
+    out.append("    .members      = {\n");
+    foreach (&field : decl.fields) {
+        TypeInfo info = types.entries.get(field.type_name)!!;
+        out.append("        {\n");
+        out.appendf("            .offset        = %d,\n", field.offset);
+        out.appendf("            .size          = %d,\n", info.size);
+        out.appendf("            .scalar_width  = %d,\n", info.scalar_width);
+        out.appendf("            .scalar_signed = %s,\n", info.scalar_signed ? "true" : "false");
+        out.appendf("            .integer       = %s,\n", info.integer ? "true" : "false");
+        out.append("        },\n");
+    }
+    for (uint i = (uint)decl.fields.len(); i < max_push_members; i++) {
+        out.append("        {},\n");
+    }
+    out.append("    },\n");
+    out.append("};\n");
 }
 
 fn usz c3_type_width(StructDecl* decl, TypeTable* types) {

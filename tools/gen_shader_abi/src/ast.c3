@@ -26,6 +26,9 @@ struct TypeInfo {
     TypeKind kind;
     uint     size;
     uint     alignment;
+    uint     scalar_width;
+    bool     scalar_signed;
+    bool     integer;
     String   c3_name;
     String   glsl_name;
 }
@@ -91,15 +94,15 @@ fn void Schema.free(&self) {
 fn void TypeTable.init(&self) {
     self.entries.init(mem);
     self.symbols.init(mem);
-    self.entries.set("uint",  { .kind = SCALAR, .size = 4, .alignment = 4, .c3_name = "uint",  .glsl_name = "uint" });
-    self.entries.set("int",   { .kind = SCALAR, .size = 4, .alignment = 4, .c3_name = "int",   .glsl_name = "int" });
-    self.entries.set("float", { .kind = SCALAR, .size = 4, .alignment = 4, .c3_name = "float", .glsl_name = "float" });
-    self.entries.set("u64",   { .kind = SCALAR, .size = 8, .alignment = 8, .c3_name = "ulong", .glsl_name = "uint64_t" });
-    self.entries.set("vec2",  { .kind = VECTOR, .size = 8,  .alignment = 8,  .c3_name = "Vec2f", .glsl_name = "vec2" });
-    self.entries.set("vec4",  { .kind = VECTOR, .size = 16, .alignment = 16, .c3_name = "Vec4f", .glsl_name = "vec4" });
-    self.entries.set("GpuAddress",   { .kind = SEMANTIC, .size = 8, .alignment = 8, .c3_name = "GpuAddress",   .glsl_name = "uint64_t" });
-    self.entries.set("TextureIndex", { .kind = SEMANTIC, .size = 4, .alignment = 4, .c3_name = "TextureIndex", .glsl_name = "uint" });
-    self.entries.set("SamplerIndex", { .kind = SEMANTIC, .size = 4, .alignment = 4, .c3_name = "SamplerIndex", .glsl_name = "uint" });
+    self.entries.set("uint",  { .kind = SCALAR, .size = 4, .alignment = 4, .scalar_width = 32, .integer = true, .c3_name = "uint",  .glsl_name = "uint" });
+    self.entries.set("int",   { .kind = SCALAR, .size = 4, .alignment = 4, .scalar_width = 32, .scalar_signed = true, .integer = true, .c3_name = "int", .glsl_name = "int" });
+    self.entries.set("float", { .kind = SCALAR, .size = 4, .alignment = 4, .scalar_width = 32, .c3_name = "float", .glsl_name = "float" });
+    self.entries.set("u64",   { .kind = SCALAR, .size = 8, .alignment = 8, .scalar_width = 64, .integer = true, .c3_name = "ulong", .glsl_name = "uint64_t" });
+    self.entries.set("vec2",  { .kind = VECTOR, .size = 8,  .alignment = 8,  .scalar_width = 32, .c3_name = "Vec2f", .glsl_name = "vec2" });
+    self.entries.set("vec4",  { .kind = VECTOR, .size = 16, .alignment = 16, .scalar_width = 32, .c3_name = "Vec4f", .glsl_name = "vec4" });
+    self.entries.set("GpuAddress",   { .kind = SEMANTIC, .size = 8, .alignment = 8, .scalar_width = 64, .integer = true, .c3_name = "GpuAddress", .glsl_name = "uint64_t" });
+    self.entries.set("TextureIndex", { .kind = SEMANTIC, .size = 4, .alignment = 4, .scalar_width = 32, .integer = true, .c3_name = "TextureIndex", .glsl_name = "uint" });
+    self.entries.set("SamplerIndex", { .kind = SEMANTIC, .size = 4, .alignment = 4, .scalar_width = 32, .integer = true, .c3_name = "SamplerIndex", .glsl_name = "uint" });
 }
 
 fn void TypeTable.free(&self) {

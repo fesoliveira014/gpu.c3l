@@ -1,0 +1,55 @@
+OpCapability Shader
+OpCapability Int64
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %good "good" %good_pc
+OpEntryPoint GLCompute %bad_descriptor "bad_descriptor" %bad_descriptor_pc %bad_buffer
+OpEntryPoint GLCompute %bad_push "bad_push" %bad_push_pc
+OpExecutionMode %good LocalSize 1 1 1
+OpExecutionMode %bad_descriptor LocalSize 1 1 1
+OpExecutionMode %bad_push LocalSize 1 1 1
+OpDecorate %GoodPush Block
+OpMemberDecorate %GoodPush 0 Offset 0
+OpDecorate %BadPush Block
+OpMemberDecorate %BadPush 0 Offset 0
+OpDecorate %BadBuffer Block
+OpMemberDecorate %BadBuffer 0 Offset 0
+OpDecorate %bad_buffer DescriptorSet 1
+OpDecorate %bad_buffer Binding 0
+%void = OpTypeVoid
+%function = OpTypeFunction %void
+%u64 = OpTypeInt 64 0
+%u32 = OpTypeInt 32 0
+%u32_0 = OpConstant %u32 0
+%GoodPush = OpTypeStruct %u64
+%BadPush = OpTypeStruct %u32
+%BadBuffer = OpTypeStruct %u32
+%good_push_ptr = OpTypePointer PushConstant %GoodPush
+%bad_push_ptr = OpTypePointer PushConstant %BadPush
+%bad_buffer_ptr = OpTypePointer StorageBuffer %BadBuffer
+%push_u64_ptr = OpTypePointer PushConstant %u64
+%push_u32_ptr = OpTypePointer PushConstant %u32
+%storage_u32_ptr = OpTypePointer StorageBuffer %u32
+%good_pc = OpVariable %good_push_ptr PushConstant
+%bad_descriptor_pc = OpVariable %good_push_ptr PushConstant
+%bad_push_pc = OpVariable %bad_push_ptr PushConstant
+%bad_buffer = OpVariable %bad_buffer_ptr StorageBuffer
+%good = OpFunction %void None %function
+%good_label = OpLabel
+%good_member = OpAccessChain %push_u64_ptr %good_pc %u32_0
+%good_value = OpLoad %u64 %good_member
+OpReturn
+OpFunctionEnd
+%bad_descriptor = OpFunction %void None %function
+%bad_descriptor_label = OpLabel
+%bad_descriptor_member = OpAccessChain %push_u64_ptr %bad_descriptor_pc %u32_0
+%bad_descriptor_value = OpLoad %u64 %bad_descriptor_member
+%bad_buffer_member = OpAccessChain %storage_u32_ptr %bad_buffer %u32_0
+%bad_buffer_value = OpLoad %u32 %bad_buffer_member
+OpReturn
+OpFunctionEnd
+%bad_push = OpFunction %void None %function
+%bad_push_label = OpLabel
+%bad_push_member = OpAccessChain %push_u32_ptr %bad_push_pc %u32_0
+%bad_push_value = OpLoad %u32 %bad_push_member
+OpReturn
+OpFunctionEnd

@@ -423,7 +423,10 @@ immutable and alive for each creation call. Each device interns exact identity
 into one owned SPIR-V clone and represents it internally with a compact ID. The
 same prepared code may be reused for multiple pipelines and devices; each device
 owns independently. Native shader modules are temporary pipeline-construction
-details, never public resources.
+details, never public resources. Before native module creation, selected-entry
+reflection validates the descriptor convention and, when a push-constant block
+is declared, its complete generated root ABI. Batch preparation performs this
+once per deduplicated shader identity and publishes nothing on failure.
 
 Pipelines are immutable shader execution objects. Creation is split by kind:
 

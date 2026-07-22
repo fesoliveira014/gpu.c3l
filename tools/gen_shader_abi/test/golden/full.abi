@@ -21,6 +21,10 @@ root BuildRoot {
     uint       _pad1;
 }
 
+push RootPush {
+    GpuAddress root_gpu;
+}
+
 push GraphicsRootPush {
     GpuAddress vertex_root_gpu;
     GpuAddress fragment_root_gpu;

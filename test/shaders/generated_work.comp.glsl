@@ -8,7 +8,9 @@ layout(buffer_reference, std430) writeonly buffer DrawRecords { GeneratedDrawRec
 layout(buffer_reference, std430) writeonly buffer IndexedRecords { GeneratedDrawIndexedRecord records[]; };
 layout(buffer_reference, std430) writeonly buffer DispatchRecords { GeneratedDispatchRecord records[]; };
 layout(buffer_reference, std430) writeonly buffer CountBuffer { uint value; };
-layout(push_constant) uniform Push { RootPush pc; };
+layout(push_constant) uniform Push {
+    uint64_t root_gpu;
+} pc;
 
 void main() {
     GeneratedWorkBuildRoot root = GeneratedWorkBuildRoot(pc.root_gpu);

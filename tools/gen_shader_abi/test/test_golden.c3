@@ -74,3 +74,23 @@ fn void app_module_imports_gpu() @test {
     assert(c3_text.str_view().contains("module my_app::abi;"));
     assert(c3_text.str_view().contains("import gpu;"));
 }
+
+fn void semantic_push_member_traits_follow_base_type() @test {
+    DString c3_text;
+    c3_text.init(mem);
+    defer c3_text.free();
+    DString glsl_text;
+    glsl_text.init(mem);
+    defer glsl_text.free();
+    generate(`
+        abi app;
+        type Address : u64;
+        push PushData {
+            Address value;
+        }
+    `, "gpu", &c3_text, &glsl_text);
+    String generated = c3_text.str_view();
+    assert(generated.contains(".scalar_width  = 64"));
+    assert(generated.contains(".scalar_signed = false"));
+    assert(generated.contains(".integer       = true"));
+}

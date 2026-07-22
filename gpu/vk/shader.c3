@@ -383,9 +383,16 @@ fn void destroy_shader_store(VkDeviceState* state) {
 
 <* Fault SHADER_INVALID on any set other than 0 or a set-0 binding that breaks
    the heap convention; buffers-only shaders pass. *>
-fn void? check_heap_convention(spvreflect::ShaderModule* reflect_module) @private {
+fn void? check_heap_convention(
+    spvreflect::ShaderModule* reflect_module,
+    ZString entry_point,
+) @private {
     uint count = 0;
-    if (reflect_module.enumerate_descriptor_bindings(&count, null) != spvreflect::ReflectResult.RESULT_SUCCESS) {
+    if (reflect_module.enumerate_entry_point_descriptor_bindings(
+        entry_point,
+        &count,
+        null,
+    ) != spvreflect::ReflectResult.RESULT_SUCCESS) {
         return gpu::SHADER_INVALID~;
     }
     if (count == 0) return;
@@ -393,7 +400,11 @@ fn void? check_heap_convention(spvreflect::ShaderModule* reflect_module) @privat
     @pool() {
         spvreflect::DescriptorBinding*[] bindings =
             mem::talloc_array(spvreflect::DescriptorBinding*, (sz)count);
-        if (reflect_module.enumerate_descriptor_bindings(&count, bindings.ptr)
+        if (reflect_module.enumerate_entry_point_descriptor_bindings(
+            entry_point,
+            &count,
+            bindings.ptr,
+        )
             != spvreflect::ReflectResult.RESULT_SUCCESS) {
             return gpu::SHADER_INVALID~;
         }
@@ -429,34 +440,96 @@ fn gpu::ShaderStage? gpu_stage_from_spv(spvreflect::ShaderStage stage) @private 
         case spvreflect::ShaderStage.SHADER_STAGE_FRAGMENT:
             return gpu::ShaderStage.FRAGMENT;
         default:
-            return gpu::INVALID_ARGUMENT~;
+            return gpu::SHADER_INVALID~;
     }
 }
 
-fn void? check_push_constant_range(
+fn gpu::RootAbiSpec root_abi_for_stage(gpu::ShaderStage stage) @private {
+    switch (stage) {
+        case gpu::ShaderStage.COMPUTE:
+            return gpu::ROOT_PUSH_ABI;
+        case gpu::ShaderStage.VERTEX:
+        case gpu::ShaderStage.FRAGMENT:
+            return gpu::GRAPHICS_ROOT_PUSH_ABI;
+    }
+}
+
+fn bool has_type_flag(
+    spvreflect::TypeFlags flags,
+    spvreflect::TypeFlags flag,
+) @private {
+    return ((uint)flags & (uint)flag) != 0;
+}
+
+fn bool root_member_shape_matches(
+    spvreflect::BlockVariable* member,
+    gpu::RootAbiMemberSpec* expected,
+) @private {
+    if (member == null
+        || member.byte_offset() != expected.offset
+        || member.byte_size() != expected.size
+        || member.scalar_width() != expected.scalar_width
+        || member.scalar_is_signed() != expected.scalar_signed) return false;
+    spvreflect::TypeFlags flags = member.type_flags();
+    bool integer = has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_INT);
+    bool float_scalar = has_type_flag(
+        flags,
+        spvreflect::TypeFlags.TYPE_FLAG_FLOAT,
+    );
+    bool scalar = !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_VECTOR)
+        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_MATRIX)
+        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_ARRAY)
+        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_STRUCT)
+        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_BOOL)
+        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_REF);
+    return scalar
+        && integer == expected.integer
+        && float_scalar != expected.integer
+        && member.vector_component_count() == 0
+        && member.matrix_column_count() == 0
+        && member.matrix_row_count() == 0
+        && member.array_dimension_count() == 0
+        && member.member_count() == 0;
+}
+
+fn void? check_root_push_abi(
     spvreflect::ShaderModule* reflect_module,
+    ZString entry_point,
     gpu::ShaderStage stage,
 ) @private {
-    usz expected_size = stage == gpu::ShaderStage.COMPUTE
-        ? gpu::RootPush::size
-        : gpu::GraphicsRootPush::size;
+    gpu::RootAbiSpec expected = root_abi_for_stage(stage);
     uint count = 0;
-    if (reflect_module.enumerate_push_constant_blocks(&count, null)
+    if (reflect_module.enumerate_entry_point_push_constant_blocks(
+        entry_point,
+        &count,
+        null,
+    )
         != spvreflect::ReflectResult.RESULT_SUCCESS) {
         return gpu::SHADER_INVALID~;
     }
     if (count == 0) return;
+    if (count != 1) return gpu::SHADER_INVALID~;
 
     @pool() {
-        spvreflect::BlockVariable*[] blocks =
-            mem::talloc_array(spvreflect::BlockVariable*, (sz)count);
-        if (reflect_module.enumerate_push_constant_blocks(&count, blocks.ptr)
+        spvreflect::BlockVariable*[1] blocks;
+        if (reflect_module.enumerate_entry_point_push_constant_blocks(
+            entry_point,
+            &count,
+            &blocks[0],
+        )
             != spvreflect::ReflectResult.RESULT_SUCCESS) {
             return gpu::SHADER_INVALID~;
         }
-        foreach (block : blocks) {
-            if ((usz)block.byte_offset() + (usz)block.byte_size() > expected_size) {
-                return gpu::INVALID_ARGUMENT~;
+        spvreflect::BlockVariable* block = blocks[0];
+        if (block == null
+            || block.byte_offset() != 0
+            || block.byte_size() != expected.block_size
+            || block.member_count() != expected.member_count) {
+            return gpu::SHADER_INVALID~;
+        }
+        for (uint i = 0; i < expected.member_count; i++) {
+            if (!root_member_shape_matches(block.member(i), &expected.members[i])) {
+                return gpu::SHADER_INVALID~;
             }
         }
     };
@@ -478,6 +551,7 @@ fn vk::Result create_pipeline_shader_module_native(
     vk::ShaderModule* out_shader,
 ) {
     $if env::TESTING:
+        state.pipeline_shader_create_attempts++;
         if (state.pipeline_shader_create_result != vk::Result.SUCCESS) {
             return state.pipeline_shader_create_result;
         }
@@ -590,23 +664,17 @@ fn PipelineShaderModule? create_pipeline_shader_module(
     }
     defer reflect_module.destroy();
 
-    if (catch heap_fault = check_heap_convention(reflect_module)) {
-        return report_shader_contract_failure(
-            state:          state,
-            operation:      operation,
-            public_fault:   heap_fault,
-            debug_name:     code.debug_name,
-            rejected_field: rejected_field,
-            invariant:      "descriptor bindings must match the gpu heap convention",
-        )~;
-    }
+    $if env::TESTING:
+        state.shader_reflection_validations++;
+    $endif
+
     spvreflect::EntryPoint* entry =
         reflect_module.get_entry_point((ZString)&shader.entry_point[0]);
     if (entry == null) {
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
-            public_fault:   gpu::INVALID_ARGUMENT,
+            public_fault:   gpu::SHADER_INVALID,
             debug_name:     code.debug_name,
             rejected_field: rejected_field,
             invariant:      "entry point must exist in SPIR-V module",
@@ -617,7 +685,7 @@ fn PipelineShaderModule? create_pipeline_shader_module(
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
-            public_fault:   reflected_fault,
+            public_fault:   gpu::SHADER_INVALID,
             debug_name:     code.debug_name,
             rejected_field: rejected_field,
             invariant:      "reflected execution model must be supported",
@@ -628,20 +696,38 @@ fn PipelineShaderModule? create_pipeline_shader_module(
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
-            public_fault:   gpu::INVALID_ARGUMENT,
+            public_fault:   gpu::SHADER_INVALID,
             debug_name:     code.debug_name,
             rejected_field: rejected_field,
             invariant:      "prepared stage must match the reflected entry point",
         )~;
     }
-    if (catch push_fault = check_push_constant_range(reflect_module, code.stage)) {
+    ZString selected_entry_point = (ZString)&shader.entry_point[0];
+    if (catch heap_fault = check_heap_convention(
+        reflect_module,
+        selected_entry_point,
+    )) {
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   heap_fault,
+            debug_name:     code.debug_name,
+            rejected_field: rejected_field,
+            invariant:      "selected-entry descriptor bindings must match the gpu heap convention",
+        )~;
+    }
+    if (catch push_fault = check_root_push_abi(
+        reflect_module,
+        selected_entry_point,
+        code.stage,
+    )) {
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
             public_fault:   push_fault,
             debug_name:     code.debug_name,
             rejected_field: rejected_field,
-            invariant:      "push constants must fit the shader-stage root ABI",
+            invariant:      "selected-entry push constants must exactly match the root ABI",
         )~;
     }
 

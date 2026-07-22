@@ -318,6 +318,20 @@ SPIR-V reflection validation
 pipeline layout creation
 ```
 
+Shaders declare the generated members directly in the push-constant block.
+The reflected block may be absent, but when present it must match the selected
+stage's complete root ABI:
+
+```glsl
+layout(push_constant) uniform Push {
+    uint64_t root_gpu;
+} pc;
+```
+
+Do not nest `RootPush` or `GraphicsRootPush` inside that block. A nested struct
+has a different reflected type shape even when its total byte size happens to
+match.
+
 ## 11. Shader language policy
 
 ### First implementation
@@ -377,8 +391,9 @@ Block kinds and emission:
 struct        plain struct on both sides
 root          C3 struct; GLSL layout(buffer_reference, std430,
               buffer_reference_align = A) buffer block
-push          C3 struct; GLSL plain struct — the shader hand-writes the one
-              binding line: layout(push_constant) uniform Push { RootPush pc; };
+push          C3 struct; GLSL plain struct plus private C3 reflection metadata;
+              the shader hand-writes a push block with the generated fields
+              directly, in declaration order
 extern struct C3 declaration already exists (e.g. gpu/command.c3); emits the GLSL
               twin plus C3 size/offset asserts against the existing type
 type X : uint user semantic type; C3 typedef, plain scalar in GLSL
@@ -412,6 +427,10 @@ The generated GLSL include is self-contained: include guard derived from the
 declare their own `buffer_reference` wrapper blocks (array views) still declare
 the buffer-reference extensions themselves.
 
+For each `push` declaration, generated private C3 metadata records the exact
+block size and each member's offset, size, scalar width, signedness, and numeric
+kind. The Vulkan backend consumes this metadata; it is not public API.
+
 ## 13. Ownership: generator vs shaders
 
 The generator owns layouts; shaders own bindings. Hand-written shader code is
@@ -420,7 +439,9 @@ limited to:
 ```text
 array-view wrapper blocks:  layout(buffer_reference, std430) readonly buffer
                             Instances { Instance items[]; }
-push binding blocks:        layout(push_constant) uniform Push { RootPush pc; };
+push binding blocks:        layout(push_constant) uniform Push {
+                                uint64_t root_gpu;
+                            } pc;
 ```
 
 Wrappers reference generated layouts only, so they carry no drift risk;
@@ -435,12 +456,24 @@ Checks:
 
 ```text
 entry point exists and matches the declared stage
-push constant blocks fit the stage's root-push range
-descriptor heap set/binding matches backend convention
+only the selected entry point's interfaces participate
+zero push-constant blocks are accepted
+one declared push-constant block starts at offset zero and exactly matches the
+    selected stage's generated block size, member count, member order, offsets,
+    sizes, scalar widths, signedness, and integer/float shape
+vectors, matrices, arrays, nested structs, booleans, and references are rejected
+descriptor heap set/binding for the selected entry matches backend convention
 shader stages use explicit locations
 required capabilities are present
 no unexpected descriptor sets are declared
 ```
+
+SPIR-V member and block names are not ABI. Reflection failures, including a
+missing selected entry or a stage mismatch, return `SHADER_INVALID`. A caller
+that places otherwise valid shader code in the wrong pipeline role receives
+`INVALID_ARGUMENT`. Validation completes before native shader-module creation,
+pipeline cache insertion, or output publication, and a deduplicated `ShaderId`
+is reflected once per preparation batch.
 
 Do not use reflection to create arbitrary per-shader public descriptor layouts. That moves the API back toward descriptor-set-driven design.
 
@@ -511,6 +544,6 @@ graphics draw can pass separate vertex/fragment roots
 textures are sampled through TextureIndex
 samplers are accessed through SamplerIndex
 all shared structs have generated or manual size checks
-SPIR-V reflection rejects unexpected descriptor declarations
+SPIR-V reflection rejects unexpected descriptors and non-exact root blocks
 no sample stores vk descriptor objects in material data
 ```

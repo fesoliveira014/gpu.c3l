@@ -1,6 +1,6 @@
 // Reflection-validation fixture: a push_constant block larger than both
 // root-push ABIs (8B compute / 16B graphics). pipeline creation must fault
-// INVALID_ARGUMENT.
+// SHADER_INVALID.
 #version 460
 
 layout(local_size_x = 1) in;

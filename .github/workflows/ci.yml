@@ -55,10 +55,10 @@ jobs:
           fi
           echo "$HOME/tools/c3" >> "$GITHUB_PATH"
 
-      - name: Install glslc and lavapipe
+      - name: Install shader tools and lavapipe
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y glslc mesa-vulkan-drivers vulkan-validationlayers vulkan-tools
+          sudo apt-get install -y glslc mesa-vulkan-drivers spirv-tools vulkan-validationlayers vulkan-tools
 
       - name: Select lavapipe and validation
         run: |
@@ -87,10 +87,11 @@ jobs:
       - name: Generator unit tests
         run: c3c test unit --path tools/gen_shader_abi
 
-      - name: Benchmark and command policy contract tests
+      - name: Benchmark, command, and shader policy contract tests
         run: |
-          python3 -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy
+          python3 -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy scripts.test_check_shader_reflection_policy
           python3 -B scripts/check_command_policy.py
+          python3 -B scripts/check_shader_reflection_policy.py
 
       - name: ABI drift gate
         run: python3 scripts/gen_abi.py --check
@@ -298,16 +299,20 @@ jobs:
       - name: Generator unit tests
         run: c3c test unit --path tools/gen_shader_abi
 
-      - name: Benchmark and command policy contract tests
+      - name: Benchmark, command, and shader policy contract tests
         run: |
-          python -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy
+          python -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy scripts.test_check_shader_reflection_policy
           python -B scripts/check_command_policy.py
+          python -B scripts/check_shader_reflection_policy.py
 
       - name: ABI drift gate
         run: C3C="$(cygpath -w "$(command -v c3c)")" python scripts/gen_abi.py --check
 
       - name: Build shaders
-        run: GLSLC="$(cygpath -w "$(command -v glslc)")" python scripts/build_shaders.py
+        run: |
+          GLSLC="$(cygpath -w "$(command -v glslc)")" \
+          SPIRV_AS="$(cygpath -w "$(command -v spirv-as)")" \
+          python scripts/build_shaders.py
 
       - name: Build benchmark targets
         run: |

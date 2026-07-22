@@ -6,7 +6,9 @@
 layout(local_size_x = 1) in;
 
 layout(buffer_reference, std430) writeonly buffer OutBuf { float value; };
-layout(push_constant) uniform Push { RootPush pc; };
+layout(push_constant) uniform Push {
+    uint64_t root_gpu;
+} pc;
 
 void main() {
     SampleDepthRoot root = SampleDepthRoot(pc.root_gpu);
