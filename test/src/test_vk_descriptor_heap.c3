@@ -583,6 +583,55 @@ fn void texture_view_zero_owner_count_faults_before_destruction_mutation() @test
     gpu::destroy_texture_view(&device, view)!!;
 }
 
+fn void texture_view_missing_owner_faults_before_destruction_mutation() @test {
+    gpu::Device device = make_heap_test_device(4, 1);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::TextureSlot* owner = state.textures.get(texture)!!;
+    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    vk::TextureDescriptorCell* cell =
+        &heap.texture_cells[view.index.value - 1];
+    gpu::TextureHandle owner_before = cell.owner;
+    cell.owner.generation = 0;
+    vk::TextureDescriptorCell cell_before = *cell;
+    uint free_count_before = heap.texture_free_count;
+    DescriptorBackendCapture capture = {
+        .expected_fault     = gpu::BACKEND_ERROR,
+        .expected_operation = "destroy_texture_view",
+        .expected_text      = "live texture descriptor owner is missing",
+        .expected_result    = 0,
+    };
+    state.debug_callback = &capture_descriptor_backend_diagnostic;
+    state.debug_user_data = &capture;
+    vk::reset_texture_view_accounting(state);
+
+    fault accounting = @catch(gpu::destroy_texture_view(&device, view));
+
+    assert(accounting == gpu::BACKEND_ERROR
+            && capture.calls == 1 && capture.matched,
+        "a missing live descriptor owner emits one exact backend fault");
+    assert(cell.used == cell_before.used
+            && cell.owner == cell_before.owner
+            && cell.generation == cell_before.generation,
+        "missing owner failure preserves the descriptor cell");
+    assert(heap.texture_free_count == free_count_before,
+        "missing owner failure preserves the free list");
+    assert(owner.live_descriptor_views == 1,
+        "missing owner failure preserves the real owner count");
+    vk::TextureViewAccountingCounters counters =
+        vk::texture_view_accounting(state);
+    assert(counters.cell_lookups == 1,
+        "missing owner failure reuses the single resolved descriptor cell");
+
+    state.debug_callback = null;
+    cell.owner = owner_before;
+    gpu::destroy_texture_view(&device, view)!!;
+}
+
 fn void texture_view_increment_invariant_faults_transactionally() @test {
     gpu::Device device = make_heap_test_device(8, 1);
     defer destroy_test_device(&device)!!;

@@ -88,7 +88,6 @@ struct TextureViewAccountingCounters @if(env::TESTING || $feature(TEXTURE_VIEW_A
     ulong ownership_work_units;
 }
 
-
 fn void? report_descriptor_backend_failure(
     VkDeviceState* state,
     ZString operation,
@@ -1168,11 +1167,11 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
         for (uint i = 0; i < descs.len; i++) {
             CachedViewCreation creation;
             if (catch f = prepare_texture_descriptor_item(
-                state:    state,
-                desc:     &descs[i],
+                state:         state,
+                desc:          &descs[i],
                 pending_count: (uint)descs.len,
-                pending:  &pending[i],
-                creation: &creation,
+                pending:       &pending[i],
+                creation:      &creation,
             )) {
                 rollback_texture_view_creations(state, creations[:creation_count]);
                 return f~;
@@ -1251,7 +1250,15 @@ fn void? vk_destroy_texture_view(
         )~;
     }
     TextureDescriptorCell* cell = resolved;
-    TextureSlot* owner = state.textures.get(cell.owner)!;
+    TextureSlot*? resolved_owner = state.textures.get(cell.owner);
+    if (catch resolved_owner) {
+        return report_texture_view_accounting_failure(
+            state,
+            "destroy_texture_view",
+            "live texture descriptor owner is missing",
+        );
+    }
+    TextureSlot* owner = resolved_owner;
     validate_texture_view_decrement(state, owner)!;
     cell.used = false;
     owner.live_descriptor_views--;
