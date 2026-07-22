@@ -6,14 +6,6 @@ import std::atomic;
 import std::atomic::types;
 import std::core::mem;
 
-alias RuntimeData @private = gpu::internal::RuntimeData;
-
-fn RuntimeData* resolve_runtime(Runtime* runtime) @private =>
-    gpu::internal::resolve_runtime(runtime);
-
-fn Surface? register_surface(Runtime* runtime, void* backend_surface) @private =>
-    gpu::internal::register_surface(runtime, backend_surface);
-
 <* True when the device handle is not the invalid zero sentinel. *>
 fn bool Device.is_valid(self)          => (ulong)self != 0;
 // Owner-bearing handles require both fields to be nonzero.

@@ -7,8 +7,8 @@
   "linklib-dir": "linked-libs",
   // Public facade, platform surfaces, shared internals, and the Vulkan backend.
   "sources": [
-    "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/internal/**",
-    "gpu/surface/**"
+    "gpu/gpu.c3i", "gpu/gpu.c3", "gpu/surface/**",
+    "gpu/internal/**"
   ],
   "targets": {
     "linux-x64": {

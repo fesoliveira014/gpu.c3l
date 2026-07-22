@@ -7,8 +7,9 @@
     "no-unused"
   ],
   "sources": [
-    "../../gpu/gpu.c3",
     "../../gpu/gpu.c3i",
+    "../../gpu/gpu.c3",
+    "../../gpu/surface/**",
     "../../gpu/internal/runtime.c3",
     "../../gpu/internal/adapter.c3",
     "../../gpu/internal/device.c3",
@@ -23,7 +24,6 @@
     "../../gpu/internal/render_pass.c3",
     "../../gpu/internal/sync.c3",
     "../../gpu/internal/queue.c3",
-    "../../gpu/surface/**",
     "../../gpu/internal/vk/internal.c3",
     "vk_stub.c3"
   ],

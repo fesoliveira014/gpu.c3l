@@ -12,8 +12,8 @@
   // crashes in VMA's std::mutex when the runtimes drift apart.
   "wincrt": "dynamic",
   "sources": [
-    "../gpu/gpu.c3", "../gpu/gpu.c3i", "../gpu/internal/**",
-    "../gpu/surface/**",
+    "../gpu/gpu.c3i", "../gpu/gpu.c3", "../gpu/surface/**",
+    "../gpu/internal/**",
     "src/test_lifetime_helpers.c3", "src/bench_lifetime.c3"
   ],
   "output": "build",

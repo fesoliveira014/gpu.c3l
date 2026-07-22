@@ -169,6 +169,7 @@ faultdef
     // native diagnostics; this does not imply that the device was lost.
     BACKEND_ERROR;
 
+// BEGIN GENERATED SHADER ABI - do not edit.
 struct RootPush {
     GpuAddress root_gpu;
 }
@@ -232,6 +233,7 @@ $assert GeneratedDispatchRecord::size == 24;
 $assert $reflect(GeneratedDispatchRecord.root_gpu).offset == 0;
 $assert $reflect(GeneratedDispatchRecord.arguments).offset == 8;
 $assert $reflect(GeneratedDispatchRecord._pad0).offset == 20;
+// END GENERATED SHADER ABI
 
 <* Graphics API a device is created against. *>
 enum BackendKind : int {
