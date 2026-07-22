@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import std::core::mem;
 import std::io;
@@ -974,14 +974,14 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
 
     gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
     gpu::reset_command_resolution_stats();
-    gpu::vk::reset_root_push_observation();
+    gpu::internal::vk::reset_root_push_observation();
     gpu::cmd_dispatch(
         commands: &commands,
         root:     (gpu::GpuAddress)0,
         groups:   { 0, 0, 0 },
     )!!;
-    gpu::vk::RootPushObservation compute_roots =
-        gpu::vk::root_push_observation();
+    gpu::internal::vk::RootPushObservation compute_roots =
+        gpu::internal::vk::root_push_observation();
     assert(compute_roots.compute == (gpu::GpuAddress)0,
         "dispatch pushes a null compute root unchanged");
     gpu::cmd_dispatch(
@@ -1030,7 +1030,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
 
     gpu::DepthState depth = {};
     gpu::cmd_set_depth_state(&commands, &depth)!!;
-    gpu::vk::reset_root_push_observation();
+    gpu::internal::vk::reset_root_push_observation();
     gpu::cmd_draw(
         commands:      &commands,
         vertex_root:   (gpu::GpuAddress)0,
@@ -1038,8 +1038,8 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         vertex_count:  0,
         instance_count: 0,
     )!!;
-    gpu::vk::RootPushObservation vertex_roots =
-        gpu::vk::root_push_observation();
+    gpu::internal::vk::RootPushObservation vertex_roots =
+        gpu::internal::vk::root_push_observation();
     assert(vertex_roots.vertex == (gpu::GpuAddress)0
         && vertex_roots.fragment == root,
         "draw pushes a null vertex root unchanged");
@@ -1050,8 +1050,8 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         vertex_count:  0,
         instance_count: 0,
     )!!;
-    gpu::vk::RootPushObservation fragment_roots =
-        gpu::vk::root_push_observation();
+    gpu::internal::vk::RootPushObservation fragment_roots =
+        gpu::internal::vk::root_push_observation();
     assert(fragment_roots.vertex == root
         && fragment_roots.fragment == (gpu::GpuAddress)0,
         "draw pushes a null fragment root unchanged");

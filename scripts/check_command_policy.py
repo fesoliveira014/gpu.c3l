@@ -118,7 +118,7 @@ FUNCTION_DECLARATION = re.compile(
     r"(?m)^fn\s+[^\r\n(]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*\(",
 )
 TABLE_DECLARATION = re.compile(
-    r"(?m)^const\s+gpu::CommandOps\s+([A-Za-z_][A-Za-z0-9_]*)\b[^=]*=\s*\{",
+    r"(?m)^const\s+gpu::internal::CommandOps\s+([A-Za-z_][A-Za-z0-9_]*)\b[^=]*=\s*\{",
 )
 TABLE_ENTRY = re.compile(
     r"\.([A-Za-z_][A-Za-z0-9_]*)\s*=\s*&([A-Za-z_][A-Za-z0-9_]*)\s*,",
@@ -261,7 +261,7 @@ def source_functions(relative: str, source: str) -> list[Function]:
 
 def load_functions(root: Path) -> dict[str, list[Function]]:
     functions: dict[str, list[Function]] = {}
-    backend = root / "gpu" / "vk"
+    backend = root / "gpu" / "internal" / "vk"
     for path in sorted(backend.rglob("*.c3"), key=lambda item: item.as_posix()):
         relative = path.relative_to(root).as_posix()
         source = path.read_text(encoding="utf-8")
@@ -271,7 +271,7 @@ def load_functions(root: Path) -> dict[str, list[Function]]:
 
 
 def command_tables(root: Path) -> dict[str, dict[str, str]]:
-    path = root / "gpu" / "vk" / "device.c3"
+    path = root / "gpu" / "internal" / "vk" / "device.c3"
     source = path.read_text(encoding="utf-8")
     masked = mask_non_code(source)
     tables: dict[str, dict[str, str]] = {}

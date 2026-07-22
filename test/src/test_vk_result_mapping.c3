@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 
 const gpu::internal::BackendVTable DEVICE_LOSS_VTABLE = {
@@ -18,7 +18,7 @@ fn void destroy_device_loss_fixture(void* backend_state) {
     (void)backend_state;
 }
 
-fn gpu::Device device_loss_fixture(gpu::vk::VkDeviceState* state) {
+fn gpu::Device device_loss_fixture(gpu::internal::vk::VkDeviceState* state) {
     return gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          { .strict_enabled = true },
@@ -44,11 +44,11 @@ fn void capture_backend_result(gpu::DebugMessage* message, void* user_data) {
 
 fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
     BackendResultCapture capture;
-    gpu::vk::VkDeviceState configured = {
+    gpu::internal::vk::VkDeviceState configured = {
         .debug_callback  = &capture_backend_result,
         .debug_user_data = &capture,
     };
-    fault configured_fault = @catch(gpu::vk::check_backend_result(
+    fault configured_fault = @catch(gpu::internal::vk::check_backend_result(
         state:     &configured,
         operation: "wait_completion",
         result:    (vk::Result)-999,
@@ -58,8 +58,8 @@ fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
     assert(capture.calls == 1, "configured backend result dispatches exactly once");
     assert(capture.fields_match, "callback observes operation, native code, backend text, and fault during delivery");
 
-    gpu::vk::VkDeviceState fallback = {};
-    fault fallback_fault = @catch(gpu::vk::check_backend_result(
+    gpu::internal::vk::VkDeviceState fallback = {};
+    fault fallback_fault = @catch(gpu::internal::vk::check_backend_result(
         state:     &fallback,
         operation: "wait_completion",
         result:    (vk::Result)-999,
@@ -69,13 +69,13 @@ fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
 }
 
 fn void explicit_device_loss_invalidates_only_its_owner() @test {
-    gpu::vk::VkDeviceState first_state;
-    gpu::vk::VkDeviceState second_state;
+    gpu::internal::vk::VkDeviceState first_state;
+    gpu::internal::vk::VkDeviceState second_state;
     gpu::Device first = device_loss_fixture(&first_state);
     gpu::Device second = device_loss_fixture(&second_state);
 
     assert(
-        @catch(gpu::vk::check_backend_result(
+        @catch(gpu::internal::vk::check_backend_result(
             state:     &first_state,
             operation: "submit",
             result:    (vk::Result)-999,
@@ -86,7 +86,7 @@ fn void explicit_device_loss_invalidates_only_its_owner() @test {
     assert(gpu::get_device_caps(&second)!!.strict_enabled, "an unknown result leaves a peer usable");
 
     assert(
-        @catch(gpu::vk::check_backend_result(
+        @catch(gpu::internal::vk::check_backend_result(
             state:     &first_state,
             operation: "submit",
             result:    vk::Result.ERROR_DEVICE_LOST,
@@ -104,11 +104,11 @@ fn void explicit_device_loss_invalidates_only_its_owner() @test {
 }
 
 fn void custom_result_routes_mark_the_reporting_device() @test {
-    gpu::vk::VkDeviceState texture_state;
+    gpu::internal::vk::VkDeviceState texture_state;
     gpu::Device texture_device = device_loss_fixture(&texture_state);
-    gpu::vk::TextureSlot texture_slot;
+    gpu::internal::vk::TextureSlot texture_slot;
     assert(
-        @catch(gpu::vk::check_texture_view_backend_result(
+        @catch(gpu::internal::vk::check_texture_view_backend_result(
             state:     &texture_state,
             operation: null,
             texture:   {},
@@ -120,16 +120,16 @@ fn void custom_result_routes_mark_the_reporting_device() @test {
     assert(@catch(gpu::get_device_caps(&texture_device)) == gpu::DEVICE_LOST, "texture-view loss marks its owner");
     gpu::destroy_device(&texture_device)!!;
 
-    gpu::vk::VkDeviceState wsi_state;
+    gpu::internal::vk::VkDeviceState wsi_state;
     gpu::Device wsi_device = device_loss_fixture(&wsi_state);
-    gpu::vk::WsiDiagnosticContext context = {
+    gpu::internal::vk::WsiDiagnosticContext context = {
         .state     = &wsi_state,
         .operation = "present",
     };
     assert(
-        @catch(gpu::vk::check_wsi_backend_result(
+        @catch(gpu::internal::vk::check_wsi_backend_result(
             context: &context,
-            kind:    gpu::vk::WsiResultKind.PRESENT,
+            kind:    gpu::internal::vk::WsiResultKind.PRESENT,
             result:  vk::Result.ERROR_DEVICE_LOST,
         )) == gpu::DEVICE_LOST,
         "presentation loss remains exact"
@@ -139,15 +139,15 @@ fn void custom_result_routes_mark_the_reporting_device() @test {
 }
 
 fn void generic_result_mapping_is_truthful() @test {
-    gpu::vk::check(vk::Result.SUCCESS)!!;
+    gpu::internal::vk::check(vk::Result.SUCCESS)!!;
 
-    fault host_oom = @catch(gpu::vk::check(vk::Result.ERROR_OUT_OF_HOST_MEMORY));
-    fault device_oom = @catch(gpu::vk::check(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY));
-    fault device_lost = @catch(gpu::vk::check(vk::Result.ERROR_DEVICE_LOST));
-    fault unknown = @catch(gpu::vk::check(vk::Result.ERROR_UNKNOWN));
-    fault format = @catch(gpu::vk::check(vk::Result.ERROR_FORMAT_NOT_SUPPORTED));
-    fault initialization = @catch(gpu::vk::check(vk::Result.ERROR_INITIALIZATION_FAILED));
-    fault arbitrary = @catch(gpu::vk::check((vk::Result)-999));
+    fault host_oom = @catch(gpu::internal::vk::check(vk::Result.ERROR_OUT_OF_HOST_MEMORY));
+    fault device_oom = @catch(gpu::internal::vk::check(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY));
+    fault device_lost = @catch(gpu::internal::vk::check(vk::Result.ERROR_DEVICE_LOST));
+    fault unknown = @catch(gpu::internal::vk::check(vk::Result.ERROR_UNKNOWN));
+    fault format = @catch(gpu::internal::vk::check(vk::Result.ERROR_FORMAT_NOT_SUPPORTED));
+    fault initialization = @catch(gpu::internal::vk::check(vk::Result.ERROR_INITIALIZATION_FAILED));
+    fault arbitrary = @catch(gpu::internal::vk::check((vk::Result)-999));
 
     assert(host_oom == gpu::OUT_OF_HOST_MEMORY, "host OOM remains exact");
     assert(device_oom == gpu::OUT_OF_DEVICE_MEMORY, "device OOM remains exact");
@@ -159,18 +159,18 @@ fn void generic_result_mapping_is_truthful() @test {
 }
 
 fn void backend_and_wsi_result_mapping_is_specific() @test {
-    fault init = @catch(gpu::vk::check_backend_create_result(vk::Result.ERROR_INITIALIZATION_FAILED));
-    fault driver = @catch(gpu::vk::check_backend_create_result(vk::Result.ERROR_INCOMPATIBLE_DRIVER));
-    fault physical_init = @catch(gpu::vk::check_physical_device_enumeration_result(vk::Result.ERROR_INITIALIZATION_FAILED));
-    fault surface = @catch(gpu::vk::check_surface_result(vk::Result.ERROR_SURFACE_LOST_KHR));
-    fault surface_window = @catch(gpu::vk::check_surface_result(vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR));
-    fault surface_fill = @catch(gpu::vk::check_surface_enumeration_result(vk::Result.ERROR_SURFACE_LOST_KHR));
-    fault surface_incomplete = @catch(gpu::vk::check_surface_enumeration_result(vk::Result.INCOMPLETE));
-    fault out_of_date = @catch(gpu::vk::check_swapchain_create_result(vk::Result.ERROR_OUT_OF_DATE_KHR));
-    fault window_in_use = @catch(gpu::vk::check_swapchain_create_result(vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR));
-    fault image_usage = @catch(gpu::vk::check_swapchain_create_result(vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR));
-    fault acquire_surface = @catch(gpu::vk::check_acquire_result(vk::Result.ERROR_SURFACE_LOST_KHR));
-    fault present_surface = @catch(gpu::vk::check_present_result(vk::Result.ERROR_SURFACE_LOST_KHR));
+    fault init = @catch(gpu::internal::vk::check_backend_create_result(vk::Result.ERROR_INITIALIZATION_FAILED));
+    fault driver = @catch(gpu::internal::vk::check_backend_create_result(vk::Result.ERROR_INCOMPATIBLE_DRIVER));
+    fault physical_init = @catch(gpu::internal::vk::check_physical_device_enumeration_result(vk::Result.ERROR_INITIALIZATION_FAILED));
+    fault surface = @catch(gpu::internal::vk::check_surface_result(vk::Result.ERROR_SURFACE_LOST_KHR));
+    fault surface_window = @catch(gpu::internal::vk::check_surface_result(vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR));
+    fault surface_fill = @catch(gpu::internal::vk::check_surface_enumeration_result(vk::Result.ERROR_SURFACE_LOST_KHR));
+    fault surface_incomplete = @catch(gpu::internal::vk::check_surface_enumeration_result(vk::Result.INCOMPLETE));
+    fault out_of_date = @catch(gpu::internal::vk::check_swapchain_create_result(vk::Result.ERROR_OUT_OF_DATE_KHR));
+    fault window_in_use = @catch(gpu::internal::vk::check_swapchain_create_result(vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR));
+    fault image_usage = @catch(gpu::internal::vk::check_swapchain_create_result(vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR));
+    fault acquire_surface = @catch(gpu::internal::vk::check_acquire_result(vk::Result.ERROR_SURFACE_LOST_KHR));
+    fault present_surface = @catch(gpu::internal::vk::check_present_result(vk::Result.ERROR_SURFACE_LOST_KHR));
 
     assert(init == gpu::UNSUPPORTED_BACKEND, "backend initialization failure is bootstrap-specific");
     assert(driver == gpu::UNSUPPORTED_BACKEND, "incompatible driver is unsupported backend");
@@ -187,13 +187,13 @@ fn void backend_and_wsi_result_mapping_is_specific() @test {
 }
 
 fn void resource_result_mapping_is_specific() @test {
-    fault format = @catch(gpu::vk::check_texture_create_result(vk::Result.ERROR_FORMAT_NOT_SUPPORTED));
-    fault usage = @catch(gpu::vk::check_texture_create_result(vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR));
-    fault shader = @catch(gpu::vk::check_shader_create_result(vk::Result.ERROR_INVALID_SHADER_NV));
-    fault shader_validation = @catch(gpu::vk::check_shader_create_result(vk::Result.ERROR_VALIDATION_FAILED_EXT));
-    fault descriptor = @catch(gpu::vk::check_descriptor_allocate_result(vk::Result.ERROR_OUT_OF_POOL_MEMORY));
-    fault pool_fragmentation = @catch(gpu::vk::check_descriptor_pool_create_result(vk::Result.ERROR_FRAGMENTATION));
-    fault fragmented_pool = @catch(gpu::vk::check_descriptor_allocate_result(vk::Result.ERROR_FRAGMENTED_POOL));
+    fault format = @catch(gpu::internal::vk::check_texture_create_result(vk::Result.ERROR_FORMAT_NOT_SUPPORTED));
+    fault usage = @catch(gpu::internal::vk::check_texture_create_result(vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR));
+    fault shader = @catch(gpu::internal::vk::check_shader_create_result(vk::Result.ERROR_INVALID_SHADER_NV));
+    fault shader_validation = @catch(gpu::internal::vk::check_shader_create_result(vk::Result.ERROR_VALIDATION_FAILED_EXT));
+    fault descriptor = @catch(gpu::internal::vk::check_descriptor_allocate_result(vk::Result.ERROR_OUT_OF_POOL_MEMORY));
+    fault pool_fragmentation = @catch(gpu::internal::vk::check_descriptor_pool_create_result(vk::Result.ERROR_FRAGMENTATION));
+    fault fragmented_pool = @catch(gpu::internal::vk::check_descriptor_allocate_result(vk::Result.ERROR_FRAGMENTED_POOL));
 
     assert(format == gpu::UNSUPPORTED_FEATURE, "unsupported image format is a capability result");
     assert(usage == gpu::UNSUPPORTED_FEATURE, "unsupported image usage is a capability result");
@@ -205,15 +205,15 @@ fn void resource_result_mapping_is_specific() @test {
 }
 
 fn void pipeline_and_cache_result_mapping_preserves_fatal_faults() @test {
-    fault pipeline_unknown = @catch(gpu::vk::check_pipeline_create_result(vk::Result.ERROR_UNKNOWN));
-    fault pipeline_shader = @catch(gpu::vk::check_pipeline_create_result(vk::Result.ERROR_INVALID_SHADER_NV));
-    fault pipeline_compile = @catch(gpu::vk::check_pipeline_create_result(vk::Result.PIPELINE_COMPILE_REQUIRED));
-    fault pipeline_oom = @catch(gpu::vk::check_pipeline_create_result(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY));
-    fault pipeline_lost = @catch(gpu::vk::check_pipeline_create_result(vk::Result.ERROR_DEVICE_LOST));
-    fault cache_incomplete = @catch(gpu::vk::check_pipeline_cache_data_result(vk::Result.INCOMPLETE));
-    fault enumeration_incomplete = @catch(gpu::vk::check_enumeration_result(vk::Result.INCOMPLETE));
-    bool unknown_retryable = gpu::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_UNKNOWN);
-    bool validation_retryable = gpu::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_VALIDATION_FAILED_EXT);
+    fault pipeline_unknown = @catch(gpu::internal::vk::check_pipeline_create_result(vk::Result.ERROR_UNKNOWN));
+    fault pipeline_shader = @catch(gpu::internal::vk::check_pipeline_create_result(vk::Result.ERROR_INVALID_SHADER_NV));
+    fault pipeline_compile = @catch(gpu::internal::vk::check_pipeline_create_result(vk::Result.PIPELINE_COMPILE_REQUIRED));
+    fault pipeline_oom = @catch(gpu::internal::vk::check_pipeline_create_result(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY));
+    fault pipeline_lost = @catch(gpu::internal::vk::check_pipeline_create_result(vk::Result.ERROR_DEVICE_LOST));
+    fault cache_incomplete = @catch(gpu::internal::vk::check_pipeline_cache_data_result(vk::Result.INCOMPLETE));
+    fault enumeration_incomplete = @catch(gpu::internal::vk::check_enumeration_result(vk::Result.INCOMPLETE));
+    bool unknown_retryable = gpu::internal::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_UNKNOWN);
+    bool validation_retryable = gpu::internal::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_VALIDATION_FAILED_EXT);
 
     assert(pipeline_unknown == gpu::PIPELINE_CREATE_FAILED, "pipeline unknown is operation-specific");
     assert(pipeline_shader == gpu::PIPELINE_CREATE_FAILED, "pipeline invalid shader is creation failure");
@@ -225,16 +225,16 @@ fn void pipeline_and_cache_result_mapping_preserves_fatal_faults() @test {
 
     assert(unknown_retryable, "unknown warm blob rejection retries empty");
     assert(validation_retryable, "validation warm blob rejection retries empty");
-    assert(!gpu::vk::pipeline_cache_blob_retryable(vk::Result.SUCCESS), "success never retries");
-    assert(!gpu::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_OUT_OF_HOST_MEMORY), "host OOM never retries");
-    assert(!gpu::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY), "device OOM never retries");
-    assert(!gpu::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_DEVICE_LOST), "device loss never retries");
+    assert(!gpu::internal::vk::pipeline_cache_blob_retryable(vk::Result.SUCCESS), "success never retries");
+    assert(!gpu::internal::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_OUT_OF_HOST_MEMORY), "host OOM never retries");
+    assert(!gpu::internal::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY), "device OOM never retries");
+    assert(!gpu::internal::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_DEVICE_LOST), "device loss never retries");
 }
 
 fn void wait_timeout_mapping_stays_retryable() @test {
-    fault timeout = @catch(gpu::vk::check_wait(vk::Result.TIMEOUT));
-    fault pure_timeout = gpu::vk::wait_result_fault(vk::Result.TIMEOUT);
-    fault pure_device_lost = gpu::vk::wait_result_fault(vk::Result.ERROR_DEVICE_LOST);
+    fault timeout = @catch(gpu::internal::vk::check_wait(vk::Result.TIMEOUT));
+    fault pure_timeout = gpu::internal::vk::wait_result_fault(vk::Result.TIMEOUT);
+    fault pure_device_lost = gpu::internal::vk::wait_result_fault(vk::Result.ERROR_DEVICE_LOST);
     assert(timeout == gpu::WAIT_TIMEOUT, "bounded wait timeout remains retryable");
     assert(pure_timeout == timeout, "legacy and context-aware waits share one timeout taxonomy");
     assert(pure_device_lost == gpu::DEVICE_LOST, "pure wait mapping preserves generic device loss");

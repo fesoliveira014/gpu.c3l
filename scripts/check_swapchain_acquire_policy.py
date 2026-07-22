@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SWAPCHAIN_SOURCE = ROOT / "gpu" / "vk" / "swapchain.c3"
+SWAPCHAIN_SOURCE = ROOT / "gpu" / "internal" / "vk" / "swapchain.c3"
 FUNCTION_DECLARATION = re.compile(
     r"^fn\s+[^\r\n(]*?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
     re.MULTILINE,

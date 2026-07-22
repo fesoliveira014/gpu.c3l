@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 
 // Headless (lavapipe): D32_FLOAT depth attachments. Depth-tested overlap in

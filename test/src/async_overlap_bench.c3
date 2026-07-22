@@ -2,7 +2,7 @@ module gpu_bench;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import gpu_test;
 import vk;
 import std::io;
@@ -44,7 +44,7 @@ fn double mask_and_scale(ulong raw, uint valid_bits, float period) {
 fn void read_pool(vk::VkDeviceState* state, vk::QueryPool pool, uint valid_bits, float period, double* begin_ns, double* end_ns) {
     ulong[2] ticks;
     vk::QueryResultFlags flags = (vk::QueryResultFlags)((uint)vk::QueryResultFlagBits.RESULT_64_BIT | (uint)vk::QueryResultFlagBits.WAIT_BIT);
-    gpu::vk::check_backend_result(
+    gpu::internal::vk::check_backend_result(
         state:     state,
         operation: "async_overlap_bench",
         result:    vk::get_query_pool_results(
@@ -65,7 +65,7 @@ fn void read_pool(vk::VkDeviceState* state, vk::QueryPool pool, uint valid_bits,
 <* Record the compute workload and optional timestamps. *>
 fn gpu::ExecutableCommandList record_compute(gpu::CommandAllocator* allocator, gpu::PipelineHandle pipeline, gpu::GpuAddress root_gpu, vk::QueryPool pool, bool timestamps_ok) {
     gpu::CommandList cmd = gpu::begin_commands(allocator)!!;
-    vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
+    vk::CommandBuffer raw_cmd = gpu::internal::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);
@@ -85,7 +85,7 @@ fn gpu::ExecutableCommandList record_compute(gpu::CommandAllocator* allocator, g
 <* Record the graphics workload and optional timestamps. *>
 fn gpu::ExecutableCommandList record_graphics(gpu::CommandAllocator* allocator, gpu::PipelineHandle pipeline, gpu::AttachmentViewHandle view, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
     gpu::CommandList cmd = gpu::begin_commands(allocator)!!;
-    vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
+    vk::CommandBuffer raw_cmd = gpu::internal::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);
@@ -210,7 +210,7 @@ fn int main() {
     vk::QueryPool gfx_pool;
     if (timestamps_ok) {
         vk::QueryPoolCreateInfo pool_info = vk::query_pool_create_info().set_query_type(vk::QueryType.TIMESTAMP).set_query_count(2);
-        gpu::vk::check_backend_result(
+        gpu::internal::vk::check_backend_result(
             state:     state,
             operation: "async_overlap_bench",
             result:    vk::create_query_pool(
@@ -220,7 +220,7 @@ fn int main() {
                 p_query_pool:  &comp_pool,
             ),
         )!!;
-        gpu::vk::check_backend_result(
+        gpu::internal::vk::check_backend_result(
             state:     state,
             operation: "async_overlap_bench",
             result:    vk::create_query_pool(

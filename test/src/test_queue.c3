@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 
 fn RuntimeDesc queue_runtime_desc() {
     return {

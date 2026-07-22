@@ -153,7 +153,7 @@ def strip_json_comments(source: str) -> str:
 
 
 def is_private_backend_source(relative: Path) -> bool:
-    return relative.parts[:2] == ("gpu", "vk")
+    return relative.parts[:3] == ("gpu", "internal", "vk")
 
 
 def collect_failures(root: Path) -> list[str]:

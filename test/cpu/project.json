@@ -1,6 +1,6 @@
 {
   "langrev": "1",
-  // Pure-CPU lane: the full public module plus a stub gpu::vk backend, zero
+  // Pure-CPU lane: the full public module plus a stub gpu::internal::vk backend, zero
   // native libraries — a clean checkout runs these with no Vulkan/VMA
   // installed. Shared sources at project scope; targets add only test files.
   "warnings": [
@@ -24,7 +24,7 @@
     "../../gpu/internal/sync.c3",
     "../../gpu/internal/queue.c3",
     "../../gpu/surface/**",
-    "../../gpu/vk/internal.c3",
+    "../../gpu/internal/vk/internal.c3",
     "vk_stub.c3"
   ],
   "output": "build",

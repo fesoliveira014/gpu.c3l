@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import spvreflect;
 
 // Headless (lavapipe): pipeline-time reflection validation against the

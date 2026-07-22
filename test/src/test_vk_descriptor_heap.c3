@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import std::core::mem::allocators;
 
@@ -103,7 +103,7 @@ fn void expect_descriptor_diagnostic(
 fn void descriptor_buffer_create_info_uses_exclusive_for_one_family() @test {
     uint[1] family_storage = { 3 };
 
-    vk::BufferCreateInfo info = gpu::vk::make_descriptor_buffer_create_info(
+    vk::BufferCreateInfo info = gpu::internal::vk::make_descriptor_buffer_create_info(
         4096,
         family_storage[..],
     );
@@ -118,7 +118,7 @@ fn void descriptor_buffer_create_info_uses_exclusive_for_one_family() @test {
 fn void descriptor_buffer_create_info_uses_only_graphics_and_compute_families() @test {
     uint[2] family_storage = { 5, 2 };
 
-    vk::BufferCreateInfo info = gpu::vk::make_descriptor_buffer_create_info(
+    vk::BufferCreateInfo info = gpu::internal::vk::make_descriptor_buffer_create_info(
         8192,
         family_storage[..],
     );
@@ -133,8 +133,8 @@ fn void descriptor_buffer_create_info_uses_only_graphics_and_compute_families() 
 }
 
 fn void disabled_descriptor_heap_bind_returns_unsupported_feature() @test {
-    gpu::vk::VkDeviceState state = {};
-    fault bind_fault = @catch(gpu::vk::bind_descriptor_heap(
+    gpu::internal::vk::VkDeviceState state = {};
+    fault bind_fault = @catch(gpu::internal::vk::bind_descriptor_heap(
         state:      &state,
         cb:         (vk::CommandBuffer)null,
         layout:     (vk::PipelineLayout)null,
@@ -145,11 +145,11 @@ fn void disabled_descriptor_heap_bind_returns_unsupported_feature() @test {
 }
 
 fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
-    gpu::vk::VkDeviceState state = {};
+    gpu::internal::vk::VkDeviceState state = {};
     gpu::PipelineHandle cached = { .index = 7, .generation = 3 };
     gpu::PipelineHandle requested = { .index = 11, .generation = 5 };
-    gpu::vk::CommandRecord record = {
-        .state = gpu::vk::CommandState.RECORDING,
+    gpu::internal::vk::CommandRecord record = {
+        .state = gpu::internal::vk::CommandState.RECORDING,
         .bound_pipeline = {
             .handle      = cached,
             .cache_entry = 19,
@@ -160,7 +160,7 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
         .backend_command = &record,
     };
 
-    fault bind_fault = @catch(gpu::vk::checked_bind_pipeline(&encoder, requested));
+    fault bind_fault = @catch(gpu::internal::vk::checked_bind_pipeline(&encoder, requested));
     assert(bind_fault == gpu::UNSUPPORTED_FEATURE,
         "pipeline binding preflight rejects a disabled descriptor heap");
     assert(record.bound_pipeline.handle == cached,
@@ -1627,7 +1627,7 @@ fn void device_loss_teardown_accepts_live_texture_view_accounting() @test {
 // values directly rather than depending on what the driver reports.
 
 fn void heap_fits_limits_indexing_at_limit_fits() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_sampled_images           = 100,
         .max_storage_images           = 100,
         .max_samplers                 = 50,
@@ -1637,8 +1637,8 @@ fn void heap_fits_limits_indexing_at_limit_fits() @test {
         .max_per_stage_resources      = 200,
         .max_all_pools_descriptors    = 250,
     };
-    bool fits = gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+    bool fits = gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         tex_capacity:   100,
         smp_capacity:   50,
         limits:         limits,
@@ -1647,7 +1647,7 @@ fn void heap_fits_limits_indexing_at_limit_fits() @test {
 }
 
 fn void heap_fits_limits_indexing_exceeds_per_stage_aggregate() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_sampled_images           = 100,
         .max_storage_images           = 100,
         .max_samplers                 = 50,
@@ -1657,8 +1657,8 @@ fn void heap_fits_limits_indexing_exceeds_per_stage_aggregate() @test {
         .max_per_stage_resources      = 199,
         .max_all_pools_descriptors    = 250,
     };
-    bool fits = gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+    bool fits = gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         tex_capacity:   100,
         smp_capacity:   50,
         limits:         limits,
@@ -1667,7 +1667,7 @@ fn void heap_fits_limits_indexing_exceeds_per_stage_aggregate() @test {
 }
 
 fn void heap_fits_limits_indexing_excludes_samplers_from_per_stage_aggregate() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_sampled_images           = 100,
         .max_storage_images           = 100,
         .max_samplers                 = 50,
@@ -1677,8 +1677,8 @@ fn void heap_fits_limits_indexing_excludes_samplers_from_per_stage_aggregate() @
         .max_per_stage_resources      = 200,
         .max_all_pools_descriptors    = 250,
     };
-    bool fits = gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+    bool fits = gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         tex_capacity:   100,
         smp_capacity:   50,
         limits:         limits,
@@ -1687,7 +1687,7 @@ fn void heap_fits_limits_indexing_excludes_samplers_from_per_stage_aggregate() @
 }
 
 fn void heap_fits_limits_indexing_exceeds_all_pools_aggregate() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
 
         .max_sampled_images           = 100,
         .max_storage_images           = 100,
@@ -1698,8 +1698,8 @@ fn void heap_fits_limits_indexing_exceeds_all_pools_aggregate() @test {
         .max_per_stage_resources      = 200,
         .max_all_pools_descriptors    = 249,
     };
-    bool fits = gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+    bool fits = gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         tex_capacity:   100,
         smp_capacity:   50,
         limits:         limits,
@@ -1709,7 +1709,7 @@ fn void heap_fits_limits_indexing_exceeds_all_pools_aggregate() @test {
 
 fn void heap_fits_limits_indexing_widens_aggregate_arithmetic() @test {
 
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_sampled_images           = uint::max,
         .max_storage_images           = uint::max,
         .max_samplers                 = uint::max,
@@ -1719,8 +1719,8 @@ fn void heap_fits_limits_indexing_widens_aggregate_arithmetic() @test {
         .max_per_stage_resources      = uint::max,
         .max_all_pools_descriptors    = uint::max,
     };
-    bool fits = gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+    bool fits = gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         tex_capacity:   0x8000_0000,
         smp_capacity:   0,
         limits:         limits,
@@ -1729,7 +1729,7 @@ fn void heap_fits_limits_indexing_widens_aggregate_arithmetic() @test {
 }
 
 fn void heap_fits_limits_indexing_exceeds_sampled_images() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_sampled_images = 99,
         .max_storage_images = 100,
         .max_samplers       = 50,
@@ -1739,8 +1739,8 @@ fn void heap_fits_limits_indexing_exceeds_sampled_images() @test {
         .max_per_stage_resources      = 250,
         .max_all_pools_descriptors    = 250,
     };
-    assert(!gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+    assert(!gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         tex_capacity:   100,
         smp_capacity:   50,
         limits:         limits,
@@ -1749,7 +1749,7 @@ fn void heap_fits_limits_indexing_exceeds_sampled_images() @test {
 }
 
 fn void heap_fits_limits_indexing_exceeds_storage_images() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_sampled_images = 100,
         .max_storage_images = 99,
         .max_samplers       = 50,
@@ -1759,8 +1759,8 @@ fn void heap_fits_limits_indexing_exceeds_storage_images() @test {
         .max_per_stage_resources      = 250,
         .max_all_pools_descriptors    = 250,
     };
-    assert(!gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+    assert(!gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         tex_capacity:   100,
         smp_capacity:   50,
         limits:         limits,
@@ -1769,7 +1769,7 @@ fn void heap_fits_limits_indexing_exceeds_storage_images() @test {
 }
 
 fn void heap_fits_limits_indexing_exceeds_samplers() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_sampled_images = 100,
         .max_storage_images = 100,
         .max_samplers       = 49,
@@ -1779,8 +1779,8 @@ fn void heap_fits_limits_indexing_exceeds_samplers() @test {
         .max_per_stage_resources      = 250,
         .max_all_pools_descriptors    = 250,
     };
-    assert(!gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+    assert(!gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         tex_capacity:   100,
         smp_capacity:   50,
         limits:         limits,
@@ -1789,7 +1789,7 @@ fn void heap_fits_limits_indexing_exceeds_samplers() @test {
 }
 
 fn void heap_fits_limits_buffer_at_limit_fits() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_resource_descriptor_buffer_range = 4096,
         .max_sampler_descriptor_buffer_range  = 4096,
                 .resource_descriptor_address_space_size = 4096,
@@ -1797,8 +1797,8 @@ fn void heap_fits_limits_buffer_at_limit_fits() @test {
 .descriptor_buffer_address_space_size = 4096,
         .layout_size                          = 4096,
     };
-    assert(gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+    assert(gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
         tex_capacity:   0,
         smp_capacity:   0,
         limits:         limits,
@@ -1807,7 +1807,7 @@ fn void heap_fits_limits_buffer_at_limit_fits() @test {
 }
 
 fn void heap_fits_limits_buffer_exceeds_resource_range() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_resource_descriptor_buffer_range = 2048,
         .max_sampler_descriptor_buffer_range  = 4096,
                 .resource_descriptor_address_space_size = 4096,
@@ -1815,8 +1815,8 @@ fn void heap_fits_limits_buffer_exceeds_resource_range() @test {
 .descriptor_buffer_address_space_size = 4096,
         .layout_size                          = 4096,
     };
-    assert(!gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+    assert(!gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
         tex_capacity:   0,
         smp_capacity:   0,
         limits:         limits,
@@ -1825,7 +1825,7 @@ fn void heap_fits_limits_buffer_exceeds_resource_range() @test {
 }
 
 fn void heap_fits_limits_buffer_exceeds_sampler_range() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_resource_descriptor_buffer_range = 4096,
         .max_sampler_descriptor_buffer_range  = 2048,
                 .resource_descriptor_address_space_size = 4096,
@@ -1833,8 +1833,8 @@ fn void heap_fits_limits_buffer_exceeds_sampler_range() @test {
 .descriptor_buffer_address_space_size = 4096,
         .layout_size                          = 4096,
     };
-    assert(!gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+    assert(!gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
         tex_capacity:   0,
         smp_capacity:   0,
         limits:         limits,
@@ -1843,7 +1843,7 @@ fn void heap_fits_limits_buffer_exceeds_sampler_range() @test {
 }
 
 fn void heap_fits_limits_buffer_exceeds_address_space() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_resource_descriptor_buffer_range = 4096,
         .max_sampler_descriptor_buffer_range  = 4096,
                 .resource_descriptor_address_space_size = 2048,
@@ -1851,8 +1851,8 @@ fn void heap_fits_limits_buffer_exceeds_address_space() @test {
 .descriptor_buffer_address_space_size = 2048,
         .layout_size                          = 4096,
     };
-    assert(!gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+    assert(!gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
         tex_capacity:   0,
         smp_capacity:   0,
         limits:         limits,
@@ -1861,7 +1861,7 @@ fn void heap_fits_limits_buffer_exceeds_address_space() @test {
 }
 
 fn void heap_fits_limits_indexing_exceeds_per_stage() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_sampled_images           = 100,
         .max_storage_images           = 100,
         .max_samplers                 = 50,
@@ -1871,8 +1871,8 @@ fn void heap_fits_limits_indexing_exceeds_per_stage() @test {
         .max_per_stage_resources      = 250,
         .max_all_pools_descriptors    = 250,
     };
-    bool fits = gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+    bool fits = gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         tex_capacity:   100,
         smp_capacity:   50,
         limits:         limits,
@@ -1881,7 +1881,7 @@ fn void heap_fits_limits_indexing_exceeds_per_stage() @test {
 }
 
 fn void heap_fits_limits_buffer_exceeds_per_type_address_space() @test {
-    gpu::vk::HeapLimits limits = {
+    gpu::internal::vk::HeapLimits limits = {
         .max_resource_descriptor_buffer_range    = 4096,
         .max_sampler_descriptor_buffer_range     = 4096,
         .resource_descriptor_address_space_size  = 4096,
@@ -1889,8 +1889,8 @@ fn void heap_fits_limits_buffer_exceeds_per_type_address_space() @test {
         .descriptor_buffer_address_space_size    = 4096,
         .layout_size                             = 4096,
     };
-    bool fits = gpu::vk::heap_fits_limits(
-        implementation: gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+    bool fits = gpu::internal::vk::heap_fits_limits(
+        implementation: gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
         tex_capacity:   0,
         smp_capacity:   0,
         limits:         limits,
@@ -2183,7 +2183,7 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
         .expected_text      = "Vulkan descriptor pool is fragmented",
         .expected_result    = (int)vk::Result.ERROR_FRAGMENTATION,
     };
-    fault pool = @catch(gpu::vk::check_descriptor_pool_backend_result(
+    fault pool = @catch(gpu::internal::vk::check_descriptor_pool_backend_result(
         state:     &state,
         operation: "create_device",
         result:    vk::Result.ERROR_FRAGMENTATION,
@@ -2198,7 +2198,7 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
         .expected_text      = "Vulkan descriptor allocation exhausted the pool",
         .expected_result    = (int)vk::Result.ERROR_OUT_OF_POOL_MEMORY,
     };
-    fault allocate = @catch(gpu::vk::check_descriptor_allocate_backend_result(
+    fault allocate = @catch(gpu::internal::vk::check_descriptor_allocate_backend_result(
         state:     &state,
         operation: "create_device",
         result:    vk::Result.ERROR_OUT_OF_POOL_MEMORY,
@@ -2213,7 +2213,7 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
         .expected_text      = "descriptor buffer device address is zero",
         .expected_result    = 0,
     };
-    fault address = @catch(gpu::vk::report_descriptor_backend_failure(
+    fault address = @catch(gpu::internal::vk::report_descriptor_backend_failure(
         state:         &state,
         operation:     "create_device",
         public_fault:  gpu::BACKEND_ERROR,
@@ -2236,7 +2236,7 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
         .expected_text       = "Vulkan device memory exhausted",
         .expected_result     = (int)vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
     };
-    fault view_backend = @catch(gpu::vk::check_texture_view_backend_result(
+    fault view_backend = @catch(gpu::internal::vk::check_texture_view_backend_result(
         state:     &state,
         operation: "create_texture_view",
         texture:   texture,
@@ -2247,7 +2247,7 @@ fn void descriptor_bootstrap_result_mappings_emit_once_and_preserve_faults() @te
         "image-view creation reports operation and resolved texture identity");
 
     state.debug_callback = null;
-    fault fallback = @catch(gpu::vk::check_descriptor_pool_backend_result(
+    fault fallback = @catch(gpu::internal::vk::check_descriptor_pool_backend_result(
         state:     &state,
         operation: "create_device",
         result:    vk::Result.ERROR_FRAGMENTATION,

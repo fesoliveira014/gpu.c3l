@@ -352,8 +352,6 @@ def validate_generated_backend_privacy(document: dict) -> list[str]:
         if not (
             module_name == "gpu::internal"
             or module_name.startswith("gpu::internal::")
-            or module_name == "gpu::vk"
-            or module_name.startswith("gpu::vk::")
         ):
             continue
         for contents in module.values():
@@ -1641,7 +1639,7 @@ def validate_private_backend_source(relative: Path, source: str) -> list[str]:
     module_declarations = list(MODULE_DECLARATION.finditer(normalized))
     if not module_declarations:
         failures.append(
-            f"{relative.as_posix()} must declare the private gpu::vk backend module"
+            f"{relative.as_posix()} must declare the private gpu::internal::vk backend module"
         )
     for declaration in module_declarations:
         name = declaration.group("name")
@@ -1650,16 +1648,16 @@ def validate_private_backend_source(relative: Path, source: str) -> list[str]:
             0,
             declaration.start(),
         ) + 1
-        if name != "gpu::vk" and not name.startswith("gpu::vk::"):
+        if name != "gpu::internal::vk" and not name.startswith("gpu::internal::vk::"):
             failures.append(
                 f"{relative.as_posix()}:{line_number} "
-                "backend file may only declare gpu::vk modules, "
+                "backend file may only declare gpu::internal::vk modules, "
                 f"found {name}"
             )
             continue
         if "@private" not in declaration.group("attributes").split():
             failures.append(
-                f"{relative.as_posix()} must declare the private gpu::vk backend module"
+                f"{relative.as_posix()} must declare the private gpu::internal::vk backend module"
             )
 
     for line_number, line in enumerate(normalized.splitlines(), start=1):
@@ -1758,7 +1756,7 @@ def validate_public_module_source(
 
 
 def is_private_backend_source(relative: Path) -> bool:
-    return relative.parts[:2] == ("gpu", "vk")
+    return relative.parts[:3] == ("gpu", "internal", "vk")
 
 
 def is_private_internal_source(relative: Path) -> bool:
@@ -1786,7 +1784,7 @@ def scan_public_module_sources() -> list[str]:
 
 def scan_private_backend_modules() -> list[str]:
     failures = []
-    for path in sorted((ROOT / "gpu" / "vk").rglob("*")):
+    for path in sorted((ROOT / "gpu" / "internal" / "vk").rglob("*")):
         if not path.is_file() or path.suffix not in {".c3", ".c3i"}:
             continue
         failures.extend(

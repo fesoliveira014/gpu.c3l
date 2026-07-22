@@ -1,4 +1,4 @@
-module gpu::vk;
+module gpu::internal::vk;
 
 import gpu @public;
 

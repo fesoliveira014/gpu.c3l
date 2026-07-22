@@ -1,7 +1,7 @@
 module gpu;
 
 import gpu::internal @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import std::atomic;
 import std::atomic::types;
 import std::core::mem;
@@ -93,7 +93,7 @@ fn Runtime? create_runtime(RuntimeDesc* desc) {
     gpu::internal::validate_runtime_desc(desc)!;
     switch (desc.backend) {
         case BackendKind.VULKAN:
-            return gpu::vk::create_vk_runtime(desc);
+            return gpu::internal::vk::create_vk_runtime(desc);
         default:
             DebugMessage message = {
                 .severity       = DebugMessageSeverity.ERROR,
@@ -419,7 +419,7 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
 
     switch (runtime_data.backend) {
         case BackendKind.VULKAN:
-            device = gpu::vk::create_vk_device(adapter, request, &runtime)!;
+            device = gpu::internal::vk::create_vk_device(adapter, request, &runtime)!;
         default:
             return UNSUPPORTED_BACKEND~;
     }

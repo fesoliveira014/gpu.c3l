@@ -2,7 +2,7 @@ module gpu_bench;
 
 import gpu::internal @public;
 import gpu;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import std::io;
 import std::time;
 import std::core::mem;

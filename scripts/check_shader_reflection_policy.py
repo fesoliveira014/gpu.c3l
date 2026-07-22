@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_FILES = (
     "gpu/internal/shader_abi.c3",
-    "gpu/vk/shader.c3",
+    "gpu/internal/vk/shader.c3",
     "tools/gen_shader_abi/src/emit_c3.c3",
     "scripts/build_shaders.py",
 )
@@ -98,7 +98,7 @@ def check(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     try:
         generated = (root / "gpu/internal/shader_abi.c3").read_text(encoding="utf-8")
-        shader = (root / "gpu/vk/shader.c3").read_text(encoding="utf-8")
+        shader = (root / "gpu/internal/vk/shader.c3").read_text(encoding="utf-8")
         emitter = (root / "tools/gen_shader_abi/src/emit_c3.c3").read_text(
             encoding="utf-8"
         )

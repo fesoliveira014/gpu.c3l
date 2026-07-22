@@ -13,7 +13,7 @@
   "wincrt": "dynamic",
   "sources": [
     "../gpu/gpu.c3", "../gpu/gpu.c3i", "../gpu/internal/**",
-    "../gpu/surface/**", "../gpu/vk/**",
+    "../gpu/surface/**",
     "src/test_lifetime_helpers.c3", "src/bench_lifetime.c3"
   ],
   "output": "build",

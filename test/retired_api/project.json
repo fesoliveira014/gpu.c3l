@@ -21,7 +21,7 @@
     "../../gpu/internal/sync.c3",
     "../../gpu/internal/queue.c3",
     "../../gpu/surface/**",
-    "../../gpu/vk/internal.c3",
+    "../../gpu/internal/vk/internal.c3",
     "../cpu/vk_stub.c3"
   ],
   "output": "build",

@@ -56,7 +56,7 @@ fn void texture_desc_profile_rejects_unsupported_formats() @test {
 }
 
 fn void texture_view_publication_requires_strict_capability() @test {
-    gpu::Device device = gpu::vk::stub_create_strict_disabled_device()!!;
+    gpu::Device device = gpu::internal::vk::stub_create_strict_disabled_device()!!;
     gpu::TextureDesc texture_desc = valid_texture_desc();
     gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
 

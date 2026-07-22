@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import std::atomic;
 
@@ -564,7 +564,7 @@ fn void readiness_only_submit_validates_stale_swapchain() @test {
         .owner      = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.SWAPCHAIN),
         .generation = 1,
     };
-    gpu::SwapchainReadiness readiness = gpu::vk::make_swapchain_readiness(
+    gpu::SwapchainReadiness readiness = gpu::internal::vk::make_swapchain_readiness(
         device,
         stale,
         1,

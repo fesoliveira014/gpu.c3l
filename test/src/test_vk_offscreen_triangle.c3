@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk;
+import gpu::internal::vk;
 import vk;
 
 // Headless (lavapipe): offscreen graphics. Clear, textured triangle through

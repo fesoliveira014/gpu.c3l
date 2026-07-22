@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import std::core::mem;
 import vk;
 
@@ -241,7 +241,7 @@ fn void cache_corrupt_blob_tolerated() @test {
         if (i >= 32) *b ^= (char)0xA5;
     }
     vk::VkDeviceState* state_a = (vk::VkDeviceState*)gpu::internal::device_backend_state(device_a);
-    assert(gpu::vk::cache_blob_compatible(state_a, blob),
+    assert(gpu::internal::vk::cache_blob_compatible(state_a, blob),
         "corrupt payload retains a compatible header and reaches the driver retry path");
     gpu::destroy_pipeline(&device_a, pipe_a)!!;
     destroy_test_device(&device_a)!!;
@@ -291,13 +291,13 @@ fn void pipeline_cache_retry_seam_is_exact_and_silent_on_success() @test {
     state.debug_callback = &capture_cache_backend_diagnostic;
     state.debug_user_data = &capture;
     PipelineCacheCreateProbe probe;
-    gpu::vk::PipelineCacheCreateOps ops = {
+    gpu::internal::vk::PipelineCacheCreateOps ops = {
         .user_data = &probe,
         .create    = &scripted_pipeline_cache_create,
     };
     char[4] compatible_blob = { 1, 2, 3, 4 };
 
-    gpu::vk::create_driver_pipeline_cache_with_ops(
+    gpu::internal::vk::create_driver_pipeline_cache_with_ops(
         state:      &state,
         cache_data: compatible_blob[..],
         ops:        &ops,
@@ -322,7 +322,7 @@ fn void pipeline_cache_terminal_results_emit_once_and_preserve_faults() @test {
         .expected_text      = "Vulkan returned incomplete pipeline cache data",
         .expected_result    = (int)vk::Result.INCOMPLETE,
     };
-    fault incomplete = @catch(gpu::vk::check_pipeline_cache_data_backend_result(
+    fault incomplete = @catch(gpu::internal::vk::check_pipeline_cache_data_backend_result(
         state:     &state,
         operation: "get_pipeline_cache_data",
         result:    vk::Result.INCOMPLETE,
@@ -337,7 +337,7 @@ fn void pipeline_cache_terminal_results_emit_once_and_preserve_faults() @test {
         .expected_text      = "Vulkan host memory exhausted",
         .expected_result    = (int)vk::Result.ERROR_OUT_OF_HOST_MEMORY,
     };
-    fault terminal = @catch(gpu::vk::check_pipeline_cache_terminal_result(
+    fault terminal = @catch(gpu::internal::vk::check_pipeline_cache_terminal_result(
         state:     &state,
         operation: "create_device",
         result:    vk::Result.ERROR_OUT_OF_HOST_MEMORY,
@@ -345,7 +345,7 @@ fn void pipeline_cache_terminal_results_emit_once_and_preserve_faults() @test {
     assert(terminal == gpu::OUT_OF_HOST_MEMORY && capture.calls == 2 && capture.matched,
         "pipeline-cache terminal result uses operation-aware backend routing");
 
-    gpu::vk::check_pipeline_cache_terminal_result(
+    gpu::internal::vk::check_pipeline_cache_terminal_result(
         state:     &state,
         operation: "create_device",
         result:    vk::Result.SUCCESS,
@@ -353,7 +353,7 @@ fn void pipeline_cache_terminal_results_emit_once_and_preserve_faults() @test {
     assert(capture.calls == 2, "successful retry completion emits no diagnostic");
 
     state.debug_callback = null;
-    fault fallback = @catch(gpu::vk::check_pipeline_cache_data_backend_result(
+    fault fallback = @catch(gpu::internal::vk::check_pipeline_cache_data_backend_result(
         state:     &state,
         operation: "get_pipeline_cache_data",
         result:    vk::Result.INCOMPLETE,

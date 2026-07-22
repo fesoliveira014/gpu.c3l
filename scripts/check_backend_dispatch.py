@@ -53,7 +53,7 @@ def build_methods_use_global_dispatch(
 
 
 def load_backend_sources(root: Path) -> dict[str, str]:
-    backend = root / "gpu" / "vk"
+    backend = root / "gpu" / "internal" / "vk"
     paths = sorted(backend.rglob("*.c3"), key=lambda path: path.as_posix())
     return {
         path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")

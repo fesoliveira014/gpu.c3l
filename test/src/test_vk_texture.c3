@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vma;
 import vk;
 import std::atomic;
@@ -1667,8 +1667,8 @@ fn void texture_barrier_invalid_use_diagnostic_identifies_resource() @test {
     assert(capture.rejected_field_matches, "after-use field is identified");
     assert(capture.invariant_matches, "semantic-use invariant is identified");
 
-    gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    gpu::internal::vk::VkDeviceState* state =
+        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     state.debug_callback = null;
     fault without_callback = @catch(gpu::cmd_texture_barrier(
         &commands,

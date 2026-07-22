@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import std::thread;
 import std::core::mem::allocators;
@@ -169,7 +169,7 @@ fn void queue_completion_publication_rejects_gaps() @test {
     vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
         .set_semaphore(completion.timeline)
         .set_value(completion.next_sequence);
-    gpu::vk::check_backend_result(
+    gpu::internal::vk::check_backend_result(
         state:     state,
         operation: "signal test completion",
         result:    vk::signal_semaphore(state.device, &signal),
@@ -196,7 +196,7 @@ fn void completion_observation_advances_for_poll_and_wait() @test {
     vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
         .set_semaphore(completion.timeline)
         .set_value(gpu::internal::completion_point_sequence(first));
-    gpu::vk::check_backend_result(
+    gpu::internal::vk::check_backend_result(
         state:     state,
         operation: "signal first observed completion",
         result:    vk::signal_semaphore(state.device, &signal),
@@ -209,7 +209,7 @@ fn void completion_observation_advances_for_poll_and_wait() @test {
     );
 
     signal = signal.set_value(gpu::internal::completion_point_sequence(second));
-    gpu::vk::check_backend_result(
+    gpu::internal::vk::check_backend_result(
         state:     state,
         operation: "signal second observed completion",
         result:    vk::signal_semaphore(state.device, &signal),
@@ -259,7 +259,7 @@ fn void queue_completion_poll_wait_is_reusable() @test {
     vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
         .set_semaphore(completion.timeline)
         .set_value(gpu::internal::completion_point_sequence(point));
-    gpu::vk::check_backend_result(
+    gpu::internal::vk::check_backend_result(
         state:     state,
         operation: "signal test completion",
         result:    vk::signal_semaphore(state.device, &signal),

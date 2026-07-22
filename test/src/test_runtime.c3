@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 
 fn RuntimeDesc runtime_desc() {
     return {
@@ -52,7 +52,7 @@ fn void null_runtime_descriptor_is_rejected() @test {
 }
 
 fn void runtimes_enumerate_independent_borrowed_adapters() @test {
-    gpu::vk::stub_set_adapter_count(2);
+    gpu::internal::vk::stub_set_adapter_count(2);
     RuntimeDesc desc = runtime_desc();
     Runtime first = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&first)!!;
@@ -85,7 +85,7 @@ fn void runtimes_enumerate_independent_borrowed_adapters() @test {
 }
 
 fn void runtime_can_have_no_adapters() @test {
-    gpu::vk::stub_set_adapter_count(0);
+    gpu::internal::vk::stub_set_adapter_count(0);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
@@ -96,7 +96,7 @@ fn void runtime_can_have_no_adapters() @test {
 }
 
 fn void borrowed_adapters_expire_with_their_runtime() @test {
-    gpu::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_adapter_count(1);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Runtime stale_runtime = runtime;
@@ -117,7 +117,7 @@ fn void borrowed_adapters_expire_with_their_runtime() @test {
 }
 
 fn void reserved_runtime_and_adapter_bits_are_rejected() @test {
-    gpu::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_adapter_count(1);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
@@ -139,7 +139,7 @@ fn void reserved_runtime_and_adapter_bits_are_rejected() @test {
 }
 
 fn void forged_adapter_runtime_identity_is_rejected() @test {
-    gpu::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_adapter_count(1);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
@@ -161,20 +161,20 @@ fn void forged_adapter_runtime_identity_is_rejected() @test {
 }
 
 fn void runtime_is_invalid_during_backend_teardown() @test {
-    gpu::vk::stub_set_adapter_count(1);
-    gpu::vk::stub_probe_destroy_visibility();
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_probe_destroy_visibility();
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
 
     gpu::destroy_runtime(&runtime)!!;
     assert(
-        gpu::vk::stub_destroy_visibility_fault() == gpu::INVALID_HANDLE,
+        gpu::internal::vk::stub_destroy_visibility_fault() == gpu::INVALID_HANDLE,
         "backend teardown cannot re-enter a live public runtime"
     );
 }
 
 fn void runtime_destruction_rejects_live_dependents() @test {
-    gpu::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_adapter_count(1);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::internal::runtime_retain_device(&runtime)!!;
@@ -197,7 +197,7 @@ fn void runtime_destruction_rejects_live_dependents() @test {
 }
 
 fn void runtime_adapter_count_matches_token_capacity() @test {
-    gpu::vk::stub_set_adapter_count(gpu::internal::MAX_ADAPTERS_PER_RUNTIME);
+    gpu::internal::vk::stub_set_adapter_count(gpu::internal::MAX_ADAPTERS_PER_RUNTIME);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
@@ -205,21 +205,21 @@ fn void runtime_adapter_count_matches_token_capacity() @test {
     assert(last.adapter_index == ushort::max, "the full adapter index range is representable");
     gpu::destroy_runtime(&runtime)!!;
 
-    gpu::vk::stub_set_adapter_count(gpu::internal::MAX_ADAPTERS_PER_RUNTIME + 1);
-    gpu::vk::stub_reset_runtime_counts();
+    gpu::internal::vk::stub_set_adapter_count(gpu::internal::MAX_ADAPTERS_PER_RUNTIME + 1);
+    gpu::internal::vk::stub_reset_runtime_counts();
     assert(
         @catch(gpu::create_runtime(&desc)) == gpu::SLOT_TABLE_FULL,
         "an adapter count beyond the token range is rejected"
     );
     assert(
-        gpu::vk::stub_runtime_create_count() == gpu::vk::stub_runtime_destroy_count(),
+        gpu::internal::vk::stub_runtime_create_count() == gpu::internal::vk::stub_runtime_destroy_count(),
         "the rejected backend runtime is released"
     );
 }
 
 fn void runtime_publication_failure_is_transactional() @test {
-    gpu::vk::stub_set_adapter_count(1);
-    gpu::vk::stub_reset_runtime_counts();
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_reset_runtime_counts();
     RuntimeDesc desc = runtime_desc();
     Runtime[gpu::internal::MAX_RUNTIMES] runtimes;
     for (uint i = 0; i < gpu::internal::MAX_RUNTIMES; i++) {
@@ -228,13 +228,13 @@ fn void runtime_publication_failure_is_transactional() @test {
 
     assert(@catch(gpu::create_runtime(&desc)) == gpu::SLOT_TABLE_FULL, "a full runtime table faults cleanly");
     assert(
-        gpu::vk::stub_runtime_destroy_count() == 1,
+        gpu::internal::vk::stub_runtime_destroy_count() == 1,
         "an unpublished backend runtime is destroyed"
     );
 
     foreach (&runtime : runtimes) gpu::destroy_runtime(runtime)!!;
     assert(
-        gpu::vk::stub_runtime_create_count() == gpu::vk::stub_runtime_destroy_count(),
+        gpu::internal::vk::stub_runtime_create_count() == gpu::internal::vk::stub_runtime_destroy_count(),
         "every created backend runtime is released"
     );
 }
